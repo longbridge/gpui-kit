@@ -36,6 +36,7 @@ collapsed: false
 - [DatePicker](date-picker) - 日期选择器
 - [OtpInput](otp-input) - 一次性验证码输入
 - [ColorPicker](color-picker) - 颜色选择器
+- [Questionnaire](questionnaire) - 可组合的多步骤问卷与答案
 - [Form](form) - 表单容器与布局
 
 ## 布局与高级组件
