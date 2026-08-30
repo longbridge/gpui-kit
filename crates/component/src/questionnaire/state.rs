@@ -805,9 +805,7 @@ impl QuestionnaireState {
         let Some(item_ix) = self.current else {
             return false;
         };
-        if (self.is_current_input_focused(window) && self.current_input_has_text(cx))
-            || (!self.items[item_ix].is_multiple() && self.focused_current_choice(window).is_some())
-        {
+        if self.is_current_input_focused(window) && self.current_input_has_text(cx) {
             return false;
         }
 
@@ -879,6 +877,20 @@ impl QuestionnaireState {
             (None, true) => targets.len() - 1,
             (None, false) => 0,
         };
+
+        // GPUI's Radio primitive intentionally leaves group arrow behavior to
+        // its owner. Let the root emulate native radio movement only when both
+        // adjacent answers are radios; crossing the boundary to an Input stays
+        // in this schema-ordered answer sequence.
+        if !self.items[item_ix].is_multiple()
+            && focused.is_some_and(|focused_ix| {
+                matches!(targets[focused_ix], Target::Choice(_))
+                    && matches!(targets[target_ix], Target::Choice(_))
+            })
+        {
+            return false;
+        }
+
         match targets[target_ix] {
             Target::Choice(choice_ix) => {
                 if !self.items[item_ix].is_multiple() {

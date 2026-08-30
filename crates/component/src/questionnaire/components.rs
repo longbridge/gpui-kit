@@ -30,13 +30,22 @@ struct QuestionnaireMetrics {
     choice_padding_x: gpui::Pixels,
     choice_padding_y: gpui::Pixels,
     choice_min_height: gpui::Pixels,
+    choice_radius: gpui::Pixels,
+    input_padding_y: gpui::Pixels,
+    input_radius: gpui::Pixels,
     indicator_size: gpui::Pixels,
     indicator_mark_size: gpui::Pixels,
+    indicator_check_size: gpui::Pixels,
+    shortcut_size: gpui::Pixels,
+    shortcut_text_size: gpui::Pixels,
+    shortcut_radius: gpui::Pixels,
 }
 
 impl QuestionnaireMetrics {
     fn new(size: Size, cx: &App) -> Self {
-        let spacing = cx.theme().semantic_tokens().spacing;
+        let tokens = cx.theme().semantic_tokens();
+        let spacing = tokens.spacing;
+        let radius = tokens.radius;
         match size {
             Size::XSmall => Self {
                 root_gap: spacing.sm,
@@ -46,8 +55,15 @@ impl QuestionnaireMetrics {
                 choice_padding_x: spacing.sm,
                 choice_padding_y: spacing.xs,
                 choice_min_height: spacing.xl + spacing.xs,
+                choice_radius: radius.md,
+                input_padding_y: gpui::Pixels::ZERO,
+                input_radius: radius.md,
                 indicator_size: spacing.md,
                 indicator_mark_size: spacing.xs,
+                indicator_check_size: spacing.sm,
+                shortcut_size: spacing.lg,
+                shortcut_text_size: spacing.sm,
+                shortcut_radius: radius.sm,
             },
             Size::Small => Self {
                 root_gap: spacing.md,
@@ -57,8 +73,15 @@ impl QuestionnaireMetrics {
                 choice_padding_x: spacing.sm,
                 choice_padding_y: spacing.xs,
                 choice_min_height: spacing.xxl,
+                choice_radius: radius.lg,
+                input_padding_y: spacing.xxs,
+                input_radius: radius.lg,
                 indicator_size: spacing.md + spacing.xxs,
                 indicator_mark_size: spacing.xs + spacing.xxs,
+                indicator_check_size: spacing.sm + spacing.xxs,
+                shortcut_size: spacing.lg + spacing.xxs,
+                shortcut_text_size: spacing.sm + spacing.xxs * 0.5,
+                shortcut_radius: radius.md,
             },
             Size::Large => Self {
                 root_gap: spacing.xl,
@@ -68,30 +91,51 @@ impl QuestionnaireMetrics {
                 choice_padding_x: spacing.lg,
                 choice_padding_y: spacing.md,
                 choice_min_height: spacing.xxl + spacing.lg,
+                choice_radius: radius.xl,
+                input_padding_y: spacing.sm,
+                input_radius: radius.xl,
                 indicator_size: spacing.lg + spacing.xxs,
                 indicator_mark_size: spacing.sm + spacing.xxs,
+                indicator_check_size: spacing.lg,
+                shortcut_size: spacing.xl,
+                shortcut_text_size: spacing.md,
+                shortcut_radius: radius.xl,
             },
             Size::Size(value) => Self {
                 root_gap: value,
                 item_gap: value,
-                choice_gap: value * 0.5,
+                choice_gap: value * 0.625,
                 content_gap: value * 0.25,
                 choice_padding_x: value * 0.75,
-                choice_padding_y: value * 0.5,
+                choice_padding_y: value * 0.625,
                 choice_min_height: value * 2.75,
+                choice_radius: (radius.lg + radius.xl) * 0.5,
+                input_padding_y: value * 0.25,
+                input_radius: (radius.lg + radius.xl) * 0.5,
                 indicator_size: value,
                 indicator_mark_size: value * 0.5,
+                indicator_check_size: value * 0.875,
+                shortcut_size: value * 1.25,
+                shortcut_text_size: value * 0.625,
+                shortcut_radius: radius.lg,
             },
             Size::Medium => Self {
                 root_gap: spacing.lg,
                 item_gap: spacing.lg,
-                choice_gap: spacing.sm,
+                choice_gap: spacing.sm + spacing.xxs,
                 content_gap: spacing.xxs,
                 choice_padding_x: spacing.md,
-                choice_padding_y: spacing.sm,
+                choice_padding_y: spacing.sm + spacing.xxs,
                 choice_min_height: spacing.xxl + spacing.md,
+                choice_radius: (radius.lg + radius.xl) * 0.5,
+                input_padding_y: spacing.xs,
+                input_radius: (radius.lg + radius.xl) * 0.5,
                 indicator_size: spacing.lg,
                 indicator_mark_size: spacing.sm,
+                indicator_check_size: spacing.md + spacing.xxs,
+                shortcut_size: spacing.lg + spacing.xs,
+                shortcut_text_size: spacing.sm + spacing.xxs,
+                shortcut_radius: radius.lg,
             },
         }
     }
@@ -110,6 +154,30 @@ fn text_style<T: Styled>(element: T, size: Size, cx: &App) -> T {
         .text_size(token.size)
         .line_height(token.line_height)
         .font_weight(token.weight)
+}
+
+fn progress_text_style<T: Styled>(element: T, size: Size, cx: &App) -> T {
+    let typography = cx.theme().semantic_tokens().typography;
+    let token = match size {
+        Size::XSmall | Size::Small | Size::Medium => typography.xs,
+        Size::Large => typography.sm,
+        Size::Size(value) => {
+            return element.text_size(value * 0.75).line_height(value);
+        }
+    };
+
+    element
+        .text_size(token.size)
+        .line_height(token.line_height)
+        .font_weight(token.weight)
+}
+
+fn description_text_style<T: Styled>(element: T, size: Size, cx: &App) -> T {
+    let metrics = QuestionnaireMetrics::new(size, cx);
+
+    // A native fieldset excludes its legend from the flex gap before the
+    // description. Recreate that base-nova relationship for GPUI's group.
+    text_style(element, size, cx).mt(-metrics.item_gap)
 }
 
 fn title_text_style<T: Styled>(element: T, size: Size, cx: &App) -> T {
@@ -186,52 +254,58 @@ impl Questionnaire {
                 && state.focused_current_choice(window).is_some()
         };
 
-        let handled =
-            if key == "enter" && modifiers.secondary() && modifiers.number_of_modifiers() == 1 {
-                state.update(cx, |state, cx| state.confirm_current(window, cx))
-            } else if modifiers.number_of_modifiers() != 0 {
-                false
-            } else if input_focused {
-                match key {
-                    "enter" if Self::focused_answer_is_filled(state, window, cx) => {
-                        state.update(cx, |state, cx| state.confirm_current(window, cx))
-                    }
-                    "up" if !input_has_text => {
-                        state.update(cx, |state, cx| state.focus_previous_answer(window, cx))
-                    }
-                    "down" if !input_has_text => {
-                        state.update(cx, |state, cx| state.focus_next_answer(window, cx))
-                    }
-                    _ => false,
+        let handled = if key == "enter"
+            && modifiers.secondary()
+            && modifiers.number_of_modifiers() == 1
+        {
+            state.update(cx, |state, cx| state.confirm_current(window, cx))
+        } else if modifiers.number_of_modifiers() != 0 {
+            false
+        } else if input_focused {
+            match key {
+                "enter" if Self::focused_answer_is_filled(state, window, cx) => {
+                    state.update(cx, |state, cx| state.confirm_current(window, cx))
                 }
-            } else {
-                match key {
-                    "up" if single_radio_focused => {
-                        state.update(cx, |state, cx| state.move_current_radio(-1, window, cx))
-                    }
-                    "down" if single_radio_focused => {
-                        state.update(cx, |state, cx| state.move_current_radio(1, window, cx))
-                    }
-                    "up" => state.update(cx, |state, cx| state.focus_previous_answer(window, cx)),
-                    "down" => state.update(cx, |state, cx| state.focus_next_answer(window, cx)),
-                    "left" if single_radio_focused => {
-                        state.update(cx, |state, cx| state.move_current_radio(-1, window, cx))
-                    }
-                    "right" if single_radio_focused => {
-                        state.update(cx, |state, cx| state.move_current_radio(1, window, cx))
-                    }
-                    "left" => state.update(cx, |state, cx| state.go_previous(window, cx)),
-                    "right" if state.read(cx).navigation_state().is_confirmable() => {
-                        state.update(cx, |state, cx| state.go_next(window, cx))
-                    }
-                    "right" => false,
-                    "enter" if Self::focused_answer_is_filled(state, window, cx) => {
-                        state.update(cx, |state, cx| state.confirm_current(window, cx))
-                    }
-                    "enter" => false,
-                    _ => state.update(cx, |state, cx| state.activate_shortcut(key, window, cx)),
+                "up" if !input_has_text => {
+                    state.update(cx, |state, cx| state.focus_previous_answer(window, cx))
                 }
-            };
+                "down" if !input_has_text => {
+                    state.update(cx, |state, cx| state.focus_next_answer(window, cx))
+                }
+                _ => false,
+            }
+        } else {
+            match key {
+                "up" => {
+                    state.update(cx, |state, cx| state.focus_previous_answer(window, cx))
+                        || (single_radio_focused
+                            && state
+                                .update(cx, |state, cx| state.move_current_radio(-1, window, cx)))
+                }
+                "down" => {
+                    state.update(cx, |state, cx| state.focus_next_answer(window, cx))
+                        || (single_radio_focused
+                            && state
+                                .update(cx, |state, cx| state.move_current_radio(1, window, cx)))
+                }
+                "left" if single_radio_focused => {
+                    state.update(cx, |state, cx| state.move_current_radio(-1, window, cx))
+                }
+                "right" if single_radio_focused => {
+                    state.update(cx, |state, cx| state.move_current_radio(1, window, cx))
+                }
+                "left" => state.update(cx, |state, cx| state.go_previous(window, cx)),
+                "right" if state.read(cx).navigation_state().is_confirmable() => {
+                    state.update(cx, |state, cx| state.go_next(window, cx))
+                }
+                "right" => false,
+                "enter" if Self::focused_answer_is_filled(state, window, cx) => {
+                    state.update(cx, |state, cx| state.confirm_current(window, cx))
+                }
+                "enter" => false,
+                _ => state.update(cx, |state, cx| state.activate_shortcut(key, window, cx)),
+            }
+        };
 
         if handled {
             window.prevent_default();
@@ -349,10 +423,9 @@ impl RenderOnce for QuestionnaireProgress {
         let label: SharedString =
             t!("Questionnaire.progress", current = current, total = total).into();
         let colors = cx.theme().semantic_tokens().colors;
-        let mono_font = cx.theme().semantic_tokens().typography.mono.clone();
         let has_children = !self.children.is_empty();
 
-        text_style(
+        progress_text_style(
             div()
                 .id(element_id(&self.state, "progress"))
                 .role(Role::ProgressIndicator)
@@ -364,7 +437,6 @@ impl RenderOnce for QuestionnaireProgress {
             self.size,
             cx,
         )
-        .font_family(mono_font)
         .font_weight(gpui::FontWeight::MEDIUM)
         .refine_style(&self.style)
         .when(!has_children, |this| this.child(label))
@@ -441,7 +513,7 @@ questionnaire_item_part!(QuestionnaireTitle, item_label, title_text_style, foreg
 questionnaire_item_part!(
     QuestionnaireDescription,
     item_description,
-    text_style,
+    description_text_style,
     muted_foreground
 );
 
@@ -729,7 +801,7 @@ where
         } else {
             tokens.colors.background.opacity(0.)
         })
-        .rounded(tokens.radius.lg)
+        .rounded(metrics.choice_radius)
         .when(!disabled, |this| {
             this.hover(|style| style.bg(tokens.colors.muted.opacity(0.5)))
         })
@@ -782,7 +854,9 @@ impl RenderOnce for QuestionnaireChoice {
         let focus_handle = state.choice_focus_handle(&self.item, &self.value).cloned();
         let colors = cx.theme().semantic_tokens().colors;
         let radius = cx.theme().semantic_tokens().radius;
+        let mono_font = cx.theme().semantic_tokens().typography.mono.clone();
         let metrics = QuestionnaireMetrics::new(self.size, cx);
+        let answer_alignment_offset = metrics.content_gap;
         let focused = focus_handle
             .as_ref()
             .is_some_and(|focus_handle| focus_handle.is_focused(window));
@@ -809,11 +883,12 @@ impl RenderOnce for QuestionnaireChoice {
                 })
                 .when(multiple, |this| this.rounded(radius.sm))
                 .when(!multiple, |this| this.rounded(radius.full))
+                .mt(answer_alignment_offset)
                 .refine_style(&self.indicator_style)
                 .when(selected && multiple, |this| {
                     this.child(
                         svg()
-                            .size(metrics.indicator_mark_size)
+                            .size(metrics.indicator_check_size)
                             .path(IconName::Check.path())
                             .text_color(colors.primary_foreground),
                     )
@@ -866,9 +941,19 @@ impl RenderOnce for QuestionnaireChoice {
             };
             Kbd::new(keystroke)
                 .outline()
+                .flex()
+                .items_center()
+                .justify_center()
+                .size(metrics.shortcut_size)
+                .p_0()
                 .bg(colors.background)
                 .border_color(colors.input)
                 .text_color(colors.muted_foreground)
+                .font_family(mono_font.clone())
+                .text_size(metrics.shortcut_text_size)
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .rounded(metrics.shortcut_radius)
+                .mt(answer_alignment_offset)
                 .refine_style(&self.shortcut_style)
                 .into_any_element()
         };
@@ -1096,11 +1181,14 @@ impl RenderOnce for QuestionnaireInput {
         if !active {
             return gpui::Empty.into_any_element();
         }
+        let metrics = QuestionnaireMetrics::new(self.size, cx);
 
         Input::new(input_definition.state())
             .aria_label(input_definition.accessibility_label().clone())
             .disabled(item_state.is_disabled() || input_definition.is_disabled())
             .with_size(self.size)
+            .py(metrics.input_padding_y)
+            .rounded(metrics.input_radius)
             .when(item_state.is_invalid(), |this| {
                 this.border_color(cx.theme().semantic_tokens().colors.destructive)
             })
@@ -1233,7 +1321,7 @@ impl RenderOnce for QuestionnaireActions {
             .flex()
             .min_w_0()
             .items_center()
-            .justify_end()
+            .justify_start()
             .gap(metrics.choice_gap)
             .w_full()
             .refine_style(&self.style)
@@ -1303,6 +1391,13 @@ macro_rules! questionnaire_action_part {
                     return gpui::Empty.into_any_element();
                 }
 
+                let anchors_trailing_actions = match action {
+                    QuestionnaireAction::Skip => true,
+                    QuestionnaireAction::Next | QuestionnaireAction::Submit => {
+                        !navigation.is_skip_visible()
+                    }
+                    QuestionnaireAction::Previous => false,
+                };
                 let state = self.state.clone();
                 let has_children = !self.children.is_empty();
                 let debug_selector = format!(
@@ -1310,11 +1405,12 @@ macro_rules! questionnaire_action_part {
                     self.state.entity_id(),
                     stringify!($action)
                 );
-                let button = Button::new(element_id(&self.state, stringify!($action)))
+                Button::new(element_id(&self.state, stringify!($action)))
                     .debug_selector(move || debug_selector)
                     .with_size(self.size)
                     .when($outline, |this| this.outline())
                     .when($primary, |this| this.primary())
+                    .when(anchors_trailing_actions, |this| this.ml_auto())
                     .on_click(move |_, window, cx| {
                         state.update(cx, |state, cx| match action {
                             QuestionnaireAction::Previous => state.go_previous(window, cx),
@@ -1325,19 +1421,8 @@ macro_rules! questionnaire_action_part {
                     })
                     .refine_style(&self.style)
                     .when(!has_children, |this| this.label(t!($translation)))
-                    .children(self.children);
-
-                if matches!(action, QuestionnaireAction::Previous) {
-                    div()
-                        .flex()
-                        .flex_1()
-                        .min_w_0()
-                        .justify_start()
-                        .child(button.max_w_full())
-                        .into_any_element()
-                } else {
-                    button.into_any_element()
-                }
+                    .children(self.children)
+                    .into_any_element()
             }
         }
     };
@@ -1383,6 +1468,7 @@ mod tests {
 
     struct QuestionnaireHarness {
         state: Entity<QuestionnaireState>,
+        override_skip_margin: bool,
     }
 
     impl Render for QuestionnaireHarness {
@@ -1413,7 +1499,10 @@ mod tests {
                 .child(
                     QuestionnaireActions::new(&self.state)
                         .child(QuestionnairePrevious::new(&self.state))
-                        .child(QuestionnaireSkip::new(&self.state))
+                        .child(
+                            QuestionnaireSkip::new(&self.state)
+                                .when(self.override_skip_margin, |this| this.ml(px(0.))),
+                        )
                         .child(QuestionnaireNext::new(&self.state))
                         .child(QuestionnaireSubmit::new(&self.state)),
                 )
@@ -1434,7 +1523,10 @@ mod tests {
                     None => state,
                 }
             });
-            QuestionnaireHarness { state }
+            QuestionnaireHarness {
+                state,
+                override_skip_margin: false,
+            }
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let state = cx.update(|_, cx| view.read(cx).state.clone());
@@ -1469,7 +1561,10 @@ mod tests {
                 )
                 .unwrap()
             });
-            QuestionnaireHarness { state }
+            QuestionnaireHarness {
+                state,
+                override_skip_margin: false,
+            }
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let state = cx.update(|_, cx| view.read(cx).state.clone());
@@ -1478,15 +1573,16 @@ mod tests {
 
     fn actions_visual_harness(
         cx: &mut TestAppContext,
+        override_skip_margin: bool,
     ) -> (&mut VisualTestContext, Entity<QuestionnaireState>) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|_, cx| {
             let state = cx.new(|cx| {
                 QuestionnaireState::new(
                     vec![
-                        QuestionnaireItemDefinition::new("first", "First"),
+                        QuestionnaireItemDefinition::new("first", "First").with_required(true),
                         QuestionnaireItemDefinition::new("second", "Second"),
-                        QuestionnaireItemDefinition::new("third", "Third"),
+                        QuestionnaireItemDefinition::new("third", "Third").with_required(true),
                     ],
                     cx,
                 )
@@ -1494,7 +1590,10 @@ mod tests {
                 .with_current_item("second")
                 .unwrap()
             });
-            QuestionnaireHarness { state }
+            QuestionnaireHarness {
+                state,
+                override_skip_margin,
+            }
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let state = cx.update(|_, cx| view.read(cx).state.clone());
@@ -1553,13 +1652,14 @@ mod tests {
 
     #[gpui::test]
     fn actions_stay_inside_questionnaire_width(cx: &mut TestAppContext) {
-        let (cx, state) = actions_visual_harness(cx);
+        let (cx, state) = actions_visual_harness(cx, false);
         let entity_id = state.entity_id();
         let root_id = Box::leak(format!("questionnaire-{entity_id}-root").into_boxed_str());
         let actions_id = Box::leak(format!("questionnaire-{entity_id}-actions").into_boxed_str());
         let previous_id = Box::leak(format!("questionnaire-{entity_id}-Previous").into_boxed_str());
         let skip_id = Box::leak(format!("questionnaire-{entity_id}-Skip").into_boxed_str());
         let next_id = Box::leak(format!("questionnaire-{entity_id}-Next").into_boxed_str());
+        let submit_id = Box::leak(format!("questionnaire-{entity_id}-Submit").into_boxed_str());
         let root = cx.debug_bounds(root_id).expect("questionnaire rendered");
         let actions = cx.debug_bounds(actions_id).expect("actions rendered");
         let previous = cx.debug_bounds(previous_id).expect("previous rendered");
@@ -1568,10 +1668,55 @@ mod tests {
 
         assert!(actions.left() >= root.left());
         assert!(actions.right() <= root.right());
-        assert!(previous.left() >= actions.left());
+        assert_eq!(previous.left(), actions.left());
         assert!(previous.right() <= skip.left());
         assert!(skip.right() <= next.left());
-        assert!(next.right() <= actions.right());
+        assert_eq!(next.right(), actions.right());
+
+        cx.update(|window, cx| {
+            state
+                .update(cx, |state, cx| state.set_current_item("first", window, cx))
+                .unwrap();
+            window.draw(cx).clear(cx);
+        });
+        let first_actions = cx.debug_bounds(actions_id).expect("first actions rendered");
+        let first_next = cx.debug_bounds(next_id).expect("first next rendered");
+        assert!(first_next.left() >= first_actions.left());
+        assert_eq!(first_next.right(), first_actions.right());
+
+        cx.update(|window, cx| {
+            state
+                .update(cx, |state, cx| state.set_current_item("third", window, cx))
+                .unwrap();
+            window.draw(cx).clear(cx);
+        });
+        let last_actions = cx.debug_bounds(actions_id).expect("last actions rendered");
+        let last_previous = cx
+            .debug_bounds(previous_id)
+            .expect("last previous rendered");
+        let submit = cx.debug_bounds(submit_id).expect("submit rendered");
+        assert_eq!(last_previous.left(), last_actions.left());
+        assert!(last_previous.right() <= submit.left());
+        assert_eq!(submit.right(), last_actions.right());
+    }
+
+    #[gpui::test]
+    fn action_instance_style_overrides_default_trailing_anchor(cx: &mut TestAppContext) {
+        let (cx, state) = actions_visual_harness(cx, true);
+        let entity_id = state.entity_id();
+        let actions_id = Box::leak(format!("questionnaire-{entity_id}-actions").into_boxed_str());
+        let previous_id = Box::leak(format!("questionnaire-{entity_id}-Previous").into_boxed_str());
+        let skip_id = Box::leak(format!("questionnaire-{entity_id}-Skip").into_boxed_str());
+        let next_id = Box::leak(format!("questionnaire-{entity_id}-Next").into_boxed_str());
+        let actions = cx.debug_bounds(actions_id).expect("actions rendered");
+        let previous = cx.debug_bounds(previous_id).expect("previous rendered");
+        let skip = cx.debug_bounds(skip_id).expect("skip rendered");
+        let next = cx.debug_bounds(next_id).expect("next rendered");
+
+        assert_eq!(previous.left(), actions.left());
+        assert!(previous.right() <= skip.left());
+        assert!(skip.right() <= next.left());
+        assert!(next.right() < actions.right());
     }
 
     #[gpui::test]
@@ -1681,6 +1826,7 @@ mod tests {
             assert!(state.read(cx).error("first").is_some());
         });
 
+        focus_input(cx, &state, "first");
         simulate_key(cx, "up", false, false);
         cx.update(|window, cx| {
             assert_eq!(
@@ -1689,6 +1835,45 @@ mod tests {
                     .focused_current_choice(window)
                     .map(SharedString::as_ref),
                 Some("beta")
+            );
+        });
+
+        simulate_key(cx, "down", false, false);
+        cx.update(|window, cx| {
+            assert!(state.read(cx).is_current_input_focused(window));
+            assert_eq!(
+                state.read(cx).answer("first").unwrap().choices(),
+                &[SharedString::from("beta")]
+            );
+        });
+
+        simulate_key(cx, "down", false, false);
+        cx.update(|window, cx| {
+            assert_eq!(
+                state
+                    .read(cx)
+                    .focused_current_choice(window)
+                    .map(SharedString::as_ref),
+                Some("alpha")
+            );
+            assert_eq!(
+                state.read(cx).answer("first").unwrap().choices(),
+                &[SharedString::from("alpha")]
+            );
+        });
+
+        simulate_key(cx, "down", false, false);
+        cx.update(|window, cx| {
+            assert_eq!(
+                state
+                    .read(cx)
+                    .focused_current_choice(window)
+                    .map(SharedString::as_ref),
+                Some("beta")
+            );
+            assert_eq!(
+                state.read(cx).answer("first").unwrap().choices(),
+                &[SharedString::from("beta")]
             );
         });
 
@@ -1723,6 +1908,21 @@ mod tests {
         focus_input(cx, &state, "first");
 
         simulate_key(cx, "down", false, false);
+        cx.update(|window, cx| {
+            let state = state.read(cx);
+            assert!(state.is_current_input_focused(window));
+            assert_eq!(
+                state
+                    .answer("first")
+                    .unwrap()
+                    .freeform()
+                    .map(SharedString::as_ref),
+                Some("Freeform answer")
+            );
+            assert!(state.answer("first").unwrap().choices().is_empty());
+        });
+
+        simulate_key(cx, "up", false, false);
         cx.update(|window, cx| {
             let state = state.read(cx);
             assert!(state.is_current_input_focused(window));

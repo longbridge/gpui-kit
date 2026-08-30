@@ -201,10 +201,12 @@ impl QuestionnaireStory {
             choice_parts = choice_parts.child(choice);
         }
 
+        // Keep the freeform answer in the same answer group as fixed choices,
+        // matching shadcn/ui's Questionnaire composition and spacing.
+        choice_parts = choice_parts.child(QuestionnaireInput::new(state, item).with_size(size));
+
         result
             .child(choice_parts)
-            // This part renders Empty when the definition has no freeform input.
-            .child(QuestionnaireInput::new(state, item).with_size(size))
             .child(QuestionnaireError::new(state, item).with_size(size))
     }
 
@@ -240,7 +242,11 @@ impl QuestionnaireStory {
     }
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let main_state = Self::state(Self::main_items(window, cx), cx);
+        let main_state = Self::shortcut_state(
+            Self::main_items(window, cx),
+            QuestionnaireShortcutMode::Letters,
+            cx,
+        );
         let validation_state = Self::state(Self::validation_items(window, cx), cx);
         let external_state = Self::state(
             vec![
@@ -561,7 +567,7 @@ impl Render for QuestionnaireStory {
             .child(
                 section("Complete flow")
                     .description("Required single choice, multiple choice, freeform input, skip, disabled item, and submit events.")
-                    .w(px(600.))
+                    .w(px(448.))
                     .child(main),
             )
             .child(
