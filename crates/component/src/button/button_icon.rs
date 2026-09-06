@@ -165,4 +165,38 @@ mod tests {
         assert!(!progress_variant.is_spinner());
         assert!(progress_variant.is_progress());
     }
+
+    #[test]
+    fn test_custom_data_icon_converts_through_component_slots() {
+        use crate::{icon::IconSource, menu::PopupMenuItem};
+
+        struct Search;
+        impl From<Search> for Icon {
+            fn from(_: Search) -> Self {
+                Icon::default().data(include_bytes!("../../../assets/assets/icons/search.svg"))
+            }
+        }
+
+        let button = ButtonIcon::from(Search)
+            .loading(true)
+            .loading_icon(Some(Search.into()));
+        let ButtonIconVariant::Icon(icon) = button.icon else {
+            panic!("custom data icons must use the standard icon variant");
+        };
+        assert!(matches!(icon.source_ref(), IconSource::Data(_)));
+        assert!(button.loading);
+        assert!(matches!(
+            button.loading_icon.unwrap().source_ref(),
+            IconSource::Data(_)
+        ));
+
+        let menu = PopupMenuItem::new("Search").icon(Search);
+        let PopupMenuItem::Item {
+            icon: Some(icon), ..
+        } = menu
+        else {
+            panic!("custom data icons must be accepted by menu slots");
+        };
+        assert!(matches!(icon.source_ref(), IconSource::Data(_)));
+    }
 }

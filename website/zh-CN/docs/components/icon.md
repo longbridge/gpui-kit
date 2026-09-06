@@ -5,7 +5,7 @@ description: 以不同尺寸、颜色和变换方式显示 SVG 图标。
 
 # Icon
 
-Icon 是一个灵活的图标组件，用于渲染内置图标库中的 SVG 图标。图标基于 Lucide.dev，并支持尺寸、颜色与旋转等定制。组件依赖你在资源包中提供对应的 SVG 文件。
+Icon 支持通过资源路径或内存中的字节渲染 SVG 图标，并可定制尺寸、颜色与变换。内置的 Lucide 图标使用资源包；自定义 SVG 字节可以通过 `Icon::data` 直接传入。
 
 在开始之前，建议先阅读 [Icons & Assets](../assets.md)，了解如何在 GPUI 与 GPUI Component 应用中使用 SVG。
 
@@ -49,13 +49,13 @@ Icon::new(IconName::Star)
 ### 旋转图标
 
 ```rust
-use gpui_kit::Radians;
+use gpui_kit::{Transformation, radians};
 
 Icon::new(IconName::ArrowUp)
-    .rotate(Radians::from_degrees(90.))
+    .rotate(radians(std::f32::consts::FRAC_PI_2))
 
 Icon::new(IconName::ChevronRight)
-    .transform(Transformation::rotate(Radians::PI))
+    .transform(Transformation::rotate(radians(std::f32::consts::PI)))
 ```
 
 ### 自定义 SVG 路径
@@ -64,6 +64,67 @@ Icon::new(IconName::ChevronRight)
 Icon::new(Icon::empty())
     .path("icons/my-custom-icon.svg")
 ```
+
+### SVG 字节
+
+通过 `data(&[u8])` 传入 SVG 字节，无须为该图标注册 `AssetSource` 路径：
+
+```rust
+use gpui_kit::component::{Icon, button::Button, menu::PopupMenuItem};
+
+let icon = Icon::default().data(include_bytes!("search.svg"));
+
+Button::new("search").icon(icon.clone()).label("Search");
+PopupMenuItem::new("Search").icon(icon);
+```
+
+`data` 会将输入复制到共享存储中，因此输入无须具有 `'static` 生命周期。
+克隆 `Icon` 时会共享这些字节，并保留样式和变换。直接渲染与通过
+`Icon::view(cx)` 创建实体视图都会保留数据源。GPUI 渲染器可能再次复制字节，
+因此此 API 不承诺渲染过程零复制。
+
+最后一次设置的数据源生效，即使新来源为空也会替换旧来源：
+
+```rust
+let bytes = include_bytes!("search.svg");
+Icon::default().path("icons/old.svg").data(bytes); // 使用 SVG 字节
+Icon::default().data(bytes).path("icons/search.svg"); // 使用资源路径
+```
+
+字节图标与路径图标使用相同的 SVG 渲染器，保留组件尺寸、前景色与按钮加载行为。
+可以通过 `loading_icon` 指定自定义加载图标：
+
+```rust
+Button::new("search")
+    .icon(Icon::default().data(include_bytes!("search.svg")))
+    .loading_icon(Icon::default().data(include_bytes!("loader.svg")))
+    .loading(true)
+    .label("Searching")
+```
+
+`NativeMenu::menu_with_icon` 也支持字节图标，尺寸与着色继续遵循现有原生菜单规则。
+应用或组件中使用的其他路径图标仍需要资源源。
+
+### 使用 SVG 字节的自定义图标类型
+
+图标 crate 可以导出独立类型，并实现 `From<T> for Icon`：
+
+```rust
+use gpui_kit::component::{Icon, button::Button};
+
+pub struct Search;
+
+impl From<Search> for Icon {
+    fn from(_: Search) -> Self {
+        Icon::default().data(include_bytes!("search.svg"))
+    }
+}
+
+Button::new("search").icon(Search);
+```
+
+现有 `IconNamed` 实现继续提供资源路径。使用字节的类型实现上述转换即可，
+无须同时实现 `IconNamed`。二进制体积能否缩小取决于实际引用的资源和构建配置。
 
 ## 可用图标
 

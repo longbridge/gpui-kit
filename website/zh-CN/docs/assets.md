@@ -131,6 +131,22 @@ impl Render for Example {
 }
 ```
 
+## 单独嵌入 SVG 图标
+
+自定义图标可以通过 `Icon::data` 直接传入 SVG 字节，无须维护资源路径注册表：
+
+```rust
+use gpui_kit::component::{Icon, button::Button};
+
+Button::new("search")
+    .icon(Icon::default().data(include_bytes!("search.svg")))
+    .label("Search")
+```
+
+这样可以省去该图标的资源查找。内置 `IconName` 和组件中使用的其他路径图标仍需要资源源。
+数据所有权、来源替换、加载图标与自定义图标类型的说明见
+[SVG 字节](./components/icon.md#svg-字节)。
+
 ## 参考资源
 
 - [Lucide Icons](https://lucide.dev/) - GPUI Component 的图标集主要基于 Lucide 开源图标库
