@@ -65,6 +65,20 @@ Select::new(&state)
     .placeholder("Select a language...")
 ```
 
+### 可访问性
+
+给控件一个不随选中项变化的名称：
+
+```rust
+Select::new(&state)
+    .accessibility_label("Programming language")
+    .placeholder("Choose a language")
+```
+
+可访问值取自已提交选项的 `title()` 以及 `title_prefix`。自定义的 `display_title()`
+仍然只用于视觉呈现。搜索不会改变这个已提交的值。未选中时，可访问值使用 placeholder。
+启用状态的控件会暴露可访问的激活操作，用于打开或关闭弹层。
+
 ### 可搜索
 
 启用 `searchable(true)` 后，下拉菜单中会出现搜索能力：

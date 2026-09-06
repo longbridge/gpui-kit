@@ -129,7 +129,8 @@ impl Select {
         self
     }
 
-    /// Handles a dismissal requested through the Cancel action.
+    /// Handles a dismissal, however it was requested: the Cancel action, or
+    /// the accessible activation that closes an open control.
     ///
     /// This runs before the controlled open state is asked to close, so a
     /// caller that commits its pending value on dismissal can still read that
@@ -171,6 +172,26 @@ impl RenderOnce for Select {
         let on_dismiss = self.on_dismiss;
         let on_confirm = self.on_confirm;
 
+        // Every way of closing runs the same steps. A caller that tracks
+        // dismissal has to see one however the popup was closed, and the
+        // accessible activation closes exactly what Escape closes.
+        let close: ActionHandler = Rc::new({
+            let on_open_change = on_open_change.clone();
+            let on_dismiss = on_dismiss.clone();
+            let focus_handle = focus_handle.clone();
+            move |window: &mut Window, cx: &mut App| {
+                if let Some(handler) = on_dismiss.as_ref() {
+                    handler(window, cx);
+                }
+                if let Some(handler) = on_open_change.as_ref() {
+                    handler(false, window, cx);
+                }
+                if let Some(handle) = focus_handle.as_ref() {
+                    handle.focus(window, cx);
+                }
+            }
+        });
+
         div()
             .id(self.id)
             .role(Role::ComboBox)
@@ -189,21 +210,20 @@ impl RenderOnce for Select {
             .when(!disabled, |this| {
                 let on_open_change = on_open_change.clone();
                 let content_focus_handle = content_focus_handle.clone();
-                let focus_handle = focus_handle.clone();
+                let close = close.clone();
 
                 // Platform adapters may flatten the trigger child.
                 // Expose activation on the semantic root itself.
                 this.on_a11y_action(AccessibleAction::Click, move |_, window, cx| {
-                    if let Some(handler) = on_open_change.as_ref() {
-                        handler(!open, window, cx);
+                    if open {
+                        close(window, cx);
+                        return;
                     }
 
-                    let next_focus = if open {
-                        focus_handle.as_ref()
-                    } else {
-                        content_focus_handle.as_ref()
-                    };
-                    if let Some(handle) = next_focus {
+                    if let Some(handler) = on_open_change.as_ref() {
+                        handler(true, window, cx);
+                    }
+                    if let Some(handle) = content_focus_handle.as_ref() {
                         handle.focus(window, cx);
                     }
                 })
@@ -279,15 +299,7 @@ impl RenderOnce for Select {
                 }
 
                 cx.stop_propagation();
-                if let Some(handler) = on_dismiss.as_ref() {
-                    handler(window, cx);
-                }
-                if let Some(handler) = on_open_change.as_ref() {
-                    handler(false, window, cx);
-                }
-                if let Some(handle) = focus_handle.as_ref() {
-                    handle.focus(window, cx);
-                }
+                close(window, cx);
             })
             .children(self.children)
             .refine_style(&self.style)
@@ -308,6 +320,8 @@ mod tests {
         focus_handle: FocusHandle,
         content_focus_handle: FocusHandle,
         changes: Arc<Mutex<Vec<bool>>>,
+        /// Every step of a close, in the order it ran.
+        closing: Arc<Mutex<Vec<&'static str>>>,
     }
 
     impl SelectHarness {
@@ -318,6 +332,7 @@ mod tests {
                 focus_handle: cx.focus_handle(),
                 content_focus_handle: cx.focus_handle(),
                 changes: Arc::new(Mutex::new(Vec::new())),
+                closing: Arc::new(Mutex::new(Vec::new())),
             }
         }
     }
@@ -332,6 +347,8 @@ mod tests {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             let state = cx.entity();
             let changes = self.changes.clone();
+            let opened = self.closing.clone();
+            let dismissed = self.closing.clone();
 
             Select::new("select")
                 .open(self.open)
@@ -340,11 +357,16 @@ mod tests {
                 .content_focus_handle(&self.content_focus_handle)
                 .on_open_change(move |open, _, cx| {
                     changes.lock().unwrap().push(open);
+                    opened
+                        .lock()
+                        .unwrap()
+                        .push(if open { "open" } else { "close" });
                     state.update(cx, |state, cx| {
                         state.open = open;
                         cx.notify();
                     });
                 })
+                .on_dismiss(move |_, _| dismissed.lock().unwrap().push("dismiss"))
                 .child(div().track_focus(&self.content_focus_handle).size(px(20.)))
         }
     }
@@ -409,6 +431,31 @@ mod tests {
         );
     }
 
+    /// Closing runs `on_dismiss`, and runs it before the open state is asked
+    /// to close, so a caller that commits a pending value on dismissal can
+    /// still read that value.
+    ///
+    /// Every close shares one path, which is the point: the accessible
+    /// activation used to close by calling `on_open_change` alone, so a
+    /// consumer wiring `on_dismiss` — `crates/shell` forwards it to JS as
+    /// `onDismiss` — saw Escape but not a screen reader pressing the same
+    /// control. GPUI exposes no way to dispatch an accessibility action in a
+    /// test (`Window::handle_a11y_action` is `pub(crate)`), so this covers the
+    /// shared path through the route a test can reach.
+    #[gpui::test]
+    fn every_close_dismisses_before_it_closes(cx: &mut TestAppContext) {
+        let (cx, state) = harness(cx, false);
+
+        cx.simulate_keystrokes("down escape");
+        assert_eq!(
+            &*state
+                .read_with(cx, |state, _| state.closing.clone())
+                .lock()
+                .unwrap(),
+            &["open", "dismiss", "close"]
+        );
+    }
+
     #[gpui::test]
     fn disabled_select_is_not_keyboard_interactive(cx: &mut TestAppContext) {
         let (cx, state) = harness(cx, true);
@@ -442,12 +489,18 @@ mod tests {
                     .accessibility_label("Programming language")
                     .accessibility_value("Rust"),
             );
-            let disabled = info(Select::new("disabled").disabled(true));
+            // Open, so the expanded assertion below says something about
+            // `disabled` rather than about the default open state.
+            let disabled = info(Select::new("disabled").open(true).disabled(true));
 
             assert_eq!(enabled.label(), Some("Programming language"));
             assert_eq!(enabled.value(), Some("Rust"));
             assert_eq!(enabled.is_expanded(), Some(true));
-            assert_eq!(disabled.is_expanded(), Some(false));
+            assert_eq!(
+                disabled.is_expanded(),
+                Some(true),
+                "a disabled control still reports the state it is in"
+            );
             assert!(enabled.supports_action(accesskit::Action::Click));
             assert!(!disabled.supports_action(accesskit::Action::Click));
         });

@@ -40,7 +40,10 @@ use gpui_kit::base::{Select};
 
 ## 可访问性
 
-提供标签，暴露当前值，并保留上下键、Enter、Escape 与类型检索。
+在受控根节点上设置 `.accessibility_label(...)`，并把 `.accessibility_value(...)`
+设为已提交的选中项，而不是临时的搜索游标。根节点会暴露展开状态与可访问的激活操作。
+激活会请求切换展开状态，并在 trigger 与内容之间移动焦点。禁用的控件不暴露激活操作。
+带样式的 `Select` 会自动提供已提交的值，未选中时回退到 placeholder。
 
 ## 注意事项
 
