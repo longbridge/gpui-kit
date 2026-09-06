@@ -7,17 +7,31 @@
 //! - **Click-through** — mouse events pass through the window
 //! - **Always on top** — window stays above other windows
 //!
+//! # Platform support
+//!
+//! | Feature | macOS | Windows | Linux/X11 | Wayland |
+//! | ------- | ----- | ------- | --------- | ------- |
+//! | Skip taskbar | ✅ | ✅ | ✅ | ❌ |
+//! | Always on top | ✅ | ✅ | ✅ | ❌ |
+//! | Click-through | ✅ | ✅ | ⚠️ Partial | ❌ |
+//!
+//! Wayland is not supported at the client level due to protocol limitations.
+//! On Linux/X11, click-through uses `_NET_WM_WINDOW_TYPE_SPLASH` as a hint but
+//! does not implement true mouse-pass-through (that requires the XShape
+//! extension and is left for future work).
+//!
 //! # Example
 //!
 //! ```no_run
 //! use gpui_kit::base::window_ext;
 //!
 //! // After creating a window, configure it as an overlay:
-//! window_ext::make_overlay(&window);
+//! window_ext::make_overlay(&window).expect("configure overlay");
 //! ```
 //!
 //! [`WindowOptions`]: gpui::WindowOptions
 
+use anyhow::Result;
 use gpui::Window;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -87,6 +101,9 @@ impl WindowBehavior {
 /// Call this after the window has been created (e.g. inside the
 /// `open_window` closure, or from a `cx.defer` callback).
 ///
+/// Returns an error if the platform-specific handle cannot be obtained or
+/// the OS call fails.
+///
 /// # Example
 ///
 /// ```no_run
@@ -96,12 +113,12 @@ impl WindowBehavior {
 /// let behavior = WindowBehavior::new()
 ///     .with_skip_taskbar(true)
 ///     .with_always_on_top(true);
-/// window_ext::configure(&window, &behavior);
+/// window_ext::configure(&window, &behavior)?;
 /// ```
-pub fn configure(window: &Window, behavior: &WindowBehavior) {
-    let Ok(handle) = HasWindowHandle::window_handle(window) else {
-        return;
-    };
+pub fn configure(window: &Window, behavior: &WindowBehavior) -> Result<()> {
+    let handle = HasWindowHandle::window_handle(window).map_err(|e| {
+        anyhow::Error::msg(format!("failed to get window handle: {e}"))
+    })?;
     match handle.as_raw() {
         #[cfg(target_os = "macos")]
         RawWindowHandle::AppKit(handle) => configure_macos(handle, behavior),
@@ -111,36 +128,42 @@ pub fn configure(window: &Window, behavior: &WindowBehavior) {
         RawWindowHandle::Xlib(handle) => configure_xlib(window, handle, behavior),
         #[cfg(target_os = "linux")]
         RawWindowHandle::Wayland(_) => {
-            // Wayland does not support these features at the client level.
+            return Err(anyhow::Error::msg(
+                "Wayland does not support window_ext features at the client level",
+            ));
         }
-        _ => {}
+        other => {
+            return Err(anyhow::Error::msg(format!(
+                "unsupported window backend: {other:?}"
+            )));
+        }
     }
 }
 
 /// Convenience: configure as an overlay window (skip taskbar + click-through + always on top).
-pub fn make_overlay(window: &Window) {
+pub fn make_overlay(window: &Window) -> Result<()> {
     configure(
         window,
         &WindowBehavior::new()
             .with_skip_taskbar(true)
             .with_click_through(true)
             .with_always_on_top(true),
-    );
+    )
 }
 
 /// Convenience: configure as a floating window (skip taskbar + always on top, no click-through).
-pub fn make_floating(window: &Window) {
+pub fn make_floating(window: &Window) -> Result<()> {
     configure(
         window,
         &WindowBehavior::new()
             .with_skip_taskbar(true)
             .with_always_on_top(true),
-    );
+    )
 }
 
 /// Convenience: enable click-through only.
-pub fn set_click_through(window: &Window, enabled: bool) {
-    configure(window, &WindowBehavior::new().with_click_through(enabled));
+pub fn set_click_through(window: &Window, enabled: bool) -> Result<()> {
+    configure(window, &WindowBehavior::new().with_click_through(enabled))
 }
 
 // ---------------------------------------------------------------------------
@@ -151,57 +174,62 @@ pub fn set_click_through(window: &Window, enabled: bool) {
 fn configure_macos(
     handle: raw_window_handle::AppKitWindowHandle,
     behavior: &WindowBehavior,
-) {
+) -> Result<()> {
     use objc2::msg_send;
     use objc2_app_kit::NSView;
 
-    // Get the NSWindow from the NSView handle
+    // Get the NSWindow from the NSView handle.
     let ns_view_ptr = handle.ns_view.as_ptr() as *mut NSView;
     if ns_view_ptr.is_null() {
-        return;
+        return Err(anyhow::Error::msg("ns_view is null".into()));
     }
     let ns_view = unsafe { &*ns_view_ptr };
     let Some(ns_window) = ns_view.window() else {
-        return;
+        return Err(anyhow::Error::msg(
+            "ns_view is not attached to a window".into(),
+        ));
     };
-    // Use a reference for msg_send! (Retained<NSWindow> is not MessageReceiver)
+    // Use a reference for msg_send! (Retained<NSWindow> is not MessageReceiver).
     let ns_window_ref = &*ns_window;
 
     unsafe {
-        // Configure collection behavior (taskbar / alt-tab / spaces)
+        // Configure collection behavior (taskbar / alt-tab / spaces).
         if behavior.is_skip_taskbar() || behavior.is_always_on_top() {
             let mut collection_behavior: usize = 0;
 
             if behavior.is_skip_taskbar() {
-                // NSWindowCollectionBehavior::CanJoinAllSpaces
+                // NSWindowCollectionBehavior::CanJoinAllSpaces = 1 << 0
                 collection_behavior |= 1 << 0;
-                // NSWindowCollectionBehavior::Stationary
+                // NSWindowCollectionBehavior::Stationary = 1 << 6
                 collection_behavior |= 1 << 6;
-                // NSWindowCollectionBehavior::IgnoresCycle (hide from Alt-Tab)
+                // NSWindowCollectionBehavior::IgnoresCycle = 1 << 7 (hide from Alt-Tab)
                 collection_behavior |= 1 << 7;
-                // NSWindowCollectionBehavior::ExcludedFromWindowsMenu
+                // NSWindowCollectionBehavior::ExcludedFromWindowsMenu = 1 << 8
                 collection_behavior |= 1 << 8;
             }
 
             if behavior.is_always_on_top() {
-                // NSWindowCollectionBehavior::CanJoinAllSpaces
+                // NSWindowCollectionBehavior::CanJoinAllSpaces = 1 << 0
                 collection_behavior |= 1 << 0;
             }
 
             let _: () = msg_send![ns_window_ref, setCollectionBehavior: collection_behavior];
         }
 
-        // Configure window level (always on top)
+        // Configure window level (always on top).
+        // NSNormalWindowLevel = 0, NSFloatingWindowLevel = 3.
+        // Use 5 to stay above floating windows (e.g. menus).
         if behavior.is_always_on_top() {
-            // NSFloatingWindowLevel = 3, use 5 to be above floating
-            let _: () = msg_send![ns_window_ref, setLevel: 5];
+            const WINDOW_LEVEL_ABOVE_FLOATING: i32 = 5;
+            let _: () = msg_send![ns_window_ref, setLevel: WINDOW_LEVEL_ABOVE_FLOATING];
         }
 
-        // Configure click-through
+        // Configure click-through.
         if behavior.is_click_through() {
             let _: () = msg_send![ns_window_ref, setIgnoresMouseEvents: true];
         }
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +240,7 @@ fn configure_macos(
 fn configure_windows(
     handle: raw_window_handle::Win32WindowHandle,
     behavior: &WindowBehavior,
-) {
+) -> Result<()> {
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         GWL_EXSTYLE, HWND_NOTOPMOST, HWND_TOPMOST, SET_WINDOW_POS_FLAGS, WS_EX_LAYERED,
@@ -222,41 +250,55 @@ fn configure_windows(
 
     let hwnd: HWND = handle.hwnd.get() as *mut _;
     if hwnd.is_null() {
-        return;
+        return Err(anyhow::Error::msg("HWND is null".into()));
     }
 
     unsafe {
-        // Build extended window styles
+        // Build extended window styles.
         let mut ex_style: u32 = 0;
 
         if behavior.is_skip_taskbar() {
-            // WS_EX_TOOLWINDOW: hide from taskbar
+            // WS_EX_TOOLWINDOW: hide from taskbar.
             ex_style |= WS_EX_TOOLWINDOW;
-            // WS_EX_NOACTIVATE: don't steal focus
+            // WS_EX_NOACTIVATE: don't steal focus.
             ex_style |= WS_EX_NOACTIVATE;
         }
 
         if behavior.is_click_through() {
-            // WS_EX_TRANSPARENT: click-through
+            // WS_EX_TRANSPARENT: click-through.
             ex_style |= WS_EX_TRANSPARENT;
-            // WS_EX_LAYERED: required for transparent styles
+            // WS_EX_LAYERED: required for transparent styles.
             ex_style |= WS_EX_LAYERED;
         }
 
-        // Apply extended styles
-        let _ = SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style as i32);
+        // Apply extended styles.
+        let result = SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style as i32);
+        if result == 0 {
+            let err = std::io::Error::last_os_error();
+            return Err(anyhow::Error::msg(format!(
+                "SetWindowLongW failed: {err}"
+            )));
+        }
 
-        // Build set-window-pos flags
+        // Build set-window-pos flags.
         let flags: SET_WINDOW_POS_FLAGS =
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW;
 
-        // Set z-order
-        if behavior.is_always_on_top() {
-            let _ = SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags);
+        // Set z-order.
+        let z_order = if behavior.is_always_on_top() {
+            HWND_TOPMOST
         } else {
-            let _ = SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+            HWND_NOTOPMOST
+        };
+        let result = SetWindowPos(hwnd, z_order, 0, 0, 0, 0, flags);
+        if result == 0 {
+            let err = std::io::Error::last_os_error();
+            return Err(anyhow::Error::msg(format!(
+                "SetWindowPos failed: {err}"
+            )));
         }
     }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -268,29 +310,35 @@ fn configure_xlib(
     _window: &Window,
     handle: raw_window_handle::XlibWindowHandle,
     behavior: &WindowBehavior,
-) {
+) -> Result<()> {
     use x11_dl::xlib;
 
     // X11 requires a Display connection. We open a new one here because
-    // GPUI does not expose its display handle.
+    // GPUI does not expose its display handle. This is intentionally a fresh
+    // connection per call — caching would require lifetime management that
+    // does not fit this API.
     let xlib = match x11_dl::xlib::Xlib::open() {
         Ok(x) => x,
-        Err(_) => return,
+        Err(e) => {
+            return Err(anyhow::Error::msg(format!(
+                "failed to load Xlib: {e}"
+            )))
+        }
     };
 
     unsafe {
         let display = (xlib.XOpenDisplay)(std::ptr::null());
         if display.is_null() {
-            return;
+            return Err(anyhow::Error::msg("XOpenDisplay failed"));
         }
         let window = handle.window as xlib::Window;
 
-        // Helper: intern an atom
+        // Helper: intern an atom.
         let intern_atom = |name: &[u8]| -> xlib::Atom {
             (xlib.XInternAtom)(display, name.as_ptr() as *const i8, 0)
         };
 
-        // Helper: set a single Atom property on the window
+        // Helper: set a single Atom property on the window.
         let set_atom_property = |property: xlib::Atom, value: xlib::Atom| {
             (xlib.XChangeProperty)(
                 display,
@@ -304,29 +352,29 @@ fn configure_xlib(
             );
         };
 
-        // Set window type to DOCK to hide from taskbar/pager
+        // Set window type to DOCK to hide from taskbar/pager.
         if behavior.is_skip_taskbar() {
             let atom_net_wm_window_type = intern_atom(b"_NET_WM_WINDOW_TYPE\0");
             let atom_dock = intern_atom(b"_NET_WM_WINDOW_TYPE_DOCK\0");
             set_atom_property(atom_net_wm_window_type, atom_dock);
 
-            // Also set SKIP_TASKBAR state
+            // Also set SKIP_TASKBAR state.
             let atom_net_wm_state = intern_atom(b"_NET_WM_STATE\0");
             let atom_skip_taskbar = intern_atom(b"_NET_WM_STATE_SKIP_TASKBAR\0");
             set_atom_property(atom_net_wm_state, atom_skip_taskbar);
         }
 
-        // Always on top
+        // Always on top.
         if behavior.is_always_on_top() {
             let atom_net_wm_state = intern_atom(b"_NET_WM_STATE\0");
             let atom_above = intern_atom(b"_NET_WM_STATE_ABOVE\0");
             set_atom_property(atom_net_wm_state, atom_above);
         }
 
-        // Click-through on X11 requires the Shape extension.
-        // We set _NET_WM_WINDOW_TYPE_SPLASH as a hint, but true
-        // click-through needs XShapeCombineRegion which requires
-        // querying the shape extension first.
+        // Click-through on X11 is not fully implementable without the Shape
+        // extension. We set the window type to SPLASH as a hint (some WMs
+        // treat splash windows as non-interactive), but true mouse-pass-through
+        // requires XShapeCombineRegion and is left for future work.
         if behavior.is_click_through() {
             let atom_net_wm_window_type = intern_atom(b"_NET_WM_WINDOW_TYPE\0");
             let atom_splash = intern_atom(b"_NET_WM_WINDOW_TYPE_SPLASH\0");
@@ -335,5 +383,44 @@ fn configure_xlib(
 
         (xlib.XFlush)(display);
         (xlib.XCloseDisplay)(display);
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_behavior_is_all_disabled() {
+        let b = WindowBehavior::new();
+        assert!(!b.is_skip_taskbar());
+        assert!(!b.is_click_through());
+        assert!(!b.is_always_on_top());
+    }
+
+    #[test]
+    fn builder_flags_roundtrip() {
+        let b = WindowBehavior::new()
+            .with_skip_taskbar(true)
+            .with_click_through(true)
+            .with_always_on_top(true);
+        assert!(b.is_skip_taskbar());
+        assert!(b.is_click_through());
+        assert!(b.is_always_on_top());
+    }
+
+    #[test]
+    fn builder_can_disable_individually() {
+        let b = WindowBehavior::new()
+            .with_skip_taskbar(true)
+            .with_click_through(false);
+        assert!(b.is_skip_taskbar());
+        assert!(!b.is_click_through());
+        assert!(!b.is_always_on_top());
     }
 }
