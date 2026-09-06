@@ -1162,7 +1162,7 @@ pub struct Example {
     _subscriptions: Vec<Subscription>,
 }
 
-const EXAMPLE: &str = include_str!("./fixtures/test.md");
+const EXAMPLE: &str = include_str!("../../fixtures/test.md");
 
 impl Example {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {

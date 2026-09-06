@@ -80,10 +80,10 @@ cargo run
 
 ### Run single example
 
-There is also available some split examples, run `cargo run --example` to see the available examples.
+Standalone examples live in `examples/`. Run a package directly; see [the examples README](examples/README.md) for the available commands.
 
 ```bash
-cargo run --example table
+cargo run -p example-editor
 ```
 
 ## UI Guides

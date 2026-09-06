@@ -18,7 +18,7 @@ pub struct Example {
     _subscribe: Subscription,
 }
 
-const EXAMPLE: &str = include_str!("./fixtures/test.html");
+const EXAMPLE: &str = include_str!("../../fixtures/test.html");
 
 impl Example {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {

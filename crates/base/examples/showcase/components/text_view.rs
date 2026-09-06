@@ -3,7 +3,7 @@ use gpui_base::{TextView, TextViewStyle};
 use super::*;
 use crate::showcase::palette::ExamplePalette;
 
-pub const MARKDOWN: &str = include_str!("../../../../story/examples/fixtures/test.md");
+pub const MARKDOWN: &str = include_str!("../../../../../examples/fixtures/test.md");
 
 fn text_view_style(palette: ExamplePalette) -> TextViewStyle {
     let is_dark = palette.canvas == ExamplePalette::for_dark(true).canvas;

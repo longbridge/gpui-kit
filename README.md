@@ -198,17 +198,17 @@ cargo run
 
 ### Examples
 
-Some important examples are built into the `story` crate and can be run directly:
+Some larger examples reuse the `story` gallery components and run as standalone packages:
 
 ```bash
 # Dock layout system (panels, split views, tabs)
-cargo run --example dock
+cargo run -p example-dock
 
 # Markdown rendering
-cargo run --example markdown
+cargo run -p example-markdown
 
 # HTML rendering
-cargo run --example html
+cargo run -p example-html
 ```
 
 The `examples` directory also contains standalone examples, each focused on a single feature. Each example is a separate crate, run them with `cargo run -p <name>`:

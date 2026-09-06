@@ -2504,6 +2504,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-brush"
+version = "0.6.0"
+dependencies = [
+ "gpui-component-story",
+ "gpui-kit",
+]
+
+[[package]]
+name = "example-dock"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "gpui-component-story",
+ "gpui-kit",
+ "rand 0.8.6",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "example-editor"
 version = "0.6.0"
 dependencies = [
@@ -2516,6 +2536,53 @@ dependencies = [
  "serde_json",
  "smol",
  "tree-sitter-navi",
+]
+
+[[package]]
+name = "example-html"
+version = "0.6.0"
+dependencies = [
+ "gpui-component-story",
+ "gpui-kit",
+]
+
+[[package]]
+name = "example-large-text"
+version = "0.6.0"
+dependencies = [
+ "gpui-component-story",
+ "gpui-kit",
+]
+
+[[package]]
+name = "example-markdown"
+version = "0.6.0"
+dependencies = [
+ "gpui-component-story",
+ "gpui-kit",
+ "lsp-types 0.97.0",
+ "regex",
+]
+
+[[package]]
+name = "example-stream-markdown"
+version = "0.6.0"
+dependencies = [
+ "gpui-component-story",
+ "gpui-kit",
+ "rand 0.8.6",
+ "smol",
+]
+
+[[package]]
+name = "example-tiles"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "gpui-component-story",
+ "gpui-kit",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

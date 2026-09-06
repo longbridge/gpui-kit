@@ -16,7 +16,7 @@ pub struct Example {
     _update_task: Task<()>,
 }
 
-const EXAMPLE: &str = include_str!("./fixtures/test.md");
+const EXAMPLE: &str = include_str!("../../fixtures/test.md");
 
 impl Example {
     pub fn new(_: &mut Window, cx: &mut Context<Self>) -> Self {

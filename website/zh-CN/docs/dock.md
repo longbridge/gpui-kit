@@ -155,7 +155,7 @@ self.dock_skin
 仓库内提供了包含边缘 Dock、运行时 Panel 操作、布局持久化与键盘操作的完整工作区：
 
 ```sh
-cargo run --example dock
+cargo run -p example-dock
 ```
 
-完整实现见 [`crates/story/examples/dock.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/story/examples/dock.rs)。
+完整实现见 [`examples/dock/src/main.rs`](https://github.com/longbridge/gpui-kit/blob/main/examples/dock/src/main.rs)。

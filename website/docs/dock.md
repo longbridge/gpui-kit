@@ -155,7 +155,7 @@ For complete control, implement the renderer traits in `gpui-base`. The same lay
 The repository includes a complete workspace with edge docks, runtime panel operations, layout persistence, and keyboard actions:
 
 ```sh
-cargo run --example dock
+cargo run -p example-dock
 ```
 
-See [`crates/story/examples/dock.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/story/examples/dock.rs) for the full implementation.
+See [`examples/dock/src/main.rs`](https://github.com/longbridge/gpui-kit/blob/main/examples/dock/src/main.rs) for the full implementation.
