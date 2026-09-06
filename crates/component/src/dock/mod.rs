@@ -86,6 +86,9 @@ pub(crate) struct SkinShared {
     tiles_scrollbar_mode: Cell<Option<ScrollbarMode>>,
     /// The dock whose resize handle is being dragged, if any. Only one can be.
     resizing_dock: Cell<Option<DockPlacement>>,
+    /// Whether the title-bar ellipsis (⋯) menu button is shown. Defaults to
+    /// `true`; skins that need a chrome-free title bar set it to `false`.
+    ellipsis_menu: Cell<bool>,
 }
 
 impl SkinShared {
@@ -107,6 +110,14 @@ impl SkinShared {
 
     pub(crate) fn resizing_dock(&self) -> &Cell<Option<DockPlacement>> {
         &self.resizing_dock
+    }
+
+    pub(crate) fn is_ellipsis_menu_visible(&self) -> bool {
+        self.ellipsis_menu.get()
+    }
+
+    pub(crate) fn set_ellipsis_menu_visible(&self, visible: bool) {
+        self.ellipsis_menu.set(visible);
     }
 
     /// Redraw the area after a setting changed. The skin is not an entity, so
@@ -165,6 +176,7 @@ impl DockSkin {
                 toggle_button_visible: Cell::new(true),
                 tiles_scrollbar_mode: Cell::new(None),
                 resizing_dock: Cell::new(None),
+                ellipsis_menu: Cell::new(true),
             }),
         })
     }
@@ -191,6 +203,17 @@ impl DockSkin {
 
     pub fn set_toggle_button_visible(&self, visible: bool, cx: &mut App) {
         self.shared.toggle_button_visible.set(visible);
+        self.shared.notify(cx);
+    }
+
+    /// Whether the title-bar ellipsis (⋯) menu button is drawn. Defaults to
+    /// `true`; set to `false` for a chrome-free title bar.
+    pub fn ellipsis_menu(&self) -> bool {
+        self.shared.is_ellipsis_menu_visible()
+    }
+
+    pub fn set_ellipsis_menu(&self, visible: bool, cx: &mut App) {
+        self.shared.set_ellipsis_menu_visible(visible);
         self.shared.notify(cx);
     }
 
