@@ -1,0 +1,19 @@
+[package]
+name = "example-editor"
+version = "0.6.0"
+publish = false
+edition.workspace = true
+
+[dependencies]
+gpui-kit = { workspace = true, features = ["tree-sitter-languages"] }
+gpui-component-story = { path = "../../crates/story" }
+autocorrect = "2.14.2"
+chrono = "0.4"
+color-lsp = "0.2.0"
+lsp-types.workspace = true
+serde_json.workspace = true
+smol.workspace = true
+tree-sitter-navi = "0.2.3"
+
+[lints]
+workspace = true

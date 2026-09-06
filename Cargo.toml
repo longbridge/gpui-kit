@@ -16,6 +16,7 @@ members = [
     "examples/fps_monitor",
     "examples/hello_world",
     "examples/input",
+    "examples/editor",
     "examples/window_title",
     "examples/dialog_overlay",
     "examples/webview",

@@ -178,9 +178,6 @@ cargo run
 一些重要的示例内置在 `story` crate 中，可以直接运行：
 
 ```bash
-# 支持 LSP 和语法高亮的代码编辑器
-cargo run --example editor
-
 # Dock 布局系统（面板、分割视图、标签页）
 cargo run --example dock
 
@@ -194,6 +191,9 @@ cargo run --example html
 `examples` 目录还包含独立示例，每个示例专注于单一功能。每个示例是一个独立的 crate，使用 `cargo run -p <name>` 运行：
 
 ```bash
+# 支持 LSP 和语法高亮的代码编辑器
+cargo run -p example-editor
+
 # 基础 Hello World
 cargo run -p hello_world
 

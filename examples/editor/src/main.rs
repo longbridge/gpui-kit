@@ -97,7 +97,7 @@ pub struct ExampleLspStore {
 impl ExampleLspStore {
     pub fn new() -> Self {
         let completions = serde_json::from_slice::<Vec<CompletionItem>>(include_bytes!(
-            "./fixtures/completion_items.json"
+            "../fixtures/completion_items.json"
         ))
         .unwrap();
 
@@ -702,7 +702,7 @@ impl Example {
                     hard_tabs: false,
                 })
                 .soft_wrap(false)
-                .default_value(include_str!("./fixtures/test.rs"))
+                .default_value(include_str!("../fixtures/test.rs"))
                 .placeholder("Enter your code here...")
         });
 

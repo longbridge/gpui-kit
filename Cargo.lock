@@ -2504,6 +2504,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-editor"
+version = "0.6.0"
+dependencies = [
+ "autocorrect",
+ "chrono",
+ "color-lsp",
+ "gpui-component-story",
+ "gpui-kit",
+ "lsp-types 0.97.0",
+ "serde_json",
+ "smol",
+ "tree-sitter-navi",
+]
+
+[[package]]
 name = "exr"
 version = "1.74.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3542,7 +3557,6 @@ dependencies = [
  "async-channel",
  "autocorrect",
  "chrono",
- "color-lsp",
  "csv",
  "dirs 6.0.0",
  "fake",
@@ -3563,7 +3577,6 @@ dependencies = [
  "syntect",
  "tracing",
  "tracing-subscriber",
- "tree-sitter-navi",
  "unindent",
 ]
 
