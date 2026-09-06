@@ -123,6 +123,37 @@ pub enum InputEvent {
     Blur,
 }
 
+/// Describes one accepted change to an input's text.
+///
+/// The range contains UTF-8 byte offsets into the value immediately before the
+/// change. Replacing that range with [`Self::replacement`] produces the value
+/// immediately after the change. Inputs whose masks rewrite surrounding text
+/// report a whole-value replacement so the same invariant still holds.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InputChangeEvent {
+    range: Range<usize>,
+    replacement: SharedString,
+}
+
+impl InputChangeEvent {
+    fn new(range: Range<usize>, replacement: impl Into<SharedString>) -> Self {
+        Self {
+            range,
+            replacement: replacement.into(),
+        }
+    }
+
+    /// Returns the UTF-8 byte range replaced by this change.
+    pub fn range(&self) -> &Range<usize> {
+        &self.range
+    }
+
+    /// Returns the text inserted at [`Self::range`].
+    pub fn replacement(&self) -> &str {
+        self.replacement.as_ref()
+    }
+}
+
 pub(super) const CONTEXT: &str = "Input";
 
 pub(crate) fn init(cx: &mut App) {
@@ -480,6 +511,7 @@ impl InputPresentation {
 }
 
 impl<M: InputModeKind> EventEmitter<InputEvent> for InputBaseState<M> {}
+impl<M: InputModeKind> EventEmitter<InputChangeEvent> for InputBaseState<M> {}
 
 impl<M: InputModeKind> InputBaseState<M> {
     #[doc(hidden)]
@@ -2890,6 +2922,12 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             M::on_text_typed(self, &range, &new_text, window, cx);
         }
         if self.emit_events {
+            let change = if mask_changed {
+                InputChangeEvent::new(0..old_text.len(), self.text.to_string())
+            } else {
+                InputChangeEvent::new(range, new_text.to_owned())
+            };
+            cx.emit(change);
             cx.emit(InputEvent::Change);
         }
         cx.notify();
@@ -3218,6 +3256,7 @@ mod tests {
 
     use crate::theme::Theme;
     use gpui::{TestAppContext, VisualTestContext};
+    use std::{cell::RefCell, rc::Rc};
 
     use crate::input::{EditorMode, InputMode, TextareaMode};
 
@@ -3301,6 +3340,86 @@ mod tests {
                 f(crate::input::InputState::new(window, cx))
             })
         }
+    }
+
+    #[gpui::test]
+    fn accepted_edit_emits_utf8_delta_and_legacy_change(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::new(cx);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+        let deltas = Rc::new(RefCell::new(Vec::new()));
+        let legacy_changes = Rc::new(Cell::new(0));
+
+        let _delta_subscription = cx.update(|_, cx| {
+            let deltas = deltas.clone();
+            cx.subscribe(&input, move |_, event: &InputChangeEvent, _| {
+                deltas.borrow_mut().push(event.clone());
+            })
+        });
+        let _legacy_subscription = cx.update(|_, cx| {
+            let legacy_changes = legacy_changes.clone();
+            cx.subscribe(&input, move |_, event: &InputEvent, _| {
+                if matches!(event, InputEvent::Change) {
+                    legacy_changes.set(legacy_changes.get() + 1);
+                }
+            })
+        });
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("a🙂b", window, cx);
+                let range_utf16 = state.range_to_utf16(&(1..5));
+                state.replace_text_in_range(Some(range_utf16), "λ", window, cx);
+            });
+        });
+
+        let deltas = deltas.borrow();
+        assert_eq!(deltas.len(), 1, "set_value must remain silent");
+        assert_eq!(deltas[0].range(), &(1..5));
+        assert_eq!(deltas[0].replacement(), "λ");
+        assert_eq!(legacy_changes.get(), 1);
+
+        let mut replayed = "a🙂b".to_string();
+        replayed.replace_range(deltas[0].range().clone(), deltas[0].replacement());
+        assert_eq!(replayed, "aλb");
+        assert_eq!(input.read_with(&cx, |state, _| state.value()), replayed);
+    }
+
+    #[gpui::test]
+    fn masked_edit_emits_replayable_whole_value_delta(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let input_view = InputView::build(cx, |state| {
+            state.mask_pattern(MaskPattern::Number {
+                separator: Some(','),
+                fraction: None,
+            })
+        });
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+        let deltas = Rc::new(RefCell::new(Vec::new()));
+        let _subscription = cx.update(|_, cx| {
+            let deltas = deltas.clone();
+            cx.subscribe(&input, move |_, event: &InputChangeEvent, _| {
+                deltas.borrow_mut().push(event.clone());
+            })
+        });
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("123", window, cx);
+                state.replace_text_in_range(None, "4", window, cx);
+            });
+        });
+
+        let deltas = deltas.borrow();
+        assert_eq!(deltas.as_slice().len(), 1);
+        assert_eq!(deltas[0].range(), &(0..3));
+        assert_eq!(deltas[0].replacement(), "1,234");
+
+        let mut replayed = "123".to_string();
+        replayed.replace_range(deltas[0].range().clone(), deltas[0].replacement());
+        assert_eq!(input.read_with(&cx, |state, _| state.value()), replayed);
     }
 
     #[gpui::test]
