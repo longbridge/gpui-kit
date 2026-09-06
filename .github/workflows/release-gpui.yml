@@ -1,7 +1,6 @@
 name: "Release GPUI"
 # Publish a fresh snapshot of Zed's gpui crates to crates.io as gpui-pre-*.
-# See script/bump-gpui.ts and the "Publish GPUI pre-release crates from Zed"
-# section of CONTRIBUTING.md.
+# See script/bump-gpui.ts for the publishing and validation pipeline.
 on:
   schedule:
     # Every Sunday at 18:00 Beijing time (UTC+8).
