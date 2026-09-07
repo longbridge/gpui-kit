@@ -29,7 +29,6 @@ members = [
     "examples/markdown_table",
     "crates/shell",
     "crates/component-shell",
-    "crates/rquickjs-compat",
 ]
 resolver = "2"
 
@@ -153,7 +152,7 @@ cap-std = { opt-level = 3 }
 # LLRT's public modules still name their compatible binding dependency
 # `rquickjs`. Route those dependencies through a source-compatible facade so
 # the shell and LLRT share the exact same quickjs-jit types and VM.
-rquickjs = { path = "crates/rquickjs-compat" }
+rquickjs = { git = "https://github.com/longbridge/quickjs-jit", rev = "9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620" }
 
 [workspace.metadata.typos]
 files.extend-exclude = ["**/fixtures/*"]

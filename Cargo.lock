@@ -1104,7 +1104,7 @@ dependencies = [
  "maybe-owned",
  "rustix",
  "rustix-linux-procfs",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
  "winx",
 ]
 
@@ -2267,7 +2267,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2306,28 +2306,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
  "libloading",
-]
-
-[[package]]
-name = "dlopen2"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60768c353d76ba6dd1b6332a5dbbdd3bc2dddadc2935f4cc6a9d0f17ca8ecb6a"
-dependencies = [
- "dlopen2_derive",
- "libc",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "dlopen2_derive"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1aacdd87ba97c2f83ff479e881e547f776b0a7c42921be22d4391f32b6284050"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 3.0.4",
 ]
 
 [[package]]
@@ -2615,7 +2593,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4788,7 +4766,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.58.0",
 ]
 
 [[package]]
@@ -6325,7 +6303,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -6462,7 +6440,7 @@ version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680998035259dcfcafe653688bf2aa6d3e2dc05e98be6ab46afb089dc84f1df8"
 dependencies = [
- "proc-macro-crate 3.5.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.119",
@@ -7201,7 +7179,6 @@ checksum = "010378780309880b08997fae13be7834dba947d36393bd372f2b1556deb2a2f6"
 dependencies = [
  "phf_macros 0.14.0",
  "phf_shared 0.14.0",
- "serde",
 ]
 
 [[package]]
@@ -7807,47 +7784,34 @@ dependencies = [
 
 [[package]]
 name = "quickjs-jit"
-version = "0.12.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35cab5ee38637272ba5b3c41324074d15bbbb42030d810f17011b1683db4a593"
+version = "0.12.7"
+source = "git+https://github.com/longbridge/quickjs-jit?rev=9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620#9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620"
 dependencies = [
- "either",
- "indexmap",
  "quickjs-jit-core",
  "quickjs-jit-macro",
 ]
 
 [[package]]
 name = "quickjs-jit-core"
-version = "0.12.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0885171276c9b2cfc5d931c444c0f62237dad6f9fc63f791dfe9d05fb6c0f12"
+version = "0.12.7"
+source = "git+https://github.com/longbridge/quickjs-jit?rev=9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620#9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620"
 dependencies = [
  "async-lock",
- "bytes",
- "chrono",
- "dlopen2",
- "either",
  "half",
  "hashbrown 0.17.1",
- "indexmap",
- "phf 0.14.0",
  "quickjs-jit-sys",
  "relative-path",
 ]
 
 [[package]]
 name = "quickjs-jit-macro"
-version = "0.12.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f15f9771e55eecae002342563951678d1a1f8ad351f9a28f1a4b05b3d0e50346"
+version = "0.12.7"
+source = "git+https://github.com/longbridge/quickjs-jit?rev=9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620#9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620"
 dependencies = [
  "convert_case 0.11.0",
  "fnv",
  "ident_case",
  "indexmap",
- "phf_generator 0.14.0",
- "phf_shared 0.14.0",
  "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quickjs-jit-core",
@@ -7857,9 +7821,8 @@ dependencies = [
 
 [[package]]
 name = "quickjs-jit-runtime"
-version = "0.12.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c54be317aca788f6d803d703f5073aec8be276d040747c1e22e8573901aaaf42"
+version = "0.12.7"
+source = "git+https://github.com/longbridge/quickjs-jit?rev=9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620#9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -7880,11 +7843,9 @@ dependencies = [
 
 [[package]]
 name = "quickjs-jit-sys"
-version = "0.12.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12d6c75ea0120429d056f91bd1af8fc50757bace4a778b34238029bd52c95630"
+version = "0.12.7"
+source = "git+https://github.com/longbridge/quickjs-jit?rev=9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620#9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620"
 dependencies = [
- "bindgen",
  "cc",
 ]
 
@@ -7941,7 +7902,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8457,7 +8418,8 @@ dependencies = [
 
 [[package]]
 name = "rquickjs"
-version = "0.12.4"
+version = "0.12.7"
+source = "git+https://github.com/longbridge/quickjs-jit?rev=9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620#9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620"
 dependencies = [
  "quickjs-jit",
 ]
@@ -8619,7 +8581,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8697,7 +8659,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -9333,7 +9295,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -9828,10 +9790,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -10799,7 +10761,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -11708,7 +11670,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]

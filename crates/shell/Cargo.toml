@@ -40,12 +40,13 @@ gpui_platform.workspace = true
 gpui-base = { workspace = true, features = ["inspector"] }
 gpui-fps.workspace = true
 
-rquickjs = { package = "quickjs-jit", version = "0.12.6", features = [
+# Keep the bindings, runtime, and LLRT compatibility facade on the same revision.
+rquickjs = { package = "quickjs-jit", version = "0.12.7", git = "https://github.com/longbridge/quickjs-jit", rev = "9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620", features = [
     "macro",
     "loader",
     "jit-abi",
 ], optional = true }
-rquickjs-jit = { package = "quickjs-jit-runtime", version = "0.12.6", features = ["compiler"], optional = true }
+rquickjs-jit = { package = "quickjs-jit-runtime", version = "0.12.7", git = "https://github.com/longbridge/quickjs-jit", rev = "9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620", features = ["compiler"], optional = true }
 # LLRT is still pre-release. Keep every module on the same audited revision;
 # crates.io's 0.8.1-beta release uses rquickjs 0.11 and cannot share our VM.
 llrt_buffer = { git = "https://github.com/awslabs/llrt", rev = "7b95c82a9b15e7ddfb2778eca4b5a63111e74f51", optional = true }
