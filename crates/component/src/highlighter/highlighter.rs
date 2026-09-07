@@ -18,9 +18,6 @@ use tree_sitter::{
     InputEdit, ParseOptions, Parser, Point, Query, QueryCursor, StreamingIterator, Tree,
 };
 
-/// When a node spans more than this many bytes beyond the requested query
-/// range, we recurse into its children instead of querying it directly.
-const LARGE_NODE_THRESHOLD: usize = 8 * 1024;
 const MAX_INJECTION_RANGES: usize = 4096;
 const MAX_INJECTION_BYTES: usize = 512 * 1024;
 const MAX_INJECTION_LANGUAGE_BYTES: usize = 64;
@@ -986,41 +983,37 @@ impl SyntaxHighlighter {
             }
         }
 
-        let query_nodes = collect_query_nodes(root_node, &range);
+        let mut query_cursor = QueryCursor::new();
+        query_cursor.set_byte_range(range.clone());
 
-        for query_node in &query_nodes {
-            let mut query_cursor = QueryCursor::new();
-            query_cursor.set_byte_range(range.clone());
+        let mut matches = query_cursor.matches(query, root_node, TextProvider(source));
 
-            let mut matches = query_cursor.matches(&query, *query_node, TextProvider(&source));
+        while let Some(query_match) = matches.next() {
+            for cap in query_match.captures {
+                let node = cap.node;
 
-            while let Some(query_match) = matches.next() {
-                for cap in query_match.captures {
-                    let node = cap.node;
+                let Some(highlight_name) = query.capture_names().get(cap.index as usize) else {
+                    continue;
+                };
 
-                    let Some(highlight_name) = query.capture_names().get(cap.index as usize) else {
-                        continue;
-                    };
+                let node_range: Range<usize> = node.start_byte()..node.end_byte();
+                let highlight_name = SharedString::from(highlight_name.to_string());
 
-                    let node_range: Range<usize> = node.start_byte()..node.end_byte();
-                    let highlight_name = SharedString::from(highlight_name.to_string());
+                // Merge near range and same highlight name
+                let last_item = highlights.last();
+                let last_range = last_item.map(|item| &item.range).unwrap_or(&(0..0));
+                let last_highlight_name = last_item.map(|item| item.name.clone());
 
-                    // Merge near range and same highlight name
-                    let last_item = highlights.last();
-                    let last_range = last_item.map(|item| &item.range).unwrap_or(&(0..0));
-                    let last_highlight_name = last_item.map(|item| item.name.clone());
-
-                    if last_range == &node_range {
-                        // case:
-                        // last_range: 213..220, last_highlight_name: Some("property")
-                        // last_range: 213..220, last_highlight_name: Some("string")
-                        highlights.push(HighlightItem::new(
-                            node_range,
-                            last_highlight_name.unwrap_or(highlight_name),
-                        ));
-                    } else {
-                        highlights.push(HighlightItem::new(node_range, highlight_name.clone()));
-                    }
+                if last_range == &node_range {
+                    // case:
+                    // last_range: 213..220, last_highlight_name: Some("property")
+                    // last_range: 213..220, last_highlight_name: Some("string")
+                    highlights.push(HighlightItem::new(
+                        node_range,
+                        last_highlight_name.unwrap_or(highlight_name),
+                    ));
+                } else {
+                    highlights.push(HighlightItem::new(node_range, highlight_name.clone()));
                 }
             }
         }
@@ -1211,57 +1204,6 @@ pub(crate) fn unique_styles(
     }
 
     merged
-}
-
-/// Walk the tree and collect nodes suitable for querying, skipping subtrees
-/// that fall entirely outside the byte range. Nodes much larger than the
-/// query range are recursed into so that `QueryCursor` only visits the
-/// relevant portion of the tree.
-fn collect_query_nodes<'a>(
-    root: tree_sitter::Node<'a>,
-    range: &Range<usize>,
-) -> Vec<tree_sitter::Node<'a>> {
-    let mut nodes = Vec::new();
-    collect_query_nodes_inner(root, range, &mut nodes);
-    if nodes.is_empty() {
-        nodes.push(root);
-    }
-    nodes
-}
-
-fn collect_query_nodes_inner<'a>(
-    node: tree_sitter::Node<'a>,
-    range: &Range<usize>,
-    out: &mut Vec<tree_sitter::Node<'a>>,
-) {
-    // Skip nodes entirely outside the range.
-    if node.end_byte() <= range.start || node.start_byte() >= range.end {
-        return;
-    }
-
-    let node_span = node.end_byte() - node.start_byte();
-    let range_span = range.end - range.start;
-
-    // Use `goto_first_child_for_byte` to seek directly to the first
-    // overlapping child instead of iterating all children from the start.
-    if node_span > range_span + LARGE_NODE_THRESHOLD && node.child_count() > 0 {
-        let mut cursor = node.walk();
-        if cursor.goto_first_child_for_byte(range.start).is_some() {
-            loop {
-                let child = cursor.node();
-                if child.start_byte() >= range.end {
-                    break;
-                }
-                collect_query_nodes_inner(child, range, out);
-                if !cursor.goto_next_sibling() {
-                    break;
-                }
-            }
-        }
-        return;
-    }
-
-    out.push(node);
 }
 
 /// Merge other style (Other on top)
