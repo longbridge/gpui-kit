@@ -1,0 +1,21 @@
+[package]
+name = "agent_ide"
+description = "An IDE-style workspace for managing multiple coding agents across open projects."
+version = "0.6.0"
+publish = false
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+libghostty-vt.workspace = true
+portable-pty.workspace = true
+smol.workspace = true
+gpui-kit.workspace = true
+
+# WebView
+gpui-wry = { path = "../../crates/webview" }
+wry = { version = "0.53.3", package = "lb-wry" }
+raw-window-handle = { version = "0.6", features = ["std"] }
+
+[lints]
+workspace = true
