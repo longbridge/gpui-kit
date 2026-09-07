@@ -67,6 +67,32 @@ Linux 额外支持与 Ghostty 一致的 Ctrl+Alt+左键拖动列选，以及 Alt
 
 Linux 桌面可能在编辑器收到事件之前拦截快捷键。部分桌面使用 Ctrl+Alt+↑ / ↓ 切换工作区，因此 Linux 默认不绑定这一组合。以上快捷键指键盘重映射后的逻辑修饰键。
 
+## 搜索
+
+编辑器内置搜索面板。编辑器聚焦时按 `Ctrl-F`（Windows/Linux）或 `Cmd-F`（macOS）打开。`Enter` 跳到下一个匹配，`Shift+Enter` 跳到上一个，`Escape` 关闭面板。
+
+```rust
+// 以代码方式打开查找面板
+editor.update(cx, |state, cx| {
+    state.open_search(false, cx);
+});
+
+// 关闭它
+editor.update(cx, |state, cx| {
+    state.close_search(cx);
+});
+```
+
+`Editor` 默认启用搜索。如需禁用：
+
+```rust
+editor.update(cx, |state, cx| {
+    state.set_searchable(false, cx);
+});
+```
+
+只读编辑器仍可搜索——替换界面会自动隐藏。
+
 ## 文本装饰
 
 ```rust

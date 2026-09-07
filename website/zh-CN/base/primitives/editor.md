@@ -13,6 +13,11 @@ order: 16
 Base 与样式组件共享键盘和鼠标行为。各平台快捷键、多光标编辑和矩形列选的细节请参阅
 [快捷键与矩形列选](../../docs/components/editor.md#快捷键与矩形列选)。
 
+## 搜索
+
+编辑器内置搜索面板。编辑器聚焦时按 `Ctrl-F`（Windows/Linux）或 `Cmd-F`（macOS）打开。编程式 API（`open_search`、`close_search`、`set_searchable`）与只读行为参见
+[搜索](../../docs/components/editor.md#搜索)。
+
 ## 导入
 
 ```rust

@@ -19,6 +19,13 @@ The base and styled editors share keyboard and mouse behavior. See
 [Keyboard shortcuts and column selection](../../docs/components/editor.md#keyboard-shortcuts-and-column-selection)
 for the macOS, Linux, and Windows bindings, multi-cursor editing, and column-selection details.
 
+## Search
+
+The editor has a built-in search panel. Press `Ctrl-F` (Windows/Linux) or
+`Cmd-F` (macOS) while the editor is focused to open it. See
+[Search](../../docs/components/editor.md#search) for the programmatic API
+(`open_search`, `close_search`, `set_searchable`) and read-only behavior.
+
 ## Import
 
 ```rust

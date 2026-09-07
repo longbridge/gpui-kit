@@ -86,6 +86,35 @@ them. In particular, Ctrl+Alt+Up / Down is not bound by default on Linux because
 some desktops use it to switch workspaces. The shortcuts above refer to logical
 modifiers after any keyboard remapping.
 
+## Search
+
+The editor has a built-in search panel. Press `Ctrl-F` (Windows/Linux) or
+`Cmd-F` (macOS) while the editor is focused to open it. `Enter` jumps to the
+next match, `Shift+Enter` to the previous one, `Escape` closes the panel.
+
+```rust
+// Open the find panel programmatically
+editor.update(cx, |state, cx| {
+    state.open_search(false, cx);
+});
+
+// Close it
+editor.update(cx, |state, cx| {
+    state.close_search(cx);
+});
+```
+
+Search is enabled by default for `Editor`. To disable it:
+
+```rust
+editor.update(cx, |state, cx| {
+    state.set_searchable(false, cx);
+});
+```
+
+A read-only editor can still be searched — the replace UI is hidden
+automatically.
+
 ## Decorations
 
 ```rust
