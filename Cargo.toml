@@ -57,12 +57,12 @@ gpui-wry = { path = "crates/webview", version = "0.6.0" }
 gpui-component-shell = { path = "crates/component-shell", version = "0.6.0" }
 story = { path = "crates/story" }
 
-gpui = { package = "gpui-pre", version = "0.3.1" }
-gpui_platform = { package = "gpui-pre-platform", version = "0.3.1", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { package = "gpui-pre-web", version = "0.3.1" }
-gpui_macros = { package = "gpui-pre-macros", version = "0.3.1" }
-reqwest_client = { package = "gpui-pre-reqwest-client", version = "0.3.1" }
-sum-tree = { package = "gpui-pre-sum-tree", version = "0.3.1" }
+gpui = { package = "gpui-pre", version = "0.3.4" }
+gpui_platform = { package = "gpui-pre-platform", version = "0.3.4", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { package = "gpui-pre-web", version = "0.3.4" }
+gpui_macros = { package = "gpui-pre-macros", version = "0.3.4" }
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "0.3.4" }
+sum-tree = { package = "gpui-pre-sum-tree", version = "0.3.4" }
 reqwest = { package = "gpui-pre-reqwest", version = "0.12.15", default-features = false, features = [
     "charset",
     "http2",
