@@ -2,7 +2,9 @@ use gpui_kit::component::{
     ActiveTheme, IconName, Root, WindowExt,
     button::Button,
     checkbox::Checkbox,
+    form::{Field, Form},
     input::{Input, InputEvent, InputState},
+    radio::RadioGroup,
     switch::Switch,
 };
 use gpui_kit::{
@@ -16,6 +18,7 @@ pub struct Settings {
     pub changes: usize,
     enabled: bool,
     remember: bool,
+    delivery: Option<usize>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -35,6 +38,7 @@ impl Settings {
             changes: 0,
             enabled: false,
             remember: false,
+            delivery: Some(0),
             _subscriptions: vec![subscription],
         }
     }
@@ -51,35 +55,53 @@ impl Render for Settings {
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
             .child("Profile")
-            .child(Input::new(&self.name))
-            .child(self.preview.clone())
             .child(
-                Checkbox::new("remember")
-                    .label("Remember name")
-                    .checked(self.remember)
-                    .on_click(cx.listener(|this, value, _, cx| {
-                        this.remember = *value;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Switch::new("enabled")
-                    .label("Enable notifications")
-                    .checked(self.enabled)
-                    .on_click(cx.listener(|this, value, _, cx| {
-                        this.enabled = *value;
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("about")
-                    .label("About…")
-                    .icon(IconName::Info)
-                    .on_click(|_, window, cx| {
-                        window.open_dialog(cx, |dialog, _, _| {
-                            dialog.title("About").child("A complete GPUI Kit window")
-                        });
-                    }),
+                Form::new()
+                    .child(Field::new().label("Name").child(Input::new(&self.name)))
+                    .child(Field::new().label("Preview").child(self.preview.clone()))
+                    .child(
+                        Field::new().label_indent(false).child(
+                            Checkbox::new("remember")
+                                .label("Remember name")
+                                .checked(self.remember)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.remember = *value;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(
+                        Field::new().label_indent(false).child(
+                            Switch::new("enabled")
+                                .label("Enable notifications")
+                                .checked(self.enabled)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.enabled = *value;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(
+                        Field::new().label("Delivery").child(
+                            RadioGroup::new("delivery")
+                                .children(["Immediately", "Daily summary"])
+                                .selected_index(self.delivery)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.delivery = Some(*value);
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .footer(
+                        Button::new("about")
+                            .label("About…")
+                            .icon(IconName::Info)
+                            .on_click(|_, window, cx| {
+                                window.open_dialog(cx, |dialog, _, _| {
+                                    dialog.title("About").child("A complete GPUI Kit window")
+                                });
+                            }),
+                    ),
             )
             .children(Root::render_dialog_layer(window, cx))
             .children(Root::render_sheet_layer(window, cx))

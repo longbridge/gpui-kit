@@ -7,6 +7,8 @@ description: 一组互斥的单选按钮，同一时间只能选中一个选项�
 
 Radio 用于在一组选项中选择唯一结果。适合“多选一”的场景，例如设置项、问卷和支付方式选择等。
 
+使用 `on_change` 接收请求的新值，由状态所有者保存并调用 `cx.notify()`。原有的 `on_click` 保留为兼容名称；两者设置的是同一个回调，最后一次设置生效。
+
 ## 导入
 
 ```rust
@@ -21,7 +23,7 @@ use gpui_kit::component::radio::{Radio, RadioGroup};
 Radio::new("radio-option-1")
     .label("Option 1")
     .checked(false)
-    .on_click(|checked, _, _| {
+    .on_change(|checked, _, _| {
         println!("Radio is now: {}", checked);
     })
 ```
@@ -38,7 +40,7 @@ impl Render for MyView {
         Radio::new("radio")
             .label("Select this option")
             .checked(self.radio_checked)
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.radio_checked = *checked;
                 cx.notify();
             }))
@@ -169,7 +171,7 @@ RadioGroup::vertical("disabled-group")
 | `label(text)` | 设置标签文本 |
 | `checked(bool)` | 设置选中状态 |
 | `disabled(bool)` | 设置禁用状态 |
-| `on_click(fn)` | 点击回调，参数为新的 `&bool` 选中状态 |
+| `on_change(fn)` | 点击回调，参数为新的 `&bool` 选中状态 |
 | `tab_stop(bool)` | 是否允许通过 Tab 聚焦，默认 `true` |
 | `tab_index(isize)` | 设置 Tab 顺序，默认 `0` |
 
@@ -177,6 +179,7 @@ RadioGroup::vertical("disabled-group")
 
 | 方法 | 说明 |
 | --- | --- |
+| `new(id)` | 创建未选中任何项的纵向分组 |
 | `horizontal(id)` | 创建横向分组 |
 | `vertical(id)` | 创建纵向分组 |
 | `layout(Axis)` | 设置布局方向 |

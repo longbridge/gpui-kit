@@ -7,6 +7,8 @@ description: A control that allows the user to toggle between checked and not ch
 
 A checkbox component for binary choices. Supports labels, disabled state, and different sizes.
 
+Use `on_change` for requested values. The owner stores the value and calls `cx.notify()`. The existing `on_click` name remains a compatibility alias; setting either replaces the same handler, so the last call wins.
+
 ## Import
 
 ```rust
@@ -21,12 +23,12 @@ use gpui_kit::component::checkbox::Checkbox;
 Checkbox::new("my-checkbox")
     .label("Accept terms and conditions")
     .checked(false)
-    .on_click(|checked, _, _| {
+    .on_change(|checked, _, _| {
         println!("Checkbox is now: {}", checked);
     })
 ```
 
-The `on_click` callback is triggered when the user toggles the checkbox, receiving the **new checked state**.
+The `on_change` callback is triggered when the user toggles the checkbox, receiving the **new checked state**.
 
 ### Controlled Checkbox
 
@@ -40,7 +42,7 @@ impl Render for MyView {
         Checkbox::new("checkbox")
             .label("Option")
             .checked(self.is_checked)
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.is_checked = *checked;
                 cx.notify();
             }))
@@ -122,7 +124,7 @@ v_flex()
         Checkbox::new("terms")
             .label("I agree to the terms and conditions")
             .checked(self.agree_terms)
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.agree_terms = *checked;
                 cx.notify();
             }))
@@ -131,7 +133,7 @@ v_flex()
         Checkbox::new("subscribe")
             .label("Subscribe to newsletter")
             .checked(self.subscribe)
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.subscribe = *checked;
                 cx.notify();
             }))

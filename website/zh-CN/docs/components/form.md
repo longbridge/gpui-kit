@@ -5,13 +5,28 @@ description: 支持字段布局、校验和多列排布的灵活表单容器。
 
 # Form
 
-Form 是一个完整的表单布局组件，适合组织字段、描述、校验提示以及多列响应式表单结构。它支持纵向和横向布局、字段分组以及列跨度控制。
+Form 负责字段和底部操作区的布局。应用负责字段值、校验、提交，以及根据可用宽度选择列数。
 
 ## 导入
 
 ```rust
 use gpui_kit::component::form::{field, v_form, h_form, Form, Field};
 ```
+
+## 组合约定
+
+`Form::new()` 默认使用单列，标签位于控件上方。`label_layout(Axis::Horizontal)` 将标签放到控件旁边；`columns(2)` 独立控制字段排列为两列。原有的 `horizontal()`、`vertical()`、`layout(Axis)`、`h_form()` 和 `v_form()` 继续可用。
+
+```rust
+Form::new()
+    .label_layout(Axis::Horizontal)
+    .columns(2)
+    .child(Field::new().label("Name").child(Input::new(&name_input)))
+    .child(Field::new().label("Email").child(Input::new(&email_input)))
+    .footer(Button::new("save").label("Save"))
+```
+
+`child` 接收 Field。操作按钮放入 `footer`；底部操作区跨越所有列，内容靠末端对齐。应用为按钮绑定提交逻辑，Form 不会自动提交。完整的状态、回调和窗口初始化用法见[应用示例](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes)。
 
 ## 用法
 

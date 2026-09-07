@@ -12,7 +12,13 @@ PROFILES = {
         [sys.executable, "script/check-ai-recipes", "--docs-only"],
         [sys.executable, "-m", "unittest", "discover", "-s", "script/tests"],
     ],
-    "rust": [[sys.executable, "script/check-ai-recipes"]],
+    "rust": [
+        [sys.executable, "script/check-ai-recipes"],
+        ["cargo", "test", "--locked", "-p", "gpui-component", "--no-default-features",
+         "--test", "controlled_change_callbacks", "--test", "legacy_controls_compat"],
+        ["cargo", "test", "--locked", "-p", "gpui-component", "--no-default-features",
+         "--lib", "form::form::tests"],
+    ],
     "shell": [
         ["cargo", "test", "--locked", "-p", "gpui-shell", "--lib", "typings"],
         ["cargo", "test", "--locked", "-p", "gpui-shell", "--lib", "tests::render"],

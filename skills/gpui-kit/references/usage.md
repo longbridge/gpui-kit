@@ -176,10 +176,16 @@ use gpui_kit::component::{checkbox::Checkbox, switch::Switch};
 
 // Stateless (controlled)
 Checkbox::new("cb").checked(self.checked)
-    .on_click(|checked, _, cx| { /* &bool */ })
+    .on_change(cx.listener(|this, checked, _, cx| {
+        this.checked = *checked;
+        cx.notify();
+    }))
 
 Switch::new("sw").checked(self.enabled)
-    .on_click(|checked, _, cx| {})
+    .on_change(cx.listener(|this, checked, _, cx| {
+        this.enabled = *checked;
+        cx.notify();
+    }))
 ```
 
 ### Icon
@@ -285,7 +291,7 @@ use gpui_kit::component::form::{v_form, h_form, field};
 v_form()
     .child(field().label("Name").child(Input::new(&self.name)))
     .child(field().label("Email").child(Input::new(&self.email)))
-    .child(Button::new("submit").primary().label("Submit"))
+    .footer(Button::new("submit").primary().label("Submit"))
 
 // Horizontal label alignment
 h_form()
@@ -391,7 +397,7 @@ impl Render for MyApp {
 
 ## Shared Traits
 
-All components follow the builder pattern `Component::new("id").method().method()`:
+Builders return the component so methods can be chained. Constructors follow component families: controls take a stable ID, retained controls take state, and compound parts may take no arguments. See [component conventions](conventions.md).
 
 - `Sizable`: `.xsmall()` / `.small()` / `.medium()` (default) / `.large()`
 - `Disableable`: `.disabled(bool)`

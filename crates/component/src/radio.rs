@@ -106,10 +106,18 @@ impl Radio {
         self
     }
 
-    /// Add on_click handler when the Radio is clicked.
+    /// Alias for [`Self::on_change`]. The last callback registered with either name wins.
+    pub fn on_click(self, handler: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
+        self.on_change(handler)
+    }
+
+    /// Handle a requested checked value from pointer or keyboard activation.
     ///
-    /// The `&bool` parameter is the **new checked state**.
-    pub fn on_click(mut self, handler: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
+    /// This is a controlled value: the owner must write the requested value and
+    /// call `cx.notify()` to render it. Disabled controls do not call the handler.
+    /// This and [`Self::on_click`] share one callback; chaining them replaces
+    /// the previous handler instead of calling both.
+    pub fn on_change(mut self, handler: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
         self.on_click = Some(Rc::new(handler));
         self
     }
@@ -278,7 +286,8 @@ pub struct RadioGroup {
 }
 
 impl RadioGroup {
-    fn new(id: impl Into<ElementId>) -> Self {
+    /// Creates a radio group with vertical layout and no selected item.
+    pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             id: id.into(),
             style: StyleRefinement::default().flex_1(),
@@ -306,10 +315,18 @@ impl RadioGroup {
         self
     }
 
-    // Add on_click handler when selected index changes.
-    //
-    // The `&usize` parameter is the selected index.
-    pub fn on_click(mut self, handler: impl Fn(&usize, &mut Window, &mut App) + 'static) -> Self {
+    /// Alias for [`Self::on_change`]. The last callback registered with either name wins.
+    pub fn on_click(self, handler: impl Fn(&usize, &mut Window, &mut App) + 'static) -> Self {
+        self.on_change(handler)
+    }
+
+    /// Handle a requested selected index from pointer or keyboard activation.
+    ///
+    /// This is a controlled value: the owner must write the requested value and
+    /// call `cx.notify()` to render it. Disabled controls do not call the handler.
+    /// This and [`Self::on_click`] share one callback; chaining them replaces
+    /// the previous handler instead of calling both.
+    pub fn on_change(mut self, handler: impl Fn(&usize, &mut Window, &mut App) + 'static) -> Self {
         self.on_click = Some(Rc::new(handler));
         self
     }

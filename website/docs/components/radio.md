@@ -7,6 +7,8 @@ description: A set of checkable buttons—known as radio buttons—where no more
 
 Radio buttons allow users to select a single option from a set of mutually exclusive choices. Use radio buttons when you want to give users a choice between multiple options and only one selection is allowed.
 
+Use `on_change` for requested values. The owner stores the value and calls `cx.notify()`. The existing `on_click` name remains a compatibility alias; setting either replaces the same handler, so the last call wins.
+
 ## Import
 
 ```rust
@@ -21,7 +23,7 @@ use gpui_kit::component::radio::{Radio, RadioGroup};
 Radio::new("radio-option-1")
     .label("Option 1")
     .checked(false)
-    .on_click(|checked, _, _| {
+    .on_change(|checked, _, _| {
         println!("Radio is now: {}", checked);
     })
 ```
@@ -38,7 +40,7 @@ impl Render for MyView {
         Radio::new("radio")
             .label("Select this option")
             .checked(self.radio_checked)
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.radio_checked = *checked;
                 cx.notify();
             }))
@@ -169,7 +171,7 @@ RadioGroup::vertical("disabled-group")
 | `label(text)`      | Set label text                                              |
 | `checked(bool)`    | Set checked state                                           |
 | `disabled(bool)`   | Set disabled state                                          |
-| `on_click(fn)`     | Callback when clicked, receives `&bool` (new checked state) |
+| `on_change(fn)`     | Requested checked value, receives `&bool` |
 | `tab_stop(bool)`   | Enable/disable tab navigation (default: true)               |
 | `tab_index(isize)` | Set tab order index (default: 0)                            |
 
@@ -177,6 +179,7 @@ RadioGroup::vertical("disabled-group")
 
 | Method                          | Description                                                         |
 | ------------------------------- | ------------------------------------------------------------------- |
+| `new(id)` | Create a vertical radio group with no selection |
 | `horizontal(id)`                | Create a new horizontal radio group                                 |
 | `vertical(id)`                  | Create a new vertical radio group                                   |
 | `layout(Axis)`                  | Set layout direction (Vertical or Horizontal)                       |
@@ -184,7 +187,7 @@ RadioGroup::vertical("disabled-group")
 | `children(items)`               | Add multiple radio buttons from an iterator                         |
 | `selected_index(Option<usize>)` | Set the selected option by index                                    |
 | `disabled(bool)`                | Disable all radio buttons in the group                              |
-| `on_change(fn)`                 | Callback when selection changes, receives `&usize` (selected index) |
+| `on_change(fn)`                 | Requested selected index, receives `&usize` |
 
 ### Styling
 

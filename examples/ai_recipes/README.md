@@ -1,6 +1,6 @@
 # Executable application recipes
 
-This standalone consumer imports only `gpui-kit`. Its own workspace prevents unrelated workspace members from supplying missing features or dependencies. The settings example retains state and subscriptions, uses controlled controls, installs Root, and renders dialog, sheet, and notification layers.
+This standalone consumer imports only `gpui-kit`. Its own workspace prevents unrelated workspace members from supplying missing features or dependencies. The settings example retains state and subscriptions, uses the shared `on_change` convention for Checkbox, Switch, and RadioGroup, separates typed Form fields from its footer, installs Root, and renders dialog, sheet, and notification layers.
 
 From the repository root:
 
@@ -20,7 +20,7 @@ A change is ready when its observable behavior has a regression check, the relev
 | Change | Required command | Evidence |
 | --- | --- | --- |
 | Published recipe prose or fragments | `script/check-ai docs` | Source and documentation agree; drift detection tests pass |
-| Rust application recipes | `script/check-ai rust` | Isolated consumer formats, compiles, and passes interaction tests |
+| Rust application recipes and component conventions | `script/check-ai rust` | Isolated consumer compiles and passes interaction tests; control callbacks, legacy aliases, and Form geometry pass contract tests |
 | Shell runtime or generated types | `script/check-ai shell` | Render tests, component binding tests, actual CLI failures, and pinned TypeScript positive/negative contracts pass |
 | Changes across these areas | `script/check-ai all` | All of the above |
 
