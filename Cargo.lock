@@ -2309,6 +2309,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "dlopen2"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60768c353d76ba6dd1b6332a5dbbdd3bc2dddadc2935f4cc6a9d0f17ca8ecb6a"
+dependencies = [
+ "dlopen2_derive",
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "dlopen2_derive"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aacdd87ba97c2f83ff479e881e547f776b0a7c42921be22d4391f32b6284050"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.4",
+]
+
+[[package]]
 name = "document-features"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7270,6 +7292,7 @@ checksum = "010378780309880b08997fae13be7834dba947d36393bd372f2b1556deb2a2f6"
 dependencies = [
  "phf_macros 0.14.0",
  "phf_shared 0.14.0",
+ "serde",
 ]
 
 [[package]]
@@ -7878,6 +7901,8 @@ name = "quickjs-jit"
 version = "0.12.7"
 source = "git+https://github.com/longbridge/quickjs-jit?rev=9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620#9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620"
 dependencies = [
+ "either",
+ "indexmap",
  "quickjs-jit-core",
  "quickjs-jit-macro",
 ]
@@ -7888,8 +7913,14 @@ version = "0.12.7"
 source = "git+https://github.com/longbridge/quickjs-jit?rev=9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620#9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620"
 dependencies = [
  "async-lock",
+ "bytes",
+ "chrono",
+ "dlopen2",
+ "either",
  "half",
  "hashbrown 0.17.1",
+ "indexmap",
+ "phf 0.14.0",
  "quickjs-jit-sys",
  "relative-path",
 ]
@@ -7903,6 +7934,8 @@ dependencies = [
  "fnv",
  "ident_case",
  "indexmap",
+ "phf_generator 0.14.0",
+ "phf_shared 0.14.0",
  "proc-macro-crate 3.5.0",
  "proc-macro2",
  "quickjs-jit-core",
@@ -7937,6 +7970,7 @@ name = "quickjs-jit-sys"
 version = "0.12.7"
 source = "git+https://github.com/longbridge/quickjs-jit?rev=9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620#9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620"
 dependencies = [
+ "bindgen",
  "cc",
 ]
 
@@ -8510,7 +8544,6 @@ dependencies = [
 [[package]]
 name = "rquickjs"
 version = "0.12.7"
-source = "git+https://github.com/longbridge/quickjs-jit?rev=9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620#9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620"
 dependencies = [
  "quickjs-jit",
 ]

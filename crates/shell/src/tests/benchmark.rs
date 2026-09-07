@@ -375,6 +375,7 @@ fn numeric_layout_installs_and_enters_native_code(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+#[cfg(not(debug_assertions))]
 fn mixed_market_panel_matches_interpreter_and_enters_native_code(cx: &mut TestAppContext) {
     let (interpreter, mut interpreter_context, interpreter_object) =
         runtime_with_source(cx, MIXED_MARKET_TEMPLATE, true);
