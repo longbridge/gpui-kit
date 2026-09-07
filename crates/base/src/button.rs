@@ -22,6 +22,8 @@ pub struct Button {
     base: Stateful<Div>,
     style: StyleRefinement,
     semantic_styles: ButtonStyles,
+    hover_style: Option<Box<StyleRefinement>>,
+    active_style: Option<Box<StyleRefinement>>,
     selected: bool,
     disabled: bool,
     children: SmallVec<[AnyElement; 2]>,
@@ -42,6 +44,8 @@ impl Button {
             id,
             style: StyleRefinement::default(),
             semantic_styles: ButtonStyles::default(),
+            hover_style: None,
+            active_style: None,
             selected: false,
             disabled: false,
             children: SmallVec::new(),
@@ -56,6 +60,9 @@ impl Button {
     }
 
     /// Sets whether the button ignores pointer and keyboard activation.
+    ///
+    /// Disabled buttons also suppress `hover` and `active` styles, regardless
+    /// of whether those styles are configured before or after this method.
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
@@ -197,12 +204,23 @@ impl ParentElement for Button {
 }
 
 impl InteractiveElement for Button {
+    fn hover(mut self, build: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        debug_assert!(self.hover_style.is_none(), "hover style already set");
+        self.hover_style = Some(Box::new(build(StyleRefinement::default())));
+        self
+    }
+
     fn interactivity(&mut self) -> &mut Interactivity {
         self.base.interactivity()
     }
 }
 
-impl StatefulInteractiveElement for Button {}
+impl StatefulInteractiveElement for Button {
+    fn active(mut self, build: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
+        self.active_style = Some(Box::new(build(StyleRefinement::default())));
+        self
+    }
+}
 
 impl RenderOnce for Button {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
@@ -212,6 +230,12 @@ impl RenderOnce for Button {
         let on_click = self.on_click;
 
         self.base
+            // Apply transient pointer styles only after the final disabled state
+            // is known, regardless of the order of the caller's builder methods.
+            .when(!disabled, |base| {
+                base.when_some(self.hover_style, |base, style| base.hover(|_| *style))
+                    .when_some(self.active_style, |base, style| base.active(|_| *style))
+            })
             // Centering is part of Button's control geometry. Without a flex
             // formatting context an ordinary child starts at the root's
             // leading edge, so a fixed-height unstyled Button cannot align its
@@ -552,5 +576,71 @@ mod tests {
         // aria-disabled setter even though AccessKit can represent it. This
         // assertion records that upstream gap instead of claiming support.
         assert!(!disabled.is_disabled());
+    }
+    #[gpui::test]
+    fn disabled_button_suppresses_hover_and_pressed_geometry(cx: &mut TestAppContext) {
+        struct States {
+            disabled: bool,
+            disabled_first: bool,
+        }
+        impl Render for States {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let button = Button::new("button").w(px(100.)).h(px(40.));
+                let button = if self.disabled_first {
+                    button
+                        .disabled(self.disabled)
+                        .hover(|s| s.w(px(160.)))
+                        .active(|s| s.w(px(200.)))
+                } else {
+                    button
+                        .hover(|s| s.w(px(160.)))
+                        .active(|s| s.w(px(200.)))
+                        .disabled(self.disabled)
+                };
+                div()
+                    .size(px(400.))
+                    .child(button.debug_selector(|| "state-button".into()))
+            }
+        }
+        for disabled_first in [false, true] {
+            let (view, cx) = cx.add_window_view(move |_, _| States {
+                disabled: true,
+                disabled_first,
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let position = point(px(10.), px(10.));
+            cx.simulate_mouse_move(position, None, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                cx.debug_bounds("state-button").unwrap().size.width,
+                px(100.)
+            );
+            cx.simulate_mouse_down(position, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                cx.debug_bounds("state-button").unwrap().size.width,
+                px(100.)
+            );
+            cx.simulate_mouse_up(position, MouseButton::Left, Modifiers::default());
+            view.update(cx, |this, cx| {
+                this.disabled = false;
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_move(point(px(300.), px(300.)), None, Modifiers::default());
+            cx.simulate_mouse_move(position, None, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                cx.debug_bounds("state-button").unwrap().size.width,
+                px(160.)
+            );
+            cx.simulate_mouse_down(position, MouseButton::Left, Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                cx.debug_bounds("state-button").unwrap().size.width,
+                px(200.)
+            );
+            cx.simulate_mouse_up(position, MouseButton::Left, Modifiers::default());
+        }
     }
 }
