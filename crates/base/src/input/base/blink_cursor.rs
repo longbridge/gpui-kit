@@ -73,13 +73,13 @@ impl BlinkCursor {
         self.paused || self.visible
     }
 
-    /// Pause the blinking, and delay 500ms to resume the blinking.
+    /// Show the cursor immediately and restart the idle delay before blinking resumes.
     pub(crate) fn pause(&mut self, cx: &mut Context<Self>) {
         self.paused = true;
         self.visible = true;
         cx.notify();
 
-        // delay 500ms to start the blinking
+        // Every pause replaces the pending timer, keeping repeated input visible.
         let epoch = self.next_epoch();
         self._task = cx.spawn(async move |this, cx| {
             cx.background_executor().timer(PAUSE_DELAY).await;
@@ -91,5 +91,30 @@ impl BlinkCursor {
                 });
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{AppContext as _, TestAppContext};
+
+    #[gpui::test]
+    fn repeated_pauses_keep_cursor_visible_until_idle(cx: &mut TestAppContext) {
+        let cursor = cx.new(|_| BlinkCursor::new());
+        assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
+        for _ in 0..5 {
+            cursor.update(cx, |cursor, cx| cursor.pause(cx));
+            cx.run_until_parked();
+            cx.executor().advance_clock(Duration::from_millis(200));
+            cx.run_until_parked();
+            assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
+        }
+        cx.executor().advance_clock(Duration::from_millis(100));
+        cx.run_until_parked();
+        assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
+        cx.executor().advance_clock(INTERVAL);
+        cx.run_until_parked();
+        assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
     }
 }

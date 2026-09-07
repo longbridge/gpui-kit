@@ -19,7 +19,7 @@ design-system layer owns colors, geometry, timing, and entrance choreography.
 The native showcase and WASM preview use the same implementation:
 
 ```bash
-cargo run -p gpui-base --example components -- scrollbar
+cargo run -p gpui-base-examples -- scrollbar
 ```
 
 The source is available in

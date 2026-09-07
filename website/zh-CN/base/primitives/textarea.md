@@ -56,5 +56,5 @@ let value = notes.read(cx).value();
 ## 可运行示例
 
 ```bash
-cargo run -p gpui-base --example components -- textarea
+cargo run -p gpui-base-examples -- textarea
 ```

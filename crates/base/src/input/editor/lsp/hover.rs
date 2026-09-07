@@ -88,6 +88,10 @@ impl InputBaseState<EditorMode> {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if event.modifiers.alt {
+            self.clear_hover_state(cx);
+            return;
+        }
         if event.modifiers.secondary() {
             self.handle_hover_definition(offset, window, cx);
         } else {

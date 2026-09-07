@@ -1,0 +1,333 @@
+---
+import DocSearch from './DocSearch.astro';
+
+export interface Props {
+  lang?: 'en' | 'zh-CN';
+  currentPath?: string;
+  starCount?: number;
+  /**
+   * Language-switch target for a page with no translated counterpart, such as
+   * 404. Without it the switch derives the target from the current path, which
+   * only resolves when both locales publish that page.
+   */
+  langSwitchHref?: string;
+}
+
+const { lang = 'en', currentPath = '', starCount = 0, langSwitchHref: langSwitchOverride } = Astro.props;
+const base = import.meta.env.BASE_URL;
+const isZh = lang === 'zh-CN';
+
+function url(path: string) {
+  return `${base}${path}`.replace(/\/+/g, '/');
+}
+
+const starLabel = starCount >= 1000 ? `${(starCount / 1000).toFixed(1)}k` : `${starCount}`;
+
+const navLinks = isZh
+  ? [
+      { text: '组件', href: url('zh-CN/docs/components') },
+      { text: 'Shell', href: url('zh-CN/shell') },
+      { text: 'Base', href: url('zh-CN/base') },
+      { text: '应用案例', href: url('zh-CN/apps') },
+    ]
+  : [
+      { text: 'Components', href: url('docs/components') },
+      { text: 'Shell', href: url('shell') },
+      { text: 'Base', href: url('base') },
+      { text: 'App Stories', href: url('apps') },
+    ];
+
+const resourceLinks = isZh
+  ? [
+      { text: 'API Doc', href: 'https://docs.rs/gpui-kit' },
+      { text: '贡献者', href: url('zh-CN/contributors') },
+      { text: '版本发布', href: url('zh-CN/releases') },
+      { text: 'Issues', href: 'https://github.com/longbridge/gpui-kit/issues' },
+      { text: '讨论', href: 'https://github.com/longbridge/gpui-kit/discussions' },
+    ]
+  : [
+      { text: 'API Doc', href: 'https://docs.rs/gpui-kit' },
+      { text: 'Contributors', href: url('contributors') },
+      { text: 'Releases', href: url('releases') },
+      { text: 'Issues', href: 'https://github.com/longbridge/gpui-kit/issues' },
+      { text: 'Discussion', href: 'https://github.com/longbridge/gpui-kit/discussions' },
+    ];
+
+// Swap the locale segment rather than substituting substrings: the site is
+// `trailingSlash: 'never'`, so the two roots are `/` and `/zh-CN` with no
+// trailing slash, and a plain replace either leaves one behind or fails to
+// match the bare `/zh-CN` root at all.
+const siteRoot = base.replace(/\/+$/, '');
+const zhRoot = `${siteRoot}/zh-CN`;
+
+function swapLocale(path: string) {
+  if (isZh) {
+    const rest = path.startsWith(zhRoot) ? path.slice(zhRoot.length) : path;
+    return rest || siteRoot || '/';
+  }
+  const rest = path.startsWith(siteRoot) ? path.slice(siteRoot.length) : path;
+  return `${zhRoot}${rest === '/' ? '' : rest}`;
+}
+
+const langSwitchHref = langSwitchOverride ?? swapLocale(currentPath);
+const langLabel = isZh ? 'EN' : '中';
+const resourcesLabel = isZh ? '资源' : 'Resources';
+---
+
+<nav class="site-nav" aria-label="Primary">
+  <div class="site-nav__inner">
+    <a href={base} class="site-nav__brand">
+      <img src={`${base}logo.svg`} alt="" class="site-nav__logo" />
+      <span>GPUI Kit</span>
+    </a>
+
+    <div class="site-nav__links" id="site-nav-links">
+      {navLinks.map(link => (
+        <a
+          href={link.href}
+          class={`site-nav__link${currentPath.startsWith(link.href) ? ' active' : ''}`}
+        >
+          {link.text}
+        </a>
+      ))}
+
+      <div class="site-nav__dropdown">
+        <button class="site-nav__dropdown-btn site-nav__link" type="button" aria-haspopup="true" aria-expanded="false">
+          {resourcesLabel}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
+        <div class="site-nav__dropdown-menu">
+          {resourceLinks.map(link => (
+            <a
+              href={link.href}
+              class="site-nav__dropdown-item"
+              target={link.href.startsWith('http') ? '_blank' : undefined}
+              rel={link.href.startsWith('http') ? 'noopener noreferrer' : undefined}
+            >
+              {link.text}
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+
+    <div class="site-nav__actions">
+      <!-- Pagefind search -->
+      <DocSearch lang={lang} />
+
+      <!-- GitHub star -->
+      <a
+        href="https://github.com/longbridge/gpui-kit"
+        target="_blank"
+        rel="noopener noreferrer"
+        class="github-star-btn site-nav__link"
+        title={`${starCount} stars on GitHub`}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/>
+          <path d="M9 18c-4.51 2-5-2-7-2"/>
+        </svg>
+        <span class="github-star-btn__label">{starLabel}</span>
+      </a>
+
+      <!-- Language switch -->
+      <a href={langSwitchHref} class="site-nav__lang-btn site-nav__link">
+        <span>{langLabel}</span>
+      </a>
+
+      <!-- Theme toggle -->
+      <button
+        id="theme-toggle"
+        class="theme-toggle"
+        aria-label={isZh ? '切换主题' : 'Toggle color theme'}
+        type="button"
+      >
+        <svg class="theme-toggle__sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
+        </svg>
+        <svg class="theme-toggle__moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+
+      <!-- Mobile menu toggle -->
+      <button
+        id="nav-burger"
+        class="site-nav__burger"
+        aria-label={isZh ? '打开菜单' : 'Open menu'}
+        aria-expanded="false"
+        aria-controls="site-nav-links"
+        type="button"
+      >
+        <svg class="site-nav__burger-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+        <svg class="site-nav__burger-close" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<script>
+  // Visibility is owned by CSS (`:hover`, `:focus-within`), so `aria-expanded`
+  // is derived from the element rather than tracked separately — two sources of
+  // truth drift apart. Escape adds the one state CSS cannot express: dismissed
+  // while the trigger still holds focus.
+  document.querySelectorAll<HTMLElement>('.site-nav__dropdown').forEach((group) => {
+    const btn = group.querySelector<HTMLButtonElement>('.site-nav__dropdown-btn');
+    if (!btn) return;
+
+    const sync = () => {
+      const open = !group.classList.contains('is-dismissed') && group.matches(':hover, :focus-within');
+      btn.setAttribute('aria-expanded', String(open));
+    };
+
+    for (const event of ['pointerenter', 'focusin']) {
+      group.addEventListener(event, () => requestAnimationFrame(sync));
+    }
+
+    group.addEventListener('pointerleave', () => {
+      group.classList.remove('is-dismissed');
+      requestAnimationFrame(sync);
+    });
+
+    // Escape moves focus from a menu item back to the trigger, which fires
+    // focusout on the way — clearing the flag here would reopen the menu the
+    // keypress just closed. Only a focus leaving the group counts.
+    group.addEventListener('focusout', (event) => {
+      if (!group.contains(event.relatedTarget as Node)) group.classList.remove('is-dismissed');
+      requestAnimationFrame(sync);
+    });
+
+    group.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      group.classList.add('is-dismissed');
+      btn.focus();
+      sync();
+    });
+  });
+
+  const toggle = document.getElementById('theme-toggle');
+  const sun = toggle?.querySelector('.theme-toggle__sun') as HTMLElement | null;
+  const moon = toggle?.querySelector('.theme-toggle__moon') as HTMLElement | null;
+
+  function updateIcon() {
+    const isDark = document.documentElement.classList.contains('dark');
+    if (sun) sun.style.display = isDark ? 'none' : '';
+    if (moon) moon.style.display = isDark ? '' : 'none';
+  }
+
+  updateIcon();
+
+  toggle?.addEventListener('click', () => {
+    const isDark = document.documentElement.classList.toggle('dark');
+    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+    updateIcon();
+  });
+
+
+  // Mobile nav drawer
+  const burger = document.getElementById('nav-burger');
+  const navLinksEl = document.getElementById('site-nav-links');
+  const burgerOpenIcon = burger?.querySelector('.site-nav__burger-open') as HTMLElement | null;
+  const burgerCloseIcon = burger?.querySelector('.site-nav__burger-close') as HTMLElement | null;
+
+  function setNavOpen(open: boolean) {
+    navLinksEl?.classList.toggle('is-open', open);
+    burger?.setAttribute('aria-expanded', String(open));
+    if (burgerOpenIcon) burgerOpenIcon.style.display = open ? 'none' : '';
+    if (burgerCloseIcon) burgerCloseIcon.style.display = open ? '' : 'none';
+  }
+
+  burger?.addEventListener('click', () => {
+    setNavOpen(!navLinksEl?.classList.contains('is-open'));
+  });
+
+  navLinksEl?.addEventListener('click', (e) => {
+    if ((e.target as HTMLElement).closest('a')) setNavOpen(false);
+  });
+</script>
+
+<style>
+.github-star-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.site-nav__lang-btn {
+  font-size: 0.8125rem;
+  font-weight: 560;
+}
+
+/* Give toolbar labels the same centered line box as their icons. */
+.site-nav__actions .site-nav__link { height: 2rem; padding-block: 0; }
+.github-star-btn__label,
+.site-nav__lang-btn > span {
+  display: inline-flex;
+  align-items: center;
+  height: 1rem;
+  line-height: 1rem;
+}
+.site-nav__actions svg { display: block; flex-shrink: 0; }
+
+.site-nav__burger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-control);
+  color: var(--foreground);
+  background: transparent;
+  cursor: pointer;
+}
+
+.site-nav__burger:hover { background: var(--secondary); }
+
+@media (max-width: 900px) {
+  .github-star-btn__label { display: none; }
+
+  .site-nav__burger { display: inline-flex; }
+
+  .site-nav__links {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.15rem;
+    padding: 0.5rem 1.5rem 0.85rem;
+    border-top: 1px solid var(--border);
+    background: var(--background);
+    box-shadow: var(--shadow-panel);
+  }
+
+  .site-nav__links.is-open { display: flex; }
+
+  .site-nav__link { height: auto; padding: 0.65rem 0; }
+
+  .site-nav__dropdown { position: static; }
+
+  .site-nav__dropdown-menu {
+    position: static;
+    display: flex;
+    flex-direction: column;
+    margin-left: 0.85rem;
+    padding: 0;
+    border: none;
+    box-shadow: none;
+    background: none;
+    opacity: 1;
+    visibility: visible;
+  }
+}
+</style>

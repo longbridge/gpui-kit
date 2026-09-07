@@ -52,7 +52,7 @@ v_virtual_list(cx.entity(), "customers", sizes, |_this, range, _window, _cx| {
 ## 完整 Rust 示例
 
 ```bash
-cargo run -p gpui-base --example components -- virtual-list
+cargo run -p gpui-base-examples -- virtual-list
 ```
 
 <<< ../../../crates/base/examples/showcase/components/virtual_list.rs{rust}

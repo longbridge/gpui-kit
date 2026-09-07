@@ -544,13 +544,8 @@ fn validate_shell_version(version: &str) -> Result<(), ManifestProblem> {
     let required = Version::parse(version)
         .map_err(|_| ManifestProblem::InvalidShellVersion(version.to_owned()))?;
     let runtime = Version::parse(SHELL_VERSION).expect("the crate version is semantic");
-    let compatible_line = if required.major == 0 {
-        runtime.major == 0 && runtime.minor == required.minor
-    } else {
-        runtime.major == required.major
-    };
 
-    if compatible_line && runtime >= required {
+    if runtime >= required {
         Ok(())
     } else {
         Err(ManifestProblem::IncompatibleShellVersion {
@@ -2902,6 +2897,13 @@ mod tests {
                 "{error}"
             );
         }
+    }
+
+    #[test]
+    fn older_shell_minor_versions_remain_compatible() {
+        let source = VALID.replacen("\"0.1.0\"", "\"0.0.0\"", 1);
+        PluginManifest::parse(&source)
+            .expect("a manifest's shell-version is its minimum runtime version");
     }
 
     #[test]

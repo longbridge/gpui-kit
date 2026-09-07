@@ -55,7 +55,7 @@ Dock 的数据模型比单一分栏组件更重，但换来可查询、可移动
 ## 可运行示例
 
 ```bash
-cargo run -p gpui-base --example dock
+cargo run -p gpui-base-examples -- dock
 ```
 
 <<< ../../../crates/base/examples/showcase/components/dock.rs{rust}

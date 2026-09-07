@@ -751,6 +751,92 @@ mod tests {
         text_view: Entity<TextViewState>,
     }
 
+    /// A scrollable viewport, so the list has a bounded height to measure
+    /// against and `max_offset_for_scrollbar` reports a real scroll extent.
+    struct ScrollExtentTestRoot {
+        text_view: Entity<TextViewState>,
+    }
+
+    impl Render for ScrollExtentTestRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(400.))
+                .h(px(200.))
+                .overflow_hidden()
+                .child(TextView::new(&self.text_view).scrollable(true))
+        }
+    }
+
+    /// `count` paragraphs, each `words` words long, so two documents can share
+    /// a block count while differing wildly in height.
+    fn document_of(count: usize, words: usize) -> String {
+        (1..=count)
+            .map(|i| format!("Block {i}: {}", "lorem ipsum dolor ".repeat(words)))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    /// Replacing a document with one that happens to have the *same* block
+    /// count must still re-measure. `Document::render_root` only resets the
+    /// list when the count changes, so without an explicit re-measure every
+    /// cached height stays with the previous document and the scroll extent
+    /// keeps describing it.
+    #[gpui::test]
+    fn replacing_a_document_with_an_equal_block_count_remeasures(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+
+        const BLOCKS: usize = 24;
+        let short = document_of(BLOCKS, 1);
+        let tall = document_of(BLOCKS, 60);
+
+        let (root, cx) = cx.add_window_view(|_, cx| ScrollExtentTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown(&short, cx)),
+        });
+        let cx: &mut VisualTestContext = cx;
+
+        // The list is populated and measured during layout, so every
+        // assertion below has to follow a real frame.
+        let settle = |cx: &mut VisualTestContext| {
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.run_until_parked();
+        };
+        settle(cx);
+
+        let scroll_extent = |cx: &mut VisualTestContext| {
+            root.read_with(cx, |root, cx| {
+                root.text_view
+                    .read(cx)
+                    .list_state()
+                    .max_offset_for_scrollbar()
+                    .y
+            })
+        };
+
+        let short_extent = scroll_extent(cx);
+
+        root.update(cx, |root, cx| {
+            root.text_view
+                .update(cx, |state, cx| state.set_text(&tall, cx));
+        });
+        settle(cx);
+
+        root.read_with(cx, |root, cx| {
+            assert_eq!(
+                root.text_view.read(cx).list_state().item_count(),
+                BLOCKS,
+                "the replacement must keep the block count, or the list resets and the bug cannot occur"
+            );
+        });
+
+        let tall_extent = scroll_extent(cx);
+        assert!(
+            tall_extent > short_extent * 5.,
+            "a much taller document must grow the scroll extent, but it went from \
+             {short_extent:?} to {tall_extent:?}"
+        );
+    }
+
     struct StatelessMarkdownRoot {
         renders: Arc<AtomicUsize>,
     }

@@ -1668,7 +1668,8 @@ pub enum RegistryError {
 
 /// Module names the runtime answers to itself. A component catalog may not
 /// claim one: the runtime's resolvers run first.
-const RUNTIME_MODULE_SPECIFIERS: &[&str] = &["gpui-kit", "gpui-base", "gpui-shell", "gpui-fps"];
+const RUNTIME_MODULE_SPECIFIERS: &[&str] =
+    &["gpui-kit", "gpui", "gpui-base", "gpui-shell", "gpui-fps"];
 
 /// Opens the window a catalog's components need.
 ///

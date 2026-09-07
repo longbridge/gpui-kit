@@ -1,0 +1,58 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { readdir, readFile } from 'node:fs/promises';
+import { join, relative } from 'node:path';
+import SkillsApp from '../../components/SkillsApp.vue';
+
+interface Skill {
+    id: string;
+    name: string;
+    description: string;
+    skillPath: string;
+}
+
+async function loadSkills(): Promise<Skill[]> {
+    // Not `import.meta.url`: Astro rearranges server assets during the build,
+    // so walking up from this module stopped reaching the repository and the
+    // page rendered empty. `process.cwd()` is website/; the skills live one
+    // level above it.
+    const repoRoot = join(process.cwd(), '..');
+    const dirs = [join(repoRoot, 'skills'), join(repoRoot, '.claude/skills')];
+    const skills: Skill[] = [];
+
+    for (const skillsDir of dirs) {
+        try {
+            const entries = await readdir(skillsDir, { withFileTypes: true });
+            for (const entry of entries) {
+                if (!entry.isDirectory()) continue;
+                const skillMd = join(skillsDir, entry.name, 'SKILL.md');
+                try {
+                    const content = await readFile(skillMd, 'utf-8');
+                    const m = content.match(/^---\s*\n([\s\S]*?)\n---/);
+                    const fm: Record<string, string> = {};
+                    if (m) {
+                        for (const line of m[1].split('\n')) {
+                            const idx = line.indexOf(':');
+                            if (idx > 0) fm[line.slice(0, idx).trim()] = line.slice(idx + 1).trim().replace(/^["']|["']$/g, '');
+                        }
+                    }
+                    const relPath = relative(repoRoot, skillMd).replace(/\\/g, '/');
+                    skills.push({ id: relPath, name: fm.name ?? entry.name, description: fm.description ?? '', skillPath: relPath });
+                } catch {}
+            }
+        } catch {}
+    }
+
+    return skills.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+const skills = await loadSkills();
+---
+
+<DocsLayout
+  title="技能 — GPUI Kit"
+  description="适用于 GPUI Kit 的开发技能、约定和最佳实践。"
+  lang="zh-CN"
+>
+  <SkillsApp client:load lang="zh-CN" skills={skills} />
+</DocsLayout>

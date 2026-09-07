@@ -289,6 +289,7 @@ impl Render for SelectStory {
                     .items_center()
                     .child(
                         Select::new(&self.simple_select2)
+                            .accessibility_label("Programming language")
                             .w(px(280.))
                             .with_size(self.size)
                             .disabled(self.disabled)

@@ -1,0 +1,14 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { getShowcaseApps } from '../../lib/showcases.ts';
+import AppsApp from '../../components/AppsApp.vue';
+const apps = await getShowcaseApps();
+---
+
+<DocsLayout
+  title="应用案例 — GPUI Kit"
+  description="基于 GPUI Kit 构建的桌面应用——从生产环境的交易终端到数据库客户端、终端与系统工具。"
+  lang="zh-CN"
+>
+  <AppsApp apps={apps} client:load lang="zh-CN" />
+</DocsLayout>

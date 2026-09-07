@@ -67,6 +67,21 @@ Select::new(&state)
     .placeholder("Select a language...")
 ```
 
+### Accessibility
+
+Give the control a name that stays the same when the selection changes:
+
+```rust
+Select::new(&state)
+    .accessibility_label("Programming language")
+    .placeholder("Choose a language")
+```
+
+The accessible value uses the committed item's `title()` and any `title_prefix`.
+A custom `display_title()` remains visual presentation. Searching does not change
+that committed value. With no selection, the accessible value uses the placeholder.
+Enabled controls expose accessible activation to open or close the popup.
+
 ### Searchable
 
 Use `searchable(true)` to enable search functionality within the dropdown.

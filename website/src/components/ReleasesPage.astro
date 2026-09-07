@@ -1,0 +1,306 @@
+---
+import { loadReleases } from '../lib/releases';
+
+export interface Props {
+  lang?: 'en' | 'zh-CN';
+}
+
+const { lang = 'en' } = Astro.props;
+const isZh = lang === 'zh-CN';
+
+const REPO = 'longbridge/gpui-kit';
+const releases = await loadReleases();
+
+const copy = isZh
+  ? {
+      kicker: '版本发布',
+      title: '发布说明',
+      lead: 'GPUI Kit 每个已发布版本，以及它在 GitHub Release 中的说明，最新版本在最前。说明保留 GitHub 上的英文原文。',
+      latest: '最新版本',
+      count: `${releases.length} 个版本`,
+      github: '在 GitHub 上查看全部版本',
+      latestBadge: '最新',
+      prerelease: '预发布',
+      empty: '构建时未能读取发布说明。',
+      emptyLink: '前往 GitHub 查看版本发布。',
+    }
+  : {
+      kicker: 'Releases',
+      title: 'Release notes',
+      lead: 'Every published version of GPUI Kit, with the notes from its GitHub release. The newest version comes first.',
+      latest: 'Latest',
+      count: `${releases.length} releases`,
+      github: 'All releases on GitHub',
+      latestBadge: 'Latest',
+      prerelease: 'Pre-release',
+      empty: 'The release notes could not be loaded when this page was built.',
+      emptyLink: 'See the releases on GitHub.',
+    };
+
+const releasesUrl = `https://github.com/${REPO}/releases`;
+---
+
+<div class="releases-page">
+  <div class="releases-hero">
+    <span class="releases-kicker">{copy.kicker}</span>
+    <h1>{copy.title}</h1>
+    <p class="releases-lead">{copy.lead}</p>
+    {releases.length > 0 && (
+      <ul class="releases-signals">
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/>
+            <circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/>
+          </svg>
+          {copy.latest} {releases[0].name}
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/>
+            <path d="M2 12.13a1 1 0 0 0 .59.91l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 .59-.92"/>
+            <path d="M2 17.13a1 1 0 0 0 .59.91l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 .59-.92"/>
+          </svg>
+          {copy.count}
+        </li>
+        <li>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.4 5.4 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/>
+            <path d="M9 18c-4.51 2-5-2-7-2"/>
+          </svg>
+          <a href={releasesUrl} target="_blank" rel="noopener noreferrer">{copy.github}</a>
+        </li>
+      </ul>
+    )}
+  </div>
+
+  {releases.length === 0 && (
+    <p class="releases-empty">
+      {copy.empty}
+      <a href={releasesUrl} target="_blank" rel="noopener noreferrer">{copy.emptyLink}</a>
+    </p>
+  )}
+
+  {releases.map((release, index) => (
+    <article id={release.tag} class="release">
+      <header class="release__header">
+        <h2 class="release__version">
+          <a href={`#${release.tag}`}>{release.name}</a>
+        </h2>
+        <div class="release__meta">
+          <time datetime={release.date}>{release.date}</time>
+          {index === 0 && <span class="release__badge">{copy.latestBadge}</span>}
+          {release.prerelease && <span class="release__badge">{copy.prerelease}</span>}
+          <a href={release.url} class="release__link" target="_blank" rel="noopener noreferrer">
+            GitHub
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M7 7h10v10"/>
+              <path d="M7 17 17 7"/>
+            </svg>
+          </a>
+        </div>
+      </header>
+      {/* Rendered at build time from the GitHub release body, by the same
+          markdown pipeline as the docs. */}
+      <div class="release__body" set:html={release.html} />
+    </article>
+  ))}
+</div>
+
+<style>
+  .releases-page {
+    color: var(--foreground);
+  }
+
+  /* -------------------------------------------------------------- hero */
+
+  .releases-hero {
+    max-width: 46rem;
+    margin-bottom: clamp(2.5rem, 5vw, 3.5rem);
+  }
+
+  .releases-kicker {
+    display: block;
+    margin-bottom: 0.9rem;
+    color: var(--muted-foreground);
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  :global(html[lang^='zh']) .releases-kicker {
+    letter-spacing: 0.06em;
+  }
+
+  .releases-hero h1 {
+    margin: 0;
+    border: 0;
+    padding: 0;
+    font-size: clamp(2rem, 3.6vw, 3rem);
+    font-weight: 660;
+    letter-spacing: -0.045em;
+    line-height: 1.1;
+  }
+
+  :global(html[lang^='zh']) .releases-hero h1 {
+    letter-spacing: normal;
+  }
+
+  .releases-lead {
+    margin: 1.1rem 0 0;
+    color: var(--muted-foreground);
+    font-size: 1.05rem;
+    line-height: 1.7;
+  }
+
+  .releases-signals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.5rem;
+    margin: 1.6rem 0 0;
+    padding: 0;
+    list-style: none;
+    color: var(--muted-foreground);
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .releases-signals li {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    margin: 0;
+  }
+
+  .releases-signals svg {
+    width: 0.95rem;
+    height: 0.95rem;
+    opacity: 0.7;
+  }
+
+  .releases-empty {
+    max-width: 46rem;
+    color: var(--muted-foreground);
+  }
+
+  /* ----------------------------------------------------------- release */
+
+  /* Each version is a band under a hairline: the version and date on the
+     left stay in view while its notes scroll, so a reader skimming down the
+     page always knows which release they are in. */
+  .release {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem 3rem;
+    border-top: 1px solid var(--border);
+    padding: 2rem 0 2.5rem;
+  }
+
+  @media (min-width: 960px) {
+    .release {
+      grid-template-columns: 13rem minmax(0, 1fr);
+      padding: 2.5rem 0 3rem;
+    }
+  }
+
+  .release__header {
+    align-self: start;
+  }
+
+  @media (min-width: 960px) {
+    .release__header {
+      position: sticky;
+      top: calc(var(--nav-height) + 1.5rem);
+    }
+  }
+
+  .release__version {
+    margin: 0;
+    border: 0;
+    padding: 0;
+    font-size: 1.35rem;
+    font-weight: 640;
+    letter-spacing: -0.022em;
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .release__version a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .release__meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.75rem;
+    margin-top: 0.6rem;
+    color: var(--muted-foreground);
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .release__badge {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.05rem 0.55rem;
+    font-size: 0.72rem;
+    line-height: 1.5;
+  }
+
+  .release__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.2rem;
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .release__link:hover {
+    color: var(--foreground);
+  }
+
+  .release__link svg {
+    width: 0.85rem;
+    height: 0.85rem;
+  }
+
+  /* The notes are GitHub markdown: mostly lists, with a heading per component
+     in the larger releases. Docs-level heading rhythm would be too loud for a
+     changelog, so headings inside a release are compact and unruled. */
+  .release__body {
+    min-width: 0;
+    max-width: 46rem;
+  }
+
+  .release__body :global(h1),
+  .release__body :global(h2),
+  .release__body :global(h3),
+  .release__body :global(h4) {
+    margin: 1.5rem 0 0.5rem;
+    border: 0;
+    padding: 0;
+    font-size: 1rem;
+    font-weight: 640;
+    letter-spacing: -0.012em;
+    line-height: 1.4;
+  }
+
+  .release__body :global(> :first-child) {
+    margin-top: 0;
+  }
+
+  .release__body :global(p),
+  .release__body :global(ul),
+  .release__body :global(ol) {
+    max-width: none;
+  }
+
+  .release__body :global(img) {
+    max-width: 100%;
+    height: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+  }
+</style>

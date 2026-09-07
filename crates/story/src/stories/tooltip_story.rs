@@ -2,7 +2,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use gpui_kit::component::{
-    IconName,
+    IconName, Placement,
     button::{Button, ButtonVariant, ButtonVariants, Toggle},
     checkbox::Checkbox,
     clipboard::Clipboard,
@@ -46,7 +46,7 @@ impl Story for TooltipStory {
     }
 
     fn description() -> &'static str {
-        "Describe a control on hover or keyboard focus."
+        "Describe a control on hover."
     }
 
     fn new_view(window: &mut Window, cx: &mut App) -> Entity<impl Render> {
@@ -75,22 +75,29 @@ impl Render for TooltipStory {
             .gap_3()
             .child(
                 section("Button")
-                    .description("Add plain text or a keyboard shortcut hint.")
+                    .description("Prefer the left, bottom, or right side, with an optional keyboard shortcut hint.")
                     .child(
                         Button::new("btn0")
                             .label("Search")
                             .with_variant(ButtonVariant::Primary)
-                            .tooltip("This is a search Button."),
+                            .tooltip("This is a search Button.")
+                            .tooltip_placement(Placement::Left),
                     )
-                    .child(Button::new("btn1").label("Info").tooltip_with_action(
-                        "This is a tooltip with Action for display keybinding.",
-                        &Info,
-                        Some("Tooltip"),
-                    ))
                     .child(
-                        Button::new("btn3")
+                        Button::new("btn1")
+                            .label("Info")
+                            .tooltip_with_action(
+                                "This is a tooltip with Action for display keybinding.",
+                                &Info,
+                                Some("Tooltip"),
+                            )
+                            .tooltip_placement(Placement::Bottom),
+                    )
+                    .child(
+                        Button::new("btn2")
                             .label("Hover me")
-                            .tooltip("This is tooltip 3"),
+                            .tooltip("This tooltip prefers the right side.")
+                            .tooltip_placement(Placement::Right),
                     ),
             )
             .child(

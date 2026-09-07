@@ -414,6 +414,11 @@ pub(crate) enum Component {
     /// so this node carries only the list itself. See [`VirtualListSpec`] and
     /// the exception recorded in [`crate::materialize`].
     VirtualList(Rc<VirtualListSpec>),
+    /// GPUI's own lazy lists, driven the same way as [`Component::VirtualList`]:
+    /// the items come from a callback run during layout. `list` measures every
+    /// item it draws, so rows need not state a height; `uniform_list` measures
+    /// one and places the rest by it. See [`ListSpec`].
+    List(Rc<ListSpec>),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -551,6 +556,71 @@ impl VirtualListSpec {
     }
 }
 
+/// Which of GPUI's lazy lists a [`ListSpec`] describes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ListKind {
+    /// `gpui::list`: every drawn item is measured, so heights may differ.
+    Measured,
+    /// `gpui::uniform_list`: one item is measured and every row takes its height.
+    Uniform,
+}
+
+/// The parameters of a `list` or `uniform_list` call, held for the frame.
+///
+/// The same shape as a [`VirtualListSpec`] without the size table: what
+/// distinguishes these lists is that GPUI measures the items itself, so the
+/// script says how many there are and nothing about how tall.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ListSpec {
+    id: String,
+    kind: ListKind,
+    item_count: usize,
+    get_key: CallbackId,
+    render_items: CallbackId,
+}
+
+impl ListSpec {
+    pub fn new(
+        id: String,
+        kind: ListKind,
+        item_count: usize,
+        get_key: CallbackId,
+        render_items: CallbackId,
+    ) -> Self {
+        Self {
+            id,
+            kind,
+            item_count,
+            get_key,
+            render_items,
+        }
+    }
+
+    /// The identity the script gave, also the name a `Scrollbar` pairs with.
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn kind(&self) -> ListKind {
+        self.kind
+    }
+
+    /// How many items the collection has, visible or not.
+    pub fn item_count(&self) -> usize {
+        self.item_count
+    }
+
+    /// Resolves the stable domain key for one current item index.
+    pub fn get_key(&self) -> CallbackId {
+        self.get_key
+    }
+
+    /// The handler that describes one window of items.
+    pub fn render_items(&self) -> CallbackId {
+        self.render_items
+    }
+}
+
 impl Component {
     /// What this node contributes to a [`StructureFingerprint`]: which
     /// constructor produced it, and nothing it carries.
@@ -643,6 +713,10 @@ impl Component {
             Component::VirtualList(spec) => match spec.axis() {
                 gpui::Axis::Vertical => "v_virtual_list",
                 gpui::Axis::Horizontal => "h_virtual_list",
+            },
+            Component::List(spec) => match spec.kind() {
+                ListKind::Measured => "list",
+                ListKind::Uniform => "uniform_list",
             },
         }
     }
@@ -1275,6 +1349,9 @@ impl SpecArena {
             // that says what the list is.
             Component::VirtualList(spec) => {
                 out.push_str(&format!(" {:?} \u{d7}{}", spec.id(), spec.sizes().len()))
+            }
+            Component::List(spec) => {
+                out.push_str(&format!(" {:?} \u{d7}{}", spec.id(), spec.item_count()))
             }
             Component::ChildView(spec) => out.push_str(&format!(" #{}", spec.handle())),
             Component::Slider(handle)

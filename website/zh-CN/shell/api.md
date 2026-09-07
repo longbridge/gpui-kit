@@ -35,16 +35,20 @@ API 形态跟随 Rust 原型：`App` 上的方法放在 `cx`，`Window` 上的�
 
 ### 元素
 
-| 名称          | 说明                                                                                |
-| ------------- | ----------------------------------------------------------------------------------- |
-| `Element`     | 通过链式方法构建、只属于当前 render pass 的描述                                     |
-| `div()`       | 自身不带布局的元素                                                                  |
-| `svg(path)`   | 来自应用根目录的矢量图，按周围的文字颜色着色                                        |
-| `image(path)` | 来自应用根目录的全彩图片，保留原色                                                  |
-| `PathBuilder` | GPUI 的路径构建器类型及其工厂；`fill()` 与 `stroke(width)` 都返回一个 `PathBuilder` |
-| `Background`  | `solid`、`stop`、`linear_gradient`、`pattern_slash`、`checkerboard`                 |
+| 名称              | 说明                                                                                |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| `Element`         | 通过链式方法构建、只属于当前 render pass 的描述                                     |
+| `div()`           | 自身不带布局的元素                                                                  |
+| `svg(path)`       | 来自应用根目录的矢量图，按周围的文字颜色着色                                        |
+| `image(path)`     | 来自应用根目录的全彩图片，保留原色                                                  |
+| `list(…)`         | GPUI 的惰性列表：行高任意，边画边测量                                               |
+| `uniform_list(…)` | GPUI 的等高列表：测量一行，其余按它排布                                             |
+| `PathBuilder`     | GPUI 的路径构建器类型及其工厂；`fill()` 与 `stroke(width)` 都返回一个 `PathBuilder` |
+| `Background`      | `solid`、`stop`、`linear_gradient`、`pattern_slash`、`checkerboard`                 |
 
 `PathBuilder.fill()` 与 `.stroke(width)` 返回一个句柄，可链式调用 `move_to`、`line_to`、`curve_to`、`cubic_bezier_to`、`arc_to`、`add_polygon`、`close` 与 `dash_array`，最后以 `build()` 收尾。用 `window.paint_path(path, background)` 把结果画出来——它是唯一一个通过对象取到的元素构造器，因为它镜像的东西在 Rust 侧就是窗口上的一个方法。
+
+`list` 和 `uniform_list` 是 GPUI 自己的惰性列表，参数是 `(id, item_count, get_key, render)`，即 `gpui-base` 的 `v_virtual_list` 去掉 `item_sizes` 的形状：没有尺寸表，因为 GPUI 自己测量各项。`uniform_list` 测量一行，其余各行按它排布，`render(range, cx)` 和虚拟列表一样按区间返回元素数组。`list` 会测量画出的每一项并记住尺寸，`render(index, cx)` 为一项返回一个元素，所以高度不等的行或面板不必事先说明有多高。两者都只绘制屏幕内的内容外加折叠线下方的一小段，自己处理滚动，并按名字与 `Scrollbar` 配对；都不接受 `VirtualListScrollHandle`。
 
 字符串本身也是元素，和 GPUI 里 `&str` 实现 `IntoElement` 完全一样：`.child("hello")` 就是写文本的方式，样式来自持有它的那个元素。
 

@@ -28,4 +28,4 @@ order: 1
 
 从[入门指南](./getting-started.md)开始，使用 [TextView](./text-view.md) 渲染可选择的 Markdown 与 HTML，或阅读[文本选择](./text-selection.md)为自定义 renderer 接入窗口级选择。每个页面都提供 Rust 代码和可运行的 WASM 示例。
 
-[History 与 Undo History](./history.md) 介绍两种用途明确不同的状态结构：`History` 是包含根条目、当前条目、后退与前进分支的导航轨迹，`UndoHistory` 则记录分组的 undo 与 redo 事务。
+[History](./history.md) 介绍两种用途明确不同的状态结构：`History` 是包含根条目、当前条目、后退与前进分支的导航轨迹，`UndoHistory` 则记录分组的 undo 与 redo 事务。

@@ -56,7 +56,7 @@ impl InputBaseState<EditorMode> {
         cx: &mut Context<Self>,
     ) {
         let providers = self.extras.lsp.code_action_providers.clone();
-        let range = self.selected_range.start..self.selected_range.end;
+        let range = self.selected_range();
 
         let state = cx.entity();
         self.extras.context_menu_task = cx.spawn_in(window, async move |editor, cx| {

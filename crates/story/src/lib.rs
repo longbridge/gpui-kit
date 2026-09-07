@@ -20,7 +20,7 @@ use gpui_kit::component::{
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use serde::{Deserialize, Serialize};
-use std::{cell::Cell, rc::Rc, time::Duration};
+use std::{cell::Cell, rc::Rc};
 
 mod app_menus;
 mod embedded_themes;
@@ -144,8 +144,6 @@ pub fn create_new_window_with_size<F, E>(
                 width: px(480.),
                 height: px(320.),
             }),
-            // 500 ms between inactive frames caps background animation at 2 FPS.
-            inactive_frame_interval: Some(Duration::from_millis(500)),
             kind: WindowKind::Normal,
             #[cfg(target_os = "linux")]
             window_background: story_window_background(),

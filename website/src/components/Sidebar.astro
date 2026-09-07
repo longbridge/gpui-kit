@@ -1,0 +1,63 @@
+---
+import type { SidebarItem } from '../lib/sidebar';
+
+export interface Props {
+  items: SidebarItem[];
+  currentPath: string;
+  lang?: 'en' | 'zh-CN';
+}
+
+const { items, currentPath, lang = 'en' } = Astro.props;
+
+function isActive(link: string): boolean {
+  return currentPath === link || currentPath.startsWith(link + '/');
+}
+
+function renderItems(items: SidebarItem[], depth = 0): any[] {
+  return items;
+}
+---
+
+<aside class="docs-sidebar" aria-label="Documentation navigation">
+  <nav>
+    {items.map(group => (
+      <div class="sidebar-group">
+        {group.text && (
+          <div class="sidebar-group__title">{group.text}</div>
+        )}
+        {group.items && (
+          <ul class="sidebar-group__items">
+            {group.items.map(item => (
+              item.items ? (
+                <li>
+                  <div class="sidebar-subgroup-title">{item.text}</div>
+                  <ul class="sidebar-subgroup__items">
+                    {item.items.map(sub => (
+                      <li>
+                        <a
+                          href={sub.link}
+                          class={`sidebar-item${sub.link && isActive(sub.link) ? ' active' : ''}`}
+                        >
+                          {sub.text}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ) : (
+                <li>
+                  <a
+                    href={item.link}
+                    class={`sidebar-item${item.link && isActive(item.link) ? ' active' : ''}`}
+                  >
+                    {item.text}
+                  </a>
+                </li>
+              )
+            ))}
+          </ul>
+        )}
+      </div>
+    ))}
+  </nav>
+</aside>

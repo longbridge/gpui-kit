@@ -19,7 +19,6 @@ pub(in crate::materialize) fn fps_monitor(
 
     gpui_fps::fps_monitor(window, cx)
         .when_some(behavior.anchor, |monitor, anchor| monitor.anchor(anchor))
-        .continuous(behavior.continuous.unwrap_or(false))
         .when_some(behavior.frame_budget, |monitor, budget| {
             monitor.frame_budget(budget)
         })

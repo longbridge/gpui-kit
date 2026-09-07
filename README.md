@@ -198,25 +198,25 @@ cargo run
 
 ### Examples
 
-Some important examples are built into the `story` crate and can be run directly:
+Some larger examples reuse the `story` gallery components and run as standalone packages:
 
 ```bash
-# Code editor with LSP support and syntax highlighting
-cargo run --example editor
-
 # Dock layout system (panels, split views, tabs)
-cargo run --example dock
+cargo run -p example-dock
 
 # Markdown rendering
-cargo run --example markdown
+cargo run -p example-markdown
 
 # HTML rendering
-cargo run --example html
+cargo run -p example-html
 ```
 
 The `examples` directory also contains standalone examples, each focused on a single feature. Each example is a separate crate, run them with `cargo run -p <name>`:
 
 ```bash
+# Code editor with LSP support and syntax highlighting
+cargo run -p example-editor
+
 # Basic hello world
 cargo run -p hello_world
 
@@ -237,6 +237,6 @@ See the [comparison with Iced, egui and Qt 6](https://gpui-kit.com/docs/comparis
 
 Apache-2.0
 
-- Built on [GPUI](https://github.com/zed-industries/zed), the UI framework behind Zed, also Apache-2.0.
+- Built on [GPUI](https://github.com/zed-industries/zed), the UI framework from Zed Industries, also Apache-2.0. The `gpui-pre-*` crates are snapshots of it, published with Zed's license and notices intact.
 - UI design based on [shadcn/ui](https://ui.shadcn.com), some from [Reui](https://reui.io).
 - Icons from [Lucide](https://lucide.dev).

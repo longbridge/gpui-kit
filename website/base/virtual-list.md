@@ -133,7 +133,7 @@ The tradeoff is that the size table must exist before the first frame. For a mil
 ## Complete Rust example
 
 ```bash
-cargo run -p gpui-base --example components -- virtual-list
+cargo run -p gpui-base-examples -- virtual-list
 ```
 
 <<< ../../crates/base/examples/showcase/components/virtual_list.rs{rust}

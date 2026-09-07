@@ -330,6 +330,7 @@ impl RenderOnce for DialogDescription {
 pub struct DialogClose {
     style: StyleRefinement,
     children: SmallVec<[AnyElement; 1]>,
+    trigger: Option<AnyElement>,
 }
 
 impl DialogClose {
@@ -337,7 +338,25 @@ impl DialogClose {
         Self {
             style: StyleRefinement::default(),
             children: SmallVec::new(),
+            trigger: None,
         }
+    }
+
+    /// Styles a button with the accessible name "Close" and cancel activation.
+    ///
+    /// The supplied button already supports pointer, keyboard, and accessibility
+    /// activation. The builder only needs to supply presentation.
+    /// The wrapper does not also handle clicks when a trigger is supplied.
+    pub fn trigger<E: IntoElement>(mut self, build: impl FnOnce(crate::Button) -> E) -> Self {
+        let button = crate::Button::new("close")
+            .accessibility_label("Close")
+            .on_click(Self::activate);
+        self.trigger = Some(build(button).into_any_element());
+        self
+    }
+
+    fn activate(_: &ClickEvent, window: &mut Window, cx: &mut App) {
+        window.dispatch_action(Box::new(Cancel), cx);
     }
 }
 impl Default for DialogClose {
@@ -359,7 +378,8 @@ impl RenderOnce for DialogClose {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         div()
             .id("dialog-close")
-            .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx))
+            .when(self.trigger.is_none(), |this| this.on_click(Self::activate))
+            .children(self.trigger)
             .children(self.children)
             .refine_style(&self.style)
     }
@@ -589,6 +609,107 @@ mod tests {
     use super::*;
     use gpui::{Context, Render, point};
     use std::{cell::RefCell, rc::Rc};
+
+    #[gpui::test]
+    fn close_trigger_supplies_accessible_button(cx: &mut gpui::TestAppContext) {
+        use gpui::{Element as _, accesskit, canvas};
+        use std::sync::{Arc, Mutex};
+
+        struct Probe(Arc<Mutex<Option<accesskit::Node>>>);
+        impl Render for Probe {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let captured = self.0.clone();
+                canvas(
+                    move |_, window, cx| {
+                        DialogClose::new().trigger(|button| {
+                            let element = button.render(window, cx).into_element();
+                            let mut node = accesskit::Node::new(element.a11y_role().unwrap());
+                            element.write_a11y_info(&mut node);
+                            *captured.lock().unwrap() = Some(node);
+                            element
+                        });
+                    },
+                    |_, _, _, _| {},
+                )
+            }
+        }
+
+        let captured = Arc::new(Mutex::new(None));
+        let result = captured.clone();
+        let (_, cx) = cx.add_window_view(move |_, _| Probe(captured));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let node = result.lock().unwrap().take().unwrap();
+        assert_eq!(node.role(), Role::Button);
+        assert_eq!(node.label(), Some("Close"));
+        assert!(node.supports_action(accesskit::Action::Click));
+    }
+
+    #[gpui::test]
+    fn close_trigger_activates_once_and_respects_cancel_veto(cx: &mut gpui::TestAppContext) {
+        use gpui::{KeyDownEvent, KeyUpEvent, Keystroke};
+
+        struct Harness {
+            focus: FocusHandle,
+            button_focus: FocusHandle,
+            handle: DialogHandle,
+            attempts: Rc<Cell<usize>>,
+        }
+        impl Render for Harness {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                let attempts = self.attempts.clone();
+                let button_focus = self.button_focus.clone();
+                Dialog::new(cx)
+                    .handle(self.handle.clone())
+                    .focus_handle(self.focus.clone())
+                    .on_cancel(move |_, _, _| {
+                        attempts.set(attempts.get() + 1);
+                        attempts.get() > 1
+                    })
+                    .popup(
+                        DialogClose::new().trigger(move |button| {
+                            button.size(px(100.)).track_focus(&button_focus)
+                        }),
+                    )
+            }
+        }
+
+        cx.update(crate::init);
+        let handle = DialogHandle::new(true);
+        let attempts = Rc::new(Cell::new(0));
+        let (view, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            let attempts = attempts.clone();
+            move |_, cx| Harness {
+                focus: cx.focus_handle(),
+                button_focus: cx.focus_handle(),
+                handle,
+                attempts,
+            }
+        });
+        cx.update(|window, cx| {
+            view.read(cx).focus.clone().focus(window, cx);
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_click(point(px(20.), px(20.)), Default::default());
+        cx.run_until_parked();
+        assert_eq!(attempts.get(), 1);
+        assert!(handle.is_open(), "on_cancel can veto pointer dismissal");
+
+        cx.update(|window, cx| {
+            view.read(cx).button_focus.clone().focus(window, cx);
+            window.draw(cx).clear(cx);
+        });
+        let keystroke = Keystroke::parse("space").unwrap();
+        cx.simulate_event(KeyDownEvent {
+            keystroke: keystroke.clone(),
+            is_held: false,
+            prefer_character_input: false,
+        });
+        cx.simulate_event(KeyUpEvent { keystroke });
+        cx.run_until_parked();
+        assert_eq!(attempts.get(), 2);
+        assert!(!handle.is_open(), "Space uses the same cancel decision");
+    }
 
     struct TriggerHarness {
         handle: DialogHandle,

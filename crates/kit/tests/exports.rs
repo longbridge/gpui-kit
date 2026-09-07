@@ -102,3 +102,7 @@ mod component {
 mod assets {
     type Assets = gpui_kit::assets::Assets;
 }
+
+/// The opt-in facade feature enables GPUI's feature-gated profiler API.
+#[cfg(feature = "profiler")]
+use gpui_kit::profiler::WindowProfiler;

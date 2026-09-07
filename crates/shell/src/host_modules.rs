@@ -758,6 +758,7 @@ impl HostModule {
 pub const RESERVED_SPECIFIERS: &[&str] = &[
     // The runtime's own modules.
     "gpui-kit",
+    "gpui",
     "gpui-base",
     "gpui-component",
     "gpui-shell",

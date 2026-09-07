@@ -1,0 +1,12 @@
+[package]
+name = "example-html"
+version = "0.6.0"
+publish = false
+edition.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+gpui-component-story = { path = "../../crates/story" }
+
+[lints]
+workspace = true

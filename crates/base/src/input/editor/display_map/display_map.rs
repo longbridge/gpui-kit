@@ -324,6 +324,16 @@ impl DisplayMap {
         self.fold_map.display_row_to_wrap_row(display_row)
     }
 
+    pub(crate) fn display_row_column_to_offset(&self, display_row: usize, column: usize) -> usize {
+        let wrap_row = self
+            .fold_map
+            .display_row_to_wrap_row(display_row)
+            .unwrap_or(0);
+        self.wrap_map
+            .wrapper()
+            .display_point_to_offset(WrapDisplayPoint::new(wrap_row, 0, column))
+    }
+
     /// Get the longest row index (by byte length).
     #[inline]
     pub(crate) fn longest_row(&self) -> usize {

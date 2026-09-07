@@ -466,10 +466,10 @@ cargo run -p gpui-shell -- check path/to/app     # checks it, and writes them
 cargo run -p gpui-shell -- types path/to/app     # writes them and nothing else
 ```
 
-One file, three modules: `"gpui-kit"` for GPUI's own elements and what the runtime
+One file, built-in modules for each runtime layer: `"gpui-kit"` for GPUI's own elements and what the runtime
 adds, `"gpui-base"` for gpui-base's layout helpers, components and theme, and
-`"gpui-fps"` for its performance overlay. A name belongs to exactly one of them,
-so an import says which layer a script depends on.
+`"gpui-fps"` for its performance overlay. `"gpui"` is a compatibility alias for
+`"gpui-kit"`, so `import { div } from "gpui"` uses the same binding.
 
 Add `gpui-kit.d.ts` to `.gitignore`; the file's own first line says so.
 

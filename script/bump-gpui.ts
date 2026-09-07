@@ -17,8 +17,16 @@
  * 4. Drop optional dependencies that come from git without a crates.io
  *    version (crates.io rejects those), together with the features that
  *    enable them. Non-optional ones abort the run.
- * 5. Write a standalone workspace to `target/gpui-pre/workspace`, verify it
- *    with `cargo publish --workspace --dry-run`, then publish it.
+ * 5. Write a standalone workspace to `target/gpui-pre/workspace`. Every
+ *    crate keeps Zed's `license`, copyright notices and `LICENSE-APACHE`,
+ *    gets any `NOTICE` Zed ships, and the few files this script rewrites
+ *    carry a notice saying so (Apache-2.0 §4).
+ * 6. Audit the licenses: a republished crate must be Apache-2.0, and the
+ *    dependency graph of the staged workspace must not pull in a copyleft
+ *    crate. Zed's own application crates are GPL-3.0-or-later, and one of
+ *    them reaching the closure would change the terms for every consumer.
+ * 7. Verify with `cargo publish --workspace --dry-run`, build and test
+ *    gpui-kit against the staged crates, then publish.
  *
  * crates.io only accepts a handful of brand-new crates per ten minutes. The
  * publish step re-checks crates.io before every attempt, skips versions that
@@ -276,6 +284,7 @@ function loadWorkspace(zed: string): Workspace {
     }
   }
   const ws: Workspace = { root: zed, manifest, members, pruned: new Map() };
+  WORKSPACE_PACKAGE_LICENSE = manifest.workspace.package?.license;
   applyDependencyOverrides(ws);
   return ws;
 }
@@ -740,9 +749,12 @@ function crateManifest(
 ): Toml {
   const source = crate.manifest;
   const pkg: Toml = { ...source.package };
-  if (pkg.license === undefined && pkg["license-file"] === undefined) {
+  const license = packageLicense(crate);
+  if (license !== GPUI_LICENSE) {
     throw new BumpError(
-      `${crate.name}: no \`license\` in Cargo.toml; crates.io requires one`,
+      `${crate.name}: license is ${license === undefined ? "not declared" : `\`${license}\``}, ` +
+        `and only ${GPUI_LICENSE} crates are republished as ${PUBLISH_PREFIX}-*; ` +
+        "Zed's application crates are GPL-3.0-or-later and must not reach the closure",
     );
   }
 
@@ -908,9 +920,10 @@ function stageWorkspace(
       tomlDump(manifest),
     );
   }
-  installFacadeAwareMacroPaths(staging, crates);
-  makeDeclarativeMacrosCrateRelative(staging, crates);
-  vendorGpuiSourcesForApple(staging, crates);
+  installFacadeAwareMacroPaths(staging, crates, zedSha);
+  makeDeclarativeMacrosCrateRelative(staging, crates, zedSha);
+  vendorGpuiSourcesForApple(staging, crates, zedSha);
+  carryLicenseFiles(ws.root, staging, crates);
 
   writeFileSync(
     join(staging, "Cargo.toml"),
@@ -956,7 +969,11 @@ const PROC_MACRO_ATTRIBUTE = /^#\[proc_macro(?:_derive\([^\n]*\)|_attribute)?\]$
  * the known `actions!` derive crate-relative so it also works when re-exported
  * through gpui-kit (or when gpui-pre itself is renamed by a consumer).
  */
-function makeDeclarativeMacrosCrateRelative(staging: string, crates: Crate[]) {
+function makeDeclarativeMacrosCrateRelative(
+  staging: string,
+  crates: Crate[],
+  zedSha: string,
+) {
   const gpui = crates.find((crate) => crate.name === "gpui");
   if (gpui === undefined)
     throw new BumpError("gpui is missing from the staged crate set");
@@ -964,7 +981,11 @@ function makeDeclarativeMacrosCrateRelative(staging: string, crates: Crate[]) {
   if (!existsSync(actionPath))
     throw new BumpError("gpui declarative macro source does not exist: src/action.rs");
   const source = readFileSync(actionPath, "utf8");
-  writeFileSync(actionPath, rewriteDeclarativeMacroPaths(source));
+  writeFileSync(
+    actionPath,
+    modificationNotice(zedSha, "the `actions!` derive paths are crate-relative") +
+      rewriteDeclarativeMacroPaths(source),
+  );
   logInfo("gpui: made actions! derive paths crate-relative");
 }
 
@@ -1171,7 +1192,11 @@ fn rewrite_literal(literal: &Literal, facade: Option<&FacadePath>) -> Literal {
 `;
 }
 
-function installFacadeAwareMacroPaths(staging: string, crates: Crate[]) {
+function installFacadeAwareMacroPaths(
+  staging: string,
+  crates: Crate[],
+  zedSha: string,
+) {
   const macros = crates.find((crate) => crate.name === "gpui_macros");
   if (macros === undefined)
     throw new BumpError("gpui_macros is missing from the staged crate set");
@@ -1184,8 +1209,16 @@ function installFacadeAwareMacroPaths(staging: string, crates: Crate[]) {
   if (source.includes(FACADE_PATH_MARKER))
     throw new BumpError(`gpui_macros already declares \`${FACADE_PATH_MARKER}\``);
   const wrapped = wrapProcMacroEntrypoints(source);
-  writeFileSync(libPath, `${FACADE_PATH_MARKER}\n${wrapped.source}`);
-  writeFileSync(join(dirname(libPath), `${FACADE_PATH_MODULE}.rs`), facadePathModuleSource());
+  writeFileSync(
+    libPath,
+    modificationNotice(zedSha, "the proc-macro entry points resolve gpui through a facade") +
+      `${FACADE_PATH_MARKER}\n${wrapped.source}`,
+  );
+  writeFileSync(
+    join(dirname(libPath), `${FACADE_PATH_MODULE}.rs`),
+    modificationNotice(zedSha, "this module is added by the script") +
+      facadePathModuleSource(),
+  );
   logInfo(`gpui_macros: made ${wrapped.count} proc-macro entry points facade-aware`);
 }
 
@@ -1273,7 +1306,11 @@ const GPUI_APPLE_VENDORED = '.join("vendor/gpui")';
  * crates.io has no such sibling, so copy exactly the files it names into the
  * crate and point the build script at the copy.
  */
-function vendorGpuiSourcesForApple(staging: string, crates: Crate[]) {
+function vendorGpuiSourcesForApple(
+  staging: string,
+  crates: Crate[],
+  zedSha: string,
+) {
   const apple = crates.find((c) => c.name === "gpui_apple");
   const gpui = crates.find((c) => c.name === "gpui");
   if (apple === undefined || gpui === undefined) return;
@@ -1306,10 +1343,134 @@ function vendorGpuiSourcesForApple(staging: string, crates: Crate[]) {
   }
   writeFileSync(
     buildRs,
-    text.replaceAll(GPUI_APPLE_SIBLING, GPUI_APPLE_VENDORED),
+    modificationNotice(zedSha, "the gpui sources it reads are vendored under `vendor/gpui`") +
+      text.replaceAll(GPUI_APPLE_SIBLING, GPUI_APPLE_VENDORED),
   );
   logInfo(
     `gpui_apple: vendored ${sources.length} gpui source files for its shader bindings`,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// License and attribution
+// ---------------------------------------------------------------------------
+
+/** The license GPUI is released under, and the only one a snapshot may carry. */
+const GPUI_LICENSE = "Apache-2.0";
+
+/**
+ * Licenses a dependency of the staged workspace must not have. Zed's
+ * application crates are GPL-3.0-or-later and sit in the same workspace as
+ * gpui, so a new internal dependency can pull one in without anyone noticing;
+ * a third-party crate can change its terms between snapshots just as quietly.
+ */
+const COPYLEFT_LICENSE = /\b(?:A?GPL|LGPL|SSPL|EUPL|OSL|CPAL|BUSL|CC-BY-SA)\b/i;
+
+/** Every alternative of an SPDX `OR` expression is copyleft. */
+function isCopyleft(license: string): boolean {
+  return license
+    .split(/\s+OR\s+|\//i)
+    .every((alternative) => COPYLEFT_LICENSE.test(alternative));
+}
+
+/** The crate's `license`, following `license.workspace = true`. */
+function packageLicense(crate: Crate): string | undefined {
+  const license = crate.manifest.package?.license;
+  if (typeof license === "string") return license;
+  if (isPlainObject(license) && license.workspace === true) {
+    return WORKSPACE_PACKAGE_LICENSE;
+  }
+  return undefined;
+}
+
+let WORKSPACE_PACKAGE_LICENSE: string | undefined;
+
+/**
+ * Apache-2.0 §4: a redistribution keeps the license text and every copyright
+ * notice, includes the NOTICE file if the work has one, and marks the files it
+ * changed. Copyright notices live in Zed's source files, which are copied
+ * untouched; this puts the license and any NOTICE beside every crate, and the
+ * functions above stamp the files the script rewrites.
+ */
+function carryLicenseFiles(zed: string, staging: string, crates: Crate[]) {
+  const licenseFile = join(zed, "LICENSE-APACHE");
+  if (!existsSync(licenseFile)) {
+    throw new BumpError(
+      "Zed has no LICENSE-APACHE at its root; check the license before publishing",
+    );
+  }
+  const notices = readdirSync(zed).filter(
+    (entry) =>
+      entry.startsWith("NOTICE") && statSync(join(zed, entry)).isFile(),
+  );
+  let copied = 0;
+  for (const crate of crates) {
+    const dir = join(staging, crate.relDir);
+    const destination = join(dir, "LICENSE-APACHE");
+    if (!existsSync(destination)) {
+      cpSync(licenseFile, destination);
+      copied += 1;
+    }
+    for (const notice of notices) cpSync(join(zed, notice), join(dir, notice));
+  }
+  logInfo(
+    `LICENSE-APACHE travels with every crate (${copied} added)` +
+      (notices.length ? `, with ${notices.join(", ")}` : "; Zed ships no NOTICE"),
+  );
+}
+
+/** A one-line header for a file the script rewrites (Apache-2.0 §4(b)). */
+function modificationNotice(zedSha: string, change: string): string {
+  return `// Modified for ${PUBLISH_PREFIX} (snapshot of zed@${zedSha.slice(0, 7)}): ${change}.\n`;
+}
+
+/**
+ * Check the staged workspace's whole dependency graph, not only the crates
+ * being published: what reaches a consumer is the closure, and it moves with
+ * every snapshot.
+ */
+async function auditLicenses(staging: string, crates: Crate[]) {
+  for (const crate of crates) {
+    if (!existsSync(join(staging, crate.relDir, "LICENSE-APACHE")))
+      throw new BumpError(`${crate.name}: LICENSE-APACHE is missing from the staged crate`);
+  }
+  // Not `--locked`: the lock file is Zed's, and the staged workspace is a
+  // subset of it with pruned dependencies, so it has to be updated here the
+  // way `cargo publish --dry-run` updates it in the next step.
+  const cmd = ["cargo", "metadata", "--format-version", "1"];
+  console.log(dim(`$ (cd ${staging} && ${cmd.join(" ")})`));
+  const process_ = Bun.spawn(cmd, { cwd: staging, stdout: "pipe", stderr: "inherit" });
+  const output = await new Response(process_.stdout).text();
+  if ((await process_.exited) !== 0)
+    throw new BumpError("cargo metadata failed on the staged workspace");
+  const metadata = JSON.parse(output);
+  const members = new Set<string>(metadata.workspace_members);
+  const copyleft: string[] = [];
+  const undeclared: string[] = [];
+  for (const pkg of metadata.packages as Toml[]) {
+    if (members.has(pkg.id)) continue;
+    const license: string | null = pkg.license;
+    if (license === null || license === undefined || license === "") {
+      undeclared.push(`${pkg.name} ${pkg.version}`);
+    } else if (isCopyleft(license)) {
+      copyleft.push(`${pkg.name} ${pkg.version} (${license})`);
+    }
+  }
+  if (copyleft.length > 0) {
+    throw new BumpError(
+      "copyleft crates in the dependency graph; a snapshot must not change " +
+        `the terms consumers get:\n  ${copyleft.join("\n  ")}`,
+    );
+  }
+  if (undeclared.length > 0) {
+    logWarn(
+      `${undeclared.length} dependencies declare a license file instead of an ` +
+        `SPDX expression; check them by hand: ${undeclared.join(", ")}`,
+    );
+  }
+  logSuccess(
+    `${crates.length} crates are ${GPUI_LICENSE}; ` +
+      `${metadata.packages.length - members.size} dependencies carry no copyleft license`,
   );
 }
 
@@ -1640,7 +1801,7 @@ async function main(argv: string[]): Promise<number> {
   if (Bun.which("cargo") === null)
     throw new BumpError("cargo is not installed");
 
-  const totalSteps = args.stageOnly ? 3 : args.dryRun ? 5 : 6;
+  const totalSteps = args.stageOnly ? 4 : args.dryRun ? 6 : 7;
   logHeader(`Publishing GPUI from Zed as ${PUBLISH_PREFIX}`);
   mkdirSync(WORK_DIR, { recursive: true });
 
@@ -1667,12 +1828,16 @@ async function main(argv: string[]): Promise<number> {
   logSuccess(`Workspace written to ${bold(staging)}`);
   logInfo(`Summary written to ${join(WORK_DIR, "gpui-pre.json")}`);
   console.log();
+
+  logStep(`4/${totalSteps}`, "Auditing licenses");
+  await auditLicenses(staging, crates);
+  console.log();
   if (args.stageOnly) return 0;
 
   if (args.noVerify) {
     logWarn("Skipping verification (--no-verify)");
   } else {
-    logStep(`4/${totalSteps}`, "Verifying with `cargo publish --dry-run`");
+    logStep(`5/${totalSteps}`, "Verifying with `cargo publish --dry-run`");
     const { code } = await runStreaming(
       ["cargo", "publish", "--workspace", "--dry-run", "--allow-dirty"],
       staging,
@@ -1688,7 +1853,7 @@ async function main(argv: string[]): Promise<number> {
   if (args.skipKitCheck) {
     logWarn("Skipping the gpui-kit compatibility check (--skip-kit-check)");
   } else {
-    logStep(`5/${totalSteps}`, "Building and testing gpui-kit against the staged crates");
+    logStep(`6/${totalSteps}`, "Building and testing gpui-kit against the staged crates");
     await verifyKitAgainstStaging(staging, crates, version);
     logSuccess(`gpui-kit builds and passes its tests against gpui-pre ${version}`);
   }
@@ -1698,7 +1863,7 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
 
-  logStep(`6/${totalSteps}`, "Publishing to crates.io");
+  logStep(`7/${totalSteps}`, "Publishing to crates.io");
   await publish(staging, crates, version, !args.noWait);
   console.log();
 

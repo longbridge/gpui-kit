@@ -81,7 +81,7 @@ theme, sizing, borders, prefix/suffix slots, and clear button, use the styled
 ## Runnable example
 
 ```bash
-cargo run -p gpui-base --example components -- input
+cargo run -p gpui-base-examples -- input
 ```
 
 The implementation is in

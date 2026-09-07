@@ -106,7 +106,7 @@ module 运行之前从 Git 抓取它——`import { Title } from "omarchy-ui"`�
 
 这个块里的每项授权省略时都默认**拒绝**，只有 `storage` 默认给予——要拒绝它就写 `"storage": false`。
 
-未知字段、非法 reverse-DNS id、显式填写但不合法的 SemVer、不兼容的 `shell-version`、逃出目录的 entry，以及未知 `${...}` placeholder 都会在代码执行前令 manifest 失效。省略 `version` 时显示为 `unknown`。省略 `shell-version` 时接受当前 runtime；显式填写时，它表示应用所需的最早兼容 gpui-shell 版本。兼容规则遵循 SemVer：`0.x` 应用保持相同 minor，稳定版本保持相同 major。独立 CLI 会拒绝非法 manifest，不会在假设已经不一致时继续执行 entry。
+未知字段、非法 reverse-DNS id、显式填写但不合法的 SemVer、不兼容的 `shell-version`、逃出目录的 entry，以及未知 `${...}` placeholder 都会在代码执行前令 manifest 失效。省略 `version` 时显示为 `unknown`。省略 `shell-version` 时接受当前 runtime；显式填写时，它表示应用所需的最早兼容 gpui-shell 版本。版本不低于该要求的 runtime 都会被接受。独立 CLI 会拒绝非法 manifest，不会在假设已经不一致时继续执行 entry。
 
 每条 scoped `network.http` 规则除了 host、method 与 path 外，还会绑定请求的 scheme 与有效端口。`scheme` 默认为 `https`；`port` 默认为该 scheme 的标准端口，仅非默认 endpoint 需要显式填写。
 

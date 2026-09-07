@@ -1033,10 +1033,8 @@ mod window_api;
 /// One module per crate that provides the capability, so an import says which
 /// layer a script depends on: `gpui-base`'s components come from `"gpui-base"`,
 /// `gpui-fps`'s overlay from `"gpui-fps"`, and `"gpui-kit"` carries only what GPUI
-/// itself and this runtime provide. A name belongs to exactly one of them —
-/// nothing is re-exported for convenience, because a name reachable from two
-/// specifiers stops saying anything about where it came from, and the next
-/// layer to arrive would have to be told apart from the ones already here.
+/// itself and this runtime provide. `"gpui"` is an explicit compatibility alias
+/// for that module; other names belong to exactly one layer.
 ///
 /// Anything installed onto `globalThis.__gpui` must be listed in one of these
 /// or no `import { … }` will see it.
@@ -1049,6 +1047,10 @@ pub(crate) mod exports {
         "div",
         "svg",
         "image",
+        // GPUI's own lazy lists. Base's virtual lists live in `gpui-base`;
+        // these are GPUI's, and are exported where `div` is.
+        "list",
+        "uniform_list",
         "PathBuilder",
         "Background",
     ];
@@ -1219,6 +1221,7 @@ macro_rules! builtin_modules {
 
 builtin_modules![
     (GpuiModule, "gpui-kit", exports::GPUI),
+    (GpuiAliasModule, "gpui", exports::GPUI),
     (GpuiBaseModule, "gpui-base", exports::GPUI_BASE),
     (GpuiShellModule, "gpui-shell", exports::GPUI_SHELL),
     (GpuiFpsModule, "gpui-fps", exports::GPUI_FPS),
@@ -5477,21 +5480,27 @@ globalThis.__gpui = (() => {
   // The argument checks are here rather than only on the Rust side because a
   // list built with the pieces in the wrong order — a render function where the
   // sizes go — would otherwise fail as a type error naming neither.
-  const virtualList = (build, name) => (id, item_count, item_sizes, get_key, render) => {
-    const shape = name + "(id, item_count, item_sizes, get_key, render)";
+  // The three checks every lazy list makes. Only the render hint differs:
+  // `list` is called per item, the other two per visible range.
+  const checkListArgs = (shape, item_count, get_key, render, renderHint) => {
     if (!Number.isInteger(item_count) || item_count < 0) {
       throw new TypeError(shape + " needs a whole, non-negative item_count");
-    }
-    if (typeof render !== "function") {
-      throw new TypeError(
-        shape + " needs a render function; it is called once per visible range, not once per item",
-      );
     }
     if (typeof get_key !== "function") {
       throw new TypeError(
         shape + " needs get_key(index) to return each item's stable string key",
       );
     }
+    if (typeof render !== "function") {
+      throw new TypeError(shape + " needs a render function; it is called " + renderHint);
+    }
+  };
+
+  const RANGE_HINT = "once per visible range, not once per item";
+
+  const virtualList = (build, name) => (id, item_count, item_sizes, get_key, render) => {
+    const shape = name + "(id, item_count, item_sizes, get_key, render)";
+    checkListArgs(shape, item_count, get_key, render, RANGE_HINT);
     if (Array.isArray(item_sizes) && item_sizes.length !== item_count) {
       throw new TypeError(
         shape + " was given " + item_sizes.length + " item sizes for " + item_count +
@@ -5499,6 +5508,31 @@ globalThis.__gpui = (() => {
       );
     }
     return element(build(String(id), item_count, item_sizes, get_key, render));
+  };
+
+  // `list` and `uniform_list`: GPUI's own lazy lists. Both cross the boundary
+  // the way a virtual list does -- one renderer per visible range -- so a
+  // `list` renderer written per item is folded into a range here, once, rather
+  // than teaching the host a second calling convention.
+  const lazyList = (build, name, perItem) => (id, item_count, get_key, render) => {
+    const shape = name + "(id, item_count, get_key, render)";
+    checkListArgs(
+      shape,
+      item_count,
+      get_key,
+      render,
+      perItem ? "once per item on screen, with the item's index" : RANGE_HINT,
+    );
+    const describe = perItem
+      ? (range, cx) => {
+          const items = [];
+          for (let index = range.start; index < range.end; index++) {
+            items.push(render(index, cx));
+          }
+          return items;
+        }
+      : render;
+    return element(build(String(id), item_count, get_key, describe));
   };
 
   const finiteNonNegative = (value, name) => {
@@ -6698,6 +6732,8 @@ globalThis.__gpui = (() => {
     // would put one number per row across the boundary on every render.
     v_virtual_list: virtualList(__v_virtual_list, "v_virtual_list"),
     h_virtual_list: virtualList(__h_virtual_list, "h_virtual_list"),
+    list: lazyList(__list, "list", true),
+    uniform_list: lazyList(__uniform_list, "uniform_list", false),
     VirtualListScrollHandle: { new: () => virtualScrollHandle(__virtual_scroll_new()) },
     Scrollbar: {
       new: (id) => element(__scrollbar(String(id))),
@@ -6904,7 +6940,6 @@ impl ShellRuntime {
                 "open",
                 "default_open",
                 "overlay_closable",
-                "continuous",
                 "with_item_to_measure_index",
             ]
             .into_iter()
@@ -7205,6 +7240,18 @@ impl ShellRuntime {
                 "__h_virtual_list",
                 runtime.clone(),
                 gpui::Axis::Horizontal,
+            )?;
+            list_constructor(
+                &globals,
+                "__list",
+                runtime.clone(),
+                crate::spec::ListKind::Measured,
+            )?;
+            list_constructor(
+                &globals,
+                "__uniform_list",
+                runtime.clone(),
+                crate::spec::ListKind::Uniform,
             )?;
             text_constructor(&globals, "__popup", runtime.clone(), Component::Popup)?;
             text_constructor(&globals, "__select", runtime.clone(), Component::Select)?;
@@ -7906,7 +7953,6 @@ impl ShellRuntime {
             | "default_open"
             | "overlay_closable"
             | "anchor"
-            | "continuous"
             | "frame_budget"
             | "mouse_button"
             | "open_delay"
@@ -7959,7 +8005,6 @@ impl ShellRuntime {
                     "default_open" => "default_open",
                     "overlay_closable" => "overlay_closable",
                     "anchor" => "anchor",
-                    "continuous" => "continuous",
                     "frame_budget" => "frame_budget",
                     "mouse_button" => "mouse_button",
                     "open_delay" => "open_delay",
@@ -8613,6 +8658,61 @@ impl<'js> FromJs<'js> for ItemKeyResolver {
 /// lists cannot bypass it.
 const MAX_VIRTUAL_ITEMS_PER_RENDER: usize = 1_000_000;
 
+/// The guard both lazy-list constructors run before they allocate anything.
+///
+/// The phase check is why an item renderer cannot build a list: callbacks
+/// belong to the snapshot that registered them, and by the time a renderer
+/// runs that generation is closed, so a callback pushed there is one no lookup
+/// could ever match. The budget claim has to come before the size table,
+/// because a count the script fat-fingered is an allocation measured in
+/// gigabytes.
+fn guard_lazy_list(
+    ctx: &Ctx<'_>,
+    runtime: &Weak<ShellRuntime>,
+    count: usize,
+) -> JsResult<Rc<ShellRuntime>> {
+    if scope::current_phase() == Some(ScopePhase::Layout) {
+        return Err(Exception::throw_type(
+            ctx,
+            "a list cannot be built from inside another list's item renderer: its own \
+             renderer would belong to no render pass and would never be called. Describe \
+             the nested list from the view's render() instead",
+        ));
+    }
+    let store = upgrade(runtime, ctx)?;
+    if !store
+        .arena
+        .borrow_mut()
+        .claim_virtual_items(count, MAX_VIRTUAL_ITEMS_PER_RENDER)
+    {
+        return Err(Exception::throw_type(
+            ctx,
+            &format!(
+                "the lists in one render may describe at most \
+                 {MAX_VIRTUAL_ITEMS_PER_RENDER} items in total"
+            ),
+        ));
+    }
+    Ok(store)
+}
+
+/// Files a lazy list's two script functions against the open generation.
+fn register_item_callbacks(
+    store: &Rc<ShellRuntime>,
+    get_key: ItemKeyResolver,
+    render: ItemRenderer,
+) -> (CallbackId, CallbackId) {
+    let entry = |value| {
+        store.callbacks.borrow_mut().push(CallbackEntry {
+            value,
+            view: scope::current_view().map(|view| view.downgrade()),
+            application: scope::current_application_generation(),
+            registered_in: scope::current_generation(),
+        })
+    };
+    (entry(get_key.0), entry(render.0))
+}
+
 /// `v_virtual_list` and `h_virtual_list`.
 ///
 /// The item renderer is registered as an ordinary callback, so it belongs to
@@ -8636,24 +8736,7 @@ fn virtual_list_constructor(
                   get_key: ItemKeyResolver,
                   render: ItemRenderer|
                   -> JsResult<SpecId> {
-                if scope::current_phase() == Some(ScopePhase::Layout) {
-                    return Err(Exception::throw_type(
-                        &ctx,
-                        "a virtual list cannot be built from inside another list's item                          renderer: its own renderer would belong to no render pass and would                          never be called. Describe the nested list from the view's render()                          instead",
-                    ));
-                }
-                if !upgrade(&runtime, &ctx)?
-                    .arena
-                    .borrow_mut()
-                    .claim_virtual_items(count, MAX_VIRTUAL_ITEMS_PER_RENDER)
-                {
-                    return Err(Exception::throw_type(
-                        &ctx,
-                        &format!(
-                            "the virtual lists in one render may describe at most                              {MAX_VIRTUAL_ITEMS_PER_RENDER} items in total"
-                        ),
-                    ));
-                }
+                let store = guard_lazy_list(&ctx, &runtime, count)?;
 
                 let extent = |value: f64| -> JsResult<gpui::Size<gpui::Pixels>> {
                     if !value.is_finite() || value < 0.0 {
@@ -8707,19 +8790,7 @@ fn virtual_list_constructor(
                     }
                 };
 
-                let store = upgrade(&runtime, &ctx)?;
-                let get_key = store.callbacks.borrow_mut().push(CallbackEntry {
-                    value: get_key.0,
-                    view: scope::current_view().map(|view| view.downgrade()),
-                    application: scope::current_application_generation(),
-                    registered_in: scope::current_generation(),
-                });
-                let callback = store.callbacks.borrow_mut().push(CallbackEntry {
-                    value: render.0,
-                    view: scope::current_view().map(|view| view.downgrade()),
-                    application: scope::current_application_generation(),
-                    registered_in: scope::current_generation(),
-                });
+                let (get_key, callback) = register_item_callbacks(&store, get_key, render);
                 Ok(store.push_node(Component::VirtualList(Rc::new(
                     crate::spec::VirtualListSpec::new(
                         id,
@@ -8729,6 +8800,41 @@ fn virtual_list_constructor(
                         callback,
                     ),
                 ))))
+            },
+        ),
+    )
+}
+
+/// `list` and `uniform_list`.
+///
+/// The same registration as a virtual list's, and confined for the same
+/// reasons: the renderer belongs to the snapshot being built, and cannot be
+/// registered from inside another list's item renderer. The item budget is
+/// claimed too, because `gpui::list` keeps one entry per item whether or not
+/// the item is ever drawn.
+fn list_constructor(
+    globals: &Object<'_>,
+    name: &str,
+    runtime: Weak<ShellRuntime>,
+    kind: crate::spec::ListKind,
+) -> JsResult<()> {
+    globals.set(
+        name,
+        Func::from(
+            move |ctx: Ctx<'_>,
+                  id: String,
+                  count: usize,
+                  get_key: ItemKeyResolver,
+                  render: ItemRenderer|
+                  -> JsResult<SpecId> {
+                let store = guard_lazy_list(&ctx, &runtime, count)?;
+
+                let (get_key, callback) = register_item_callbacks(&store, get_key, render);
+                Ok(
+                    store.push_node(Component::List(Rc::new(crate::spec::ListSpec::new(
+                        id, kind, count, get_key, callback,
+                    )))),
+                )
             },
         ),
     )
@@ -9864,6 +9970,20 @@ mod module_lifecycle_tests {
     use crate::dependencies::{GitDependencyStore, MaterializedDependency};
     use std::collections::BTreeMap;
     use std::process::Command;
+
+    #[test]
+    fn gpui_module_exports_div() {
+        let runtime = ShellRuntime::new_isolated().expect("runtime");
+        runtime
+            .load_source(
+                "gpui-import.js",
+                r#"
+import { div, View } from "gpui";
+export default class Panel extends View { render() { return div(); } }
+"#,
+            )
+            .expect("gpui is an importable built-in module");
+    }
 
     #[test]
     fn registrations_for_the_same_root_are_generation_scoped_and_leased() {

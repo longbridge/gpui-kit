@@ -175,25 +175,25 @@ cargo run
 
 ### Examples
 
-一些重要的示例内置在 `story` crate 中，可以直接运行：
+一些较大的示例复用 `story` 画廊组件，并作为独立 package 运行：
 
 ```bash
-# 支持 LSP 和语法高亮的代码编辑器
-cargo run --example editor
-
 # Dock 布局系统（面板、分割视图、标签页）
-cargo run --example dock
+cargo run -p example-dock
 
 # Markdown 渲染
-cargo run --example markdown
+cargo run -p example-markdown
 
 # HTML 渲染
-cargo run --example html
+cargo run -p example-html
 ```
 
 `examples` 目录还包含独立示例，每个示例专注于单一功能。每个示例是一个独立的 crate，使用 `cargo run -p <name>` 运行：
 
 ```bash
+# 支持 LSP 和语法高亮的代码编辑器
+cargo run -p example-editor
+
 # 基础 Hello World
 cargo run -p hello_world
 
@@ -214,6 +214,6 @@ cargo run -p window_title
 
 Apache-2.0
 
-- 基于 Zed 团队的 [GPUI](https://github.com/zed-industries/zed) 构建，GPUI 同样采用 Apache-2.0。
+- 基于 Zed Industries 的 [GPUI](https://github.com/zed-industries/zed) 构建，GPUI 同样采用 Apache-2.0。`gpui-pre-*` 是它的快照，发布时保留 Zed 的许可证与声明。
 - UI 设计基于 [shadcn/ui](https://ui.shadcn.com)，部分来自 [Reui](https://reui.io)。
 - 图标来自 [Lucide](https://lucide.dev)。

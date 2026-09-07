@@ -49,6 +49,43 @@ let editor = cx.new(|cx| {
 });
 ```
 
+## Keyboard shortcuts and column selection
+
+These defaults apply while the editor is focused. On macOS, Option is the Alt
+modifier. Linux uses no Super/Win bindings for these operations.
+
+| Operation | macOS | Linux | Windows |
+| --- | --- | --- | --- |
+| Add a cursor above / below | Cmd+Option+Up / Down | Alt+Shift+Up / Down | Ctrl+Alt+Up / Down |
+| Extend every selection by one character | Shift+Left / Right | Shift+Left / Right | Shift+Left / Right |
+| Extend every selection by one word | Option+Shift+Left / Right | Ctrl+Shift+Left / Right | Ctrl+Shift+Left / Right |
+| Add a cursor with the mouse | Option+left click | Alt+left click | Alt+left click |
+| Select a rectangular block | Option+Shift+left drag | Alt+Shift+left drag | Alt+Shift+left drag |
+| Keep only the active cursor | Escape | Escape | Escape |
+
+Linux also accepts Ctrl+Alt+left drag for rectangular selection, matching
+Ghostty, and Alt+Shift+Left / Right for word selection. Windows additionally
+accepts Alt+Shift+Left / Right for character selection. Alt/Option+left drag
+works as a column-selection shortcut on all three platforms: a click adds a
+cursor, while dragging builds a new block from the mouse-down position.
+
+Holding Alt/Option over the editor shows a `+` crosshair. Selection gestures
+that include Alt take priority over Ctrl/Cmd-click go-to-definition. A block
+creates one selection per display row, clipped to the available text on short
+rows. Typing or deleting edits all selections. Releasing the mouse ends the
+drag; Escape keeps the active cursor (an open context menu handles Escape
+first).
+
+Adding cursors with Up / Down is additive: reversing direction does not shrink
+the block's height. This is multi-cursor editing with mouse column selection,
+not a persistent Vim Visual Block mode. During keyboard input, carets remain
+visible; blinking resumes after 300 ms without input.
+
+Linux desktop shortcuts can intercept key combinations before the editor sees
+them. In particular, Ctrl+Alt+Up / Down is not bound by default on Linux because
+some desktops use it to switch workspaces. The shortcuts above refer to logical
+modifiers after any keyboard remapping.
+
 ## Decorations
 
 ```rust

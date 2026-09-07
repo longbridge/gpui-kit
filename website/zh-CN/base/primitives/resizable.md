@@ -15,7 +15,7 @@ order: 23
 原生示例和页面上方的 WASM 预览共用同一份实现：
 
 ```bash
-cargo run -p gpui-base --example components -- resizable
+cargo run -p gpui-base-examples -- resizable
 ```
 
 ## 导入

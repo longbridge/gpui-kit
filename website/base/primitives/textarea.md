@@ -69,5 +69,5 @@ padding, and `InputEditorStyle`. For a styled control, see the
 ## Runnable example
 
 ```bash
-cargo run -p gpui-base --example components -- textarea
+cargo run -p gpui-base-examples -- textarea
 ```

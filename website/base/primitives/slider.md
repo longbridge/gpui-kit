@@ -12,10 +12,10 @@ Like every `gpui-base` primitive, Slider supplies behavior and semantic structur
 
 ## Example
 
-The [single native Cargo entrypoint](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
+The [single native Cargo entrypoint](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/native/src/bin/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
 
 ```bash
-cargo run -p gpui-base --example components -- slider
+cargo run -p gpui-base-examples -- slider
 ```
 
 ## Import

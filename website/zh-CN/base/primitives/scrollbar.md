@@ -11,7 +11,7 @@ order: 24
 ## 运行示例
 
 ```bash
-cargo run -p gpui-base --example components -- scrollbar
+cargo run -p gpui-base-examples -- scrollbar
 ```
 
 原生与 WASM 共用 [`scrollbar.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/scrollbar.rs)。

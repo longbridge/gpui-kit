@@ -126,5 +126,5 @@ document.update(cx, |state, cx| state.set_text(updated_source, cx));
 <<< ../../../crates/base/examples/showcase/components/text_view.rs{rust}
 
 ```bash
-cargo run -p gpui-base --example components -- text-view
+cargo run -p gpui-base-examples -- text-view
 ```

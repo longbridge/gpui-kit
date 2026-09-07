@@ -1,5 +1,6 @@
 ---
 title: 安装
+description: 安装 GPUI Kit，并准备在 macOS、Windows 和 Linux 上构建 Rust 桌面应用所需的系统依赖。
 order: -1
 ---
 

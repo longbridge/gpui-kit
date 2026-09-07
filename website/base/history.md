@@ -1,10 +1,10 @@
 ---
-title: History and Undo History
+title: History
 description: Browser-style navigation trails and grouped undo/redo transactions for application state.
 order: 7
 ---
 
-# History and Undo History
+# History
 
 `History<T>` and `UndoHistory<T>` keep two different kinds of application state. Both are independent of GPUI and leave applying a returned value to the caller, but their operations intentionally have different meanings:
 

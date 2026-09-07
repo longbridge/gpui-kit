@@ -172,8 +172,19 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &mdast::Node, cx: &mut NodeC
             });
         }
         Node::Text(val) => {
-            text = val.value.clone();
-            paragraph.push_str(&val.value)
+            // A CommonMark *soft* break lives inside this value as a plain
+            // line ending. The renderer treats a newline in a text run as a
+            // line break, so a paragraph hard-wrapped in the source would
+            // render one visual line per source line instead of reflowing to
+            // the available width. Collapse soft breaks to spaces; *hard*
+            // breaks never reach here, they arrive as their own Node::Break.
+            //
+            // mdast hands the line ending over exactly as the source wrote it,
+            // so a CRLF document still carries its carriage return here. Take
+            // the CR with the newline: dropping only the newline would strand
+            // the CR in the middle of the reflowed line.
+            text = val.value.replace("\r\n", " ").replace(['\n', '\r'], " ");
+            paragraph.push_str(&text)
         }
         Node::Emphasis(val) => {
             text = merge_children_with_mark(
@@ -225,6 +236,13 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &mdast::Node, cx: &mut NodeC
                 alt: Some(raw.alt.clone().into()),
                 ..Default::default()
             });
+        }
+        Node::Break(_) => {
+            // Hard line break (trailing two spaces / backslash). Mirror the
+            // inline-HTML <br> path: emit a newline inline node so the break
+            // renders instead of silently concatenating adjacent lines.
+            text.push('\n');
+            paragraph.push(InlineNode::new("\n"));
         }
         Node::InlineMath(raw) => {
             text = raw.value.clone();
@@ -591,6 +609,80 @@ mod tests {
         );
         assert_eq!(image.width, None);
         assert_eq!(image.height, None);
+    }
+
+    /// A CommonMark soft break — a bare line ending inside a paragraph —
+    /// reflows to a space, so prose hard-wrapped in the source fills the
+    /// available width instead of keeping the source's line structure.
+    ///
+    /// Every line ending CommonMark recognises has to collapse, not just LF:
+    /// mdast passes the source's bytes through, so a CRLF document would
+    /// otherwise strand its carriage return in the middle of the line.
+    #[test]
+    fn test_soft_break_reflows_to_space() {
+        for source in [
+            "this sentence\ncontinues as a soft wrap",
+            "this sentence\r\ncontinues as a soft wrap",
+            "this sentence\rcontinues as a soft wrap",
+        ] {
+            let mut cx = NodeContext::default();
+            let document = parse(source, &mut cx).unwrap();
+
+            let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+                panic!("expected paragraph");
+            };
+
+            assert_eq!(paragraph.children.len(), 1, "source: {source:?}");
+            assert_eq!(
+                paragraph.children[0].text.as_ref(),
+                "this sentence continues as a soft wrap",
+                "source: {source:?}"
+            );
+        }
+    }
+
+    /// The two breaks stay distinguishable in one paragraph: the soft one
+    /// reflows into the run, the hard one keeps its own newline node.
+    ///
+    /// This is the invariant the soft-break collapse rests on — a hard break
+    /// arrives as `Node::Break` and never as a newline inside `Node::Text`.
+    #[test]
+    fn test_soft_break_reflows_while_hard_break_survives() {
+        let mut cx = NodeContext::default();
+        let document = parse("a\nb  \nc", &mut cx).unwrap();
+
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+
+        let texts: Vec<_> = paragraph
+            .children
+            .iter()
+            .map(|child| child.text.as_ref())
+            .collect();
+        assert_eq!(texts, ["a b", "\n", "c"]);
+    }
+
+    /// A CommonMark hard break — two trailing spaces or a trailing backslash —
+    /// renders as a newline, instead of joining the two lines.
+    #[test]
+    fn test_hard_break_renders_newline() {
+        for source in [
+            "Owner: Jane  \nPersona: assistant",
+            "Owner: Jane\\\nPersona: assistant",
+        ] {
+            let mut cx = NodeContext::default();
+            let document = parse(source, &mut cx).unwrap();
+
+            let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+                panic!("expected paragraph");
+            };
+
+            assert_eq!(paragraph.children.len(), 3, "source: {source:?}");
+            assert_eq!(paragraph.children[0].text.as_ref(), "Owner: Jane");
+            assert_eq!(paragraph.children[1].text.as_ref(), "\n");
+            assert_eq!(paragraph.children[2].text.as_ref(), "Persona: assistant");
+        }
     }
 
     #[derive(Debug, Clone, PartialEq)]

@@ -15,7 +15,7 @@ order: 29
 原生示例和页面上方的 WASM 预览共用同一份实现：
 
 ```bash
-cargo run -p gpui-base --example components -- table
+cargo run -p gpui-base-examples -- table
 ```
 
 ## 导入

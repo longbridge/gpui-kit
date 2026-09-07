@@ -108,7 +108,7 @@ the cache, and what an editor sees.
 
 Every grant in that block defaults to _denied_ when omitted, except `storage`, which defaults to granted — write `"storage": false` to refuse it.
 
-Unknown fields, invalid reverse-DNS ids, invalid explicitly declared SemVer values, incompatible `shell-version` values, escaping entries, and unknown `${...}` placeholders invalidate the manifest before code runs. Omitted `version` is reported as `unknown`. Omitted `shell-version` accepts the current runtime; when present, it names the oldest compatible gpui-shell release the application requires. Compatibility follows SemVer: `0.x` applications stay on the same minor line; stable releases stay on the same major line. The standalone CLI refuses an invalid manifest instead of executing its entry with silently different assumptions.
+Unknown fields, invalid reverse-DNS ids, invalid explicitly declared SemVer values, incompatible `shell-version` values, escaping entries, and unknown `${...}` placeholders invalidate the manifest before code runs. Omitted `version` is reported as `unknown`. Omitted `shell-version` accepts the current runtime; when present, it names the oldest compatible gpui-shell release the application requires. Any runtime at or above that version is accepted. The standalone CLI refuses an invalid manifest instead of executing its entry with silently different assumptions.
 
 Each scoped `network.http` rule binds the request scheme and effective port as well as its host, method and path. `scheme` defaults to `https`; `port` defaults to that scheme's standard port and only needs to be written for a non-default endpoint.
 

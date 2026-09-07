@@ -239,7 +239,7 @@ Foundation controls do not install animation automatically. Applications choose 
 See the [Motion guide](../../website/base/motion.md) and run its five focused interactive demonstrations with:
 
 ```bash
-cargo run -p gpui-base --example motion
+cargo run -p gpui-base-examples --bin motion
 ```
 
 ### Themes and Styles

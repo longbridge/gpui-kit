@@ -1,4 +1,6 @@
 ---
+title: Root View
+description: 使用 Root 视图为窗口启用主题、通知、对话框及其他 GPUI Component 功能。
 order: -7
 ---
 

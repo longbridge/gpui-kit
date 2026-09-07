@@ -2991,8 +2991,8 @@ must stay inside the data directory; and no uppercase, because two ids differing
 only in case are one directory on a case-insensitive filesystem and two
 everywhere else. When present, `version` must be semver-shaped, because it is
 compared across an upgrade. An explicit `shell-version` must also be SemVer and
-names the oldest compatible runtime; during `0.x`, compatibility stays on the
-same minor line. `entry` must be a path that cannot leave the plugin directory, which
+names the oldest compatible runtime; any runtime at or above that version is
+accepted. `entry` must be a path that cannot leave the plugin directory, which
 is the same rule the module resolver applies to every `import` — so a manifest
 cannot ask for a file the resolver would refuse anyway.
 
@@ -4230,9 +4230,7 @@ When present, the manifest's `shell-version` is the oldest compatible
 gpui-shell release the application requires. Omitting it accepts the current
 runtime. It is checked before the entry module executes, so a
 mismatch is a load error rather than an exception in the middle of an
-interface. Compatibility follows SemVer: before 1.0 the runtime and requirement
-must share a minor line; from 1.0 onward they must share a major line, and the
-runtime must never be older than the requirement.
+interface. A runtime is compatible when it is not older than the requirement.
 
 The engine belongs in neither the version number nor the manifest: one version
 number must mean the same capabilities and the same behavior under either engine.

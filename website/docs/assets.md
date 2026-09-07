@@ -1,5 +1,6 @@
 ---
 title: Icons & Assets
+description: Configure bundled icons and custom assets for GPUI Component applications.
 order: -4
 ---
 
@@ -126,6 +127,23 @@ impl Render for Example {
     }
 }
 ```
+
+## Embed individual SVG icons
+
+For custom icons, `Icon::data` accepts SVG bytes directly without an asset-path registry:
+
+```rust
+use gpui_kit::component::{Icon, button::Button};
+
+Button::new("search")
+    .icon(Icon::default().data(include_bytes!("search.svg")))
+    .label("Search")
+```
+
+This only removes the asset lookup for that icon. Built-in `IconName` values and
+other path-based component icons still need an asset source. See
+[SVG Bytes](./components/icon.md#svg-bytes) for ownership, source replacement,
+loading icons, and custom icon types.
 
 ## Resources
 

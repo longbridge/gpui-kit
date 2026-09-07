@@ -1,10 +1,10 @@
 ---
-title: History 与 Undo History
+title: History
 description: 用于应用状态的浏览器式导航轨迹和分组 undo/redo 事务。
 order: 7
 ---
 
-# History 与 Undo History
+# History
 
 `History<T>` 与 `UndoHistory<T>` 分别保存两种不同的应用状态。两者都不持有 GPUI 状态，且都由调用方把返回的值应用到模型；但它们的操作含义不同：
 

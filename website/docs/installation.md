@@ -1,5 +1,6 @@
 ---
 title: Installation
+description: Install GPUI Kit and prepare the system dependencies required to build Rust desktop applications on macOS, Windows, and Linux.
 order: -1
 ---
 

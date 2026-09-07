@@ -246,6 +246,9 @@ struct CompanyListDelegate {
 impl CompanyListDelegate {
     fn prepare(&mut self, query: impl Into<SharedString>) {
         self.query = query.into();
+        for companies in &mut self.matched_companies {
+            companies.clear();
+        }
         let companies: Vec<Rc<Company>> = self
             ._companies
             .iter()
@@ -593,7 +596,7 @@ impl ListStory {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut delegate = CompanyListDelegate {
             industries: vec![],
-            matched_companies: vec![vec![]],
+            matched_companies: vec![],
             _companies: vec![],
             selected_index: Some(IndexPath::default()),
             confirmed_index: None,
@@ -807,5 +810,74 @@ impl Render for ListStory {
                     .border_color(cx.theme().border)
                     .rounded(cx.theme().radius),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::prelude::v1::test;
+
+    #[test]
+    fn searching_and_refreshing_replace_company_groups() {
+        let companies = [
+            ("Acme", "Software"),
+            ("Books", "Retail"),
+            ("Atlas", "Software"),
+        ]
+        .into_iter()
+        .map(|(name, industry)| {
+            Rc::new(Company {
+                name: name.into(),
+                industry: industry.into(),
+                ..Company::default()
+            })
+        })
+        .collect();
+        let mut delegate = CompanyListDelegate {
+            industries: vec![],
+            matched_companies: vec![],
+            _companies: companies,
+            selected_index: None,
+            confirmed_index: None,
+            query: "".into(),
+            loading: false,
+            eof: false,
+            lazy_load: false,
+            draggable: false,
+            drop_target: None,
+        };
+
+        for (query, expected) in [
+            ("", vec![vec!["Acme", "Atlas"], vec!["Books"]]),
+            ("ACME", vec![vec!["Acme"], vec![]]),
+            ("missing", vec![vec![], vec![]]),
+            ("", vec![vec!["Acme", "Atlas"], vec!["Books"]]),
+        ] {
+            delegate.prepare(query);
+            assert_eq!(delegate.industries, vec!["Software", "Retail"]);
+            assert_eq!(delegate.matched_companies.len(), delegate.industries.len());
+            let names: Vec<Vec<&str>> = delegate
+                .matched_companies
+                .iter()
+                .map(|companies| {
+                    companies
+                        .iter()
+                        .map(|company| company.name.as_ref())
+                        .collect()
+                })
+                .collect();
+            assert_eq!(names, expected);
+        }
+        // Loading more data also rebuilds the current query; it must not duplicate old rows.
+        delegate.extend_more(0);
+        assert_eq!(
+            delegate
+                .matched_companies
+                .iter()
+                .map(Vec::len)
+                .sum::<usize>(),
+            3
+        );
     }
 }

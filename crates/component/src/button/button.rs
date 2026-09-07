@@ -2,8 +2,8 @@ use std::rc::Rc;
 
 use crate::ThemeStyled as _;
 use crate::{
-    ActiveTheme, Colorize as _, Disableable, Icon, RoleOverride, Selectable, Sizable, Size,
-    StyleSized, StyledExt,
+    ActiveTheme, Colorize as _, Disableable, Icon, Placement, RoleOverride, Selectable, Sizable,
+    Size, StyleSized, StyledExt,
     button::ButtonIcon,
     h_flex,
     select::Caret,
@@ -209,6 +209,7 @@ pub struct Button {
         SharedString,
         Option<(Rc<Box<dyn gpui::Action>>, Option<SharedString>)>,
     )>,
+    tooltip_placement: Option<Placement>,
     tooltip_builder: Option<Rc<dyn Fn(&mut Window, &mut App) -> gpui::AnyView>>,
     on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     on_hover: Option<Rc<dyn Fn(&bool, &mut Window, &mut App)>>,
@@ -252,6 +253,7 @@ impl Button {
             border_edges: Edges::all(true),
             size: Size::Medium,
             tooltip: None,
+            tooltip_placement: None,
             tooltip_builder: None,
             on_click: None,
             focus_ring_enabled: true,
@@ -266,6 +268,12 @@ impl Button {
             tab_index: 0,
             tab_stop: true,
         }
+    }
+
+    /// Uses a behavior primitive supplied by a compound Base control.
+    pub(crate) fn with_base(mut self, base: gpui_base::Button) -> Self {
+        self.base = base;
+        self
     }
 
     pub(super) fn variant(&self) -> ButtonVariant {
@@ -359,6 +367,15 @@ impl Button {
     /// Set the tooltip of the button.
     pub fn tooltip(mut self, tooltip: impl Into<SharedString>) -> Self {
         self.tooltip = Some((tooltip.into(), None));
+        self
+    }
+
+    /// Prefer a side for the tooltip, falling back when it does not fit.
+    ///
+    /// Applies to [`Self::tooltip`] and [`Self::tooltip_with_action`].
+    /// Omitting placement keeps automatic positioning.
+    pub fn tooltip_placement(mut self, placement: Placement) -> Self {
+        self.tooltip_placement = Some(placement);
         self
     }
 
@@ -530,6 +547,7 @@ impl RenderOnce for Button {
         let hoverable = self.hoverable();
         let disabled = self.disabled;
         let loading = self.loading;
+        let tooltip_placement = self.tooltip_placement;
         let hover_group = self.hover_group;
         let hover_group_held = self.hover_group_held;
         let mut base = self.base;
@@ -764,6 +782,9 @@ impl RenderOnce for Button {
                 on_click(event, window, cx);
             })
         })
+        .when(loading, |this| {
+            this.on_click(|_, _, cx| cx.stop_propagation())
+        })
         .when_some(self.on_hover.filter(|_| hoverable), |this, on_hover| {
             this.on_hover(move |hovered, window, cx| {
                 on_hover(hovered, window, cx);
@@ -771,9 +792,11 @@ impl RenderOnce for Button {
         })
         .map(|this| {
             if let Some(builder) = self.tooltip_builder {
-                this.managed_tooltip(move |window, cx| builder(window, cx))
+                this.managed_tooltip_with_placement(tooltip_placement, move |window, cx| {
+                    builder(window, cx)
+                })
             } else if let Some((tooltip, action)) = self.tooltip {
-                this.managed_tooltip(move |window, cx| {
+                this.managed_tooltip_with_placement(tooltip_placement, move |window, cx| {
                     Tooltip::new(tooltip.clone())
                         .when_some(action.clone(), |this, (action, context)| {
                             this.action(
@@ -1199,9 +1222,7 @@ impl ButtonVariant {
             Self::Default => cx.theme().tokens.button_active.into(),
             Self::Primary => cx.theme().tokens.button_primary_active.into(),
             Self::Secondary => cx.theme().tokens.button_secondary_active.into(),
-            // Every other variant selects with its active surface; the ghost
-            // token sits too close to its hover to read as pressed.
-            Self::Ghost => self.active(outline, cx).bg,
+            Self::Ghost => cx.theme().tokens.secondary_active.into(),
             Self::Danger => cx.theme().tokens.button_danger_active.into(),
             Self::Warning => cx.theme().tokens.button_warning_active.into(),
             Self::Success => cx.theme().tokens.button_success_active.into(),
@@ -1491,6 +1512,54 @@ mod tests {
 
         assert_eq!(parent_clicks.get(), 0);
         cx.update(|window, cx| assert!(window.focused(cx).is_some()));
+    }
+
+    #[gpui::test]
+    fn base_activation_is_preserved_and_blocked_while_loading(cx: &mut gpui::TestAppContext) {
+        use gpui::{Context, Render, point};
+        use std::{cell::Cell, rc::Rc};
+
+        struct Harness {
+            clicks: Rc<Cell<usize>>,
+            loading: bool,
+        }
+        impl Render for Harness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let clicks = self.clicks.clone();
+                div().tab_group().child(
+                    Button::new("close")
+                        .with_base(
+                            gpui_base::Button::new("close")
+                                .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
+                        )
+                        .loading(self.loading)
+                        .size(px(100.)),
+                )
+            }
+        }
+
+        cx.update(crate::init);
+        let clicks = Rc::new(Cell::new(0));
+        let (view, cx) = cx.add_window_view({
+            let clicks = clicks.clone();
+            move |_, _| Harness {
+                clicks,
+                loading: false,
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_click(point(px(10.), px(10.)), Default::default());
+        assert_eq!(clicks.get(), 1);
+
+        view.update(cx, |view, cx| {
+            view.loading = true;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_click(point(px(10.), px(10.)), Default::default());
+        cx.update(|window, cx| window.focus_next(cx));
+        cx.simulate_keystrokes("enter space");
+        assert_eq!(clicks.get(), 1);
     }
 
     #[gpui::test]

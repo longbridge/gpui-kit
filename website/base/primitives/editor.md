@@ -13,6 +13,12 @@ decorations, highlighting, search infrastructure, diagnostics, and LSP hooks.
 Use [Input](./input.md) for single-line values and
 [Textarea](./textarea.md) for ordinary multi-line text.
 
+## Keyboard shortcuts
+
+The base and styled editors share keyboard and mouse behavior. See
+[Keyboard shortcuts and column selection](../../docs/components/editor.md#keyboard-shortcuts-and-column-selection)
+for the macOS, Linux, and Windows bindings, multi-cursor editing, and column-selection details.
+
 ## Import
 
 ```rust
@@ -100,5 +106,5 @@ the [`gpui-component` Editor](../../docs/components/editor.md).
 ## Runnable example
 
 ```bash
-cargo run -p gpui-base --example components -- editor
+cargo run -p gpui-base-examples -- editor
 ```

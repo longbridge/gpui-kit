@@ -176,7 +176,7 @@ For multiple runs, give each run a stable `document_order`. Input order is prese
 The [shared Text Selection showcase](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/text_selection.rs) is the complete runnable example used by both the native command and the live Rust/WASM preview above:
 
 ```bash
-cargo run -p gpui-base --example components -- text-selection
+cargo run -p gpui-base-examples -- text-selection
 ```
 
 ## Complete Rust example

@@ -735,6 +735,37 @@ impl LineLayout {
         Some((offset + ix, line_end_affinity))
     }
 
+    /// How many columns the given position sits past the end of the line under it.
+    ///
+    /// Past the end of a line there is no glyph to hit-test against, so a position out
+    /// there resolves to the line end and loses how far right it really was. The extra
+    /// distance is reported here in whole spaces, letting a columnar selection keep its
+    /// width over a short row. Only the final visual line of a wrapped layout has that
+    /// trailing space; a continuation line ends at a wrap boundary, where the next glyph
+    /// merely lives on the following row.
+    ///
+    /// The `pos` is relative to the top-left corner of this line layout, start from (0, 0).
+    pub(crate) fn columns_past_line_end(
+        &self,
+        pos: Point<Pixels>,
+        last_layout: &LastLayout,
+    ) -> usize {
+        let Some((i, _, x)) = self.wrapped_line_at(pos, last_layout) else {
+            return 0;
+        };
+
+        if i + 1 < self.wrapped_lines.len() || last_layout.space_width <= px(0.) {
+            return 0;
+        }
+
+        let past_end = x - self.wrapped_lines[i].width;
+        if past_end <= px(0.) {
+            return 0;
+        }
+
+        (past_end / last_layout.space_width).round() as usize
+    }
+
     pub(crate) fn index_for_position(
         &self,
         pos: Point<Pixels>,
@@ -1194,6 +1225,7 @@ mod tests {
             wrap_width: None,
             wrapping_indent: WrappingIndent::default(),
             line_number_width: px(0.),
+            space_width: px(0.),
             cursor_bounds: None,
             text_align: TextAlign::Left,
             content_width: px(0.),
@@ -1494,6 +1526,7 @@ mod tests {
             wrap_width: Some(px(10.)),
             wrapping_indent: WrappingIndent::Same,
             line_number_width: px(0.),
+            space_width: px(0.),
             cursor_bounds: None,
             text_align: TextAlign::Left,
             content_width: px(0.),

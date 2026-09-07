@@ -3,7 +3,7 @@ use gpui::{
     StatefulInteractiveElement, StyleRefinement, Styled, Window, div, relative,
 };
 
-use crate::{ActiveTheme as _, StyledExt as _, dialog::Confirm, h_flex};
+use crate::{ActiveTheme as _, StyledExt as _, button::Button, dialog::Confirm, h_flex};
 
 /// Footer section of a dialog, typically contains action buttons.
 ///
@@ -11,7 +11,7 @@ use crate::{ActiveTheme as _, StyledExt as _, dialog::Confirm, h_flex};
 ///
 /// ```ignore
 /// DialogFooter::new()
-///     .child(DialogClose::new().child(Button::new("cancel").label("Cancel")))
+///     .child(DialogClose::new().trigger(|button| button.label("Cancel")))
 ///     .child(Button::new("confirm").label("Confirm"))
 /// ```
 #[derive(IntoElement)]
@@ -72,6 +72,14 @@ impl DialogClose {
         Self {
             base: gpui_base::DialogClose::new(),
         }
+    }
+
+    /// Styles a close button whose accessibility and activation are owned by Base.
+    pub fn trigger<E: IntoElement>(mut self, build: impl FnOnce(Button) -> E) -> Self {
+        self.base = self
+            .base
+            .trigger(|button| build(Button::new("close").with_base(button)));
+        self
     }
 }
 

@@ -128,5 +128,5 @@ The live preview and native command use the same Base-only source:
 <<< ../../crates/base/examples/showcase/components/text_view.rs{rust}
 
 ```bash
-cargo run -p gpui-base --example components -- text-view
+cargo run -p gpui-base-examples -- text-view
 ```

@@ -25,6 +25,8 @@
 #[cfg(target_os = "windows")]
 use crate::ActiveTheme as _;
 use crate::Icon;
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+use crate::icon::IconSource;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use gpui::AssetSource;
@@ -106,6 +108,7 @@ impl NativeMenu {
     ///
     /// Native platform menus load absolute paths ([`Path::is_absolute`]) from the filesystem,
     /// and every other path through the application [`gpui::AssetSource`].
+    /// Icons created with [`Icon::data`] use their SVG bytes directly, without an asset lookup.
     /// [`crate::IconName`] resolves as an asset and works across all backends.
     /// - **macOS**: loaded into an `NSImage` as a template image, so it tints with the item
     /// text and assigned to the item ([`NSMenuItem::image`]).
@@ -222,9 +225,18 @@ impl NativeMenu {
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(super) fn resolve_icon_image(
-    path: &SharedString,
+    icon: &Icon,
     asset_source: &dyn AssetSource,
 ) -> Option<Arc<Image>> {
+    let path = match icon.source_ref() {
+        IconSource::Path(path) => path,
+        IconSource::Data(bytes) => {
+            return Some(Arc::new(Image::from_bytes(
+                ImageFormat::Svg,
+                bytes.to_vec(),
+            )));
+        }
+    };
     if path.is_empty() {
         return None;
     }
@@ -372,7 +384,7 @@ mod tests {
         assert_eq!(label, "Github");
         assert!(!disabled);
         assert!(!checked);
-        assert_eq!(icon.path_ref().as_ref(), "icons/github.svg");
+        assert!(matches!(icon.source_ref(), IconSource::Path(path) if path == "icons/github.svg"));
     }
 
     #[test]
@@ -399,7 +411,7 @@ mod tests {
         assert_eq!(label, "Inbox");
         assert!(disabled);
         assert!(!checked);
-        assert!(icon.path_ref().ends_with("inbox.svg"));
+        assert!(matches!(icon.source_ref(), IconSource::Path(path) if path.ends_with("inbox.svg")));
     }
 
     /// Icon resolution is only compiled for the platforms with an OS-native menu.
@@ -452,7 +464,7 @@ mod tests {
         #[test]
         fn test_native_menu_icon_asset_resolves_to_bytes() {
             let icon = Icon::new(IconName::Github);
-            let image = resolve_icon_image(icon.path_ref(), &gpui_kit_assets::Assets)
+            let image = resolve_icon_image(&icon, &gpui_kit_assets::Assets)
                 .expect("icon asset should resolve");
 
             assert_eq!(image.format, ImageFormat::Svg);
@@ -464,11 +476,12 @@ mod tests {
             let path: SharedString = "native-menu-relative-shadow-test.svg".into();
             let _file = TestIconFile::create(path.as_ref(), FILE_SVG);
 
-            let image = resolve_icon_image(&path, &TestAssetSource(Some(ASSET_SVG)))
+            let icon = Icon::default().path(path);
+            let image = resolve_icon_image(&icon, &TestAssetSource(Some(ASSET_SVG)))
                 .expect("relative icon should resolve from the asset source");
             assert_eq!(image.bytes, ASSET_SVG);
 
-            assert!(resolve_icon_image(&path, &TestAssetSource(None)).is_none());
+            assert!(resolve_icon_image(&icon, &TestAssetSource(None)).is_none());
         }
 
         #[test]
@@ -479,9 +492,26 @@ mod tests {
             let _file = TestIconFile::create(&path, FILE_SVG);
             let path: SharedString = path.to_string_lossy().into_owned().into();
 
-            let image = resolve_icon_image(&path, &TestAssetSource(Some(ASSET_SVG)))
-                .expect("absolute icon should resolve from the filesystem");
+            let image = resolve_icon_image(
+                &Icon::default().path(path),
+                &TestAssetSource(Some(ASSET_SVG)),
+            )
+            .expect("absolute icon should resolve from the filesystem");
             assert_eq!(image.bytes, FILE_SVG);
+        }
+
+        #[test]
+        fn test_native_menu_icon_data_replaces_path_and_survives_clone() {
+            let icon = Icon::default().path("icons/previous.png").data(FILE_SVG);
+            let image = resolve_icon_image(&icon.clone(), &TestAssetSource(None))
+                .expect("SVG data should resolve without an asset source");
+            assert_eq!(image.format, ImageFormat::Svg);
+            assert_eq!(image.bytes, FILE_SVG);
+
+            let icon = icon.path("icons/replacement.svg");
+            let image = resolve_icon_image(&icon, &TestAssetSource(Some(ASSET_SVG)))
+                .expect("a later path should replace the data source");
+            assert_eq!(image.bytes, ASSET_SVG);
         }
     }
 }

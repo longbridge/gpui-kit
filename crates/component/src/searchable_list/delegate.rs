@@ -9,11 +9,19 @@ pub trait SearchableListItem: Clone {
     type Value: Clone + PartialEq;
 
     /// Short display label shown in the dropdown row and in the trigger by default.
+    ///
+    /// This is also what assistive technology reads as the committed value, so
+    /// it has to stand on its own as text even when [`Self::display_title`]
+    /// draws something richer.
     fn title(&self) -> SharedString;
 
     /// Override the trigger display element (e.g. "Country (US)" instead of just "United States").
     ///
     /// Returns `None` to fall back to `title()`.
+    ///
+    /// This is presentation only. An element is not text, so the accessible
+    /// value keeps reporting [`Self::title`]; if the two would read
+    /// differently, put the meaning a listener needs in `title()`.
     fn display_title(&self) -> Option<AnyElement> {
         None
     }

@@ -13,7 +13,7 @@ exampleKind: base
 运行本文配套的交互示例：
 
 ```bash
-cargo run -p gpui-base --example motion
+cargo run -p gpui-base-examples --bin motion
 ```
 
 示例包含五个相互独立的页面，可通过顶部标签逐个查看。

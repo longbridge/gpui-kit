@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use gpui_kit::component::red_500;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
@@ -551,6 +552,9 @@ impl Render for SidebarStory {
                                     .active(is_active)
                                     .default_open(ix == 0)
                                     .click_to_open(self.click_to_open_submenu)
+                                    .when(is_active, |this| {
+                                        this.border_1().border_color(Hsla::white())
+                                    })
                                     .when(ix == 0, |this| {
                                         this.context_menu({
                                             move |this, _, _| {
@@ -580,6 +584,10 @@ impl Render for SidebarStory {
                                                                 ))
                                                         }
                                                     })
+                                                    .label_style(
+                                                        StyleRefinement::default()
+                                                            .text_color(red_500()),
+                                                    )
                                                     .context_menu({
                                                         move |this, _, _| {
                                                             this.label("This is a label")

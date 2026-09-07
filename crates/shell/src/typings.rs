@@ -10,18 +10,18 @@
 //!
 //! # One module per crate
 //!
-//! The declarations are three ambient modules, not one: `"gpui-kit"` for GPUI's own
+//! The declarations include `"gpui-kit"` for GPUI's own
 //! elements and what this runtime adds, `"gpui-base"` for gpui-base's layout
 //! helpers, components and theme, and `"gpui-fps"` for its performance overlay.
-//! A name belongs to exactly one of them.
+//! `"gpui"` is a compatibility alias for `"gpui-kit"`.
 //!
 //! That is a contract about provenance rather than a filing convenience. An
 //! import line says which layer a script depends on, so a script that never
 //! reaches for a component says so, and the next layer to arrive —
 //! `gpui-component`, whose components are the reason the seam exists — needs a
 //! list and a `declare module`, not a renaming of everything already here.
-//! Nothing is re-exported for convenience: a name reachable from two specifiers
-//! stops saying where it came from, which is the property being bought.
+//! Apart from the explicit `"gpui"` alias, names are not re-exported for
+//! convenience, preserving the layer named by each import.
 //!
 //! The dependency runs upward only. `"gpui-base"` names what it borrows from
 //! `"gpui-kit"` in an import at the top of its block; `"gpui-kit"` refers down to a
@@ -210,6 +210,7 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
     out.push_str(CAPABILITIES);
     out.push_str(SCHEDULING);
     out.push_str("}\n\n");
+    out.push_str("declare module \"gpui\" {\n  export * from \"gpui-kit\";\n}\n\n");
     out.push_str("declare module \"gpui-base\" {\n");
     out.push_str(BASE_IMPORTS);
     out.push_str(&base_color_token_type());
@@ -595,8 +596,9 @@ fn directories_importing_builtins(root: &Path) -> Vec<PathBuf> {
 
 /// The specifiers one `gpui-kit.d.ts` declares. A script importing any of them
 /// wants the file beside it.
-const BUILTIN_SPECIFIERS: [&str; 5] = [
+const BUILTIN_SPECIFIERS: [&str; 6] = [
     "gpui-kit",
+    "gpui",
     "gpui-base",
     crate::DEFAULT_COMPONENT_MODULE,
     "gpui-shell",
@@ -875,12 +877,12 @@ const PREAMBLE: &str = "\
 //
 //   \"gpui-kit\"   GPUI's own elements, plus what this runtime adds: views,
 //                the style surface, the window, storage, scheduling.
+//   \"gpui\"       Compatibility alias for \"gpui-kit\".
 //   \"gpui-base\"  gpui-base's layout helpers, components and theme.
 //   \"gpui-fps\"   gpui-fps's performance overlay.
 //
-// A name belongs to exactly one of them. Nothing is re-exported for
-// convenience: a name reachable from two specifiers stops saying where it came
-// from.
+// Except for the explicit \"gpui\" compatibility alias, a name belongs to
+// exactly one module and is not re-exported for convenience.
 //
 // The style surface here is generated from the same tables the runtime
 // dispatches through, so a style method that type-checks exists at run time,
@@ -1812,8 +1814,6 @@ const ELEMENT_METHODS: &str = r#"    /**
      * edge is a preference rather than a promise.
      */
     anchor(value: Anchor): Element;
-    /** Whether an fps_monitor requests continuous whole-window redraws. Default false. */
-    continuous(value: boolean): Element;
     /** Frame budget, in milliseconds, used by an fps_monitor's FRAME grading. */
     frame_budget(milliseconds: number): Element;
     /** Which pointer button opens a `Popover`. Default `left`. */
@@ -2033,6 +2033,80 @@ const ELEMENTS: &str = r#"
    * are supported by the host image loader.
    */
   export function image(path: string): Element;
+
+  /** The visible items, as a half-open `[start, end)` interval. */
+  export interface ItemRange {
+    start: number;
+    end: number;
+  }
+
+  /**
+   * GPUI's own lazy list: rows of any height, measured as they are drawn.
+   *
+   * Where `v_virtual_list` places rows by the sizes the script states, `list`
+   * asks nothing about size. `render(index, cx)` is called for each item that
+   * is on screen, from inside layout as a virtual list's renderer is, and the
+   * element it returns is measured; the list keeps those measurements and
+   * estimates the rest, so a collection of panels that size to their own
+   * content scrolls as one and costs the script only what is visible. The
+   * rules of a virtual list's renderer apply unchanged: no handlers and no
+   * retained state inside it, and `cx.notify()` is refused there.
+   *
+   * The list scrolls itself and paints no scrollbar; pair one with it by name,
+   * as with a scroll area:
+   *
+   * ```js
+   * v_flex().relative().flex_1().min_h(0)
+   *   .child(list("panels", this.panels.length,
+   *     (index) => this.panels[index].id,
+   *     (index) => this.panel(this.panels[index])))
+   *   .child(Scrollbar.vertical("panels").absolute().inset_0());
+   * ```
+   *
+   * The measuring is what it costs: the host is entered once per visible item
+   * per frame, where `v_virtual_list` and `uniform_list` are entered once per
+   * frame however many rows are on screen. Reach for this when heights are
+   * genuinely unequal and unknown — a column of panels, a feed of mixed
+   * cards — and for a long run of same-height rows reach for one of the
+   * others.
+   *
+   * One consequence of the per-item call: `get_key`'s uniqueness is checked
+   * within a call, so a `list` cannot see that two items share a key, where
+   * the other two throw. A duplicate key there quietly gives both items one
+   * identity, and `on_item_click` reports it for either.
+   *
+   * @param id      Identity, and the name a `Scrollbar` pairs with.
+   * @param item_count How many items the collection has, visible or not.
+   * @param get_key An item's stable domain key, from its current index; the
+   *   row's element identity and what `on_item_click` reports.
+   * @param render  Called with one index; returns that item's element.
+   */
+  export function list(
+    id: string | number,
+    item_count: number,
+    get_key: (index: number) => string,
+    render: (index: number, cx: Context) => Element,
+  ): Element;
+
+  /**
+   * GPUI's own uniform list: one row is measured and every row takes its
+   * height.
+   *
+   * The same contract as `v_virtual_list` with a single size, without the
+   * size: the first row (or the one `with_item_to_measure_index` names) is
+   * measured and the rest are placed by it, so a row's height may come from
+   * its content rather than a number in the script. `render(range, cx)` is
+   * called with the visible interval and returns one element per item in it,
+   * so one frame is one call however many rows are on screen — the same
+   * bargain `v_virtual_list` makes, and the reason to prefer this over `list`
+   * whenever the rows really are the same height.
+   */
+  export function uniform_list(
+    id: string | number,
+    item_count: number,
+    get_key: (index: number) => string,
+    render: (range: ItemRange, cx: Context) => Element[],
+  ): Element;
 
   /** Immutable native GPUI geometry produced by `PathBuilder.build()`. */
   export interface Path {}
@@ -2784,10 +2858,7 @@ const BASE: &str = r#"  /** A row. */
   };
 
   /** The visible items, as a half-open `[start, end)` interval. */
-  export interface ItemRange {
-    start: number;
-    end: number;
-  }
+  export type ItemRange = import("gpui-kit").ItemRange;
 
   /**
    * A list that describes only what is on screen.
@@ -3507,12 +3578,6 @@ const FPS: &str = r#"  /**
   export interface FpsMonitorOptions {
     /** Corner or edge of the window. Default `top_right`. */
     anchor?: Anchor;
-    /**
-     * Whether the HUD requests a redraw after every frame, so the rate it
-     * shows is the rate the window *can* sustain. Default `false`: the HUD
-     * observes the application's own frames and reads zero while it idles.
-     */
-    continuous?: boolean;
     /** Frame budget in milliseconds, for the FRAME grading and the chart's scale. */
     frame_budget?: number;
   }
@@ -3900,7 +3965,6 @@ mod tests {
         "default_open",
         "overlay_closable",
         "anchor",
-        "continuous",
         "frame_budget",
         "mouse_button",
         "open_delay",
@@ -4136,6 +4200,9 @@ mod tests {
             assert!(!method.is_empty(), "a method line has no name");
         }
         assert!(declarations.contains("declare module \"gpui-kit\" {"));
+        assert!(
+            declarations.contains("declare module \"gpui\" {\n  export * from \"gpui-kit\";\n}")
+        );
         // The global declaration follows the module blocks, and has to stay
         // outside it: a `declare module` body cannot introduce a global, and
         // this file is only in script mode because it has no top-level import

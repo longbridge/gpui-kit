@@ -1,8 +1,10 @@
 name: "Release GPUI"
 # Publish a fresh snapshot of Zed's gpui crates to crates.io as gpui-pre-*.
-# See script/bump-gpui.ts and the "Publish GPUI pre-release crates from Zed"
-# section of CONTRIBUTING.md.
+# See script/bump-gpui.ts for the publishing and validation pipeline.
 on:
+  schedule:
+    # Every Sunday at 18:00 Beijing time (UTC+8).
+    - cron: "0 10 * * 0"
   workflow_dispatch:
     inputs:
       rev:
@@ -19,26 +21,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  cadence:
-    name: Every other week
-    runs-on: ubuntu-latest
-    outputs:
-      due: ${{ steps.check.outputs.due }}
-    steps:
-      - id: check
-        run: |
-          week=$(date -u +%V)
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ $((10#$week % 2)) -eq 0 ]; then
-            echo "due=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ISO week $week is odd; the next scheduled release is next Sunday."
-            echo "due=false" >> "$GITHUB_OUTPUT"
-          fi
-
   publish:
     name: Publish gpui-pre
-    needs: cadence
-    if: needs.cadence.outputs.due == 'true'
     # macOS verifies the Metal shader build script of gpui_apple, the one
     # part of the pipeline that only compiles on Apple platforms.
     runs-on: macos-latest

@@ -13,7 +13,7 @@ GPUI Kit 是一个基于 GPUI 的综合性 Rust 桌面应用开发框架。
 - **`gpui-component`**：即 GPUI Component，完整的带样式组件库，提供 60+ 控件、主题、数据表格、Dock 布局和代码编辑器。
 - **`gpui-shell`**：让 Rust 宿主可以被 JavaScript 扩展，能力逐项授予。
 
-使用 `gpui-component` 可以获得统一、成熟的视觉风格；基于 `gpui-base` 则可以复用可靠的行为与基础设施，同时创建并拥有自己的设计系统。本节文档面向 GPUI Component；另外两层请参阅 [GPUI Base](/zh-CN/base/) 与 [GPUI Shell](/zh-CN/shell/)。
+使用 `gpui-component` 可以获得统一、成熟的视觉风格；基于 `gpui-base` 则可以复用可靠的行为与基础设施，同时创建并拥有自己的设计系统。本节文档面向 GPUI Component；另外两层请参阅 [GPUI Base](/zh-CN/base) 与 [GPUI Shell](/zh-CN/shell)。
 
 ## 特性
 

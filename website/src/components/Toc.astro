@@ -1,0 +1,88 @@
+---
+export interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+
+export interface Props {
+  headings?: Heading[];
+  lang?: 'en' | 'zh-CN';
+}
+
+const { headings = [], lang = 'en' } = Astro.props;
+
+// h1 is the page title, already shown above; anything below h3 turns the
+// column into a wall of text on API pages.
+const items = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const label = lang === 'zh-CN' ? '本页内容' : 'On this page';
+---
+
+{items.length > 1 && (
+  <nav class="toc" aria-label={label}>
+    <p class="toc__label">{label}</p>
+    <ul>
+      {items.map((h) => (
+        <li class:list={['toc__item', { 'toc__item--sub': h.depth === 3 }]}>
+          <a href={`#${h.slug}`}>{h.text}</a>
+        </li>
+      ))}
+    </ul>
+  </nav>
+)}
+
+<script>
+  // Highlights the section the reader is in. `rootMargin` pulls the observation
+  // band up to just under the bar so a heading counts as current once it
+  // reaches the top of the reading area, not when it enters the viewport.
+  const links = new Map<string, HTMLAnchorElement>();
+  document.querySelectorAll<HTMLAnchorElement>('.toc a[href^="#"]').forEach((a) => {
+    links.set(decodeURIComponent(a.hash.slice(1)), a);
+  });
+
+  if (links.size > 0) {
+    const targets = [...links.keys()]
+      .map((id) => document.getElementById(id))
+      .filter((el): el is HTMLElement => el !== null);
+
+    let current: HTMLAnchorElement | null = null;
+    const setCurrent = (id: string | undefined) => {
+      const next = id ? links.get(id) ?? null : null;
+      if (next === current) return;
+      current?.classList.remove('is-current');
+      next?.classList.add('is-current');
+      current = next;
+    };
+
+    const seen = new Set<string>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) seen.add(entry.target.id);
+          else seen.delete(entry.target.id);
+        }
+        // Document order, so the topmost visible heading wins.
+        const first = targets.find((el) => seen.has(el.id));
+        if (first) {
+          setCurrent(first.id);
+          return;
+        }
+        // Nothing in the band — near the foot of the page, or inside a section
+        // longer than the viewport. Fall back to the last heading passed.
+        const limit = 88;
+        let passed: string | undefined;
+        for (const el of targets) {
+          if (el.getBoundingClientRect().top <= limit) passed = el.id;
+        }
+        if (passed) setCurrent(passed);
+      },
+      // The band starts just under the sticky bar (where an anchored heading
+      // comes to rest) and ends part-way down, so the entry that is current is
+      // the one the reader is actually reading rather than whatever is last
+      // on screen.
+      { rootMargin: '-88px 0px -55% 0px', threshold: 0 },
+    );
+
+    targets.forEach((el) => observer.observe(el));
+  }
+</script>

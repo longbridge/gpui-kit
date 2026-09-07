@@ -59,7 +59,7 @@ let password = cx.new(|cx| {
 ## 可运行示例
 
 ```bash
-cargo run -p gpui-base --example components -- input
+cargo run -p gpui-base-examples -- input
 ```
 
 实现位于 [`input.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/input.rs)。

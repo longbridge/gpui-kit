@@ -1458,6 +1458,11 @@ impl WindowSelectionState {
         window: Option<&Window>,
         cx: &mut Context<Self>,
     ) {
+        // A finished gesture keeps its anchor for shift-click extension; only
+        // a live drag may scroll.
+        if !self.is_selecting {
+            return;
+        }
         let Some(anchor) = self.anchor.as_ref().filter(|anchor| anchor.inside) else {
             return;
         };
@@ -3138,6 +3143,29 @@ mod tests {
                     state.update_in_window(point(px(1.), px(50.)), window, cx);
                     assert!(!state.auto_scroll.is_active());
                     assert!(state.auto_scroll.last_drag_position.is_none());
+                });
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn pointer_moves_after_a_click_do_not_auto_scroll(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_, cx| WindowSelectionView {
+            selection: TextSelectionHandle::new("unused", cx),
+        });
+        window
+            .update(cx, |_, window, cx| {
+                let state = cx.new(|_| WindowSelectionState::default());
+                let participant = FakeParticipant::new("participant", cx);
+                state.update(cx, |state, cx| {
+                    participant.register(state, 0., TextSelectionScopeId::default(), 0, cx);
+                    // A click on text keeps its anchor so shift-click can extend it.
+                    state.begin(point(px(1.), px(1.)), false, cx);
+                    state.end(cx);
+                    assert!(state.anchor.is_some());
+
+                    state.update_in_window(point(px(1.), px(50.)), window, cx);
+                    assert!(!state.auto_scroll.is_active());
                 });
             })
             .unwrap();

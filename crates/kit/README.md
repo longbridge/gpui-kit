@@ -53,5 +53,7 @@ fn main() {
 The `gpui-component` features (`inspector`, `decimal`, `tree-sitter`,
 `tree-sitter-languages`, and each `tree-sitter-<language>`) are available on
 `gpui-kit` under the same names. `test-support` turns on GPUI's test harness
-for `#[gpui_kit::test]`, `TestAppContext` and `VisualTestContext`; enable it
-under `[dev-dependencies]`. See <https://gpui-kit.com> for the guides.
+for `#[gpui_kit::test]`, `TestAppContext`, `VisualTestContext`, and native-platform
+rendering support; enable it under `[dev-dependencies]`. The independent `profiler`
+feature enables GPUI frame-event instrumentation and is off by default.
+See <https://gpui-kit.com> for the guides.

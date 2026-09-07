@@ -1,7 +1,9 @@
+use std::sync::Arc;
+
 use crate::{ActiveTheme, Sizable, Size};
 use gpui::{
-    AnyElement, App, AppContext, Context, Entity, Hsla, IntoElement, Radians, Render, RenderOnce,
-    SharedString, StyleRefinement, Styled, Svg, Transformation, Window,
+    AnyElement, App, AppContext, Context, Entity, Hsla, IntoElement, Pixels, Radians, Render,
+    RenderOnce, SharedString, StyleRefinement, Styled, Svg, Transformation, Window,
     prelude::FluentBuilder as _, svg,
 };
 use gpui_component_macros::icon_named;
@@ -47,37 +49,30 @@ impl RenderOnce for IconName {
     }
 }
 
-#[derive(IntoElement)]
+#[derive(Clone)]
+pub(crate) enum IconSource {
+    Path(SharedString),
+    Data(Arc<[u8]>),
+}
+
+#[derive(Clone, IntoElement)]
 pub struct Icon {
-    base: Svg,
     style: StyleRefinement,
-    path: SharedString,
+    source: IconSource,
     text_color: Option<Hsla>,
     size: Option<Size>,
-    rotation: Option<Radians>,
+    transformation: Option<Transformation>,
 }
 
 impl Default for Icon {
     fn default() -> Self {
         Self {
-            base: svg().flex_none().size_4(),
             style: StyleRefinement::default(),
-            path: "".into(),
+            source: IconSource::Path("".into()),
             text_color: None,
             size: None,
-            rotation: None,
+            transformation: None,
         }
-    }
-}
-
-impl Clone for Icon {
-    fn clone(&self) -> Self {
-        let mut this = Self::default().path(self.path.clone());
-        this.style = self.style.clone();
-        this.rotation = self.rotation;
-        this.size = self.size;
-        this.text_color = self.text_color;
-        this
     }
 }
 
@@ -93,14 +88,34 @@ impl Icon {
     /// Set the icon path of the Assets bundle
     ///
     /// For example: `icons/foo.svg`
+    /// Replaces any previously set path or SVG data.
     pub fn path(mut self, path: impl Into<SharedString>) -> Self {
-        self.path = path.into();
+        self.source = IconSource::Path(path.into());
+        self
+    }
+
+    /// Set raw SVG bytes without registering an asset path.
+    ///
+    /// Copies the bytes into shared storage; the input need not be static.
+    /// Cloning the icon shares those bytes. Replaces any previously set path or data.
+    /// Parsing and rendering follow GPUI's SVG behavior.
+    ///
+    /// ```
+    /// use gpui_component::Icon;
+    ///
+    /// let bytes = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+    ///     <path d="M4 12h16" stroke="currentColor"/>
+    /// </svg>"#;
+    /// let icon = Icon::default().data(bytes);
+    /// ```
+    pub fn data(mut self, data: &[u8]) -> Self {
+        self.source = IconSource::Data(Arc::from(data));
         self
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows", test))]
-    pub(crate) fn path_ref(&self) -> &SharedString {
-        &self.path
+    pub(crate) fn source_ref(&self) -> &IconSource {
+        &self.source
     }
 
     /// Create a new view for the icon
@@ -108,8 +123,9 @@ impl Icon {
         cx.new(|_| self)
     }
 
+    /// Set the SVG transformation, replacing any previous transformation or rotation.
     pub fn transform(mut self, transformation: gpui::Transformation) -> Self {
-        self.base = self.base.with_transformation(transformation);
+        self.transformation = Some(transformation);
         self
     }
 
@@ -118,11 +134,39 @@ impl Icon {
     }
 
     /// Rotate the icon by the given angle
+    ///
+    /// Replaces any previous transformation or rotation.
     pub fn rotate(mut self, radians: impl Into<Radians>) -> Self {
-        self.base = self
-            .base
-            .with_transformation(Transformation::rotate(radians));
+        self.transformation = Some(Transformation::rotate(radians));
         self
+    }
+
+    fn into_svg(self, text_size: Pixels, fallback_color: Hsla) -> Svg {
+        let text_color = self.text_color.unwrap_or(fallback_color);
+        let has_base_size = self.style.size.width.is_some() || self.style.size.height.is_some();
+
+        svg()
+            .map(|mut this| {
+                *this.style() = self.style;
+                this
+            })
+            .flex_shrink_0()
+            .text_color(text_color)
+            .when(!has_base_size, |this| this.size(text_size))
+            .when_some(self.size, |this, size| match size {
+                Size::Size(px) => this.size(px),
+                Size::XSmall => this.size_3(),
+                Size::Small => this.size_3p5(),
+                Size::Medium => this.size_4(),
+                Size::Large => this.size_6(),
+            })
+            .map(|this| match self.source {
+                IconSource::Path(path) => this.path(path),
+                IconSource::Data(data) => this.data(&data),
+            })
+            .when_some(self.transformation, |this, transformation| {
+                this.with_transformation(transformation)
+            })
     }
 }
 
@@ -146,24 +190,8 @@ impl Sizable for Icon {
 
 impl RenderOnce for Icon {
     fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let text_color = self.text_color.unwrap_or_else(|| window.text_style().color);
         let text_size = window.text_style().font_size.to_pixels(window.rem_size());
-        let has_base_size = self.style.size.width.is_some() || self.style.size.height.is_some();
-
-        let mut base = self.base;
-        *base.style() = self.style;
-
-        base.flex_shrink_0()
-            .text_color(text_color)
-            .when(!has_base_size, |this| this.size(text_size))
-            .when_some(self.size, |this, size| match size {
-                Size::Size(px) => this.size(px),
-                Size::XSmall => this.size_3(),
-                Size::Small => this.size_3p5(),
-                Size::Medium => this.size_4(),
-                Size::Large => this.size_6(),
-            })
-            .path(self.path)
+        self.into_svg(text_size, window.text_style().color)
     }
 }
 
@@ -175,26 +203,68 @@ impl From<Icon> for AnyElement {
 
 impl Render for Icon {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let text_color = self.text_color.unwrap_or_else(|| cx.theme().foreground);
         let text_size = window.text_style().font_size.to_pixels(window.rem_size());
-        let has_base_size = self.style.size.width.is_some() || self.style.size.height.is_some();
+        self.clone().into_svg(text_size, cx.theme().foreground)
+    }
+}
 
-        let mut base = svg().flex_none();
-        *base.style() = self.style.clone();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{px, size};
 
-        base.flex_shrink_0()
-            .text_color(text_color)
-            .when(!has_base_size, |this| this.size(text_size))
-            .when_some(self.size, |this, size| match size {
-                Size::Size(px) => this.size(px),
-                Size::XSmall => this.size_3(),
-                Size::Small => this.size_3p5(),
-                Size::Medium => this.size_4(),
-                Size::Large => this.size_6(),
-            })
-            .path(self.path.clone())
-            .when_some(self.rotation, |this, rotation| {
-                this.with_transformation(Transformation::rotate(rotation))
-            })
+    const SVG: &[u8] = include_bytes!("../../assets/assets/icons/arrow-up.svg");
+
+    #[test]
+    fn test_icon_builder_preserves_owned_data_and_transform_on_clone() {
+        let transformation = Transformation::scale(size(0.5, 0.5))
+            .with_rotation(gpui::radians(std::f32::consts::FRAC_PI_2));
+        let icon = {
+            let bytes = SVG.to_vec();
+            Icon::default()
+                .data(&bytes)
+                .large()
+                .text_color(gpui::red())
+                .transform(transformation)
+        };
+        let cloned = icon.clone();
+        let (IconSource::Data(original), IconSource::Data(copy)) = (&icon.source, &cloned.source)
+        else {
+            panic!("cloning must preserve the data source");
+        };
+        assert_eq!(copy.as_ref(), SVG);
+        assert!(Arc::ptr_eq(original, copy));
+        assert_eq!(cloned.transformation, Some(transformation));
+        assert_eq!(cloned.size, icon.size);
+        assert_eq!(cloned.text_color, icon.text_color);
+
+        let mut svg = cloned.into_svg(px(12.), gpui::blue());
+        assert_eq!(svg.style().text.color, Some(gpui::red()));
+        assert_eq!(svg.style().size.width, Some(gpui::rems(1.5).into()));
+
+        let rotated = icon.rotate(gpui::radians(std::f32::consts::PI)).clone();
+        assert_eq!(
+            rotated.transformation,
+            Some(Transformation::rotate(gpui::radians(std::f32::consts::PI)))
+        );
+    }
+
+    #[test]
+    fn test_icon_source_builders_replace_previous_source() {
+        let icon = Icon::new(IconName::Search).data(SVG);
+        assert!(matches!(icon.source_ref(), IconSource::Data(bytes) if bytes.as_ref() == SVG));
+
+        let icon = icon.path("icons/replacement.svg");
+        assert!(
+            matches!(icon.source_ref(), IconSource::Path(path) if path == "icons/replacement.svg")
+        );
+
+        let icon = icon.data(SVG).data(b"replacement");
+        assert!(
+            matches!(icon.source_ref(), IconSource::Data(bytes) if bytes.as_ref() == b"replacement")
+        );
+
+        let icon = icon.path("");
+        assert!(matches!(icon.source_ref(), IconSource::Path(path) if path.is_empty()));
     }
 }

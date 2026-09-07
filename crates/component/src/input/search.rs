@@ -78,6 +78,13 @@ impl<M: crate::input::overlay::OverlayMode> SearchPanel<M> {
         self.search_input.read(cx).value()
     }
 
+    /// The panel's search input, so a test can assert what re-invoking search
+    /// does to its value and selection.
+    #[cfg(test)]
+    pub(super) fn search_input(&self) -> &Entity<InputState> {
+        &self.search_input
+    }
+
     pub(crate) fn new(
         editor: Entity<InputBaseState<M>>,
         window: &mut Window,
@@ -124,9 +131,7 @@ impl<M: crate::input::overlay::OverlayMode> SearchPanel<M> {
         self.session.replace_mode = replace_mode;
         if focus {
             self.search_input
-                .read(cx)
-                .focus_handle(cx)
-                .focus(window, cx);
+                .update(cx, |input, cx| input.focus(window, cx));
         }
 
         self.search_input.update(cx, |this, cx| {
@@ -183,12 +188,12 @@ impl<M: crate::input::overlay::OverlayMode> SearchPanel<M> {
         cx: &mut Context<Self>,
     ) {
         self.session.open = false;
-        let _ = self.editor.update(cx, |state, cx| state.close_search(cx));
-        if focus_editor {
-            if let Some(editor) = self.editor.upgrade() {
-                editor.read(cx).focus_handle(cx).focus(window, cx);
+        let _ = self.editor.update(cx, |state, cx| {
+            state.close_search(cx);
+            if focus_editor {
+                state.focus(window, cx);
             }
-        }
+        });
         cx.notify();
     }
 

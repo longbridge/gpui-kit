@@ -1049,6 +1049,7 @@ impl SyntaxHighlighter {
     /// # Example
     ///
     /// ```no_run
+    /// # mod gpui_kit { pub extern crate gpui_component as component; }
     /// use gpui_kit::component::highlighter::{HighlightTheme, SyntaxHighlighter};
     /// use ropey::Rope;
     ///
@@ -1059,7 +1060,7 @@ impl SyntaxHighlighter {
     ///
     /// let theme = HighlightTheme::default_dark();
     /// let range = 0..code.len();
-    /// let styles = highlighter.styles(&range, &theme);
+    /// let styles = highlighter.styles(&range, &*theme);
     /// ```
     pub fn styles(
         &self,

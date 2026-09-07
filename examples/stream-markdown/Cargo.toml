@@ -1,0 +1,14 @@
+[package]
+name = "example-stream-markdown"
+version = "0.6.0"
+publish = false
+edition.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+gpui-component-story = { path = "../../crates/story" }
+rand = "0.8"
+smol.workspace = true
+
+[lints]
+workspace = true

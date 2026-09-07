@@ -1,0 +1,21 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import Nav from '../components/Nav.astro';
+import { fetchStarCount } from '../lib/github';
+
+let starCount = 0;
+try { starCount = await fetchStarCount(); } catch {}
+
+const base = import.meta.env.BASE_URL;
+---
+
+<BaseLayout title="404 — Page Not Found" description="The page you are looking for does not exist." robots="noindex, nofollow" alternates={false}>
+  <Nav lang="en" currentPath="/404" starCount={starCount} langSwitchHref={`${base}zh-CN`} />
+  <main style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:calc(100vh - 3.5rem);padding:2rem;text-align:center;gap:1.25rem;">
+    <h1 style="margin:0;font-size:clamp(3rem,8vw,6rem);font-weight:700;letter-spacing:-0.06em;color:var(--foreground);line-height:1;">404</h1>
+    <p style="margin:0;font-size:1.1rem;color:var(--muted-foreground);">The page you are looking for does not exist.</p>
+    <a href={base} style="display:inline-flex;align-items:center;gap:0.4rem;padding:0.55rem 1.1rem;border-radius:var(--radius-control);background:var(--brand);color:var(--brand-contrast);font-size:0.9rem;font-weight:600;text-decoration:none;">
+      Go home
+    </a>
+  </main>
+</BaseLayout>

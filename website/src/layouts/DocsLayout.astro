@@ -1,0 +1,105 @@
+---
+import BaseLayout from './BaseLayout.astro';
+import Nav from '../components/Nav.astro';
+import Sidebar from '../components/Sidebar.astro';
+import SiteFooter from '../components/SiteFooter.astro';
+import Toc from '../components/Toc.astro';
+import type { Heading } from '../components/Toc.astro';
+import type { SidebarItem } from '../lib/sidebar';
+import { fetchStarCount } from '../lib/github';
+import { SITE_URL } from '../lib/site';
+
+export interface Props {
+  title?: string;
+  description?: string;
+  lang?: 'en' | 'zh-CN';
+  sidebar?: SidebarItem[];
+  headings?: Heading[];
+  frontmatter?: Record<string, any>;
+}
+
+const { title, description, lang = 'en', sidebar = [], headings = [], frontmatter = {} } = Astro.props;
+const hasSidebar = sidebar.length > 0;
+const pathname = Astro.url.pathname;
+const base = import.meta.env.BASE_URL;
+
+const canonical = `${SITE_URL}${pathname}`;
+
+let starCount = 0;
+try {
+  starCount = await fetchStarCount();
+} catch {}
+
+const isZh = lang === 'zh-CN';
+const segments = pathname.split('/').filter(Boolean);
+const itemListElement = segments
+  .filter(segment => segment !== 'zh-CN')
+  .map((segment, index, visibleSegments) => ({
+    '@type': 'ListItem',
+    position: index + 1,
+    name: index === visibleSegments.length - 1 && title
+      ? title
+      : segment.replace(/[-_]/g, ' ').replace(/\b\w/g, char => char.toUpperCase()),
+    item: `${SITE_URL}/${isZh ? 'zh-CN/' : ''}${visibleSegments.slice(0, index + 1).join('/')}`,
+  }));
+const structuredData = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'WebPage',
+    name: title,
+    description,
+    url: canonical,
+    inLanguage: isZh ? 'zh-CN' : 'en',
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement,
+  },
+];
+---
+
+<BaseLayout title={title} description={description} lang={isZh ? 'zh-CN' : 'en'} canonical={canonical} structuredData={structuredData}>
+  <Nav lang={lang} currentPath={pathname} starCount={starCount} />
+
+  <div class="docs-layout">
+    {hasSidebar && <Sidebar items={sidebar} currentPath={pathname} lang={lang} />}
+
+    <main class:list={['docs-main', { 'docs-main--full': !hasSidebar }]}>
+      <article class="doc-content" data-pagefind-body>
+        <slot />
+      </article>
+    </main>
+
+    {hasSidebar && <Toc headings={headings} lang={lang} />}
+  </div>
+
+  <!-- Page-level, so it spans the shared content box rather than the
+       article's reading measure. -->
+  <SiteFooter lang={lang} />
+</BaseLayout>
+
+<script>
+  // The sidebar scrollbar is transparent at rest and appears only while the
+  // reader is scrolling it, so a long navigation tree does not carry a
+  // permanent rail beside it.
+  const sidebar = document.querySelector<HTMLElement>('.docs-sidebar');
+  if (sidebar) {
+    let hideTimer: number | undefined;
+    sidebar.addEventListener(
+      'scroll',
+      () => {
+        sidebar.dataset.scrollbarVisible = '';
+        window.clearTimeout(hideTimer);
+        hideTimer = window.setTimeout(() => {
+          delete sidebar.dataset.scrollbarVisible;
+        }, 800);
+      },
+      { passive: true },
+    );
+  }
+</script>
+
+<style is:global>
+  @import '../styles/global.css';
+</style>

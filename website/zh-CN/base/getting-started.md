@@ -77,7 +77,7 @@ Theme::global_mut(cx).tokens = SemanticThemeTokens {
 ## 运行共享示例
 
 ```sh
-cargo run -p gpui-base --example components -- button
+cargo run -p gpui-base-examples -- button
 ```
 
 将 `button` 替换为[原语目录](./primitives/index.md)中的 slug。网站会把同一份展示代码编译为 `wasm32-unknown-unknown` 并加载到各原语页面。

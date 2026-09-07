@@ -1,5 +1,6 @@
 ---
 title: 组件
+description: 浏览 60 多个面向生产环境的 Rust UI 组件，覆盖表单、导航、数据、反馈与桌面应用布局。
 order: 2
 collapsed: false
 ---
@@ -56,4 +57,4 @@ collapsed: false
 
 组件页已经预置中文路由结构，尚未完成的页面会先显示中文占位说明，并回链到英文原文：
 
-- [English version](/docs/components/index)
+- [English version](/docs/components)

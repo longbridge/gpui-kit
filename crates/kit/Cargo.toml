@@ -21,8 +21,10 @@ default = ["component", "assets"]
 component = ["dep:gpui-component"]
 # The default icon set for `gpui-component`, `gpui_kit::assets`.
 assets = ["dep:gpui-kit-assets"]
-# GPUI's test harness: `#[gpui_kit::test]`, `TestAppContext`, `VisualTestContext`.
-test-support = ["gpui/test-support"]
+# GPUI's test harness and native-platform rendering support.
+test-support = ["gpui/test-support", "gpui_platform/test-support"]
+# Frame-event instrumentation remains opt-in for performance builds.
+profiler = ["gpui/profiler"]
 inspector = ["gpui/inspector", "gpui-base/inspector", "gpui-component?/inspector"]
 decimal = ["component", "gpui-component/decimal"]
 tree-sitter = ["component", "gpui-component/tree-sitter"]
@@ -70,10 +72,6 @@ gpui_platform.workspace = true
 gpui-base.workspace = true
 gpui-component = { workspace = true, optional = true }
 gpui-kit-assets = { workspace = true, optional = true }
-
-# `reqwest_client` pulls in tokio's default runtime, which does not build on wasm.
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
-reqwest_client.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 gpui_web.workspace = true

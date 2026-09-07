@@ -4822,7 +4822,6 @@ export default class Monitor extends View {
     return div().relative().size_full().child(
       fps_monitor()
         .anchor("bottom_left")
-        .continuous(false)
         .frame_budget(8.33)
     );
   }
@@ -4839,9 +4838,7 @@ export default class Monitor extends View {
         .update(|window, cx| runtime.render_to_spec(&object, None, window, cx))
         .expect("render spec");
     assert!(
-        spec.contains("FpsMonitor :anchor")
-            && spec.contains(":continuous[Bool(false)]")
-            && spec.contains(":frame_budget[Number(8.33)]"),
+        spec.contains("FpsMonitor :anchor") && spec.contains(":frame_budget[Number(8.33)]"),
         "the snapshot must retain the native monitor and its performance options: {spec}"
     );
 
@@ -9780,31 +9777,7 @@ fn mount_virtual_list(
     gpui::Entity<ScriptView>,
     VisualTestContext,
 ) {
-    cx.update(crate::init);
-    let runtime = ShellRuntime::new_isolated().expect("runtime");
-    cx.update(|cx| runtime.set_global(cx));
-    let view_type = runtime
-        .load_source("rows.js", &virtual_list_source(extra))
-        .expect("load");
-
-    // The view has to be the window's own root. A helper that draws it once
-    // into a throwaway element would leave every later frame going to the real
-    // root instead, and a virtual list only says anything once it has been laid
-    // out more than once.
-    let runtime_for_view = Rc::clone(&runtime);
-    let window = cx.add_window(move |window, cx| {
-        let view = runtime_for_view
-            .instantiate_view(&view_type, window, cx)
-            .expect("instantiate");
-        RootedScriptView(view)
-    });
-    let mut context = VisualTestContext::from_window(*window.deref(), cx);
-    context.update(|window, cx| window.draw(cx).clear(cx));
-    let view = window
-        .root(&mut context)
-        .expect("view")
-        .read_with(&context, |root, _| root.0.clone());
-    (runtime, window, view, context)
+    mount_list_source(cx, &virtual_list_source(extra))
 }
 
 fn scroll_by(context: &mut VisualTestContext, dy: f32) {
@@ -9820,30 +9793,7 @@ fn scroll_by(context: &mut VisualTestContext, dy: f32) {
 fn a_virtual_list_describes_only_the_visible_window_and_follows_the_scroll(
     cx: &mut TestAppContext,
 ) {
-    let (_runtime, _window, view, mut context) = mount_virtual_list(cx, "");
-
-    let (start, end) = reported_range(&redraw_and_read(&mut context, &view));
-    assert_eq!(start, 0, "an unscrolled list starts at its first item");
-    assert!(
-        (10..=13).contains(&end),
-        "a 200px box of 20px rows shows about ten of five hundred, not {end}"
-    );
-
-    // Ten rows down. The script has to be asked again, with a different range:
-    // that it is asked at all is the whole of what separates this component
-    // from every other one, and that the range moves is what makes it a list
-    // rather than a window onto the first screenful.
-    scroll_by(&mut context, -200.);
-
-    let (scrolled_start, scrolled_end) = reported_range(&redraw_and_read(&mut context, &view));
-    assert_eq!(
-        scrolled_start, 10,
-        "200px of 20px rows is ten items; the window must start there"
-    );
-    assert!(
-        scrolled_end > end,
-        "the window must have moved down the collection: {scrolled_start}..{scrolled_end}"
-    );
+    assert_the_visible_window_follows_the_scroll(cx, &virtual_list_source(""));
 }
 
 #[gpui::test]
@@ -10001,23 +9951,7 @@ export default class Rows extends View {
 
 #[gpui::test]
 fn a_virtual_list_reports_which_row_was_clicked(cx: &mut TestAppContext) {
-    let (_runtime, _window, view, mut context) = mount_virtual_list(cx, "");
-
-    // Rows are twenty pixels tall and the list starts at the top of the window,
-    // so the third one covers 40..60.
-    context.simulate_click(point(px(150.), px(50.)), Modifiers::default());
-    context.update(|window, cx| window.draw(cx).clear(cx));
-
-    let tree = context.update(|_, cx| {
-        view.read(cx)
-            .snapshot()
-            .map(crate::RenderSnapshot::debug_tree)
-            .unwrap_or_default()
-    });
-    assert!(
-        tree.contains("clicked 2"),
-        "the click must arrive with the item's stable key: {tree}"
-    );
+    assert_a_click_reports_the_row_key(cx, &virtual_list_source(""), 50.);
 }
 
 /// The hit box belongs to the item it was painted for, not to the position the
@@ -10210,7 +10144,9 @@ export default class LargeLists extends View {
 "#,
     );
     assert!(
-        message.contains("virtual list") && message.contains("render"),
+        // "lists", not "virtual lists": one budget covers every lazy list in a
+        // render, `list` and `uniform_list` included.
+        message.contains("lists in one render"),
         "the error must identify the aggregate host allocation boundary: {message}"
     );
 }
@@ -10422,4 +10358,213 @@ fn retiring_an_application_generation_runs_its_app_effect_cleanups(cx: &mut Test
         "retiring the generation must run the cleanup, not wait for the view"
     );
     let _ = std::fs::remove_dir_all(&directory);
+}
+
+// ---------------------------------------------------------------------------
+// `list` and `uniform_list`: GPUI's own lazy lists, driven from script.
+
+fn uniform_list_source() -> &'static str {
+    r#"
+import { div, View, uniform_list } from "gpui-kit";
+import { v_flex } from "gpui-base";
+
+export default class Rows extends View {
+  init() {
+    this.range = [0, 0];
+    this.clicked = -1;
+  }
+
+  render(cx) {
+    return v_flex()
+      .w(300)
+      .h(400)
+      .child(
+        v_flex()
+          .h(200)
+          .child(
+            uniform_list("rows", 500, (index) => String(index), (range) => {
+              this.range = [range.start, range.end];
+              const items = [];
+              for (let index = range.start; index < range.end; index++) {
+                items.push(div().h(20).child(`row ${index}`));
+              }
+              return items;
+            }).on_item_click((key, cx) => {
+              this.clicked = key;
+              cx.notify();
+            }),
+          ),
+      )
+      .child(`range ${this.range[0]}..${this.range[1]} clicked ${this.clicked}`);
+  }
+}
+"#
+}
+
+/// Rows of two heights, so the list has to measure each one: a uniform guess
+/// from the first row would place every later row wrong.
+fn measured_list_source() -> &'static str {
+    r#"
+import { div, View, list } from "gpui-kit";
+import { v_flex } from "gpui-base";
+
+export default class Rows extends View {
+  init() {
+    this.lo = -1;
+    this.hi = -1;
+    this.shown = [-1, -1];
+    this.clicked = -1;
+  }
+
+  render(cx) {
+    // What the previous frame's layout asked for; the item renderer runs after
+    // this render, from inside layout, so the report is always one frame old.
+    this.shown = [this.lo, this.hi];
+    this.lo = -1;
+    this.hi = -1;
+    return v_flex()
+      .w(300)
+      .h(400)
+      .child(
+        v_flex()
+          .h(200)
+          .child(
+            list("rows", 500, (index) => String(index), (index) => {
+              if (this.lo < 0 || index < this.lo) this.lo = index;
+              if (index > this.hi) this.hi = index;
+              return div().h(index % 2 === 0 ? 20 : 40).child(`row ${index}`);
+            }).on_item_click((key, cx) => {
+              this.clicked = key;
+              cx.notify();
+            }),
+          ),
+      )
+      .child(`range ${this.shown[0]}..${this.shown[1] + 1} clicked ${this.clicked}`);
+  }
+}
+"#
+}
+
+/// A 200px box of 20px rows shows about ten of them, and scrolling moves which
+/// ten the script is asked for. Shared by the two lists that take a range.
+fn assert_the_visible_window_follows_the_scroll(cx: &mut TestAppContext, source: &str) {
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, source);
+
+    let (start, end) = reported_range(&redraw_and_read(&mut context, &view));
+    assert_eq!(start, 0, "an unscrolled list starts at its first item");
+    assert!(
+        (10..=13).contains(&end),
+        "a 200px box of 20px rows shows about ten of five hundred, not {end}"
+    );
+
+    // Ten rows down. The script has to be asked again, with a different range:
+    // that it is asked at all is the whole of what separates these components
+    // from every other one, and that the range moves is what makes them lists
+    // rather than a window onto the first screenful.
+    scroll_by(&mut context, -200.);
+
+    let (scrolled_start, scrolled_end) = reported_range(&redraw_and_read(&mut context, &view));
+    assert_eq!(
+        scrolled_start, 10,
+        "200px of 20px rows is ten items; the window must start there"
+    );
+    assert!(
+        scrolled_end > end,
+        "the window must have moved down the collection: {scrolled_start}..{scrolled_end}"
+    );
+}
+
+/// Rows are twenty pixels tall and the list starts at the top of the window, so
+/// the third one covers 40..60 and its stable key is `2`.
+fn assert_a_click_reports_the_row_key(cx: &mut TestAppContext, source: &str, y: f32) {
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, source);
+
+    context.simulate_click(point(px(150.), px(y)), Modifiers::default());
+    context.update(|window, cx| window.draw(cx).clear(cx));
+
+    let tree = redraw_and_read(&mut context, &view);
+    assert!(
+        tree.contains("clicked 2"),
+        "the click must arrive with the item's stable key: {tree}"
+    );
+}
+
+/// Loads one script source as the window's own root view and draws it once.
+///
+/// The view has to be the window's own root. A helper that drew it once into a
+/// throwaway element would leave every later frame going to the real root
+/// instead, and a lazy list only says anything once it has been laid out more
+/// than once.
+fn mount_list_source(
+    cx: &mut TestAppContext,
+    source: &str,
+) -> (
+    Rc<ShellRuntime>,
+    gpui::WindowHandle<RootedScriptView>,
+    gpui::Entity<ScriptView>,
+    VisualTestContext,
+) {
+    cx.update(crate::init);
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let view_type = runtime.load_source("rows.js", source).expect("load");
+
+    let runtime_for_view = Rc::clone(&runtime);
+    let window = cx.add_window(move |window, cx| {
+        let view = runtime_for_view
+            .instantiate_view(&view_type, window, cx)
+            .expect("instantiate");
+        RootedScriptView(view)
+    });
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let view = window
+        .root(&mut context)
+        .expect("view")
+        .read_with(&context, |root, _| root.0.clone());
+    (runtime, window, view, context)
+}
+
+#[gpui::test]
+fn a_uniform_list_describes_only_the_visible_window_and_follows_the_scroll(
+    cx: &mut TestAppContext,
+) {
+    assert_the_visible_window_follows_the_scroll(cx, uniform_list_source());
+}
+
+#[gpui::test]
+fn a_uniform_list_reports_which_row_was_clicked(cx: &mut TestAppContext) {
+    assert_a_click_reports_the_row_key(cx, uniform_list_source(), 50.);
+}
+
+#[gpui::test]
+fn a_list_measures_each_item_and_follows_the_scroll(cx: &mut TestAppContext) {
+    let (_runtime, _window, view, mut context) = mount_list_source(cx, measured_list_source());
+
+    let (start, end) = reported_range(&redraw_and_read(&mut context, &view));
+    assert_eq!(start, 0, "an unscrolled list starts at its first item");
+    // 20 + 40 + 20 + 40 + 20 + 40 + 20 fills the 200px box with seven rows, and
+    // the list draws a short band past the fold so it has measured ground to
+    // scroll into. A list that placed every row by the first one's 20px would
+    // put eighteen in the same space.
+    assert!(
+        (7..=13).contains(&end),
+        "a 200px box of alternating 20px and 40px rows shows about seven plus the \
+         overdraw band, not {end}"
+    );
+
+    scroll_by(&mut context, -200.);
+
+    let (_, scrolled_end) = reported_range(&redraw_and_read(&mut context, &view));
+    assert!(
+        scrolled_end > end,
+        "the window must have moved down the collection: ends at {scrolled_end}, was {end}"
+    );
+}
+
+#[gpui::test]
+fn a_list_reports_which_item_was_clicked(cx: &mut TestAppContext) {
+    // Alternating heights: row 0 covers 0..20, row 1 covers 20..60, row 2
+    // covers 60..80.
+    assert_a_click_reports_the_row_key(cx, measured_list_source(), 70.);
 }

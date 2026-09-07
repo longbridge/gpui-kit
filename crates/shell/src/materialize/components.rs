@@ -26,6 +26,7 @@ pub(super) mod collapsible;
 pub(super) mod dock;
 pub(super) mod fps;
 pub(super) mod group;
+pub(super) mod list;
 pub(super) mod number_input;
 pub(super) mod otp_input;
 pub(super) mod pagination;

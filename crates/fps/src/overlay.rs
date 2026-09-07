@@ -35,7 +35,6 @@ pub struct FpsOverlay {
     monitor: Entity<FpsMonitor>,
     anchor: Anchor,
     frame_budget: Option<Duration>,
-    continuous: Option<bool>,
 }
 
 impl FpsOverlay {
@@ -44,7 +43,6 @@ impl FpsOverlay {
             monitor: monitor.clone(),
             anchor: Anchor::TopRight,
             frame_budget: None,
-            continuous: None,
         }
     }
 
@@ -59,26 +57,13 @@ impl FpsOverlay {
         self.frame_budget = Some(budget);
         self
     }
-
-    /// Whether the HUD requests another animation frame after every render.
-    /// Defaults to the monitor's current setting (`true` on first use).
-    pub fn continuous(mut self, continuous: bool) -> Self {
-        self.continuous = Some(continuous);
-        self
-    }
 }
 
 impl RenderOnce for FpsOverlay {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
-        if self.frame_budget.is_some() || self.continuous.is_some() {
-            self.monitor.update(cx, |monitor, _| {
-                if let Some(budget) = self.frame_budget {
-                    monitor.set_frame_budget(budget);
-                }
-                if let Some(continuous) = self.continuous {
-                    monitor.set_continuous(continuous);
-                }
-            });
+        if let Some(budget) = self.frame_budget {
+            self.monitor
+                .update(cx, |monitor, _| monitor.set_frame_budget(budget));
         }
         let margin = MARGIN;
 

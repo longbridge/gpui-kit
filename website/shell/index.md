@@ -14,7 +14,7 @@ order: 1
 
 **It is not an Electron or a Tauri.** There is no WebView, no DOM, no HTML or CSS, no browser engine, and no Node.js. A script never renders. It describes an interface once, and Rust replays that description into real GPUI elements on every frame after it — the same element model a Rust application on `gpui-base` builds, through the same GPU renderer. JavaScript is the application layer here, not the rendering layer, which is why a repaint costs no JavaScript at all and taking the whole runtime costs [+13.5 MiB of binary](./engine.md#what-linking-it-costs).
 
-Both goals rest on the same split. `gpui-shell` is built directly on [`gpui-base`](/base/), with [QuickJS](https://github.com/quickjs-ng/quickjs) running on the host's own thread. The host builds the runtime and grants what a script may reach; the script draws real interface inside the same process. Rust keeps rendering, layout, text editing, virtualization, focus, overlays and every system capability; the script owns composition, presentation and business logic.
+Both goals rest on the same split. `gpui-shell` is built directly on [`gpui-base`](/base), with [QuickJS](https://github.com/quickjs-ng/quickjs) running on the host's own thread. The host builds the runtime and grants what a script may reach; the script draws real interface inside the same process. Rust keeps rendering, layout, text editing, virtualization, focus, overlays and every system capability; the script owns composition, presentation and business logic.
 
 ```js
 import { View } from "gpui-kit";

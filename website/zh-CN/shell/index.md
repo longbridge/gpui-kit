@@ -14,7 +14,7 @@ order: 1
 
 **它不是 Electron，也不是 Tauri。** 没有 WebView，没有 DOM，没有 HTML 与 CSS，没有浏览器引擎，也没有 Node.js。脚本从不负责渲染，它只把界面**描述**一次，此后每一帧都由 Rust 把这份描述重放成真正的 GPUI 元素——和一个基于 `gpui-base` 的 Rust 应用所构建的，是同一套元素模型、同一个 GPU 渲染器。在这里 JavaScript 是应用层，不是渲染层：所以一次重绘完全不执行 JavaScript，而带上整个运行时也只多 [13.5 MiB 二进制](./engine.md#链接它要付多少)。
 
-这两个目标建立在同一条分工上。`gpui-shell` 直接构建在 [`gpui-base`](/base/) 之上，[QuickJS](https://github.com/quickjs-ng/quickjs) 跑在 Host 自己的线程上。由 Host 构建运行时、决定脚本能碰到什么，而脚本在同一个进程里画出真正的界面。Rust 负责渲染、布局、文本编辑、虚拟化、焦点、浮层以及全部系统能力；脚本负责界面组合、视觉呈现与业务逻辑。
+这两个目标建立在同一条分工上。`gpui-shell` 直接构建在 [`gpui-base`](/base) 之上，[QuickJS](https://github.com/quickjs-ng/quickjs) 跑在 Host 自己的线程上。由 Host 构建运行时、决定脚本能碰到什么，而脚本在同一个进程里画出真正的界面。Rust 负责渲染、布局、文本编辑、虚拟化、焦点、浮层以及全部系统能力；脚本负责界面组合、视觉呈现与业务逻辑。
 
 ```js
 import { View } from "gpui-kit";

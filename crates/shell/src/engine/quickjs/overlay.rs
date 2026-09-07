@@ -432,11 +432,11 @@ impl<'js> FromJs<'js> for DialogRequest {
     }
 }
 
-/// `{ anchor, continuous, frame_budget }`, every key optional; `undefined` or
-/// `null` is the default HUD.
+/// `{ anchor, frame_budget }`, every key optional; `undefined` or `null` is
+/// the default HUD.
 struct FpsHudArgument(FpsHudRequest);
 
-const FPS_HUD_KEYS: &[&str] = &["anchor", "continuous", "frame_budget"];
+const FPS_HUD_KEYS: &[&str] = &["anchor", "frame_budget"];
 
 impl<'js> FromJs<'js> for FpsHudArgument {
     fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> JsResult<Self> {
@@ -464,9 +464,6 @@ impl<'js> FromJs<'js> for FpsHudArgument {
                     ),
                 )
             })?;
-        }
-        if let Some(continuous) = object.get::<_, Option<bool>>("continuous")? {
-            request.continuous = continuous;
         }
         if let Some(millis) = object.get::<_, Option<f64>>("frame_budget")? {
             if !(millis.is_finite() && millis > 0.) {

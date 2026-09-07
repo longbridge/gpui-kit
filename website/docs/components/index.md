@@ -1,5 +1,6 @@
 ---
 title: Components
+description: Browse more than 60 production-ready Rust UI components for forms, navigation, data, feedback, and desktop application layouts.
 order: 2
 collapsed: false
 ---

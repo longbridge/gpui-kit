@@ -307,7 +307,12 @@ Button::new("custom-btn")
 Button::new("btn")
     .label("Hover me")
     .tooltip("This is a helpful tooltip")
+    .tooltip_placement(Placement::Bottom)
 ```
+
+Use `.tooltip_placement(...)` to prefer a side for either `.tooltip(...)` or
+`.tooltip_with_action(...)`. The tooltip still flips when that side does not fit.
+Omit placement to keep automatic positioning.
 
 ### Custom Children
 
