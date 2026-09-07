@@ -188,11 +188,22 @@ impl ComponentId {
 }
 
 #[derive(Clone)]
-pub struct ComponentPayload(Arc<dyn Any + Send + Sync>);
+pub struct ComponentPayload(Arc<dyn Any + Send + Sync>, Option<Arc<str>>);
 
 impl ComponentPayload {
     pub fn new<T: Any + Send + Sync>(value: T) -> Self {
-        Self(Arc::new(value))
+        Self(Arc::new(value), None)
+    }
+
+    /// Adds an opt-in, quoted label to render snapshots. Adapters should use
+    /// public UI labels or stable IDs here, never private retained state.
+    pub fn with_debug_label(mut self, label: impl Into<Arc<str>>) -> Self {
+        self.1 = Some(label.into());
+        self
+    }
+
+    pub fn debug_label(&self) -> Option<&str> {
+        self.1.as_deref()
     }
 
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
@@ -722,6 +733,19 @@ impl<'a> MaterializeRequest<'a> {
         };
         self.runtime
             .with_component_state::<T, R>(*handle, kind, body)
+    }
+
+    /// Clones a built-in GPUI state entity supplied by the script. The runtime
+    /// checks ownership, liveness, the declared kind and the Rust entity type.
+    /// This preserves the existing script state's methods and subscriptions.
+    pub fn native_state<T: 'static>(
+        &self,
+        argument: &ComponentArgument,
+    ) -> anyhow::Result<gpui::Entity<T>> {
+        let ComponentArgument::Entity { kind, handle } = argument else {
+            anyhow::bail!("component argument is not native state");
+        };
+        self.runtime.native_component_state::<T>(*handle, kind)
     }
 
     /// Returns an opaque capability that may update state later from a GPUI event.
@@ -2261,6 +2285,15 @@ impl FrozenComponentRegistry {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn payload_debug_labels_are_opt_in_and_preserve_the_typed_value() {
+        let payload = super::ComponentPayload::new(42_u32);
+        assert_eq!(payload.debug_label(), None);
+        let labeled = payload.clone().with_debug_label("public choice");
+        assert_eq!(labeled.debug_label(), Some("public choice"));
+        assert_eq!(labeled.downcast_ref::<u32>(), Some(&42));
+        assert_eq!(payload.debug_label(), None);
+    }
     use super::*;
     use gpui::div;
 

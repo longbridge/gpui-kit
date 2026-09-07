@@ -1566,6 +1566,24 @@ impl ShellRuntime {
         self.entities.borrow().kind(handle)
     }
 
+    pub(crate) fn native_component_state<T: 'static>(
+        &self,
+        handle: EntityHandle,
+        kind: &'static str,
+    ) -> anyhow::Result<gpui::Entity<T>> {
+        let entities = self
+            .entities
+            .try_borrow()
+            .map_err(|_| anyhow!("native entity store is already borrowed"))?;
+        anyhow::ensure!(
+            entities.kind(handle) == Some(kind),
+            "native state is released, foreign or has the wrong kind"
+        );
+        entities
+            .native_state(handle)
+            .ok_or_else(|| anyhow!("native state does not match the requested Rust entity type"))
+    }
+
     pub(crate) fn with_component_state<T: std::any::Any, R>(
         &self,
         handle: u64,

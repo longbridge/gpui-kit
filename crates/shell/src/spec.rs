@@ -1354,6 +1354,11 @@ impl SpecArena {
                 out.push_str(&format!(" {:?} \u{d7}{}", spec.id(), spec.item_count()))
             }
             Component::ChildView(spec) => out.push_str(&format!(" #{}", spec.handle())),
+            Component::Registered(spec) => {
+                if let Some(label) = spec.payload().debug_label() {
+                    out.push_str(&format!(" {label:?}"));
+                }
+            }
             Component::Slider(handle)
             | Component::SliderTrack(handle)
             | Component::SliderIndicator(handle)

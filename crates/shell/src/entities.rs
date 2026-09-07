@@ -351,6 +351,21 @@ impl EntityStore {
         }
     }
 
+    /// Typed native state access for registered component adapters. Script
+    /// views and adapter-owned opaque values are deliberately not included.
+    pub(crate) fn native_state<T: 'static>(&self, handle: EntityHandle) -> Option<Entity<T>> {
+        let entity: &dyn std::any::Any = match self.record(handle)? {
+            Record::Input { state, .. } => state,
+            Record::Textarea { state, .. } => state,
+            Record::Calendar { state, .. } => state,
+            Record::Slider { state, .. } => state,
+            Record::Otp { state, .. } => state,
+            Record::Dock { area, .. } => area,
+            _ => return None,
+        };
+        entity.downcast_ref::<Entity<T>>().cloned()
+    }
+
     /// Creates a multi-line text state and returns its handle.
     ///
     /// `rows` is offered at construction because the layout default is a single
@@ -1416,6 +1431,16 @@ mod tests {
         assert!(store.input(textarea).is_none());
         assert!(store.textarea(textarea).is_some());
 
+        assert_eq!(store.native_state::<InputState>(input), store.input(input));
+        assert_eq!(
+            store.native_state::<TextareaState>(textarea),
+            store.textarea(textarea)
+        );
+        assert!(store.native_state::<InputState>(textarea).is_none());
+        assert!(store.native_state::<TextareaState>(input).is_none());
+        let other_store = EntityStore::try_new().expect("another store");
+        assert!(other_store.native_state::<InputState>(input).is_none());
+
         // Subscribing reaches both through the one method, which is the part
         // that would silently stop working if a variant were forgotten there.
         assert!(context.update(|window, cx| store.subscribe_input(
@@ -1428,6 +1453,7 @@ mod tests {
 
         assert!(store.release(textarea));
         assert!(store.textarea(textarea).is_none());
+        assert!(store.native_state::<TextareaState>(textarea).is_none());
         assert!(store.input(input).is_some());
     }
 
