@@ -31,6 +31,8 @@ members = [
     "examples/focus_trap",
     "examples/tooltip_top_edge",
     "examples/sidebar",
+    "examples/dual_sidebar",
+    "examples/agent_ide",
     "examples/text_max_lines",
     "examples/text_selection",
     "examples/root_borderless",
@@ -74,6 +76,8 @@ reqwest = { package = "gpui-pre-reqwest", version = "0.12.15", default-features 
 ] }
 
 anyhow = "1"
+libghostty-vt = "0.2.1"
+portable-pty = "0.9"
 instant = { version = "0.1", features = ["wasm-bindgen"] }
 log = "0.4"
 lsp-types = { version = "0.97.0", features = ["proposed"] }

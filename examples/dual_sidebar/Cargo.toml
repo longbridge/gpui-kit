@@ -1,0 +1,13 @@
+[package]
+name = "dual_sidebar"
+description = "A three-pane application layout: left sidebar, center view, right sidebar."
+version = "0.6.0"
+publish = false
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+gpui-kit.workspace = true
+
+[lints]
+workspace = true
