@@ -1,5 +1,9 @@
 [default]
-extend-ignore-re = ['\\u\{[0-9A-Fa-f]+\}']
+extend-ignore-re = [
+    '\\u\{[0-9A-Fa-f]+\}',
+    # Git patch object hashes are metadata, not words. Keep checking the patch body.
+    '(?m)^index [0-9a-f]+\.\.[0-9a-f]+ [0-7]+$',
+]
 
 [default.extend-words]
 # Correct Italian singular of "command".
