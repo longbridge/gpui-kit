@@ -7,6 +7,8 @@ description: A control that allows the user to toggle between checked and not ch
 
 A toggle switch component for binary on/off states. Features smooth animations, different sizes, labels, disabled state, and customizable positioning.
 
+Use `on_change` for requested values. The owner stores the value and calls `cx.notify()`. The existing `on_click` name remains a compatibility alias; setting either replaces the same handler, so the last call wins.
+
 ## Import
 
 ```rust
@@ -20,7 +22,7 @@ use gpui_kit::component::switch::Switch;
 ```rust
 Switch::new("my-switch")
     .checked(false)
-    .on_click(|checked, _, _| {
+    .on_change(|checked, _, _| {
         println!("Switch is now: {}", checked);
     })
 ```
@@ -36,7 +38,7 @@ impl Render for MyView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         Switch::new("switch")
             .checked(self.is_enabled)
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.is_enabled = *checked;
                 cx.notify();
             }))
@@ -50,7 +52,7 @@ impl Render for MyView {
 Switch::new("notifications")
     .label("Enable notifications")
     .checked(true)
-    .on_click(|checked, _, _| {
+    .on_change(|checked, _, _| {
         println!("Notifications: {}", if *checked { "enabled" } else { "disabled" });
     })
 ```
@@ -136,7 +138,7 @@ Switch::new("switch")
 | `disabled(bool)`   | Set disabled state                                          |
 | `tooltip(text)`    | Add tooltip text                                            |
 | `color(color)`     | Set background color when checked (default: `theme.primary`) |
-| `on_click(fn)`     | Callback when clicked, receives `&bool` (new checked state) |
+| `on_change(fn)`     | Requested checked value, receives `&bool` |
 
 ### Styling
 
@@ -187,7 +189,7 @@ v_flex()
                     .child(
                         Switch::new("marketing")
                             .checked(self.marketing_emails)
-                            .on_click(cx.listener(|view, checked, _, cx| {
+                            .on_change(cx.listener(|view, checked, _, cx| {
                                 view.marketing_emails = *checked;
                                 cx.notify();
                             }))
@@ -203,7 +205,7 @@ v_flex()
             .child(
                 Switch::new("push")
                     .checked(self.push_notifications)
-                    .on_click(cx.listener(|view, checked, _, cx| {
+                    .on_change(cx.listener(|view, checked, _, cx| {
                         view.push_notifications = *checked;
                         cx.notify();
                     }))
@@ -260,7 +262,7 @@ v_flex()
             .label("Subscribe to newsletter")
             .checked(self.subscribe_newsletter)
             .tooltip("Receive monthly updates about new features")
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.subscribe_newsletter = *checked;
                 cx.notify();
             }))
@@ -269,7 +271,7 @@ v_flex()
         Switch::new("notifications")
             .label("Enable notifications")
             .checked(self.enable_notifications)
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.enable_notifications = *checked;
                 cx.notify();
             }))
@@ -279,7 +281,7 @@ v_flex()
             .label("Remember me")
             .checked(self.remember_me)
             .small()
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.remember_me = *checked;
                 cx.notify();
             }))
@@ -293,7 +295,7 @@ Switch::new("custom")
     .label("Custom styled switch")
     .w(px(200.))
     .checked(true)
-    .on_click(|checked, _, _| {
+    .on_change(|checked, _, _| {
         println!("Custom switch: {}", checked);
     })
 ```

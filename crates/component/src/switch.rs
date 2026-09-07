@@ -68,8 +68,21 @@ impl Switch {
         self
     }
 
-    /// Add a click handler for the switch.
-    pub fn on_click<F>(mut self, handler: F) -> Self
+    /// Alias for [`Self::on_change`]. The last callback registered with either name wins.
+    pub fn on_click<F>(self, handler: F) -> Self
+    where
+        F: Fn(&bool, &mut Window, &mut App) + 'static,
+    {
+        self.on_change(handler)
+    }
+
+    /// Handle a requested checked value from pointer or keyboard activation.
+    ///
+    /// This is a controlled value: the owner must write the requested value and
+    /// call `cx.notify()` to render it. Disabled controls do not call the handler.
+    /// This and [`Self::on_click`] share one callback; chaining them replaces
+    /// the previous handler instead of calling both.
+    pub fn on_change<F>(mut self, handler: F) -> Self
     where
         F: Fn(&bool, &mut Window, &mut App) + 'static,
     {

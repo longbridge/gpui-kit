@@ -2960,6 +2960,7 @@ impl ShellRuntime {
     /// tests that never paint a frame. This runs the script; to read a
     /// description that has already been built, use
     /// [`RenderSnapshot::debug_tree`] instead — that path never enters the VM.
+    #[cfg(test)]
     pub(crate) fn render_to_spec(
         self: &Rc<Self>,
         object: &ViewObject,

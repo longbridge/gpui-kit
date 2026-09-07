@@ -64,7 +64,9 @@ This is the same trade the Rust side makes when an application builds directly
 on `gpui-base` instead of `gpui-component`. Colors are named as semantic theme
 tokens, so a shared visual language stays available without the runtime making
 visual decisions on the application's behalf. Applications that want ready-made
-product visuals wait for a `gpui-component` module, a later milestone.
+product visuals use the `gpui-component-shell` host and its `gpui-component`
+script module. Run `cargo run -p gpui-component-shell -- examples/js_story`
+for the styled gallery. Use this crate's bare host for Base-first applications.
 
 ## Quick Start
 
@@ -79,7 +81,7 @@ default-exports, and mounts one instance of it as the window's root view:
 
 ```js
 // main.js
-import { View } from "gpui-kit";
+import { View, div } from "gpui-kit";
 import { v_flex, Button, InputState } from "gpui-base";
 
 export default class Notes extends View {
@@ -128,12 +130,14 @@ cargo run -p gpui-shell -- check examples/js_todolist --print-spec
 cargo run -p gpui-shell -- types examples/js_todolist    # writes gpui-kit.d.ts
 ```
 
-`check` loads and renders the application once without showing a window. It
-reports syntax errors, unresolved imports, a missing or malformed default
-export, unknown style methods with a suggestion, wrongly typed style arguments,
-and an element used twice — each with the script's own stack. `types` writes
-TypeScript declarations generated from the same tables the runtime dispatches
-through, so an editor catches a mistyped style method before it runs.
+`check` loads the application, builds its description, and materializes eager
+native elements in a hidden window. It exits nonzero for load, render, or
+registered-component materialization errors, including invalid structured
+children and unsupported styles. It does not validate layout, paint, deferred
+slots, nested view renders, or later interactions and asynchronous states.
+`--print-spec` prints the same description that was materialized. `types` writes
+TypeScript declarations from the runtime's registration tables so an editor
+can catch invalid calls before execution.
 
 ### Working on an application
 
@@ -430,7 +434,7 @@ an internal trait with opaque handles, and a fake engine to compile it against �
 is worth doing when there is a second engine to write, and is make-work before
 that.
 
-## Not Here Yet
+## Host capabilities
 
 Present today: the element and style surface, state styles (`hover` / `active` /
 `focus`), `Button`, `Checkbox`, `Switch`, retained `InputState` with input
@@ -443,10 +447,12 @@ declarations.
 Deliberately absent:
 
 - `gpui.open_window` and multi-window applications; the host opens the window.
-- Select, combobox, tabs, list, table and tree bindings.
-- Charts, the code editor and its LSP surface, and WebView — these stay in Rust
-  on purpose; binding a trait-and-generics interface across a language boundary
-  costs more than it returns.
+- Full Rust API parity: script support is explicitly tracked per surface, not
+  inferred from the existence of a Rust component. The styled adapter already
+  supplies collection, select, table, tree, chart, and editor bindings. Consult
+  [the component inventory](../component-shell/component-inventory.json) and
+  [the gallery](../../examples/js_story/README.md) for available and deferred
+  surfaces; do not assume every delegate, LSP, or WebView facility is exposed.
 - Packaging and installing an application as a distributable archive.
 
 The design, what is implemented, and what is not are in

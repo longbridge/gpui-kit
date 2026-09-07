@@ -7,6 +7,8 @@ description: 用于在选中和未选中之间切换的开关控件。
 
 Switch 是一个二元开关组件，适合表示开启 / 关闭状态。它支持平滑动画、不同尺寸、标签、禁用状态和自定义颜色。
 
+使用 `on_change` 接收请求的新值，由状态所有者保存并调用 `cx.notify()`。原有的 `on_click` 保留为兼容名称；两者设置的是同一个回调，最后一次设置生效。
+
 ## 导入
 
 ```rust
@@ -20,7 +22,7 @@ use gpui_kit::component::switch::Switch;
 ```rust
 Switch::new("my-switch")
     .checked(false)
-    .on_click(|checked, _, _| {
+    .on_change(|checked, _, _| {
         println!("Switch is now: {}", checked);
     })
 ```
@@ -36,7 +38,7 @@ impl Render for MyView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         Switch::new("switch")
             .checked(self.is_enabled)
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.is_enabled = *checked;
                 cx.notify();
             }))
@@ -50,7 +52,7 @@ impl Render for MyView {
 Switch::new("notifications")
     .label("Enable notifications")
     .checked(true)
-    .on_click(|checked, _, _| {
+    .on_change(|checked, _, _| {
         println!("Notifications: {}", if *checked { "enabled" } else { "disabled" });
     })
 ```
@@ -128,7 +130,7 @@ Switch::new("switch")
 | `disabled(bool)` | 设置禁用状态 |
 | `tooltip(text)` | 添加提示文本 |
 | `color(color)` | 设置选中时的背景色，默认 `theme.primary` |
-| `on_click(fn)` | 点击回调，参数为新的 `&bool` 状态 |
+| `on_change(fn)` | 点击回调，参数为新的 `&bool` 状态 |
 
 ### 样式
 
@@ -170,7 +172,7 @@ v_flex()
                     .child(
                         Switch::new("marketing")
                             .checked(self.marketing_emails)
-                            .on_click(cx.listener(|view, checked, _, cx| {
+                            .on_change(cx.listener(|view, checked, _, cx| {
                                 view.marketing_emails = *checked;
                                 cx.notify();
                             }))

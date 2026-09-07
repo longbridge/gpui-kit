@@ -673,9 +673,12 @@ fn descriptor_drives_runtime_and_typescript(cx: &mut TestAppContext) {
     // descriptor declares none of them, and the runtime refuses them for a
     // registered component that does not.
     assert!(declarations.contains(
-        "export type TestBoxElement = Omit<Element, \"tone\" | \"disabled\" | \"selected\" | \"on_click\"> & {"
+        "export type TestBoxElement = Omit<NativeElement, \"tone\" | \"disabled\" | \"selected\" | \"on_click\" | \"role\" | \"transition\"> & {"
     ));
-    assert!(declarations.contains("import { ClickEvent, Context, Element } from \"gpui-kit\";"));
+    assert!(
+        declarations
+            .contains("import { ClickEvent, Context, Element, NativeElement } from \"gpui-kit\";")
+    );
     assert!(declarations.contains("export const TestBox: { new(id: string): TestBoxElement }"));
     assert!(declarations.contains("tone(value: string): TestBoxElement;"));
     assert!(declarations.contains("A test component."));
@@ -2492,7 +2495,7 @@ fn link_typings_expose_a_real_external_target() {
     let types =
         crate::typings::declarations_with_components(&crate::FrozenComponentRegistry::default());
     assert!(types.contains("export const Link: ComponentType;"));
-    assert!(types.contains("href(url: string): Element;"));
+    assert!(types.contains("href<Self extends Element>(this: Self, url: string): Self;"));
 }
 
 #[gpui::test]

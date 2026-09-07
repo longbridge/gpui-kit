@@ -4,11 +4,13 @@
 
 ## Setup
 
+Use the [tested application recipe](recipes.md) for complete examples and their verification command. Store subscription handles on the owning view; binding one to a constructor-local variable alone does not keep it alive after construction.
+
 ### 1. Cargo.toml
 
 ```toml
 [dependencies]
-gpui-kit = "0.6" # re-exports gpui, gpui_platform, gpui-base, gpui-component, gpui-shell and the default icons
+gpui-kit = "0.6" # re-exports GPUI, platform, base, component and the default icons; Shell is a separate host dependency
 ```
 
 ### 2. Initialization
@@ -139,14 +141,14 @@ Input::new(&input).appearance(false)         // remove default border/bg
 // Reading value
 let value = input.read(cx).value();
 
-// Events
-cx.subscribe_in(&input, window, |view, state, event, window, cx| {
+// Keep this subscription in the owning view (for example, `_subscriptions`).
+self._subscriptions.push(cx.subscribe_in(&input, window, |view, state, event, window, cx| {
     match event {
         InputEvent::Change => { let v = state.read(cx).value(); }
         InputEvent::PressEnter { .. } => { /* submit */ }
         InputEvent::Focus | InputEvent::Blur => {}
     }
-});
+}));
 ```
 
 ### Select
@@ -170,14 +172,20 @@ let selected = state.read(cx).selected_item();
 ### Checkbox / Switch / Radio
 
 ```rust
-use gpui_kit::component::{Checkbox, Switch};
+use gpui_kit::component::{checkbox::Checkbox, switch::Switch};
 
 // Stateless (controlled)
 Checkbox::new("cb").checked(self.checked)
-    .on_click(|checked, _, cx| { /* &bool */ })
+    .on_change(cx.listener(|this, checked, _, cx| {
+        this.checked = *checked;
+        cx.notify();
+    }))
 
 Switch::new("sw").checked(self.enabled)
-    .on_click(|checked, _, cx| {})
+    .on_change(cx.listener(|this, checked, _, cx| {
+        this.enabled = *checked;
+        cx.notify();
+    }))
 ```
 
 ### Icon
@@ -283,7 +291,7 @@ use gpui_kit::component::form::{v_form, h_form, field};
 v_form()
     .child(field().label("Name").child(Input::new(&self.name)))
     .child(field().label("Email").child(Input::new(&self.email)))
-    .child(Button::new("submit").primary().label("Submit"))
+    .footer(Button::new("submit").primary().label("Submit"))
 
 // Horizontal label alignment
 h_form()
@@ -300,12 +308,12 @@ let list_state = cx.new(|cx| ListState::new(MyDelegate::new(), window, cx));
 
 // Render
 List::new(&list_state)
-// Events
-cx.subscribe(&list_state, |this, _, event, cx| {
+// Keep this subscription in the owning view, alongside list_state.
+self._subscriptions.push(cx.subscribe(&list_state, |this, _, event, cx| {
     if let ListEvent::Select(index_path) = event {
         // handle selection
     }
-});
+}));
 ```
 
 ---
@@ -389,7 +397,7 @@ impl Render for MyApp {
 
 ## Shared Traits
 
-All components follow the builder pattern `Component::new("id").method().method()`:
+Builders return the component so methods can be chained. Constructors follow component families: controls take a stable ID, retained controls take state, and compound parts may take no arguments. See [component conventions](conventions.md).
 
 - `Sizable`: `.xsmall()` / `.small()` / `.medium()` (default) / `.large()`
 - `Disableable`: `.disabled(bool)`

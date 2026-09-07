@@ -1,0 +1,14 @@
+[package]
+name = "gpui-kit-recipes"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Deliberately isolated: workspace feature unification must not make these pass.
+[workspace]
+
+[dependencies]
+gpui-kit = { path = "../../crates/kit" }
+
+[dev-dependencies]
+gpui-kit = { path = "../../crates/kit", features = ["test-support"] }

@@ -1747,6 +1747,12 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let style = window.text_style();
         let font = style.font();
         let text_size = style.font_size.to_pixels(window.rem_size());
+        // Past the end of a line there are no glyphs to hit-test against, so a pointer
+        // out there is measured in spaces instead.
+        let space_width = {
+            let font_id = window.text_system().resolve_font(&font);
+            window.text_system().layout_width(font_id, text_size, ' ')
+        };
 
         self.state.update(cx, |state, cx| {
             state.display_map.set_font(font, text_size, cx);
@@ -1859,6 +1865,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             wrap_width,
             wrapping_indent,
             line_number_width,
+            space_width,
             lines: Rc::new(vec![]),
             cursor_bounds: None,
             text_align: state.text_align,
@@ -2427,6 +2434,13 @@ impl<M: InputModeKind> Element for TextElement<M> {
         );
 
         self.state.update(cx, |state, cx| {
+            let geometry_changed = state.last_bounds != Some(bounds)
+                || state.input_bounds != input_bounds
+                || state.scroll_size != prepaint.scroll_size
+                || state.last_layout.as_ref().is_none_or(|layout| {
+                    layout.cursor_bounds != prepaint.last_layout.cursor_bounds
+                        || layout.line_height != prepaint.last_layout.line_height
+                });
             state.last_layout = Some(prepaint.last_layout.clone());
             state.last_bounds = Some(bounds);
             state.last_cursor = Some(state.cursor());
@@ -2436,7 +2450,11 @@ impl<M: InputModeKind> Element for TextElement<M> {
             state.update_scroll_offset(Some(prepaint.cursor_scroll_offset), cx);
             state.deferred_scroll_offset = None;
 
-            cx.notify();
+            // Layout consumers need changed geometry, not another notification
+            // for every paint of an unchanged input.
+            if geometry_changed {
+                cx.notify();
+            }
         });
 
         if let Some(hitbox) = prepaint.hover_definition_hitbox.as_ref()

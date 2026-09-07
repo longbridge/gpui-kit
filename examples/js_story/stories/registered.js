@@ -392,6 +392,7 @@ export function registeredExamples(surface, cx) {
         },
       ];
     case "MessageScroller": {
+      /** @type {{ alignment: "start" | "end", variant: "filled" | "secondary", body: string }[]} */
       const messages = [
         {
           alignment: "end",

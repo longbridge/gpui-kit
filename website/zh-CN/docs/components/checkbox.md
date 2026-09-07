@@ -7,6 +7,8 @@ description: 用于切换选中与未选中状态的复选框组件。
 
 Checkbox 是一个用于二元选择的复选框组件，支持标签、禁用状态和不同文字尺寸。
 
+使用 `on_change` 接收请求的新值，由状态所有者保存并调用 `cx.notify()`。原有的 `on_click` 保留为兼容名称；两者设置的是同一个回调，最后一次设置生效。
+
 ## 导入
 
 ```rust
@@ -21,12 +23,12 @@ use gpui_kit::component::checkbox::Checkbox;
 Checkbox::new("my-checkbox")
     .label("Accept terms and conditions")
     .checked(false)
-    .on_click(|checked, _, _| {
+    .on_change(|checked, _, _| {
         println!("Checkbox is now: {}", checked);
     })
 ```
 
-`on_click` 会在用户切换状态时触发，接收到的是切换后的新状态。
+`on_change` 会在用户切换状态时触发，接收到的是切换后的新状态。
 
 ### 受控 Checkbox
 
@@ -40,7 +42,7 @@ impl Render for MyView {
         Checkbox::new("checkbox")
             .label("Option")
             .checked(self.is_checked)
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.is_checked = *checked;
                 cx.notify();
             }))
@@ -122,7 +124,7 @@ v_flex()
         Checkbox::new("terms")
             .label("I agree to the terms and conditions")
             .checked(self.agree_terms)
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.agree_terms = *checked;
                 cx.notify();
             }))
@@ -131,7 +133,7 @@ v_flex()
         Checkbox::new("subscribe")
             .label("Subscribe to newsletter")
             .checked(self.subscribe)
-            .on_click(cx.listener(|view, checked, _, cx| {
+            .on_change(cx.listener(|view, checked, _, cx| {
                 view.subscribe = *checked;
                 cx.notify();
             }))

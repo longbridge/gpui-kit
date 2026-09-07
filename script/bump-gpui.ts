@@ -35,11 +35,17 @@
  * Usage:
  *     script/bump-gpui.ts [VERSION] [--rev REV] [--zed PATH]
  *                         [--dry-run] [--stage-only] [--no-verify] [--no-wait]
+ *                         [--force]
  *
  * Every crate is published at `<VERSION>.<N>`, e.g. `0.3.12`: the
  * `VERSION` constant below (major.minor) plus a patch number that continues
  * from whatever crates.io already has. A positional VERSION overrides that
  * for one run.
+ *
+ * A version is only spent on a snapshot that differs from the newest
+ * published one: the run compares the requested Zed revision against the one
+ * that snapshot was cut from and stops when nothing under the published
+ * crates changed. `--force` publishes regardless.
  */
 
 import {
@@ -82,6 +88,10 @@ const DEPENDENCY_OVERRIDES: Record<
 };
 
 const ZED_GIT_URL = "https://github.com/zed-industries/zed";
+const ZED_GITHUB_API = ZED_GIT_URL.replace(
+  "https://github.com/",
+  "https://api.github.com/repos/",
+);
 const ZED_DEFAULT_REV = "main";
 const PUBLISH_PREFIX = "gpui-pre";
 const ROOT_CRATES = ["gpui", "gpui_platform", "gpui_macros", "reqwest_client"];
@@ -150,12 +160,25 @@ async function run(cmd: string[], options: RunOptions = {}): Promise<string> {
     ? `(cd ${options.cwd} && ${cmd.join(" ")})`
     : cmd.join(" ");
   console.log(dim(`$ ${shown}`));
-  const { code, output } = await spawn(cmd, options.cwd, !options.capture);
+  const { code, stdout, output } = await spawn(
+    cmd,
+    options.cwd,
+    !options.capture,
+  );
   if (code !== 0) {
     const detail = output.trim() ? `\n${output.trim()}` : "";
     throw new BumpError(`command failed (${code}): ${cmd[0]}${detail}`);
   }
-  return output;
+  return stdout;
+}
+
+/** Run a command, returning its standard output, or `undefined` if it failed. */
+async function runQuiet(
+  cmd: string[],
+  cwd: string,
+): Promise<string | undefined> {
+  const { code, stdout } = await spawn(cmd, cwd, false);
+  return code === 0 ? stdout : undefined;
 }
 
 /** Run a command, streaming its output while also capturing it. */
@@ -167,6 +190,13 @@ async function runStreaming(
   return spawn(cmd, cwd, true);
 }
 
+/**
+ * Run a command, keeping its standard output apart from the merged stream.
+ *
+ * Cargo reports its progress (`Updating crates.io index`, `Compiling ...`) on
+ * stderr, so a caller that parses `cargo metadata` has to read `stdout` on its
+ * own; the merged `output` is there to show what a failing command said.
+ */
 async function spawn(cmd: string[], cwd: string | undefined, echo: boolean) {
   const process_ = Bun.spawn(cmd, {
     cwd,
@@ -174,18 +204,20 @@ async function spawn(cmd: string[], cwd: string | undefined, echo: boolean) {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const chunks: string[] = [];
-  const decoder = new TextDecoder();
-  const pump = async (stream: ReadableStream<Uint8Array>) => {
+  const out: string[] = [];
+  const merged: string[] = [];
+  const pump = async (stream: ReadableStream<Uint8Array>, sink?: string[]) => {
+    const decoder = new TextDecoder();
     for await (const chunk of stream) {
       const text = decoder.decode(chunk, { stream: true });
-      chunks.push(text);
+      sink?.push(text);
+      merged.push(text);
       if (echo) process.stdout.write(text);
     }
   };
-  await Promise.all([pump(process_.stdout), pump(process_.stderr)]);
+  await Promise.all([pump(process_.stdout, out), pump(process_.stderr)]);
   const code = await process_.exited;
-  return { code, output: chunks.join("") };
+  return { code, stdout: out.join(""), output: merged.join("") };
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +267,122 @@ async function zedRevision(zed: string): Promise<string> {
       `${zed} is not a git checkout; cannot determine the Zed revision`,
     );
   }
+}
+
+/** The Zed revision a published description names, if it names one. */
+function snapshotRev(description: string): string | undefined {
+  return /\bzed@([0-9a-f]{7,40})\b/.exec(description)?.[1];
+}
+
+/**
+ * Resolve a Zed revision to a commit the checkout holds.
+ *
+ * The checkout is fetched one commit deep, so the previously published
+ * revision is normally absent and has to be fetched on its own. A server only
+ * answers for a full revision and crates.io records an abbreviated one, so
+ * GitHub expands it first. Returns `undefined` when the revision cannot be
+ * reached, which leaves the caller with nothing to compare against.
+ */
+async function fetchZedRev(
+  zed: string,
+  rev: string,
+): Promise<string | undefined> {
+  const local = await runQuiet(
+    ["git", "rev-parse", "--verify", "--quiet", `${rev}^{commit}`],
+    zed,
+  );
+  if (local !== undefined) return local.trim();
+  let full: string;
+  try {
+    const response = await fetch(`${ZED_GITHUB_API}/commits/${rev}`, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "application/vnd.github+json",
+        ...(process.env.GITHUB_TOKEN === undefined
+          ? {}
+          : { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }),
+      },
+    });
+    if (!response.ok) return undefined;
+    full = String(((await response.json()) as Toml).sha);
+  } catch {
+    return undefined;
+  }
+  const fetched = await runQuiet(
+    ["git", "fetch", "--depth", "1", "--no-tags", "origin", full],
+    zed,
+  );
+  return fetched === undefined ? undefined : full;
+}
+
+/**
+ * The newest published snapshot, and the Zed revision it was cut from.
+ *
+ * Every crate records that revision in `[package.metadata.gpui-pre]`, which
+ * crates.io does not serve, and in its description, which it does:
+ * `... (gpui-pre snapshot of zed@5b055fa)`.
+ */
+async function publishedSnapshot(
+  base: string,
+  crate: string,
+): Promise<{ version: string; rev: string } | undefined> {
+  const pattern = new RegExp(`^${base.replaceAll(".", "\\.")}\\.(\\d+)$`);
+  const data = await cratesIoGet(`${crate}/versions`);
+  let newest: { version: string; patch: number } | undefined;
+  for (const version of data?.versions ?? []) {
+    const match = pattern.exec(String(version.num));
+    if (match === null || version.yanked) continue;
+    const patch = Number(match[1]);
+    if (newest === undefined || patch > newest.patch)
+      newest = { version: String(version.num), patch };
+  }
+  if (newest === undefined) return undefined;
+  const detail = await cratesIoGet(`${crate}/${newest.version}`);
+  const rev = snapshotRev(String(detail?.version?.description ?? ""));
+  return rev === undefined ? undefined : { version: newest.version, rev };
+}
+
+/**
+ * The newest published snapshot when Zed has not touched it since, so that a
+ * run publishes a version only when there is something in it.
+ *
+ * The comparison covers the directory of every crate that gets published,
+ * together with Zed's workspace manifest, whose `[workspace.dependencies]`
+ * versions are inlined into the staged crates. Whatever it cannot establish —
+ * nothing published yet, a revision GitHub will not expand, a checkout without
+ * the Zed remote — publishes.
+ */
+async function unchangedSnapshot(
+  zed: string,
+  crates: Crate[],
+  zedSha: string,
+): Promise<{ version: string; rev: string } | undefined> {
+  const gpui = crates.find((crate) => crate.name === "gpui");
+  if (gpui === undefined) return undefined;
+  const published = await publishedSnapshot(VERSION, gpui.publishedName);
+  if (published === undefined) return undefined;
+  const previous = await fetchZedRev(zed, published.rev);
+  if (previous === undefined) {
+    logWarn(
+      `Cannot reach zed@${published.rev}, the revision ${PUBLISH_PREFIX} ` +
+        `${published.version} was cut from; publishing without comparing`,
+    );
+    return undefined;
+  }
+  if (previous === zedSha) return published;
+  const paths = ["Cargo.toml", ...crates.map((crate) => crate.relDir)];
+  const changed = await runQuiet(
+    ["git", "diff", "--name-only", previous, zedSha, "--", ...paths],
+    zed,
+  );
+  if (changed === undefined) return undefined;
+  const files = changed.split("\n").filter((line) => line !== "");
+  if (files.length === 0) return published;
+  logInfo(
+    `${files.length} published files changed since ${PUBLISH_PREFIX} ` +
+      `${published.version}, among them ${files.slice(0, 3).join(", ")}`,
+  );
+  return undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -1292,6 +1440,13 @@ fn helper(input: TokenStream) -> TokenStream { input }
     if (!pathRewriter.includes(expected))
       throw new BumpError(`self-test path rewriter is missing \`${expected}\``);
   }
+  for (const [description, expected] of [
+    ["Zed's GPU-accelerated UI framework (gpui-pre snapshot of zed@5b055fa)", "5b055fa"],
+    ["no revision here", undefined],
+  ] as const) {
+    if (snapshotRev(description) !== expected)
+      throw new BumpError(`self-test read the wrong revision from \`${description}\``);
+  }
   logSuccess("Facade-aware gpui_macros transformation self-test passed");
 }
 
@@ -1501,7 +1656,10 @@ async function cratesIoGet(path: string): Promise<Toml | undefined> {
  * that number, and the run resumes at it instead of starting a new one.
  * Yanked versions still occupy their number.
  */
-async function nextVersion(base: string, crates: Crate[]): Promise<string> {
+async function nextVersion(
+  base: string,
+  crates: Crate[],
+): Promise<{ version: string; resuming: boolean }> {
   const pattern = new RegExp(`^${base.replaceAll(".", "\\.")}\\.(\\d+)$`);
   const numbers = new Map<Crate, Set<number>>();
   let highest = -1;
@@ -1516,7 +1674,7 @@ async function nextVersion(base: string, crates: Crate[]): Promise<string> {
     highest = Math.max(highest, ...published);
     await Bun.sleep(200); // be polite to the crates.io API
   }
-  if (highest < 0) return `${base}.0`;
+  if (highest < 0) return { version: `${base}.0`, resuming: false };
   const incomplete = crates.filter(
     (crate) => !numbers.get(crate)!.has(highest),
   );
@@ -1524,9 +1682,9 @@ async function nextVersion(base: string, crates: Crate[]): Promise<string> {
     logInfo(
       `Resuming ${base}.${highest}: ${incomplete.length} crates are still missing it`,
     );
-    return `${base}.${highest}`;
+    return { version: `${base}.${highest}`, resuming: true };
   }
-  return `${base}.${highest + 1}`;
+  return { version: `${base}.${highest + 1}`, resuming: false };
 }
 
 async function versionIsPublished(
@@ -1657,6 +1815,7 @@ Options:
   --no-verify       skip \`cargo publish --dry-run\` verification
   --no-wait         abort instead of waiting on the crates.io rate limit
   --skip-kit-check  do not build and test this repository against the staged crates
+  --force           publish even when Zed did not change the published crates
   -h, --help        show this help
 `;
 
@@ -1669,6 +1828,7 @@ interface Args {
   noVerify: boolean;
   noWait: boolean;
   skipKitCheck: boolean;
+  force: boolean;
   selfTest: boolean;
 }
 
@@ -1686,6 +1846,7 @@ function parseCommandLine(argv: string[]): Args {
         "no-verify": { type: "boolean", default: false },
         "no-wait": { type: "boolean", default: false },
         "skip-kit-check": { type: "boolean", default: false },
+        force: { type: "boolean", default: false },
         "self-test": { type: "boolean", default: false },
         help: { type: "boolean", short: "h", default: false },
       },
@@ -1713,6 +1874,7 @@ function parseCommandLine(argv: string[]): Args {
     noVerify: parsed.values["no-verify"] as boolean,
     noWait: parsed.values["no-wait"] as boolean,
     skipKitCheck: parsed.values["skip-kit-check"] as boolean,
+    force: parsed.values.force as boolean,
     selfTest: parsed.values["self-test"] as boolean,
   };
 }
@@ -1804,6 +1966,7 @@ async function main(argv: string[]): Promise<number> {
   const totalSteps = args.stageOnly ? 4 : args.dryRun ? 6 : 7;
   logHeader(`Publishing GPUI from Zed as ${PUBLISH_PREFIX}`);
   mkdirSync(WORK_DIR, { recursive: true });
+  rmSync(join(WORK_DIR, "gpui-pre.json"), { force: true });
 
   logStep(`1/${totalSteps}`, "Preparing the Zed checkout");
   const zed = await prepareZed(args.rev, args.zed);
@@ -1814,13 +1977,39 @@ async function main(argv: string[]): Promise<number> {
   logStep(`2/${totalSteps}`, "Collecting the crates that gpui needs");
   const ws = loadWorkspace(zed);
   const crates = selectCrates(ws);
-  const version = args.version ?? (await nextVersion(VERSION, crates));
+  const next =
+    args.version === undefined
+      ? await nextVersion(VERSION, crates)
+      : { version: args.version, resuming: false };
+  const version = next.version;
   const width = Math.max(...crates.map((c) => c.name.length));
   for (const crate of crates)
     console.log(`    ${crate.name.padEnd(width)}  ->  ${crate.publishedName}`);
   logSuccess(
     `${crates.length} crates will be published as version ${bold(version)}`,
   );
+
+  // A run that uploads nothing, that was told which version to publish, or
+  // that resumes an unfinished one always does its work; the weekly cron is
+  // the one that must not spend a version on a snapshot nobody changed.
+  if (
+    !args.force &&
+    !args.dryRun &&
+    !args.stageOnly &&
+    args.version === undefined &&
+    !next.resuming
+  ) {
+    const unchanged = await unchangedSnapshot(zed, crates, zedSha);
+    if (unchanged !== undefined) {
+      console.log();
+      logSuccess(
+        "Nothing to publish: Zed has not touched the published crates since " +
+          `${PUBLISH_PREFIX} ${unchanged.version} (zed@${unchanged.rev}); ` +
+          "pass --force to publish anyway",
+      );
+      return 0;
+    }
+  }
   console.log();
 
   logStep(`3/${totalSteps}`, "Staging a standalone workspace");

@@ -200,7 +200,20 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
     out.push_str("   * belongs to the render pass that built it; storing one and using it\n");
     out.push_str("   * again throws, which no type can prevent.\n");
     out.push_str("   */\n");
-    out.push_str("  export interface Element {\n");
+    // Registered builders can override a native signature (for example size).
+    // A renderable union keeps those builders valid children without pretending
+    // that an adapter's semantic size accepts native lengths.
+    out.push_str("  export type Element = NativeElement");
+    for descriptor in components.descriptors() {
+        let _ = write!(
+            out,
+            " | import(\"gpui-component\").{}Element",
+            descriptor.name()
+        );
+    }
+    out.push_str(";\n\n");
+    out.push_str("  /** The fluent builder returned by native and Base element factories. */\n");
+    out.push_str("  export interface NativeElement {\n");
     out.push_str(ELEMENT_METHODS);
     out.push_str(&parametric_styles(&parametric));
     out.push_str(&nullary_styles(&nullary));
@@ -218,7 +231,7 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
     out.push_str(BASE);
     out.push_str("}\n\n");
     out.push_str("declare module \"gpui-component\" {\n");
-    out.push_str("  import { ClickEvent, Context, Element } from \"gpui-kit\";\n");
+    out.push_str("  import { ClickEvent, Context, Element, NativeElement } from \"gpui-kit\";\n");
     for state in components.states() {
         push_jsdoc(&mut out, state.documentation(), None, "  ");
         out.push_str("  export interface ");
@@ -252,6 +265,9 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
         let withheld = REGISTERED_COMMON_BEHAVIORS
             .iter()
             .copied()
+            // These native behaviors are not dispatched for registered
+            // components unless supplied by their own descriptor.
+            .chain(["role", "transition"])
             .filter(|behavior| !declared.contains(behavior))
             .collect::<Vec<_>>();
         let removed = declared
@@ -260,9 +276,9 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
             .chain(withheld.iter().copied())
             .collect::<Vec<_>>();
         if removed.is_empty() {
-            out.push_str("Element & {\n");
+            out.push_str("NativeElement & {\n");
         } else {
-            out.push_str("Omit<Element, ");
+            out.push_str("Omit<NativeElement, ");
             for (index, name) in removed.iter().enumerate() {
                 if index != 0 {
                     out.push_str(" | ");
@@ -283,10 +299,8 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
             out.push_str(descriptor.name());
             out.push_str("Element;\n");
         }
-        // Re-declared rather than simply removed. Dropping the member outright
-        // would also drop this type's assignability to `Element`, so a typed
-        // part could no longer be passed to a slot that takes one. A `never`
-        // parameter keeps the shape and still refuses every call.
+        // Keep unavailable behaviors visible with their explanation while a
+        // `never` parameter refuses every call, including after fluent methods.
         for behavior in &withheld {
             out.push_str("    /**\n     * Not available on this component: `");
             out.push_str(descriptor.name());
@@ -446,7 +460,7 @@ fn host_modules() -> String {
                 // Rust type of that name carries, so `any` would be wider than
                 // the runtime: a script passing a function or a Symbol would
                 // type-check and then be refused at the call.
-                out.push_str("  import { Element, HostValue } from \"gpui-kit\";\n\n");
+                out.push_str("  import { NativeElement, HostValue } from \"gpui-kit\";\n\n");
                 for function in module.function_names() {
                     // Permissive about shape, but not wrong about the one thing
                     // the caller has to get right: an asynchronous export is
@@ -464,7 +478,7 @@ fn host_modules() -> String {
                 for component in module.component_names() {
                     let _ = writeln!(
                         out,
-                        "  export const {component}: {{ new(id: string, props: HostValue): Element }};"
+                        "  export const {component}: {{ new(id: string, props: HostValue): NativeElement }};"
                     );
                 }
             }
@@ -801,7 +815,7 @@ fn parametric_styles(names: &[&'static str]) -> String {
         out.push_str(&doc_comment(style::documentation(name), 4));
         let _ = writeln!(
             out,
-            "    {name}(value: {}): Element;",
+            "    {name}<Self extends Element>(this: Self, value: {}): Self;",
             argument_of(name).ts_type()
         );
     }
@@ -820,7 +834,7 @@ fn nullary_styles(names: &[&'static str]) -> String {
     );
     for name in names {
         out.push_str(&doc_comment(style::documentation(name), 4));
-        let _ = writeln!(out, "    {name}(): Element;");
+        let _ = writeln!(out, "    {name}<Self extends Element>(this: Self): Self;");
     }
     out
 }
@@ -1235,13 +1249,15 @@ const CONTEXT_AND_VIEW: &str = r#"  /**
 /// Hand-written because each has a signature of its own; the names match the
 /// behavior list the engine installs on the prototype, and
 /// [`tests::every_element_method_is_accounted_for`] fails if the two drift.
+/// Explicit receiver generics survive `Omit` in registered builder types;
+/// polymorphic `this` alone would resolve to the original native interface.
 const ELEMENT_METHODS: &str = r#"    /**
      * Passes this element to `transform` and returns exactly what it returns.
      *
      * This mirrors GPUI's `FluentBuilder.map`: it is useful for keeping an
      * imperative or conditional transformation inside a fluent expression.
      */
-    map<T>(transform: (element: Element) => T): T;
+    map<Self extends Element, T>(this: Self, transform: (element: Self) => T): T;
     /**
      * Adds one child. The child is consumed; using it again throws.
      *
@@ -1254,9 +1270,9 @@ const ELEMENT_METHODS: &str = r#"    /**
      * entity may appear once per parent snapshot; a second mount in the same
      * description is refused before any of it is published.
      */
-    child(child: Element | Entity | string | number | boolean): Element;
+    child<Self extends Element>(this: Self, child: Element | Entity | string | number | boolean): Self;
     /** Adds several children, in order. */
-    children(children: Iterable<Element | Entity | string | number | boolean>): Element;
+    children<Self extends Element>(this: Self, children: Iterable<Element | Entity | string | number | boolean>): Self;
     /**
      * Fills the `content` slot of a `Collapsible`, a `Popover`, a `HoverCard`
      * or a `Popup`.
@@ -1280,7 +1296,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * on the inner element; the region the pointer has to reach is the wrapper
      * around it.
      */
-    content(element: Element): Element;
+    content<Self extends Element>(this: Self, element: Element): Self;
     /**
      * Fills an `Avatar`'s `image` slot, which takes an `AvatarImage`.
      *
@@ -1288,15 +1304,15 @@ const ELEMENT_METHODS: &str = r#"    /**
      * child. Base renders this one when it is there and the `fallback` when it
      * is not, so filling both is how a picture gets something to fall back to.
      */
-    image(element: Element): Element;
+    image<Self extends Element>(this: Self, element: Element): Self;
     /** Fills an `Avatar`'s `fallback` slot, which takes an `AvatarFallback`. */
-    fallback(element: Element): Element;
+    fallback<Self extends Element>(this: Self, element: Element): Self;
     /** Fills an `AccordionItem`'s `header` slot, which takes an `AccordionHeader`. */
-    header(element: Element): Element;
+    header<Self extends Element>(this: Self, element: Element): Self;
     /** Fills a component's named `footer` slot. */
-    footer(element: Element): Element;
+    footer<Self extends Element>(this: Self, element: Element): Self;
     /** Fills an `AccordionItem`'s `panel` slot, which takes an `AccordionPanel`. */
-    panel(element: Element): Element;
+    panel<Self extends Element>(this: Self, element: Element): Self;
     /**
      * Fills the `trigger` slot of a `Popover` or a `HoverCard`: the element
      * that is on screen while the surface is closed, and that opens it.
@@ -1306,7 +1322,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * instead, because its trigger's bounds are what the content is anchored
      * to.
      */
-    trigger(element: Element): Element;
+    trigger<Self extends Element>(this: Self, element: Element): Self;
     /**
      * Fills the editor slot of a `NumberInput`.
      *
@@ -1316,7 +1332,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * editor, and a frame inside this frame draws two borders. Adornments
      * beside the editor are ordinary `child(...)` calls on the number input.
      */
-    input(element: Element): Element;
+    input<Self extends Element>(this: Self, element: Element): Self;
     /**
      * Supplies the look of a `NumberInput`'s decrement button.
      *
@@ -1336,30 +1352,30 @@ const ELEMENT_METHODS: &str = r#"    /**
      * `disabled(...)` and `on_click(...)` written here are overwritten: the
      * number input owns whether stepping is allowed and what a press does.
      */
-    decrement_button(element: Element): Element;
+    decrement_button<Self extends Element>(this: Self, element: Element): Self;
     /** The increment button, replayed exactly as `decrement_button` is. */
-    increment_button(element: Element): Element;
+    increment_button<Self extends Element>(this: Self, element: Element): Self;
     /**
      * Stacks both of a `NumberInput`'s step buttons to the right of the text,
      * rather than putting one on each side of it.
      */
-    controls_right(): Element;
+    controls_right<Self extends Element>(this: Self): Self;
     /**
      * Applies `branch` only when `condition` is truthy, keeping the chain in
      * one piece. `branch` must return the element.
      */
-    when(condition: unknown, branch: (el: Element) => Element): Element;
+    when<Self extends Element>(this: Self, condition: unknown, branch: (el: Self) => Self): Self;
 
     /**
      * `handler(event, cx)` on activation. Keyboard activation is available
      * only on components whose Base primitive supports it; `Tab` is currently
      * pointer-only pending the compound keyboard behavior tracked in #2838.
      */
-    on_click(handler: (event: ClickEvent, cx: Context) => void): Element;
+    on_click<Self extends Element>(this: Self, handler: (event: ClickEvent, cx: Context) => void): Self;
     /** GPUI `InteractiveElement::on_mouse_move`, delivered while this element is hovered. */
-    on_mouse_move(handler: (event: MouseMoveEvent, cx: Context) => void): Element;
+    on_mouse_move<Self extends Element>(this: Self, handler: (event: MouseMoveEvent, cx: Context) => void): Self;
     /** GPUI `InteractiveElement::on_hover`; reports both pointer entry and exit. */
-    on_hover(handler: (hovered: boolean, cx: Context) => void): Element;
+    on_hover<Self extends Element>(this: Self, handler: (hovered: boolean, cx: Context) => void): Self;
     /**
      * GPUI `InteractiveElement::on_key_down`, delivered while this element or
      * something inside it holds the keyboard.
@@ -1380,13 +1396,13 @@ const ELEMENT_METHODS: &str = r#"    /**
      * component that accepts no focus handle — `Tab` — hears presses and never
      * hears keys, however well both are wired.
      */
-    on_key_down(handler: (event: KeyEvent, cx: Context) => void): Element;
+    on_key_down<Self extends Element>(this: Self, handler: (event: KeyEvent, cx: Context) => void): Self;
     /** GPUI `InteractiveElement::on_key_up`, on the same focus path as `on_key_down`. */
-    on_key_up(handler: (event: KeyEvent, cx: Context) => void): Element;
+    on_key_up<Self extends Element>(this: Self, handler: (event: KeyEvent, cx: Context) => void): Self;
     /** GPUI `InteractiveElement::on_modifiers_changed`, on the keyboard focus path. */
-    on_modifiers_changed(
+    on_modifiers_changed<Self extends Element>(this: Self,
       handler: (event: ModifiersChangedEvent, cx: Context) => void,
-    ): Element;
+    ): Self;
     /**
      * GPUI `InteractiveElement::on_mouse_down`, for one button.
      *
@@ -1396,15 +1412,15 @@ const ELEMENT_METHODS: &str = r#"    /**
      * for two buttons on one element is fine — the two handlers are
      * independent.
      */
-    on_mouse_down(
+    on_mouse_down<Self extends Element>(this: Self,
       button: MouseButton,
       handler: (event: MouseButtonEvent, cx: Context) => void,
-    ): Element;
+    ): Self;
     /** GPUI `InteractiveElement::on_mouse_up`, for one button. */
-    on_mouse_up(
+    on_mouse_up<Self extends Element>(this: Self,
       button: MouseButton,
       handler: (event: MouseButtonEvent, cx: Context) => void,
-    ): Element;
+    ): Self;
     /**
      * GPUI `InteractiveElement::on_mouse_down_out`: a press anywhere *outside*
      * this element, delivered during the capture phase.
@@ -1413,7 +1429,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * elsewhere — the same listener base's own components close on. It fires
      * for any button.
      */
-    on_mouse_down_out(handler: (event: MouseButtonEvent, cx: Context) => void): Element;
+    on_mouse_down_out<Self extends Element>(this: Self, handler: (event: MouseButtonEvent, cx: Context) => void): Self;
     /**
      * GPUI `InteractiveElement::on_scroll_wheel`: wheel and trackpad scrolling
      * over this element.
@@ -1422,7 +1438,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * not: it hands GPUI's own retained scroll container the job. Use this when
      * the gesture drives something else — a zoom, a value, a custom viewport.
      */
-    on_scroll_wheel(handler: (event: ScrollWheelEvent, cx: Context) => void): Element;
+    on_scroll_wheel<Self extends Element>(this: Self, handler: (event: ScrollWheelEvent, cx: Context) => void): Self;
     /**
      * `handler(event, cx)` when the named action is dispatched to this element
      * or to something inside it.
@@ -1436,7 +1452,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * Registering several on one element is fine and they are independent. An
      * action none of them names carries on to an element further out.
      */
-    on_action(action: string, handler: (event: ActionEvent, cx: Context) => void): Element;
+    on_action<Self extends Element>(this: Self, action: string, handler: (event: ActionEvent, cx: Context) => void): Self;
     /**
      * `InteractiveElement::key_context`: the key-binding context this element
      * and its subtree sit in.
@@ -1446,18 +1462,18 @@ const ELEMENT_METHODS: &str = r#"    /**
      * a predicate expression, not free text; an unparsable one is reported and
      * the context is left unset.
      */
-    key_context(context: string): Element;
+    key_context<Self extends Element>(this: Self, context: string): Self;
     /**
      * An `AccordionHeader`'s announced heading level — "heading level 3" — as
      * `aria-level` means it. Defaults to 3. It announces; it sizes nothing.
      */
-    aria_level(level: number): Element;
+    aria_level<Self extends Element>(this: Self, level: number): Self;
     /**
      * Whether an `AccordionPanel` stays in the tree while shut. Off by default;
      * on, its content keeps a scroll position or a half-typed field across a
      * close and reopen.
      */
-    keep_mounted(value?: boolean): Element;
+    keep_mounted<Self extends Element>(this: Self, value?: boolean): Self;
     /**
      * `handler(key, cx)` when a row of a virtual list is clicked, where `key`
      * is what the list's `get_key(index)` returned for that row.
@@ -1483,7 +1499,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * an item renderer starts working, with no change to anything written
      * against `on_item_click`.
      */
-    on_item_click(handler: (key: string, cx: Context) => void): Element;
+    on_item_click<Self extends Element>(this: Self, handler: (key: string, cx: Context) => void): Self;
     /**
      * `handler(key, event, cx)` on a secondary press — the right button — over
      * a row of a virtual list. `key` is what the list's `get_key(index)`
@@ -1502,9 +1518,9 @@ const ELEMENT_METHODS: &str = r#"    /**
      * pane learns which row was pressed from this handler and where in the
      * pane to open from the pane's.
      */
-    on_item_secondary_click(
+    on_item_secondary_click<Self extends Element>(this: Self,
       handler: (key: string, event: MouseButtonEvent, cx: Context) => void,
-    ): Element;
+    ): Self;
     /**
      * `handler(value, cx)`, on a toggle. The script owns the new value.
      *
@@ -1512,7 +1528,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * already checked — or disabled — radio reports nothing at all, and
      * clearing a group is the script's own business.
      */
-    on_change(handler: (checked: boolean, cx: Context) => void): Element;
+    on_change<Self extends Element>(this: Self, handler: (checked: boolean, cx: Context) => void): Self;
 
     /**
      * `handler(action, cx)` on a `NumberInput`, where `action` is
@@ -1527,7 +1543,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      *
      * Both the step buttons and the Up and Down keys report through it.
      */
-    on_step(handler: (action: "increment" | "decrement", cx: Context) => void): Element;
+    on_step<Self extends Element>(this: Self, handler: (action: "increment" | "decrement", cx: Context) => void): Self;
     /**
      * `handler(open, cx)`, when something other than the script changed a
      * `Popover`'s open state: a press on the trigger, a press outside it, or
@@ -1539,7 +1555,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * its open state cannot produce. A hover card's open state is its own, so
      * nothing is lost except the notification.
      */
-    on_open_change(handler: (open: boolean, cx: Context) => void): Element;
+    on_open_change<Self extends Element>(this: Self, handler: (open: boolean, cx: Context) => void): Self;
     /**
      * `handler(_, cx)` on Enter in an open `Select` or `Combobox`.
      *
@@ -1548,13 +1564,13 @@ const ELEMENT_METHODS: &str = r#"    /**
      * the script is the only side that knows. Confirming a *closed* root opens
      * it instead, so this never runs for that case.
      */
-    on_confirm(handler: (event: {}, cx: Context) => void): Element;
+    on_confirm<Self extends Element>(this: Self, handler: (event: {}, cx: Context) => void): Self;
     /**
      * `handler(_, cx)` on Escape in an open `Select` or `Combobox`, before
      * `on_open_change(false)` — which is what lets a script commit a pending
      * value on the way out.
      */
-    on_dismiss(handler: (event: {}, cx: Context) => void): Element;
+    on_dismiss<Self extends Element>(this: Self, handler: (event: {}, cx: Context) => void): Self;
     /**
      * The label a hover shows over this element, once the pointer has rested
      * on it for half a second.
@@ -1577,41 +1593,41 @@ const ELEMENT_METHODS: &str = r#"    /**
      * A tooltip is not a substitute for `accessibility_label`. A screen reader
      * announces the label; the tooltip is for the pointer.
      */
-    tooltip(text: string): Element;
+    tooltip<Self extends Element>(this: Self, text: string): Self;
     /** Blocks activation and reports the disabled state. Draw it yourself. */
-    disabled(value: boolean): Element;
+    disabled<Self extends Element>(this: Self, value: boolean): Self;
     /** Reports the selected state of a `Button`. */
-    selected(value: boolean): Element;
+    selected<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * This item's one-based position and its collection's total size, so a
      * screen reader can announce "tab 2 of 5" or "option 2 of 5". Announced,
      * never drawn: a tab list or radio group that omits it looks identical and
      * says nothing about where the reader is in the set.
      */
-    set_position(position: number, size: number): Element;
+    set_position<Self extends Element>(this: Self, position: number, size: number): Self;
     /** The controlled value of a `Checkbox`, `Switch` or `Radio`. */
-    checked(value: boolean): Element;
+    checked<Self extends Element>(this: Self, value: boolean): Self;
     /** The controlled state of a `Toggle`: a button that stays down. */
-    pressed(value: boolean): Element;
+    pressed<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * The announced progress percentage of a `Progress`, clamped to `0..=100`.
      *
      * It moves nothing on screen: size the `ProgressIndicator` from the same
      * number to draw the bar.
      */
-    value(percent: number): Element;
+    value<Self extends Element>(this: Self, percent: number): Self;
     /**
      * Withdraws a `Progress` value from the accessibility tree — "still
      * working, no idea how far". It does not animate anything; a barber-pole
      * or a sliding indicator is yours to draw, and `transition` on the
      * indicator is how it moves.
      */
-    indeterminate(value: boolean): Element;
+    indeterminate<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * What a screen reader announces. An icon-only control has no text of its
      * own and announces nothing without it.
      */
-    accessibility_label(description: string): Element;
+    accessibility_label<Self extends Element>(this: Self, description: string): Self;
     /**
      * What this element announces itself as.
      *
@@ -1622,14 +1638,14 @@ const ELEMENT_METHODS: &str = r#"    /**
      * menu item). Every other component announces a role of its own, and a
      * `role` there is reported and dropped rather than silently overwritten.
      */
-    role(name: Role): Element;
+    role<Self extends Element>(this: Self, name: Role): Self;
     /**
      * The selected state of an option in a list the script built itself.
      *
      * Plain elements only. `Tab` and `Radio` announce their own selection from
      * `selected(...)` and `checked(...)`.
      */
-    aria_selected(value: boolean): Element;
+    aria_selected<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * Announces this element as the focused one while an ancestor actually
      * holds the keyboard — the highlighted option of a combobox whose input
@@ -1639,7 +1655,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      *
      * Plain elements only.
      */
-    aria_active_descendant(): Element;
+    aria_active_descendant<Self extends Element>(this: Self): Self;
     /**
      * Tracks a `FocusHandle` the script owns, so `handle.is_focused()` answers
      * for this element and `handle.focus()` moves the keyboard onto it.
@@ -1655,7 +1671,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * you drew as the trigger, or nothing focusable is on screen and Escape and
      * Enter reach nothing.
      */
-    track_focus(handle: FocusHandle): Element;
+    track_focus<Self extends Element>(this: Self, handle: FocusHandle): Self;
     /**
      * Gives a virtual list the scroll position held by a
      * `VirtualListScrollHandle`, so the script can drive it with
@@ -1665,7 +1681,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * the id it was built with — which is the same place a `Scrollbar` named
      * after that id looks, so the bar works either way.
      */
-    track_scroll(handle: import("gpui-base").VirtualListScrollHandle): Element;
+    track_scroll<Self extends Element>(this: Self, handle: import("gpui-base").VirtualListScrollHandle): Self;
     /**
      * Which item a virtual list measures to infer its size across the axis it
      * scrolls: a vertical list takes its width from this item, a horizontal
@@ -1673,7 +1689,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      *
      * The name is base's own builder, kept verbatim.
      */
-    with_item_to_measure_index(index: number): Element;
+    with_item_to_measure_index<Self extends Element>(this: Self, index: number): Self;
     /**
      * The handle a `Select` or `Combobox` moves the keyboard to when it opens,
      * and away from when Escape closes it.
@@ -1682,7 +1698,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * then style itself from `handle.is_focused()`. It does **not** give you
      * arrow-key navigation — see `Select` for what is and is not there.
      */
-    content_focus_handle(handle: FocusHandle): Element;
+    content_focus_handle<Self extends Element>(this: Self, handle: FocusHandle): Self;
     /**
      * Where this element sits in the window's Tab order. A whole number;
      * setting it also makes the element a tab stop.
@@ -1691,15 +1707,15 @@ const ELEMENT_METHODS: &str = r#"    /**
      * `Tabs` and the table, group and progress parts, which base leaves out of
      * keyboard focus entirely.
      */
-    tab_index(index: number): Element;
+    tab_index<Self extends Element>(this: Self, index: number): Self;
     /**
      * Whether Tab can land on this element. `false` keeps its place in the
      * order without making it reachable, which is what a container that
      * forwards focus to its first child wants.
      */
-    tab_stop(value: boolean): Element;
+    tab_stop<Self extends Element>(this: Self, value: boolean): Self;
     /** Sets the absolute HTTP(S) target opened by a `Link`. */
-    href(url: string): Element;
+    href<Self extends Element>(this: Self, url: string): Self;
     /**
      * A stable name for this element, used as its identity.
      *
@@ -1711,36 +1727,36 @@ const ELEMENT_METHODS: &str = r#"    /**
      * Any component whose factory takes an id is already identified by that id
      * and ignores this.
      */
-    id(name: string): Element;
+    id<Self extends Element>(this: Self, name: string): Self;
     /** Owns wheel and touch scrolling on both axes for overflowing children. */
-    overflow_scroll(): Element;
+    overflow_scroll<Self extends Element>(this: Self): Self;
     /** Owns horizontal wheel and touch scrolling for overflowing children. */
-    overflow_x_scroll(): Element;
+    overflow_x_scroll<Self extends Element>(this: Self): Self;
     /** Owns vertical wheel and touch scrolling for overflowing children. */
-    overflow_y_scroll(): Element;
+    overflow_y_scroll<Self extends Element>(this: Self): Self;
     /** Scrolls both axes and paints base-layer scrollbars. */
-    overflow_scrollbar(): Element;
+    overflow_scrollbar<Self extends Element>(this: Self): Self;
     /** Scrolls horizontally and paints a base-layer scrollbar. */
-    overflow_x_scrollbar(): Element;
+    overflow_x_scrollbar<Self extends Element>(this: Self): Self;
     /** Scrolls vertically and paints a base-layer scrollbar. */
-    overflow_y_scrollbar(): Element;
+    overflow_y_scrollbar<Self extends Element>(this: Self): Self;
     /**
      * A `Scrollbar`'s visibility policy. Omitted, it follows the theme, which
      * is what every bar painted by `overflow_*_scrollbar` does.
      */
-    mode(value: import("gpui-base").ScrollbarMode): Element;
+    mode<Self extends Element>(this: Self, value: import("gpui-base").ScrollbarMode): Self;
     /**
      * The content size a `Scrollbar` measures its thumb against, in pixels,
      * for when the script knows it and the scroll area does not — a list that
      * paints a window of rows rather than all of them.
      */
-    scroll_size(width: number, height: number): Element;
+    scroll_size<Self extends Element>(this: Self, width: number, height: number): Self;
     /**
      * Makes a `Scrollbar` take its viewport from its own box rather than from
      * the scroll area it drives. The way to run a bar down the rows of a table
      * without it reaching up over the fixed header.
      */
-    viewport_from_layout(): Element;
+    viewport_from_layout<Self extends Element>(this: Self): Self;
     /**
      * How far a `resizable_panel()` may be dragged, in pixels.
      *
@@ -1749,7 +1765,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * while the maximum is optional and defaults to unbounded. Omit the call
      * entirely to keep both of base's defaults.
      */
-    size_range(min: number, max?: number): Element;
+    size_range<Self extends Element>(this: Self, min: number, max?: number): Self;
     /**
      * `handler(sizes, cx)` on an `h_resizable()` or `v_resizable()`, once a drag
      * of one of its handles has ended. `sizes` is the pixel size of every panel,
@@ -1760,7 +1776,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * wired: it is for persisting a layout or showing a width, not for making
      * the group resize.
      */
-    on_resize(handler: (sizes: number[], cx: Context) => void): Element;
+    on_resize<Self extends Element>(this: Self, handler: (sizes: number[], cx: Context) => void): Self;
     /**
      * The orientation a `RadioGroup` or `ToggleGroup` announces.
      *
@@ -1770,15 +1786,15 @@ const ELEMENT_METHODS: &str = r#"    /**
      * drawn. Omitted, each container keeps its own default: `RadioGroup` is
      * vertical, `ToggleGroup` horizontal.
      */
-    axis(value: Axis): Element;
+    axis<Self extends Element>(this: Self, value: Axis): Self;
     /**
      * A `Table`'s total number of rows, including rows outside the range the
      * script rendered, so a screen reader can announce "row 5 of 200". A table
      * that draws every row it has does not need it.
      */
-    row_count(count: number): Element;
+    row_count<Self extends Element>(this: Self, count: number): Self;
     /** A `Table`'s total number of columns, including unrendered ones. */
-    column_count(count: number): Element;
+    column_count<Self extends Element>(this: Self, count: number): Self;
     /**
      * Whether a `Collapsible` renders the element in its `content` slot — its
      * ordinary children are rendered either way — or whether a `Popover`,
@@ -1794,16 +1810,16 @@ const ELEMENT_METHODS: &str = r#"    /**
      * A `Popup` has no open state to set. It shows whatever is in its `content`
      * slot, so `.when(open, el => el.content(...))` is how one is opened.
      */
-    open(value: boolean): Element;
+    open<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * Whether a `Popover` starts open. Read once, when the surface is first
      * described; a controlled popover ignores it from then on.
      */
-    default_open(value: boolean): Element;
+    default_open<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * Whether pressing outside an open `Popover` closes it. Default `true`.
      */
-    overlay_closable(value: boolean): Element;
+    overlay_closable<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * Which corner of a `Popover` or `HoverCard` is pinned to its trigger, or
      * where an `fps_monitor()` is pinned inside its relative parent. Omitted,
@@ -1813,33 +1829,33 @@ const ELEMENT_METHODS: &str = r#"    /**
      * The surface is clamped into the window either way, so an anchor near an
      * edge is a preference rather than a promise.
      */
-    anchor(value: Anchor): Element;
+    anchor<Self extends Element>(this: Self, value: Anchor): Self;
     /** Frame budget, in milliseconds, used by an fps_monitor's FRAME grading. */
-    frame_budget(milliseconds: number): Element;
+    frame_budget<Self extends Element>(this: Self, milliseconds: number): Self;
     /** Which pointer button opens a `Popover`. Default `left`. */
-    mouse_button(value: MouseButton): Element;
+    mouse_button<Self extends Element>(this: Self, value: MouseButton): Self;
     /**
      * How long, in milliseconds, the pointer must rest on a `HoverCard`'s
      * trigger before the card appears. Default 600.
      */
-    open_delay(ms: number): Element;
+    open_delay<Self extends Element>(this: Self, ms: number): Self;
     /**
      * How long, in milliseconds, a `HoverCard` waits after the pointer leaves
      * both the trigger and the card before closing. Default 300; it is what
      * lets the pointer cross the gap between the two.
      */
-    close_delay(ms: number): Element;
+    close_delay<Self extends Element>(this: Self, ms: number): Self;
     /** Animates later target changes entirely in native GPUI code. */
-    transition(property: import("gpui-shell").MotionProperty, policy: number | import("gpui-shell").TransitionPolicy): Element;
+    transition<Self extends Element>(this: Self, property: import("gpui-shell").MotionProperty, policy: number | import("gpui-shell").TransitionPolicy): Self;
     /** Springs later target changes entirely in native GPUI code. */
-    spring(property: import("gpui-shell").MotionProperty, policy?: import("gpui-shell").SpringPolicy): Element;
+    spring<Self extends Element>(this: Self, property: import("gpui-shell").MotionProperty, policy?: import("gpui-shell").SpringPolicy): Self;
 
     /**
      * Which thumb of a range slider a `SliderThumb` is: the one at the start
      * of the range, or the one at its end. Default `false`, the end — which
      * is the only thumb a single-value slider has.
      */
-    start(value: boolean): Element;
+    start<Self extends Element>(this: Self, value: boolean): Self;
     /**
      * How the filled part of a `SliderIndicator` looks. `declare` receives a
      * detached element that collects the styles, exactly as `hover` does; its
@@ -1852,7 +1868,7 @@ const ELEMENT_METHODS: &str = r#"    /**
      * with no `range_style` has no fill at all, which is a slider drawn as a
      * groove and a knob.
      */
-    range_style(declare: (el: Element) => Element | void): Element;
+    range_style<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /**
      * How every cell of an `OtpInput` looks. `declare` receives a detached
      * element that collects the styles, exactly as `hover` does; its return
@@ -1862,13 +1878,13 @@ const ELEMENT_METHODS: &str = r#"    /**
      * by the script, so an `OtpInput` without this one is a row of boxes with
      * no size, no border and no background — nothing on screen at all.
      */
-    cell_style(declare: (el: Element) => Element | void): Element;
+    cell_style<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /**
      * Layered on top of `cell_style` for the one cell the next digit lands in,
      * while the code holds the keyboard and is not disabled. A refinement
      * rather than a replacement, the way `hover` is: declare only what differs.
      */
-    cell_active_style(declare: (el: Element) => Element | void): Element;
+    cell_active_style<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /**
      * The blinking mark drawn in that cell while it is still empty. Give it a
      * width, a height and a background; with no `caret_style` there is no
@@ -1876,17 +1892,17 @@ const ELEMENT_METHODS: &str = r#"    /**
      *
      * Not `cursor_style`: everywhere else in this API `cursor` is the pointer.
      */
-    caret_style(declare: (el: Element) => Element | void): Element;
+    caret_style<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /**
      * Styles applied while the pointer is over the element. `declare` receives
      * a detached element that collects the styles; its return value is
      * ignored, so a chain and a block body both work.
      */
-    hover(declare: (el: Element) => Element | void): Element;
+    hover<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /** Styles applied while the element is pressed. */
-    active(declare: (el: Element) => Element | void): Element;
+    active<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /** Styles applied while the element has focus. */
-    focus(declare: (el: Element) => Element | void): Element;
+    focus<Self extends Element>(this: Self, declare: (el: NativeElement) => NativeElement | void): Self;
     /**
      * Displays the tab at `index` in `group` when this element is clicked.
      *
@@ -1902,42 +1918,42 @@ const ELEMENT_METHODS: &str = r#"    /**
      * `h_flex` or a `v_flex`; a `Button` builds its own interior and has
      * nowhere to put one.
      */
-    select_tab(group: import("gpui-base").DockGroup, index: number): Element;
+    select_tab<Self extends Element>(this: Self, group: import("gpui-base").DockGroup, index: number): Self;
     /** Closes `panel` when this element is clicked, if its group allows it. */
-    close_panel(group: import("gpui-base").DockGroup, panel: number): Element;
+    close_panel<Self extends Element>(this: Self, group: import("gpui-base").DockGroup, panel: number): Self;
     /** Zooms the group in, or back out. */
-    toggle_zoom(group: import("gpui-base").DockGroup): Element;
+    toggle_zoom<Self extends Element>(this: Self, group: import("gpui-base").DockGroup): Self;
     /**
      * Makes this element the drag source for the tab at `index`, carrying
      * base's own panel payload — so dropping it on another group, or on the
      * area itself, moves the panel there.
      */
-    drag_tab(group: import("gpui-base").DockGroup, index: number): Element;
+    drag_tab<Self extends Element>(this: Self, group: import("gpui-base").DockGroup, index: number): Self;
     /**
      * Accepts a dragged panel here. `index` is the slot it lands in; leave it
      * out to append, which is what a drop past the last tab means.
      */
-    drop_tab(group: import("gpui-base").DockGroup, index?: number): Element;
+    drop_tab<Self extends Element>(this: Self, group: import("gpui-base").DockGroup, index?: number): Self;
     /** Opens or closes the dock when this element is clicked. */
-    toggle_dock(dock: import("gpui-base").DockRegion): Element;
+    toggle_dock<Self extends Element>(this: Self, dock: import("gpui-base").DockRegion): Self;
     /**
      * Drags the dock's edge. Base clamps every size it is given against the
      * area and the opposite dock, so nothing here has to.
      */
-    resize_dock(dock: import("gpui-base").DockRegion): Element;
+    resize_dock<Self extends Element>(this: Self, dock: import("gpui-base").DockRegion): Self;
     /** Drags the tile around its canvas, raising it first. */
-    move_tile(tile: import("gpui-base").DockTile): Element;
+    move_tile<Self extends Element>(this: Self, tile: import("gpui-base").DockTile): Self;
     /** Drags one edge or corner of the tile. */
-    resize_tile(
+    resize_tile<Self extends Element>(this: Self,
       tile: import("gpui-base").DockTile,
       side: import("gpui-base").TileResizeSide,
-    ): Element;
+    ): Self;
     /** Brings the tile above the others when this element is pressed. */
-    raise_tile(tile: import("gpui-base").DockTile): Element;
+    raise_tile<Self extends Element>(this: Self, tile: import("gpui-base").DockTile): Self;
     /** Zooms the tile to fill its dock, or back out. */
-    toggle_tile_zoom(tile: import("gpui-base").DockTile): Element;
+    toggle_tile_zoom<Self extends Element>(this: Self, tile: import("gpui-base").DockTile): Self;
     /** Closes the tile. */
-    close_tile(tile: import("gpui-base").DockTile): Element;
+    close_tile<Self extends Element>(this: Self, tile: import("gpui-base").DockTile): Self;
 "#;
 
 fn shell_types() -> String {
@@ -2013,7 +2029,7 @@ const SHELL_TYPES: &str = r#"  /** A path coordinate in pixels or as a percentag
 /// them. `gpui-base`'s components are declared separately, in [`BASE`].
 const ELEMENTS: &str = r#"
   /** An element with no layout of its own. */
-  export function div(): Element;
+  export function div(): NativeElement;
 
   /**
    * A vector image from the application's own directory.
@@ -2023,7 +2039,7 @@ const ELEMENTS: &str = r#"
    * application's public directory works. It inherits the surrounding text
    * color unless it sets its own.
    */
-  export function svg(path: string): Element;
+  export function svg(path: string): NativeElement;
 
   /**
    * A full-color image from the application's own directory.
@@ -2032,7 +2048,7 @@ const ELEMENTS: &str = r#"
    * as a theme-tinted icon mask. SVG, PNG, JPEG and other GPUI image formats
    * are supported by the host image loader.
    */
-  export function image(path: string): Element;
+  export function image(path: string): NativeElement;
 
   /** The visible items, as a half-open `[start, end)` interval. */
   export interface ItemRange {
@@ -2086,7 +2102,7 @@ const ELEMENTS: &str = r#"
     item_count: number,
     get_key: (index: number) => string,
     render: (index: number, cx: Context) => Element,
-  ): Element;
+  ): NativeElement;
 
   /**
    * GPUI's own uniform list: one row is measured and every row takes its
@@ -2106,7 +2122,7 @@ const ELEMENTS: &str = r#"
     item_count: number,
     get_key: (index: number) => string,
     render: (range: ItemRange, cx: Context) => Element[],
-  ): Element;
+  ): NativeElement;
 
   /** Immutable native GPUI geometry produced by `PathBuilder.build()`. */
   export interface Path {}
@@ -2164,12 +2180,12 @@ const BASE_SHARED_TYPES: &str = r#"
 
   /** A component identified across renders by `new(id)`. */
   export interface ComponentType {
-    new: (id: string | number) => Element;
+    new: (id: string | number) => NativeElement;
   }
 
   /** A sub-part with no identity of its own, constructed with `new()`. */
   export interface PartType {
-    new: () => Element;
+    new: () => NativeElement;
   }
 
 "#;
@@ -2235,7 +2251,7 @@ const WINDOW: &str = r#"
      * the window rather than on the app. Legal from `render`, unlike the
      * overlays above — it builds a description like any other element.
      */
-    paint_path(path: Path, background: Background | Color): Element;
+    paint_path(path: Path, background: Background | Color): NativeElement;
 
     /**
      * `Window::dispatch_action`. Dispatches an action down this window's focus
@@ -2326,9 +2342,9 @@ const WINDOW: &str = r#"
 /// theme. Emitted into `declare module "gpui-base"`, so an import says which
 /// layer a script is reaching for.
 const BASE: &str = r#"  /** A row. */
-  export function h_flex(): Element;
+  export function h_flex(): NativeElement;
   /** A column. */
-  export function v_flex(): Element;
+  export function v_flex(): NativeElement;
 
   /** Activation, focus, disabled and selected state. No styling. */
   export const Button: ComponentType;
@@ -2339,11 +2355,11 @@ const BASE: &str = r#"  /** A row. */
   /** A controlled switch. No styling. */
   export const Switch: ComponentType;
   /** Rich HTML or Markdown text. CSS in HTML is not supported. */
-  export interface TextViewElement extends Element {
+  export interface TextViewElement extends NativeElement {
     /** Overrides TextView's default URL opening and reports the resolved URL. */
-    on_link_click(handler: (url: string, cx: Context) => void): TextViewElement;
-    selectable(value?: boolean): TextViewElement;
-    scrollable(value?: boolean): TextViewElement;
+    on_link_click(handler: (url: string, cx: Context) => void): this;
+    selectable(value?: boolean): this;
+    scrollable(value?: boolean): this;
   }
   export const TextView: {
     html(id: string, html: string): TextViewElement;
@@ -2624,11 +2640,11 @@ const BASE: &str = r#"  /** A row. */
   /** The body row group of a `Table`. */
   export const TableBody: ComponentType;
   /** One row. `TableRow.new(id, row_index)`, one-based. */
-  export const TableRow: { new: (id: string | number, row_index: number) => Element };
+  export const TableRow: { new: (id: string | number, row_index: number) => NativeElement };
   /** One column header. `TableHead.new(id, column_index)`, one-based. */
-  export const TableHead: { new: (id: string | number, column_index: number) => Element };
+  export const TableHead: { new: (id: string | number, column_index: number) => NativeElement };
   /** One data cell. `TableCell.new(id, column_index)`, one-based. */
-  export const TableCell: { new: (id: string | number, column_index: number) => Element };
+  export const TableCell: { new: (id: string | number, column_index: number) => NativeElement };
   /**
    * The visual slot a caption belongs in. It is an identified container and
    * nothing more: it carries no caption role, so assistive technology does not
@@ -2661,9 +2677,9 @@ const BASE: &str = r#"  /** A row. */
    *   .child(resizable_panel().child(editor));
    * ```
    */
-  export function h_resizable(id: string): Element;
+  export function h_resizable(id: string): NativeElement;
   /** A column of panes with draggable dividers. See `h_resizable`. */
-  export function v_resizable(id: string): Element;
+  export function v_resizable(id: string): NativeElement;
   /**
    * One pane of an `h_resizable()` or `v_resizable()`, and only there: a panel
    * anywhere else throws when it is added, because its size and its drag handle
@@ -2680,7 +2696,7 @@ const BASE: &str = r#"  /** A row. */
    *   `visibility` style. A hidden panel keeps its place in the group, so its
    *   siblings' sizes are undisturbed while it is away. Default `true`.
    */
-  export function resizable_panel(): Element;
+  export function resizable_panel(): NativeElement;
 
   /**
    * A region whose `content` is materialized and rendered only while `open` is
@@ -2745,7 +2761,7 @@ const BASE: &str = r#"  /** A row. */
    * and `track_focus` all land on it.
    */
   export const Popup: {
-    new: (id: string | number, trigger: Element) => Element;
+    new: (id: string | number, trigger: Element) => NativeElement;
   };
 
   /**
@@ -2816,7 +2832,7 @@ const BASE: &str = r#"  /** A row. */
    * trigger and calendar inside one.
    */
   export const DatePicker: {
-    new: (id: string | number, focus_handle: FocusHandle) => Element;
+    new: (id: string | number, focus_handle: FocusHandle) => NativeElement;
   };
 
   /** When a `Scrollbar` shows itself. */
@@ -2850,11 +2866,11 @@ const BASE: &str = r#"  /** A row. */
    */
   export const Scrollbar: {
     /** Both axes. */
-    new: (id: string | number) => Element;
+    new: (id: string | number) => NativeElement;
     /** The horizontal bar alone. */
-    horizontal: (id: string | number) => Element;
+    horizontal: (id: string | number) => NativeElement;
     /** The vertical bar alone. */
-    vertical: (id: string | number) => Element;
+    vertical: (id: string | number) => NativeElement;
   };
 
   /** The visible items, as a half-open `[start, end)` interval. */
@@ -2920,7 +2936,7 @@ const BASE: &str = r#"  /** A row. */
     item_sizes: number | number[],
     get_key: (index: number) => string,
     render: (range: ItemRange, cx: Context) => Element[],
-  ): Element;
+  ): NativeElement;
 
   /** `v_virtual_list` along the other axis; `item_sizes` are widths. */
   export function h_virtual_list(
@@ -2929,7 +2945,7 @@ const BASE: &str = r#"  /** A row. */
     item_sizes: number | number[],
     get_key: (index: number) => string,
     render: (range: ItemRange, cx: Context) => Element[],
-  ): Element;
+  ): NativeElement;
 
   /**
    * A virtual list's scroll position, kept across frames so the script can move
@@ -2998,7 +3014,7 @@ const BASE: &str = r#"  /** A row. */
   };
 
   /** The frame around retained text state. */
-  export const Input: { new: (state: InputState) => Element };
+  export const Input: { new: (state: InputState) => NativeElement };
 
   /**
    * A spinbutton over the same `InputState` an `Input` holds.
@@ -3015,7 +3031,7 @@ const BASE: &str = r#"  /** A row. */
    * declares its own key context, which the two bindings are registered
    * against.
    */
-  export const NumberInput: { new: (state: InputState) => Element };
+  export const NumberInput: { new: (state: InputState) => NativeElement };
 
   /**
    * Retained multi-line text state, created once and kept on the view.
@@ -3047,7 +3063,7 @@ const BASE: &str = r#"  /** A row. */
   };
 
   /** The frame around retained multi-line text state. */
-  export const Textarea: { new: (state: TextareaState) => Element };
+  export const Textarea: { new: (state: TextareaState) => NativeElement };
 
   /** One thumb, or the two ends of a range. */
   export type SliderValue = number | [number, number];
@@ -3126,16 +3142,16 @@ const BASE: &str = r#"  /** A row. */
    * `axis("vertical")` is announced *and* used to place both, and each part is
    * told separately, as in Rust. A vertical slider grows from the bottom.
    */
-  export const Slider: { new: (state: SliderState) => Element };
+  export const Slider: { new: (state: SliderState) => NativeElement };
   /** The press and drag surface. Give it the height a pointer can hit. */
-  export const SliderTrack: { new: (state: SliderState) => Element };
+  export const SliderTrack: { new: (state: SliderState) => NativeElement };
   /**
    * The groove, and the part that records the geometry. It must span the whole
    * travel of the slider: the box it records is what every pointer position is
    * divided by, so an indicator sized to the value would make the value its own
    * scale.
    */
-  export const SliderIndicator: { new: (state: SliderState) => Element };
+  export const SliderIndicator: { new: (state: SliderState) => NativeElement };
   /**
    * The knob. `start(true)` is the lower thumb of a range slider; the default
    * is the upper one, which is the only thumb a single-value slider has.
@@ -3144,7 +3160,7 @@ const BASE: &str = r#"  /** A row. */
    * state and a `transition("left", ...)` needs to know which of them it is
    * following.
    */
-  export const SliderThumb: { new: (state: SliderState) => Element };
+  export const SliderThumb: { new: (state: SliderState) => NativeElement };
 
   /**
    * Retained one-time-code state, created once and kept on the view.
@@ -3214,7 +3230,7 @@ const BASE: &str = r#"  /** A row. */
    * Grouping ("123 456") is not offered: the groups would be boxes the shell
    * invents, with no template to say what they look like.
    */
-  export const OtpInput: { new: (state: OtpState) => Element };
+  export const OtpInput: { new: (state: OtpState) => NativeElement };
 
   /** Where a region sits relative to the center of a dock area. */
   export type DockPlacement = "center" | "left" | "right" | "bottom";
@@ -3442,7 +3458,7 @@ const BASE: &str = r#"  /** A row. */
    */
   export function dock_area(area: DockArea): DockAreaElement;
 
-  export interface DockAreaElement extends Element {
+  export interface DockAreaElement extends NativeElement {
     /** The tab bar above a group's displayed panel. */
     tab_bar(handler: (group: DockGroup, cx: Context) => Element): DockAreaElement;
     /** What a group with no displayed panel shows. */
@@ -3468,7 +3484,7 @@ const BASE: &str = r#"  /** A row. */
    * Where a dock's own panels go inside the chrome the `dock` handler drew
    * around them. Legal only inside that handler, and only once.
    */
-  export function dock_content(): Element;
+  export function dock_content(): NativeElement;
 
   /** Which edge or corner of a tile a resize handle pulls. */
   export type TileResizeSide = "left" | "right" | "top" | "bottom" | "bottom_right";
@@ -3558,6 +3574,7 @@ const BASE_IMPORTS: &str = r#"  import {
     Color,
     Context,
     Element,
+    NativeElement,
     FocusHandle,
   } from "gpui-kit";
 
@@ -3572,7 +3589,7 @@ const FPS: &str = r#"  /**
    * Prefer `show_fps_monitor()`: a HUD placed inside the script's own tree is
    * rebuilt with it, and what the tree does then counts against the reading.
    */
-  export function fps_monitor(): Element;
+  export function fps_monitor(): NativeElement;
 
   /** Where the root-owned HUD sits and how it behaves. Every key is optional. */
   export interface FpsMonitorOptions {
@@ -3598,7 +3615,7 @@ const FPS: &str = r#"  /**
 "#;
 
 /// What `gpui-fps`'s declarations borrow from `"gpui-kit"`.
-const FPS_IMPORTS: &str = r#"  import { Anchor, Element } from "gpui-kit";
+const FPS_IMPORTS: &str = r#"  import { Anchor, Element, NativeElement } from "gpui-kit";
 
 "#;
 
@@ -4018,18 +4035,20 @@ mod tests {
         let _ = &registry as &ComponentRegistry;
         let declarations = super::declarations_with_components(&registry.freeze().unwrap());
 
-        for behavior in super::REGISTERED_COMMON_BEHAVIORS {
+        for behavior in super::REGISTERED_COMMON_BEHAVIORS
+            .into_iter()
+            .chain(["role", "transition"])
+        {
             assert!(
                 declarations.contains(&format!("{behavior}(unavailable: never): never;")),
                 "`{behavior}` must be declared uncallable on a component that does not declare it"
             );
         }
-        // Re-declared, not dropped: removing the member would cost the type its
-        // assignability to `Element`, so a typed part could no longer be passed
-        // to a slot that takes one.
+        // The common native surface is retained, with unsupported behaviors
+        // explicitly redeclared as uncallable.
         assert!(
             declarations.contains(
-                "export type PlainElement = Omit<Element, \"disabled\" | \"selected\" | \"on_click\">"
+                "export type PlainElement = Omit<NativeElement, \"disabled\" | \"selected\" | \"on_click\" | \"role\" | \"transition\">"
             ),
             "{declarations}"
         );
@@ -4038,7 +4057,7 @@ mod tests {
     fn element_methods(declarations: &str) -> Vec<String> {
         declarations
             .lines()
-            .skip_while(|line| !line.starts_with("  export interface Element {"))
+            .skip_while(|line| !line.starts_with("  export interface NativeElement {"))
             .skip(1)
             .take_while(|line| !line.starts_with("  }"))
             .filter_map(|line| {
@@ -4055,27 +4074,31 @@ mod tests {
     #[test]
     fn a_reflected_style_is_declared_with_no_arguments() {
         let declarations = base_declarations();
-        assert!(declarations.contains("\n    items_center(): Element;\n"));
-        assert!(declarations.contains("\n    flex_col(): Element;\n"));
+        assert!(
+            declarations.contains("\n    items_center<Self extends Element>(this: Self): Self;\n")
+        );
+        assert!(declarations.contains("\n    flex_col<Self extends Element>(this: Self): Self;\n"));
         // Reflection misses the macro-generated font weights; the runtime adds
         // them back, and so must the declarations.
-        assert!(declarations.contains("\n    font_semibold(): Element;\n"));
+        assert!(
+            declarations.contains("\n    font_semibold<Self extends Element>(this: Self): Self;\n")
+        );
     }
 
     #[test]
     fn a_parametric_style_is_declared_with_the_type_the_runtime_enforces() {
         let declarations = base_declarations();
         for expected in [
-            "    bg(value: Color): Element;",
-            "    border_color(value: Color): Element;",
-            "    w(value: Length): Element;",
-            "    p(value: DefiniteLength): Element;",
-            "    gap(value: DefiniteLength): Element;",
-            "    rounded(value: AbsoluteLength): Element;",
-            "    text_size(value: AbsoluteLength): Element;",
-            "    font_weight(value: number): Element;",
-            "    opacity(value: number): Element;",
-            "    flex_grow(value: number): Element;",
+            "    bg<Self extends Element>(this: Self, value: Color): Self;",
+            "    border_color<Self extends Element>(this: Self, value: Color): Self;",
+            "    w<Self extends Element>(this: Self, value: Length): Self;",
+            "    p<Self extends Element>(this: Self, value: DefiniteLength): Self;",
+            "    gap<Self extends Element>(this: Self, value: DefiniteLength): Self;",
+            "    rounded<Self extends Element>(this: Self, value: AbsoluteLength): Self;",
+            "    text_size<Self extends Element>(this: Self, value: AbsoluteLength): Self;",
+            "    font_weight<Self extends Element>(this: Self, value: number): Self;",
+            "    opacity<Self extends Element>(this: Self, value: number): Self;",
+            "    flex_grow<Self extends Element>(this: Self, value: number): Self;",
         ] {
             assert!(declarations.contains(expected), "missing: {expected}");
         }
@@ -4266,7 +4289,7 @@ mod tests {
         // `HostValue` rather than `any`: the boundary is not wider than the
         // Rust type of that name, and the declarations should not claim it is.
         assert!(
-            declarations.contains("  import { Element, HostValue } from \"gpui-kit\";"),
+            declarations.contains("  import { NativeElement, HostValue } from \"gpui-kit\";"),
             "the permissive signatures below need this import to resolve"
         );
         assert!(
@@ -4277,7 +4300,7 @@ mod tests {
                 .contains("  export function drain(...args: HostValue[]): Promise<HostValue>;")
         );
         assert!(declarations.contains(
-            "  export const AuditPanel: { new(id: string, props: HostValue): Element };"
+            "  export const AuditPanel: { new(id: string, props: HostValue): NativeElement };"
         ));
 
         crate::clear_exported_modules();
@@ -4322,7 +4345,7 @@ mod tests {
                 "`{name}` is also declared in gpui-base"
             );
         }
-        assert!(module("gpui-fps").contains("export function fps_monitor(): Element;"));
+        assert!(module("gpui-fps").contains("export function fps_monitor(): NativeElement;"));
 
         // The dependency runs upward only: a layer names what it borrows from
         // `"gpui-kit"`, and `"gpui-kit"` imports nothing back.
@@ -4533,12 +4556,12 @@ mod tests {
     fn focus_and_accessibility_are_declared_from_the_runtime_tables() {
         let declarations = base_declarations();
         for expected in [
-            "    role(name: Role): Element;",
-            "    aria_selected(value: boolean): Element;",
-            "    aria_active_descendant(): Element;",
-            "    track_focus(handle: FocusHandle): Element;",
-            "    tab_index(index: number): Element;",
-            "    tab_stop(value: boolean): Element;",
+            "    role<Self extends Element>(this: Self, name: Role): Self;",
+            "    aria_selected<Self extends Element>(this: Self, value: boolean): Self;",
+            "    aria_active_descendant<Self extends Element>(this: Self): Self;",
+            "    track_focus<Self extends Element>(this: Self, handle: FocusHandle): Self;",
+            "    tab_index<Self extends Element>(this: Self, index: number): Self;",
+            "    tab_stop<Self extends Element>(this: Self, value: boolean): Self;",
             // `App::focus_handle` in GPUI, so `cx` here — there is no
             // `FocusHandle::new` to mirror.
             "    focus_handle(): FocusHandle;",
@@ -4571,7 +4594,7 @@ mod tests {
     fn text_view_behaviors_are_not_declared_on_every_element() {
         let declarations = declarations();
         let element = declarations
-            .split_once("export interface Element")
+            .split_once("export interface NativeElement")
             .expect("Element declaration")
             .1
             .split_once("\n  }")
@@ -4580,7 +4603,7 @@ mod tests {
         assert!(!element.contains("on_link_click("));
         assert!(!element.contains("selectable("));
         assert!(!element.contains("scrollable("));
-        assert!(declarations.contains("export interface TextViewElement extends Element"));
+        assert!(declarations.contains("export interface TextViewElement extends NativeElement"));
         assert!(declarations.contains("html(id: string, html: string): TextViewElement;"));
     }
 
@@ -4634,10 +4657,10 @@ mod tests {
         assert!(base.contains("export interface PartType"));
         assert!(!declarations.contains("IndexedComponentType"));
         assert!(declarations.contains(
-            "export const TableRow: { new: (id: string | number, row_index: number) => Element };"
+            "export const TableRow: { new: (id: string | number, row_index: number) => NativeElement };"
         ));
         assert!(declarations.contains(
-            "export const TableCell: { new: (id: string | number, column_index: number) => Element };"
+            "export const TableCell: { new: (id: string | number, column_index: number) => NativeElement };"
         ));
     }
 
@@ -4741,11 +4764,11 @@ mod tests {
             );
         }
         for expected in [
-            "    anchor(value: Anchor): Element;",
-            "    mouse_button(value: MouseButton): Element;",
-            "    trigger(element: Element): Element;",
-            "    open_delay(ms: number): Element;",
-            "    close_delay(ms: number): Element;",
+            "    anchor<Self extends Element>(this: Self, value: Anchor): Self;",
+            "    mouse_button<Self extends Element>(this: Self, value: MouseButton): Self;",
+            "    trigger<Self extends Element>(this: Self, element: Element): Self;",
+            "    open_delay<Self extends Element>(this: Self, ms: number): Self;",
+            "    close_delay<Self extends Element>(this: Self, ms: number): Self;",
             "  export const Popover: ComponentType;",
             "  export const HoverCard: ComponentType;",
         ] {
@@ -4757,11 +4780,11 @@ mod tests {
     fn motion_policies_are_declared_without_per_frame_callbacks() {
         let declarations = base_declarations();
         assert!(declarations.contains(
-            "transition(property: import(\"gpui-shell\").MotionProperty, policy: number | import(\"gpui-shell\").TransitionPolicy): Element;"
+            "transition<Self extends Element>(this: Self, property: import(\"gpui-shell\").MotionProperty, policy: number | import(\"gpui-shell\").TransitionPolicy): Self;"
         ));
         assert!(
             declarations.contains(
-                "spring(property: import(\"gpui-shell\").MotionProperty, policy?: import(\"gpui-shell\").SpringPolicy): Element;"
+                "spring<Self extends Element>(this: Self, property: import(\"gpui-shell\").MotionProperty, policy?: import(\"gpui-shell\").SpringPolicy): Self;"
             )
         );
         assert!(declarations.contains(

@@ -299,12 +299,11 @@ Commands:
   types        Write gpui-kit.d.ts next to the application, so an editor — or a
                model writing the code — sees the whole API and catches a
                mistyped style method before it runs.
-  check        Load and render the application once without showing a window,
-               then exit 0 if it worked and 1 if it did not. JavaScript has no
-               compiler, so this is what takes its place: it reports syntax
-               errors, unresolved imports, a missing or malformed default
-               export, unknown style methods with a suggestion, wrongly typed
-               style arguments, and an element used twice.
+  check        Load the application, build its description, and materialize its
+               eager native elements in a hidden window. Exit 0 on success or
+               1 on load, render, or registered-component materialization errors.
+               Does not check layout, paint, deferred slots, nested view renders,
+               or later interaction and asynchronous states.
 
 Options:
   --watch      Reload the application when its sources change.
@@ -449,18 +448,9 @@ fn run(arguments: Arguments, components: crate::FrozenComponentRegistry, brand: 
         });
 }
 
-/// Loads and renders the application once, without showing anything.
-///
-/// This is what a compiler would do for a language that had one. The script
-/// surface is dynamic — an unknown style method, a wrongly typed argument or a
-/// reused element are all runtime facts — so the only honest way to check an
-/// application is to build it and render one frame. The window is real but
-/// never shown, because rendering is where those facts surface.
+/// Checks the application description and eager native materialization in a
+/// hidden window. This does not draw or validate a complete frame.
 fn check(arguments: CheckArguments, components: crate::FrozenComponentRegistry) -> ! {
-    // The exit status has to survive the app's own event loop, which does not
-    // return a value, so it is stashed and read after `run` unwinds.
-    let outcome = Rc::new(RefCell::new(CheckOutcome::default()));
-    let sink = outcome.clone();
     let directory = arguments.directory.clone();
 
     // Assets are served from the application directory, so the source has to be
@@ -474,6 +464,7 @@ fn check(arguments: CheckArguments, components: crate::FrozenComponentRegistry) 
     gpui_platform::application()
         .with_assets(AppAssets::new(asset_root))
         .run(move |cx| {
+            let mut outcome = CheckOutcome::default();
             crate::init_with_components(cx, &components);
             install_palette(cx);
 
@@ -483,72 +474,53 @@ fn check(arguments: CheckArguments, components: crate::FrozenComponentRegistry) 
             let runtime = match ShellRuntime::new_with_components(cx, components) {
                 Ok(runtime) => runtime,
                 Err(error) => {
-                    sink.borrow_mut().fail(format!("{error:#}"));
-                    cx.quit();
-                    return;
+                    outcome.fail(format!("{error:#}"));
+                    outcome.exit(&directory);
                 }
             };
 
             let root = match crate::resolve_app_root(&arguments.directory, ENTRY) {
                 Ok(root) => root,
                 Err(error) => {
-                    sink.borrow_mut().fail(format!("{error:#}"));
-                    cx.quit();
-                    return;
+                    outcome.fail(format!("{error:#}"));
+                    outcome.exit(&directory);
                 }
             };
 
             let manifest = match read_local_manifest(&root) {
                 Ok(manifest) => manifest,
                 Err(error) => {
-                    sink.borrow_mut().fail(error);
-                    cx.quit();
-                    return;
+                    outcome.fail(error);
+                    outcome.exit(&directory);
                 }
             };
             grant_local_access(&root, manifest.as_ref());
 
-            // A check is the closest thing this runtime has to a compiler, so it
-            // leaves the editor correct on its way past: whatever it reports, the
-            // declarations beside the source are the ones it just checked
-            // against.
-            let window_sink = sink.clone();
-            let print_spec = arguments.print_spec;
-
-            // Through the catalog's opener too. A check renders one frame in a
-            // real window, and a component that requires a particular window
-            // root has to find it here as well — otherwise the check passes an
-            // application the run would panic on.
-            let build = move |window: &mut Window, cx: &mut App| -> Entity<LoadFailure> {
-                let result = runtime.check(&root, window, cx);
-
-                match result {
-                    Ok(spec) => window_sink.borrow_mut().succeed(spec, print_spec),
-                    Err(error) => window_sink.borrow_mut().fail(format!("{error:#}")),
-                }
-
-                cx.new(|_| LoadFailure(String::new()))
-            };
+            // Finish opening before checking so catalog-owned roots and window
+            // facilities are installed when native materializers use them.
+            let build = |_: &mut Window, cx: &mut App| cx.new(|_| gpui::Empty);
             let options = hidden_window_options(cx);
             let opened = match window_opener {
                 Some(open) => {
                     let mut build = |window: &mut Window, cx: &mut App| build(window, cx).into();
-                    open(cx, options, &mut build).map(|_| ())
+                    open(cx, options, &mut build)
                 }
-                None => cx.open_window(options, build).map(|_| ()),
+                None => cx.open_window(options, build).map(Into::into),
             };
 
-            if let Err(error) = opened {
-                sink.borrow_mut().fail(format!("{error:#}"));
+            let result = opened.and_then(|window| {
+                window.update(cx, |_, window, cx| runtime.check(&root, window, cx))?
+            });
+            match result {
+                Ok(spec) => outcome.succeed(spec, arguments.print_spec),
+                Err(error) => outcome.fail(format!("{error:#}")),
             }
 
             // Reporting and exiting happen here rather than after `run` returns:
             // an application loop that has opened a window does not unwind just
             // because nothing is shown, and a check that never terminates is worse
             // than one that reports nothing.
-            let outcome = sink.borrow();
-            outcome.report(&directory);
-            std::process::exit(outcome.status());
+            outcome.exit(&directory);
         });
 
     unreachable!("the check exits from inside the application loop")
@@ -579,6 +551,13 @@ struct CheckOutcome {
 }
 
 impl CheckOutcome {
+    // Quitting GPUI can terminate the native process with status zero before
+    // the application loop returns, including failures before a window opens.
+    fn exit(&self, directory: &Path) -> ! {
+        self.report(directory);
+        std::process::exit(self.status());
+    }
+
     fn fail(&mut self, error: String) {
         self.ran = true;
         self.error = Some(error);

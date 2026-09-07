@@ -88,10 +88,18 @@ impl Checkbox {
         self
     }
 
-    /// Set the click handler for the checkbox.
+    /// Alias for [`Self::on_change`]. The last callback registered with either name wins.
+    pub fn on_click(self, handler: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
+        self.on_change(handler)
+    }
+
+    /// Handle a requested checked value from pointer or keyboard activation.
     ///
-    /// The `&bool` parameter indicates the new checked state after the click.
-    pub fn on_click(mut self, handler: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
+    /// This is a controlled value: the owner must write the requested value and
+    /// call `cx.notify()` to render it. Disabled controls do not call the handler.
+    /// This and [`Self::on_click`] share one callback; chaining them replaces
+    /// the previous handler instead of calling both.
+    pub fn on_change(mut self, handler: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
         self.on_click = Some(Rc::new(handler));
         self
     }

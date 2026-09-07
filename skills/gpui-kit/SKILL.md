@@ -10,6 +10,11 @@ each layer is reachable by name: `gpui_kit::component` (styled components),
 `gpui_kit::base` (unstyled behavior), `gpui_kit::assets` (default icons),
 `gpui_kit::platform`.
 
+Start with [component-family conventions](references/conventions.md) to choose the constructor, state owner, event, and layout contract for the task. Learn the family once, then verify the specific component supports the capability.
+
+For a complete compiled view with retained state, subscriptions, and overlay
+layers, read [the tested application recipe](references/recipes.md).
+
 ## Read the Guides First
 
 Two guides hold the rules this skill assumes. They are requirements, not
@@ -80,7 +85,8 @@ A floor, not a substitute for the guides.
 
 ## Documentation
 
-- **Full reference**: fetch `https://gpui-kit.com/llms-full.txt`
+- **Find a task/component page**: use `https://gpui-kit.com/llms.txt`, then load its Markdown page.
+- **Full reference**: `https://gpui-kit.com/llms-full.txt` is available when broad reference is actually needed
 - **Per-component API**: fetch `https://gpui-kit.com/docs/components/{name}.md`,
   e.g. `button.md`, `input.md`, `select.md`, `dialog.md`, `data-table.md`
 - **Any site page** can be fetched as Markdown by appending `.md` to the URL

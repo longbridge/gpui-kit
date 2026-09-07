@@ -105,28 +105,126 @@ impl Render for MyView {
 
 ### Stateful Components
 
-There are some stateful components like `Dropdown`, `List`, and `Table` that manage their own internal state for convenience, these components implement the [Render] trait.
+See the [tested application recipes](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes) for a complete window with retained subscriptions, icons, and overlay layers. `Root` must wrap each window, and the application content must render the dialog, sheet, and notification layers it uses.
 
-Those components to use are a bit different, we need create the [Entity] and hold it in the view struct.
+Controls such as Input, List, and DataTable use retained state entities. Store that state on the owning view and construct the styled element from it during render.
 
-```rs
-struct MyView {
-    input: Entity<InputState>,
+Create the [Entity] once, outside render:
+
+<!-- recipe:settings:start -->
+```rust
+use gpui_kit::component::{
+    ActiveTheme, IconName, Root, WindowExt,
+    button::Button,
+    checkbox::Checkbox,
+    form::{Field, Form},
+    input::{Input, InputEvent, InputState},
+    radio::RadioGroup,
+    switch::Switch,
+};
+use gpui_kit::{
+    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
+    Styled as _, Subscription, Window, div,
+};
+
+pub struct Settings {
+    pub name: Entity<InputState>,
+    pub preview: SharedString,
+    pub changes: usize,
+    enabled: bool,
+    remember: bool,
+    delivery: Option<usize>,
+    _subscriptions: Vec<Subscription>,
 }
 
-impl MyView {
-    fn new(window: &Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx).default_value("Hello 世界"));
-        Self { input }
+impl Settings {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder("Name"));
+        let subscription = cx.subscribe_in(&name, window, |this, state, event, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.preview = state.read(cx).value().to_string().into();
+                this.changes += 1;
+                cx.notify();
+            }
+        });
+        Self {
+            name,
+            preview: "".into(),
+            changes: 0,
+            enabled: false,
+            remember: false,
+            delivery: Some(0),
+            _subscriptions: vec![subscription],
+        }
     }
 }
 
-impl Render for MyView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.input.clone()
+impl Render for Settings {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .p_4()
+            .gap_3()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .child("Profile")
+            .child(
+                Form::new()
+                    .child(Field::new().label("Name").child(Input::new(&self.name)))
+                    .child(Field::new().label("Preview").child(self.preview.clone()))
+                    .child(
+                        Field::new().label_indent(false).child(
+                            Checkbox::new("remember")
+                                .label("Remember name")
+                                .checked(self.remember)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.remember = *value;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(
+                        Field::new().label_indent(false).child(
+                            Switch::new("enabled")
+                                .label("Enable notifications")
+                                .checked(self.enabled)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.enabled = *value;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(
+                        Field::new().label("Delivery").child(
+                            RadioGroup::new("delivery")
+                                .children(["Immediately", "Daily summary"])
+                                .selected_index(self.delivery)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.delivery = Some(*value);
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .footer(
+                        Button::new("about")
+                            .label("About…")
+                            .icon(IconName::Info)
+                            .on_click(|_, window, cx| {
+                                window.open_dialog(cx, |dialog, _, _| {
+                                    dialog.title("About").child("A complete GPUI Kit window")
+                                });
+                            }),
+                    ),
+            )
+            .children(Root::render_dialog_layer(window, cx))
+            .children(Root::render_sheet_layer(window, cx))
+            .children(Root::render_notification_layer(window, cx))
     }
 }
 ```
+<!-- recipe:settings:end -->
 
 ### Theming
 

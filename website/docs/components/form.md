@@ -5,13 +5,28 @@ description: Flexible form container with support for field layout, validation, 
 
 # Form
 
-A comprehensive form component that provides structured layout for form fields with support for vertical/horizontal layouts, validation, field groups, and responsive multi-column layouts.
+Form lays out typed fields and an optional footer. The application owns values, validation, submission, and responsive column choices.
 
 ## Import
 
 ```rust
 use gpui_kit::component::form::{field, v_form, h_form, Form, Field};
 ```
+
+## Predictable composition
+
+`Form::new()` defaults to one column with labels above controls. `label_layout(Axis::Horizontal)` places labels beside controls; `columns(2)` independently creates two field columns. Existing `horizontal()`, `vertical()`, `layout(Axis)`, `h_form()`, and `v_form()` remain available.
+
+```rust
+Form::new()
+    .label_layout(Axis::Horizontal)
+    .columns(2)
+    .child(Field::new().label("Name").child(Input::new(&name_input)))
+    .child(Field::new().label("Email").child(Input::new(&email_input)))
+    .footer(Button::new("save").label("Save"))
+```
+
+`child` accepts a Field. Put commands in `footer`, which spans all columns and aligns its content to the trailing edge. Attach submission behavior to the supplied Button; Form does not submit automatically. See the [complete application recipe](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes) for retained state, callbacks, and window setup.
 
 ## Usage
 

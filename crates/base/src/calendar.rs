@@ -505,6 +505,12 @@ impl CalendarItem {
             children: vec![],
         }
     }
+    // Keep the default visible label available to assistive technology even
+    // when a presentation assigns a role that does not derive a name from children.
+    fn with_label(self, label: SharedString) -> Self {
+        self.aria_label(label.clone()).child(label)
+    }
+
     pub fn item_state(&self) -> CalendarItemState {
         self.state
     }
@@ -605,7 +611,12 @@ impl Calendar {
         cx: &mut App,
     ) -> AnyElement {
         let label = (self.label)(state.kind(), value);
-        (self.item)(CalendarItem::new(id, state).child(label), state, window, cx)
+        (self.item)(
+            CalendarItem::new(id, state).with_label(label),
+            state,
+            window,
+            cx,
+        )
     }
 }
 impl Styled for Calendar {
@@ -624,7 +635,8 @@ impl RenderOnce for Calendar {
             let st = CalendarItemState::new(CalendarItemKind::Previous).disabled(
                 view.is_month() || (view.is_year() && !self.state.read(cx).has_prev_year_page()),
             );
-            let mut item = CalendarItem::new("calendar-prev", st).child((self.label)(st.kind(), 0));
+            let mut item =
+                CalendarItem::new("calendar-prev", st).with_label((self.label)(st.kind(), 0));
             if !st.is_disabled() {
                 let entity = self.state.clone();
                 item = item.on_click(move |_, _window, cx| {
@@ -652,7 +664,7 @@ impl RenderOnce for Calendar {
                 let st = CalendarItemState::new(kind).active(active);
                 let entity = self.state.clone();
                 let mut item = CalendarItem::new(format!("calendar-{kind:?}"), st)
-                    .child((self.label)(kind, value));
+                    .with_label((self.label)(kind, value));
                 item = item.on_click(move |_, _, cx| {
                     entity.update(cx, |s, cx| {
                         s.set_view(
@@ -692,7 +704,8 @@ impl RenderOnce for Calendar {
             let st = CalendarItemState::new(CalendarItemKind::Next).disabled(
                 view.is_month() || (view.is_year() && !self.state.read(cx).has_next_year_page()),
             );
-            let mut item = CalendarItem::new("calendar-next", st).child((self.label)(st.kind(), 0));
+            let mut item =
+                CalendarItem::new("calendar-next", st).with_label((self.label)(st.kind(), 0));
             if !st.is_disabled() {
                 let entity = self.state.clone();
                 item = item.on_click(move |_, _, cx| {
@@ -752,7 +765,8 @@ impl RenderOnce for Calendar {
                         };
                         let mut item =
                             CalendarItem::new(format!("calendar-{date}-{offset}-{week_index}"), st)
-                                .child((self.label)(st.kind(), date.day() as i32));
+                                .with_label((self.label)(st.kind(), date.day() as i32))
+                                .aria_label(date.to_string());
                         if !st.is_disabled() {
                             let entity = self.state.clone();
                             item = item.on_click(move |_, _, cx| {
@@ -773,7 +787,7 @@ impl RenderOnce for Calendar {
                 let st = CalendarItemState::new(CalendarItemKind::Month).active(month == current);
                 let entity = self.state.clone();
                 let item = CalendarItem::new(format!("calendar-month-{month}"), st)
-                    .child((self.label)(st.kind(), month as i32))
+                    .with_label((self.label)(st.kind(), month as i32))
                     .on_click(move |_, _, cx| {
                         entity.update(cx, |s, cx| {
                             s.select_month(month);
@@ -789,7 +803,7 @@ impl RenderOnce for Calendar {
                 let st = CalendarItemState::new(CalendarItemKind::Year).active(year == current);
                 let entity = self.state.clone();
                 let item = CalendarItem::new(format!("calendar-year-{year}"), st)
-                    .child((self.label)(st.kind(), year))
+                    .with_label((self.label)(st.kind(), year))
                     .on_click(move |_, _, cx| {
                         entity.update(cx, |s, cx| {
                             s.select_year(year);
@@ -837,6 +851,55 @@ mod tests {
     use gpui::{AppContext as _, Context, Entity, IntoElement, Render, Subscription, Window};
 
     use super::*;
+
+    #[gpui::test]
+    fn calendar_items_expose_names_in_every_view(cx: &mut gpui::TestAppContext) {
+        use gpui::{Element as _, accesskit};
+        struct Names {
+            calendar: Entity<CalendarState>,
+            labels: Rc<RefCell<Vec<(CalendarItemKind, String)>>>,
+        }
+        impl Render for Names {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let labels = self.labels.clone();
+                labels.borrow_mut().clear();
+                Calendar::new("named-calendar", &self.calendar).item(move |item, state, _, _| {
+                    let mut node = accesskit::Node::new(accesskit::Role::Button);
+                    item.base.write_a11y_info(&mut node);
+                    labels
+                        .borrow_mut()
+                        .push((state.kind(), node.label().unwrap_or("").to_string()));
+                    item.into_any_element()
+                })
+            }
+        }
+        let (view, cx) = cx.add_window_view(|window, cx| Names {
+            calendar: cx.new(|cx| CalendarState::new(window, cx)),
+            labels: Rc::new(RefCell::new(Vec::new())),
+        });
+        for mode in [CalendarView::Day, CalendarView::Month, CalendarView::Year] {
+            cx.update(|window, cx| {
+                view.read(cx).calendar.clone().update(cx, |state, cx| {
+                    state.apply_date(Date::Single(Some(
+                        NaiveDate::from_ymd_opt(2026, 9, 7).unwrap(),
+                    )));
+                    state.set_view(mode);
+                    cx.notify();
+                });
+                window.draw(cx).clear(cx);
+                let labels = view.read(cx).labels.borrow();
+                assert!(!labels.is_empty());
+                for (kind, label) in labels.iter() {
+                    assert!(!label.is_empty(), "missing name for {kind:?}");
+                }
+                if mode.is_day() {
+                    assert!(labels.iter().any(
+                        |(kind, label)| *kind == CalendarItemKind::Day && label == "2026-09-07"
+                    ));
+                }
+            });
+        }
+    }
 
     struct EventHarness {
         calendar: Entity<CalendarState>,

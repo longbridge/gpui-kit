@@ -1,5 +1,6 @@
 use crate::input::InputModeKind;
 use gpui::{Context, Pixels, Point, Window};
+use sum_tree::Bias;
 
 use crate::input::{
     InputBaseState, MoveDown, MoveEnd, MoveHome, MoveLeft, MovePageDown, MovePageUp, MoveRight,
@@ -83,7 +84,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     ) {
         self.undo_manager.break_transaction_coalescing();
         self.selections.remove_all_but_active();
-        let offset = offset.clamp(0, self.text.len());
+        let offset = self.cursor_boundary(offset, Bias::Left);
         self.cursor_line_end_affinity = line_end_affinity;
         self.set_cursor_to(offset);
         self.scroll_to(offset, direction, cx);
@@ -184,7 +185,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         self.undo_manager.break_transaction_coalescing();
-        let len = self.text.len();
         let mut active_affinity = false;
         let new_selections: Vec<CursorSelection> = self
             .selections
@@ -195,7 +195,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                     active_affinity = line_end_affinity;
                 }
                 let mut new_sel = *sel;
-                new_sel.place_at(offset.clamp(0, len), anchor);
+                new_sel.place_at(self.cursor_boundary(offset, Bias::Left), anchor);
                 new_sel
             })
             .collect();

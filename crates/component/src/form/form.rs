@@ -1,12 +1,12 @@
 use gpui::{
-    App, Axis, IntoElement, ParentElement, Pixels, Rems, RenderOnce, StyleRefinement, Styled,
-    Window, px,
+    AnyElement, App, Axis, IntoElement, ParentElement, Pixels, Rems, RenderOnce, StyleRefinement,
+    Styled, Window, prelude::FluentBuilder as _, px,
 };
 
 use crate::{
     Sizable, Size,
     form::{Field, FieldProps},
-    v_flex,
+    h_flex, v_flex,
 };
 
 /// A form element that contains multiple form fields.
@@ -14,35 +14,54 @@ use crate::{
 pub struct Form {
     style: StyleRefinement,
     fields: Vec<Field>,
+    footer: Option<AnyElement>,
     props: FieldProps,
 }
 
+impl Default for Form {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Form {
-    fn new() -> Self {
+    /// Creates a single-column form with labels above their controls.
+    pub fn new() -> Self {
         Self {
             style: StyleRefinement::default(),
             props: FieldProps::default(),
             fields: Vec::new(),
+            footer: None,
         }
     }
 
-    /// Creates a new form with a horizontal layout.
+    /// Creates a new form with labels beside their controls.
     pub fn horizontal() -> Self {
         Self::new().layout(Axis::Horizontal)
     }
 
-    /// Creates a new form with a vertical layout.
+    /// Creates a new form with labels above their controls.
     pub fn vertical() -> Self {
         Self::new().layout(Axis::Vertical)
     }
 
-    /// Set the layout for the form, default is `Axis::Vertical`.
-    pub fn layout(mut self, layout: Axis) -> Self {
+    /// Sets label/control orientation within each field, default is `Axis::Vertical`.
+    ///
+    /// This is an alias for [`Self::label_layout`]. Use [`Self::columns`] to arrange fields.
+    pub fn layout(self, layout: Axis) -> Self {
+        self.label_layout(layout)
+    }
+
+    /// Sets label/control orientation within each field.
+    ///
+    /// `Axis::Vertical` (default) places labels above controls; `Axis::Horizontal`
+    /// places labels beside controls. This does not change the field grid columns.
+    pub fn label_layout(mut self, layout: Axis) -> Self {
         self.props.layout = layout;
         self
     }
 
-    /// Set the width of the labels in the form. Default is `px(100.)`.
+    /// Set the width of the labels in the form. Default is `px(140.)`.
     pub fn label_width(mut self, width: Pixels) -> Self {
         self.props.label_width = Some(width);
         self
@@ -66,7 +85,16 @@ impl Form {
         self
     }
 
-    /// Set the column count for the form.
+    /// Sets content in a full-width footer after all fields, aligned to the trailing edge.
+    ///
+    /// The caller owns action composition, state, and callbacks. Calling this again
+    /// replaces the footer. No footer row is rendered unless content is supplied.
+    pub fn footer(mut self, footer: impl IntoElement) -> Self {
+        self.footer = Some(footer.into_any_element());
+        self
+    }
+
+    /// Set the column count for the field grid, independently of label orientation.
     ///
     /// Default is 1.
     pub fn columns(mut self, columns: usize) -> Self {
@@ -110,5 +138,18 @@ impl RenderOnce for Form {
                     .enumerate()
                     .map(|(ix, field)| field.props(ix, props)),
             )
+            .when_some(self.footer, |this, footer| {
+                this.child(
+                    h_flex()
+                        .col_span_full()
+                        .min_w_0()
+                        .justify_end()
+                        .child(footer),
+                )
+            })
     }
 }
+
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
