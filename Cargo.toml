@@ -32,7 +32,6 @@ members = [
     "examples/tooltip_top_edge",
     "examples/sidebar",
     "examples/dual_sidebar",
-    "examples/agent_ide",
     "examples/text_max_lines",
     "examples/text_selection",
     "examples/root_borderless",
@@ -40,6 +39,7 @@ members = [
     "examples/markdown_table",
     "crates/shell",
     "crates/component-shell",
+    "crates/agent-ide",
 ]
 resolver = "2"
 

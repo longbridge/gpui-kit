@@ -27,12 +27,12 @@
 
 ## P0 任务清单（骨架）
 
-1. 新建 `crates/agent-ide`（Cargo.toml + main.rs：窗口/Root/主题初始化），加入 workspace members
-2. 从 `examples/agent_ide/src/terminal.rs` 迁终端到 `crates/agent-ide/src/terminal/`
-3. 迁三栏布局骨架，接 Dock 系统（terminal panel 实现 `Panel` trait 两侧）
-4. BEL → tab 状态点（需要关注）状态机
-5. 项目列表（打开本地目录 + 最近列表持久化到 state.json）
-6. 删除 `examples/agent_ide`
+- [x] 1. 新建 `crates/agent-ide`（Cargo.toml + main.rs：窗口/Root/主题初始化），加入 workspace members
+- [x] 2. 从 `examples/agent_ide/src/terminal.rs` 迁终端到 `crates/agent-ide/src/terminal/`
+- [x] 3. 迁三栏布局骨架，接 Dock 系统（terminal panel 实现 `Panel` trait 两侧）
+- [x] 4. BEL → tab 状态点（需要关注）状态机
+- [x] 5. 项目列表（打开本地目录 + 最近列表持久化到 state.json）
+- [x] 6. 删除 `examples/agent_ide`
 
 ## 现状（examples/agent_ide）
 

@@ -1,5 +1,5 @@
 [package]
-name = "agent_ide"
+name = "agent-ide"
 description = "An IDE-style workspace for managing multiple coding agents across open projects."
 version = "0.6.0"
 publish = false
@@ -11,11 +11,11 @@ libghostty-vt.workspace = true
 portable-pty.workspace = true
 smol.workspace = true
 gpui-kit.workspace = true
-
-# WebView
-gpui-wry = { path = "../../crates/webview" }
-wry = { version = "0.53.3", package = "lb-wry" }
-raw-window-handle = { version = "0.6", features = ["std"] }
+# Matches `crates/story`; not in workspace dependencies.
+dirs = "6.0.0"
+rfd = "0.16"
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

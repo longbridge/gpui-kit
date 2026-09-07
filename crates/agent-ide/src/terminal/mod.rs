@@ -6,7 +6,9 @@
 //! thread; the only extra thread is the PTY reader, which just ships bytes.
 
 use std::{
+    cell::Cell,
     io::{Read as _, Write},
+    path::{Path, PathBuf},
     rc::Rc,
 };
 
@@ -55,6 +57,17 @@ pub struct RunOut {
     underline: bool,
 }
 
+/// Events a terminal view sends to whatever hosts it (the dock panel).
+pub enum TerminalEvent {
+    /// The running program rang the bell (BEL, 0x07) while the view had no
+    /// keyboard focus, so nobody saw it.
+    Bell,
+    /// The view gained keyboard focus.
+    Focused,
+}
+
+impl EventEmitter<TerminalEvent> for TerminalState {}
+
 pub struct TerminalState {
     terminal: gvt::Terminal<'static, 'static>,
     render_state: gvt::RenderState<'static>,
@@ -72,6 +85,16 @@ pub struct TerminalState {
     /// Last known element bounds, for mouse → cell conversion.
     bounds: Bounds<Pixels>,
     pub focus_handle: FocusHandle,
+    /// Raised by the libghostty bell callback (it fires inside `vt_write`,
+    /// where no gpui `Context` exists to emit from); drained by [`ingest`],
+    /// the one place that holds a context. `Rc` because the whole terminal
+    /// is main-thread only.
+    bell_rang: Rc<Cell<bool>>,
+    /// Whether this view currently holds keyboard focus.
+    focused: bool,
+    /// Focus listeners, installed on the first render because the
+    /// constructor runs without a `Window`. Held so they stay subscribed.
+    _focus_listeners: Option<(Subscription, Subscription)>,
     cols: u16,
     rows: u16,
     cell_w: Pixels,
@@ -81,6 +104,12 @@ pub struct TerminalState {
 
 impl TerminalState {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        Self::new_in(cx, None)
+    }
+
+    /// Spawn a terminal whose login shell starts in `cwd`; `None` keeps the
+    /// shell's own default (the user's home).
+    pub fn new_in(cx: &mut Context<Self>, cwd: Option<PathBuf>) -> Self {
         let mut terminal = gvt::Terminal::new(gvt::TerminalOptions {
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
@@ -93,8 +122,8 @@ impl TerminalState {
         terminal.set_default_bg_color(Some(to_gvt(bg))).ok();
         terminal.set_default_fg_color(Some(to_gvt(fg))).ok();
 
-        let (pty_master, writer, child) =
-            spawn_shell(DEFAULT_COLS, DEFAULT_ROWS).expect("failed to spawn shell in PTY");
+        let (pty_master, writer, child) = spawn_shell(DEFAULT_COLS, DEFAULT_ROWS, cwd.as_deref())
+            .expect("failed to spawn shell in PTY");
 
         // Responses the terminal generates (DA queries etc.) go back to the PTY.
         let response_writer = Rc::new(std::cell::RefCell::new(writer));
@@ -104,6 +133,15 @@ impl TerminalState {
                 let _ = sink.borrow_mut().write_all(data);
             })
             .expect("failed to install pty write callback");
+
+        // BEL (0x07): libghostty invokes the callback synchronously during
+        // `vt_write`, where no gpui context exists, so it only raises the
+        // flag; `ingest` turns the flag into a [`TerminalEvent::Bell`].
+        let bell_rang = Rc::new(Cell::new(false));
+        let bell_sink = bell_rang.clone();
+        terminal
+            .on_bell(move |_| bell_sink.set(true))
+            .expect("failed to install bell callback");
 
         // Reader thread: the only thread besides main; just ships bytes.
         let (tx, rx) = smol::channel::unbounded::<Vec<u8>>();
@@ -162,6 +200,9 @@ impl TerminalState {
             hovered_uri: None,
             bounds: Bounds::default(),
             focus_handle: cx.focus_handle(),
+            bell_rang,
+            focused: false,
+            _focus_listeners: None,
             cols: DEFAULT_COLS,
             rows: DEFAULT_ROWS,
             cell_w: px(7.7),
@@ -177,6 +218,12 @@ impl TerminalState {
 
     fn ingest(&mut self, bytes: &[u8], cx: &mut Context<Self>) {
         self.terminal.vt_write(bytes);
+        // Drain the flag the bell callback raised. A focused terminal already
+        // has the user's attention, so only an unfocused bell becomes an
+        // event; the panel decides what to show for it.
+        if self.bell_rang.replace(false) && !self.focused {
+            cx.emit(TerminalEvent::Bell);
+        }
         self.rebuild_frame();
         cx.notify();
     }
@@ -387,6 +434,18 @@ impl TerminalState {
             }
             Err(_) => {}
         }
+    }
+
+    // ---- Focus ----
+
+    fn on_focus_gained(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        self.focused = true;
+        // Focus landing back here is what reads away an unread bell.
+        cx.emit(TerminalEvent::Focused);
+    }
+
+    fn on_focus_lost(&mut self, _: &mut Window, _: &mut Context<Self>) {
+        self.focused = false;
     }
 
     // ---- Mouse ----
@@ -632,6 +691,7 @@ fn digit_key(c: char) -> gvt::key::Key {
 fn spawn_shell(
     cols: u16,
     rows: u16,
+    cwd: Option<&Path>,
 ) -> anyhow::Result<(
     Box<dyn MasterPty + Send>,
     Box<dyn Write + Send>,
@@ -648,6 +708,9 @@ fn spawn_shell(
     let mut cmd = CommandBuilder::new(shell);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
+    if let Some(cwd) = cwd {
+        cmd.cwd(cwd);
+    }
     let child = pair.slave.spawn_command(cmd)?;
     let writer = pair.master.take_writer()?;
     Ok((pair.master, writer, child))
@@ -861,7 +924,14 @@ impl Focusable for TerminalState {
 }
 
 impl Render for TerminalState {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Focus listeners need a `Window`, so they install here on the first
+        // paint rather than in the constructor.
+        if self._focus_listeners.is_none() {
+            let focus = cx.on_focus(&self.focus_handle, window, Self::on_focus_gained);
+            let blur = cx.on_blur(&self.focus_handle, window, Self::on_focus_lost);
+            self._focus_listeners = Some((focus, blur));
+        }
         div()
             .id(("terminal-view", cx.entity_id()))
             .size_full()

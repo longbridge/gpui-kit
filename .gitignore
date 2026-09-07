@@ -32,3 +32,6 @@ crates/story-web/www/dist/
 crates/story-web/www/bun.lockb
 crates/base/examples/wasm/www/dist/
 .worktrees
+
+# Mimosa security-scan plugin local state
+.mimosa/
