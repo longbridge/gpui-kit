@@ -782,7 +782,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             }
             _ => {}
         }
-        cx.notify();
+        self.refresh(cx);
     }
 
     fn reset_highlighter(&mut self, cx: &mut Context<Self>) {
