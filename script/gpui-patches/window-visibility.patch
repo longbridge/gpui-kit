@@ -1,0 +1,534 @@
+diff --git a/crates/gpui/src/app/test_context.rs b/crates/gpui/src/app/test_context.rs
+index a34a779007..807365c584 100644
+--- a/crates/gpui/src/app/test_context.rs
++++ b/crates/gpui/src/app/test_context.rs
+@@ -789,6 +789,11 @@ impl VisualTestContext {
+         self.cx.test_window(self.window).0.lock().title.clone()
+     }
+
++    /// Returns whether the test window is visible.
++    pub fn is_window_visible(&mut self) -> bool {
++        self.cx.test_window(self.window).is_visible()
++    }
++
+     /// Read the document path off the window (set by `Window#set_document_path`)
+     pub fn document_path(&mut self) -> Option<std::path::PathBuf> {
+         self.cx
+diff --git a/crates/gpui/src/platform.rs b/crates/gpui/src/platform.rs
+index eeba999dac..cc44d677a3 100644
+--- a/crates/gpui/src/platform.rs
++++ b/crates/gpui/src/platform.rs
+@@ -847,6 +847,7 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
+     fn background_appearance(&self) -> WindowBackgroundAppearance;
+     fn set_title(&mut self, title: &str);
+     fn set_background_appearance(&self, background_appearance: WindowBackgroundAppearance);
++    fn set_visible(&self, visible: bool);
+     fn minimize(&self);
+     fn zoom(&self);
+     fn toggle_fullscreen(&self);
+diff --git a/crates/gpui/src/platform/test/window.rs b/crates/gpui/src/platform/test/window.rs
+index 5a07bc5c01..6e64e45def 100644
+--- a/crates/gpui/src/platform/test/window.rs
++++ b/crates/gpui/src/platform/test/window.rs
+@@ -42,6 +42,7 @@ pub(crate) struct TestWindowState {
+     frame_wake_count: Rc<Cell<usize>>,
+     frame_scheduled: bool,
+     frame_callback_pending: bool,
++    visible: bool,
+     input_handler: Option<PlatformInputHandler>,
+     text_input_configurations: Vec<TextInputConfiguration>,
+     text_input_state_changes: Vec<TextInputStateChange>,
+@@ -107,6 +108,7 @@ impl TestWindow {
+             frame_wake_count: Rc::new(Cell::new(0)),
+             frame_scheduled: false,
+             frame_callback_pending: false,
++            visible: params.show,
+             input_handler: None,
+             text_input_configurations: Vec::new(),
+             text_input_state_changes: Vec::new(),
+@@ -141,6 +143,11 @@ impl TestWindow {
+         self.0.lock().frame_scheduled
+     }
+
++    /// Returns whether this test window is visible.
++    pub fn is_visible(&self) -> bool {
++        self.0.lock().visible
++    }
++
+     /// Every [`TextInputConfiguration`] forwarded to this window, in order.
+     pub fn text_input_configurations(&self) -> Vec<TextInputConfiguration> {
+         self.0.lock().text_input_configurations.clone()
+@@ -343,6 +350,10 @@ impl PlatformWindow for TestWindow {
+
+     fn set_background_appearance(&self, _background: WindowBackgroundAppearance) {}
+
++    fn set_visible(&self, visible: bool) {
++        self.0.lock().visible = visible;
++    }
++
+     fn set_edited(&mut self, edited: bool) {
+         self.0.lock().edited = edited;
+     }
+diff --git a/crates/gpui/src/window.rs b/crates/gpui/src/window.rs
+index 606623b5b0..ff00577768 100644
+--- a/crates/gpui/src/window.rs
++++ b/crates/gpui/src/window.rs
+@@ -6213,6 +6213,15 @@ impl Window {
+         self.platform_window.minimize();
+     }
+
++    /// Show or hide the current window at the platform level.
++    ///
++    /// Hiding keeps the window and its view alive, unlike closing it. Call
++    /// [`Window::activate_window`] after showing when the window should also receive focus.
++    /// The window manager may apply its own focus policy when a window is mapped.
++    pub fn set_visible(&self, visible: bool) {
++        self.platform_window.set_visible(visible);
++    }
++
+     /// Toggle full screen status on the current window at the platform level.
+     pub fn toggle_fullscreen(&self) {
+         self.platform_window.toggle_fullscreen();
+diff --git a/crates/gpui/tests/window_visibility.rs b/crates/gpui/tests/window_visibility.rs
+new file mode 100644
+index 0000000000..112e6874f6
+--- /dev/null
++++ b/crates/gpui/tests/window_visibility.rs
+@@ -0,0 +1,39 @@
++#![cfg(feature = "test-support")]
++
++use gpui::{AppContext, EmptyView, TestAppContext, VisualTestContext, WindowOptions};
++
++#[gpui::test]
++fn visibility_preserves_windows_and_is_independent(cx: &mut TestAppContext) {
++    let open = |show, cx: &mut TestAppContext| {
++        cx.update(|cx| {
++            cx.open_window(
++                WindowOptions {
++                    show,
++                    ..Default::default()
++                },
++                |_, cx| cx.new(|_| EmptyView),
++            )
++            .unwrap()
++        })
++    };
++    let hidden = open(false, cx);
++    let visible = open(true, cx);
++    let mut hidden_platform = VisualTestContext::from_window(hidden.into(), cx);
++    let mut visible_platform = VisualTestContext::from_window(visible.into(), cx);
++    assert!(!hidden_platform.is_window_visible());
++    assert!(visible_platform.is_window_visible());
++
++    // Repeated calls and complete hide/show cycles retain the same usable window handle.
++    for show in [false, true, true, false, false, true] {
++        hidden
++            .update(cx, |_, window, _| window.set_visible(show))
++            .unwrap();
++        assert_eq!(hidden_platform.is_window_visible(), show);
++        assert!(visible_platform.is_window_visible());
++    }
++    visible
++        .update(cx, |_, window, _| window.set_visible(false))
++        .unwrap();
++    assert!(!visible_platform.is_window_visible());
++    assert!(hidden_platform.is_window_visible());
++}
+diff --git a/crates/gpui_linux/src/linux/headless/window.rs b/crates/gpui_linux/src/linux/headless/window.rs
+index e41b09723d..fd6ba274ed 100644
+--- a/crates/gpui_linux/src/linux/headless/window.rs
++++ b/crates/gpui_linux/src/linux/headless/window.rs
+@@ -177,6 +177,8 @@ impl PlatformWindow for HeadlessWindow {
+
+     fn set_background_appearance(&self, _background: WindowBackgroundAppearance) {}
+
++    fn set_visible(&self, _visible: bool) {}
++
+     fn minimize(&self) {}
+
+     fn zoom(&self) {}
+diff --git a/crates/gpui_linux/src/linux/wayland/window.rs b/crates/gpui_linux/src/linux/wayland/window.rs
+index c0a7a6410f..05fc3ac2f6 100644
+--- a/crates/gpui_linux/src/linux/wayland/window.rs
++++ b/crates/gpui_linux/src/linux/wayland/window.rs
+@@ -102,6 +102,8 @@ pub struct WaylandWindowState {
+     children: FxHashMap<ObjectId, bool>,
+     pub surface: wl_surface::WlSurface,
+     app_id: Option<String>,
++    title: Option<String>,
++    window_min_size: Option<Size<Pixels>>,
+     appearance: WindowAppearance,
+     blur: Option<org_kde_kwin_blur::OrgKdeKwinBlur>,
+     viewport: Option<wp_viewport::WpViewport>,
+@@ -122,6 +124,7 @@ pub struct WaylandWindowState {
+     handle: AnyWindowHandle,
+     active: bool,
+     hovered: bool,
++    visible: bool,
+     redraw_requested: bool,
+     presentation: PresentationState,
+     pending_frame_callback: Option<wl_callback::WlCallback>,
+@@ -577,9 +580,15 @@ impl WaylandWindowState {
+             WgpuRenderer::new(gpu_context, &raw_window, config, compositor_gpu)?
+         };
+
++        let title = options
++            .titlebar
++            .as_ref()
++            .and_then(|titlebar| titlebar.title.as_ref())
++            .map(ToString::to_string);
++
+         if let WaylandSurfaceState::Xdg(ref xdg_state) = surface_state {
+-            if let Some(title) = options.titlebar.and_then(|titlebar| titlebar.title) {
+-                xdg_state.toplevel.set_title(title.to_string());
++            if let Some(title) = title.as_ref() {
++                xdg_state.toplevel.set_title(title.clone());
+             }
+
+             if let Some(app_id) = options.app_id.as_ref() {
+@@ -600,6 +609,8 @@ impl WaylandWindowState {
+             children: FxHashMap::default(),
+             surface,
+             app_id: options.app_id,
++            title,
++            window_min_size: options.window_min_size,
+             blur: None,
+             viewport,
+             globals,
+@@ -622,6 +633,7 @@ impl WaylandWindowState {
+             handle,
+             active: false,
+             hovered: false,
++            visible: options.show,
+             redraw_requested: false,
+             presentation: PresentationState::Unpresented,
+             pending_frame_callback: None,
+@@ -637,6 +649,40 @@ impl WaylandWindowState {
+             || self.background_appearance != WindowBackgroundAppearance::Opaque
+     }
+
++    fn prepare_to_map(&self) {
++        let WaylandSurfaceState::Xdg(xdg_state) = &self.surface_state else {
++            return;
++        };
++
++        if let Some(title) = self.title.as_ref() {
++            xdg_state.toplevel.set_title(title.clone());
++        }
++        if let Some(app_id) = self.app_id.as_ref() {
++            xdg_state.toplevel.set_app_id(app_id.clone());
++        }
++        if let Some(size) = self.window_min_size {
++            xdg_state
++                .toplevel
++                .set_min_size(f32::from(size.width) as i32, f32::from(size.height) as i32);
++        }
++
++        let max_texture_size = self.renderer.max_texture_size() as i32;
++        xdg_state
++            .toplevel
++            .set_max_size(max_texture_size, max_texture_size);
++
++        if let Some(parent) = self.parent.as_ref() {
++            let parent_toplevel = parent.toplevel();
++            xdg_state.toplevel.set_parent(parent_toplevel.as_ref());
++        }
++
++        if self.fullscreen {
++            xdg_state.toplevel.set_fullscreen(None);
++        } else if self.maximized {
++            xdg_state.toplevel.set_maximized();
++        }
++    }
++
+     fn update_subpixel_layout(&mut self) {
+         use wayland_client::protocol::wl_output::Subpixel;
+         let is_bgr = self
+@@ -861,8 +907,11 @@ impl WaylandWindow {
+             frame_ping,
+         });
+
+-        // Kick things off
+-        surface.commit();
++        // An initial empty commit asks the compositor to configure the surface. If the caller
++        // requested a hidden window, defer that commit until the window is shown.
++        if this.borrow().visible {
++            surface.commit();
++        }
+
+         Ok((this, surface.id()))
+     }
+@@ -917,8 +966,12 @@ impl WaylandWindowStatePtr {
+     }
+
+     pub fn frame(&self) {
+-        self.frame_loop.set(FrameLoop::Ticking);
+         let mut state = self.state.borrow_mut();
++        if !state.visible {
++            self.frame_loop.set(FrameLoop::Unconfigured);
++            return;
++        }
++        self.frame_loop.set(FrameLoop::Ticking);
+         state.resize_throttle = false;
+         // GPUI may throttle this tick without calling draw, so leave the request
+         // latched until a draw actually reaches the renderer.
+@@ -943,6 +996,11 @@ impl WaylandWindowStatePtr {
+
+     fn complete_frame(&self) {
+         let mut state = self.state.borrow_mut();
++        // A frame callback can hide the window. Do not schedule a retry for an unmapped surface.
++        if !state.visible {
++            self.frame_loop.set(FrameLoop::Unconfigured);
++            return;
++        }
+
+         let frame_loop = self.frame_loop.get();
+         if frame_loop == FrameLoop::AwaitingCallback {
+@@ -1123,8 +1181,11 @@ impl WaylandWindowStatePtr {
+             );
+
+             let initial_configure = self.frame_loop.get() == FrameLoop::Unconfigured;
++            let visible = state.visible;
+             drop(state);
+-            if initial_configure {
++            if !visible {
++                return;
++            } else if initial_configure {
+                 self.frame();
+             } else {
+                 self.request_redraw();
+@@ -1786,7 +1847,9 @@ impl PlatformWindow for WaylandWindow {
+     }
+
+     fn set_title(&mut self, title: &str) {
+-        if let Some(toplevel) = self.borrow().surface_state.toplevel() {
++        let mut state = self.borrow_mut();
++        state.title = Some(title.to_owned());
++        if let Some(toplevel) = state.surface_state.toplevel() {
+             toplevel.set_title(title.to_string());
+         }
+     }
+@@ -1813,6 +1876,29 @@ impl PlatformWindow for WaylandWindow {
+         self.borrow().background_appearance
+     }
+
++    fn set_visible(&self, visible: bool) {
++        let mut state = self.borrow_mut();
++        if state.visible == visible {
++            return;
++        }
++
++        state.visible = visible;
++        if visible {
++            // Remapping an xdg surface starts with an empty commit and a fresh configure cycle.
++            state.prepare_to_map();
++            state.surface.commit();
++        } else {
++            // Attaching a null buffer unmaps an xdg surface without destroying its role objects.
++            // The next map must wait for a new configure before presenting another buffer.
++            state.pending_frame_callback.take();
++            state.surface.attach(None, 0, 0);
++            state.surface.commit();
++            state.presentation = PresentationState::Unpresented;
++            state.redraw_requested = true;
++            self.0.frame_loop.set(FrameLoop::Unconfigured);
++        }
++    }
++
+     fn is_subpixel_rendering_supported(&self) -> bool {
+         let client = self.borrow().client.get_client();
+         let state = client.borrow();
+@@ -1901,6 +1987,12 @@ impl PlatformWindow for WaylandWindow {
+     fn draw(&self, scene: &Scene) {
+         let mut state = self.borrow_mut();
+
++        if !state.visible {
++            state.redraw_requested = true;
++            self.0.frame_loop.set(FrameLoop::Unconfigured);
++            return;
++        }
++
+         if state.renderer.device_lost() {
+             let raw_window = RawWindow {
+                 window: state.surface.id().as_ptr().cast::<std::ffi::c_void>(),
+diff --git a/crates/gpui_linux/src/linux/x11/window.rs b/crates/gpui_linux/src/linux/x11/window.rs
+index d6db24e2e0..996eafa109 100644
+--- a/crates/gpui_linux/src/linux/x11/window.rs
++++ b/crates/gpui_linux/src/linux/x11/window.rs
+@@ -275,6 +275,7 @@ pub struct X11WindowState {
+     background_appearance: WindowBackgroundAppearance,
+     maximized_vertical: bool,
+     maximized_horizontal: bool,
++    visible: bool,
+     hidden: bool,
+     active: bool,
+     hovered: bool,
+@@ -832,6 +833,7 @@ impl X11WindowState {
+                 fullscreen: false,
+                 maximized_vertical: false,
+                 maximized_horizontal: false,
++                visible: params.show,
+                 hidden: false,
+                 appearance,
+                 handle,
+@@ -1588,10 +1590,12 @@ impl PlatformWindow for X11Window {
+     }
+
+     fn map_window(&mut self) -> anyhow::Result<()> {
+-        check_reply(
+-            || "X11 MapWindow failed.",
+-            self.0.xcb.map_window(self.0.x_window),
+-        )?;
++        if self.0.state.borrow().visible {
++            check_reply(
++                || "X11 MapWindow failed.",
++                self.0.xcb.map_window(self.0.x_window),
++            )?;
++        }
+         Ok(())
+     }
+
+@@ -1606,6 +1610,33 @@ impl PlatformWindow for X11Window {
+         self.0.state.borrow().background_appearance
+     }
+
++    fn set_visible(&self, visible: bool) {
++        let mut state = self.0.state.borrow_mut();
++        if state.visible == visible {
++            return;
++        }
++        state.visible = visible;
++        drop(state);
++
++        let result = if visible {
++            self.0.xcb.map_window(self.0.x_window)
++        } else {
++            self.0.xcb.unmap_window(self.0.x_window)
++        };
++        check_reply(
++            || {
++                if visible {
++                    "X11 MapWindow failed."
++                } else {
++                    "X11 UnmapWindow failed."
++                }
++            },
++            result,
++        )
++        .log_err();
++        xcb_flush(&self.0.xcb);
++    }
++
+     fn is_subpixel_rendering_supported(&self) -> bool {
+         self.0
+             .state
+diff --git a/crates/gpui_macos/src/window.rs b/crates/gpui_macos/src/window.rs
+index d8f5b3c878..00ff1c8ddd 100644
+--- a/crates/gpui_macos/src/window.rs
++++ b/crates/gpui_macos/src/window.rs
+@@ -1740,6 +1740,26 @@ impl PlatformWindow for MacWindow {
+             .detach();
+     }
+
++    fn set_visible(&self, visible: bool) {
++        let lock = self.0.lock();
++        let window = lock.native_window;
++        let closed = lock.closed.clone();
++        let executor = lock.foreground_executor.clone();
++        executor
++            .spawn(async move {
++                if !closed.load(Ordering::Acquire) {
++                    unsafe {
++                        if visible {
++                            let _: () = msg_send![window, orderFront: nil];
++                        } else {
++                            let _: () = msg_send![window, orderOut: nil];
++                        }
++                    }
++                }
++            })
++            .detach();
++    }
++
+     fn minimize(&self) {
+         let window = self.0.lock().native_window;
+         unsafe {
+diff --git a/crates/gpui_web/src/window.rs b/crates/gpui_web/src/window.rs
+index 06c021bd40..6c16ec2e34 100644
+--- a/crates/gpui_web/src/window.rs
++++ b/crates/gpui_web/src/window.rs
+@@ -141,7 +141,7 @@ impl WebWindow {
+     #[allow(clippy::too_many_arguments)]
+     pub(crate) fn new(
+         _handle: AnyWindowHandle,
+-        _params: WindowParams,
++        params: WindowParams,
+         context: &WgpuContext,
+         canvas: web_sys::HtmlCanvasElement,
+         surface: wgpu::Surface<'static>,
+@@ -218,6 +218,14 @@ impl WebWindow {
+             raf_function: RefCell::new(None),
+         });
+
++        if !params.show {
++            inner
++                .canvas
++                .style()
++                .set_property("display", "none")
++                .map_err(|error| anyhow::anyhow!("Failed to hide canvas: {error:?}"))?;
++        }
++
+         let raf_closure = inner.create_raf_closure();
+         inner.wake_frame_loop();
+
+@@ -738,6 +746,14 @@ impl PlatformWindow for WebWindow {
+
+     fn set_background_appearance(&self, _background: WindowBackgroundAppearance) {}
+
++    fn set_visible(&self, visible: bool) {
++        self.inner
++            .canvas
++            .style()
++            .set_property("display", if visible { "block" } else { "none" })
++            .unwrap_or_else(|error| log::error!("Failed to update canvas visibility: {error:?}"));
++    }
++
+     fn minimize(&self) {
+         log::warn!("WebWindow::minimize is not supported in the browser");
+     }
+diff --git a/crates/gpui_windows/src/window.rs b/crates/gpui_windows/src/window.rs
+index 37e9d9a176..0cd08377c7 100644
+--- a/crates/gpui_windows/src/window.rs
++++ b/crates/gpui_windows/src/window.rs
+@@ -899,6 +899,31 @@ impl PlatformWindow for WindowsWindow {
+         }
+     }
+
++    fn set_visible(&self, visible: bool) {
++        let hwnd = self.0.hwnd;
++        let this = self.0.clone();
++        self.0
++            .executor
++            .spawn(async move {
++                if visible {
++                    let initial_placement = this.state.initial_placement.take();
++                    let has_initial_placement = initial_placement.is_some();
++                    this.state.initial_placement.set(initial_placement);
++                    this.set_window_placement().log_err();
++                    if !has_initial_placement {
++                        unsafe {
++                            ShowWindowAsync(hwnd, SW_SHOWNOACTIVATE).ok().log_err();
++                        }
++                    }
++                } else {
++                    unsafe {
++                        ShowWindowAsync(hwnd, SW_HIDE).ok().log_err();
++                    }
++                }
++            })
++            .detach();
++    }
++
+     fn minimize(&self) {
+         unsafe { ShowWindowAsync(self.0.hwnd, SW_MINIMIZE).ok().log_err() };
+     }

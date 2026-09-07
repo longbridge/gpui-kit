@@ -920,6 +920,7 @@ function crateManifest(
       "zed-crate": crate.name,
       "zed-version": crate.version,
       "zed-rev": zedSha,
+      patches: ["window-visibility"],
     },
   };
 
@@ -1042,12 +1043,12 @@ function copyCrate(source: string, destination: string) {
   });
 }
 
-function stageWorkspace(
+async function stageWorkspace(
   ws: Workspace,
   crates: Crate[],
   version: string,
   zedSha: string,
-): string {
+): Promise<string> {
   const staging = join(WORK_DIR, "workspace");
   if (existsSync(staging)) {
     for (const entry of readdirSync(staging)) {
@@ -1059,6 +1060,8 @@ function stageWorkspace(
 
   for (const crate of crates)
     copyCrate(join(ws.root, crate.relDir), join(staging, crate.relDir));
+
+  await installWindowVisibility(staging, zedSha);
 
   const cratesByDir = new Map(crates.map((c) => [c.relDir, c]));
   for (const crate of crates) {
@@ -1091,6 +1094,7 @@ function stageWorkspace(
   const summary = {
     version,
     zed: { url: ZED_GIT_URL, rev: zedSha },
+    patches: ["window-visibility"],
     crates: crates.map((c) => ({
       name: c.publishedName,
       zed_name: c.name,
@@ -1105,6 +1109,21 @@ function stageWorkspace(
     `${JSON.stringify(summary, null, 2)}\n`,
   );
   return staging;
+}
+
+/** Carry runtime window visibility until it is available in the upstream snapshot. */
+async function installWindowVisibility(staging: string, zedSha: string) {
+  const patch = join(REPO_ROOT, "script/gpui-patches/window-visibility.patch");
+  const directory = relative(REPO_ROOT, staging);
+  // Run from the repository root: git apply otherwise skips paths outside its cwd prefix.
+  // Check every hunk first so upstream drift stops staging rather than silently losing the API.
+  await run(["git", "apply", "--check", `--directory=${directory}`, patch], { cwd: REPO_ROOT });
+  await run(["git", "apply", `--directory=${directory}`, patch], { cwd: REPO_ROOT });
+  for (const match of readFileSync(patch, "utf8").matchAll(/^\+\+\+ b\/(.+)$/gm)) {
+    const path = join(staging, match[1]);
+    writeFileSync(path, modificationNotice(zedSha, "added runtime window visibility") + readFileSync(path, "utf8"));
+  }
+  logInfo("gpui: installed runtime window visibility on every platform");
 }
 
 const FACADE_PATH_MODULE = "gpui_pre_facade_paths";
@@ -2013,7 +2032,7 @@ async function main(argv: string[]): Promise<number> {
   console.log();
 
   logStep(`3/${totalSteps}`, "Staging a standalone workspace");
-  const staging = stageWorkspace(ws, crates, version, zedSha);
+  const staging = await stageWorkspace(ws, crates, version, zedSha);
   logSuccess(`Workspace written to ${bold(staging)}`);
   logInfo(`Summary written to ${join(WORK_DIR, "gpui-pre.json")}`);
   console.log();
@@ -2035,6 +2054,10 @@ async function main(argv: string[]): Promise<number> {
       throw new BumpError(
         "verification failed; inspect the staged workspace and fix the issue",
       );
+    await run(
+      ["cargo", "test", "-p", "gpui-pre", "--features", "test-support", "--test", "window_visibility"],
+      { cwd: staging },
+    );
     logSuccess("Every crate packages and builds");
   }
   console.log();
