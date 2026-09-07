@@ -295,6 +295,27 @@ pub(crate) fn init(cx: &mut App) {
     ]);
 }
 
+/// A mouse position resolved for a columnar (block) selection.
+///
+/// A position past the end of a short row has no glyph to land on, so `offset` clips to
+/// that row's end and `columns_past_line_end` keeps what the clip dropped. Together they
+/// say which column the pointer really reached, which is what a block spanning rows of
+/// different lengths has to be measured in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ColumnarPoint {
+    offset: usize,
+    columns_past_line_end: usize,
+}
+
+impl ColumnarPoint {
+    pub(super) fn new(offset: usize, columns_past_line_end: usize) -> Self {
+        Self {
+            offset,
+            columns_past_line_end,
+        }
+    }
+}
+
 /// The shared text-editing engine behind [`crate::input::InputState`],
 /// [`crate::input::TextareaState`] and [`crate::input::EditorState`].
 ///
@@ -341,8 +362,8 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) last_bounds: Option<Bounds<Pixels>>,
     pub(super) last_selected_range: Option<CursorSelection>,
     pub(super) selecting: bool,
-    /// Anchor offset for an in-progress columnar (block) selection.
-    pub(super) column_select_start: Option<usize>,
+    /// Anchor point of an in-progress columnar (block) selection.
+    pub(super) column_select_start: Option<ColumnarPoint>,
     pub(crate) disabled: bool,
     pub(crate) readonly: bool,
     pub(crate) text_align: TextAlign,
@@ -1886,11 +1907,16 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     /// Build a columnar (block) selection spanning the rows between the two
-    /// offsets, one selection per display row at the same column span.
+    /// points, one selection per display row at the same column span.
+    ///
+    /// The span keeps the columns the pointer sat past the end of a short row, so a row
+    /// that runs out of text does not narrow the block for the rows that do reach that
+    /// far. Each row is then clipped to its own end, selecting as much of the span as it
+    /// actually has.
     pub(super) fn build_columnar_selection(
         &mut self,
-        start_offset: usize,
-        end_offset: usize,
+        start: ColumnarPoint,
+        end: ColumnarPoint,
         cx: &mut Context<Self>,
     ) {
         if !self.is_multi_line() {
@@ -1898,35 +1924,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
 
         self.undo_manager.break_transaction_coalescing();
-        let (start, end) = if start_offset <= end_offset {
-            (start_offset, end_offset)
-        } else {
-            (end_offset, start_offset)
-        };
 
-        let start_point = self.display_map.offset_to_wrap_display_point(start);
-        let end_point = self.display_map.offset_to_wrap_display_point(end);
-
-        let start_col = start_point.column;
-        let end_col = end_point.column;
-        let (start_col, end_col) = if start_col <= end_col {
-            (start_col, end_col)
-        } else {
-            (end_col, start_col)
-        };
-
-        let start_row = self
-            .display_map
-            .wrap_row_to_display_row(start_point.row)
-            .unwrap_or_else(|| {
-                self.display_map
-                    .nearest_visible_display_row(start_point.row)
-            });
-        let end_row = self
-            .display_map
-            .wrap_row_to_display_row(end_point.row)
-            .unwrap_or_else(|| self.display_map.nearest_visible_display_row(end_point.row));
+        let (start_row, start_col) = self.columnar_row_column(start);
+        let (end_row, end_col) = self.columnar_row_column(end);
         let (start_row, end_row) = (start_row.min(end_row), start_row.max(end_row));
+        let (start_col, end_col) = (start_col.min(end_col), start_col.max(end_col));
 
         let mut new_selections = Vec::with_capacity(end_row - start_row + 1);
         for row in start_row..=end_row {
@@ -1940,13 +1942,23 @@ impl<M: InputModeKind> InputBaseState<M> {
             new_selections.push(CursorSelection::new(id, sel_start, sel_end));
         }
 
-        if new_selections.is_empty() {
-            let id = self.selections.generate_id();
-            new_selections.push(CursorSelection::new(id, end, end));
-        }
-
         self.selections.replace_all(new_selections);
         cx.notify();
+    }
+
+    /// Resolve a columnar point to the display row it is on and the column it reaches,
+    /// counting the columns beyond the row's end so a short row keeps the full span.
+    fn columnar_row_column(&self, point: ColumnarPoint) -> (usize, usize) {
+        let display_point = self.display_map.offset_to_wrap_display_point(point.offset);
+        let row = self
+            .display_map
+            .wrap_row_to_display_row(display_point.row)
+            .unwrap_or_else(|| {
+                self.display_map
+                    .nearest_visible_display_row(display_point.row)
+            });
+
+        (row, display_point.column + point.columns_past_line_end)
     }
 
     pub(super) fn on_mouse_down(
@@ -1972,7 +1984,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
 
         self.selecting = true;
-        let (offset, line_end_affinity) = self.index_for_mouse_position(event.position);
+        let (offset, line_end_affinity, columns_past_line_end) =
+            self.resolve_mouse_position(event.position);
 
         if M::on_click(self, event, offset, window, cx) {
             return;
@@ -2008,7 +2021,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             {
                 // Alt+Shift starts a block; Linux also accepts Ghostty's Ctrl+Alt.
                 // Mark selecting so the drag handler extends the block.
-                self.column_select_start = Some(offset);
+                self.column_select_start = Some(ColumnarPoint::new(offset, columns_past_line_end));
                 self.selecting = true;
                 self.move_to_with_affinity(offset, None, line_end_affinity, cx);
                 return;
@@ -2016,7 +2029,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 self.add_cursor_at(offset, cx);
                 // Keep click-to-add behavior, but use this press as the block
                 // anchor if the user continues dragging with the left button.
-                self.column_select_start = Some(offset);
+                self.column_select_start = Some(ColumnarPoint::new(offset, columns_past_line_end));
                 return;
             }
         }
@@ -2564,15 +2577,26 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// selection must pass it on, or clicking past the last glyph of a wrapped row leaves a
     /// caret one row below the pointer.
     pub(crate) fn index_for_mouse_position(&self, position: Point<Pixels>) -> (usize, bool) {
+        let (offset, line_end_affinity, _) = self.resolve_mouse_position(position);
+        (offset, line_end_affinity)
+    }
+
+    /// Resolve a mouse position to a text offset, the caret affinity to use for it, and
+    /// how many columns the pointer sits past the end of that row.
+    ///
+    /// Only a columnar selection needs the third value; everywhere else a position past
+    /// the end of a row means the end of that row, and
+    /// [`Self::index_for_mouse_position`] is the call to make.
+    fn resolve_mouse_position(&self, position: Point<Pixels>) -> (usize, bool, usize) {
         // If the text is empty, always return 0
         if self.text.len() == 0 {
-            return (0, false);
+            return (0, false, 0);
         }
 
         let (Some(bounds), Some(last_layout)) =
             (self.last_bounds.as_ref(), self.last_layout.as_ref())
         else {
-            return (0, false);
+            return (0, false, 0);
         };
 
         let line_height = last_layout.line_height;
@@ -2591,6 +2615,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         let inner_position = position - bounds.origin - point(line_number_width, px(0.));
 
         let mut y_offset = last_layout.visible_top;
+        // Position relative to the last line walked, kept for a pointer that ends up
+        // below every line.
+        let mut last_line_pos = None;
 
         // Traverse visible buffer lines (compact, no hidden entries)
         for (vi, (line_layout, _buffer_line)) in last_layout
@@ -2609,7 +2636,11 @@ impl<M: InputModeKind> InputBaseState<M> {
             if self.is_single_line() {
                 let local_index = line_layout.closest_index_for_x(pos.x, last_layout);
                 // A single line never wraps, so there is no boundary to disambiguate.
-                return (self.resolve_index(line_start_offset + local_index), false);
+                return (
+                    self.resolve_index(line_start_offset + local_index),
+                    false,
+                    0,
+                );
             }
 
             // Check if mouse is in this line's bounds
@@ -2619,17 +2650,31 @@ impl<M: InputModeKind> InputBaseState<M> {
                 return (
                     self.resolve_index(line_start_offset + local_index),
                     line_end_affinity,
+                    line_layout.columns_past_line_end(pos, last_layout),
                 );
             } else if pos.y < px(0.) {
                 // Mouse is above this line, return start of this line
-                return (self.resolve_index(line_start_offset), false);
+                return (self.resolve_index(line_start_offset), false, 0);
             }
 
             y_offset += line_layout.size(line_height).height;
+            last_line_pos = Some(pos);
         }
 
-        // Mouse is below all visible lines, return end of text
-        (self.text.len(), false)
+        // Mouse is below all visible lines, return end of text. A columnar selection
+        // still needs how far right the pointer was, so measure it against the last
+        // line rather than reporting a block that collapses at the bottom edge.
+        let columns_past_line_end = last_layout
+            .lines
+            .last()
+            .zip(last_line_pos)
+            .map(|(line_layout, pos)| {
+                let last_row_top = (line_layout.size(line_height).height - line_height).max(px(0.));
+                line_layout.columns_past_line_end(point(pos.x, last_row_top), last_layout)
+            })
+            .unwrap_or(0);
+
+        (self.text.len(), false, columns_past_line_end)
     }
 
     /// Map a display byte index back to a text offset, undoing the mask expansion when the input
@@ -2920,9 +2965,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
 
         self.auto_scroll.last_drag_position = Some(event.position);
-        let (offset, line_end_affinity) = self.index_for_mouse_position(event.position);
+        let (offset, line_end_affinity, columns_past_line_end) =
+            self.resolve_mouse_position(event.position);
         if let Some(start) = self.column_select_start {
-            self.build_columnar_selection(start, offset, cx);
+            let end = ColumnarPoint::new(offset, columns_past_line_end);
+            self.build_columnar_selection(start, end, cx);
         } else {
             self.select_to_with_affinity(offset, line_end_affinity, cx);
         }
@@ -2935,9 +2982,11 @@ impl<M: InputModeKind> InputBaseState<M> {
                 let current = state.scroll_handle.offset();
                 state.update_scroll_offset(Some(point(current.x, current.y + delta)), cx);
                 if let Some(pos) = state.auto_scroll.last_drag_position {
-                    let (offset, line_end_affinity) = state.index_for_mouse_position(pos);
+                    let (offset, line_end_affinity, columns_past_line_end) =
+                        state.resolve_mouse_position(pos);
                     if let Some(start) = state.column_select_start {
-                        state.build_columnar_selection(start, offset, cx);
+                        let end = ColumnarPoint::new(offset, columns_past_line_end);
+                        state.build_columnar_selection(start, end, cx);
                     } else {
                         state.select_to_with_affinity(offset, line_end_affinity, cx);
                     }
@@ -6099,6 +6148,48 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_alt_drag_over_a_short_row_keeps_the_block_width(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "abcdef\nab\nabcdef");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| state.focus(window, cx));
+        });
+        // Drag from row 0 column 1 down to row 1, at the x of row 0's column 5. Row 1
+        // only has two characters, so the pointer ends past its end.
+        let (start, end) = view.input.read_with(&cx, |state, _| {
+            let layout = state.last_layout.as_ref().unwrap();
+            let origin = state.last_bounds.unwrap().origin;
+            let x_of = |index| {
+                layout.line_number_width
+                    + layout.lines[0]
+                        .position_for_index(index, layout, false)
+                        .unwrap()
+                        .x
+            };
+            (
+                origin + point(x_of(1), layout.line_height * 0.5),
+                origin + point(x_of(5), layout.line_height * 1.5),
+            )
+        });
+        let modifiers = gpui::Modifiers {
+            alt: true,
+            shift: true,
+            ..Default::default()
+        };
+        cx.simulate_mouse_down(start, MouseButton::Left, modifiers);
+        cx.simulate_mouse_move(end, MouseButton::Left, modifiers);
+        cx.simulate_mouse_up(end, MouseButton::Left, modifiers);
+
+        // The short row is clipped to its own end; the long row keeps the full span.
+        view.input.read_with(&cx, |state, _| {
+            let ranges: Vec<_> = state.selections.iter().map(|s| (s.start, s.end)).collect();
+            assert_eq!(ranges, vec![(1, 5), (8, 9)]);
+        });
+    }
+
+    #[gpui::test]
     fn test_alt_mouse_release_outside_editor_ends_column_selection(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let view = InputView::<EditorMode>::new(cx);
@@ -6369,7 +6460,11 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "ab\n你好\ncd");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state.build_columnar_selection(1, 11, cx);
+                state.build_columnar_selection(
+                    ColumnarPoint::new(1, 0),
+                    ColumnarPoint::new(11, 0),
+                    cx,
+                );
                 let text = state.value();
                 for sel in state.selections.iter() {
                     assert!(text.is_char_boundary(sel.start));
@@ -7013,9 +7108,35 @@ mod tests {
         cx.update(|_, cx| {
             input.update(cx, |state, cx| {
                 // From row 0 col 1 to row 2 col 3.
-                state.build_columnar_selection(1, 13, cx);
+                state.build_columnar_selection(
+                    ColumnarPoint::new(1, 0),
+                    ColumnarPoint::new(13, 0),
+                    cx,
+                );
                 let ranges: Vec<_> = state.selections.iter().map(|s| (s.start, s.end)).collect();
                 assert_eq!(ranges, vec![(1, 3), (6, 8), (11, 13)]);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_columnar_selection_keeps_width_over_short_rows(cx: &mut TestAppContext) {
+        let view = multi_line(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        let input = view.input;
+
+        setup_cursors(&mut cx, &input, "abcdef\nab\nabcdef");
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                // Ends on the short row, 3 columns past its end: the block still spans
+                // columns 1..5, and only that row is clipped to what it has.
+                state.build_columnar_selection(
+                    ColumnarPoint::new(1, 0),
+                    ColumnarPoint::new(9, 3),
+                    cx,
+                );
+                let ranges: Vec<_> = state.selections.iter().map(|s| (s.start, s.end)).collect();
+                assert_eq!(ranges, vec![(1, 5), (8, 9)]);
             });
         });
     }

@@ -1747,6 +1747,12 @@ impl<M: InputModeKind> Element for TextElement<M> {
         let style = window.text_style();
         let font = style.font();
         let text_size = style.font_size.to_pixels(window.rem_size());
+        // Past the end of a line there are no glyphs to hit-test against, so a pointer
+        // out there is measured in spaces instead.
+        let space_width = {
+            let font_id = window.text_system().resolve_font(&font);
+            window.text_system().layout_width(font_id, text_size, ' ')
+        };
 
         self.state.update(cx, |state, cx| {
             state.display_map.set_font(font, text_size, cx);
@@ -1859,6 +1865,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             wrap_width,
             wrapping_indent,
             line_number_width,
+            space_width,
             lines: Rc::new(vec![]),
             cursor_bounds: None,
             text_align: state.text_align,

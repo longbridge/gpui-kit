@@ -22,6 +22,11 @@ pub(super) struct LastLayout {
     pub(super) wrap_width: Option<Pixels>,
     pub(super) wrapping_indent: WrappingIndent,
     pub(super) line_number_width: Pixels,
+    /// Width of one space in the editor font.
+    ///
+    /// Past the end of a line there are no glyphs to hit-test against, so this is the
+    /// step used to measure how far past the end a pointer sits.
+    pub(super) space_width: Pixels,
     pub(super) cursor_bounds: Option<Bounds<Pixels>>,
     pub(super) text_align: TextAlign,
     pub(super) content_width: Pixels,
