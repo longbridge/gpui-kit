@@ -1,86 +1,8 @@
----
-title: 开始使用
-description: 学习如何在项目中安装并使用 GPUI Component。
-order: -2
----
+# Tested application recipe
 
-# 开始使用
+This complete view comes from `examples/ai_recipes/src/lib.rs`. Its standalone consumer depends only on `gpui-kit`; the same source is compiled and tested by `script/check-ai-recipes`. Pair it with that example's `src/main.rs`, which installs assets, initializes the library, and wraps the window in `Root`.
 
-## 安装
-
-在 `Cargo.toml` 中添加依赖：
-
-```toml
-[dependencies]
-gpui-kit = "0.6"
-anyhow = "1.0"
-```
-
-:::tip
-`gpui-kit` 始终引入 GPUI 和 `gpui-base`，并默认带上 `gpui-component` 和默认图标集。如果你希望自行管理图标与资源文件，只保留需要的 feature 即可：
-
-```toml
-gpui-kit = { version = "0.6", default-features = false, features = ["component"] }
-```
-更多说明见 [资源与图标](./assets.md)。
-:::
-
-## 快速开始
-
-下面是一个最小可运行示例：
-
-```rust
-use gpui_kit::component::button::*;
-use gpui_kit::component::*;
-use gpui_kit::*;
-
-pub struct HelloWorld;
-
-impl Render for HelloWorld {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .v_flex()
-            .gap_2()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .child("Hello, World!")
-            .child(
-                Button::new("ok")
-                    .primary()
-                    .label("Let's Go!")
-                    .on_click(|_, _, _| println!("Clicked!")),
-            )
-    }
-}
-
-fn main() {
-    let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
-
-    app.run(move |cx| {
-        gpui_kit::init(cx);
-
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| HelloWorld);
-                cx.new(|cx| Root::new(view, window, cx))
-            })
-            .expect("Failed to open window");
-        })
-        .detach();
-    });
-}
-```
-
-:::info
-请确保在 `app.run` 闭包中尽早调用 `gpui_kit::init(cx);`。它会初始化主题和全局配置。
-:::
-
-## 有状态组件与完整示例
-
-Input、List 和 DataTable 的状态由持有它们的视图保存。使用 `&mut Window` 创建 `InputState`，在 render 中通过 `Input::new(&self.input)` 渲染组件，不要每帧重新创建状态。事件订阅也必须保存在视图中，不能仅绑定到构造函数的局部变量。
-
-每个窗口以 `Root` 包装，应用内容还需渲染所使用的 dialog、sheet 和 notification 图层。完整实现及验证命令见[可执行应用示例](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes)。
+The view owns both input state and subscriptions. Rendering creates only elements. Application content renders each overlay layer once; `Root` alone does not render dialog, sheet, or notification content.
 
 <!-- recipe:settings:start -->
 ```rust
@@ -175,8 +97,4 @@ impl Render for Settings {
 ```
 <!-- recipe:settings:end -->
 
-## 后续阅读
-
-- [组件总览](./components/index)
-- [资源与图标](./assets.md)
-
+For changes in this repository, run `script/check-ai docs`, `script/check-ai rust`, or `script/check-ai shell` for the relevant verification profile (or `script/check-ai all` for all three). For a downstream app, compile and test your own consumer, then verify keyboard/focus and visuals in a real window. Automated recipe tests do not establish a model success rate.

@@ -158,7 +158,7 @@ impl TableVisibleRange {
 ///
 /// ```rust,ignore
 /// let table_state = cx.new(|cx| {
-///     TableState::new(delegate, cx)
+///     TableState::new(delegate, window, cx)
 ///         .cell_selectable(true)
 ///         .row_selectable(true)
 /// });
@@ -358,7 +358,7 @@ where
     ///
     /// ```rust,ignore
     /// let table_state = cx.new(|cx| {
-    ///     TableState::new(delegate, cx)
+    ///     TableState::new(delegate, window, cx)
     ///         .cell_selectable(true)  // Enable cell selection
     ///         .row_selectable(true)   // Also allow row selection via row header
     /// });

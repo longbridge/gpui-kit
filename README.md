@@ -20,12 +20,14 @@ Documentation: <https://gpui-kit.com>
 ```text
 gpui-kit             The one crate applications depend on
 ├── gpui-base        Unstyled behavior, state, and infrastructure
-├── gpui-shell       JavaScript extensions for a Rust host
 └── gpui-component   GPUI Component: the complete styled UI system
 ```
 
-`gpui-kit` pins the matching GPUI release and re-exports every layer, so an
-application lists a single dependency and never GPUI itself.
+`gpui-kit` pins the matching GPUI release and re-exports GPUI, base, component,
+and assets, so a Rust application lists a single dependency. JavaScript extension
+hosts add `gpui-shell` separately; `gpui-component-shell` supplies the styled catalog.
+
+See the [executable application recipe and AI-assisted development acceptance checks](examples/ai_recipes/README.md) for a tested starting point and verification commands.
 
 ## Features
 

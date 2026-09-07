@@ -4,11 +4,13 @@
 
 ## Setup
 
+Use the [tested application recipe](recipes.md) for complete examples and their verification command. Store subscription handles on the owning view; binding one to a constructor-local variable alone does not keep it alive after construction.
+
 ### 1. Cargo.toml
 
 ```toml
 [dependencies]
-gpui-kit = "0.6" # re-exports gpui, gpui_platform, gpui-base, gpui-component, gpui-shell and the default icons
+gpui-kit = "0.6" # re-exports GPUI, platform, base, component and the default icons; Shell is a separate host dependency
 ```
 
 ### 2. Initialization
@@ -139,14 +141,14 @@ Input::new(&input).appearance(false)         // remove default border/bg
 // Reading value
 let value = input.read(cx).value();
 
-// Events
-cx.subscribe_in(&input, window, |view, state, event, window, cx| {
+// Keep this subscription in the owning view (for example, `_subscriptions`).
+self._subscriptions.push(cx.subscribe_in(&input, window, |view, state, event, window, cx| {
     match event {
         InputEvent::Change => { let v = state.read(cx).value(); }
         InputEvent::PressEnter { .. } => { /* submit */ }
         InputEvent::Focus | InputEvent::Blur => {}
     }
-});
+}));
 ```
 
 ### Select
@@ -170,7 +172,7 @@ let selected = state.read(cx).selected_item();
 ### Checkbox / Switch / Radio
 
 ```rust
-use gpui_kit::component::{Checkbox, Switch};
+use gpui_kit::component::{checkbox::Checkbox, switch::Switch};
 
 // Stateless (controlled)
 Checkbox::new("cb").checked(self.checked)
@@ -300,12 +302,12 @@ let list_state = cx.new(|cx| ListState::new(MyDelegate::new(), window, cx));
 
 // Render
 List::new(&list_state)
-// Events
-cx.subscribe(&list_state, |this, _, event, cx| {
+// Keep this subscription in the owning view, alongside list_state.
+self._subscriptions.push(cx.subscribe(&list_state, |this, _, event, cx| {
     if let ListEvent::Select(index_path) = event {
         // handle selection
     }
-});
+}));
 ```
 
 ---

@@ -681,6 +681,18 @@ pub fn materialize(
     })
 }
 
+/// Builds the same eager element tree as a view render, preserving registered
+/// component failures for a source check instead of only showing a fallback.
+/// Deferred slots, nested views, and layout callbacks are not driven here.
+pub(crate) fn try_materialize(
+    runtime: &Rc<ShellRuntime>,
+    snapshot: &RenderSnapshot,
+    window: &mut Window,
+    cx: &mut App,
+) -> anyhow::Result<AnyElement> {
+    with_error_frame(|| materialize(runtime, snapshot, window, cx))
+}
+
 /// Materializes one described subtree from an arena that is not a snapshot's.
 ///
 /// The public entry above takes a [`RenderSnapshot`] because that is what a
