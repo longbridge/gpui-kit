@@ -14,7 +14,7 @@ const compiler = [
   process.execPath, join(directory, 'node_modules/typescript/bin/tsc'),
   // Match the generated editor config: ambient runtime library checking is
   // separate from checking consumers of the fluent API.
-  '--skipLibCheck', '--noEmit', '--target', 'ES2020', '--lib', 'ES2020',
+  '--skipLibCheck', '--target', 'ES2020', '--lib', 'ES2020',
   '--module', 'ESNext', '--moduleResolution', 'bundler',
   join(temporary, 'gpui-kit.d.ts'),
 ];
@@ -27,15 +27,22 @@ function run([command, ...args], timeout) {
 
 try {
   run([...shell, 'types', temporary]);
-  copyFileSync(join(directory, 'runtime.js'), join(temporary, 'main.js'));
   copyFileSync(join(directory, 'fluent.ts'), join(temporary, 'fluent.ts'));
+  copyFileSync(join(directory, 'rejected.ts'), join(temporary, 'rejected.ts'));
   copyFileSync(join(workspace, 'examples/js_story/stories/registered.js'), join(temporary, 'registered.js'));
-  run([...compiler, '--strict', join(temporary, 'fluent.ts')], 120000);
+  // Execute exactly the positive TypeScript fixture that passed type checking.
+  run([...compiler, '--strict', '--outDir', join(temporary, 'emitted'), join(temporary, 'fluent.ts')], 120000);
+  copyFileSync(join(temporary, 'emitted/fluent.js'), join(temporary, 'main.js'));
+  run([...compiler, '--strict', '--noEmit', join(temporary, 'rejected.ts')], 120000);
   // Shipped JavaScript uses the editor's default (non-strict) checkJs settings.
-  run([...compiler, '--allowJs', '--checkJs', join(temporary, 'main.js'), join(temporary, 'registered.js')], 120000);
+  run([...compiler, '--noEmit', '--allowJs', '--checkJs', join(temporary, 'registered.js')], 120000);
   run([...shell, 'check', temporary], 30000);
 
   for (const [expression, diagnostic] of [
+    ["new Spinner().transition('opacity', 120)", 'transition'],
+    ["new Spinner().p(4).transition('opacity', 120)", 'transition'],
+    ["new Spinner().role('status')", 'role'],
+    ["new Spinner().p(4).role('status')", 'role'],
     ['new Spinner().p(4).on_click(() => {})', 'on_click'],
     ["new Spinner().when(true, element => element).size('huge')", 'size(size) expects'],
   ]) {

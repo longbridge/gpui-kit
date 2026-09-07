@@ -265,6 +265,9 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
         let withheld = REGISTERED_COMMON_BEHAVIORS
             .iter()
             .copied()
+            // These native behaviors are not dispatched for registered
+            // components unless supplied by their own descriptor.
+            .chain(["role", "transition"])
             .filter(|behavior| !declared.contains(behavior))
             .collect::<Vec<_>>();
         let removed = declared
@@ -4032,7 +4035,10 @@ mod tests {
         let _ = &registry as &ComponentRegistry;
         let declarations = super::declarations_with_components(&registry.freeze().unwrap());
 
-        for behavior in super::REGISTERED_COMMON_BEHAVIORS {
+        for behavior in super::REGISTERED_COMMON_BEHAVIORS
+            .into_iter()
+            .chain(["role", "transition"])
+        {
             assert!(
                 declarations.contains(&format!("{behavior}(unavailable: never): never;")),
                 "`{behavior}` must be declared uncallable on a component that does not declare it"
@@ -4042,7 +4048,7 @@ mod tests {
         // explicitly redeclared as uncallable.
         assert!(
             declarations.contains(
-                "export type PlainElement = Omit<NativeElement, \"disabled\" | \"selected\" | \"on_click\">"
+                "export type PlainElement = Omit<NativeElement, \"disabled\" | \"selected\" | \"on_click\" | \"role\" | \"transition\">"
             ),
             "{declarations}"
         );

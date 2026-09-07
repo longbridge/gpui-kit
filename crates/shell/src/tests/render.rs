@@ -673,7 +673,7 @@ fn descriptor_drives_runtime_and_typescript(cx: &mut TestAppContext) {
     // descriptor declares none of them, and the runtime refuses them for a
     // registered component that does not.
     assert!(declarations.contains(
-        "export type TestBoxElement = Omit<NativeElement, \"tone\" | \"disabled\" | \"selected\" | \"on_click\"> & {"
+        "export type TestBoxElement = Omit<NativeElement, \"tone\" | \"disabled\" | \"selected\" | \"on_click\" | \"role\" | \"transition\"> & {"
     ));
     assert!(
         declarations
