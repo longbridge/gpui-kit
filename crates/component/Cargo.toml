@@ -138,7 +138,7 @@ instant.workspace = true
 # Native-only dependencies (not available on WASM)
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 smol.workspace = true
-tree-sitter = { version = "0.26", optional = true }
+tree-sitter = { version = "0.26.13", optional = true }
 tree-sitter-astro-next = { version="0.1.1", optional = true }
 tree-sitter-bash = { version = "0.23.3", optional = true }
 tree-sitter-c = { version = "0.24.1", optional = true }
