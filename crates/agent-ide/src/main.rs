@@ -16,16 +16,15 @@ fn main() {
         cx.activate(true);
 
         let window_options = WindowOptions {
+            titlebar: None,
+            window_decorations: Some(WindowDecorations::Client),
+            window_background: WindowBackgroundAppearance::Blurred,
             window_bounds: Some(WindowBounds::centered(size(px(1280.), px(800.)), cx)),
             window_min_size: Some(gpui_kit::Size {
                 width: px(960.),
                 height: px(600.),
             }),
-            window_background: WindowBackgroundAppearance::Blurred,
-            kind: WindowKind::Normal,
-            // The workspace renders its own TitleBar, which owns dragging and
-            // the double-click zoom.
-            ..TitleBar::window_options()
+            ..Default::default()
         };
 
         cx.spawn(async move |cx| {

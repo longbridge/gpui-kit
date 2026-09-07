@@ -108,6 +108,9 @@ impl Workspace {
 
     fn render_title_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         TitleBar::new()
+            // Transparent like the original example: the blurred window
+            // background shows through, keeping the glass look.
+            .bg(hsla(0., 0., 0., 0.))
             .child(
                 div()
                     .text_sm()
@@ -184,6 +187,11 @@ impl Workspace {
             .collapsible(SidebarCollapsible::Icon)
             .collapsed(self.left_collapsed)
             .w(LEFT_SIDEBAR_WIDTH)
+            // Translucent over the blurred window so the glass look from the
+            // original example survives the sidebar's opaque token default.
+            // Sidebar's token background is fully opaque in the new palette;
+            // clear it so the sides stay as glassy as the original example.
+            .bg(hsla(0., 0., 0., 0.))
             .header(
                 SidebarHeader::new().child(
                     h_flex()
@@ -212,12 +220,13 @@ impl Workspace {
     }
 
     /// Right rail: static session placeholders until the session panel lands.
-    fn render_right_sidebar(&self) -> impl IntoElement {
+    fn render_right_sidebar(&self, cx: &Context<Self>) -> impl IntoElement {
         Sidebar::new("right-sidebar")
             .side(Side::Right)
             .collapsible(SidebarCollapsible::Icon)
             .collapsed(self.right_collapsed)
             .w(RIGHT_SIDEBAR_WIDTH)
+            .bg(hsla(0., 0., 0., 0.))
             .child(SidebarGroup::new("Session").children([
                 SidebarMenuItem::new("Model: claude-fable-5-1"),
                 SidebarMenuItem::new("Task: Fix flaky table test"),
@@ -240,7 +249,7 @@ impl Render for Workspace {
                     .items_stretch()
                     .child(self.render_left_sidebar(cx))
                     .child(div().flex_1().min_w_0().child(self.dock_area.clone()))
-                    .child(self.render_right_sidebar()),
+                    .child(self.render_right_sidebar(cx)),
             )
     }
 }
