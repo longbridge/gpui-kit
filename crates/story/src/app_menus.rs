@@ -140,7 +140,7 @@ mod tests {
 
     use super::*;
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn build_menus_puts_navigation_actions_in_go_menu(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
 
@@ -170,7 +170,7 @@ mod tests {
         });
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn build_menus_reflects_active_theme_and_locale_checked_states(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));

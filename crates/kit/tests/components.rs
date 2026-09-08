@@ -105,7 +105,7 @@ impl Render for ScrollFocus {
             .track_focus(&self.focus)
     }
 }
-#[gpui_kit::test]
+#[gpui::test]
 fn scrollable_elements_forward_observed_focus_binding(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);
     let handle = cx.add_window(|_, cx| ScrollFocus {

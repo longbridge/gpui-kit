@@ -137,3 +137,7 @@ required-features = ["test-support", "component"]
 [[test]]
 name = "dock"
 required-features = ["test-support", "component"]
+
+[[test]]
+name = "search"
+required-features = ["test-support", "component"]

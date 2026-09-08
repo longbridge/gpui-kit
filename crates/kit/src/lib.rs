@@ -80,14 +80,15 @@ macro_rules! actions {
 }
 
 // Everything in GPUI itself, so `use gpui_kit::*;` is enough to get started.
-// With the `test-support` feature the glob also carries GPUI's `test`
-// attribute, so a test module imports explicitly (or adds
-// `use core::prelude::v1::test;`) to keep the built-in `#[test]`.
 pub use ::gpui::*;
 
-// The crate name, so code that keeps `gpui::…` paths still resolves after
-// `use gpui_kit::*;`. `gpui_kit::*` is the documented way.
-#[doc(hidden)]
+// An explicit re-export wins over the GPUI glob's attribute in the macro
+// namespace. Keep ordinary #[test] intact, including the #[test] generated
+// by #[gpui::test], when consumers use gpui_kit::*.
+pub use core::prelude::v1::test;
+
+/// GPUI's upstream namespace, including `#[gpui::test]` with `test-support`.
+/// Available through `use gpui_kit::*;` without a separate GPUI dependency.
 pub use ::gpui;
 
 /// Headless UI interaction and observation helpers for application tests.

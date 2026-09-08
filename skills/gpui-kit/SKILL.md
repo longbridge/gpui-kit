@@ -57,7 +57,7 @@ section for the change (`grep -n '^## ' references/coding-guides.md`).
 | Public API design                    | Anything `pub`: builders, private fields, setter and reader naming     |
 | Platform and capability boundaries   | macOS/Windows/Linux/wasm differences, feature gates                    |
 | File and naming conventions          | New files, modules, type and method names, `Kind` suffix, `Context`    |
-| Testing strategy                     | What to test, `#[gpui_kit::test]`, `TestAppContext`                    |
+| Testing strategy                     | What to test, `#[gpui::test]`, `TestAppContext`                    |
 | Performance rules                    | Render cost, allocation, re-render triggers                            |
 | Common failure modes                 | Before finishing; invented APIs, state in render, index ids            |
 | Rules for coding agents              | Always when an agent writes code                                       |
@@ -251,7 +251,7 @@ contents line.
 | Global state                | [global.md](references/gpui/global.md)                 | `Global` trait, `cx.set_global`, app-wide config                |
 | Layout & styling            | [layout-style.md](references/gpui/layout-style.md)     | `div()`, `h_flex()`, `v_flex()`, flexbox, overflow, positioning |
 | ElementId                   | [element-id.md](references/gpui/element-id.md)         | `ElementId`, `.id()`, uniqueness rules, stateful elements       |
-| Testing                     | [test.md](references/gpui/test.md)                     | `#[gpui_kit::test]`, `TestAppContext`, `VisualTestContext`      |
+| Testing                     | [test.md](references/gpui/test.md)                     | `#[gpui::test]`, `TestAppContext`, `VisualTestContext`      |
 
 Deep dives, for when the topic file is not enough:
 

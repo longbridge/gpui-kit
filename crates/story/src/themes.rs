@@ -237,7 +237,7 @@ mod tests {
     use gpui_kit::component::ThemeConfig;
     use std::rc::Rc;
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn applying_custom_theme_updates_base_component_colors(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         let config = Rc::new(
@@ -285,7 +285,7 @@ mod tests {
         assert_eq!(json["radius"], 4.0);
     }
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn persisted_radius_overrides_the_theme_radius(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         let config = Rc::new(

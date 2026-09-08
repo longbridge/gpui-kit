@@ -39,7 +39,7 @@ impl Render for Commands {
             }))
     }
 }
-#[gpui_kit::test]
+#[gpui::test]
 async fn menu_skips_disabled_commands_confirms_and_restores_focus(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
@@ -80,7 +80,7 @@ async fn menu_skips_disabled_commands_confirms_and_restores_focus(cx: &mut TestA
     .await;
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 async fn hovering_submenu_opens_and_clicking_item_dismisses_the_chain(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {

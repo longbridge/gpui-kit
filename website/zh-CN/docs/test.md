@@ -10,11 +10,11 @@ example: false
 本指南统一介绍 GPUI Kit 应用和 GPUI 的测试方式。根据要验证的行为选择测试层级：
 
 - 纯数据转换、校验和状态转换使用普通 Rust `#[test]`。
-- Entity、action、订阅和异步任务使用 `#[gpui_kit::test]` 与 `TestAppContext`，按需创建窗口。
+- Entity、action、订阅和异步任务使用 `#[gpui::test]` 与 `TestAppContext`，按需创建窗口。
 - UI 集成测试渲染真实应用视图，通过 `gpui_kit::test` 派发事件，再检查控件状态、布局和业务结果。
 - 像素检查使用独立的离屏渲染器；原生窗口和平台集成保留相应测试。
 
-GPUI 类型和测试属性宏都由 `gpui-kit` 根模块导出，应用无需再添加 GPUI 依赖。下面以完整的 UI 集成测试为例。
+GPUI 类型和测试属性宏都由 `gpui-kit` 根模块导出，通过 `use gpui_kit::*;` 即可使用 `#[gpui::test]`，应用无需再添加 GPUI 依赖。下面以完整的 UI 集成测试为例。
 
 使用 `gpui_kit::test`，可以通过 GPUI 的真实事件分发操作应用视图，再用普通 Rust 断言验证原生无障碍属性、布局和业务结果。测试会创建无头窗口，通过 `ElementId` 定位控件，点击、输入文本，并检查焦点、值和布局。
 
@@ -84,6 +84,8 @@ cargo test -p gpui-kit --features test-support --test ui --locked
 | Switch / Toggle | 勾选、名称、焦点作用域 |
 | Radio | 勾选、选中、名称、焦点作用域 |
 | Tab | 选中、名称 |
+| Command | 原生选项 selected 状态、面板焦点作用域和行边界 |
+| Combobox | 原生 expanded 状态与焦点作用域；选择结果通过事件及状态验证 |
 | Select | 无障碍值（包含标题前缀）、展开、焦点作用域 |
 | ListItem / SidebarMenuItem | 几何；其他状态仅在原生无障碍属性提供时可读 |
 | Accordion | 触发器展开状态；标题与面板边界 |
@@ -235,7 +237,7 @@ cx.update_window(handle.into(), |_, window, cx| {
 使用 `TestAppContext::update_window`。带类型的 `WindowHandle::update` 已经借用根 entity，
 不能在同一个回调中安全地重绘它。
 
-异步工作或 Select 的延迟提交，应在 async `#[gpui_kit::test]` 中、window update **外部**等待：
+异步工作或 Select 的延迟提交，应在 async `#[gpui::test]` 中、window update **外部**等待：
 
 ```rust
 use gpui_kit::test::TestAppContextExt;
@@ -266,6 +268,8 @@ Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用�
 
 | 测试文件 | 验证行为 |
 | --- | --- |
+| `test_macro.rs` | 普通 `#[test]` 与同步/异步 `#[gpui::test]` 共存；独立、仅依赖 Kit 的 recipes 包复用相同契约 |
+| `search.rs` | Command 禁用项跳过、循环导航、中文关键词、空结果、Action 与原始索引回调、两阶段 Escape；Combobox 搜索、单选/多选、清除、空结果恢复、禁用行为及关闭时仅一次 Confirm |
 | `disclosure.rs` | Accordion 互斥展开、折叠与实际面板几何；Stepper 内容导航；禁用展开与步骤操作；Slider 轨道点击、滑块拖动与禁用行为 |
 | `collections.rs` | Tree 点击展开、键盘展开/折叠与选择；DataTable 行选择、键盘虚拟滚动与滚轮滚动 |
 | `date_picker.rs` | 打开、精确预设日期与日历日期选择、月份切换、清除、Escape 与禁用行为 |

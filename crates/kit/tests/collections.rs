@@ -20,7 +20,7 @@ impl Render for Files {
             }))
     }
 }
-#[gpui_kit::test]
+#[gpui::test]
 fn tree_pointer_and_keyboard_expand_collapse_and_select_nodes(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(480.), px(320.)), |window, cx| {
@@ -84,7 +84,7 @@ impl Render for Records {
         div().size_full().child(DataTable::new(&self.table))
     }
 }
-#[gpui_kit::test]
+#[gpui::test]
 fn table_selects_rows_and_keyboard_scrolls_virtualized_content(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(640.), px(320.)), |window, cx| Records {

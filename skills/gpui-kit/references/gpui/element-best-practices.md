@@ -387,7 +387,7 @@ mod tests {
     use super::*;
     use gpui_kit::TestAppContext;
 
-    #[gpui_kit::test]
+    #[gpui::test]
     fn test_element_layout(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let mut window = cx.open_window(Default::default(), |_, _| ()).unwrap();
@@ -416,7 +416,7 @@ mod tests {
 Test that interactions work correctly:
 
 ```rust
-#[gpui_kit::test]
+#[gpui::test]
 fn test_element_click(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let mut window = cx.open_window(Default::default(), |_, cx| {

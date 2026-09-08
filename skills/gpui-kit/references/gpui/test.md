@@ -4,13 +4,13 @@
 
 ## Choose the test level
 
-Use ordinary Rust `#[test]` for pure logic. Use `#[gpui_kit::test]` and
+Use ordinary Rust `#[test]` for pure logic. Use `#[gpui::test]` and
 `TestAppContext` for entities, subscriptions, actions and async tasks; it can
 create headless windows too. `VisualTestContext` is available for existing GPUI
 window helpers. For an application UI flow, use `gpui_kit::test::TestWindowExt`
 on the real `Window` and assert the behavior produced by native events.
 
-Keep GPUI types and the test attribute imported from `gpui_kit`. Add
+Use `use gpui_kit::*;` for GPUI types and the `gpui` namespace. Write `#[gpui::test]` for GPUI context tests; ordinary `#[test]` remains Rust’s built-in attribute. Add
 `test-support` to the application's `gpui-kit` development dependency, using
 exactly the same source and version as its normal dependency. The helpers
 require a Kit revision that includes them; check the installed API before
@@ -66,18 +66,13 @@ without a repository checkout. In an application, replace that view definition
 with an import of your production view.
 
 ```rust
-use gpui_kit::test::{TestSupportExt, TestWindowExt};
-use gpui_kit::{
-    AppContext, Context, Entity, SharedString, TestAppContext, Window,
-    component::{
-        Root,
-        button::Button,
-        input::{Input, InputState},
-    },
-    div,
-    prelude::*,
-    px, size,
+use gpui_kit::component::{
+    Root,
+    button::Button,
+    input::{Input, InputState},
 };
+use gpui_kit::test::{TestSupportExt, TestWindowExt};
+use gpui_kit::*;
 
 struct Profile {
     name: Entity<InputState>,
@@ -116,7 +111,7 @@ impl Render for Profile {
     }
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 fn saves_a_profile_through_the_ui(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let mut profile = None;

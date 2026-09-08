@@ -10,11 +10,11 @@ example: false
 This guide covers testing GPUI Kit applications and GPUI behavior. Choose the test level from the behavior you need to verify:
 
 - Use ordinary Rust `#[test]` for pure data transformations, validation and state transitions.
-- Use `#[gpui_kit::test]` and `TestAppContext` for entities, actions, subscriptions and async tasks, creating a window when needed.
+- Use `#[gpui::test]` and `TestAppContext` for entities, actions, subscriptions and async tasks, creating a window when needed.
 - For UI integration tests, render the production application view, dispatch events through `gpui_kit::test`, and check control state, layout and the application result.
 - Use the separate offscreen renderer for pixel checks, and retain native-window and platform integration tests for those behaviors.
 
-GPUI types and its test attribute are exported at the `gpui-kit` root; applications do not need an additional GPUI dependency. The following sections walk through a complete UI integration test.
+GPUI types and its test attribute are exported at the `gpui-kit` root; `use gpui_kit::*;` makes `#[gpui::test]` available alongside ordinary Rust `#[test]`. Applications do not need an additional GPUI dependency. The following sections walk through a complete UI integration test.
 
 Use `gpui_kit::test` to exercise a GPUI Kit view through real GPUI event dispatch,
 then assert its native accessibility properties, layout and application result with ordinary Rust
@@ -107,6 +107,8 @@ observation adds no layout container:
 | Switch / Toggle | Checked, label, focus scope |
 | Radio | Checked, selected, label, focus scope |
 | Tab | Selected, label |
+| Command | Native option selected state, root focus scope and row bounds |
+| Combobox | Native expanded state and focus scope; selection verified through events and retained state |
 | Select | Accessibility value (including title prefix), expanded, focus scope |
 | ListItem / SidebarMenuItem | Geometry; additional state only when provided by native accessibility properties |
 | Accordion | Expanded trigger; header and panel bounds |
@@ -276,7 +278,7 @@ Use `TestAppContext::update_window`; typed `WindowHandle::update` already borrow
 the root entity and cannot safely redraw it in the same callback.
 
 For asynchronous work or deferred selection commits, use an async
-`#[gpui_kit::test]` and wait **outside** the window update:
+`#[gpui::test]` and wait **outside** the window update:
 
 ```rust
 use gpui_kit::test::TestAppContextExt;
@@ -313,6 +315,8 @@ that every option or combination of every component has been exhaustively tested
 
 | Suite | Behavior exercised |
 | --- | --- |
+| `test_macro.rs` | Ordinary `#[test]` alongside sync/async `#[gpui::test]`; the independent Kit-only recipes package runs the same contract |
+| `search.rs` | Command disabled-item skipping, wraparound, Unicode keywords, empty results, Action dispatch and original-index callbacks, two-stage Escape; Combobox search, single/multi selection, clearing, empty-result recovery, disabled behavior and exactly one Confirm on close |
 | `disclosure.rs` | Accordion exclusive expansion/collapse and actual panel geometry; Stepper content navigation; disabled disclosure/steps; Slider track click, thumb drag and disabled behavior |
 | `collections.rs` | Tree pointer expansion, keyboard collapse/expansion and selection; DataTable row selection, keyboard virtualization and wheel scrolling |
 | `date_picker.rs` | Opening, exact preset/day selection, month navigation, clearing, Escape and disabled behavior |

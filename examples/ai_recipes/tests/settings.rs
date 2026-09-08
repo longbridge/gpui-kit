@@ -1,8 +1,9 @@
 use gpui_kit::component::Root;
+use gpui_kit::gpui;
 use gpui_kit::{AppContext as _, TestAppContext};
 use gpui_kit_recipes::Settings;
 
-#[gpui_kit::test]
+#[gpui::test]
 fn typing_updates_the_owner_after_unrelated_redraws(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let mut settings = None;

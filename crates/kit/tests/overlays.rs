@@ -85,7 +85,7 @@ impl Render for Workspace {
     }
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 async fn dialog_validates_scoped_input_saves_and_dismisses_notification(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(800.), px(700.)), |window, cx| {
@@ -148,7 +148,7 @@ async fn dialog_validates_scoped_input_saves_and_dismisses_notification(cx: &mut
     .await;
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 async fn escape_dismisses_dialog_and_sheet_and_restores_focus(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(800.), px(700.)), |window, cx| {
@@ -208,7 +208,7 @@ async fn escape_dismisses_dialog_and_sheet_and_restores_focus(cx: &mut TestAppCo
     .unwrap();
 }
 
-#[gpui_kit::test]
+#[gpui::test]
 async fn notification_auto_dismisses_after_its_timer(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(800.), px(700.)), |window, cx| {
