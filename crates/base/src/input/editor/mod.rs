@@ -214,11 +214,8 @@ impl EditorState {
             if after == Some(typed) {
                 // Guard quotes: only skip when not inside a word (e.g. don't).
                 if matches!(typed, '"' | '\'') {
-                    let before: Option<char> = self
-                        .text
-                        .slice(..cursor.saturating_sub(1))
-                        .chars()
-                        .last();
+                    let before: Option<char> =
+                        self.text.slice(..cursor.saturating_sub(1)).chars().last();
                     if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
                         return;
                     }
@@ -229,7 +226,7 @@ impl EditorState {
                     window,
                     cx,
                 );
-                self.select_to(range.start + 1, cx);
+                self.set_selected_range(range.start + 1..range.start + 1, cx);
                 return;
             }
         }
@@ -239,14 +236,19 @@ impl EditorState {
             return;
         };
         if matches!(typed, '"' | '\'') {
-            // Don't pair quotes inside words (e.g. contractions).
-            let after: Option<char> = self.text.slice(cursor..).chars().next();
-            if after.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+            // Don't pair quotes inside words (e.g. contractions like don't).
+            // Check the char before the just-typed quote.
+            let before_typed: Option<char> = self
+                .text
+                .slice(..range.start.saturating_sub(1))
+                .chars()
+                .last();
+            if before_typed.is_some_and(|c| c.is_alphanumeric() || c == '_') {
                 return;
             }
         }
         self.replace_text_in_range_silent(None, &closer.to_string(), window, cx);
-        self.select_to(cursor, cx);
+        self.set_selected_range(cursor..cursor, cx);
     }
 }
 

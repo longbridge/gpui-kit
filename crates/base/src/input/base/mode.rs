@@ -110,16 +110,25 @@ impl LayoutMode {
     /// Return true if this layout is a code editor with auto-close enabled.
     #[inline]
     pub(super) fn is_auto_close(&self) -> bool {
-        matches!(self, LayoutMode::CodeEditor { auto_close: true, .. })
+        matches!(
+            self,
+            LayoutMode::CodeEditor {
+                auto_close: true,
+                ..
+            }
+        )
     }
 
     /// Return true if this layout is a code editor with smart indent enabled.
     #[inline]
     pub(super) fn is_smart_indent(&self) -> bool {
-        matches!(self, LayoutMode::CodeEditor {
-            smart_indent: true,
-            ..
-        })
+        matches!(
+            self,
+            LayoutMode::CodeEditor {
+                smart_indent: true,
+                ..
+            }
+        )
     }
 
     #[inline]
@@ -348,11 +357,15 @@ mod tests {
             highlighter: Default::default(),
             highlighter_factory: None,
             diagnostics: DiagnosticSet::new(&Rope::new()),
+            auto_close: false,
+            smart_indent: false,
         };
         assert_eq!(mode.line_number(), false);
         assert_eq!(mode.has_indent_guides(), false);
         assert_eq!(mode.min_rows(), 1);
         assert_eq!(mode.is_folding(), false);
+        assert_eq!(mode.is_auto_close(), false);
+        assert_eq!(mode.is_smart_indent(), false);
     }
 
     #[test]
