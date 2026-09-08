@@ -2210,7 +2210,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         let row_offset_y = line_height * display_pos.row;
 
         // For Right alignment use 0 margin: the cursor indicator is clamped inside bounds
-        // in layout_cursor, so shifting the text here would cause a first-click visual jump.
+        // in layout_cursors, so shifting the text here would cause a first-click visual jump.
         let safety_margin = match last_layout.text_align {
             TextAlign::Left => RIGHT_MARGIN,
             TextAlign::Right => px(0.),
@@ -2236,7 +2236,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
 
         // Scroll the row into view. Use the same edge clearance helper as
-        // `TextElement::layout_cursor` so both scroll-into-view paths agree
+        // `TextElement::layout_cursors` so both scroll-into-view paths agree
         // (a mismatch flickered on `Down` at end-of-buffer with a small
         // `cursor_surrounding_lines` override).
         let edge_height =
@@ -2244,7 +2244,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 super::element::cursor_surrounding_padding(
                     self.mode.is_auto_grow(),
                     self.cursor_surrounding_lines,
-                    (bounds.size.height / line_height) as usize,
+                    super::element::viewport_visible_lines(bounds.size.height, line_height),
                     line_height,
                 )
             } else {

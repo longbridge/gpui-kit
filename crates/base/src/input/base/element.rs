@@ -325,6 +325,15 @@ fn ime_marked_display_range(
     }
 }
 
+/// Viewport capacity in display rows, independent of logical buffer lines.
+///
+/// Shared by both scroll-into-view paths (`layout_cursors` and
+/// `scroll_to_with_padding`) so they agree on the visible-line count even
+/// when soft-wrapped lines make logical and display rows diverge.
+pub(super) fn viewport_visible_lines(viewport_height: Pixels, line_height: Pixels) -> usize {
+    (viewport_height / line_height) as usize
+}
+
 /// Minimum pixel padding the cursor is kept clear of the viewport's
 /// top/bottom edges before auto-scroll engages. Backs
 /// [`InputBaseState::cursor_surrounding_lines`].
@@ -463,7 +472,7 @@ impl<M: InputModeKind> TextElement<M> {
         let top_bottom_margin = cursor_surrounding_padding(
             state.mode.is_auto_grow(),
             state.cursor_surrounding_lines,
-            (bounds.size.height / line_height) as usize,
+            viewport_visible_lines(bounds.size.height, line_height),
             line_height,
         );
 
