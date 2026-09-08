@@ -6,6 +6,18 @@ Please ensure that you are using clean code, following the coding style and code
 
 Please submit **one PR that does one thing**, this is important, and helps us to review your code more easily and push to merge fast.
 
+## GPUI and GPUI Kit
+
+GPUI Kit is built on top of GPUI. We do not aim to fork GPUI or maintain a separate GPUI implementation.
+
+GPUI provides the core rendering, windowing, and platform capabilities. GPUI Kit focuses on the application layer, including UI components, application frameworks, developer tooling, and native integrations.
+
+Changes to GPUI's core APIs or platform behavior should be contributed upstream. 
+
+Extensions that can be implemented on top of GPUI without modifying it are welcome in GPUI Kit.
+
+The gpui-pre crates provide version-aligned releases of upstream GPUI. They must remain compatible with upstream and must not carry behavioral patches, so that we can continue updating directly from upstream and use the official GPUI crates when appropriate.
+
 ## AI-Assisted Contributions
 
 GPUI Kit fully embraces AI-assisted development. We welcome contributions
