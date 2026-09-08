@@ -36,7 +36,11 @@ export default defineConfig({
   base: BASE,
   output: 'static',
   trailingSlash: 'never',
-  redirects: componentRedirects,
+  redirects: {
+    ...componentRedirects,
+    '/docs/ui-testing': '/docs/test',
+    '/zh-CN/docs/ui-testing': '/zh-CN/docs/test',
+  },
 
   integrations: [
     vue({ devtools: false }),

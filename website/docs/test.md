@@ -1,11 +1,20 @@
 ---
-title: UI Automation Testing
-description: Write complete headless UI tests for GPUI Kit applications, from dependency setup and real input events to layout assertions and CI.
+title: Testing
+description: Test GPUI Kit applications and GPUI behavior with Rust unit tests, TestAppContext, native UI interactions, layout assertions and CI.
 order: -2.3
 example: false
 ---
 
-# UI Automation Testing
+# Testing
+
+This guide covers testing GPUI Kit applications and GPUI behavior. Choose the test level from the behavior you need to verify:
+
+- Use ordinary Rust `#[test]` for pure data transformations, validation and state transitions.
+- Use `#[gpui_kit::test]` and `TestAppContext` for entities, actions, subscriptions and async tasks, creating a window when needed.
+- For UI integration tests, render the production application view, dispatch events through `gpui_kit::test`, and check control state, layout and the application result.
+- Use the separate offscreen renderer for pixel checks, and retain native-window and platform integration tests for those behaviors.
+
+GPUI types and its test attribute are exported at the `gpui-kit` root; applications do not need an additional GPUI dependency. The following sections walk through a complete UI integration test.
 
 Use `gpui_kit::test` to exercise a GPUI Kit view through real GPUI event dispatch,
 then assert its native accessibility properties, layout and application result with ordinary Rust

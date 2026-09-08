@@ -1,6 +1,6 @@
 ---
 name: gpui-kit
-description: 'How to build desktop applications with GPUI Kit, the Rust framework published as the gpui-kit crate (GPUI plus gpui_kit::component, gpui_kit::base, gpui_kit::assets). Use when setting up a gpui-kit app, choosing or using a component (Button, Input, Select, Dialog, Sheet, Tabs, Sidebar, List, DataTable, Tree, Chart, etc.), handling component state, theming, or window overlays, and for GPUI mechanics: actions and keybindings, async tasks, contexts, custom elements, entities, events, focus, global state, layout and styling, ElementId, and tests. Holds the normative Coding Guides: read them before any architecture, state-ownership, public API, naming, or testing decision. Pairs with the gpui-kit-design-guides skill for the Design Guides.'
+description: 'How to build desktop applications with GPUI Kit, the Rust framework published as the gpui-kit crate (GPUI plus gpui_kit::component, gpui_kit::base, gpui_kit::assets). Use when setting up a gpui-kit app, choosing or using a component (Button, Input, Select, Dialog, Sheet, Tabs, Sidebar, List, DataTable, Tree, Chart, etc.), handling component state, theming, or window overlays, and for GPUI mechanics: actions and keybindings, async tasks, contexts, custom elements, entities, events, focus, global state, layout and styling, ElementId, and tests including UI integration testing. Holds the normative Coding Guides: read them before any architecture, state-ownership, public API, naming, or testing decision. Pairs with the gpui-kit-design-guides skill for the Design Guides.'
 ---
 
 # GPUI Kit
@@ -225,6 +225,14 @@ fetch the component's `.md` doc.
 | --------- | --------------------------------------------------------------- | ------------------------------ |
 | `Chart`   | `chart::{AreaChart, BarChart, LineChart, PieChart, RadarChart}` | Bar, line, area, pie charts    |
 | `Plot`    | `plot::Plot`                                                    | `#[derive(IntoPlot)]` for data |
+
+## Testing
+
+For unit tests, GPUI context tests or UI integration tests, read
+[Testing](references/gpui/test.md). It includes dependency setup, a complete
+runnable UI flow, scoped native interactions, frame/async handling and the
+limits of accessibility and geometry assertions. Use the production view and
+verify the action's outcome through normal Rust assertions.
 
 ## GPUI References
 

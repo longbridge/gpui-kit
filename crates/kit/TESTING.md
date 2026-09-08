@@ -4,10 +4,10 @@ Enable `gpui-kit/test-support` under development dependencies and import
 `gpui_kit::test::{TestWindowExt, TestAppContextExt, TestSupportExt, ElementSnapshot}`.
 The implementation uses GPUI public APIs, with no fork, Cargo patch or separate crate.
 
-Read the [complete UI automation guide](../../website/docs/ui-testing.md) for
+Read the [testing guide](../../website/docs/test.md) for
 setup, a compiled application workflow, the control coverage matrix, scoped IDs,
 state assertions, mouse/keyboard/scroll/drag operations, async waits and CI.
-The [Chinese guide](../../website/zh-CN/docs/ui-testing.md) covers the same API.
+The [Chinese guide](../../website/zh-CN/docs/test.md) covers the same API.
 
 ## Core semantics
 

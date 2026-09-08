@@ -1,11 +1,20 @@
 ---
-title: UI 自动化测试
-description: 为 GPUI Kit 应用编写完整的无头 UI 测试，涵盖依赖配置、真实输入事件、布局断言和 CI 接入。
+title: 测试
+description: 通过 Rust 单元测试、TestAppContext、真实 UI 交互和布局断言测试 GPUI Kit 应用与 GPUI 行为。
 order: -2.3
 example: false
 ---
 
-# UI 自动化测试
+# 测试
+
+本指南统一介绍 GPUI Kit 应用和 GPUI 的测试方式。根据要验证的行为选择测试层级：
+
+- 纯数据转换、校验和状态转换使用普通 Rust `#[test]`。
+- Entity、action、订阅和异步任务使用 `#[gpui_kit::test]` 与 `TestAppContext`，按需创建窗口。
+- UI 集成测试渲染真实应用视图，通过 `gpui_kit::test` 派发事件，再检查控件状态、布局和业务结果。
+- 像素检查使用独立的离屏渲染器；原生窗口和平台集成保留相应测试。
+
+GPUI 类型和测试属性宏都由 `gpui-kit` 根模块导出，应用无需再添加 GPUI 依赖。下面以完整的 UI 集成测试为例。
 
 使用 `gpui_kit::test`，可以通过 GPUI 的真实事件分发操作应用视图，再用普通 Rust 断言验证原生无障碍属性、布局和业务结果。测试会创建无头窗口，通过 `ElementId` 定位控件，点击、输入文本，并检查焦点、值和布局。
 
