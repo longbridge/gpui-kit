@@ -28,7 +28,7 @@ use gpui_base::{
 use rust_i18n::t;
 
 use crate::{
-    ActiveTheme as _, IconName, Selectable as _, Sizable as _,
+    ActiveTheme as _, IconName, Selectable as _, Sizable as _, Size,
     button::{Button, ButtonVariants as _},
     dock::{ClosePanel, PanelControl, PanelHandle, PanelStyle, SkinShared, ToggleZoom},
     h_flex,
@@ -369,9 +369,17 @@ impl TabGroupSkin {
         let title_style = handle.and_then(|handle| handle.title_style(cx));
         let drag = tab_drag(group, ix, cx);
 
+        let title_h = match self.shared.tab_size() {
+            Size::Size(h) => h,
+            Size::XSmall => px(20.),
+            Size::Small => px(24.),
+            Size::Large => px(36.),
+            _ => px(30.),
+        };
+
         h_flex()
             .justify_between()
-            .h(px(30.))
+            .h(title_h)
             .py_2()
             .pl_3()
             .pr_2()
@@ -466,6 +474,7 @@ impl TabGroupSkin {
         }
 
         TabBar::new("tab-bar")
+            .with_size(self.shared.tab_size())
             .track_scroll(&self.scroll_handle)
             .when(has_leading, |this| {
                 this.prefix(
@@ -788,6 +797,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::Size;
     use crate::dock::{
         DockSkin, Panel, panel_handle,
         test_support::{HideableProbe, MeasuredProbe},
@@ -1418,6 +1428,49 @@ mod tests {
             content > window_height - px(60.),
             "the panel should fill what the tab bar leaves; it got {content:?} \
              of {window_height:?}"
+        );
+    }
+
+    /// A dock skin's tab-size setting has to reach the `TabBar` it builds.
+    ///
+    /// The skin is the only public handle an application has on dock chrome;
+    /// constructing a sized `TabBar` directly does not affect the bars inside a
+    /// `DockArea`. Compare the panel's remaining height before and after the
+    /// setting changes so this test covers the complete path rather than only the
+    /// stored value.
+    #[gpui::test]
+    fn tab_size_changes_the_height_left_for_panel_content(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let height = Rc::new(Cell::new(px(0.)));
+        let mut skin_handle = None;
+        let (area, cx) = cx.add_window_view(|window, cx| {
+            let skin = DockSkin::new(cx);
+            skin_handle = Some(skin.clone());
+            DockArea::new("sized-tabs", None, window, cx).with_renderer(skin)
+        });
+        let skin = skin_handle.expect("skin constructed with dock area");
+        cx.update(|_, cx| skin.set_panel_style(PanelStyle::TabBar, cx));
+
+        let measured = height.clone();
+        cx.update(|window, cx| {
+            let panel = MeasuredProbe::new(measured, cx);
+            let layout = DockLayout::tabs().panel_view(panel_handle(panel), cx);
+            area.update(cx, |area, cx| area.set_center(layout, window, cx));
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let medium_content = height.get();
+
+        cx.update(|_, cx| skin.set_tab_size(px(44.), cx));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let custom_content = height.get();
+
+        assert_eq!(skin.tab_size(), Size::Size(px(44.)));
+        assert_eq!(
+            medium_content - custom_content,
+            px(12.),
+            "a 12px taller tab bar must leave 12px less panel content"
         );
     }
 

@@ -27,7 +27,7 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{App, AppContext as _, Context, Entity, SharedString, WeakEntity, Window, actions};
 
-use crate::scroll::ScrollbarMode;
+use crate::{Size, scroll::ScrollbarMode};
 
 /// The behavior half of the panel traits, which every panel implements
 /// alongside [`Panel`]. Exported under this name because `Panel` in this
@@ -82,6 +82,7 @@ pub(crate) fn init(cx: &mut App) {
 pub(crate) struct SkinShared {
     area: WeakEntity<DockArea>,
     panel_style: Cell<PanelStyle>,
+    tab_size: Cell<Size>,
     toggle_button_visible: Cell<bool>,
     tiles_scrollbar_mode: Cell<Option<ScrollbarMode>>,
     /// The dock whose resize handle is being dragged, if any. Only one can be.
@@ -95,6 +96,10 @@ impl SkinShared {
 
     pub(crate) fn panel_style(&self) -> PanelStyle {
         self.panel_style.get()
+    }
+
+    pub(crate) fn tab_size(&self) -> Size {
+        self.tab_size.get()
     }
 
     pub(crate) fn is_toggle_button_visible(&self) -> bool {
@@ -162,6 +167,7 @@ impl DockSkin {
             shared: Rc::new(SkinShared {
                 area: cx.weak_entity(),
                 panel_style: Cell::new(PanelStyle::default()),
+                tab_size: Cell::new(Size::default()),
                 toggle_button_visible: Cell::new(true),
                 tiles_scrollbar_mode: Cell::new(None),
                 resizing_dock: Cell::new(None),
@@ -180,6 +186,19 @@ impl DockSkin {
 
     pub fn set_panel_style(&self, style: PanelStyle, cx: &mut App) {
         self.shared.panel_style.set(style);
+        self.shared.notify(cx);
+    }
+
+    /// The size of full tab bars rendered by the dock.
+    ///
+    /// A pixel value sets an exact outer tab height. The default is
+    /// [`Size::Medium`].
+    pub fn tab_size(&self) -> Size {
+        self.shared.tab_size()
+    }
+
+    pub fn set_tab_size(&self, size: impl Into<Size>, cx: &mut App) {
+        self.shared.tab_size.set(size.into());
         self.shared.notify(cx);
     }
 

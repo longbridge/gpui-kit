@@ -23,6 +23,10 @@ pub enum TabVariant {
 impl TabVariant {
     fn height(&self, size: Size) -> Pixels {
         match size {
+            // `Sizable` accepts a pixel value, but tabs previously treated it as
+            // `Medium`. Honor the caller's requested outer height, as the other
+            // sizable components do.
+            Size::Size(height) => height,
             Size::XSmall => match self {
                 TabVariant::Underline => px(26.),
                 _ => px(20.),
@@ -44,6 +48,18 @@ impl TabVariant {
 
     pub(super) fn inner_height(&self, size: Size) -> Pixels {
         match size {
+            // Preserve each variant's medium-size inset. The custom value is the
+            // outer height, so the inner surface needs the same relationship to it
+            // as the built-in medium size.
+            Size::Size(height) => {
+                let inset = match self {
+                    TabVariant::Tab => px(2.),
+                    TabVariant::Outline | TabVariant::Pill => px(6.),
+                    TabVariant::Segmented => px(8.),
+                    TabVariant::Underline => px(10.),
+                };
+                (height - inset).max(px(0.))
+            }
             Size::XSmall => match self {
                 TabVariant::Tab | TabVariant::Outline | TabVariant::Pill => px(18.),
                 TabVariant::Segmented => px(16.),
@@ -71,6 +87,7 @@ impl TabVariant {
     /// Default px(12) to match a dock tab bar's px_3
     fn inner_paddings(&self, size: Size) -> Edges<Pixels> {
         let mut padding_x = match size {
+            Size::Size(height) => height * 0.375,
             Size::XSmall => px(8.),
             Size::Small => px(10.),
             Size::Large => px(16.),
@@ -955,6 +972,28 @@ mod tests {
         let tab = Tab::new().label("Acct").aria_label("Account settings");
 
         assert_eq!(tab.a11y_label(), Some("Account settings".into()));
+    }
+
+    #[test]
+    fn custom_size_controls_outer_height_and_scales_horizontal_padding() {
+        let size = Size::Size(px(40.));
+
+        for variant in VARIANTS {
+            assert_eq!(variant.height(size), px(40.));
+            assert!(
+                variant.inner_height(size) <= px(40.),
+                "{variant:?} inner height must fit its outer height"
+            );
+
+            let padding = variant.inner_paddings(size);
+            if variant == TabVariant::Underline {
+                assert_eq!(padding.left, px(0.));
+                assert_eq!(padding.right, px(0.));
+            } else {
+                assert_eq!(padding.left, px(15.));
+                assert_eq!(padding.right, px(15.));
+            }
+        }
     }
 
     #[gpui::test]

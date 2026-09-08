@@ -349,6 +349,7 @@ impl Sizable for TabBar {
 impl RenderOnce for TabBar {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let default_gap = match self.size {
+            Size::Size(height) => height * 0.375,
             Size::Small | Size::XSmall => px(8.),
             Size::Large => px(16.),
             _ => px(12.),
@@ -368,6 +369,7 @@ impl RenderOnce for TabBar {
             }
             TabVariant::Segmented => {
                 let padding_x = match self.size {
+                    Size::Size(height) => height * 0.125,
                     Size::XSmall => px(2.),
                     Size::Small => px(3.),
                     _ => px(4.),
@@ -383,6 +385,7 @@ impl RenderOnce for TabBar {
             TabVariant::Underline => {
                 // This gap is same as the tab inner_paddings
                 let gap = match self.size {
+                    Size::Size(height) => height * 0.5,
                     Size::XSmall => px(10.),
                     Size::Small => px(12.),
                     Size::Large => px(20.),
