@@ -284,6 +284,12 @@ fn render_scrollbar<H: ScrollbarHandle + Clone>(
         )
 }
 
+#[cfg(feature = "test-support")]
+impl<E> ScrollableElement for gpui_base::test_support::Observed<E> where
+    E: ScrollableElement + Element<PrepaintState = Option<gpui::Hitbox>>
+{
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

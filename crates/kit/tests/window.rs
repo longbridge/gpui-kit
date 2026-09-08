@@ -559,3 +559,56 @@ fn focus_query_diagnoses_observation_after_track_focus(cx: &mut TestAppContext) 
     })
     .unwrap();
 }
+
+struct FocusParts {
+    handles: Vec<gpui::FocusHandle>,
+}
+impl Render for FocusParts {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                gpui_kit::base::AccordionTrigger::new("disclosure")
+                    .track_focus(&self.handles[0])
+                    .size_8(),
+            )
+            .child(
+                gpui_kit::base::TableRow::new("row", 1)
+                    .track_focus(&self.handles[1])
+                    .size_8(),
+            )
+            .child(
+                gpui_kit::base::TableCell::new("cell", 1)
+                    .track_focus(&self.handles[2])
+                    .size_8(),
+            )
+            .child(
+                gpui_kit::base::TableHeader::new("header")
+                    .track_focus(&self.handles[3])
+                    .size_8(),
+            )
+    }
+}
+#[gpui_kit::test]
+fn native_parts_forward_their_public_focus_binding(cx: &mut TestAppContext) {
+    let handle = cx.add_window(|_, cx| FocusParts {
+        handles: (0..4).map(|_| cx.focus_handle()).collect(),
+    });
+    let handles = handle
+        .update(cx, |view, _, _| view.handles.clone())
+        .unwrap();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        for (id, focus) in ["disclosure", "row", "cell", "header"]
+            .into_iter()
+            .zip(&handles)
+        {
+            assert_eq!(window.find(id).focused(), Some(false));
+            window.focus(focus, cx);
+            window.render_frame(cx);
+            assert_eq!(window.find(id).focused(), Some(true));
+        }
+    })
+    .unwrap();
+}

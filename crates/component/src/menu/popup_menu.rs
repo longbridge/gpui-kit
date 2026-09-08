@@ -12,6 +12,7 @@ use gpui::{
     Styled, WeakEntity, Window, anchored, deferred, div, prelude::FluentBuilder, px, rems,
 };
 use gpui::{ClickEvent, Half, MouseDownEvent, OwnedMenuItem, Point, Subscription};
+use gpui_base::TestSupportExt as _;
 
 use std::rc::Rc;
 
@@ -1353,6 +1354,7 @@ impl PopupMenu {
                                 .child(
                                     div()
                                         .id("submenu")
+                                        .test_support()
                                         .occlude()
                                         .when(is_bottom_pos, |this| this.bottom_0())
                                         .when(!is_bottom_pos, |this| this.top_neg_1())
@@ -1427,6 +1429,7 @@ impl Render for PopupMenu {
 
         v_flex()
             .id("popup-menu")
+            .test_support()
             .role(Role::Menu)
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)

@@ -1,3 +1,4 @@
+use crate::TestSupportExt as _;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,
@@ -514,6 +515,7 @@ impl RenderOnce for Dialog {
             anchored().position(point(px(0.), px(0.))).child(
                 div()
                     .id(("dialog-host", self.layer))
+                    .test_support()
                     .absolute()
                     .top_0()
                     .left_0()

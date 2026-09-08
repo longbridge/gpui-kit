@@ -113,3 +113,27 @@ name = "rendering"
 test = false
 harness = false
 required-features = ["test-support", "component", "assets"]
+
+[[test]]
+name = "disclosure"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "overlays"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "menu"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "collections"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "date_picker"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "dock"
+required-features = ["test-support", "component"]

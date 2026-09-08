@@ -188,7 +188,7 @@ pub fn snapshots(window: &Window) -> Vec<ElementSnapshot> {
 
 /// Internal focus membership check; unsupported bindings are not evidence of focus.
 #[doc(hidden)]
-pub fn scope_has_focus(window: &Window, scope: &[ElementId]) -> bool {
+pub fn has_observed_focus(window: &Window, scope: &[ElementId]) -> bool {
     snapshots(window)
         .iter()
         .any(|element| element.path.starts_with(scope) && element.focused == Some(true))

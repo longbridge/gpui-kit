@@ -27,8 +27,9 @@ The [Chinese guide](../../website/zh-CN/docs/ui-testing.md) covers the same API.
 - Clicks use real hit testing. `click_at` provides a local offset for clipped targets.
 - Instrumentation adds no layout container, but evaluates computed style an extra time.
   Snapshots cannot infer an unobserved ancestor's opacity or inspect pixels.
-- Controls are instrumented incrementally; this is not complete Table/Menu/Dialog/Dock
-  coverage or packaged-application automation. See the guide's explicit coverage matrix.
+- The component suites cover disclosures, date/calendar selection, virtualized Table/Tree,
+  modal forms, notifications, nested menus and Dock drag/zoom workflows. See the guide's
+  per-suite contract matrix; this is not exhaustive option coverage or packaged-app automation.
 
 ## Adding test support to controls
 
@@ -43,6 +44,16 @@ even when focus tracking was placed before `.test_support()`. Review the builder
 and assert both unfocused and focused snapshots when adding a control; do not treat
 absence of a panic as proof of correct registration. Debug prints detected omissions
 as `focused: <binding missed>` rather than `None`.
+
+When a component stores an observed native base, forward its public `track_focus`
+method to that base as well as forwarding `interactivity()`. The trait's default
+setter alone bypasses observation. `native_parts_forward_their_public_focus_binding`
+protects this builder path with real Table and Accordion parts.
+
+Queued actions must finish before subsequent test edits mutate the values they read.
+Legacy GPUI animations use wall time, so a test-clock wait is not an animation clock.
+Use reduced motion for Base motion geometry tests, or wait the actual legacy entrance
+before checking final bounds. Preserve real hit testing for hover-only close controls.
 
 ## Verification
 

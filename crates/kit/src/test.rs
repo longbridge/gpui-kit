@@ -353,7 +353,7 @@ impl ScopedWindow<'_> {
 
 fn require_scope_focus(window: &Window, scope: &[ElementId]) {
     assert!(
-        observation::scope_has_focus(window, scope),
+        observation::has_observed_focus(window, scope),
         "no observed keyboard focus inside scope {:?}; register the focused control with .test_support().track_focus(&handle) inside this scope before press/input",
         scope
     );

@@ -100,6 +100,16 @@ observation adds no layout container:
 | Tab | Selected, label |
 | Select | Accessibility value (including title prefix), expanded, focus scope |
 | ListItem / SidebarMenuItem | Geometry; additional state only when provided by native accessibility properties |
+| Accordion | Expanded trigger; header and panel bounds |
+| Tree | Native tree/item roles, label, selected and expanded; root focus scope |
+| Table / DataTable | Native table parts; DataTable row selection and root focus scope |
+| DatePicker / Calendar | DatePicker displayed date value, expanded and focus scope; calendar item labels and bounds |
+| Slider | Track and thumb bounds; numeric accessibility values are not exposed by `ElementSnapshot::value()` |
+| Stepper | Step and trigger bounds; verify the resulting application content |
+| Dialog / Sheet | Host focus scope and surface bounds; child controls retain their own properties |
+| Menu | Item label and selection, menu focus scope and submenu bounds |
+| Notification | Alert role and bounds; close button uses normal Button observation |
+| Dock | Area/group/content bounds and focus scopes; tabs retain native selection |
 
 Use constructor IDs where available. Input and Select accept `.id("name")`;
 their defaults include the state entity ID. Tabs inside a TabBar use their
@@ -274,20 +284,48 @@ wait, not an OS event loop or a network-service simulator. Provide controlled
 responses for external dependencies. A parked executor alone does not imply
 that timers or deferred work have completed.
 
+GPUI `dispatch_action` queues work. Complete the dispatch (for example by leaving
+`update_window` and running `cx.run_until_parked()`) before editing values that the
+action will read. Use `wait_for` for the resulting state or timer completion.
+Legacy non-synced GPUI `Animation` uses wall-clock `Instant`; advancing the test clock
+does not finish it. The Sheet/Notification geometry tests wait their actual entrance
+durations before asserting final bounds. Base motion can instead honor the public
+`cx.set_reduce_motion(true)` preference when testing final disclosure geometry.
+
 Snapshots never update in place. Cached views keep their painted facts until
 invalidated. Unmounted targets disappear after the frame releasing their
 element state; virtualized rows become queryable when painted after scrolling.
 
 ## Coverage and failure cases
 
-This is an incrementally growing headless interaction API, not automatic
-coverage of every Kit component. Table rows, Tree nodes, Dialog, Sheet, Notification,
-Accordion, DatePicker, Slider, Menu, Stepper and Dock do not yet have
-comprehensive automatic semantic observation or dedicated end-to-end workflows.
-Native scrolling and drag/drop primitives are tested, including a real virtual
-list and delayed HoverCard opening/closing; this does not establish every Table or Dock behavior. Add observation to
-an existing native element in a custom view when necessary. Unsupported properties
-remain unavailable; there is no manual test-only override.
+The repository covers the following component workflows through real input, native
+properties and resolved bounds. These are concrete regression contracts, not a claim
+that every option or combination of every component has been exhaustively tested.
+
+| Suite | Behavior exercised |
+| --- | --- |
+| `disclosure.rs` | Accordion exclusive expansion/collapse and actual panel geometry; Stepper content navigation; disabled disclosure/steps; Slider track click, thumb drag and disabled behavior |
+| `collections.rs` | Tree pointer expansion, keyboard collapse/expansion and selection; DataTable row selection, keyboard virtualization and wheel scrolling |
+| `date_picker.rs` | Opening, exact preset/day selection, month navigation, clearing, Escape and disabled behavior |
+| `overlays.rs` | Dialog validation → scoped Input → save → Notification; hover-revealed close; auto-dismiss timer; Dialog/Sheet Escape and focus restoration; surface bounds |
+| `menu.rs` | Disabled items, keyboard confirmation, Escape, focus restoration, submenu hover and nested item activation |
+| `dock.rs` | Tab selection/reordering, cross-group drag/drop, zoom and restored split geometry |
+
+The existing form, Select, HoverCard, virtual-list, pointer, lifecycle and isolation
+suites remain in place. Pure presentation components need geometry or pixel assertions,
+not invented interaction state. Custom parts register their existing native elements;
+unsupported properties remain unavailable, with no manual test-only override.
+
+Views that open dialogs, sheets or notifications through `WindowExt` must render the
+corresponding `Root::render_dialog_layer`, `Root::render_sheet_layer` and
+`Root::render_notification_layer` children, just as the production application does.
+Constructing `Root` alone does not mount those overlay layers.
+
+Use `within` for repeated controls. A Sheet's `"sheet"` host scope contains its
+`"sheet-content"` surface; Dialog's `"dialog"` scope contains the layer-indexed surface.
+Nested menus also contain a `"popup-menu"`, so retain the resolved parent scope when
+opening a submenu, or query under `"submenu"`. Do not assume a previously unique ID
+remains unique after another layer opens.
 
 Missing or invisible click targets panic. Disabled controls receive real events
 and decide whether to respond. Visibility combines geometry, viewport/content

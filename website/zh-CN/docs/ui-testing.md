@@ -77,6 +77,16 @@ cargo test -p gpui-kit --features test-support --test ui --locked
 | Tab | 选中、名称 |
 | Select | 无障碍值（包含标题前缀）、展开、焦点作用域 |
 | ListItem / SidebarMenuItem | 几何；其他状态仅在原生无障碍属性提供时可读 |
+| Accordion | 触发器展开状态；标题与面板边界 |
+| Tree | 原生树与节点角色、名称、选中与展开状态；根节点焦点作用域 |
+| Table / DataTable | 原生表格部件；DataTable 行选中状态与根焦点作用域 |
+| DatePicker / Calendar | 日期选择器显示的日期值、展开与焦点作用域；日历项名称与边界 |
+| Slider | 轨道与滑块边界；`ElementSnapshot::value()` 不读取数值型无障碍属性 |
+| Stepper | 步骤与触发器边界；通过应用内容验证导航结果 |
+| Dialog / Sheet | 宿主焦点作用域与内容表面边界；子控件保留各自属性 |
+| Menu | 菜单项名称与选中状态、菜单焦点作用域、子菜单边界 |
+| Notification | Alert 角色与边界；关闭按钮沿用 Button 观察 |
+| Dock | 区域、分组与内容边界及焦点作用域；Tab 保留原生选中状态 |
 
 优先使用构造函数 ID。Input 和 Select 支持 `.id("name")`，默认 ID 包含状态 entity ID。
 TabBar 内的 Tab 使用下标 ID。Select 已有的 `"input"` 子元素是触发区域：
@@ -234,13 +244,39 @@ cx.wait_for(handle.into(), Duration::from_millis(200), |window, _| {
 快照永不原地更新。缓存视图保留绘制事实，直到被失效并重绘。卸载目标在释放其
 element state 的帧完成后消失；虚拟列表行则在滚动后实际绘制时进入查询结果。
 
+GPUI `dispatch_action` 会排队执行。继续修改 action 将读取的值之前，应先完成派发，
+例如离开 `update_window` 后运行 `cx.run_until_parked()`；结果或计时器完成使用 `wait_for`。
+旧的非同步 GPUI `Animation` 使用真实时钟 `Instant`，推进测试时钟不会让动画结束。
+Sheet/Notification 几何测试会等待真实入场时长，再断言最终边界。
+Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用于测试展开后的最终几何。
+
 ## 覆盖范围与失败排查
 
-这是逐步扩展的无头交互 API，并未自动覆盖所有 Kit 组件。Table 行、Tree 节点、
-Dialog、Sheet、Notification、Accordion、DatePicker、Slider、Menu、Stepper 和 Dock
-尚未拥有全面的自动语义观察与专门的端到端流程测试。原生滚动与拖放已有测试，
-包括真实虚拟列表与 HoverCard 延迟显示/关闭，但不能据此宣称所有 Table 或 Dock 行为已验证。
-自定义视图需要时可以观察已有原生元素，不支持的属性保持不可用，不提供手填测试值的覆盖入口。
+仓库通过真实输入、原生属性和布局边界验证以下组件流程。这些是具体的回归契约，
+不代表已穷举每个组件的全部配置和组合。
+
+| 测试文件 | 验证行为 |
+| --- | --- |
+| `disclosure.rs` | Accordion 互斥展开、折叠与实际面板几何；Stepper 内容导航；禁用展开与步骤操作；Slider 轨道点击、滑块拖动与禁用行为 |
+| `collections.rs` | Tree 点击展开、键盘展开/折叠与选择；DataTable 行选择、键盘虚拟滚动与滚轮滚动 |
+| `date_picker.rs` | 打开、精确预设日期与日历日期选择、月份切换、清除、Escape 与禁用行为 |
+| `overlays.rs` | Dialog 校验 → 作用域 Input → 保存 → Notification；悬停显示关闭按钮；自动关闭计时；Dialog/Sheet Escape 与焦点恢复；表面边界 |
+| `menu.rs` | 禁用菜单项、键盘确认、Escape、焦点恢复、子菜单悬停及嵌套菜单项激活 |
+| `dock.rs` | Tab 选择与重排、跨分组拖放、放大和恢复分割布局 |
+
+已有表单、Select、HoverCard、虚拟列表、指针、生命周期和隔离测试继续保留。
+纯展示组件通过几何或像素断言验证，不虚构交互状态。自定义部件观察已有原生元素；
+不支持的属性保持不可用，不提供手填测试值的覆盖入口。
+
+通过 `WindowExt` 打开 Dialog、Sheet 或 Notification 的视图，需要像生产应用一样挂载
+`Root::render_dialog_layer`、`Root::render_sheet_layer` 和
+`Root::render_notification_layer` 返回的子元素。仅构造 `Root` 不会自动挂载这些覆盖层。
+
+重复控件使用 `within`。Sheet 的 `"sheet"` 宿主作用域包含 `"sheet-content"` 内容表面；
+Dialog 的 `"dialog"` 作用域包含以层下标标识的表面。子菜单也包含 `"popup-menu"`，
+打开子菜单时应保留已解析的父作用域，或在 `"submenu"` 下查询。
+不要假定打开另一层之后，原先唯一的 ID 仍然唯一。
+
 
 目标缺失或不可见时点击会 panic。禁用控件仍接收原生事件，由控件自己决定是否响应。
 可见性结合几何、视口与内容裁剪、目标计算样式，不判断像素遮挡；覆盖层仍会拦截点击。
