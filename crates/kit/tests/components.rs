@@ -5,7 +5,7 @@ use gpui_component::{
     input::{Input, InputState},
     popover::Popover,
 };
-use gpui_test::{ObserveElement, TestWindowExt};
+use gpui_kit::test_support::{ObserveElement, TestWindowExt};
 
 struct Controls {
     input: Entity<InputState>,

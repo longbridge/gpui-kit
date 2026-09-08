@@ -554,14 +554,11 @@ impl RenderOnce for Input {
             .disabled(disabled)
             .map(|this| {
                 #[cfg(feature = "test-support")]
-                let this = {
-                    this.test_metadata(gpui_base::test_support::Metadata {
-                        focus: Some(presentation.focus_handle().clone()),
-                        text: (!presentation.is_masked())
-                            .then(|| state.text(cx).to_string().into()),
-                        ..Default::default()
-                    })
-                };
+                let this = this
+                    .observe_focus(presentation.focus_handle())
+                    .when(!presentation.is_masked(), |this| {
+                        this.observe_text(state.text(cx).to_string())
+                    });
                 this
             })
             .track_focus(&frame_focus_handle)

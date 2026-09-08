@@ -7,7 +7,7 @@ example: false
 
 # UI Automation Testing
 
-Use `gpui-test` to exercise a GPUI Kit view through real GPUI event dispatch,
+Use `gpui_kit::test_support` to exercise a GPUI Kit view through real GPUI event dispatch,
 then assert its rendered state and application result with ordinary Rust
 assertions. A test creates a headless window, finds controls by `ElementId`,
 clicks and enters text, and checks focus, values and layout.
@@ -19,9 +19,9 @@ part of the behavior you need to verify.
 
 ## Set up a test project
 
-`gpui-test` is currently consumed from the GPUI Kit source checkout. Use a
-checkout containing the testing crate and keep Kit and the testing crate on
-the same revision. There is no GPUI fork or Cargo patch to install.
+UI testing is part of `gpui-kit`, behind its `test-support` feature. The
+example below uses a Kit source checkout containing these helpers. There is
+no additional testing crate, GPUI fork or Cargo patch to install.
 
 Prepare the platform dependencies described in [Installation](./installation.md).
 Headless tests still compile GPUI's native dependencies. For a standalone test
@@ -46,10 +46,9 @@ publish = false
 
 [dev-dependencies]
 gpui-kit = { path = "../gpui-kit/crates/kit", features = ["test-support"] }
-gpui-test = { path = "../gpui-kit/crates/test" }
 ```
 
-For an existing application, add these development dependencies to its package.
+For an existing application, add this development dependency to its package.
 Its normal `gpui-kit` dependency must resolve to the same source and version;
 features then unify for tests. Keep `test-support` in development dependencies
 so ordinary application builds do not enable observation. An application that
@@ -65,7 +64,7 @@ The test enters a Unicode name, edits it with Backspace, clicks Save, checks
 the status text and layout, and verifies the saved application value. The same
 source is compiled and run in GPUI Kit's integration suite.
 
-<<< ../../crates/test/tests/ui.rs{rust}
+<<< ../../crates/kit/tests/ui.rs{rust}
 
 In your own application, import the production view and its constructor from
 your library crate. Keeping a second implementation of the view in the test
@@ -83,7 +82,7 @@ Commit `Cargo.lock` with the test project. Inside the GPUI Kit checkout, run
 this exact example with:
 
 ```sh
-cargo test -p gpui-test --test ui --locked
+cargo test -p gpui-kit --features test-support --test ui --locked
 ```
 
 ## Choose stable test targets
@@ -104,11 +103,10 @@ let status = status.observe().text(message.clone());
 
 Here `message` is a `SharedString` and `ObserveElement` must be imported under
 the same configuration. If your application uses this pattern, declare an
-application `test-support` feature, enable the relevant Kit feature, and make
-`gpui-test` available as an optional dependency for the instrumented view;
-then run its tests with `--features test-support`. A development dependency
-alone is available to integration tests, not to the application library they
-import.
+application `test-support` feature that forwards to `gpui-kit/test-support`
+and import `gpui_kit::test_support::ObserveElement` in the instrumented view.
+Run its tests with `--features test-support`. The application library uses its
+normal `gpui-kit` dependency; it needs no separate testing dependency.
 
 Use unique IDs for queried targets. For rows, composite IDs such as
 `("row", record_id)` remain associated with the record after reordering.
@@ -200,7 +198,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: ./script/bootstrap
-      - run: cargo test -p gpui-test --locked
+      - run: cargo test -p gpui-kit --features test-support --locked
 ```
 
 For an application repository, install its platform dependencies and run

@@ -126,7 +126,9 @@ impl InputContextMenuCapabilities {
 #[derive(IntoElement)]
 pub struct InputBase {
     #[cfg(feature = "test-support")]
-    test_metadata: crate::test_support::Metadata,
+    observed_text: Option<gpui::SharedString>,
+    #[cfg(feature = "test-support")]
+    observed_focus: Option<gpui::FocusHandle>,
     base: gpui::Stateful<Div>,
     style: StyleRefinement,
     semantic_styles: InputStyles,
@@ -137,18 +139,26 @@ pub struct InputBase {
 }
 
 impl InputBase {
-    /// Supplies observable facts for headless tests without changing GPUI.
+    /// Reports the input's unmasked logical value to headless UI tests.
     #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub fn test_metadata(mut self, metadata: crate::test_support::Metadata) -> Self {
-        self.test_metadata = metadata;
+    pub fn observe_text(mut self, text: impl Into<gpui::SharedString>) -> Self {
+        self.observed_text = Some(text.into());
+        self
+    }
+
+    /// Observes the editor's focus when it differs from the input frame's focus.
+    #[cfg(feature = "test-support")]
+    pub fn observe_focus(mut self, focus: &gpui::FocusHandle) -> Self {
+        self.observed_focus = Some(focus.clone());
         self
     }
 
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             #[cfg(feature = "test-support")]
-            test_metadata: Default::default(),
+            observed_text: None,
+            #[cfg(feature = "test-support")]
+            observed_focus: None,
             base: div().id(id),
             style: StyleRefinement::default(),
             semantic_styles: InputStyles::default(),
@@ -249,9 +259,11 @@ impl RenderOnce for InputBase {
         #[cfg(feature = "test-support")]
         let element = {
             use crate::test_support::ObserveElement as _;
-            let mut metadata = self.test_metadata;
-            metadata.disabled = self.disabled;
-            element.observe().metadata(metadata)
+            element
+                .observe()
+                .disabled(self.disabled)
+                .when_some(self.observed_focus, |this, focus| this.focus(&focus))
+                .when_some(self.observed_text, |this, text| this.text(text))
         };
         element
     }

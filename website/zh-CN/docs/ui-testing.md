@@ -7,13 +7,13 @@ example: false
 
 # UI 自动化测试
 
-使用 `gpui-test`，可以通过 GPUI 的真实事件分发操作应用视图，再用普通 Rust 断言验证渲染状态和业务结果。测试会创建无头窗口，通过 `ElementId` 定位控件，点击、输入文本，并检查焦点、值和布局。
+使用 `gpui_kit::test_support`，可以通过 GPUI 的真实事件分发操作应用视图，再用普通 Rust 断言验证渲染状态和业务结果。测试会创建无头窗口，通过 `ElementId` 定位控件，点击、输入文本，并检查焦点、值和布局。
 
 本指南介绍进程内的行为与布局自动化。测试框架不会启动打包后的应用，也不会检查像素。如果需要验证原生窗口、平台集成或视觉效果，应另外保留相应测试。
 
 ## 配置测试项目
 
-目前从 GPUI Kit 源码检出目录引入 `gpui-test`。请使用包含测试 crate 的版本，并让 Kit 和测试 crate 来自同一提交。不需要 GPUI fork 或 Cargo 补丁。
+UI 测试直接集成在 `gpui-kit` 中，通过 `test-support` feature 启用。下面示例使用包含这些辅助方法的 Kit 源码检出目录，不需要额外测试 crate、GPUI fork 或 Cargo 补丁。
 
 先按照[安装说明](./installation.md)准备平台依赖。无头测试仍然需要编译 GPUI 的原生依赖。可以在源码目录旁创建独立测试项目：
 
@@ -36,10 +36,9 @@ publish = false
 
 [dev-dependencies]
 gpui-kit = { path = "../gpui-kit/crates/kit", features = ["test-support"] }
-gpui-test = { path = "../gpui-kit/crates/test" }
 ```
 
-已有应用可以在自己的 package 中添加这两个开发依赖。普通 `gpui-kit` 依赖必须解析到相同来源和版本，测试时 feature 才能合并。将 `test-support` 放在开发依赖中，让普通应用构建不启用观察功能。直接使用组件 crate 的应用也可以启用 `gpui-component/test-support`。
+已有应用可以在自己的 package 中添加这个开发依赖。普通 `gpui-kit` 依赖必须解析到相同来源和版本，测试时 feature 才能合并。将 `test-support` 放在开发依赖中，让普通应用构建不启用观察功能。直接使用组件 crate 的应用也可以启用 `gpui-component/test-support`。
 
 ## 一个完整测试
 
@@ -47,7 +46,7 @@ gpui-test = { path = "../gpui-kit/crates/test" }
 
 测试会输入 Unicode 姓名，通过 Backspace 编辑，点击 Save，检查状态文本与布局，最后验证保存的业务值。以下代码直接引用仓库集成测试的源码，会实际编译运行。
 
-<<< ../../../crates/test/tests/ui.rs{rust}
+<<< ../../../crates/kit/tests/ui.rs{rust}
 
 在自己的应用中，应从 library crate 导入生产视图及其构造函数。不要在测试中另写一份视图实现，否则测试与应用可能逐渐不一致。本例内联定义视图，是为了让整个示例可以直接复制到新项目。
 
@@ -61,7 +60,7 @@ cargo test --test ui --locked
 将 `Cargo.lock` 一起提交。在 GPUI Kit 源码目录中，可以直接运行同一个示例：
 
 ```sh
-cargo test -p gpui-test --test ui --locked
+cargo test -p gpui-kit --features test-support --test ui --locked
 ```
 
 ## 选择稳定的测试目标
@@ -76,7 +75,7 @@ let status = div().id("status").child(message.clone());
 let status = status.observe().text(message.clone());
 ```
 
-这里的 `message` 是 `SharedString`，`ObserveElement` 也应在相同条件下导入。采用这种写法时，需要在应用中声明 `test-support` feature，启用对应的 Kit feature，并将 `gpui-test` 作为可选依赖供视图代码使用；测试命令增加 `--features test-support`。仅添加开发依赖，只能供集成测试使用，不能供被测试的应用 library 使用。
+这里的 `message` 是 `SharedString`，`ObserveElement` 也应在相同条件下导入。采用这种写法时，需要在应用中声明转发到 `gpui-kit/test-support` 的 `test-support` feature，并在视图中导入 `gpui_kit::test_support::ObserveElement`；测试命令增加 `--features test-support`。应用 library 复用普通的 `gpui-kit` 依赖，不需要额外的测试依赖。
 
 为需要查询的目标选择唯一 ID。列表可以使用 `("row", record_id)` 这样的复合 ID，使查询在重排后仍对应同一条记录。不同作用域出现相同 ID 时，窗口级查找存在歧义，会 panic。
 
@@ -138,7 +137,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: ./script/bootstrap
-      - run: cargo test -p gpui-test --locked
+      - run: cargo test -p gpui-kit --features test-support --locked
 ```
 
 应用仓库需要安装自身的平台依赖，并改为在测试 package 中运行 `cargo test --test ui --locked`。将锁定版本的 Kit 源码放到 manifest 声明的路径，再按照普通原生构建的环境配置增加 Linux 和 Windows job。

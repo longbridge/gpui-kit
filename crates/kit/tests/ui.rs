@@ -1,3 +1,4 @@
+use gpui_kit::test_support::{ObserveElement, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window,
     component::{
@@ -9,7 +10,6 @@ use gpui_kit::{
     prelude::*,
     px, size,
 };
-use gpui_test::{ObserveElement, TestWindowExt};
 
 struct Profile {
     name: Entity<InputState>,

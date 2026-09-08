@@ -90,6 +90,10 @@ pub use ::gpui::*;
 #[doc(hidden)]
 pub use ::gpui;
 
+/// Headless UI interaction and observation helpers for application tests.
+#[cfg(feature = "test-support")]
+pub mod test_support;
+
 pub use ::gpui_base as base;
 pub use ::gpui_platform as platform;
 #[cfg(target_family = "wasm")]

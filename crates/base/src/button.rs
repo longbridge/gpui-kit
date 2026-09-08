@@ -19,7 +19,7 @@ type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 #[derive(IntoElement)]
 pub struct Button {
     #[cfg(feature = "test-support")]
-    test_metadata: crate::test_support::Metadata,
+    observed_text: Option<SharedString>,
     id: ElementId,
     base: Stateful<Div>,
     style: StyleRefinement,
@@ -37,11 +37,10 @@ pub struct Button {
 }
 
 impl Button {
-    /// Supplies observable facts for headless tests without changing GPUI.
+    /// Reports the button's logical label to headless UI tests.
     #[cfg(feature = "test-support")]
-    #[doc(hidden)]
-    pub fn test_metadata(mut self, metadata: crate::test_support::Metadata) -> Self {
-        self.test_metadata = metadata;
+    pub fn observe_text(mut self, text: impl Into<SharedString>) -> Self {
+        self.observed_text = Some(text.into());
         self
     }
 
@@ -49,7 +48,7 @@ impl Button {
         let id = id.into();
         Self {
             #[cfg(feature = "test-support")]
-            test_metadata: Default::default(),
+            observed_text: None,
             base: div().id(id.clone()),
             id,
             style: StyleRefinement::default(),
@@ -272,10 +271,11 @@ impl RenderOnce for Button {
         #[cfg(feature = "test-support")]
         let element = {
             use crate::test_support::ObserveElement as _;
-            let mut metadata = self.test_metadata;
-            metadata.disabled = self.disabled;
-            metadata.focus = Some(test_focus);
-            element.observe().metadata(metadata)
+            element
+                .observe()
+                .disabled(self.disabled)
+                .focus(&test_focus)
+                .when_some(self.observed_text, |this, text| this.text(text))
         };
         element
     }

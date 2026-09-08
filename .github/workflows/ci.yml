@@ -34,7 +34,7 @@ jobs:
         if: ${{ matrix.run_on != 'windows-latest' }}
         run: script/bootstrap
       - name: Headless UI integration tests
-        run: cargo test -p gpui-test --locked
+        run: cargo test -p gpui-kit --features test-support --locked
       - name: Machete
         if: ${{ matrix.run_on == 'macos-latest' }}
         uses: bnjbvr/cargo-machete@v0.9.1

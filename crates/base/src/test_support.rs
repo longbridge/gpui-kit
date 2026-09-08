@@ -12,14 +12,6 @@ use std::{
     rc::{Rc, Weak},
 };
 
-/// Optional facts known by the control, rather than inferred from its element tree.
-#[derive(Clone, Default)]
-pub struct Metadata {
-    pub focus: Option<FocusHandle>,
-    pub disabled: bool,
-    pub text: Option<SharedString>,
-}
-
 /// Owned facts from the last paint of an observed element.
 #[derive(Clone, Debug)]
 pub struct TestElement {
@@ -76,7 +68,7 @@ impl Drop for Registration {
     }
 }
 
-/// Internal lookup used by the public Window extension in gpui-test.
+/// Internal lookup used by the public Window extension in gpui-kit.
 #[doc(hidden)]
 pub fn find(window: &Window, id: ElementId) -> Option<TestElement> {
     REGISTRY.with(|registry| {
@@ -107,7 +99,9 @@ pub trait ObserveElement:
         );
         Observed {
             inner: self,
-            metadata: Metadata::default(),
+            focus: None,
+            disabled: false,
+            text: None,
         }
     }
 }
@@ -117,19 +111,22 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> ObserveEle
 /// state, so normal state cleanup and cached-view replay determine its lifetime.
 pub struct Observed<E> {
     inner: E,
-    metadata: Metadata,
+    focus: Option<FocusHandle>,
+    disabled: bool,
+    text: Option<SharedString>,
 }
 impl<E> Observed<E> {
-    pub fn metadata(mut self, metadata: Metadata) -> Self {
-        self.metadata = metadata;
+    /// Reports whether a custom control is disabled.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         self
     }
     pub fn text(mut self, text: impl Into<SharedString>) -> Self {
-        self.metadata.text = Some(text.into());
+        self.text = Some(text.into());
         self
     }
     pub fn focus(mut self, focus: &FocusHandle) -> Self {
-        self.metadata.focus = Some(focus.clone());
+        self.focus = Some(focus.clone());
         self
     }
 }
@@ -171,8 +168,8 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
             bounds,
             visible: false,
             focused: false,
-            disabled: self.metadata.disabled,
-            text: self.metadata.text.clone(),
+            disabled: self.disabled,
+            text: self.text.clone(),
         };
         let registration =
             window.with_element_state(global_id, |state: Option<Rc<Registration>>, window| {
@@ -224,7 +221,6 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
                 && clipped.size.width > px(0.)
                 && clipped.size.height > px(0.);
             facts.focused = self
-                .metadata
                 .focus
                 .as_ref()
                 .is_some_and(|focus| focus.is_focused(window));
@@ -261,7 +257,7 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Interactiv
         self.inner.interactivity()
     }
     fn track_focus(mut self, focus: &FocusHandle) -> Self {
-        self.metadata.focus = Some(focus.clone());
+        self.focus = Some(focus.clone());
         self.inner = self.inner.track_focus(focus);
         self
     }

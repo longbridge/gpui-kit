@@ -21,7 +21,7 @@ default = ["component", "assets"]
 component = ["dep:gpui-component"]
 # The default icon set for `gpui-component`, `gpui_kit::assets`.
 assets = ["dep:gpui-kit-assets"]
-# GPUI's test harness and native-platform rendering support.
+# GPUI's test harness, native-platform rendering, and Kit UI test helpers.
 test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui-base/test-support", "gpui-component?/test-support"]
 # Frame-event instrumentation remains opt-in for performance builds.
 profiler = ["gpui/profiler"]
@@ -78,3 +78,23 @@ gpui_web.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+
+[[test]]
+name = "window"
+required-features = ["test-support"]
+
+[[test]]
+name = "lifecycle"
+required-features = ["test-support"]
+
+[[test]]
+name = "components"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "input"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "ui"
+required-features = ["test-support", "component"]

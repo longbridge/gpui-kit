@@ -1,4 +1,4 @@
-# gpui-test
+# UI testing in GPUI Kit
 
 Headless behavior and layout tests using GPUI's existing `TestAppContext`, native
 input dispatch, `ElementId`, and ordinary Rust assertions. No GPUI fork, Cargo
@@ -6,18 +6,17 @@ patch, accessibility query, or separate application runner is required.
 
 ```toml
 [dev-dependencies]
-gpui-test = { path = "../gpui-kit/crates/test" }
-gpui-component = { path = "../gpui-kit/crates/component", features = ["test-support"] }
+gpui-kit = { path = "../gpui-kit/crates/kit", features = ["test-support"] }
 ```
 
-Use the same GPUI dependency as GPUI Kit. The umbrella `gpui-kit/test-support`
-feature also enables component instrumentation.
+The `gpui-kit/test-support` feature exposes `gpui_kit::test_support` and also
+enables instrumentation for the enabled Kit components.
 
 ## Test API
 
 ```rust,ignore
-use gpui::AppContext as _;
-use gpui_test::TestWindowExt;
+use gpui_kit::AppContext as _;
+use gpui_kit::test_support::TestWindowExt;
 
 // Initialize the component library and create the window with normal GPUI APIs.
 cx.update_window(handle.into(), |_, window, cx| {
@@ -46,8 +45,8 @@ Following CONTRIBUTING, this crate does **not** modify GPUI to obtain them.
 Native elements must opt in using a transparent wrapper:
 
 ```rust,ignore
-use gpui::{div, prelude::*, px};
-use gpui_test::ObserveElement;
+use gpui_kit::{div, prelude::*, px};
+use gpui_kit::test_support::ObserveElement;
 
 let content = div().id("popover").observe().w(px(200.)).h(px(80.));
 ```
@@ -97,7 +96,7 @@ masked input values and unspecified custom text are not reported.
 ## Verification
 
 ```sh
-cargo test -p gpui-test --locked
+cargo test -p gpui-kit --features test-support --locked
 ```
 
 The 28 tests cover:

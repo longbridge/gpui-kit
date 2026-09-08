@@ -674,7 +674,7 @@ impl RenderOnce for Button {
             .clone()
             .or_else(|| self.label.clone());
         #[cfg(feature = "test-support")]
-        let test_text = self.label.clone();
+        let observed_label = self.label.clone();
         let content = h_flex()
             .id("label")
             .size_full()
@@ -722,10 +722,7 @@ impl RenderOnce for Button {
         .disabled(disabled)
         .map(|this| {
             #[cfg(feature = "test-support")]
-            let this = this.test_metadata(gpui_base::test_support::Metadata {
-                text: test_text,
-                ..Default::default()
-            });
+            let this = this.when_some(observed_label, |this, label| this.observe_text(label));
             this
         })
         // Base layers semantic states over the builder chain, so the caller's
