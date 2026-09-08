@@ -22,3 +22,11 @@ async fn async_test_runs(cx: &mut TestAppContext) {
     cx.background_executor.run_until_parked();
     assert_eq!(counter.read_with(cx, |counter, _| counter.0), 0);
 }
+
+#[test]
+fn ordinary_rust_test_keeps_the_builtin_attribute() {
+    assert_eq!(
+        gpui_kit::size(gpui_kit::px(12.), gpui_kit::px(24.)).width,
+        gpui_kit::px(12.)
+    );
+}

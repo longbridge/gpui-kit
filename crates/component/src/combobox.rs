@@ -234,6 +234,11 @@ where
                     let weak_cancel = weak_cancel.clone();
                     move |_list_state, window, cx| {
                         _ = weak_cancel.update(cx, |this, cx| {
+                            // Cancel propagates to the BaseCombobox, which may already
+                            // have confirmed and closed before this deferred callback.
+                            if !this.state.open {
+                                return;
+                            }
                             cx.emit(ComboboxEvent::Confirm(this.selected_values()));
                             this.set_open(false, cx);
                             this.focus(window, cx);

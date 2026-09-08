@@ -139,5 +139,5 @@ name = "dock"
 required-features = ["test-support", "component"]
 
 [[test]]
-name = "assets"
-required-features = ["assets"]
+name = "search"
+required-features = ["assets", "test-support", "component"]

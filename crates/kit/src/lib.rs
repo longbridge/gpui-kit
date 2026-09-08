@@ -79,18 +79,26 @@ macro_rules! actions {
     };
 }
 
-// Everything in GPUI itself, so `use gpui_kit::*;` is enough to get started.
-// With the `test-support` feature the glob also carries GPUI's `test`
-// attribute, so a test module imports explicitly (or adds
-// `use core::prelude::v1::test;`) to keep the built-in `#[test]`.
+// Public facade decision — 2026-09-08:
+// GPUI Kit is the application-facing entry point. Users should depend on and
+// import gpui-kit without needing to know which GPUI crates implement it.
+// Keep GPUI APIs available through the Kit root and preserve the published
+// #[gpui_kit::test] macro. Do not replace it with Rust's built-in #[test].
+// A future switch to official GPUI crates is an internal dependency migration,
+// not a reason to steer Kit users toward gpui:: paths or require import changes.
+// Keep the existing gpui namespace re-export hidden for source compatibility;
+// it is not the recommended application API.
+//
+// With test-support, the glob below includes GPUI's test macro. Test modules
+// should import their Kit types explicitly to avoid shadowing Rust's #[test].
 pub use ::gpui::*;
 
-// The crate name, so code that keeps `gpui::…` paths still resolves after
-// `use gpui_kit::*;`. `gpui_kit::*` is the documented way.
 #[doc(hidden)]
 pub use ::gpui;
 
-/// Headless UI interaction and observation helpers for application tests.
+/// UI integration testing: render real components in headless windows, dispatch
+/// pointer and keyboard events, and assert state, focus, layout and callbacks.
+/// Run tests with `#[gpui_kit::test]`; use this module to interact with their UI.
 #[cfg(feature = "test-support")]
 pub mod test;
 

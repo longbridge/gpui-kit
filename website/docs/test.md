@@ -14,12 +14,28 @@ This guide covers testing GPUI Kit applications and GPUI behavior. Choose the te
 - For UI integration tests, render the production application view, dispatch events through `gpui_kit::test`, and check control state, layout and the application result.
 - Use the separate offscreen renderer for pixel checks, and retain native-window and platform integration tests for those behaviors.
 
-GPUI types and its test attribute are exported at the `gpui-kit` root; applications do not need an additional GPUI dependency. The following sections walk through a complete UI integration test.
+GPUI Kit exposes its types and `#[gpui_kit::test]` through the Kit root; applications do not need an additional GPUI dependency. In test modules, import the types you use explicitly: `use gpui_kit::*;` also imports the GPUI `test` macro and can shadow Rust’s ordinary `#[test]`. The complete example below uses explicit imports.
 
-Use `gpui_kit::test` to exercise a GPUI Kit view through real GPUI event dispatch,
-then assert its native accessibility properties, layout and application result with ordinary Rust
-assertions. A test creates a headless window, finds controls by `ElementId`,
-clicks and enters text, and checks focus, values and layout.
+## What is a UI integration test?
+
+A **UI integration test** renders real components or an application view in a
+headless window, simulates clicks, keyboard input and scrolling, then verifies
+state, focus, layout and application callbacks. For example, a Checkbox test can
+verify that clicking changes the owner's value and that a disabled Checkbox
+rejects the same interaction.
+
+`#[gpui_kit::test]` runs the test and provides its GPUI context.
+`gpui_kit::test` supplies the tools to operate and inspect the UI:
+
+```rust
+use gpui_kit::{TestAppContext, Window};
+use gpui_kit::test::TestWindowExt;
+```
+
+Use these tests when a behavior depends on components working together, such as
+entering a value, saving a dialog and checking the result in the parent view.
+Find controls by `ElementId`, dispatch real GPUI events and assert the outcome
+with ordinary Rust assertions.
 
 This guide covers in-process behavior and layout automation. Element snapshots do not inspect pixels or launch your packaged application.
 For pixel checks, use GPUI’s separate offscreen renderer as described below. Keep native-window,
@@ -107,6 +123,8 @@ observation adds no layout container:
 | Switch / Toggle | Checked, label, focus scope |
 | Radio | Checked, selected, label, focus scope |
 | Tab | Selected, label |
+| Command | Native option selected state, root focus scope and row bounds |
+| Combobox | Native expanded state and focus scope; selection verified through events and retained state |
 | Select | Accessibility value (including title prefix), expanded, focus scope |
 | ListItem / SidebarMenuItem | Geometry; additional state only when provided by native accessibility properties |
 | Accordion | Expanded trigger; header and panel bounds |
@@ -313,6 +331,8 @@ that every option or combination of every component has been exhaustively tested
 
 | Suite | Behavior exercised |
 | --- | --- |
+| `test_macro.rs` | Published `#[gpui_kit::test]` sync/async compatibility alongside ordinary Rust tests; the independent Kit-only recipes package runs the same contract |
+| `search.rs` | Command disabled-item skipping, wraparound, Unicode keywords, empty results, Action dispatch and original-index callbacks, two-stage Escape; Combobox search, single/multi selection, clearing, empty-result recovery, disabled behavior and exactly one Confirm on close |
 | `disclosure.rs` | Accordion exclusive expansion/collapse and actual panel geometry; Stepper content navigation; disabled disclosure/steps; Slider track click, thumb drag and disabled behavior |
 | `collections.rs` | Tree pointer expansion, keyboard collapse/expansion and selection; DataTable row selection, keyboard virtualization and wheel scrolling |
 | `date_picker.rs` | Opening, exact preset/day selection, month navigation, clearing, Escape and disabled behavior |
