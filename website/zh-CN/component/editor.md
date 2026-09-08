@@ -119,6 +119,8 @@ editor.update(cx, |state, cx| {
 
 Editor 默认使用主题中的等宽字体 —— `mono_font_family` 和 `mono_font_size`，行高为字号的
 1.5 倍。这只是默认值：在 Editor 上设置的文本样式会覆盖它，gutter 和行高都跟随字号变化。
+主题加载时会核对平台默认等宽字体（`Menlo`、`Consolas`、`DejaVu Sans Mono`）是否已安装，
+缺失时换成已安装的等宽字体，再不行退到 `.SystemUIFont`；你自己指定的字体族则原样使用。
 
 ```rust
 Editor::new(&editor).text_sm()

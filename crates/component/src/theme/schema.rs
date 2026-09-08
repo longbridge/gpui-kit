@@ -53,6 +53,10 @@ pub struct ThemeConfig {
     /// - macOS: `Menlo`
     /// - Windows: `Consolas`
     /// - Linux: `DejaVu Sans Mono`
+    ///
+    /// The default falls back to an installed monospace font, then to
+    /// `.SystemUIFont`, when the machine lacks it. A family named here is used
+    /// as-is, so name one that is installed or embedded with `add_fonts`.
     #[serde(rename = "mono_font.family")]
     pub mono_font_family: Option<SharedString>,
     /// The monospace font size, default is 13.
