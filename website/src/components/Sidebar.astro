@@ -61,3 +61,69 @@ function renderItems(items: SidebarItem[], depth = 0): any[] {
     ))}
   </nav>
 </aside>
+
+<script is:inline>
+  (function () {
+    const sidebar = document.querySelector('.docs-sidebar');
+    if (!sidebar) return;
+
+    const section = window.location.pathname.match(/(?:^|\/)(docs|base|shell)(?:\/|$)/)?.[1] || 'docs';
+    const key = 'gpui-kit:sidebar-scroll:' + section;
+
+    // 1. Restore the last known scroll position for this section.
+    let isRestoring = true;
+    try {
+      const saved = sessionStorage.getItem(key);
+      if (saved !== null) {
+        sidebar.scrollTop = Number(saved);
+      }
+    } catch {}
+
+    // 2. Ensure the active item is visible; if off-screen (e.g. direct link or refresh), scroll it into center.
+    const active = sidebar.querySelector('.sidebar-item.active');
+    if (active) {
+      const cRect = sidebar.getBoundingClientRect();
+      const aRect = active.getBoundingClientRect();
+      const isVisible = aRect.top >= cRect.top && aRect.bottom <= cRect.bottom;
+      if (!isVisible) {
+        sidebar.scrollTop = active.offsetTop - (sidebar.clientHeight / 2) + (active.offsetHeight / 2);
+      }
+    }
+
+    requestAnimationFrame(function () {
+      delete sidebar.dataset.scrollbarVisible;
+      isRestoring = false;
+    });
+
+    // 3. Synchronize scroll position and manage transient scrollbar visibility.
+    let hideTimer;
+    function saveScroll() {
+      try {
+        sessionStorage.setItem(key, String(sidebar.scrollTop));
+      } catch {}
+    }
+
+    sidebar.addEventListener(
+      'scroll',
+      function () {
+        if (!isRestoring) {
+          sidebar.dataset.scrollbarVisible = '';
+          window.clearTimeout(hideTimer);
+          hideTimer = window.setTimeout(function () {
+            delete sidebar.dataset.scrollbarVisible;
+          }, 800);
+        }
+        saveScroll();
+      },
+      { passive: true },
+    );
+
+    sidebar.addEventListener('click', function (e) {
+      if (e.target && e.target.closest('a')) {
+        saveScroll();
+      }
+    });
+
+    window.addEventListener('pagehide', saveScroll);
+  })();
+</script>
