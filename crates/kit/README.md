@@ -55,10 +55,11 @@ The `gpui-component` features (`inspector`, `decimal`, `tree-sitter`,
 `gpui-kit` under the same names. `test-support` turns on GPUI's test harness
 for `#[gpui::test]` (available through `use gpui_kit::*;`), `TestAppContext`, `VisualTestContext`, and native-platform
 rendering support; enable it under `[dev-dependencies]`. It also exposes
-`gpui_kit::test::{TestWindowExt, TestAppContextExt, TestSupportExt, ElementSnapshot}` for
-headless UI interactions and assertions. `gpui_kit::TestSupportExt` is also
+`gpui_kit::ui_test::{TestWindowExt, TestAppContextExt, TestSupportExt, ElementSnapshot}` for
+UI integration testing: render real components in headless windows, simulate input,
+and verify state, focus, layout and application callbacks. `gpui_kit::TestSupportExt` is also
 available without the feature: `.test_support()` keeps production render chains
 intact and returns the original element in normal builds. Snapshots read native
-accessibility properties without hand-supplied state. See [UI testing](TESTING.md) for usage.
+accessibility properties without hand-supplied state. See [UI integration testing](TESTING.md) for usage.
 The independent `profiler` feature enables GPUI frame-event instrumentation and is off by default.
 See <https://gpui-kit.com> for the guides.

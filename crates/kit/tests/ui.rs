@@ -3,7 +3,7 @@ use gpui_kit::component::{
     button::Button,
     input::{Input, InputState},
 };
-use gpui_kit::test::{TestSupportExt, TestWindowExt};
+use gpui_kit::ui_test::{TestSupportExt, TestWindowExt};
 use gpui_kit::*;
 
 struct Profile {

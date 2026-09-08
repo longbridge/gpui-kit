@@ -1,5 +1,5 @@
 use gpui::{AppContext, Context, TestAppContext, Window, div, prelude::*, px, size};
-use gpui_kit::test::{TestSupportExt, TestWindowExt};
+use gpui_kit::ui_test::{TestSupportExt, TestWindowExt};
 
 struct Example {
     open: bool,

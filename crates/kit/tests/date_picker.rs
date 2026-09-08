@@ -2,7 +2,7 @@ use gpui_kit::component::{
     Disableable,
     date_picker::{DatePicker, DatePickerState, DateRangePreset},
 };
-use gpui_kit::test::{TestAppContextExt, TestWindowExt};
+use gpui_kit::ui_test::{TestAppContextExt, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, ElementId, Entity, TestAppContext, Window, div, prelude::*, px, size,
 };

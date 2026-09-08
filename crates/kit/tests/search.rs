@@ -4,7 +4,7 @@ use gpui_kit::component::{
     command::{Command, CommandGroup, CommandItem, CommandState},
 };
 use gpui_kit::gpui;
-use gpui_kit::test::{TestSupportExt, TestWindowExt};
+use gpui_kit::ui_test::{TestSupportExt, TestWindowExt};
 use gpui_kit::{AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size};
 
 gpui_kit::actions!(search_test, [Save]);
@@ -187,7 +187,7 @@ use gpui_kit::component::{
     combobox::{Combobox, ComboboxEvent, ComboboxState},
     searchable_list::SearchableVec,
 };
-use gpui_kit::test::TestAppContextExt;
+use gpui_kit::ui_test::TestAppContextExt;
 use std::time::Duration;
 
 type LanguageState = ComboboxState<SearchableVec<&'static str>>;

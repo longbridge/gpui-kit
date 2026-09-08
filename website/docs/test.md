@@ -11,15 +11,31 @@ This guide covers testing GPUI Kit applications and GPUI behavior. Choose the te
 
 - Use ordinary Rust `#[test]` for pure data transformations, validation and state transitions.
 - Use `#[gpui::test]` and `TestAppContext` for entities, actions, subscriptions and async tasks, creating a window when needed.
-- For UI integration tests, render the production application view, dispatch events through `gpui_kit::test`, and check control state, layout and the application result.
+- For UI integration tests, render the production application view, dispatch events through `gpui_kit::ui_test`, and check control state, layout and the application result.
 - Use the separate offscreen renderer for pixel checks, and retain native-window and platform integration tests for those behaviors.
 
 GPUI types and its test attribute are exported at the `gpui-kit` root; `use gpui_kit::*;` makes `#[gpui::test]` available alongside ordinary Rust `#[test]`. Applications do not need an additional GPUI dependency. The following sections walk through a complete UI integration test.
 
-Use `gpui_kit::test` to exercise a GPUI Kit view through real GPUI event dispatch,
-then assert its native accessibility properties, layout and application result with ordinary Rust
-assertions. A test creates a headless window, finds controls by `ElementId`,
-clicks and enters text, and checks focus, values and layout.
+## What is a UI integration test?
+
+A **UI integration test** renders real components or an application view in a
+headless window, simulates clicks, keyboard input and scrolling, then verifies
+state, focus, layout and application callbacks. For example, a Checkbox test can
+verify that clicking changes the owner's value and that a disabled Checkbox
+rejects the same interaction.
+
+`#[gpui::test]` runs the test and provides its GPUI context.
+`gpui_kit::ui_test` supplies the tools to operate and inspect the UI:
+
+```rust
+use gpui_kit::*;
+use gpui_kit::ui_test::TestWindowExt;
+```
+
+Use these tests when a behavior depends on components working together, such as
+entering a value, saving a dialog and checking the result in the parent view.
+Find controls by `ElementId`, dispatch real GPUI events and assert the outcome
+with ordinary Rust assertions.
 
 This guide covers in-process behavior and layout automation. Element snapshots do not inspect pixels or launch your packaged application.
 For pixel checks, use GPUI’s separate offscreen renderer as described below. Keep native-window,
@@ -195,7 +211,7 @@ IDs such as `("row", record_id)` preserve record identity after reordering.
 
 ## Interact and assert
 
-Import `gpui_kit::test::TestWindowExt` for the following methods:
+Import `gpui_kit::ui_test::TestWindowExt` for the following methods:
 
 | API | Behavior |
 | --- | --- |
@@ -281,7 +297,7 @@ For asynchronous work or deferred selection commits, use an async
 `#[gpui::test]` and wait **outside** the window update:
 
 ```rust
-use gpui_kit::test::TestAppContextExt;
+use gpui_kit::ui_test::TestAppContextExt;
 use std::time::Duration;
 
 cx.wait_for(handle.into(), Duration::from_millis(200), |window, _| {

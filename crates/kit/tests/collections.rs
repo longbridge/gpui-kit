@@ -3,7 +3,7 @@ use gpui_kit::component::{
     table::{Column, DataTable, TableDelegate, TableState},
     tree::{Tree, TreeItem, TreeState},
 };
-use gpui_kit::test::TestWindowExt;
+use gpui_kit::ui_test::TestWindowExt;
 use gpui_kit::{
     App, AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size,
 };

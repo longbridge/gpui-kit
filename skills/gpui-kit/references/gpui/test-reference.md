@@ -326,7 +326,7 @@ fn test_rapid_confirms_keep_consistent_snapshot(cx: &mut TestAppContext) {
 Use random data to test edge cases:
 
 ```rust
-#[gpui_kit::test(iterations = 10)]
+#[gpui::test(iterations = 10)]
 fn test_counter_random_operations(cx: &mut TestAppContext, mut rng: StdRng) {
     let counter = cx.new(|cx| Counter::new(cx));
 
@@ -388,7 +388,7 @@ fn test_distributed_apps(cx_a: &mut TestAppContext, cx_b: &mut TestAppContext) {
 Test concurrent operations with random execution order:
 
 ```rust
-#[gpui_kit::test(iterations = 10)]
+#[gpui::test(iterations = 10)]
 fn test_concurrent_operations(
     cx_a: &mut TestAppContext,
     cx_b: &mut TestAppContext,

@@ -2,12 +2,21 @@
 
 **Contents:** [Choose the test level](#choose-the-test-level) · [UI integration workflow](#ui-integration-workflow) · [Complete example](#complete-example) · [Queries and interactions](#queries-and-interactions) · [Frames and async work](#frames-and-async-work) · [Assertion boundaries](#assertion-boundaries) · [Additional resources](#additional-resources)
 
+## UI integration testing
+
+A UI integration test renders real components in a headless window, dispatches
+clicks, keyboard input and scrolling, then checks state, focus, layout and owner
+callbacks. For example: add a Checkbox UI integration test that proves clicking
+toggles the owner's value and disabled controls reject the interaction.
+Use this term when describing component interaction coverage.
+`#[gpui::test]` runs the test; `gpui_kit::ui_test` operates and inspects its UI.
+
 ## Choose the test level
 
 Use ordinary Rust `#[test]` for pure logic. Use `#[gpui::test]` and
 `TestAppContext` for entities, subscriptions, actions and async tasks; it can
 create headless windows too. `VisualTestContext` is available for existing GPUI
-window helpers. For an application UI flow, use `gpui_kit::test::TestWindowExt`
+window helpers. For an application UI flow, use `gpui_kit::ui_test::TestWindowExt`
 on the real `Window` and assert the behavior produced by native events.
 
 Use `use gpui_kit::*;` for GPUI types and the `gpui` namespace. Write `#[gpui::test]` for GPUI context tests; ordinary `#[test]` remains Rust’s built-in attribute. Add
@@ -71,7 +80,7 @@ use gpui_kit::component::{
     button::Button,
     input::{Input, InputState},
 };
-use gpui_kit::test::{TestSupportExt, TestWindowExt};
+use gpui_kit::ui_test::{TestSupportExt, TestWindowExt};
 use gpui_kit::*;
 
 struct Profile {
@@ -157,7 +166,7 @@ fn saves_a_profile_through_the_ui(cx: &mut TestAppContext) {
 ## Queries and interactions
 
 Import `TestWindowExt` and, for custom registration, `TestSupportExt` from
-`gpui_kit::test`. Use normal Rust `assert!` and `assert_eq!` with snapshots.
+`gpui_kit::ui_test`. Use normal Rust `assert!` and `assert_eq!` with snapshots.
 
 | API | Behavior |
 | --- | --- |

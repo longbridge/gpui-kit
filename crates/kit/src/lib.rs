@@ -91,9 +91,11 @@ pub use core::prelude::v1::test;
 /// Available through `use gpui_kit::*;` without a separate GPUI dependency.
 pub use ::gpui;
 
-/// Headless UI interaction and observation helpers for application tests.
+/// UI integration testing: render real components in headless windows, dispatch
+/// pointer and keyboard events, and assert state, focus, layout and callbacks.
+/// Run tests with `#[gpui::test]`; use this module to interact with their UI.
 #[cfg(feature = "test-support")]
-pub mod test;
+pub mod ui_test;
 
 pub use ::gpui_base as base;
 pub use ::gpui_platform as platform;
