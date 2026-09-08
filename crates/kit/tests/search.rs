@@ -3,7 +3,6 @@ use gpui_kit::component::{
     Disableable, IndexPath, Root,
     command::{Command, CommandGroup, CommandItem, CommandState},
 };
-use gpui_kit::gpui;
 use gpui_kit::ui_test::{TestSupportExt, TestWindowExt};
 use gpui_kit::{AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size};
 
@@ -87,7 +86,7 @@ fn palette(cx: &mut TestAppContext) -> (gpui_kit::WindowHandle<Root>, Entity<Pal
     (window, view)
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn command_skips_disabled_rows_wraps_and_confirms_original_index(cx: &mut TestAppContext) {
     let (handle, view) = palette(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -120,7 +119,7 @@ fn command_skips_disabled_rows_wraps_and_confirms_original_index(cx: &mut TestAp
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn command_searches_unicode_keywords_and_escape_clears_before_cancel(cx: &mut TestAppContext) {
     let (handle, view) = palette(cx);
     cx.update_window(handle.into(), |_, window, cx| window.input("保存", cx))
@@ -156,7 +155,7 @@ fn command_searches_unicode_keywords_and_escape_clears_before_cancel(cx: &mut Te
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn command_empty_and_disabled_only_results_cannot_confirm(cx: &mut TestAppContext) {
     let (handle, view) = palette(cx);
     for query in ["missing", "Delete"] {
@@ -258,7 +257,7 @@ fn languages(
     (handle, view.unwrap())
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn combobox_filters_and_commits_single_selection(cx: &mut TestAppContext) {
     let (handle, view) = languages(cx, false, false);
     let id = cx.update(|cx| ("multi-combo-box", view.read(cx).state.entity_id()));
@@ -293,7 +292,7 @@ async fn combobox_filters_and_commits_single_selection(cx: &mut TestAppContext) 
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn combobox_multiple_selection_toggles_and_confirms_on_escape(cx: &mut TestAppContext) {
     let (handle, view) = languages(cx, true, false);
     let id = cx.update(|cx| ("multi-combo-box", view.read(cx).state.entity_id()));
@@ -343,7 +342,7 @@ async fn combobox_multiple_selection_toggles_and_confirms_on_escape(cx: &mut Tes
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn disabled_combobox_rejects_opening_and_emits_no_selection(cx: &mut TestAppContext) {
     let (handle, view) = languages(cx, false, true);
     let id = cx.update(|cx| ("multi-combo-box", view.read(cx).state.entity_id()));
@@ -363,7 +362,7 @@ fn disabled_combobox_rejects_opening_and_emits_no_selection(cx: &mut TestAppCont
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn combobox_empty_search_cannot_select_and_can_recover(cx: &mut TestAppContext) {
     let (handle, view) = languages(cx, false, false);
     let id = cx.update(|cx| ("multi-combo-box", view.read(cx).state.entity_id()));
@@ -411,7 +410,7 @@ async fn combobox_empty_search_cannot_select_and_can_recover(cx: &mut TestAppCon
     });
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn combobox_clear_button_updates_selection_without_reopening(cx: &mut TestAppContext) {
     let (handle, view) = languages(cx, false, false);
     let id = cx.update(|cx| ("multi-combo-box", view.read(cx).state.entity_id()));

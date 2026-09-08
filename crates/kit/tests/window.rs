@@ -429,7 +429,7 @@ impl Render for RepeatedObservation {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn repeated_observation_preserves_native_properties_and_identity(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, _| RepeatedObservation);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -469,7 +469,7 @@ impl Render for NativeProperties {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn native_properties_follow_rendered_changes(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, _| NativeProperties { checked: false });
     cx.update_window(handle.into(), |_, window, cx| {
@@ -505,7 +505,7 @@ impl Render for UnknownProperties {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn missing_native_properties_stay_unknown(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, _| UnknownProperties);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -545,7 +545,7 @@ impl Render for LateObservation {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 #[should_panic(expected = "focus binding was not observed")]
 fn focus_query_diagnoses_observation_after_track_focus(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, cx| LateObservation {
@@ -590,7 +590,7 @@ impl Render for FocusParts {
             )
     }
 }
-#[gpui::test]
+#[gpui_kit::test]
 fn native_parts_forward_their_public_focus_binding(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, cx| FocusParts {
         handles: (0..4).map(|_| cx.focus_handle()).collect(),
@@ -627,7 +627,7 @@ impl Render for RenamedFocus {
             .size(px(100.))
     }
 }
-#[gpui::test]
+#[gpui_kit::test]
 fn renaming_observed_elements_preserves_focus_binding(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, cx| RenamedFocus {
         focus: cx.focus_handle(),

@@ -63,7 +63,7 @@ impl Render for Form {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn checkbox_switch_and_tabs_report_controlled_state(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(640.), px(600.)), |window, cx| Form {
@@ -114,7 +114,7 @@ fn checkbox_switch_and_tabs_report_controlled_state(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn select_reports_value_and_keyboard_open_state(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(640.), px(600.)), |window, cx| Form {
@@ -181,7 +181,7 @@ impl Render for HoverHelp {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn real_hover_card_opens_and_closes_after_pointer_delays(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
@@ -219,7 +219,7 @@ impl Render for DisconnectedCheckbox {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn checkbox_click_cannot_fabricate_a_successful_state_change(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.add_window(|_, _| DisconnectedCheckbox);

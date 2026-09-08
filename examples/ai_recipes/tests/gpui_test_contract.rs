@@ -1,3 +1,4 @@
+// Preserve the published #[gpui_kit::test] API.
 // This package has its own workspace and depends only on gpui-kit. Running the
 // same contract here prevents Kit's direct GPUI dependency from hiding a broken
 // re-export or macro expansion in consumers.

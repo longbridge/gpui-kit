@@ -68,7 +68,7 @@ impl Render for Settings {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn accordion_expands_one_panel_and_stepper_navigates(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     cx.update(|cx| cx.set_reduce_motion(true));
@@ -125,7 +125,7 @@ fn accordion_expands_one_panel_and_stepper_navigates(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn disabled_disclosures_and_steps_do_not_change_content(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(640.), px(600.)), |_, cx| Settings {
@@ -151,7 +151,7 @@ fn disabled_disclosures_and_steps_do_not_change_content(cx: &mut TestAppContext)
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn slider_click_and_drag_move_the_actual_thumb(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(640.), px(600.)), |_, cx| Settings {
@@ -181,7 +181,7 @@ fn slider_click_and_drag_move_the_actual_thumb(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn disabled_slider_ignores_pointer_changes(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(640.), px(600.)), |_, cx| Settings {

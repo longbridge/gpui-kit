@@ -57,7 +57,7 @@ section for the change (`grep -n '^## ' references/coding-guides.md`).
 | Public API design                    | Anything `pub`: builders, private fields, setter and reader naming     |
 | Platform and capability boundaries   | macOS/Windows/Linux/wasm differences, feature gates                    |
 | File and naming conventions          | New files, modules, type and method names, `Kind` suffix, `Context`    |
-| Testing strategy                     | What to test, `#[gpui::test]`, `TestAppContext`                    |
+| Testing strategy                     | What to test, `#[gpui_kit::test]`, `TestAppContext`                    |
 | Performance rules                    | Render cost, allocation, re-render triggers                            |
 | Common failure modes                 | Before finishing; invented APIs, state in render, index ids            |
 | Rules for coding agents              | Always when an agent writes code                                       |
@@ -230,7 +230,7 @@ fetch the component's `.md` doc.
 
 **UI integration testing** means rendering real components in headless windows,
 simulating input, and checking state, focus, layout and owner callbacks. Use
-`#[gpui::test]` to run tests and `gpui_kit::ui_test` to operate and inspect the UI.
+`#[gpui_kit::test]` to run tests and `gpui_kit::ui_test` to operate and inspect the UI.
 When asked to add component interaction coverage, describe it as UI integration testing.
 
 For unit tests, GPUI context tests or UI integration tests, read
@@ -256,7 +256,7 @@ contents line.
 | Global state                | [global.md](references/gpui/global.md)                 | `Global` trait, `cx.set_global`, app-wide config                |
 | Layout & styling            | [layout-style.md](references/gpui/layout-style.md)     | `div()`, `h_flex()`, `v_flex()`, flexbox, overflow, positioning |
 | ElementId                   | [element-id.md](references/gpui/element-id.md)         | `ElementId`, `.id()`, uniqueness rules, stateful elements       |
-| Testing                     | [test.md](references/gpui/test.md)                     | `#[gpui::test]`, `TestAppContext`, `VisualTestContext`      |
+| Testing                     | [test.md](references/gpui/test.md)                     | `#[gpui_kit::test]`, `TestAppContext`, `VisualTestContext`      |
 
 Deep dives, for when the topic file is not enough:
 

@@ -1646,7 +1646,7 @@ mod tests {
     /// `validate` is part of the assertion: it is what checks `MARKET_TYPES`
     /// against the functions actually registered, so a rename on either side
     /// fails here rather than in an editor.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn story_host_registry_only_grants_market(cx: &mut TestAppContext) {
         let market = cx.new(|_| Market::open());
         let module = market_module(&market);
@@ -1677,7 +1677,7 @@ mod tests {
     /// It is worth an end-to-end test rather than a unit one because it spans
     /// every part that has to agree: the entity, the host module, the script's
     /// `ticks()` call, and the difference between `refresh` and `notify`.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_quote_tick_re_runs_the_script_and_a_repaint_does_not(cx: &mut TestAppContext) {
         // The story reads shell theme tokens through `cx.theme()`, so
         // the theme has to exist before the script's first render.
@@ -1745,7 +1745,7 @@ mod tests {
     /// pinning it would turn an unrelated change to the script into a failure.
     /// What the test defends is the claim: a moving price is a value, not a
     /// structure.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_quote_feed_mostly_repeats_the_panel_s_shape(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         let window = cx.add_window(|window, cx| ShellStory::new(window, cx));
@@ -1786,7 +1786,7 @@ mod tests {
     /// Pausing one half must not pause the other, and the two mechanisms are
     /// genuinely different: the script half stops because nothing invalidates
     /// it, the Rust half because the story keeps a copy.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn each_half_pauses_on_its_own(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         let window = cx.add_window(|window, cx| ShellStory::new(window, cx));
@@ -1852,7 +1852,7 @@ mod tests {
 
     /// The board moves the same way twice, so the panel a reader sees on one run
     /// is the panel they saw on the last one.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn the_feed_is_deterministic(_: &mut TestAppContext) {
         let mut first = Market::open();
         let mut second = Market::open();
@@ -1981,7 +1981,7 @@ mod tests {
     /// The motion lab has its own loaded object, rather than being extra work
     /// inside the quote board. A pointer event retargets it, then GPUI samples
     /// native animation frames without returning to QuickJS.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn standalone_motion_view_retargets_native_frames(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         let window = cx.add_window(|window, cx| ShellStory::new(window, cx));
@@ -2040,7 +2040,7 @@ mod tests {
     /// Choosing the interpolation policy is not itself an animation command.
     /// The selected segment remains an ordinary interactive control, while the
     /// independent Run action is the only thing that changes the card target.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn selecting_a_motion_policy_does_not_run_the_motion(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         let window = cx.add_window(|window, cx| ShellStory::new(window, cx));

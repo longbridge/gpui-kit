@@ -485,7 +485,7 @@ mod tests {
     use super::*;
     use gpui_kit::TestAppContext;
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn test_entity_update(cx: &mut TestAppContext) {
         let entity = cx.new(|_| MyState { count: 0 });
 
@@ -503,7 +503,7 @@ mod tests {
 ### Test Entity Observation
 
 ```rust
-#[gpui::test]
+#[gpui_kit::test]
 fn test_entity_observation(cx: &mut TestAppContext) {
     let observed = cx.new(|_| MyState { value: 0 });
     let observer = cx.new(|cx| Observer::new(observed.clone(), cx));

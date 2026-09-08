@@ -5,7 +5,7 @@
 //! For example, test that clicking a Checkbox changes the owner's value while
 //! a disabled Checkbox rejects the same interaction.
 //!
-//! `#[gpui::test]` runs the test and provides its GPUI context. This module
+//! `#[gpui_kit::test]` runs the test and provides its GPUI context. This module
 //! supplies UI interactions and snapshots; it does not inspect rendered pixels.
 //!
 //! [`ElementSnapshot`] is immutable. Call [`TestWindowExt::render_frame`] after

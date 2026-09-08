@@ -1,10 +1,15 @@
-use gpui_kit::component::{
-    Root,
-    button::Button,
-    input::{Input, InputState},
-};
 use gpui_kit::ui_test::{TestSupportExt, TestWindowExt};
-use gpui_kit::*;
+use gpui_kit::{
+    AppContext, Context, Entity, SharedString, TestAppContext, Window,
+    component::{
+        Root,
+        button::Button,
+        input::{Input, InputState},
+    },
+    div,
+    prelude::*,
+    px, size,
+};
 
 struct Profile {
     name: Entity<InputState>,
@@ -43,7 +48,7 @@ impl Render for Profile {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn saves_a_profile_through_the_ui(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let mut profile = None;

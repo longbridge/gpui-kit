@@ -2,7 +2,7 @@
 
 A UI integration test renders real components in a headless window, simulates
 clicks, keyboard input and scrolling, then checks state, focus, layout and owner
-callbacks. `#[gpui::test]` runs the test; `gpui_kit::ui_test` supplies the tools
+callbacks. `#[gpui_kit::test]` runs the test; `gpui_kit::ui_test` supplies the tools
 to operate and inspect its UI.
 
 Enable `gpui-kit/test-support` under development dependencies and import

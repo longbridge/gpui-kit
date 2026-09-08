@@ -9,7 +9,7 @@
 Test entity creation, updates, and reads:
 
 ```rust
-#[gpui::test]
+#[gpui_kit::test]
 fn test_counter_entity(cx: &mut TestAppContext) {
     let counter = cx.new(|cx| Counter::new(cx));
 
@@ -40,7 +40,7 @@ struct ValueChanged {
 
 impl EventEmitter<ValueChanged> for MyComponent {}
 
-#[gpui::test]
+#[gpui_kit::test]
 fn test_event_emission(cx: &mut TestAppContext) {
     let component = cx.new(|cx| {
         let mut comp = MyComponent::default();
@@ -72,7 +72,7 @@ Test action dispatching and handling:
 ```rust
 actions!(my_app, [Increment, Decrement]);
 
-#[gpui::test]
+#[gpui_kit::test]
 fn test_action_dispatch(cx: &mut TestAppContext) {
     let window = cx.update(|cx| {
         cx.open_window(Default::default(), |_, cx| {
@@ -119,7 +119,7 @@ impl MyComponent {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn test_async_operations(cx: &mut TestAppContext) {
     let component = cx.new(|cx| MyComponent::new(cx));
 
@@ -162,7 +162,7 @@ impl MyComponent {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn test_timers(cx: &mut TestAppContext) {
     let component = cx.new(|cx| MyComponent::new(cx));
 
@@ -185,7 +185,7 @@ async fn test_timers(cx: &mut TestAppContext) {
 For tests involving external systems, use `allow_parking()`:
 
 ```rust
-#[gpui::test]
+#[gpui_kit::test]
 async fn test_external_io(cx: &mut TestAppContext) {
     // Allow parking for external I/O
     cx.executor().allow_parking();
@@ -214,7 +214,7 @@ The most dangerous class of GPUI bugs is **entity re-entrancy**: code that tries
 ### Pattern: Drive `confirm` / `cancel` through the real delegate
 
 ```rust
-#[gpui::test]
+#[gpui_kit::test]
 fn test_confirm_does_not_panic(cx: &mut TestAppContext) {
     // Build the component state the same way the real app does.
     let state = cx.new(|cx| {
@@ -271,7 +271,7 @@ impl SearchableListDelegate for RecordingDelegate {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn test_hooks_fire_in_correct_order(cx: &mut TestAppContext) {
     let state = cx.new(|cx| SelectState::new(RecordingDelegate::with_items(3), None, window, cx));
 
@@ -293,7 +293,7 @@ fn test_hooks_fire_in_correct_order(cx: &mut TestAppContext) {
 ### Pattern: Rapid multiple confirms (snapshot consistency)
 
 ```rust
-#[gpui::test]
+#[gpui_kit::test]
 fn test_rapid_confirms_keep_consistent_snapshot(cx: &mut TestAppContext) {
     let state = cx.new(|cx| SelectState::new(MyDelegate::with_items(5), None, window, cx));
 
@@ -326,7 +326,7 @@ fn test_rapid_confirms_keep_consistent_snapshot(cx: &mut TestAppContext) {
 Use random data to test edge cases:
 
 ```rust
-#[gpui::test(iterations = 10)]
+#[gpui_kit::test(iterations = 10)]
 fn test_counter_random_operations(cx: &mut TestAppContext, mut rng: StdRng) {
     let counter = cx.new(|cx| Counter::new(cx));
 
@@ -358,7 +358,7 @@ struct NetworkMessage {
     data: i32,
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn test_distributed_apps(cx_a: &mut TestAppContext, cx_b: &mut TestAppContext) {
     // Create components in different app contexts
     let comp_a = cx_a.new(|_| MyComponent::new("A".to_string()));
@@ -388,7 +388,7 @@ fn test_distributed_apps(cx_a: &mut TestAppContext, cx_b: &mut TestAppContext) {
 Test concurrent operations with random execution order:
 
 ```rust
-#[gpui::test(iterations = 10)]
+#[gpui_kit::test(iterations = 10)]
 fn test_concurrent_operations(
     cx_a: &mut TestAppContext,
     cx_b: &mut TestAppContext,
@@ -450,7 +450,7 @@ impl MockNetwork {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn test_networked_components(cx: &mut TestAppContext) {
     let network = Arc::new(MockNetwork::new());
 

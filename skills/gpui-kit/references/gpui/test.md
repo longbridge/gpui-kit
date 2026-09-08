@@ -9,17 +9,17 @@ clicks, keyboard input and scrolling, then checks state, focus, layout and owner
 callbacks. For example: add a Checkbox UI integration test that proves clicking
 toggles the owner's value and disabled controls reject the interaction.
 Use this term when describing component interaction coverage.
-`#[gpui::test]` runs the test; `gpui_kit::ui_test` operates and inspects its UI.
+`#[gpui_kit::test]` runs the test; `gpui_kit::ui_test` operates and inspects its UI.
 
 ## Choose the test level
 
-Use ordinary Rust `#[test]` for pure logic. Use `#[gpui::test]` and
+Use ordinary Rust `#[test]` for pure logic. Use `#[gpui_kit::test]` and
 `TestAppContext` for entities, subscriptions, actions and async tasks; it can
 create headless windows too. `VisualTestContext` is available for existing GPUI
 window helpers. For an application UI flow, use `gpui_kit::ui_test::TestWindowExt`
 on the real `Window` and assert the behavior produced by native events.
 
-Use `use gpui_kit::*;` for GPUI types and the `gpui` namespace. Write `#[gpui::test]` for GPUI context tests; ordinary `#[test]` remains Rust’s built-in attribute. Add
+Import the Kit types you use explicitly and write `#[gpui_kit::test]`. Avoid `use gpui_kit::*;` in test modules: it imports GPUI’s `test` macro and can shadow Rust’s built-in `#[test]`. Add
 `test-support` to the application's `gpui-kit` development dependency, using
 exactly the same source and version as its normal dependency. The helpers
 require a Kit revision that includes them; check the installed API before
@@ -75,13 +75,18 @@ without a repository checkout. In an application, replace that view definition
 with an import of your production view.
 
 ```rust
-use gpui_kit::component::{
-    Root,
-    button::Button,
-    input::{Input, InputState},
-};
 use gpui_kit::ui_test::{TestSupportExt, TestWindowExt};
-use gpui_kit::*;
+use gpui_kit::{
+    AppContext, Context, Entity, SharedString, TestAppContext, Window,
+    component::{
+        Root,
+        button::Button,
+        input::{Input, InputState},
+    },
+    div,
+    prelude::*,
+    px, size,
+};
 
 struct Profile {
     name: Entity<InputState>,
@@ -120,7 +125,7 @@ impl Render for Profile {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn saves_a_profile_through_the_ui(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let mut profile = None;

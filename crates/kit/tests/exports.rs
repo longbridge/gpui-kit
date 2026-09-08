@@ -55,7 +55,7 @@ mod selective_actions_import {
     }
 }
 
-/// `gpui_kit::gpui` preserves upstream paths, including the test attribute.
+/// `gpui_kit::gpui` is hidden but kept, for code that keeps `gpui::…` paths.
 mod gpui_by_name {
     use gpui_kit::*;
 

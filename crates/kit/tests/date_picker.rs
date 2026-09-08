@@ -24,7 +24,7 @@ impl Render for Schedule {
         )
     }
 }
-#[gpui::test]
+#[gpui_kit::test]
 async fn date_picker_opens_selects_preset_clears_and_cancels(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let mut id: Option<ElementId> = None;
@@ -79,7 +79,7 @@ async fn date_picker_opens_selects_preset_clears_and_cancels(cx: &mut TestAppCon
     })
     .unwrap();
 }
-#[gpui::test]
+#[gpui_kit::test]
 fn disabled_date_picker_does_not_open(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let mut id: Option<ElementId> = None;

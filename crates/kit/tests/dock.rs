@@ -52,7 +52,7 @@ impl Render for Editor {
         div().size_full().child(self.area.clone())
     }
 }
-#[gpui::test]
+#[gpui_kit::test]
 async fn dock_switches_and_reorders_real_tabs(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(900.), px(600.)), |window, cx| {
@@ -98,7 +98,7 @@ async fn dock_switches_and_reorders_real_tabs(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 async fn dock_moves_a_tab_between_groups_and_zooms_the_result(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(900.), px(600.)), |window, cx| {

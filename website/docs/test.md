@@ -10,11 +10,11 @@ example: false
 This guide covers testing GPUI Kit applications and GPUI behavior. Choose the test level from the behavior you need to verify:
 
 - Use ordinary Rust `#[test]` for pure data transformations, validation and state transitions.
-- Use `#[gpui::test]` and `TestAppContext` for entities, actions, subscriptions and async tasks, creating a window when needed.
+- Use `#[gpui_kit::test]` and `TestAppContext` for entities, actions, subscriptions and async tasks, creating a window when needed.
 - For UI integration tests, render the production application view, dispatch events through `gpui_kit::ui_test`, and check control state, layout and the application result.
 - Use the separate offscreen renderer for pixel checks, and retain native-window and platform integration tests for those behaviors.
 
-GPUI types and its test attribute are exported at the `gpui-kit` root; `use gpui_kit::*;` makes `#[gpui::test]` available alongside ordinary Rust `#[test]`. Applications do not need an additional GPUI dependency. The following sections walk through a complete UI integration test.
+GPUI Kit exposes its types and `#[gpui_kit::test]` through the Kit root; applications do not need an additional GPUI dependency. In test modules, import the types you use explicitly: `use gpui_kit::*;` also imports the GPUI `test` macro and can shadow Rust’s ordinary `#[test]`. The complete example below uses explicit imports.
 
 ## What is a UI integration test?
 
@@ -24,11 +24,11 @@ state, focus, layout and application callbacks. For example, a Checkbox test can
 verify that clicking changes the owner's value and that a disabled Checkbox
 rejects the same interaction.
 
-`#[gpui::test]` runs the test and provides its GPUI context.
+`#[gpui_kit::test]` runs the test and provides its GPUI context.
 `gpui_kit::ui_test` supplies the tools to operate and inspect the UI:
 
 ```rust
-use gpui_kit::*;
+use gpui_kit::{TestAppContext, Window};
 use gpui_kit::ui_test::TestWindowExt;
 ```
 
@@ -294,7 +294,7 @@ Use `TestAppContext::update_window`; typed `WindowHandle::update` already borrow
 the root entity and cannot safely redraw it in the same callback.
 
 For asynchronous work or deferred selection commits, use an async
-`#[gpui::test]` and wait **outside** the window update:
+`#[gpui_kit::test]` and wait **outside** the window update:
 
 ```rust
 use gpui_kit::ui_test::TestAppContextExt;
@@ -331,7 +331,7 @@ that every option or combination of every component has been exhaustively tested
 
 | Suite | Behavior exercised |
 | --- | --- |
-| `test_macro.rs` | Ordinary `#[test]` alongside sync/async `#[gpui::test]`; the independent Kit-only recipes package runs the same contract |
+| `test_macro.rs` | Published `#[gpui_kit::test]` sync/async compatibility alongside ordinary Rust tests; the independent Kit-only recipes package runs the same contract |
 | `search.rs` | Command disabled-item skipping, wraparound, Unicode keywords, empty results, Action dispatch and original-index callbacks, two-stage Escape; Combobox search, single/multi selection, clearing, empty-result recovery, disabled behavior and exactly one Confirm on close |
 | `disclosure.rs` | Accordion exclusive expansion/collapse and actual panel geometry; Stepper content navigation; disabled disclosure/steps; Slider track click, thumb drag and disabled behavior |
 | `collections.rs` | Tree pointer expansion, keyboard collapse/expansion and selection; DataTable row selection, keyboard virtualization and wheel scrolling |

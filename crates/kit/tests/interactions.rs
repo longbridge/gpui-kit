@@ -25,7 +25,7 @@ impl Render for Scopes {
         }))
     }
 }
-#[gpui::test]
+#[gpui_kit::test]
 fn scoped_queries_follow_existing_gpui_paths_without_observed_containers(cx: &mut TestAppContext) {
     let clicks = Rc::new(RefCell::new(vec![]));
     let handle = cx.add_window(|_, _| Scopes {
@@ -44,7 +44,7 @@ fn scoped_queries_follow_existing_gpui_paths_without_observed_containers(cx: &mu
     assert_eq!(&*clicks.borrow(), &["dialog"]);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 #[should_panic(expected = "Registered paths:")]
 fn missing_targets_explain_the_registered_frame(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, _| Scopes {
@@ -83,7 +83,7 @@ impl Render for Pointer {
             })
     }
 }
-#[gpui::test]
+#[gpui_kit::test]
 fn hover_right_click_and_double_click_dispatch_native_pointer_events(cx: &mut TestAppContext) {
     let events = Rc::new(RefCell::new(vec![]));
     let handle = cx.add_window(|_, _| Pointer {
@@ -125,7 +125,7 @@ impl Render for Scrolling {
             }))
     }
 }
-#[gpui::test]
+#[gpui_kit::test]
 fn scrolling_changes_clipping_and_resolved_row_positions(cx: &mut TestAppContext) {
     let scroll = ScrollHandle::new();
     let handle = cx.open_window(size(px(200.), px(200.)), |_, _| Scrolling {
@@ -174,7 +174,7 @@ impl Render for Dropping {
             )
     }
 }
-#[gpui::test]
+#[gpui_kit::test]
 fn dragging_runs_gpui_drag_creation_and_drop_hit_testing(cx: &mut TestAppContext) {
     let drops = Rc::new(RefCell::new(0));
     let handle = cx.add_window(|_, _| Dropping {
@@ -200,7 +200,7 @@ impl Render for Loading {
         })
     }
 }
-#[gpui::test]
+#[gpui_kit::test]
 async fn wait_for_drives_test_time_and_refreshes_async_changes(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, _| Loading { ready: false });
     let executor = cx.executor();
@@ -219,7 +219,7 @@ async fn wait_for_drives_test_time_and_refreshes_async_changes(cx: &mut TestAppC
     })
     .await;
 }
-#[gpui::test]
+#[gpui_kit::test]
 #[should_panic(expected = "UI condition timed out")]
 async fn wait_for_has_a_bounded_failure(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, _| Loading { ready: false });
@@ -277,7 +277,7 @@ impl Render for ChoiceStates {
             )
     }
 }
-#[gpui::test]
+#[gpui_kit::test]
 fn mixed_checkbox_radio_and_toggle_report_distinct_states(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.add_window(|_, _| ChoiceStates {
@@ -337,7 +337,7 @@ impl Render for VirtualRows {
             )
     }
 }
-#[gpui::test]
+#[gpui_kit::test]
 fn scrolling_a_real_virtual_list_registers_new_rows_and_releases_old_ones(cx: &mut TestAppContext) {
     let handle = cx.open_window(size(px(200.), px(200.)), |_, _| VirtualRows {
         scroll: gpui_kit::base::VirtualListScrollHandle::new(),
@@ -373,7 +373,7 @@ impl<T: Render> Render for Pair<T> {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn scoped_pointer_events_do_not_reach_duplicate_ids_in_another_scope(cx: &mut TestAppContext) {
     let left = Rc::new(RefCell::new(vec![]));
     let right = Rc::new(RefCell::new(vec![]));
@@ -400,7 +400,7 @@ fn scoped_pointer_events_do_not_reach_duplicate_ids_in_another_scope(cx: &mut Te
     assert!(events.windows(2).any(|pair| pair == ["left:1", "left:2"]));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn scoped_scroll_moves_only_the_selected_list(cx: &mut TestAppContext) {
     let left = ScrollHandle::new();
     let right = ScrollHandle::new();
@@ -425,7 +425,7 @@ fn scoped_scroll_moves_only_the_selected_list(cx: &mut TestAppContext) {
     assert!(right.offset().y < px(0.));
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn scoped_drag_to_resolves_both_ids_inside_the_scope(cx: &mut TestAppContext) {
     let left = Rc::new(RefCell::new(0));
     let right = Rc::new(RefCell::new(0));
@@ -446,7 +446,7 @@ fn scoped_drag_to_resolves_both_ids_inside_the_scope(cx: &mut TestAppContext) {
     assert_eq!(*right.borrow(), 1);
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn drag_to_uses_native_drop_dispatch(cx: &mut TestAppContext) {
     let drops = Rc::new(RefCell::new(0));
     let handle = cx.add_window(|_, _| Dropping {
@@ -499,7 +499,7 @@ impl Render for KeyboardJump {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn scoped_input_stops_when_a_handler_moves_focus_to_another_scope(cx: &mut TestAppContext) {
     let keys = Rc::new(RefCell::new(vec![]));
     let handle = cx.add_window(|_, cx| KeyboardJump {
@@ -550,7 +550,7 @@ impl Render for KeyboardFrames {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn scoped_keyboard_refreshes_without_extra_renders(cx: &mut TestAppContext) {
     let renders = Rc::new(std::cell::Cell::new(0));
     let keys = Rc::new(RefCell::new(vec![]));

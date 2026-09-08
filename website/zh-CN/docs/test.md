@@ -10,11 +10,11 @@ example: false
 本指南统一介绍 GPUI Kit 应用和 GPUI 的测试方式。根据要验证的行为选择测试层级：
 
 - 纯数据转换、校验和状态转换使用普通 Rust `#[test]`。
-- Entity、action、订阅和异步任务使用 `#[gpui::test]` 与 `TestAppContext`，按需创建窗口。
+- Entity、action、订阅和异步任务使用 `#[gpui_kit::test]` 与 `TestAppContext`，按需创建窗口。
 - UI 集成测试渲染真实应用视图，通过 `gpui_kit::ui_test` 派发事件，再检查控件状态、布局和业务结果。
 - 像素检查使用独立的离屏渲染器；原生窗口和平台集成保留相应测试。
 
-GPUI 类型和测试属性宏都由 `gpui-kit` 根模块导出，通过 `use gpui_kit::*;` 即可使用 `#[gpui::test]`，应用无需再添加 GPUI 依赖。下面以完整的 UI 集成测试为例。
+类型和 `#[gpui_kit::test]` 均由 Kit 根模块提供，应用无需再添加 GPUI 依赖。测试模块应显式导入用到的类型：`use gpui_kit::*;` 也会引入 GPUI 的 `test` 宏，可能遮蔽 Rust 原生的 `#[test]`。下方完整示例使用显式导入。
 
 ## 什么是 UI 集成测试？
 
@@ -22,11 +22,11 @@ GPUI 类型和测试属性宏都由 `gpui-kit` 根模块导出，通过 `use gpu
 验证组件状态、焦点、布局及业务回调。例如，给 Checkbox 增加 UI 集成测试，
 可以验证点击是否修改了宿主持有的值，以及禁用时是否拒绝同样的交互。
 
-`#[gpui::test]` 负责运行测试并提供 GPUI 上下文；
+`#[gpui_kit::test]` 负责运行测试并提供 GPUI 上下文；
 `gpui_kit::ui_test` 提供操作和检查界面的工具：
 
 ```rust
-use gpui_kit::*;
+use gpui_kit::{TestAppContext, Window};
 use gpui_kit::ui_test::TestWindowExt;
 ```
 
@@ -253,7 +253,7 @@ cx.update_window(handle.into(), |_, window, cx| {
 使用 `TestAppContext::update_window`。带类型的 `WindowHandle::update` 已经借用根 entity，
 不能在同一个回调中安全地重绘它。
 
-异步工作或 Select 的延迟提交，应在 async `#[gpui::test]` 中、window update **外部**等待：
+异步工作或 Select 的延迟提交，应在 async `#[gpui_kit::test]` 中、window update **外部**等待：
 
 ```rust
 use gpui_kit::ui_test::TestAppContextExt;
@@ -284,7 +284,7 @@ Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用�
 
 | 测试文件 | 验证行为 |
 | --- | --- |
-| `test_macro.rs` | 普通 `#[test]` 与同步/异步 `#[gpui::test]` 共存；独立、仅依赖 Kit 的 recipes 包复用相同契约 |
+| `test_macro.rs` | 普通 `#[test]` 与同步/异步 `#[gpui_kit::test]` 共存；独立、仅依赖 Kit 的 recipes 包复用相同契约 |
 | `search.rs` | Command 禁用项跳过、循环导航、中文关键词、空结果、Action 与原始索引回调、两阶段 Escape；Combobox 搜索、单选/多选、清除、空结果恢复、禁用行为及关闭时仅一次 Confirm |
 | `disclosure.rs` | Accordion 互斥展开、折叠与实际面板几何；Stepper 内容导航；禁用展开与步骤操作；Slider 轨道点击、滑块拖动与禁用行为 |
 | `collections.rs` | Tree 点击展开、键盘展开/折叠与选择；DataTable 行选择、键盘虚拟滚动与滚轮滚动 |
