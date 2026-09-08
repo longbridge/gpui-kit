@@ -1535,9 +1535,28 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         if next_indent.len() > current_indent.len() {
             return next_indent;
-        } else {
-            return current_indent;
         }
+
+        // Smart indent: one extra level after lines ending with an opener.
+        if self.mode.is_smart_indent() {
+            let line_before: String = self
+                .text
+                .slice(current_line_start_pos..offset)
+                .chars()
+                .collect();
+            if line_before.trim_end().ends_with(['{', '(', '[', ':']) {
+                let tab = self.mode.tab_size();
+                if tab.hard_tabs {
+                    current_indent.push('\t');
+                } else {
+                    for _ in 0..tab.tab_size {
+                        current_indent.push(' ');
+                    }
+                }
+            }
+        }
+
+        current_indent
     }
 
     /// Delete every selection as one batch. Collapsed cursors are first
@@ -1604,6 +1623,29 @@ impl<M: InputModeKind> InputBaseState<M> {
         if self.selections.is_single() && self.active_selection().is_empty() && self.cursor() == 0 {
             cx.propagate();
             return;
+        }
+
+        // Paired bracket deletion: Backspace between `()` deletes both.
+        if self.is_code_editor()
+            && self.mode.is_auto_close()
+            && self.selections.is_single()
+            && self.active_selection().is_empty()
+        {
+            let off = self.cursor();
+            let before: Option<char> = self.text.slice(..off.saturating_sub(1)).chars().last();
+            let after: Option<char> = self.text.slice(off..).chars().next();
+            let paired = matches!(
+                (before, after),
+                (Some('('), Some(')'))
+                    | (Some('['), Some(']'))
+                    | (Some('{'), Some('}'))
+                    | (Some('"'), Some('"'))
+                    | (Some('\''), Some('\''))
+            );
+            if paired && off >= 1 {
+                self.replace_text_in_range_silent(Some(off - 1..off + 1), "", window, cx);
+                return;
+            }
         }
 
         self.delete_selections(
@@ -7831,6 +7873,66 @@ impl InputBaseState<crate::input::EditorMode> {
     pub fn set_line_number(&mut self, line_number: bool, _: &mut Window, cx: &mut Context<Self>) {
         if let LayoutMode::CodeEditor { line_number: l, .. } = &mut self.mode {
             *l = line_number;
+        }
+        cx.notify();
+    }
+
+    /// Set enable/disable automatic closing brackets and quotes.
+    ///
+    /// When enabled, typing `(`, `[`, `{`, `"` or `'` inserts the matching
+    /// closer and places the cursor inside. Typing a closer that is already
+    /// present just moves past it. Default: true
+    #[doc(hidden)]
+    pub fn auto_close(mut self, auto_close: bool) -> Self {
+        if let LayoutMode::CodeEditor {
+            auto_close: flag, ..
+        } = &mut self.mode
+        {
+            *flag = auto_close;
+        }
+        self
+    }
+
+    /// Set automatic closing brackets and quotes at runtime.
+    pub fn set_auto_close(&mut self, auto_close: bool, _: &mut Window, cx: &mut Context<Self>) {
+        if let LayoutMode::CodeEditor {
+            auto_close: flag, ..
+        } = &mut self.mode
+        {
+            *flag = auto_close;
+        }
+        cx.notify();
+    }
+
+    /// Set enable/disable smart indent on Enter.
+    ///
+    /// When enabled, pressing Enter after a line ending with `{`, `(`, `[`
+    /// or `:` adds one extra indent level. Default: true
+    #[doc(hidden)]
+    pub fn smart_indent(mut self, smart_indent: bool) -> Self {
+        if let LayoutMode::CodeEditor {
+            smart_indent: flag,
+            ..
+        } = &mut self.mode
+        {
+            *flag = smart_indent;
+        }
+        self
+    }
+
+    /// Set smart indent on Enter at runtime.
+    pub fn set_smart_indent(
+        &mut self,
+        smart_indent: bool,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let LayoutMode::CodeEditor {
+            smart_indent: flag,
+            ..
+        } = &mut self.mode
+        {
+            *flag = smart_indent;
         }
         cx.notify();
     }

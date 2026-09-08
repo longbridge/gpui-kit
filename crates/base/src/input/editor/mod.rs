@@ -94,6 +94,7 @@ impl InputModeKind for EditorMode {
         cx: &mut gpui::Context<InputBaseState<Self>>,
     ) {
         state.handle_completion_trigger(range, text, window, cx);
+        state.handle_auto_close(range, text, window, cx);
     }
 
     fn clear_inline_completion(
@@ -180,6 +181,84 @@ impl EditorState {
     /// The LSP providers, mutably. Configure the providers through this.
     pub fn lsp_mut(&mut self) -> &mut super::Lsp {
         &mut self.extras.lsp
+    }
+
+    /// Automatically insert or skip over a closing bracket or quote.
+    ///
+    /// Called from `on_text_typed` after every edit. Only acts on a single
+    /// freshly typed opener or closer with a collapsed cursor.
+    pub(crate) fn handle_auto_close(
+        &mut self,
+        range: &std::ops::Range<usize>,
+        text: &str,
+        window: &mut Window,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.mode.is_auto_close() || !self.is_editable() {
+            return;
+        }
+        if !self.selections.is_single() || !self.active_selection().is_empty() {
+            return;
+        }
+        // Only single characters typed over a collapsed cursor.
+        if text.chars().count() != 1 || range.start != range.end {
+            return;
+        }
+        let typed: char = text.chars().next().unwrap_or_default();
+        let cursor = self.cursor();
+
+        // Skip-over: typed a closer that already follows the cursor.
+        // Remove the just-typed char and move past the existing one.
+        if matches!(typed, ')' | ']' | '}' | '"' | '\'') {
+            let after: Option<char> = self.text.slice(cursor..).chars().next();
+            if after == Some(typed) {
+                // Guard quotes: only skip when not inside a word (e.g. don't).
+                if matches!(typed, '"' | '\'') {
+                    let before: Option<char> = self
+                        .text
+                        .slice(..cursor.saturating_sub(1))
+                        .chars()
+                        .last();
+                    if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+                        return;
+                    }
+                }
+                self.replace_text_in_range_silent(
+                    Some(range.start..range.start + 1),
+                    "",
+                    window,
+                    cx,
+                );
+                self.select_to(range.start + 1, cx);
+                return;
+            }
+        }
+
+        // Auto-close: typed an opener, insert the matching closer.
+        let Some(closer) = matching_close(typed) else {
+            return;
+        };
+        if matches!(typed, '"' | '\'') {
+            // Don't pair quotes inside words (e.g. contractions).
+            let after: Option<char> = self.text.slice(cursor..).chars().next();
+            if after.is_some_and(|c| c.is_alphanumeric() || c == '_') {
+                return;
+            }
+        }
+        self.replace_text_in_range_silent(None, &closer.to_string(), window, cx);
+        self.select_to(cursor, cx);
+    }
+}
+
+/// The closing counterpart for an opening bracket or quote, if any.
+fn matching_close(opener: char) -> Option<char> {
+    match opener {
+        '(' => Some(')'),
+        '[' => Some(']'),
+        '{' => Some('}'),
+        '"' => Some('"'),
+        '\'' => Some('\''),
+        _ => None,
     }
 }
 

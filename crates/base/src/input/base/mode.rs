@@ -46,6 +46,10 @@ pub(crate) enum LayoutMode {
         highlighter: Rc<RefCell<Option<Box<dyn InputHighlighter>>>>,
         highlighter_factory: Option<InputHighlighterFactory>,
         diagnostics: DiagnosticSet,
+        /// Automatically insert closing brackets/quotes when typing openers.
+        auto_close: bool,
+        /// Increase indent after lines ending with `{`, `(`, `[`, `:`.
+        smart_indent: bool,
     },
 }
 
@@ -79,6 +83,8 @@ impl LayoutMode {
             indent_guides: true,
             folding: true,
             diagnostics: DiagnosticSet::new(&Rope::new()),
+            auto_close: true,
+            smart_indent: true,
         }
     }
 
@@ -99,6 +105,21 @@ impl LayoutMode {
         }
 
         matches!(self, LayoutMode::CodeEditor { folding: true, .. })
+    }
+
+    /// Return true if this layout is a code editor with auto-close enabled.
+    #[inline]
+    pub(super) fn is_auto_close(&self) -> bool {
+        matches!(self, LayoutMode::CodeEditor { auto_close: true, .. })
+    }
+
+    /// Return true if this layout is a code editor with smart indent enabled.
+    #[inline]
+    pub(super) fn is_smart_indent(&self) -> bool {
+        matches!(self, LayoutMode::CodeEditor {
+            smart_indent: true,
+            ..
+        })
     }
 
     #[inline]
