@@ -9,14 +9,14 @@ patch, accessibility query, or separate application runner is required.
 gpui-kit = { path = "../gpui-kit/crates/kit", features = ["test-support"] }
 ```
 
-The `gpui-kit/test-support` feature exposes `gpui_kit::test_support` and also
+The `gpui-kit/test-support` feature exposes `gpui_kit::test` and also
 enables instrumentation for the enabled Kit components.
 
 ## Test API
 
 ```rust,ignore
 use gpui_kit::AppContext as _;
-use gpui_kit::test_support::TestWindowExt;
+use gpui_kit::test::TestWindowExt;
 
 // Initialize the component library and create the window with normal GPUI APIs.
 cx.update_window(handle.into(), |_, window, cx| {
@@ -46,7 +46,7 @@ Native elements must opt in using a transparent wrapper:
 
 ```rust,ignore
 use gpui_kit::{div, prelude::*, px};
-use gpui_kit::test_support::ObserveElement;
+use gpui_kit::test::ObserveElement;
 
 let content = div().id("popover").observe().w(px(200.)).h(px(80.));
 ```

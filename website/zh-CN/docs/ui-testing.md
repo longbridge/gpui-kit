@@ -7,7 +7,7 @@ example: false
 
 # UI 自动化测试
 
-使用 `gpui_kit::test_support`，可以通过 GPUI 的真实事件分发操作应用视图，再用普通 Rust 断言验证渲染状态和业务结果。测试会创建无头窗口，通过 `ElementId` 定位控件，点击、输入文本，并检查焦点、值和布局。
+使用 `gpui_kit::test`，可以通过 GPUI 的真实事件分发操作应用视图，再用普通 Rust 断言验证渲染状态和业务结果。测试会创建无头窗口，通过 `ElementId` 定位控件，点击、输入文本，并检查焦点、值和布局。
 
 本指南介绍进程内的行为与布局自动化。测试框架不会启动打包后的应用，也不会检查像素。如果需要验证原生窗口、平台集成或视觉效果，应另外保留相应测试。
 
@@ -75,7 +75,7 @@ let status = div().id("status").child(message.clone());
 let status = status.observe().text(message.clone());
 ```
 
-这里的 `message` 是 `SharedString`，`ObserveElement` 也应在相同条件下导入。采用这种写法时，需要在应用中声明转发到 `gpui-kit/test-support` 的 `test-support` feature，并在视图中导入 `gpui_kit::test_support::ObserveElement`；测试命令增加 `--features test-support`。应用 library 复用普通的 `gpui-kit` 依赖，不需要额外的测试依赖。
+这里的 `message` 是 `SharedString`，`ObserveElement` 也应在相同条件下导入。采用这种写法时，需要在应用中声明转发到 `gpui-kit/test-support` 的 `test-support` feature，并在视图中导入 `gpui_kit::test::ObserveElement`；测试命令增加 `--features test-support`。应用 library 复用普通的 `gpui-kit` 依赖，不需要额外的测试依赖。
 
 为需要查询的目标选择唯一 ID。列表可以使用 `("row", record_id)` 这样的复合 ID，使查询在重排后仍对应同一条记录。不同作用域出现相同 ID 时，窗口级查找存在歧义，会 panic。
 

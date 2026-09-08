@@ -1,4 +1,4 @@
-use gpui_kit::test_support::{ObserveElement, TestWindowExt};
+use gpui_kit::test::{ObserveElement, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window,
     component::{
@@ -6,7 +6,7 @@ use gpui_kit::{
         button::Button,
         input::{Input, InputState},
     },
-    div, gpui,
+    div,
     prelude::*,
     px, size,
 };
@@ -47,7 +47,7 @@ impl Render for Profile {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn saves_a_profile_through_the_ui(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let mut profile = None;

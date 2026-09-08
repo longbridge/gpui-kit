@@ -2,7 +2,7 @@ use gpui::{
     AppContext, Context, Entity, TestAppContext, Window, WindowHandle, div, prelude::*, px,
 };
 use gpui_component::input::{Input, InputState};
-use gpui_kit::test_support::TestWindowExt;
+use gpui_kit::test::TestWindowExt;
 
 struct Inputs {
     first: Entity<InputState>,

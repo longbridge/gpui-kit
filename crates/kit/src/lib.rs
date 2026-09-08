@@ -92,7 +92,7 @@ pub use ::gpui;
 
 /// Headless UI interaction and observation helpers for application tests.
 #[cfg(feature = "test-support")]
-pub mod test_support;
+pub mod test;
 
 pub use ::gpui_base as base;
 pub use ::gpui_platform as platform;

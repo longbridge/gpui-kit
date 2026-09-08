@@ -7,7 +7,7 @@ example: false
 
 # UI Automation Testing
 
-Use `gpui_kit::test_support` to exercise a GPUI Kit view through real GPUI event dispatch,
+Use `gpui_kit::test` to exercise a GPUI Kit view through real GPUI event dispatch,
 then assert its rendered state and application result with ordinary Rust
 assertions. A test creates a headless window, finds controls by `ElementId`,
 clicks and enters text, and checks focus, values and layout.
@@ -104,7 +104,7 @@ let status = status.observe().text(message.clone());
 Here `message` is a `SharedString` and `ObserveElement` must be imported under
 the same configuration. If your application uses this pattern, declare an
 application `test-support` feature that forwards to `gpui-kit/test-support`
-and import `gpui_kit::test_support::ObserveElement` in the instrumented view.
+and import `gpui_kit::test::ObserveElement` in the instrumented view.
 Run its tests with `--features test-support`. The application library uses its
 normal `gpui-kit` dependency; it needs no separate testing dependency.
 

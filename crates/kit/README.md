@@ -55,7 +55,7 @@ The `gpui-component` features (`inspector`, `decimal`, `tree-sitter`,
 `gpui-kit` under the same names. `test-support` turns on GPUI's test harness
 for `#[gpui_kit::test]`, `TestAppContext`, `VisualTestContext`, and native-platform
 rendering support; enable it under `[dev-dependencies]`. It also exposes
-`gpui_kit::test_support::{TestWindowExt, ObserveElement, TestElement}` for
+`gpui_kit::test::{TestWindowExt, ObserveElement, TestElement}` for
 headless UI interactions and assertions. See [UI testing](TESTING.md) for usage.
 The independent `profiler` feature enables GPUI frame-event instrumentation and is off by default.
 See <https://gpui-kit.com> for the guides.

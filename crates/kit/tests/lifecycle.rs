@@ -1,7 +1,7 @@
 use gpui::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window, div, prelude::*, px,
 };
-use gpui_kit::test_support::{ObserveElement, TestWindowExt};
+use gpui_kit::test::{ObserveElement, TestWindowExt};
 
 struct Child {
     label: SharedString,
