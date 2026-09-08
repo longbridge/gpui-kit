@@ -31,12 +31,24 @@ const componentRedirects = Object.fromEntries(
   }),
 );
 
+// PR #3010 (root/theme/dock migration): these three guides lived directly
+// under /docs before this move, so they need a literal old->new mapping —
+// componentRedirects only recognizes the /docs/components/<slug> prefix.
+const legacyDocRedirects = Object.fromEntries(
+  ['', 'zh-CN/'].flatMap((locale) =>
+    ['root', 'theme', 'dock'].map((slug) => [
+      `/${locale}docs/${slug}`,
+      `/${locale}component/${slug}`,
+    ]),
+  ),
+);
+
 export default defineConfig({
   site: 'https://gpui-kit.com',
   base: BASE,
   output: 'static',
   trailingSlash: 'never',
-  redirects: componentRedirects,
+  redirects: { ...componentRedirects, ...legacyDocRedirects },
 
   integrations: [
     vue({ devtools: false }),

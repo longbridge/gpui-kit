@@ -234,7 +234,7 @@ impl Render for ModalView {
 
 ## 另请参阅
 
-- [Root View System](/docs/root)
+- [Root View System](/zh-CN/component/root)
 - [Dialog](/zh-CN/component/dialog)
 - [Sheet](/zh-CN/component/sheet)
 - [focus-trap-react](https://github.com/focus-trap/focus-trap-react)

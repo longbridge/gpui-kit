@@ -109,7 +109,7 @@ ThemeRegistry::watch_dir(PathBuf::from("./themes"), cx, move |cx| {
 });
 ```
 
-完整配置说明参见 [Theme](./theme.md)。
+完整配置说明参见 [Theme](../component/theme.md)。
 
 ## WebAssembly 说明
 

@@ -114,7 +114,7 @@ ThemeRegistry::watch_dir(PathBuf::from("./themes"), cx, move |cx| {
 });
 ```
 
-See [Theme](./theme.md) for the full config reference.
+See [Theme](../component/theme.md) for the full config reference.
 
 ## WebAssembly note
 

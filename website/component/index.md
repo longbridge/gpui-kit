@@ -57,6 +57,8 @@ collapsed: false
 
 - [DescriptionList](description-list) - Key-value pair display
 - [GroupBox](group-box) - Grouped content with borders
+- [Root](root) - Window-level provider for themes, dialogs, and notifications
+- [Theme](theme) - Customize colors, typography, and light/dark appearance
 - [Dialog](dialog) - Dialog and modal windows
 - [Notification](notification) - Toast notifications
 - [Popover](popover) - Floating content display
@@ -75,7 +77,7 @@ collapsed: false
 - [Menu](menu) - Menu and context menu and dropdown menu.
 - [Settings](settings) - Settings UI
 - [DataTable](data-table) - High-performance data tables
-- [Dock](/docs/dock) - Production-ready dock layouts with tabs, splits, and persistent state
+- [Dock](dock) - Production-ready dock layouts with tabs, splits, and persistent state
 - [Tabs](tabs) - Tabbed interface
 - [Tree](tree) - Hierarchical tree data display
 - [VirtualList](virtual-list) - Virtualized list for large datasets

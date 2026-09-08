@@ -1,7 +1,7 @@
 ---
 title: 主题
 description: 使用 GPUI Component 主题系统定制颜色、字体、圆角以及明暗外观。
-order: -4
+example: false
 ---
 
 # Theme
