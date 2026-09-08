@@ -7,8 +7,8 @@ use gpui::{
     prelude::FluentBuilder as _,
 };
 
-use crate::StyledExt as _;
 use crate::actions::{Cancel, Confirm, SelectDown, SelectUp};
+use crate::{StyledExt as _, TestSupportExt as _};
 
 const CONTEXT: &str = "Select";
 
@@ -42,7 +42,7 @@ type ActionHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 /// `aria_active_descendant()`; this root cannot do it on the caller's behalf.
 #[derive(IntoElement)]
 pub struct Select {
-    id: ElementId,
+    base: crate::ObservedElement<gpui::Stateful<gpui::Div>>,
     open: bool,
     disabled: bool,
     focus_handle: Option<FocusHandle>,
@@ -60,7 +60,7 @@ pub struct Select {
 impl Select {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            id: id.into(),
+            base: div().id(id).test_support(),
             open: false,
             disabled: false,
             focus_handle: None,
@@ -192,8 +192,7 @@ impl RenderOnce for Select {
             }
         });
 
-        div()
-            .id(self.id)
+        self.base
             .role(Role::ComboBox)
             .aria_expanded(open)
             .when_some(self.accessibility_label, |this, label| {

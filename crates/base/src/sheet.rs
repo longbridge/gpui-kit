@@ -1,3 +1,4 @@
+use crate::TestSupportExt as _;
 use std::rc::Rc;
 
 use gpui::{
@@ -122,6 +123,7 @@ impl RenderOnce for Sheet {
         anchored().position(point(px(0.), px(0.))).child(
             self.base
                 .id("sheet-host")
+                .test_support()
                 .absolute()
                 .top_0()
                 .left_0()

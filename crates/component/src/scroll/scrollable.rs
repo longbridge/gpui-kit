@@ -118,6 +118,11 @@ where
     fn interactivity(&mut self) -> &mut gpui::Interactivity {
         self.element.interactivity()
     }
+
+    fn track_focus(mut self, focus: &gpui::FocusHandle) -> Self {
+        self.element = self.element.track_focus(focus);
+        self
+    }
 }
 
 impl<E> RenderOnce for Scrollable<E>
@@ -282,6 +287,12 @@ fn render_scrollbar<H: ScrollbarHandle + Clone>(
                 .axis(axis)
                 .viewport_from_layout(),
         )
+}
+
+#[cfg(feature = "test-support")]
+impl<E> ScrollableElement for gpui_base::test_support::Observed<E> where
+    E: ScrollableElement + Element<PrepaintState = Option<gpui::Hitbox>>
+{
 }
 
 #[cfg(test)]

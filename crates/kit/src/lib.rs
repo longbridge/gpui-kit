@@ -90,6 +90,10 @@ pub use ::gpui::*;
 #[doc(hidden)]
 pub use ::gpui;
 
+/// Headless UI interaction and observation helpers for application tests.
+#[cfg(feature = "test-support")]
+pub mod test;
+
 pub use ::gpui_base as base;
 pub use ::gpui_platform as platform;
 #[cfg(target_family = "wasm")]
@@ -142,3 +146,6 @@ pub fn init(cx: &mut App) {
     #[cfg(not(feature = "component"))]
     gpui_base::init(cx);
 }
+
+/// Fluent UI test observation, inert unless `test-support` is enabled.
+pub use gpui_base::TestSupportExt;

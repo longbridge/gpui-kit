@@ -12,6 +12,7 @@ use gpui::{
     ParentElement as _, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled,
     Window, div, percentage, prelude::FluentBuilder,
 };
+use gpui_base::TestSupportExt as _;
 use std::rc::Rc;
 
 /// Menu for the [`super::Sidebar`]
@@ -272,6 +273,7 @@ impl SidebarItem for SidebarMenuItem {
 
         div()
             .id(id.clone())
+            .test_support()
             .w_full()
             .child(
                 h_flex()

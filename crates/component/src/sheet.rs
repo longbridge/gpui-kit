@@ -1,3 +1,4 @@
+use gpui_base::TestSupportExt as _;
 use std::{rc::Rc, time::Duration};
 
 use gpui::{
@@ -164,7 +165,8 @@ impl RenderOnce for Sheet {
             .bg(overlay_color(self.overlay, cx));
 
         let surface = v_flex()
-            .id("sheet")
+            .id("sheet-content")
+            .test_support()
             .absolute()
             .occlude()
             .bg(cx.theme().tokens.background)

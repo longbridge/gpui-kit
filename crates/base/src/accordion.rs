@@ -1,3 +1,4 @@
+use crate::TestSupportExt as _;
 use std::rc::Rc;
 
 use gpui::{
@@ -14,7 +15,7 @@ type ChangeHandler = Rc<dyn Fn(bool, &ClickEvent, &mut Window, &mut App)>;
 /// An unstyled accordion root for application-owned items.
 #[derive(IntoElement)]
 pub struct Accordion {
-    base: gpui::Stateful<Div>,
+    base: crate::ObservedElement<gpui::Stateful<Div>>,
     style: StyleRefinement,
     children: SmallVec<[AnyElement; 2]>,
 }
@@ -22,7 +23,7 @@ pub struct Accordion {
 impl Accordion {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            base: div().id(id),
+            base: div().id(id).test_support(),
             style: StyleRefinement::default(),
             children: SmallVec::new(),
         }
@@ -44,6 +45,11 @@ impl ParentElement for Accordion {
 impl InteractiveElement for Accordion {
     fn interactivity(&mut self) -> &mut Interactivity {
         self.base.interactivity()
+    }
+
+    fn track_focus(mut self, handle: &gpui::FocusHandle) -> Self {
+        self.base = self.base.track_focus(handle);
+        self
     }
 }
 
@@ -188,6 +194,7 @@ impl RenderOnce for AccordionHeader {
         match self.id {
             Some(id) => content
                 .id(id)
+                .test_support()
                 .role(Role::Heading)
                 .aria_level(self.level)
                 .into_any_element(),
@@ -253,7 +260,11 @@ impl RenderOnce for AccordionPanel {
 
         let content = div().children(self.children).refine_style(&self.style);
         match self.id {
-            Some(id) => content.id(id).role(Role::Region).into_any_element(),
+            Some(id) => content
+                .id(id)
+                .test_support()
+                .role(Role::Region)
+                .into_any_element(),
             None => content.into_any_element(),
         }
     }
@@ -265,7 +276,7 @@ impl RenderOnce for AccordionPanel {
 /// animation. Activating the trigger requests the opposite of `open`.
 #[derive(IntoElement)]
 pub struct AccordionTrigger {
-    base: gpui::Stateful<Div>,
+    base: crate::ObservedElement<gpui::Stateful<Div>>,
     style: StyleRefinement,
     children: SmallVec<[AnyElement; 2]>,
     open: bool,
@@ -276,7 +287,7 @@ pub struct AccordionTrigger {
 impl AccordionTrigger {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            base: div().id(id),
+            base: div().id(id).test_support(),
             style: StyleRefinement::default(),
             children: SmallVec::new(),
             open: false,
@@ -320,6 +331,11 @@ impl ParentElement for AccordionTrigger {
 impl InteractiveElement for AccordionTrigger {
     fn interactivity(&mut self) -> &mut Interactivity {
         self.base.interactivity()
+    }
+
+    fn track_focus(mut self, handle: &gpui::FocusHandle) -> Self {
+        self.base = self.base.track_focus(handle);
+        self
     }
 }
 

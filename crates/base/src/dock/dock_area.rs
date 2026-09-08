@@ -1,6 +1,7 @@
 //! The dock area: the trees, the entity cache that mirrors them, and the
 //! reconciliation that keeps the two in step.
 
+use crate::TestSupportExt as _;
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
@@ -1594,6 +1595,7 @@ impl Render for DockArea {
 
         renderer
             .frame(window, cx)
+            .test_support()
             // Structure, applied after the hook and not inside it. A dock area
             // lays its left dock, centre and right dock out in a row; a frame
             // that is not one stacks them down the window instead, which is

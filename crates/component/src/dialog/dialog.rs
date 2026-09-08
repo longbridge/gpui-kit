@@ -1,3 +1,4 @@
+use gpui_base::TestSupportExt as _;
 use std::{rc::Rc, sync::LazyLock, time::Duration};
 
 use gpui::{
@@ -532,6 +533,7 @@ impl RenderOnce for Dialog {
             .child(
                 div()
                     .id("dialog")
+                    .test_support()
                     .occlude()
                     .w(view_size.width)
                     .h(view_size.height)
@@ -571,6 +573,7 @@ impl RenderOnce for Dialog {
                             .popup(
                                 v_flex()
                                     .id(layer_ix)
+                                    .test_support()
                                     .bg(cx.theme().tokens.background)
                                     .border_1()
                                     .border_color(cx.theme().border)
