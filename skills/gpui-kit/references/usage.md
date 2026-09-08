@@ -405,4 +405,4 @@ Builders return the component so methods can be chained. Constructors follow com
 - `Styled`: any GPUI style methods (`.w()`, `.bg()`, `.p_2()`, etc.)
 
 For any component not covered here, fetch its doc from:
-`https://gpui-kit.com/docs/components/{name}.md`
+`https://gpui-kit.com/component/{name}.md`

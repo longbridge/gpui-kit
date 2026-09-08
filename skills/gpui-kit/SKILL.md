@@ -87,7 +87,7 @@ A floor, not a substitute for the guides.
 
 - **Find a task/component page**: use `https://gpui-kit.com/llms.txt`, then load its Markdown page.
 - **Full reference**: `https://gpui-kit.com/llms-full.txt` is available when broad reference is actually needed
-- **Per-component API**: fetch `https://gpui-kit.com/docs/components/{name}.md`,
+- **Per-component API**: fetch `https://gpui-kit.com/component/{name}.md`,
   e.g. `button.md`, `input.md`, `select.md`, `dialog.md`, `data-table.md`
 - **Any site page** can be fetched as Markdown by appending `.md` to the URL
 
