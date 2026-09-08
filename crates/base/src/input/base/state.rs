@@ -1538,8 +1538,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
 
         // Smart indent: one extra level after lines ending with a trigger.
+        // Skipped inside strings and comments: the trigger is literal text.
         if let Some(rules) = self.mode.edit_rules() {
-            if rules.smart_indent {
+            if rules.smart_indent
+                && M::editing_syntax_context(self, offset) == crate::input::SyntaxContext::Code
+            {
                 let line_before: String = self
                     .text
                     .slice(current_line_start_pos..offset)
@@ -1614,6 +1617,42 @@ impl<M: InputModeKind> InputBaseState<M> {
             .record_selections(cursors, self.selections.iter().copied().collect());
         self.undo_manager.commit_transaction();
         self.pause_blink_cursor(cx);
+    }
+
+    /// Cursor target when a typed closer should skip over an existing one.
+    ///
+    /// Returns `Some(offset)` when `new_text` is a single closer from the
+    /// active [`EditRules`] that already follows the collapsed cursor and is
+    /// not escaped. The caller then moves the cursor without editing text or
+    /// history. `None` means insert normally.
+    fn skip_over_target(&self, new_text: &str) -> Option<usize> {
+        let rules = self.mode.edit_rules()?;
+        if !rules.auto_close {
+            return None;
+        }
+        if new_text.chars().count() != 1 {
+            return None;
+        }
+        let typed = new_text.chars().next()?;
+        if !rules.is_closer(typed) {
+            return None;
+        }
+        let cursor = self.cursor();
+        if self.text.chars_at(cursor).next() != Some(typed) {
+            return None;
+        }
+        // Escaped followers (odd backslash run) are literals, not closers.
+        let mut backslashes = 0;
+        for c in self.text.chars_at(cursor).reversed() {
+            if c != '\\' {
+                break;
+            }
+            backslashes += 1;
+        }
+        if backslashes % 2 == 1 {
+            return None;
+        }
+        Some(cursor + typed.len_utf8())
     }
 
     pub(super) fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
@@ -1782,10 +1821,15 @@ impl<M: InputModeKind> InputBaseState<M> {
                 // Bracket split: Enter between `{|}` produces `{\n  \n}`
                 // with the cursor on the middle line. Requires auto_close;
                 // the extra indent level additionally requires smart_indent.
+                // Skipped inside strings and comments: splitting there would
+                // restructure literal text.
                 let mut split = false;
                 if self.is_code_editor() && self.active_selection().is_empty() {
                     if let Some(rules) = self.mode.edit_rules() {
-                        if rules.auto_close {
+                        if rules.auto_close
+                            && M::editing_syntax_context(self, self.cursor())
+                                == crate::input::SyntaxContext::Code
+                        {
                             let off = self.cursor();
                             let before: Option<char> = (off > 0)
                                 .then(|| self.text.chars_at(off).reversed().next())
@@ -3273,6 +3317,23 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.silent_replace_text = false;
     }
 
+    /// Replace text without typing hooks and without recording history.
+    ///
+    /// For corrective edits that must not appear in undo (e.g. removing the
+    /// just-typed closer during skip-over, where the insertion alone is the
+    /// undoable unit). Mirrors `set_value`'s ignoring pattern.
+    pub(crate) fn replace_silent_ignoring_history(
+        &mut self,
+        range_utf16: Option<Range<usize>>,
+        new_text: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.undo_manager.set_ignoring(true);
+        self.replace_text_in_range_silent(range_utf16, new_text, window, cx);
+        self.undo_manager.set_ignoring(false);
+    }
+
     /// Apply a batch of edits as one atomic history transaction.
     ///
     /// `edits` are `(byte range in the current pre-edit document, replacement)`
@@ -3546,6 +3607,26 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         // use the normalized text.
         let new_text = self.normalize_input(new_text);
         let new_text: &str = &new_text;
+
+        // Skip-over as a pure cursor move: a typed closer that already follows
+        // the cursor moves past it without touching text or history, so Undo
+        // never exposes a transient duplicate. Only for interactive single
+        // keystrokes (current selection, no IME mark, not silent replays).
+        // `take_pending_intent` above already consumed any request.
+        if range_utf16.is_none()
+            && self.ime_marked_range.is_none()
+            && !self.silent_replace_text
+            && self.is_code_editor()
+            && self.selections.is_single()
+            && self.active_selection().is_empty()
+        {
+            if let Some(target) = self.skip_over_target(new_text) {
+                self.set_cursor_to(target);
+                self.update_preferred_column();
+                cx.notify();
+                return;
+            }
+        }
 
         let range = range_utf16
             .as_ref()
@@ -7086,6 +7167,203 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_skip_records_no_history(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "(a|)");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                // Type a normal char (recorded), then skip over `)`.
+                state.replace_text_in_range(None, "b", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "(ab|)");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, ")", window, cx);
+            });
+        });
+        // Skip is a pure cursor move: no history entry of its own.
+        assert_cursors(&mut cx, &view.input, "(ab)|");
+        // Undo removes `b`, never exposing a transient `())`.
+        cx.update(|window, cx| {
+            view.input
+                .update(cx, |state, cx| state.undo(&Undo, window, cx));
+        });
+        assert_cursors(&mut cx, &view.input, "(a|)");
+    }
+
+    #[gpui::test]
+    fn test_pair_insert_undo_removes_both(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "(", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "(|)");
+        // One undo removes the whole pair (typing coalescing).
+        cx.update(|window, cx| {
+            view.input
+                .update(cx, |state, cx| state.undo(&Undo, window, cx));
+        });
+        assert_cursors(&mut cx, &view.input, "|");
+    }
+
+    #[gpui::test]
+    fn test_escaped_quote_does_not_skip(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        // Odd backslashes: the typed quote is escaped, insert literally.
+        setup_cursors(&mut cx, &view.input, "\"hello\\|\"");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "\"", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "\"hello\\\"|\"");
+    }
+
+    #[gpui::test]
+    fn test_even_backslashes_still_skip(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        // Even backslashes: quote is not escaped, skip over the terminator.
+        setup_cursors(&mut cx, &view.input, "\"hello\\\\|\"");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "\"", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "\"hello\\\\\"|");
+    }
+
+    #[gpui::test]
+    fn test_flag_pins_survive_language_sync(cx: &mut TestAppContext) {
+        use crate::input::{BracketPair, EditRules};
+
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                // Pin smart_indent off, then simulate render-time language sync
+                // with a table that enables it: pairs follow sync, pin wins.
+                state.set_smart_indent(false, window, cx);
+                state.ensure_edit_rules(
+                    EditRules {
+                        pairs: vec![BracketPair {
+                            open: '«',
+                            close: '»',
+                        }],
+                        ..EditRules::default()
+                    },
+                    cx,
+                );
+            });
+        });
+        view.input.read_with(&cx, |state, _| {
+            assert!(!state.mode.is_smart_indent(), "pinned flag preserved");
+            assert!(state.mode.is_auto_close());
+            let pairs = &state.mode.edit_rules().unwrap().pairs;
+            assert_eq!(pairs.len(), 1, "pairs follow synced table");
+            assert_eq!(pairs[0].open, '«');
+        });
+    }
+
+    struct CommentAllProvider;
+    impl crate::input::SyntaxContextProvider for CommentAllProvider {
+        fn context_at(&self, _text: &ropey::Rope, _offset: usize) -> crate::input::SyntaxContext {
+            crate::input::SyntaxContext::Comment
+        }
+    }
+
+    struct StringAllProvider;
+    impl crate::input::SyntaxContextProvider for StringAllProvider {
+        fn context_at(&self, _text: &ropey::Rope, _offset: usize) -> crate::input::SyntaxContext {
+            crate::input::SyntaxContext::String
+        }
+    }
+
+    #[gpui::test]
+    fn test_smart_indent_suppressed_in_strings(cx: &mut TestAppContext) {
+        use std::rc::Rc;
+
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.update(|_window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_syntax_context_provider(Rc::new(StringAllProvider), cx);
+            });
+        });
+        // Trigger `{` inside a string: no extra level, base indent only.
+        setup_cursors(&mut cx, &view.input, "  x = {|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.enter(
+                    &Enter {
+                        secondary: false,
+                        shift: false,
+                    },
+                    window,
+                    cx,
+                );
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "  x = {\n  |");
+    }
+
+    #[gpui::test]
+    fn test_split_suppressed_in_strings(cx: &mut TestAppContext) {
+        use std::rc::Rc;
+
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.update(|_window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_syntax_context_provider(Rc::new(StringAllProvider), cx);
+            });
+        });
+        // No three-way split inside strings: plain newline instead.
+        setup_cursors(&mut cx, &view.input, "{|}");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.enter(
+                    &Enter {
+                        secondary: false,
+                        shift: false,
+                    },
+                    window,
+                    cx,
+                );
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "{\n|}");
+    }
+
+    #[gpui::test]
+    fn test_comment_context_disables_pairing(cx: &mut TestAppContext) {
+        use std::rc::Rc;
+
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.update(|_window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_syntax_context_provider(Rc::new(CommentAllProvider), cx);
+            });
+        });
+        setup_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "(", window, cx);
+            });
+        });
+        // In comments every character is literal.
+        assert_cursors(&mut cx, &view.input, "(|");
+    }
+
+    #[gpui::test]
     fn test_backspace_deletes_empty_pair(cx: &mut TestAppContext) {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
@@ -8219,10 +8497,12 @@ impl InputBaseState<crate::input::EditorMode> {
     /// Apply rules unless the app explicitly customized them.
     ///
     /// Render-time per-language sync calls this; explicit `edit_rules()` /
-    /// `set_edit_rules()` calls always win.
+    /// `set_edit_rules()` calls always win. Notifies only when the stored
+    /// rules actually changed, so idle renders stay quiet.
     pub fn ensure_edit_rules(&mut self, rules: EditRules, cx: &mut Context<Self>) {
-        self.mode.ensure_edit_rules(rules);
-        cx.notify();
+        if self.mode.ensure_edit_rules(rules) {
+            cx.notify();
+        }
     }
 
     /// Set enable/disable automatic closing brackets and quotes.
@@ -8235,7 +8515,7 @@ impl InputBaseState<crate::input::EditorMode> {
         if let Some(rules) = self.mode.edit_rules_mut() {
             rules.auto_close = auto_close;
         }
-        self.mode.mark_rules_customized();
+        self.mode.pin_auto_close();
         self
     }
 
@@ -8244,7 +8524,7 @@ impl InputBaseState<crate::input::EditorMode> {
         if let Some(rules) = self.mode.edit_rules_mut() {
             rules.auto_close = auto_close;
         }
-        self.mode.mark_rules_customized();
+        self.mode.pin_auto_close();
         cx.notify();
     }
 
@@ -8258,7 +8538,7 @@ impl InputBaseState<crate::input::EditorMode> {
         if let Some(rules) = self.mode.edit_rules_mut() {
             rules.smart_indent = smart_indent;
         }
-        self.mode.mark_rules_customized();
+        self.mode.pin_smart_indent();
         self
     }
 
@@ -8267,7 +8547,7 @@ impl InputBaseState<crate::input::EditorMode> {
         if let Some(rules) = self.mode.edit_rules_mut() {
             rules.smart_indent = smart_indent;
         }
-        self.mode.mark_rules_customized();
+        self.mode.pin_smart_indent();
         cx.notify();
     }
 }

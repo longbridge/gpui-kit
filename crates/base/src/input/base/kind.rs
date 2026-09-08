@@ -23,12 +23,14 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui::{Div, Entity, Stateful, Window};
+use gpui::{Div, Entity, SharedString, Stateful, Window};
 use ropey::Rope;
 
 use super::decorations::DecorationCollections;
 use super::lsp::{ContextMenuContent, HoverDefinition, InlineCompletion};
-use crate::input::{HighlightStyleResolver, InputEdit, InputHighlighter, TextDecoration};
+use crate::input::{
+    HighlightStyleResolver, InputEdit, InputHighlighter, SyntaxContext, TextDecoration,
+};
 use crate::input::{HoverPopoverState, Lsp};
 use gpui::Task;
 
@@ -185,6 +187,14 @@ pub trait InputModeKind: sealed::Sealed + Sized + 'static {
     /// Drops decorations and hover state when the text is replaced wholesale.
     fn reset_annotations(_state: &mut InputBaseState<Self>) {}
 
+    /// Syntax context at `offset` for editing decisions.
+    ///
+    /// Only a code editor can have a provider installed; the default answer
+    /// is `Code`, which preserves character-heuristic behavior.
+    fn editing_syntax_context(_state: &InputBaseState<Self>, _offset: usize) -> SyntaxContext {
+        SyntaxContext::Code
+    }
+
     /// Slides decoration ranges along with an edit.
     fn adjust_annotations(
         _state: &mut InputBaseState<Self>,
@@ -331,6 +341,9 @@ pub struct EditorExtras {
     pub(crate) hover_popover: Option<HoverPopoverState>,
     pub(crate) hover_definition: HoverDefinition,
     pub(crate) context_menu_task: Task<anyhow::Result<()>>,
+    pub(crate) syntax_context_provider: Option<std::rc::Rc<dyn super::SyntaxContextProvider>>,
+    pub(crate) syntax_provider_customized: bool,
+    pub(crate) syntax_provider_language: Option<SharedString>,
 }
 
 impl Default for EditorExtras {
@@ -343,6 +356,9 @@ impl Default for EditorExtras {
             hover_popover: None,
             hover_definition: HoverDefinition::default(),
             context_menu_task: Task::ready(Ok(())),
+            syntax_context_provider: None,
+            syntax_provider_customized: false,
+            syntax_provider_language: None,
         }
     }
 }

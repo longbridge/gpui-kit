@@ -1,11 +1,13 @@
 mod clear_button;
 mod content_type;
+mod edit_rules;
 mod input;
 mod number_input;
 mod otp_input;
 mod overlay;
 pub(crate) mod popovers;
 mod search;
+mod syntax_context;
 
 pub(crate) use clear_button::*;
 pub use content_type::*;
@@ -30,7 +32,6 @@ pub use gpui_base::input::{
     WrappingIndent,
 };
 pub use gpui_base::input::{EditorMode, InputMode, InputModeKind, TextareaMode};
-mod edit_rules;
 #[doc(hidden)]
 mod editor;
 mod state;

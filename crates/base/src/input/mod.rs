@@ -76,7 +76,7 @@ pub use edit_rules::{BracketPair, EditRules};
 pub use editor::{Editor, EditorState};
 pub use highlighting::{
     DiagnosticColors, FoldIconRenderer, HighlightStyleResolver, InputEditorStyle, InputHighlighter,
-    InputHighlighterFactory, SharedHighlightStyleResolver,
+    InputHighlighterFactory, SharedHighlightStyleResolver, SyntaxContext, SyntaxContextProvider,
 };
 pub use indent::TabSize;
 pub use input::{Input, InputState};

@@ -40,6 +40,10 @@ impl InputModeKind for EditorMode {
         state.extras.decorations.clear();
     }
 
+    fn editing_syntax_context(state: &InputBaseState<Self>, offset: usize) -> super::SyntaxContext {
+        state.syntax_context_at(offset)
+    }
+
     fn adjust_annotations(
         state: &mut InputBaseState<Self>,
         range: &std::ops::Range<usize>,
@@ -183,6 +187,54 @@ impl EditorState {
         &mut self.extras.lsp
     }
 
+    /// Install a syntax-context provider for editing decisions.
+    ///
+    /// Pairing, skip-over, and indent consult it; without one the engine
+    /// uses character heuristics. `gpui-component` supplies a tree-sitter
+    /// backed implementation. Explicit installs win over render-time sync.
+    pub fn set_syntax_context_provider(
+        &mut self,
+        provider: std::rc::Rc<dyn super::SyntaxContextProvider>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        self.extras.syntax_context_provider = Some(provider);
+        self.extras.syntax_provider_customized = true;
+        cx.notify();
+    }
+
+    /// Install a provider unless the app explicitly installed one.
+    ///
+    /// Render-time per-language sync calls this with the editor's current
+    /// language. Reinstalls only on language change, preserving the
+    /// provider's incremental parse cache across renders. Returns whether
+    /// anything changed.
+    pub fn ensure_syntax_context_provider(
+        &mut self,
+        language: &gpui::SharedString,
+        provider: Option<std::rc::Rc<dyn super::SyntaxContextProvider>>,
+    ) -> bool {
+        if self.extras.syntax_provider_customized {
+            return false;
+        }
+        if self.extras.syntax_provider_language.as_ref() == Some(language)
+            && self.extras.syntax_context_provider.is_some() == provider.is_some()
+        {
+            return false;
+        }
+        self.extras.syntax_provider_language = Some(language.clone());
+        self.extras.syntax_context_provider = provider;
+        true
+    }
+
+    /// Syntax context at `offset`, or `Code` when no provider is installed.
+    pub(crate) fn syntax_context_at(&self, offset: usize) -> super::SyntaxContext {
+        self.extras
+            .syntax_context_provider
+            .as_ref()
+            .map(|provider| provider.context_at(&self.text, offset))
+            .unwrap_or(super::SyntaxContext::Code)
+    }
+
     /// Automatically insert or skip over a closing bracket or quote.
     ///
     /// Called from `on_text_typed` after every edit. Only acts on a single
@@ -213,6 +265,30 @@ impl EditorState {
         }
         let typed: char = text.chars().next().unwrap_or_default();
         let cursor = self.cursor();
+        // Syntax context: comments are literal text (no pairing, no skip);
+        // inside strings only terminator skip-over applies, never new pairs.
+        // Without a provider everything is Code (previous behavior).
+        let in_string = self.syntax_context_at(range.start) == super::SyntaxContext::String;
+        if self.syntax_context_at(range.start) == super::SyntaxContext::Comment {
+            return;
+        }
+
+        // Escape check first: a quote preceded by an odd run of backslashes
+        // is escaped (e.g. `"hello\"|`), so it is a literal — neither skip
+        // nor pair, just leave the typed character alone.
+        if typed == '"' || typed == '\'' {
+            let mut backslashes = 0;
+            for c in self.text.chars_at(range.start).reversed() {
+                if c != '\\' {
+                    break;
+                }
+                backslashes += 1;
+            }
+            if backslashes % 2 == 1 {
+                return;
+            }
+        }
+
         // Seek-based neighbor lookup: no linear prefix scan, Unicode-safe.
         let after: Option<char> = self.text.chars_at(cursor).next();
 
@@ -220,8 +296,10 @@ impl EditorState {
         // Remove the just-typed char and move past the existing one.
         // No word guard here: a matching follower is always a closer.
         if rules.is_closer(typed) && after == Some(typed) {
+            // History-ignoring: the framework's insertion alone stays as
+            // the undoable unit; undo never exposes the transient duplicate.
             let typed_utf16 = self.range_to_utf16(&(range.start..range.start + typed.len_utf8()));
-            self.replace_text_in_range_silent(Some(typed_utf16), "", window, cx);
+            self.replace_silent_ignoring_history(Some(typed_utf16), "", window, cx);
             // NOTE: byte target is correct: closers are ASCII (1 byte).
             let target = range.start + typed.len_utf8();
             self.set_selected_range(target..target, cx);
@@ -229,6 +307,11 @@ impl EditorState {
         }
 
         // Auto-close: typed an opener, insert the matching closer.
+        // Inside strings no new pairs open (the terminator skip above
+        // already handled closing).
+        if in_string {
+            return;
+        }
         let Some(closer) = rules.matching_close(typed) else {
             return;
         };

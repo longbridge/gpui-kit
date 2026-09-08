@@ -116,17 +116,23 @@ impl TextInputState {
             .update(cx, |state, _| state.ensure_highlighter_factory(factory)))
     }
 
-    /// Sync per-language editing rules (auto-close pairs, indent triggers).
+    /// Sync per-language editing rules and syntax context.
     ///
-    /// Reads the editor's current language and applies
-    /// [`super::edit_rules::language_rules`], unless the app explicitly
-    /// customized rules via `edit_rules()` / `set_edit_rules()`.
-    /// No-op for single-line inputs and textareas.
+    /// Reads the editor's current language, applies
+    /// [`super::edit_rules::language_rules`] plus a tree-sitter syntax
+    /// provider, unless the app explicitly customized them. Notifies only
+    /// when something actually changed. No-op for single-line inputs and
+    /// textareas.
     pub(crate) fn sync_edit_rules(&self, cx: &mut App) {
         if let TextInputState::Editor(state) = self {
             state.update(cx, |state, cx| {
-                let rules = super::edit_rules::language_rules(&state.language_name());
+                let language = state.language_name();
+                let rules = super::edit_rules::language_rules(&language);
                 state.ensure_edit_rules(rules, cx);
+                let provider = super::syntax_context::syntax_context_provider(&language);
+                if state.ensure_syntax_context_provider(&language, provider) {
+                    cx.notify();
+                }
             });
         }
     }
