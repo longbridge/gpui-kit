@@ -99,6 +99,17 @@ test('component pages have independent routes, translated alternates and readabl
   }
 });
 
+test('legacy /docs/<slug> URLs for the root/theme/dock migration redirect to /component/<slug>', () => {
+  for (const locale of ['', 'zh-CN/']) {
+    for (const slug of ['root', 'theme', 'dock']) {
+      const legacyHtml = read(`${locale}docs/${slug}/index.html`);
+      assert.match(legacyHtml, /<meta[^>]+http-equiv="refresh"/i, `${locale}docs/${slug} must be a static redirect`);
+      assert.ok(legacyHtml.includes(`url=/${locale}component/${slug}`), `${locale}docs/${slug} must redirect to /${locale}component/${slug}`);
+      assert.ok(existsSync(new URL(`${locale}component/${slug}/index.html`, dist)), `/${locale}component/${slug} must exist as the real page`);
+    }
+  }
+});
+
 test('shared guides remain under docs and sidebars keep the sections separate', () => {
   for (const locale of ['', 'zh-CN/']) {
     for (const guide of ['coding-guides', 'design-guides']) {
