@@ -272,6 +272,18 @@ impl SidebarItem for SidebarMenuItem {
 
         div()
             .id(id.clone())
+            .map(|this| {
+                #[cfg(feature = "test-support")]
+                let this = {
+                    use gpui_base::test_support::ObserveElement as _;
+                    this.observe()
+                        .observe_selected(is_active)
+                        .observe_disabled(is_disabled)
+                        .observe_expanded(is_open)
+                        .observe_text(self.label.clone())
+                };
+                this
+            })
             .w_full()
             .child(
                 h_flex()

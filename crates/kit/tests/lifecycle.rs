@@ -11,7 +11,7 @@ impl Render for Child {
         div()
             .id("child")
             .observe()
-            .text(self.label.clone())
+            .observe_text(self.label.clone())
             .size(px(40.))
             .child(self.label.clone())
     }
@@ -51,7 +51,7 @@ fn cached_child_hides_and_reappears_after_refresh(cx: &mut TestAppContext) {
         cx.update_window(handle.into(), |_, window, cx| {
             window.refresh();
             window.draw(cx).clear(cx);
-            assert_eq!(window.find("child").unwrap().visible(), !hidden);
+            assert_eq!(window.find("child").visible(), !hidden);
         })
         .unwrap();
     }
@@ -70,7 +70,7 @@ fn unmount_and_remount_do_not_retain_old_metadata(cx: &mut TestAppContext) {
         .update_window(handle.into(), |_, window, cx| {
             window.refresh();
             window.draw(cx).clear(cx);
-            window.find("child").unwrap()
+            window.find("child")
         })
         .unwrap();
     handle
@@ -82,7 +82,7 @@ fn unmount_and_remount_do_not_retain_old_metadata(cx: &mut TestAppContext) {
     cx.update_window(handle.into(), |_, window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
-        assert!(window.find("child").is_none());
+        assert!(window.try_find("child").is_none());
     })
     .unwrap();
     handle
@@ -98,7 +98,7 @@ fn unmount_and_remount_do_not_retain_old_metadata(cx: &mut TestAppContext) {
     cx.update_window(handle.into(), |_, window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
-        assert_eq!(window.find("child").unwrap().text(), Some("replacement"));
+        assert_eq!(window.find("child").text(), Some("replacement"));
         assert_eq!(old.text(), Some("original"));
     })
     .unwrap();
@@ -119,7 +119,7 @@ impl Render for Rows {
             div()
                 .id(("row", index))
                 .observe()
-                .text(label.clone())
+                .observe_text(label.clone())
                 .h(px(30.))
                 .w(px(100.))
                 .child(label)
@@ -140,8 +140,8 @@ fn composite_ids_follow_reordered_rows(cx: &mut TestAppContext) {
         cx.update_window(handle.into(), |_, window, cx| {
             window.refresh();
             window.draw(cx).clear(cx);
-            let first = window.find(("row", 0usize)).unwrap();
-            let last = window.find(("row", 2usize)).unwrap();
+            let first = window.find(("row", 0usize));
+            let last = window.find(("row", 2usize));
             assert_eq!(first.text(), Some("row 0"));
             assert_eq!(last.text(), Some("row 2"));
             assert_eq!(first.bounds().top() > last.bounds().top(), reversed);
@@ -161,7 +161,7 @@ fn closing_one_window_preserves_other_window_and_owned_snapshot(cx: &mut TestApp
     let snapshot = cx
         .update_window(first.into(), |_, window, cx| {
             window.draw(cx).clear(cx);
-            window.find("child").unwrap()
+            window.find("child")
         })
         .unwrap();
     cx.update_window(first.into(), |_, window, _| window.remove_window())
@@ -170,7 +170,7 @@ fn closing_one_window_preserves_other_window_and_owned_snapshot(cx: &mut TestApp
     cx.update_window(second.into(), |_, window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
-        assert_eq!(window.find("child").unwrap().text(), Some("second"));
+        assert_eq!(window.find("child").text(), Some("second"));
     })
     .unwrap();
     assert_eq!(snapshot.text(), Some("first"));
@@ -233,13 +233,15 @@ fn clipped_center_does_not_bypass_native_hit_testing(cx: &mut TestAppContext) {
     cx.update_window(handle.into(), |_, window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
-        let target = window.find("partly-visible").unwrap();
+        let target = window.find("partly-visible");
         assert!(target.visible());
         assert_eq!(target.bounds().size.width, px(100.));
         window.click("partly-visible", cx);
+        assert_eq!(clicks.get(), 0);
+        window.click_at("partly-visible", gpui::point(px(10.), px(20.)), cx);
     })
     .unwrap();
-    assert_eq!(clicks.get(), 0);
+    assert_eq!(clicks.get(), 1);
 }
 
 struct ManyRows {
@@ -269,7 +271,7 @@ fn large_frame_removes_stale_records_when_list_shrinks(cx: &mut TestAppContext) 
         window.draw(cx).clear(cx);
         for index in 0..1000usize {
             assert_eq!(
-                window.find(("record", index)).unwrap().bounds().top(),
+                window.find(("record", index)).bounds().top(),
                 px(index as f32)
             );
         }
@@ -285,7 +287,7 @@ fn large_frame_removes_stale_records_when_list_shrinks(cx: &mut TestAppContext) 
         window.refresh();
         window.draw(cx).clear(cx);
         for index in 0..1000usize {
-            assert_eq!(window.find(("record", index)).is_some(), index < 10);
+            assert_eq!(window.try_find(("record", index)).is_some(), index < 10);
         }
     })
     .unwrap();

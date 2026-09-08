@@ -184,6 +184,16 @@ impl RenderOnce for ListItem {
         let is_selectable = !(self.disabled || self.mode.is_separator());
 
         self.base
+            .map(|this| {
+                #[cfg(feature = "test-support")]
+                let this = {
+                    use gpui_base::test_support::ObserveElement as _;
+                    this.observe()
+                        .observe_selected(self.selected)
+                        .observe_disabled(self.disabled)
+                };
+                this
+            })
             .relative()
             .gap_x_1()
             .py_1()

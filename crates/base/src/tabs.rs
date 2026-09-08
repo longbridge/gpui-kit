@@ -151,7 +151,8 @@ impl RenderOnce for Tab {
         let disabled = self.disabled;
         let style = self.resolved_style();
 
-        self.base
+        let element = self
+            .base
             .id(self.id)
             .role(Role::Tab)
             // Match Button's neutral control geometry: a fixed-size tab
@@ -177,7 +178,16 @@ impl RenderOnce for Tab {
                 },
             )
             .children(self.children)
-            .refine_style(&style)
+            .refine_style(&style);
+        #[cfg(feature = "test-support")]
+        let element = {
+            use crate::test_support::ObserveElement as _;
+            element
+                .observe()
+                .observe_disabled(disabled)
+                .observe_selected(self.selected)
+        };
+        element
     }
 }
 

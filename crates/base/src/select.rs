@@ -42,6 +42,8 @@ type ActionHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 /// `aria_active_descendant()`; this root cannot do it on the caller's behalf.
 #[derive(IntoElement)]
 pub struct Select {
+    #[cfg(feature = "test-support")]
+    observed_value: Option<SharedString>,
     id: ElementId,
     open: bool,
     disabled: bool,
@@ -58,8 +60,17 @@ pub struct Select {
 }
 
 impl Select {
+    /// Reports the selected item's logical value independently of accessibility naming.
+    #[cfg(feature = "test-support")]
+    pub fn observe_value(mut self, value: impl Into<SharedString>) -> Self {
+        self.observed_value = Some(value.into());
+        self
+    }
+
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
+            #[cfg(feature = "test-support")]
+            observed_value: None,
             id: id.into(),
             open: false,
             disabled: false,
@@ -192,7 +203,11 @@ impl RenderOnce for Select {
             }
         });
 
-        div()
+        #[cfg(feature = "test-support")]
+        let observed_focus = focus_handle.clone();
+        #[cfg(feature = "test-support")]
+        let observed_value = self.observed_value;
+        let element = div()
             .id(self.id)
             .role(Role::ComboBox)
             .aria_expanded(open)
@@ -302,7 +317,18 @@ impl RenderOnce for Select {
                 close(window, cx);
             })
             .children(self.children)
-            .refine_style(&self.style)
+            .refine_style(&self.style);
+        #[cfg(feature = "test-support")]
+        let element = {
+            use crate::test_support::ObserveElement as _;
+            element
+                .observe()
+                .observe_disabled(disabled)
+                .observe_expanded(open)
+                .when_some(observed_focus, |this, focus| this.observe_focus(&focus))
+                .when_some(observed_value, |this, value| this.observe_value(value))
+        };
+        element
     }
 }
 

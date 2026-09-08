@@ -12,7 +12,7 @@ impl Render for Example {
                 div()
                     .id("trigger")
                     .observe()
-                    .text("Open")
+                    .observe_text("Open")
                     .w(px(120.))
                     .h(px(32.))
                     .child("Open")
@@ -26,7 +26,7 @@ impl Render for Example {
                     div()
                         .id("popup")
                         .observe()
-                        .text("Hello")
+                        .observe_text("Hello")
                         .w(px(200.))
                         .h(px(80.))
                         .child("Hello"),
@@ -40,15 +40,15 @@ fn finds_completed_layout_and_dispatches_click(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, _| Example { open: false });
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        let trigger = window.find("trigger").unwrap();
+        let trigger = window.find("trigger");
         assert_eq!(trigger.bounds().size, size(px(120.), px(32.)));
         assert_eq!(trigger.text(), Some("Open"));
         assert!(trigger.visible());
-        assert!(window.find("popup").is_none());
+        assert!(window.try_find("popup").is_none());
         window.click("trigger", cx);
-        assert_eq!(window.find("popup").unwrap().text(), Some("Hello"));
+        assert_eq!(window.find("popup").text(), Some("Hello"));
         window.click("trigger", cx);
-        assert!(window.find("popup").is_none());
+        assert!(window.try_find("popup").is_none());
     })
     .unwrap();
 }
@@ -98,18 +98,18 @@ fn visibility_and_resize_use_resolved_geometry(cx: &mut TestAppContext) {
     let handle = cx.open_window(size(px(600.), px(500.)), |_, _| Geometry);
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        assert_eq!(window.find("fill").unwrap().bounds().size.width, px(600.));
+        assert_eq!(window.find("fill").bounds().size.width, px(600.));
         for id in ["zero", "hidden", "transparent", "clipped", "offscreen"] {
-            assert!(!window.find(id).unwrap().visible(), "{id}");
+            assert!(!window.find(id).visible(), "{id}");
         }
-        assert!(window.find("sidebar").unwrap().visible());
+        assert!(window.find("sidebar").visible());
     })
     .unwrap();
     cx.simulate_window_resize(handle.into(), size(px(300.), px(400.)));
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        assert_eq!(window.find("fill").unwrap().bounds().size.width, px(300.));
-        assert!(window.find("sidebar").is_none());
+        assert_eq!(window.find("fill").bounds().size.width, px(300.));
+        assert!(window.try_find("sidebar").is_none());
     })
     .unwrap();
 }
@@ -120,15 +120,15 @@ fn windows_and_owned_snapshots_are_independent(cx: &mut TestAppContext) {
     let second = cx.add_window(|_, _| Example { open: true });
     cx.update_window(first.into(), |_, window, cx| {
         window.click("trigger", cx);
-        let old = window.find("popup").unwrap();
+        let old = window.find("popup");
         window.click("trigger", cx);
-        assert!(window.find("popup").is_none());
+        assert!(window.try_find("popup").is_none());
         assert_eq!(old.text(), Some("Hello"));
     })
     .unwrap();
     cx.update_window(second.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        assert!(window.find("popup").is_some());
+        assert!(window.try_find("popup").is_some());
     })
     .unwrap();
 }
@@ -158,7 +158,7 @@ fn duplicate_local_ids_fail_clearly(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, _| Duplicate);
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        window.find("duplicate");
+        window.try_find("duplicate");
     })
     .unwrap();
 }
@@ -182,11 +182,8 @@ fn cached_paint_keeps_identity_and_text(cx: &mut TestAppContext) {
     cx.update_window(handle.into(), |_, window, cx| {
         for _ in 0..3 {
             window.draw(cx).clear(cx);
-            assert_eq!(window.find("popup").unwrap().text(), Some("Hello"));
-            assert_eq!(
-                window.find("trigger").unwrap().bounds().size.height,
-                px(32.)
-            );
+            assert_eq!(window.find("popup").text(), Some("Hello"));
+            assert_eq!(window.find("trigger").bounds().size.height, px(32.));
         }
     })
     .unwrap();
@@ -230,7 +227,7 @@ fn click_obeys_occlusion_instead_of_calling_callback(cx: &mut TestAppContext) {
     cx.update_window(handle.into(), |_, window, cx| {
         window.click("covered", cx);
         // Geometric visibility deliberately does not claim that pixels are unoccluded.
-        assert!(window.find("covered").unwrap().visible());
+        assert!(window.find("covered").visible());
     })
     .unwrap();
     assert_eq!(clicks.get(), 0);
@@ -273,11 +270,11 @@ fn focus_is_from_the_completed_frame(cx: &mut TestAppContext) {
     let focus = handle.update(cx, |view, _, _| view.focus.clone()).unwrap();
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        assert!(!window.find("focus-target").unwrap().focused());
+        assert!(!window.find("focus-target").focused());
         window.focus(&focus, cx);
-        assert!(!window.find("focus-target").unwrap().focused());
+        assert!(!window.find("focus-target").focused());
         window.draw(cx).clear(cx);
-        assert!(window.find("focus-target").unwrap().focused());
+        assert!(window.find("focus-target").focused());
     })
     .unwrap();
 }
@@ -349,9 +346,9 @@ fn resolved_bounds_support_centering_containment_and_overlap_assertions(cx: &mut
     let handle = cx.open_window(size(px(600.), px(400.)), |_, _| CenteredLayout);
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        let dialog = window.find("dialog").unwrap().bounds();
-        let left = window.find("left").unwrap().bounds();
-        let right = window.find("right").unwrap().bounds();
+        let dialog = window.find("dialog").bounds();
+        let left = window.find("left").bounds();
+        let right = window.find("right").bounds();
         assert_eq!(dialog.center(), gpui::point(px(300.), px(200.)));
         assert!(left.left() >= dialog.left() && left.right() <= dialog.right());
         assert!(left.top() >= dialog.top() && left.bottom() <= dialog.bottom());
@@ -368,28 +365,28 @@ fn observations_do_not_cross_app_contexts(cx: &mut TestAppContext) {
     let second = other.add_window(|_, _| Example { open: true });
     cx.update_window(first.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        assert!(window.find("popup").is_none());
+        assert!(window.try_find("popup").is_none());
     })
     .unwrap();
     other
         .update_window(second.into(), |_, window, cx| {
             window.draw(cx).clear(cx);
-            assert_eq!(window.find("popup").unwrap().text(), Some("Hello"));
+            assert_eq!(window.find("popup").text(), Some("Hello"));
         })
         .unwrap();
     cx.update_window(first.into(), |_, window, cx| {
         window.click("trigger", cx);
-        assert!(window.find("popup").is_some());
+        assert!(window.try_find("popup").is_some());
     })
     .unwrap();
     other
         .update_window(second.into(), |_, window, cx| {
             window.click("trigger", cx);
-            assert!(window.find("popup").is_none());
+            assert!(window.try_find("popup").is_none());
         })
         .unwrap();
     cx.update_window(first.into(), |_, window, _| {
-        assert!(window.find("popup").is_some())
+        assert!(window.try_find("popup").is_some())
     })
     .unwrap();
     other.quit();
@@ -407,7 +404,7 @@ fn native_elements_require_explicit_observation(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, _| NativeElement);
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        assert!(window.find("native").is_none());
+        assert!(window.try_find("native").is_none());
     })
     .unwrap();
 }

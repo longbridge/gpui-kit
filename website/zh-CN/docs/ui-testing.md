@@ -65,63 +65,141 @@ cargo test -p gpui-kit --features test-support --test ui --locked
 
 ## 选择稳定的测试目标
 
-Kit Button 使用构造函数中的 ID，例如 `Button::new("save")`。Input 可以通过 `Input::new(&state).id("name")` 指定 ID；默认 ID 包含输入状态的 entity ID。
+启用 `test-support` 后，以下控件在已有原生元素上注册，不增加布局容器：
 
-原生 GPUI div 通过 `.id(...).observe()` 显式参与观察。视图知道逻辑文本时，用 `.text(value)` 提供；包装器不会从任意子元素中提取文字。生产视图可按 feature 条件添加：
+| 控件 | 除几何与可见性以外报告的状态 |
+| --- | --- |
+| Button | 标签文本、焦点、禁用、选中 |
+| Input | 未掩码的文本与值、焦点、禁用 |
+| Checkbox | 勾选、半选、焦点、禁用 |
+| Switch / Toggle | 勾选、焦点、禁用 |
+| Radio | 勾选、选中、焦点、禁用 |
+| Tab | 选中、禁用 |
+| Select | 选中项标题作为值、展开、焦点、禁用 |
+| ListItem | 选中、禁用 |
+| SidebarMenuItem | 标签文本、选中、展开、禁用 |
+
+优先使用构造函数 ID。Input 和 Select 支持 `.id("name")`，默认 ID 包含状态 entity ID。
+TabBar 内的 Tab 使用下标 ID。Select 已有的 `"input"` 子元素是触发区域：
+`window.within("language").click("input", cx)`。
+
+原生 div 通过 `.id(...).observe()` 参与观察。使用 `observe_text`、`observe_focus`、
+`observe_disabled`、`observe_checked`、`observe_indeterminate`、`observe_selected`、
+`observe_expanded` 和 `observe_value` 提供视图已知的真实状态。这些方法只报告事实，
+不会改变控件行为，例如 `observe_disabled(true)` 不会禁用事件处理器。
 
 ```rust
 let status = div().id("status").child(message.clone());
 #[cfg(feature = "test-support")]
-let status = status.observe().text(message.clone());
+let status = status.observe().observe_text(message.clone());
 ```
 
-这里的 `message` 是 `SharedString`，`ObserveElement` 也应在相同条件下导入。采用这种写法时，需要在应用中声明转发到 `gpui-kit/test-support` 的 `test-support` feature，并在视图中导入 `gpui_kit::test::ObserveElement`；测试命令增加 `--features test-support`。应用 library 复用普通的 `gpui-kit` 依赖，不需要额外的测试依赖。
+这里 `message` 是 `SharedString`。在相同条件下导入 `gpui_kit::test::ObserveElement`，
+并声明转发到 `gpui-kit/test-support` 的应用 feature；测试时增加 `--features test-support`。
+包装器保留已有 div 的身份、布局、事件与无障碍接口，不会自动发现任意子元素的文字或 ID。
 
-为需要查询的目标选择唯一 ID。列表可以使用 `("row", record_id)` 这样的复合 ID，使查询在重排后仍对应同一条记录。不同作用域出现相同 ID 时，窗口级查找存在歧义，会 panic。
+ID 只需在 GPUI 身份作用域内唯一。窗口级查询遇到重复 ID 会报歧义；可以直接使用已有父级作用域，无须添加测试容器：
+
+```rust
+window.within("toolbar").click("save", cx);
+window.within("dialog").click("save", cx);
+let save = window.within("dialog").within("footer").find("save");
+assert!(!save.disabled());
+```
+
+父级本身不必被观察：它的 ID 已经包含在被观察子元素的 GPUI 路径中。
+`within` 要求当前已绘制路径唯一。列表使用 `("row", record_id)` 等复合 ID，可保持重排后的记录身份。
 
 ## 操作与断言
 
+导入 `gpui_kit::test::TestWindowExt` 后使用以下方法：
+
 | API | 行为 |
 | --- | --- |
-| `window.find(id)` | 返回最近完成帧的独立快照；目标未注册时返回 `None`。 |
-| `window.click(id, cx)` | 在目标中心依次发送鼠标移动、按下和释放，经过 GPUI 命中测试。 |
-| `window.input(text, cx)` | 通过模拟按键向当前键盘焦点输入文本，不负责聚焦目标，也不会替换整个值。 |
-| `cx.simulate_keystrokes(handle.into(), "backspace")` | 复用 GPUI 现有接口发送特殊按键和快捷键。 |
+| `window.find(id)` | 严格返回最近完成帧的 `ElementSnapshot`；缺失时 panic，列出注册路径与排查提示。 |
+| `window.try_find(id)` | 缺失时返回 `None`，歧义仍会 panic。 |
+| `window.click(id, cx)` | 在中心发送原生鼠标移动、按下与释放。 |
+| `window.click_at(id, offset, cx)` | 相对于目标左上角的像素偏移点击，适合部分裁剪。 |
+| `window.right_click(id, cx)` / `double_click(id, cx)` | 原生右键或两次点击序列。 |
+| `window.hover(id, cx)` | 移动指针，不按键。 |
+| `window.scroll(id, delta, cx)` | 原生滚轮事件，`ScrollDelta` 保留 GPUI 的方向与单位。 |
+| `window.drag(from, to, cx)` | 窗口坐标之间的左键拖拽，经过真实拖拽创建与放置命中测试。 |
+| `window.press("backspace", cx)` | 使用 GPUI 按键解析器发送特殊键或快捷键。 |
+| `window.input(text, cx)` | 向当前焦点逐字符输入，不自动聚焦或替换整个值。 |
 
-快照提供 `bounds()`、`visible()`、`focused()`、`disabled()` 和 `text()`。围绕具体行为做断言，例如保存结果、输入焦点、禁用控件保持无响应，或浮层位于触发按钮下方。还要检查业务状态或输出结果，避免仅凭显示文字就让错误的流程通过测试。
+作用域支持 `find`、`try_find`、嵌套 `within`、`click` 和 `click_at`。
+拖拽时可查询不同作用域的目标，将它们的 `bounds().center()` 传给 `window.drag`。
 
-文本输入按字符模拟，不覆盖操作系统输入法的完整组合输入流程。密码输入框不会报告文本；需要验证实际结果时，读取应用状态。
+`ElementSnapshot` 是某次完成绘制的独立、不可变记录。它提供 `path()`、`bounds()`、
+`visible()`、`focused()`、`disabled()`、`text()`、`value()`、`checked()`、
+`indeterminate()`、`selected()` 和 `expanded()`。最后四种状态返回 `Option<bool>`：
+`None` 表示未报告，不等于 false。文本与值也可以未报告。交互后重新查询：
+
+```rust
+let before = window.find("agree");
+window.click("agree", cx);
+assert_eq!(before.checked(), Some(false)); // 原来的帧。
+assert_eq!(window.find("agree").checked(), Some(true)); // 新的一帧。
+```
+
+同时断言界面状态与业务结果。验证保存的模型或发出的事件也是集成测试的一部分，
+但不能取代相关控件可见状态的验证。文本输入不模拟完整的系统 IME 组合输入；
+密码输入框既不报告文本，也不报告值，需要时通过应用状态验证结果。
 
 ## 查询前完成一帧
 
-第一次查询前先绘制。点击和输入辅助方法会在事件分发前后刷新并绘制。直接修改状态、改变焦点、调整窗口大小或执行 GPUI 键盘动作后，需要显式刷新：
+第一次查询、外部直接修改状态或焦点、调整尺寸后，调用 `window.render_frame(cx)`。
+交互方法会在同步派发过程中刷新，包括 `press`。但外层 window update 尚未返回时，
+它们不能完成需要释放该借用的延迟回调。
 
 ```rust
 cx.update_window(handle.into(), |_, window, cx| {
-    window.refresh();
-    window.draw(cx).clear(cx);
-    assert!(window.find("name").unwrap().focused());
+    window.render_frame(cx);
+    window.click("name", cx);
+    window.input("Ada", cx);
+    window.press("backspace", cx);
+    assert_eq!(window.find("name").value(), Some("Ad"));
 }).unwrap();
 ```
 
-使用 `TestAppContext::update_window` 执行这些交互。带类型的 `WindowHandle::update` 已经借用了根 entity，不能在同一个回调中安全地重绘它。可以用带类型的 update 检查或修改模型，返回后再通过 `update_window` 绘制。
+使用 `TestAppContext::update_window`。带类型的 `WindowHandle::update` 已经借用根 entity，
+不能在同一个回调中安全地重绘它。
 
-异步任务应在窗口 update 之外通过 `cx.run_until_parked()` 驱动测试执行器，然后刷新并查询。等待定时器、网络或外部服务的任务还需要可控测试时钟或模拟响应；执行器停驻不代表这些任务都已完成。不要用固定时长的 sleep 代替完成条件。
+异步工作或 Select 的延迟提交，应在 async `#[gpui_kit::test]` 中、window update **外部**等待：
 
-快照不会原地更新。下一帧后重新调用 `find` 获取状态。缓存视图保留最近绘制的事实，外部状态变化后需要 refresh。元素卸载后，在释放其 element state 的帧完成时，查询结果会消失。
+```rust
+use gpui_kit::test::TestAppContextExt;
+use std::time::Duration;
 
-## 可见性与失败排查
+cx.wait_for(handle.into(), Duration::from_millis(200), |window, _| {
+    window.try_find("result").is_some_and(|snapshot| snapshot.visible())
+}).await;
+```
 
-点击不存在或不可见的目标会 panic，并包含目标 ID。禁用控件仍然接收原生事件，由控件自身决定是否响应；测试应检查业务状态没有变化。
+`wait_for` 按 GPUI 测试执行器时钟每 10ms 刷新并检查条件，超时报错列出注册路径。
+它是有界的条件等待，不模拟操作系统事件循环或网络服务；外部依赖需要受控响应。
+执行器停驻本身不代表定时器或延迟工作已经完成。
 
-可见性结合布局尺寸、视口与内容裁剪、目标的计算样式判断。覆盖层可能拦截点击，即使目标报告可见。部分裁剪元素的中心也可能落在可见区域之外。这些情况下，辅助方法不会绕过命中测试直接调用回调。GPUI 没有公开未观察祖先的透明绘制信息，包装器无法推断这种祖先透明度。
+快照永不原地更新。缓存视图保留绘制事实，直到被失效并重绘。卸载目标在释放其
+element state 的帧完成后消失；虚拟列表行则在滚动后实际绘制时进入查询结果。
 
-遇到失败，依次检查：
+## 覆盖范围与失败排查
 
-1. 目标是否有稳定 ID，且通过 Kit 的测试支持或 `.observe()` 注册。
-2. 是否完成了反映当前状态的刷新与绘制。
-3. 预期输入框是否有焦点，是否有覆盖层或裁剪拦截点击。
-4. 异步依赖是否已在测试执行器中完成。
+这是逐步扩展的无头交互 API，并未自动覆盖所有 Kit 组件。Table、Menu、Dialog、Dock
+尚未拥有全面的自动语义观察与专门的端到端流程测试。原生滚动与拖放已有测试，
+包括真实虚拟列表与 HoverCard 延迟显示/关闭，但不能据此宣称所有 Table 或 Dock 行为已验证。
+自定义视图需要时可以观察已有原生元素，并报告真实状态，而非测试专用常量。
+
+目标缺失或不可见时点击会 panic。禁用控件仍接收原生事件，由控件自己决定是否响应。
+可见性结合几何、视口与内容裁剪、目标计算样式，不判断像素遮挡；覆盖层仍会拦截点击。
+`click_at(id, point(px(10.), px(10.)), cx)` 可以选择裁剪后可见的部分，不会绕过命中测试。
+
+观察依赖 feature，因此被测制品与生产制品并非逐字节相同。透明包装器不增加布局盒子，
+但可见性检查会额外计算一次样式；style/drag 谓词不能依赖调用次数。
+GPUI 没有公开未观察祖先的继承绘制透明度，因此无法推断该情况。
+实现没有使用 GPUI fork 或 Cargo patch 绕过这些限制。
+
+失败时按具体情况检查注册路径、观察配置、完成帧、键盘焦点、裁剪与覆盖层、异步完成条件。
 
 ## 接入 CI
 

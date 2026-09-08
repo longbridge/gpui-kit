@@ -41,7 +41,7 @@ impl Render for Profile {
                 div()
                     .id("status")
                     .observe()
-                    .text(status.clone())
+                    .observe_text(status.clone())
                     .child(status),
             )
     }
@@ -62,30 +62,24 @@ fn saves_a_profile_through_the_ui(cx: &mut TestAppContext) {
     let profile = profile.unwrap();
 
     cx.update_window(handle.into(), |_, window, cx| {
-        window.draw(cx).clear(cx);
-        assert_eq!(window.find("status").unwrap().text(), Some("Not saved"));
+        window.render_frame(cx);
+        assert_eq!(window.find("status").text(), Some("Not saved"));
 
         window.click("name", cx);
         window.input("Ada 中文", cx);
-        let name = window.find("name").unwrap();
+        let name = window.find("name");
         assert!(name.focused());
         assert_eq!(name.text(), Some("Ada 中文"));
         assert!(name.bounds().size.width > px(0.));
-    })
-    .unwrap();
-
-    // Special keys use GPUI's existing test context.
-    cx.simulate_keystrokes(handle.into(), "backspace");
-    cx.update_window(handle.into(), |_, window, cx| {
-        window.refresh();
-        window.draw(cx).clear(cx);
-        assert_eq!(window.find("name").unwrap().text(), Some("Ada 中"));
+        // Named keys share the same Window API and refresh the resulting frame.
+        window.press("backspace", cx);
+        assert_eq!(window.find("name").text(), Some("Ada 中"));
 
         window.click("save", cx);
-        let status = window.find("status").unwrap();
+        let status = window.find("status");
         assert!(status.visible());
         assert_eq!(status.text(), Some("Saved: Ada 中"));
-        assert!(status.bounds().top() >= window.find("save").unwrap().bounds().bottom());
+        assert!(status.bounds().top() >= window.find("save").bounds().bottom());
     })
     .unwrap();
 

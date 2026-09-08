@@ -98,3 +98,11 @@ required-features = ["test-support", "component"]
 [[test]]
 name = "ui"
 required-features = ["test-support", "component"]
+
+[[test]]
+name = "controls"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "interactions"
+required-features = ["test-support"]

@@ -168,7 +168,10 @@ impl RenderOnce for Toggle {
         let style = self.resolved_style();
         let on_change = self.on_change;
 
-        self.base
+        #[cfg(feature = "test-support")]
+        let observed_focus = focus_handle.clone();
+        let element = self
+            .base
             .role(Role::Button)
             // Match Button's neutral control geometry: a fixed-size toggle
             // centers ordinary content, while callers still own its size,
@@ -206,7 +209,17 @@ impl RenderOnce for Toggle {
                 },
             )
             .children(self.children)
-            .refine_style(&style)
+            .refine_style(&style);
+        #[cfg(feature = "test-support")]
+        let element = {
+            use crate::test_support::ObserveElement as _;
+            element
+                .observe()
+                .observe_disabled(disabled)
+                .observe_focus(&observed_focus)
+                .observe_checked(pressed)
+        };
+        element
     }
 }
 

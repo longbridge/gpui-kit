@@ -273,9 +273,10 @@ impl RenderOnce for Button {
             use crate::test_support::ObserveElement as _;
             element
                 .observe()
-                .disabled(self.disabled)
-                .focus(&test_focus)
-                .when_some(self.observed_text, |this, text| this.text(text))
+                .observe_disabled(self.disabled)
+                .observe_selected(self.selected)
+                .observe_focus(&test_focus)
+                .when_some(self.observed_text, |this, text| this.observe_text(text))
         };
         element
     }

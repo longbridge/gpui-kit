@@ -14,14 +14,39 @@ use std::{
 
 /// Owned facts from the last paint of an observed element.
 #[derive(Clone, Debug)]
-pub struct TestElement {
+pub struct ElementSnapshot {
+    path: Vec<ElementId>,
+    checked: Option<bool>,
+    indeterminate: Option<bool>,
+    selected: Option<bool>,
+    expanded: Option<bool>,
+    value: Option<SharedString>,
     bounds: Bounds<Pixels>,
     visible: bool,
     focused: bool,
     disabled: bool,
     text: Option<SharedString>,
 }
-impl TestElement {
+impl ElementSnapshot {
+    pub fn path(&self) -> &[ElementId] {
+        &self.path
+    }
+    pub fn checked(&self) -> Option<bool> {
+        self.checked
+    }
+    pub fn indeterminate(&self) -> Option<bool> {
+        self.indeterminate
+    }
+    pub fn selected(&self) -> Option<bool> {
+        self.selected
+    }
+    pub fn expanded(&self) -> Option<bool> {
+        self.expanded
+    }
+    pub fn value(&self) -> Option<&str> {
+        self.value.as_deref()
+    }
+
     pub fn bounds(&self) -> Bounds<Pixels> {
         self.bounds
     }
@@ -50,8 +75,7 @@ thread_local! { static REGISTRY: RefCell<Registry> = RefCell::new(HashMap::new()
 pub struct Registration {
     window: WindowKey,
     global_id: GlobalElementId,
-    id: ElementId,
-    facts: RefCell<TestElement>,
+    facts: RefCell<ElementSnapshot>,
 }
 impl Drop for Registration {
     fn drop(&mut self) {
@@ -68,23 +92,86 @@ impl Drop for Registration {
     }
 }
 
-/// Internal lookup used by the public Window extension in gpui-kit.
+/// Internal lookup used by Kit's testing API. Scope follows GPUI's element path.
 #[doc(hidden)]
-pub fn find(window: &Window, id: ElementId) -> Option<TestElement> {
+pub fn find(window: &Window, scope: &[ElementId], id: &ElementId) -> Option<ElementSnapshot> {
     REGISTRY.with(|registry| {
         let registry = registry.borrow();
         let entries = registry.get(&(std::sync::Arc::as_ptr(window.text_system()) as usize))?;
-        let mut matches = entries
+        let matches: Vec<_> = entries
             .values()
             .filter_map(Weak::upgrade)
-            .filter(|entry| entry.id == id);
-        let entry = matches.next()?;
+            .filter(|entry| {
+                entry.global_id.len() > scope.len()
+                    && entry.global_id.starts_with(scope)
+                    && entry.global_id.last() == Some(id)
+            })
+            .collect();
         assert!(
-            matches.next().is_none(),
-            "ambiguous ElementId {id:?}; use a unique target ID"
+            matches.len() <= 1,
+            "ambiguous ElementId {id:?}; use within(...) to select a scope. Matches: {:?}",
+            matches
+                .iter()
+                .map(|entry| &entry.global_id)
+                .collect::<Vec<_>>()
         );
-        Some(entry.facts.borrow().clone())
+        matches.first().map(|entry| entry.facts.borrow().clone())
     })
+}
+
+#[doc(hidden)]
+pub fn snapshots(window: &Window) -> Vec<ElementSnapshot> {
+    REGISTRY.with(|registry| {
+        registry
+            .borrow()
+            .get(&(std::sync::Arc::as_ptr(window.text_system()) as usize))
+            .map(|entries| {
+                entries
+                    .values()
+                    .filter_map(Weak::upgrade)
+                    .map(|entry| entry.facts.borrow().clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+}
+
+/// Resolves a scope even when only its descendants are observed.
+#[doc(hidden)]
+pub fn scope(window: &Window, parent: &[ElementId], id: &ElementId) -> Vec<ElementId> {
+    let mut paths = std::collections::HashSet::new();
+    for snapshot in snapshots(window) {
+        if !snapshot.path.starts_with(parent) {
+            continue;
+        }
+        for index in parent.len()..snapshot.path.len() {
+            if &snapshot.path[index] == id {
+                paths.insert(snapshot.path[..=index].to_vec());
+            }
+        }
+    }
+    assert_eq!(
+        paths.len(),
+        1,
+        "expected one scope {id:?} below {parent:?}, found {}. Registered paths: {}",
+        paths.len(),
+        registered_paths(window)
+    );
+    paths.into_iter().next().unwrap()
+}
+
+#[doc(hidden)]
+pub fn registered_paths(window: &Window) -> String {
+    let mut paths: Vec<_> = snapshots(window)
+        .iter()
+        .map(|entry| format!("{:?}", entry.path))
+        .collect();
+    paths.sort();
+    if paths.is_empty() {
+        "<none; draw a frame and enable observation>".into()
+    } else {
+        paths.join(", ")
+    }
 }
 
 /// Adds observation to a GPUI div without changing its identity or event handling.
@@ -99,6 +186,11 @@ pub trait ObserveElement:
         );
         Observed {
             inner: self,
+            checked: None,
+            indeterminate: None,
+            selected: None,
+            expanded: None,
+            value: None,
             focus: None,
             disabled: false,
             text: None,
@@ -111,21 +203,47 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> ObserveEle
 /// state, so normal state cleanup and cached-view replay determine its lifetime.
 pub struct Observed<E> {
     inner: E,
+    checked: Option<bool>,
+    indeterminate: Option<bool>,
+    selected: Option<bool>,
+    expanded: Option<bool>,
+    value: Option<SharedString>,
     focus: Option<FocusHandle>,
     disabled: bool,
     text: Option<SharedString>,
 }
 impl<E> Observed<E> {
+    pub fn observe_checked(mut self, checked: bool) -> Self {
+        self.checked = Some(checked);
+        self
+    }
+    pub fn observe_indeterminate(mut self, indeterminate: bool) -> Self {
+        self.indeterminate = Some(indeterminate);
+        self
+    }
+    pub fn observe_selected(mut self, selected: bool) -> Self {
+        self.selected = Some(selected);
+        self
+    }
+    pub fn observe_expanded(mut self, expanded: bool) -> Self {
+        self.expanded = Some(expanded);
+        self
+    }
+    pub fn observe_value(mut self, value: impl Into<SharedString>) -> Self {
+        self.value = Some(value.into());
+        self
+    }
+
     /// Reports whether a custom control is disabled.
-    pub fn disabled(mut self, disabled: bool) -> Self {
+    pub fn observe_disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
-    pub fn text(mut self, text: impl Into<SharedString>) -> Self {
+    pub fn observe_text(mut self, text: impl Into<SharedString>) -> Self {
         self.text = Some(text.into());
         self
     }
-    pub fn focus(mut self, focus: &FocusHandle) -> Self {
+    pub fn observe_focus(mut self, focus: &FocusHandle) -> Self {
         self.focus = Some(focus.clone());
         self
     }
@@ -164,7 +282,13 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
         cx: &mut App,
     ) -> Self::PrepaintState {
         let global_id = id.expect("observed elements have an ID");
-        let facts = TestElement {
+        let facts = ElementSnapshot {
+            path: global_id.to_vec(),
+            checked: self.checked,
+            indeterminate: self.indeterminate,
+            selected: self.selected,
+            expanded: self.expanded,
+            value: self.value.clone(),
             bounds,
             visible: false,
             focused: false,
@@ -177,7 +301,6 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
                     Rc::new(Registration {
                         window: std::sync::Arc::as_ptr(window.text_system()) as usize,
                         global_id: global_id.clone(),
-                        id: Element::id(&self.inner).unwrap(),
                         facts: RefCell::new(facts.clone()),
                     })
                 });

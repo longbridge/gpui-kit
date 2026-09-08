@@ -349,7 +349,10 @@ impl RenderOnce for Switch {
         let disabled = self.disabled;
         let style = self.resolved_style();
 
-        self.base
+        #[cfg(feature = "test-support")]
+        let observed_focus = focus_handle.clone();
+        let element = self
+            .base
             .role(Role::Switch)
             .aria_toggled(if checked {
                 Toggled::True
@@ -380,7 +383,17 @@ impl RenderOnce for Switch {
                 },
             )
             .children(self.children)
-            .refine_style(&style)
+            .refine_style(&style);
+        #[cfg(feature = "test-support")]
+        let element = {
+            use crate::test_support::ObserveElement as _;
+            element
+                .observe()
+                .observe_disabled(disabled)
+                .observe_focus(&observed_focus)
+                .observe_checked(checked)
+        };
+        element
     }
 }
 

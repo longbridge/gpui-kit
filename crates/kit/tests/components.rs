@@ -52,17 +52,17 @@ fn kit_controls_use_native_events_and_report_state(cx: &mut TestAppContext) {
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        assert!(window.find("disabled").unwrap().disabled());
+        assert!(window.find("disabled").disabled());
         window.click("disabled", cx);
         window.click("search", cx);
-        assert!(window.find("search").unwrap().focused());
+        assert!(window.find("search").focused());
         window.input("GPUI 中文 🦀", cx);
-        assert_eq!(window.find("search").unwrap().text(), Some("GPUI 中文 🦀"));
-        assert!(window.find("popover-content").is_none());
+        assert_eq!(window.find("search").text(), Some("GPUI 中文 🦀"));
+        assert!(window.try_find("popover-content").is_none());
         window.click("open", cx);
-        let content = window.find("popover-content").unwrap();
+        let content = window.find("popover-content");
         assert!(content.visible());
-        assert!(content.bounds().top() >= window.find("open").unwrap().bounds().bottom());
+        assert!(content.bounds().top() >= window.find("open").bounds().bottom());
     })
     .unwrap();
     handle
@@ -85,7 +85,7 @@ fn button_reports_its_label_instead_of_accessibility_name(cx: &mut TestAppContex
     let handle = cx.add_window(|_, _| NamedButton);
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        assert_eq!(window.find("save").unwrap().text(), Some("Save"));
+        assert_eq!(window.find("save").text(), Some("Save"));
     })
     .unwrap();
 }

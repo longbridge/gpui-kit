@@ -87,101 +87,165 @@ cargo test -p gpui-kit --features test-support --test ui --locked
 
 ## Choose stable test targets
 
-Kit Button uses its constructor ID, such as `Button::new("save")`. Give Input
-an explicit ID with `Input::new(&state).id("name")`; its default ID includes the
-input state's entity ID.
+With `test-support` enabled, these controls register their existing native element;
+observation adds no layout container:
 
-Native GPUI divs opt in with `.id(...).observe()`. Supply logical text with
-`.text(value)` when your view knows it. The wrapper does not discover text
-inside arbitrary children. Add it conditionally in production views:
+| Control | Reported state beyond geometry and visibility |
+| --- | --- |
+| Button | Label text, focus, disabled, selected |
+| Input | Unmasked text/value, focus, disabled |
+| Checkbox | Checked, indeterminate, focus, disabled |
+| Switch / Toggle | Checked, focus, disabled |
+| Radio | Checked, selected, focus, disabled |
+| Tab | Selected, disabled |
+| Select | Selected title as value, expanded, focus, disabled |
+| ListItem | Selected, disabled |
+| SidebarMenuItem | Label text, selected, expanded, disabled |
+
+Use constructor IDs where available. Input and Select accept `.id("name")`;
+their defaults include the state entity ID. Tabs inside a TabBar use their
+index as ID. Select's existing `"input"` child identifies its trigger:
+`window.within("language").click("input", cx)`.
+
+Native divs opt in with `.id(...).observe()`. Supply facts the view actually
+knows with `observe_text`, `observe_focus`, `observe_disabled`, `observe_checked`,
+`observe_indeterminate`, `observe_selected`, `observe_expanded` and `observe_value`.
+These methods report facts; they do not change control behavior. For example,
+`observe_disabled(true)` does not disable an event handler.
 
 ```rust
 let status = div().id("status").child(message.clone());
 #[cfg(feature = "test-support")]
-let status = status.observe().text(message.clone());
+let status = status.observe().observe_text(message.clone());
 ```
 
-Here `message` is a `SharedString` and `ObserveElement` must be imported under
-the same configuration. If your application uses this pattern, declare an
-application `test-support` feature that forwards to `gpui-kit/test-support`
-and import `gpui_kit::test::ObserveElement` in the instrumented view.
-Run its tests with `--features test-support`. The application library uses its
-normal `gpui-kit` dependency; it needs no separate testing dependency.
+Here `message` is a `SharedString`. Import `gpui_kit::test::ObserveElement` under
+the same condition and declare an application `test-support` feature forwarding
+to `gpui-kit/test-support`; run with `--features test-support`.
+`observe()` wraps the existing identified div, preserves its identity, layout,
+events and accessibility, and does not discover arbitrary child text or IDs.
 
-Use unique IDs for queried targets. For rows, composite IDs such as
-`("row", record_id)` remain associated with the record after reordering.
-Repeated IDs in separate scopes are ambiguous for a window-wide lookup and
-cause a panic.
+IDs only need to be unique within their GPUI identity scope. Window-wide queries
+panic on ambiguity. Use existing scopes without adding test containers:
+
+```rust
+window.within("toolbar").click("save", cx);
+window.within("dialog").click("save", cx);
+let save = window.within("dialog").within("footer").find("save");
+assert!(!save.disabled());
+```
+
+A parent scope need not itself be observed: its ID is part of its observed
+children's GPUI paths. `within` requires a unique painted path. Composite row
+IDs such as `("row", record_id)` preserve record identity after reordering.
 
 ## Interact and assert
 
+Import `gpui_kit::test::TestWindowExt` for the following methods:
+
 | API | Behavior |
 | --- | --- |
-| `window.find(id)` | Returns an owned snapshot from the last completed frame, or `None` for an unregistered target. |
-| `window.click(id, cx)` | Sends mouse move, down and up at the target's center through GPUI hit testing. |
-| `window.input(text, cx)` | Sends text to the current keyboard focus through simulated keystrokes. It does not focus a target or replace the whole value. |
-| `cx.simulate_keystrokes(handle.into(), "backspace")` | Uses GPUI's existing API for named keys and shortcuts. |
+| `window.find(id)` | Requires an `ElementSnapshot` from the last completed frame; missing targets panic with registered paths and troubleshooting hints. |
+| `window.try_find(id)` | Returns `None` when absent; ambiguity still panics. |
+| `window.click(id, cx)` | Native mouse move/down/up at the target center. |
+| `window.click_at(id, offset, cx)` | Click at a pixel offset from the target's top-left corner, useful for partial clipping. |
+| `window.right_click(id, cx)` / `double_click(id, cx)` | Native right-button or two-click sequences. |
+| `window.hover(id, cx)` | Move the pointer without pressing a button. |
+| `window.scroll(id, delta, cx)` | Native wheel event; `ScrollDelta` retains GPUI units and sign. |
+| `window.drag(from, to, cx)` | Left-button drag between window-local points, through GPUI drag creation and drop hit testing. |
+| `window.press("backspace", cx)` | Named key or shortcut using GPUI's keystroke parser. |
+| `window.input(text, cx)` | Per-character text input to the current focus; does not focus or replace the whole value. |
 
-Snapshots expose `bounds()`, `visible()`, `focused()`, `disabled()` and `text()`.
-Check the facts that matter to the behavior: a save result, the focused input,
-a disabled control remaining inert, or a popover positioned below its trigger.
-Also assert the application state or emitted result so that a rendered label
-alone cannot make a broken workflow pass.
+Scoped queries support `find`, `try_find`, nested `within`, `click` and `click_at`.
+For a coordinate drag, query scoped targets and pass their `bounds().center()`
+to `window.drag`.
 
-Text input simulates per-character input. It does not model the operating
-system's complete IME composition workflow. Masked inputs intentionally report
-no text; verify their resulting value through application state when needed.
+`ElementSnapshot` is an owned, immutable record of a completed paint. Its readers
+are `path()`, `bounds()`, `visible()`, `focused()`, `disabled()`, `text()`,
+`value()`, `checked()`, `indeterminate()`, `selected()` and `expanded()`.
+The last four state readers return `Option<bool>`: `None` means unreported,
+not false. Text/value are also optional. Re-query after interactions:
+
+```rust
+let before = window.find("agree");
+window.click("agree", cx);
+assert_eq!(before.checked(), Some(false)); // The original frame.
+assert_eq!(window.find("agree").checked(), Some(true)); // The new frame.
+```
+
+Assert rendered facts and application results together. Checking saved model
+state or an emitted result is a useful part of an integration test; it should
+not replace verifying the relevant visible control state.
+
+Text input does not model complete OS IME composition. Masked inputs report
+neither text nor value; verify sensitive results through application state.
 
 ## Complete the frame before querying
 
-Draw before the first query. Click and input helpers refresh and draw around
-their dispatch. After a direct state change, focus change, resize or GPUI
-keyboard action, explicitly refresh and draw:
+Call `window.render_frame(cx)` before the first query and after direct external
+state/focus changes or resizing. Interaction helpers refresh around synchronous
+dispatch, including `press`. They cannot finish deferred callbacks while the
+surrounding window update is still borrowed.
 
 ```rust
 cx.update_window(handle.into(), |_, window, cx| {
-    window.refresh();
-    window.draw(cx).clear(cx);
-    assert!(window.find("name").unwrap().focused());
+    window.render_frame(cx);
+    window.click("name", cx);
+    window.input("Ada", cx);
+    window.press("backspace", cx);
+    assert_eq!(window.find("name").value(), Some("Ad"));
 }).unwrap();
 ```
 
-Use `TestAppContext::update_window` for these interactions. A typed
-`WindowHandle::update` borrows the root entity and cannot safely redraw that
-entity inside the same callback. Use typed updates to inspect or change model
-state, then return before drawing through `update_window`.
+Use `TestAppContext::update_window`; typed `WindowHandle::update` already borrows
+the root entity and cannot safely redraw it in the same callback.
 
-For asynchronous work, drive GPUI's test executor outside the window update
-with `cx.run_until_parked()`, then refresh and query. Work waiting for a timer,
-network response or external service needs a controlled test clock or a fake
-service response; a parked executor does not imply that all such work finished.
-Avoid wall-clock sleeps as a substitute for completion.
+For asynchronous work or deferred selection commits, use an async
+`#[gpui_kit::test]` and wait **outside** the window update:
 
-Snapshots do not update in place. Call `find` again after the next frame.
-Cached views retain their last painted facts until invalidated; refresh after
-external changes. Unmounted targets disappear after the completed frame that
-releases their element state.
+```rust
+use gpui_kit::test::TestAppContextExt;
+use std::time::Duration;
 
-## Visibility and failure cases
+cx.wait_for(handle.into(), Duration::from_millis(200), |window, _| {
+    window.try_find("result").is_some_and(|snapshot| snapshot.visible())
+}).await;
+```
 
-A missing or invisible click target panics with its ID. A disabled control
-still receives native events and decides whether to handle them; test that it
-does not change application state.
+`wait_for` refreshes frames and polls every 10 ms using GPUI's test executor
+clock, with registered paths in timeout errors. This is a bounded condition
+wait, not an OS event loop or a network-service simulator. Provide controlled
+responses for external dependencies. A parked executor alone does not imply
+that timers or deferred work have completed.
 
-Visibility uses layout size, viewport/content clipping and the target's
-computed style. An overlay may intercept a click even when the target reports
-visible. The center of a partially clipped element can fall outside its
-visible portion. These helpers do not bypass either case to invoke callbacks.
-An unobserved ancestor's transparent paint opacity is not exposed by GPUI and
-cannot be inferred by this wrapper.
+Snapshots never update in place. Cached views keep their painted facts until
+invalidated. Unmounted targets disappear after the frame releasing their
+element state; virtualized rows become queryable when painted after scrolling.
 
-When a test fails, first check:
+## Coverage and failure cases
 
-1. The target has a stable ID and is registered through Kit instrumentation or
-   `.observe()`.
-2. A completed, refreshed frame reflects the state being asserted.
-3. The intended input has focus, and no overlay or clipping intercepts clicks.
-4. Any asynchronous dependency has completed in the test executor.
+This is an incrementally growing headless interaction API, not automatic
+coverage of every Kit component. Table, Menu, Dialog and Dock do not yet have
+comprehensive automatic semantic observation or dedicated end-to-end workflows.
+Native scrolling and drag/drop primitives are tested, including a real virtual
+list and delayed HoverCard opening/closing; this does not establish every Table or Dock behavior. Add observation to
+an existing native element in a custom view when necessary, and supply actual
+state rather than a test-only constant.
+
+Missing or invisible click targets panic. Disabled controls receive real events
+and decide whether to respond. Visibility combines geometry, viewport/content
+clipping and the target's computed style; it does not detect pixel occlusion.
+Overlays can intercept clicks. `click_at(id, point(px(10.), px(10.)), cx)` can
+choose a visible portion of a clipped target without bypassing hit testing.
+
+Observation is feature-gated and therefore not byte-identical to a production
+build. The transparent wrapper adds no layout box, but visibility inspection
+computes style an additional time; style/drag predicates must not rely on call
+counts. GPUI does not expose inherited paint opacity from an unobserved ancestor.
+No GPUI fork or Cargo patch is used to bypass these limitations.
+
+On failure, check the reported paths, observation, completed frame, keyboard
+focus, clipping/overlays and asynchronous completion, in that order as relevant.
 
 ## Run in CI
 

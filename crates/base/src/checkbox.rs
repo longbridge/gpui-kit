@@ -369,7 +369,10 @@ impl RenderOnce for Checkbox {
         let style = self.resolved_style();
         let on_change = self.on_change;
 
-        self.base
+        #[cfg(feature = "test-support")]
+        let observed_focus = focus_handle.clone();
+        let element = self
+            .base
             .when_some(self.role.resolve(|| Role::CheckBox), |this, role| {
                 this.role(role)
             })
@@ -393,7 +396,18 @@ impl RenderOnce for Checkbox {
                 },
             )
             .children(self.children)
-            .refine_style(&style)
+            .refine_style(&style);
+        #[cfg(feature = "test-support")]
+        let element = {
+            use crate::test_support::ObserveElement as _;
+            element
+                .observe()
+                .observe_disabled(disabled)
+                .observe_focus(&observed_focus)
+                .observe_checked(self.state == CheckboxState::Checked)
+                .observe_indeterminate(self.state == CheckboxState::Indeterminate)
+        };
+        element
     }
 }
 

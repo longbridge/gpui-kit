@@ -49,13 +49,13 @@ fn text_goes_only_to_the_focused_input(cx: &mut TestAppContext) {
     cx.update_window(handle.into(), |_, window, cx| {
         window.click("first", cx);
         window.input("A🦀", cx);
-        let previous = window.find("first").unwrap();
+        let previous = window.find("first");
         window.click("second", cx);
         window.input("中文", cx);
-        assert!(!window.find("first").unwrap().focused());
-        assert!(window.find("second").unwrap().focused());
-        assert_eq!(window.find("first").unwrap().text(), Some("A🦀"));
-        assert_eq!(window.find("second").unwrap().text(), Some("中文"));
+        assert!(!window.find("first").focused());
+        assert!(window.find("second").focused());
+        assert_eq!(window.find("first").text(), Some("A🦀"));
+        assert_eq!(window.find("second").text(), Some("中文"));
         assert!(previous.focused());
     })
     .unwrap();
@@ -81,7 +81,7 @@ fn readonly_and_disabled_inputs_reject_native_typing(cx: &mut TestAppContext) {
         cx.update_window(handle.into(), |_, window, cx| {
             window.click("guarded", cx);
             window.input("ignored", cx);
-            let input = window.find("guarded").unwrap();
+            let input = window.find("guarded");
             assert_eq!(input.disabled(), disabled);
             assert_eq!(input.text(), Some("fixed"));
         })
@@ -100,7 +100,7 @@ fn masked_input_handles_typing_without_reporting_secret_value(cx: &mut TestAppCo
     cx.update_window(handle.into(), |_, window, cx| {
         window.click("secret", cx);
         window.input("secret", cx);
-        let secret = window.find("secret").unwrap();
+        let secret = window.find("secret");
         assert!(secret.focused());
         assert_eq!(secret.text(), None);
     })
@@ -124,7 +124,7 @@ fn existing_gpui_keyboard_editing_updates_observed_value(cx: &mut TestAppContext
     cx.update_window(handle.into(), |_, window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
-        assert_eq!(window.find("first").unwrap().text(), Some("a"));
+        assert_eq!(window.find("first").text(), Some("a"));
     })
     .unwrap();
     handle
