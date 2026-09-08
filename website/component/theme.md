@@ -1,7 +1,7 @@
 ---
 title: Theme
 description: Customize colors, typography, radii, and light or dark appearance with the GPUI Component theme system.
-order: -4
+example: false
 ---
 
 # Theme

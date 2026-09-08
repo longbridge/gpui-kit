@@ -4,6 +4,7 @@ use gpui::{
     RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window,
     deferred, div, prelude::FluentBuilder, px, rems,
 };
+use gpui_base::TestSupportExt as _;
 use rust_i18n::t;
 
 use crate::ThemeStyled as _;
@@ -488,6 +489,7 @@ where
                 .child(
                     div()
                         .id("input")
+                        .test_support()
                         .relative()
                         .flex()
                         .items_center()
@@ -606,6 +608,12 @@ where
             options: SelectOptions::default(),
             empty: None,
         }
+    }
+
+    /// Sets an explicit identity for the select root.
+    pub fn id(mut self, id: impl Into<ElementId>) -> Self {
+        self.id = id.into();
+        self
     }
 
     /// Set the width of the dropdown menu, default: `Length::Auto`.

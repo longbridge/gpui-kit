@@ -4,6 +4,7 @@ use gpui::{
     MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, RenderOnce, Stateful,
     StatefulInteractiveElement, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _,
 };
+use gpui_base::TestSupportExt as _;
 use smallvec::SmallVec;
 use std::collections::HashMap;
 
@@ -184,6 +185,7 @@ impl RenderOnce for ListItem {
         let is_selectable = !(self.disabled || self.mode.is_separator());
 
         self.base
+            .test_support()
             .relative()
             .gap_x_1()
             .py_1()

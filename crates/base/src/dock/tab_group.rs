@@ -1,5 +1,6 @@
 //! A tab group's behavior, with no appearance of its own.
 
+use crate::TestSupportExt as _;
 use std::{rc::Rc, sync::Arc};
 
 use gpui::{
@@ -695,6 +696,7 @@ impl Render for TabGroup {
 
         renderer
             .frame(&context, window, cx)
+            .test_support()
             // Structure, applied around whatever the renderer returns.
             //
             // A column, and not a `div`: gpui's default display is Block, and
@@ -714,6 +716,7 @@ impl Render for TabGroup {
             .child(
                 renderer
                     .content_frame(&context, window, cx)
+                    .test_support()
                     // The region below the tab bar takes the rest of the
                     // group -- except in a collapsed one, which is a strip of
                     // tabs with no content and must claim no space at all.

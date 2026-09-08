@@ -18,7 +18,9 @@ export async function getStaticPaths() {
     const aliases = slug === 'index' ? ['components', 'components/index'] : [`components/${slug}`];
     return aliases.map((slug) => ({ params: { slug }, props: { entry, route } }));
   });
-  return [...routes, ...legacy];
+  const testing = routes.find((route) => route.params.slug === 'test');
+  const testAliases = testing ? [{ ...testing, params: { slug: 'ui-testing' } }] : [];
+  return [...routes, ...legacy, ...testAliases];
 }
 
 export const GET: APIRoute = ({ props }) => {

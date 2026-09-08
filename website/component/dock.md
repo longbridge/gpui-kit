@@ -1,7 +1,6 @@
 ---
 title: Dock
 description: Production-ready dock layouts with styled tabs, split panes, edge docks, and persistent state.
-order: -6
 example: dock
 ---
 

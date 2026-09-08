@@ -404,6 +404,9 @@ impl RenderOnce for DatePicker {
 
         BaseDatePicker::new(self.id, &state.focus_handle)
             .open(state.open)
+            .when(state.date.is_some(), |this| {
+                this.aria_value(display_title.clone())
+            })
             .disabled(self.disabled)
             .on_open_change(move |open, window, cx| {
                 picker_state.update(cx, |state, cx| {

@@ -1,7 +1,6 @@
 ---
 title: Dock
 description: 支持标签页、分割面板、边缘 Dock 与状态持久化的生产级工作区布局。
-order: -6
 example: dock
 ---
 

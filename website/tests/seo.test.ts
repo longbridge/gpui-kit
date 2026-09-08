@@ -148,3 +148,15 @@ test('primary navigation follows the Kit section order', () => {
     assert.deepEqual(links.slice(0, 5).map(match => match[1]), ['docs', 'component', 'base', 'shell', 'apps'].map(section => `/${locale}${section}`));
   }
 });
+
+
+test('testing guide has canonical routes and readable legacy URLs', () => {
+  for (const locale of ['', 'zh-CN/']) {
+    const route = `${locale}docs/test`;
+    const html = read(`${route}/index.html`);
+    assert.ok(html.includes(`https://gpui-kit.com/${route}`));
+    assert.ok(read(`${locale}docs/ui-testing/index.html`).includes(`url=/${route}`));
+    assert.equal(read(`${locale}docs/ui-testing.md`), read(`${route}.md`));
+    assert.ok(read("llms.txt").includes(`/${route}.md`));
+  }
+});

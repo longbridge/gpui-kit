@@ -1,3 +1,4 @@
+use crate::TestSupportExt as _;
 use std::ops::Range;
 
 use gpui::{
@@ -474,6 +475,7 @@ impl RenderOnce for Slider {
 
         self.base
             .id(("slider", entity_id))
+            .test_support()
             .role(Role::Slider)
             .aria_numeric_value(state.value().end() as f64)
             .aria_min_numeric_value(state.min_value() as f64)
@@ -576,6 +578,7 @@ impl RenderOnce for SliderTrack {
         let percentage = state.percentage();
         self.base
             .id("slider-bar-container")
+            .test_support()
             .children(self.children)
             .when(!self.disabled, |this| {
                 this.on_mouse_down(
@@ -746,6 +749,7 @@ impl RenderOnce for SliderThumb {
         let start = self.start;
         self.base
             .id(("slider-thumb", start as u32))
+            .test_support()
             .children(self.children)
             .when(!self.disabled, |this| {
                 this.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

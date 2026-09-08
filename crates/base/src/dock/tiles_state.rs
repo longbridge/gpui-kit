@@ -1,5 +1,6 @@
 //! A tiles canvas's behavior, with no appearance of its own.
 
+use crate::TestSupportExt as _;
 use std::{rc::Rc, sync::Arc};
 
 use gpui::{
@@ -581,6 +582,7 @@ impl Render for TilesState {
 
         renderer
             .frame(window, cx)
+            .test_support()
             .track_focus(&focus_handle)
             .on_drop(cx.listener(|_, item: &AnyDrag, _, cx| {
                 cx.emit(TilesEvent::DragDrop { item: item.clone() });

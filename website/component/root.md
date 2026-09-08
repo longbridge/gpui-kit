@@ -1,7 +1,7 @@
 ---
 title: Root View
 description: Use the Root view to enable themes, notifications, dialogs, and other GPUI Component features in a window.
-order: -7
+example: false
 ---
 
 # Root View

@@ -1,3 +1,4 @@
+use gpui_base::TestSupportExt as _;
 use std::{ops::Range, rc::Rc, time::Duration};
 
 use crate::{
@@ -1584,6 +1585,7 @@ where
             .child(
                 self.render_cell(None, col_ix, window, cx)
                     .id(("col-header", col_ix))
+                    .test_support()
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.on_col_head_click(col_ix, window, cx);
                     }))
@@ -1940,7 +1942,7 @@ where
         is_filled: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Stateful<Div> {
+    ) -> gpui::AnyElement {
         let horizontal_scroll_handle = self.horizontal_scroll_handle.clone();
         let is_stripe_row = self.options.stripe && row_ix % 2 != 0;
         let is_selected = self.selected_row == Some(row_ix);
@@ -1954,7 +1956,10 @@ where
             let mut tr = self.delegate.render_tr(row_ix, window, cx);
             let style = tr.style().clone();
 
-            tr.h_flex()
+            tr.test_support()
+                .role(gpui::Role::Row)
+                .aria_selected(is_selected)
+                .h_flex()
                 .w_full()
                 .h(row_height)
                 .when(need_render_border, |this| {
@@ -2229,6 +2234,7 @@ where
                 .on_click(cx.listener(move |this, e, window, cx| {
                     this.on_row_left_click(e, row_ix, window, cx);
                 }))
+                .into_any_element()
         } else {
             // Render fake rows to fill the rest table space
             self.delegate
@@ -2255,6 +2261,7 @@ where
                         .child(self.render_cell(None, col_ix, window, cx))
                 }))
                 .child(self.delegate.render_last_empty_col(window, cx))
+                .into_any_element()
         }
     }
 

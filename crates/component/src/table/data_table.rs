@@ -10,6 +10,7 @@ use gpui::{
     App, Edges, Entity, Focusable, InteractiveElement, IntoElement, KeyBinding, ParentElement,
     RenderOnce, Styled, Window, div, prelude::FluentBuilder,
 };
+use gpui_base::TestSupportExt as _;
 
 const CONTEXT: &'static str = "DataTable";
 pub(super) fn init(cx: &mut App) {
@@ -150,6 +151,7 @@ where
 
         div()
             .id("table")
+            .test_support()
             .size_full()
             .key_context(CONTEXT)
             .track_focus(&focus_handle)
