@@ -2,6 +2,8 @@
 extend-ignore-re = ['\\u\{[0-9A-Fa-f]+\}']
 
 [default.extend-words]
+# Official Lucide icon name for the astroid curve.
+astroid = "astroid"
 # Correct Italian singular of "command".
 comando = "comando"
 # A deliberately misspelled manifest key: `crates/shell/src/plugin.rs` refuses

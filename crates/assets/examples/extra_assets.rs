@@ -1,4 +1,7 @@
+// Native-only binary size measurement: WASM assets are fetched from an endpoint.
+#[cfg(not(target_family = "wasm"))]
 use gpui::AssetSource;
+#[cfg(not(target_family = "wasm"))]
 gpui_kit_assets::icon_assets!(
     ExtraIcons,
     [
@@ -14,7 +17,9 @@ gpui_kit_assets::icon_assets!(
         Compass
     ]
 );
+#[cfg(not(target_family = "wasm"))]
 struct AppAssets;
+#[cfg(not(target_family = "wasm"))]
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> gpui::Result<Option<std::borrow::Cow<'static, [u8]>>> {
         if let Some(bytes) = ExtraIcons.load(path)? {
@@ -31,6 +36,7 @@ impl AssetSource for AppAssets {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn main() {
     let path = std::env::args()
         .nth(1)
@@ -39,3 +45,6 @@ fn main() {
     let bytes = std::hint::black_box(source.load(&path).unwrap());
     println!("{:?}", bytes.map(|bytes| bytes.len()));
 }
+
+#[cfg(target_family = "wasm")]
+fn main() {}
