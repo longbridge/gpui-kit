@@ -118,6 +118,11 @@ where
     fn interactivity(&mut self) -> &mut gpui::Interactivity {
         self.element.interactivity()
     }
+
+    fn track_focus(mut self, focus: &gpui::FocusHandle) -> Self {
+        self.element = self.element.track_focus(focus);
+        self
+    }
 }
 
 impl<E> RenderOnce for Scrollable<E>

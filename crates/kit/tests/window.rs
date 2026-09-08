@@ -612,3 +612,38 @@ fn native_parts_forward_their_public_focus_binding(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+struct RenamedFocus {
+    focus: gpui::FocusHandle,
+}
+impl Render for RenamedFocus {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("original")
+            .test_support()
+            .id("renamed")
+            .track_focus(&self.focus)
+            .id("final")
+            .size(px(100.))
+    }
+}
+#[gpui_kit::test]
+fn renaming_observed_elements_preserves_focus_binding(cx: &mut TestAppContext) {
+    let handle = cx.add_window(|_, cx| RenamedFocus {
+        focus: cx.focus_handle(),
+    });
+    let focus = handle.update(cx, |view, _, _| view.focus.clone()).unwrap();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("final").focused(), Some(false));
+        window.focus(&focus, cx);
+        window.render_frame(cx);
+        assert_eq!(window.find("final").focused(), Some(true));
+        assert!(window.try_find("original").is_none());
+        assert!(window.try_find("renamed").is_none());
+        window.blur(cx);
+        window.render_frame(cx);
+        assert_eq!(window.find("final").focused(), Some(false));
+    })
+    .unwrap();
+}

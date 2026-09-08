@@ -244,6 +244,18 @@ impl<E: Element> Observed<E> {
         self
     }
 
+    /// Changes the native identity while keeping observation outside GPUI's
+    /// stateful wrapper, so later focus bindings still reach this element.
+    pub fn id(self, id: impl Into<ElementId>) -> Observed<gpui::Stateful<E>>
+    where
+        E: InteractiveElement,
+    {
+        Observed {
+            inner: self.inner.id(id),
+            focus: self.focus,
+        }
+    }
+
     pub(crate) fn new(inner: E) -> Self {
         assert!(
             Element::id(&inner).is_some(),

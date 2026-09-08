@@ -72,6 +72,7 @@ async fn date_picker_opens_selects_preset_clears_and_cancels(cx: &mut TestAppCon
         assert!(window.find("clean").visible());
         window.click("clean", cx);
         assert!(window.try_find("clean").is_none());
+        assert_eq!(window.find(id.clone()).value(), None);
         window.click(id.clone(), cx);
         window.press("escape", cx);
         assert_eq!(window.find(id.clone()).expanded(), Some(false));

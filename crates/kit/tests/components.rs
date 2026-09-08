@@ -89,3 +89,45 @@ fn button_reports_accessibility_name_without_claiming_visible_text(cx: &mut Test
     })
     .unwrap();
 }
+
+struct ScrollFocus {
+    focus: gpui::FocusHandle,
+}
+impl Render for ScrollFocus {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        use gpui_component::scroll::ScrollableElement as _;
+        div()
+            .id("original")
+            .test_support()
+            .size(px(100.))
+            .overflow_y_scrollbar()
+            .id("scroll")
+            .track_focus(&self.focus)
+    }
+}
+#[gpui_kit::test]
+fn scrollable_elements_forward_observed_focus_binding(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let handle = cx.add_window(|_, cx| ScrollFocus {
+        focus: cx.focus_handle(),
+    });
+    let focus = handle.update(cx, |view, _, _| view.focus.clone()).unwrap();
+    cx.update_window(handle.into(), |_, window, cx| {
+        let content = (gpui::ElementId::from("scroll"), "content");
+        window.render_frame(cx);
+        assert_eq!(
+            window.within("scroll").find(content.clone()).focused(),
+            Some(false)
+        );
+        window.focus(&focus, cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.within("scroll").find(content.clone()).focused(),
+            Some(true)
+        );
+        window.blur(cx);
+        window.render_frame(cx);
+        assert_eq!(window.within("scroll").find(content).focused(), Some(false));
+    })
+    .unwrap();
+}

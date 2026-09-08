@@ -227,6 +227,18 @@ async fn notification_auto_dismisses_after_its_timer(cx: &mut TestAppContext) {
         window.try_find("notification").is_some()
     })
     .await;
+    // The default timeout is five seconds; the notification must remain
+    // mounted before that deadline, not merely disappear eventually.
+    for _ in 0..40 {
+        cx.background_executor
+            .advance_clock(Duration::from_millis(100));
+        cx.run_until_parked();
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("notification").is_some());
+        })
+        .unwrap();
+    }
     cx.wait_for(handle.into(), Duration::from_secs(10), |window, _| {
         window.try_find("notification").is_none()
     })
