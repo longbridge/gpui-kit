@@ -124,7 +124,11 @@ including the nested editor inside an Input frame. If GPUI advertises focus supp
 but the binding was not observed, `focused()` panics with a diagnostic instead of
 silently returning `None`. This catches `.track_focus(&handle).test_support()`;
 implicit `.focusable()` handles are also unavailable, so use an explicit handle.
-`None` is reserved for elements with neither an observed binding nor native focus support.
+This diagnostic is best effort: it relies on the native accessibility `Action::Focus`.
+A custom element that omits this action can still return `None` for a missed binding.
+`None` means neither a binding nor an advertised focus action was observed; it does
+not prove that the element cannot receive focus. Debug output marks a detected missed
+binding as `focused: <binding missed>` without panicking.
 
 Snapshots read native `role`, `aria_toggled`, `aria_selected`, `aria_expanded`,
 `aria_label` and `aria_value`. There are no `TestProps` or hand-supplied fallback values.
@@ -203,6 +207,14 @@ Scoped keyboard operations do not move focus. They require an observed focus bin
 inside the scope; otherwise they panic before dispatch. `input` checks before every
 character, so a handler moving focus outside the scope cannot redirect the remaining
 text. Use `window.press` for deliberate window-wide shortcuts.
+
+For custom input controls, register the actual focus-bearing element with
+`.id("editor").test_support().track_focus(&focus_handle)`, using its real focus handle.
+An unobserved input, or an observed outer container without a tracked handle, cannot
+satisfy this check even if keyboard focus is physically inside the scope. Window-level
+`input` and `press` dispatch to the current focus without this scope guarantee.
+Scoped input shares the window input loop: one initial refresh, then one refresh per
+character, with scope checks against each completed frame.
 
 `ElementSnapshot` is an owned, immutable record of a completed paint. Its readers
 are `role()`, `path()`, `bounds()`, `visible()`, `focused()`, `disabled()`, `label()`,

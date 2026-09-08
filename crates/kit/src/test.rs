@@ -258,15 +258,7 @@ impl TestWindowExt for Window {
         self.render_frame(cx);
     }
     fn input(&mut self, text: &str, cx: &mut App) {
-        self.render_frame(cx);
-        for character in text.chars() {
-            let text = character.to_string();
-            let mut key =
-                Keystroke::parse(&text).expect("a Unicode character is a valid GPUI keystroke");
-            key.key_char = Some(text);
-            self.dispatch_keystroke(key, cx);
-            self.render_frame(cx);
-        }
+        input_text(self, text, None, cx);
     }
 }
 
@@ -346,23 +338,39 @@ impl ScopedWindow<'_> {
     /// Dispatches to current focus, requiring an observed focus binding inside this scope.
     /// Does not move focus; click a scoped input first.
     pub fn press(&mut self, key: &str, cx: &mut App) {
-        self.require_focus(cx);
-        self.window.press(key, cx);
+        let key =
+            Keystroke::parse(key).unwrap_or_else(|error| panic!("invalid test keystroke: {error}"));
+        self.window.render_frame(cx);
+        require_scope_focus(self.window, &self.scope);
+        self.window.dispatch_keystroke(key, cx);
+        self.window.render_frame(cx);
     }
     /// Checks scope membership before every character, including after focus-changing handlers.
     pub fn input(&mut self, text: &str, cx: &mut App) {
-        for character in text.chars() {
-            self.require_focus(cx);
-            self.window.input(&character.to_string(), cx);
-        }
+        input_text(self.window, text, Some(&self.scope), cx);
     }
-    fn require_focus(&mut self, cx: &mut App) {
-        self.window.render_frame(cx);
-        assert!(
-            observation::scope_has_focus(self.window, &self.scope),
-            "no observed keyboard focus inside scope {:?}; focus a control in this scope before press/input",
-            self.scope
-        );
+}
+
+fn require_scope_focus(window: &Window, scope: &[ElementId]) {
+    assert!(
+        observation::scope_has_focus(window, scope),
+        "no observed keyboard focus inside scope {:?}; register the focused control with .test_support().track_focus(&handle) inside this scope before press/input",
+        scope
+    );
+}
+
+fn input_text(window: &mut Window, text: &str, scope: Option<&[ElementId]>, cx: &mut App) {
+    window.render_frame(cx);
+    for character in text.chars() {
+        if let Some(scope) = scope {
+            require_scope_focus(window, scope);
+        }
+        let text = character.to_string();
+        let mut key =
+            Keystroke::parse(&text).expect("a Unicode character is a valid GPUI keystroke");
+        key.key_char = Some(text);
+        window.dispatch_keystroke(key, cx);
+        window.render_frame(cx);
     }
 }
 

@@ -97,7 +97,11 @@ let target = div().id("details").test_support().child(content);
 是否存在键盘焦点，也包括 Input 外框中的编辑器。如果 GPUI 声明元素可聚焦，但没有
 观察到绑定，`focused()` 会报错并给出修复提示，不再静默返回 `None`。这能发现
 `.track_focus(&handle).test_support()` 的顺序错误；隐式 `.focusable()` 句柄也无法读取，
-应改用显式句柄。只有既没有观察到绑定、也没有原生焦点能力时才返回 `None`。
+应改用显式句柄。没有观察到绑定、也没有声明焦点 action 时返回 `None`。
+这个诊断是尽力而为的，依赖原生 accessibility 的 `Action::Focus`。
+自定义元素如果没有声明此 action，遗漏绑定时仍可能返回 `None`，因此 `None`
+不能证明元素无法获得焦点。检测到遗漏绑定时，Debug 输出
+`focused: <binding missed>`，格式化本身不会 panic。
 
 快照直接读取 `role`、`aria_toggled`、`aria_selected`、`aria_expanded`、
 `aria_label` 和 `aria_value`。没有 `TestProps` 或手填的备用值。Input 在测试中启用
@@ -169,6 +173,13 @@ dialog.hover("help", cx);
 作用域内的键盘操作不会移动焦点，必须先有一个已观察的焦点绑定位于该作用域中，
 否则派发前就报错。`input` 在每个字符前检查，所以处理器把焦点移到作用域外时，
 剩余文字不会输入到其他控件。需要窗口级快捷键时，使用 `window.press`。
+
+自定义输入控件需要在实际承载焦点的元素上调用
+`.id("editor").test_support().track_focus(&focus_handle)`，使用控件真正的焦点句柄。
+未观察的输入控件，或没有绑定焦点句柄的外层容器，即使实际焦点位于作用域内，
+也无法通过检查。窗口级 `input` 和 `press` 向当前焦点派发，但不提供作用域保证。
+作用域输入与窗口输入共用同一循环：开始时刷新一次，随后每个字符刷新一次，
+每次作用域检查都读取已完成的帧。
 
 `ElementSnapshot` 是某次完成绘制的独立、不可变记录。它提供 `role()`、`path()`、`bounds()`、
 `visible()`、`focused()`、`disabled()`、`label()`、`value()`、`checked()`、

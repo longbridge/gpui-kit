@@ -518,6 +518,7 @@ fn missing_native_properties_stay_unknown(cx: &mut TestAppContext) {
         );
         assert_eq!(target.value(), None);
         assert_eq!(target.focused(), None);
+        assert!(format!("{target:?}").contains("focused: None"));
         assert_eq!(target.checked(), None);
         assert_eq!(target.indeterminate(), None);
         assert_eq!(target.selected(), None);
@@ -552,7 +553,9 @@ fn focus_query_diagnoses_observation_after_track_focus(cx: &mut TestAppContext) 
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.find("late-focus").focused();
+        let snapshot = window.find("late-focus");
+        assert!(format!("{snapshot:?}").contains("focused: <binding missed>"));
+        snapshot.focused();
     })
     .unwrap();
 }

@@ -527,3 +527,61 @@ fn scoped_input_stops_when_a_handler_moves_focus_to_another_scope(cx: &mut TestA
     .unwrap();
     assert_eq!(&*keys.borrow(), &["a"]);
 }
+
+struct KeyboardFrames {
+    focus: gpui_kit::FocusHandle,
+    renders: Rc<std::cell::Cell<usize>>,
+    keys: Rc<RefCell<Vec<String>>>,
+}
+impl Render for KeyboardFrames {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.renders.set(self.renders.get() + 1);
+        let keys = self.keys.clone();
+        div().id("editor-scope").child(
+            div()
+                .id("editor")
+                .test_support()
+                .track_focus(&self.focus)
+                .size(px(40.))
+                .on_key_down(move |event, _, _| {
+                    keys.borrow_mut().push(event.keystroke.key.clone());
+                }),
+        )
+    }
+}
+
+#[gpui_kit::test]
+fn scoped_keyboard_refreshes_without_extra_renders(cx: &mut TestAppContext) {
+    let renders = Rc::new(std::cell::Cell::new(0));
+    let keys = Rc::new(RefCell::new(vec![]));
+    let handle = cx.add_window(|_, cx| KeyboardFrames {
+        focus: cx.focus_handle(),
+        renders: renders.clone(),
+        keys: keys.clone(),
+    });
+    let focus = handle.update(cx, |view, _, _| view.focus.clone()).unwrap();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        // External focus changes must be refreshed before the scoped guard runs.
+        window.focus(&focus, cx);
+        renders.set(0);
+        window.within("editor-scope").input("abcdef", cx);
+        assert_eq!(keys.borrow().len(), 6);
+        // Compare steady-state rendering after the focus transition has settled.
+        renders.set(0);
+        window.within("editor-scope").input("abcdef", cx);
+        let scoped_renders = renders.get();
+        renders.set(0);
+        window.input("abcdef", cx);
+        assert_eq!(renders.get(), scoped_renders);
+        assert_eq!(keys.borrow().len(), 18);
+        renders.set(0);
+        window.within("editor-scope").press("backspace", cx);
+        let scoped_renders = renders.get();
+        renders.set(0);
+        window.press("backspace", cx);
+        assert_eq!(renders.get(), scoped_renders);
+        assert_eq!(keys.borrow().len(), 20);
+    })
+    .unwrap();
+}

@@ -9,11 +9,12 @@ use gpui::{
 use std::{
     cell::RefCell,
     collections::HashMap,
+    fmt,
     rc::{Rc, Weak},
 };
 
 /// Owned facts from the last paint of an observed element.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct ElementSnapshot {
     role: Option<gpui::Role>,
     path: Vec<ElementId>,
@@ -29,6 +30,37 @@ pub struct ElementSnapshot {
     disabled: Option<bool>,
     label: Option<SharedString>,
 }
+impl fmt::Debug for ElementSnapshot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        struct BindingMissed;
+        impl fmt::Debug for BindingMissed {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("<binding missed>")
+            }
+        }
+        let focused: &dyn fmt::Debug = if self.focused.is_none() && self.focus_action {
+            &BindingMissed
+        } else {
+            &self.focused
+        };
+        f.debug_struct("ElementSnapshot")
+            .field("role", &self.role)
+            .field("path", &self.path)
+            .field("checked", &self.checked)
+            .field("indeterminate", &self.indeterminate)
+            .field("selected", &self.selected)
+            .field("expanded", &self.expanded)
+            .field("value", &self.value)
+            .field("bounds", &self.bounds)
+            .field("visible", &self.visible)
+            .field("focused", focused)
+            .field("focus_action", &self.focus_action)
+            .field("disabled", &self.disabled)
+            .field("label", &self.label)
+            .finish()
+    }
+}
+
 impl ElementSnapshot {
     pub fn role(&self) -> Option<gpui::Role> {
         self.role
@@ -61,7 +93,8 @@ impl ElementSnapshot {
     }
     /// Whether the tracked focus scope contains the current keyboard focus.
     /// `None` means no focus binding or native focus capability was observed.
-    /// Panics if the native element supports focus but its binding was missed.
+    /// Panics if the native element advertises `Action::Focus` but its binding was missed.
+    /// Custom elements omitting that action cannot be diagnosed and may return `None`.
     pub fn focused(&self) -> Option<bool> {
         assert!(
             self.focused.is_some() || !self.focus_action,

@@ -30,6 +30,20 @@ The [Chinese guide](../../website/zh-CN/docs/ui-testing.md) covers the same API.
 - Controls are instrumented incrementally; this is not complete Table/Menu/Dialog/Dock
   coverage or packaged-application automation. See the guide's explicit coverage matrix.
 
+## Adding test support to controls
+
+Register the actual identified element before `.track_focus(&handle)`, using the same
+handle as production keyboard behavior. An observed outer container without a tracked
+handle does not make an unobserved custom input available to scoped `input` or `press`.
+These helpers require observed focus inside the scope and recheck it for every character.
+
+Missed-binding diagnostics are best effort: they depend on native accessibility
+`Action::Focus`. A custom element that omits that action can silently return `None`
+even when focus tracking was placed before `.test_support()`. Review the builder order
+and assert both unfocused and focused snapshots when adding a control; do not treat
+absence of a panic as proof of correct registration. Debug prints detected omissions
+as `focused: <binding missed>` rather than `None`.
+
 ## Verification
 
 ```sh
