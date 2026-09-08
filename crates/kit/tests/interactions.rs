@@ -1,4 +1,4 @@
-use gpui_kit::ui_test::{TestAppContextExt, TestSupportExt, TestWindowExt};
+use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, MouseButton, ScrollDelta, ScrollHandle, TestAppContext, Window, div,
     point, prelude::*, px, size,

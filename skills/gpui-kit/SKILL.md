@@ -230,7 +230,7 @@ fetch the component's `.md` doc.
 
 **UI integration testing** means rendering real components in headless windows,
 simulating input, and checking state, focus, layout and owner callbacks. Use
-`#[gpui_kit::test]` to run tests and `gpui_kit::ui_test` to operate and inspect the UI.
+`#[gpui_kit::test]` to run tests and `gpui_kit::test` to operate and inspect the UI.
 When asked to add component interaction coverage, describe it as UI integration testing.
 
 For unit tests, GPUI context tests or UI integration tests, read

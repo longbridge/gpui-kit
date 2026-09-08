@@ -11,7 +11,7 @@ example: false
 
 - 纯数据转换、校验和状态转换使用普通 Rust `#[test]`。
 - Entity、action、订阅和异步任务使用 `#[gpui_kit::test]` 与 `TestAppContext`，按需创建窗口。
-- UI 集成测试渲染真实应用视图，通过 `gpui_kit::ui_test` 派发事件，再检查控件状态、布局和业务结果。
+- UI 集成测试渲染真实应用视图，通过 `gpui_kit::test` 派发事件，再检查控件状态、布局和业务结果。
 - 像素检查使用独立的离屏渲染器；原生窗口和平台集成保留相应测试。
 
 类型和 `#[gpui_kit::test]` 均由 Kit 根模块提供，应用无需再添加 GPUI 依赖。测试模块应显式导入用到的类型：`use gpui_kit::*;` 也会引入 GPUI 的 `test` 宏，可能遮蔽 Rust 原生的 `#[test]`。下方完整示例使用显式导入。
@@ -23,11 +23,11 @@ example: false
 可以验证点击是否修改了宿主持有的值，以及禁用时是否拒绝同样的交互。
 
 `#[gpui_kit::test]` 负责运行测试并提供 GPUI 上下文；
-`gpui_kit::ui_test` 提供操作和检查界面的工具：
+`gpui_kit::test` 提供操作和检查界面的工具：
 
 ```rust
 use gpui_kit::{TestAppContext, Window};
-use gpui_kit::ui_test::TestWindowExt;
+use gpui_kit::test::TestWindowExt;
 ```
 
 当行为涉及组件之间的协作，例如输入内容、保存对话框、检查父视图中的结果，
@@ -178,7 +178,7 @@ assert!(save.visible());
 
 ## 操作与断言
 
-导入 `gpui_kit::ui_test::TestWindowExt` 后使用以下方法：
+导入 `gpui_kit::test::TestWindowExt` 后使用以下方法：
 
 | API | 行为 |
 | --- | --- |
@@ -256,7 +256,7 @@ cx.update_window(handle.into(), |_, window, cx| {
 异步工作或 Select 的延迟提交，应在 async `#[gpui_kit::test]` 中、window update **外部**等待：
 
 ```rust
-use gpui_kit::ui_test::TestAppContextExt;
+use gpui_kit::test::TestAppContextExt;
 use std::time::Duration;
 
 cx.wait_for(handle.into(), Duration::from_millis(200), |window, _| {

@@ -1,4 +1,4 @@
-use gpui_kit::ui_test::{TestSupportExt, TestWindowExt};
+use gpui_kit::test::{TestSupportExt, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window,
     component::{

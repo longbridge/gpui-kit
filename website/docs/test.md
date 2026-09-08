@@ -11,7 +11,7 @@ This guide covers testing GPUI Kit applications and GPUI behavior. Choose the te
 
 - Use ordinary Rust `#[test]` for pure data transformations, validation and state transitions.
 - Use `#[gpui_kit::test]` and `TestAppContext` for entities, actions, subscriptions and async tasks, creating a window when needed.
-- For UI integration tests, render the production application view, dispatch events through `gpui_kit::ui_test`, and check control state, layout and the application result.
+- For UI integration tests, render the production application view, dispatch events through `gpui_kit::test`, and check control state, layout and the application result.
 - Use the separate offscreen renderer for pixel checks, and retain native-window and platform integration tests for those behaviors.
 
 GPUI Kit exposes its types and `#[gpui_kit::test]` through the Kit root; applications do not need an additional GPUI dependency. In test modules, import the types you use explicitly: `use gpui_kit::*;` also imports the GPUI `test` macro and can shadow Rust’s ordinary `#[test]`. The complete example below uses explicit imports.
@@ -25,11 +25,11 @@ verify that clicking changes the owner's value and that a disabled Checkbox
 rejects the same interaction.
 
 `#[gpui_kit::test]` runs the test and provides its GPUI context.
-`gpui_kit::ui_test` supplies the tools to operate and inspect the UI:
+`gpui_kit::test` supplies the tools to operate and inspect the UI:
 
 ```rust
 use gpui_kit::{TestAppContext, Window};
-use gpui_kit::ui_test::TestWindowExt;
+use gpui_kit::test::TestWindowExt;
 ```
 
 Use these tests when a behavior depends on components working together, such as
@@ -211,7 +211,7 @@ IDs such as `("row", record_id)` preserve record identity after reordering.
 
 ## Interact and assert
 
-Import `gpui_kit::ui_test::TestWindowExt` for the following methods:
+Import `gpui_kit::test::TestWindowExt` for the following methods:
 
 | API | Behavior |
 | --- | --- |
@@ -297,7 +297,7 @@ For asynchronous work or deferred selection commits, use an async
 `#[gpui_kit::test]` and wait **outside** the window update:
 
 ```rust
-use gpui_kit::ui_test::TestAppContextExt;
+use gpui_kit::test::TestAppContextExt;
 use std::time::Duration;
 
 cx.wait_for(handle.into(), Duration::from_millis(200), |window, _| {

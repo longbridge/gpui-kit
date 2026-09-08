@@ -1,5 +1,5 @@
 use gpui_kit::component::{Root, button::Button, menu::DropdownMenu};
-use gpui_kit::ui_test::{TestAppContextExt, TestSupportExt, TestWindowExt};
+use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
 use gpui_kit::{AppContext, Context, TestAppContext, Window, actions, div, prelude::*, px, size};
 use std::time::Duration;
 

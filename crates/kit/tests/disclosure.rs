@@ -3,7 +3,7 @@ use gpui_kit::component::{
     slider::{Slider, SliderState},
     stepper::{Stepper, StepperItem},
 };
-use gpui_kit::ui_test::{TestSupportExt, TestWindowExt};
+use gpui_kit::test::{TestSupportExt, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, Entity, TestAppContext, Window, div, point, prelude::*, px, size,
 };

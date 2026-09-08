@@ -100,7 +100,7 @@ pub use ::gpui;
 /// pointer and keyboard events, and assert state, focus, layout and callbacks.
 /// Run tests with `#[gpui_kit::test]`; use this module to interact with their UI.
 #[cfg(feature = "test-support")]
-pub mod ui_test;
+pub mod test;
 
 pub use ::gpui_base as base;
 pub use ::gpui_platform as platform;

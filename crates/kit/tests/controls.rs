@@ -5,7 +5,7 @@ use gpui_kit::component::{
     switch::Switch,
     tab::{Tab, TabBar},
 };
-use gpui_kit::ui_test::{TestAppContextExt, TestWindowExt};
+use gpui_kit::test::{TestAppContextExt, TestWindowExt};
 use gpui_kit::{AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size};
 use std::time::Duration;
 
@@ -155,7 +155,7 @@ struct HoverHelp;
 impl Render for HoverHelp {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         use gpui_kit::component::{button::Button, hover_card::HoverCard};
-        use gpui_kit::ui_test::TestSupportExt as _;
+        use gpui_kit::test::TestSupportExt as _;
         div().size_full().flex().flex_col().gap_8().children([
             HoverCard::new("help")
                 .open_delay(Duration::from_millis(30))

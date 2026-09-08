@@ -5,7 +5,7 @@ use gpui_kit::component::{
         panel_handle,
     },
 };
-use gpui_kit::ui_test::{TestAppContextExt, TestSupportExt, TestWindowExt};
+use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
 use gpui_kit::{
     App, AppContext, Context, Entity, EventEmitter, FocusHandle, Focusable, TestAppContext, Window,
     div, prelude::*, px, size,

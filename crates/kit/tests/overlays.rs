@@ -5,7 +5,7 @@ use gpui_kit::component::{
     input::{Input, InputState},
     notification::Notification,
 };
-use gpui_kit::ui_test::{TestAppContextExt, TestWindowExt};
+use gpui_kit::test::{TestAppContextExt, TestWindowExt};
 use gpui_kit::{AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size};
 use std::time::Duration;
 
