@@ -3,6 +3,7 @@ use gpui::{
     Pixels, RenderOnce, Role, StatefulInteractiveElement as _, StyleRefinement, Styled, Window,
     div, prelude::FluentBuilder as _, px, relative,
 };
+use gpui_base::TestSupportExt as _;
 
 use crate::{
     ActiveTheme as _, AxisExt, Icon, Sizable, Size, StyledExt as _,
@@ -123,6 +124,7 @@ impl RenderOnce for StepperItem {
 
         div()
             .id(("stepper-item", self.step))
+            .test_support()
             .role(Role::ListItem)
             .aria_position_in_set(self.step + 1)
             .relative()

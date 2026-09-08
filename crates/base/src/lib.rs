@@ -39,6 +39,7 @@ mod measure;
 pub mod motion;
 mod nav_stack;
 mod number_input;
+mod observe;
 mod otp_input;
 mod pagination;
 mod popover;
@@ -128,6 +129,7 @@ pub use number_input::{
     Decrement, Increment, NumberInput, NumberInputEvent, NumberInputText, NumberStep, StepAction,
     step_value,
 };
+pub use observe::{ObservedElement, TestSupportExt};
 pub use otp_input::{OtpEvent, OtpInput, OtpState};
 pub use pagination::{Pagination, PaginationItem, PaginationState};
 pub use popover::{Popover, PopoverState};
@@ -208,3 +210,6 @@ pub fn init(cx: &mut App) {
     tree::init(cx);
     text::init(cx);
 }
+
+#[cfg(feature = "test-support")]
+pub mod test_support;

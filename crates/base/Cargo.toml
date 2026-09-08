@@ -21,6 +21,7 @@ name = "motion"
 harness = false
 
 [features]
+test-support = ["gpui/test-support"]
 inspector = ["gpui_macros/inspector", "gpui/inspector"]
 
 [dependencies]

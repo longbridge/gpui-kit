@@ -1,3 +1,4 @@
+use crate::TestSupportExt as _;
 use std::rc::Rc;
 
 use crate::{h_flex, styled::StyledExt as _, v_flex};
@@ -490,7 +491,7 @@ impl CalendarItemState {
 /// An unstyled, pre-wired calendar item passed to the item slot.
 #[derive(IntoElement)]
 pub struct CalendarItem {
-    base: gpui::Stateful<gpui::Div>,
+    base: crate::ObservedElement<gpui::Stateful<gpui::Div>>,
     state: CalendarItemState,
     style: StyleRefinement,
     children: Vec<AnyElement>,
@@ -499,7 +500,7 @@ pub struct CalendarItem {
 impl CalendarItem {
     fn new(id: impl Into<ElementId>, state: CalendarItemState) -> Self {
         Self {
-            base: div().id(id.into()),
+            base: div().id(id.into()).test_support(),
             state,
             style: StyleRefinement::default(),
             children: vec![],
@@ -534,6 +535,11 @@ impl Styled for CalendarItem {
 impl InteractiveElement for CalendarItem {
     fn interactivity(&mut self) -> &mut gpui::Interactivity {
         self.base.interactivity()
+    }
+
+    fn track_focus(mut self, handle: &gpui::FocusHandle) -> Self {
+        self.base = self.base.track_focus(handle);
+        self
     }
 }
 impl StatefulInteractiveElement for CalendarItem {}

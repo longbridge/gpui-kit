@@ -245,7 +245,7 @@ impl Render for ModalView {
 
 ## See Also
 
-- [Root View System](/docs/root) - Manages focus trap behavior at the window level
+- [Root View System](/component/root) - Manages focus trap behavior at the window level
 - [Dialog](/component/dialog) - Uses focus trap automatically
 - [Sheet](/component/sheet) - Uses focus trap automatically
 - [focus-trap-react](https://github.com/focus-trap/focus-trap-react) - Similar concept for React applications
