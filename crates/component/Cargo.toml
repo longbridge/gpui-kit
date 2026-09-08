@@ -101,8 +101,6 @@ gpui = { workspace = true }
 gpui_macros.workspace = true
 gpui-base.workspace = true
 gpui-component-macros = { workspace = true }
-# This regular dependency propagates the canonical icon directory from the
-# assets build script into this crate's build script through Cargo DEP metadata.
 gpui-kit-assets = { workspace = true }
 notify.workspace = true
 ropey.workspace = true

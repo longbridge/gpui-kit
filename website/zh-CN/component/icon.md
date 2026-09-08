@@ -9,6 +9,41 @@ Icon 支持通过资源路径或内存中的字节渲染 SVG 图标，并可定�
 
 在开始之前，建议先阅读 [Icons & Assets](../docs/assets.md)，了解如何在 GPUI 与 GPUI Component 应用中使用 SVG。
 
+`IconName` 定义于 `gpui_kit::assets` 并在此重导出。使用
+`IconName::Search.view(cx)` 时需导入 `gpui_kit::component::IconNameExt`。
+
+:::note NOTE — 依赖图标 crate 不等于嵌入全部图标
+
+`gpui-kit-assets` 包含完整图标目录，但**仅添加依赖或使用 `IconName`，
+不会自动将全部 SVG 放入最终二进制，也不会将它们全部加载到内存**。
+优化构建会移除未引用的 SVG 数据。
+
+- 注册完整的 `Assets` 资源源时，原生程序会嵌入**全部** SVG。
+- 使用 `icon_assets!(AppAssets, [Search, Check])` 并注册 `AppAssets`
+  替代 `Assets` 时，原生和 WASM 程序都**只嵌入这两个** SVG。
+- 按需资源加载时借用静态 SVG 字节，不复制数据或分配缓存。
+  实际渲染仍需要 SVG 解析、栅格化和 GPUI 渲染缓存的内存，并非零内存开销。
+
+下载的 crate 和构建产物中仍包含完整目录。运行时 `IconName` 查找可能保留
+名称到路径的映射表，但不会因此保留 SVG 内容。
+WASM 的完整 `Assets::new(endpoint)` 资源源则按需下载图标，不将其全部嵌入。
+
+:::
+
+
+## 只嵌入使用的图标
+
+```rust
+use gpui_kit::assets::icon_assets;
+
+icon_assets!(AppAssets, [Search, Check]);
+let app = gpui_kit::application().with_assets(AppAssets);
+```
+
+之后照常使用 `Icon::new(IconName::Search)`。未选择的资源路径返回 `Ok(None)`，
+因此需列出组件所需的所有图标。完整和自定义资源源的配置见
+[Icons & Assets](../docs/assets.md)。
+
 ## 导入
 
 ```rust

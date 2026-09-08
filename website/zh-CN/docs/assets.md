@@ -16,6 +16,50 @@ GPUI Component 中的 [IconName] 和 [Icon] 提供了一套可直接在 GPUI 应
 - 完全不引入图标资源
 - 自己维护一套 SVG 资源
 
+
+:::note NOTE — 依赖图标 crate 不等于嵌入全部图标
+
+`gpui-kit-assets` 包含完整图标目录，但**仅添加依赖或使用 `IconName`，
+不会自动将全部 SVG 放入最终二进制，也不会将它们全部加载到内存**。
+优化构建会移除未引用的 SVG 数据。
+
+- 注册完整的 `Assets` 资源源时，原生程序会嵌入**全部** SVG。
+- 使用 `icon_assets!(AppAssets, [Search, Check])` 并注册 `AppAssets`
+  替代 `Assets` 时，原生和 WASM 程序都**只嵌入这两个** SVG。
+- 按需资源加载时借用静态 SVG 字节，不复制数据或分配缓存。
+  实际渲染仍需要 SVG 解析、栅格化和 GPUI 渲染缓存的内存，并非零内存开销。
+
+下载的 crate 和构建产物中仍包含完整目录。运行时 `IconName` 查找可能保留
+名称到路径的映射表，但不会因此保留 SVG 内容。
+WASM 的完整 `Assets::new(endpoint)` 资源源则按需下载图标，不将其全部嵌入。
+
+:::
+
+## 共享名称与按需嵌入
+
+`IconName` 和 `IconNamed` 定义在 `gpui_kit::assets` 中，由
+`gpui_kit::component` 重导出。Base 和其他表现层无需依赖 GPUI Component
+即可使用完整图标目录。资源包含 Lucide 1.43.0 的全部 1,818 个图标，
+以及保留的 12 个 GPUI Kit 图标。
+
+只嵌入应用需要的图标：
+
+```rust
+use gpui_kit::assets::{icon_assets, IconName};
+icon_assets!(AppAssets, [Search, Check]);
+let app = gpui_kit::application().with_assets(AppAssets);
+```
+
+注册 `AppAssets` 替代完整的 `Assets`。原生和 WASM 构建均只嵌入所选 SVG，
+其他路径返回 `Ok(None)`。加载时借用静态字节，不复制数据或创建运行时缓存；
+渲染仍有 GPUI 正常的 SVG 解析和栅格化开销。由于应用可以在运行时传入字符串路径，
+选择需要显式声明，无法自动推断。仅使用 `IconName` 不会引用 SVG 字节，
+但运行时名称查找可能保留名称到路径的映射表。
+
+`IconName::ALL` 列出完整目录，`IconName::Search.path()` 返回资源路径。
+现有 component 导入仍然可用。调用 `name.view(cx)` 时需额外导入
+`gpui_kit::component::IconNameExt`，也可以使用 `Icon::new(name).view(cx)`。
+
 ## 使用默认内置资源
 
 [gpui-kit-assets] 提供了一个默认的资源实现，包含 `assets/icons` 目录下的全部图标文件。
@@ -152,7 +196,7 @@ Button::new("search")
 - [Lucide Icons](https://lucide.dev/) - GPUI Component 的图标集主要基于 Lucide 开源图标库
 
 [rust-embed]: https://docs.rs/rust-embed/latest/rust_embed/
-[IconName]: https://docs.rs/gpui_component/latest/gpui_component/icon/enum.IconName.html
+[IconName]: https://docs.rs/gpui-kit-assets/latest/gpui_kit_assets/enum.IconName.html
 [Icon]: https://docs.rs/gpui_component/latest/gpui_component/icon/struct.Icon.html
 [assets]: https://github.com/longbridge/gpui-kit/tree/main/crates/assets/assets/
 [gpui-kit-assets]: https://crates.io/crates/gpui-kit-assets

@@ -9,6 +9,43 @@ A flexible icon component that renders SVG icons from asset paths or in-memory b
 
 Before you start, please make sure you have read: [Icons & Assets](../docs/assets.md) to understand how use SVG in GPUI & GPUI Component application.
 
+`IconName` is defined in `gpui_kit::assets` and reexported here. Import
+`gpui_kit::component::IconNameExt` when using `IconName::Search.view(cx)`.
+
+:::note NOTE — Depending on the crate does not embed every icon
+
+`gpui-kit-assets` includes the full icon catalog, but **adding the dependency or
+using `IconName` does not by itself put every SVG into your final binary or load
+it into memory**. In optimized builds, unreferenced SVG data is discarded.
+
+- Registering the full `Assets` source embeds **all** SVGs on native platforms.
+- Registering `icon_assets!(AppAssets, [Search, Check])` embeds **only those two**
+  SVGs, on native and WASM. Register `AppAssets` instead of `Assets`.
+- Selected assets borrow static SVG bytes when loaded, without copying them or
+  allocating a cache. Rendering still needs memory for SVG parsing,
+  rasterization, and GPUI's render caches. This is not a zero-memory guarantee.
+
+The complete catalog is still present in the downloaded crate and build
+artifacts. Runtime `IconName` lookup can retain its name/path table; this does
+not retain the SVG payloads. The full WASM `Assets::new(endpoint)` source fetches
+icons on demand rather than embedding them.
+
+:::
+
+
+## Embed only the icons you use
+
+```rust
+use gpui_kit::assets::icon_assets;
+
+icon_assets!(AppAssets, [Search, Check]);
+let app = gpui_kit::application().with_assets(AppAssets);
+```
+
+Use `Icon::new(IconName::Search)` as usual. Unlisted asset paths return `Ok(None)`;
+include every icon your components need. See [Icons & Assets](../docs/assets.md)
+for complete and custom asset sources.
+
 ## Import
 
 ```rust

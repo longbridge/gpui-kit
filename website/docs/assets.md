@@ -12,6 +12,53 @@ But for minimal size applications, **we have not embedded any icon assets by def
 
 We split the icon assets into a separate crate [gpui-kit-assets] to allow developers to choose whether to include the icon assets in their applications or if you don't need the icons at all, you can build your own assets.
 
+
+:::note NOTE — Depending on the crate does not embed every icon
+
+`gpui-kit-assets` includes the full icon catalog, but **adding the dependency or
+using `IconName` does not by itself put every SVG into your final binary or load
+it into memory**. In optimized builds, unreferenced SVG data is discarded.
+
+- Registering the full `Assets` source embeds **all** SVGs on native platforms.
+- Registering `icon_assets!(AppAssets, [Search, Check])` embeds **only those two**
+  SVGs, on native and WASM. Register `AppAssets` instead of `Assets`.
+- Selected assets borrow static SVG bytes when loaded, without copying them or
+  allocating a cache. Rendering still needs memory for SVG parsing,
+  rasterization, and GPUI's render caches. This is not a zero-memory guarantee.
+
+The complete catalog is still present in the downloaded crate and build
+artifacts. Runtime `IconName` lookup can retain its name/path table; this does
+not retain the SVG payloads. The full WASM `Assets::new(endpoint)` source fetches
+icons on demand rather than embedding them.
+
+:::
+
+## Shared names and selected embedding
+
+`IconName` and `IconNamed` are defined in `gpui_kit::assets` and reexported by
+`gpui_kit::component`. Base and alternative presentation layers can use the
+complete icon catalog without depending on GPUI Component. The bundle contains
+all 1,818 Lucide 1.43.0 icons plus 12 retained GPUI Kit icons.
+
+To embed only the icons your application needs:
+
+```rust
+use gpui_kit::assets::{icon_assets, IconName};
+icon_assets!(AppAssets, [Search, Check]);
+let app = gpui_kit::application().with_assets(AppAssets);
+```
+
+Register `AppAssets` instead of the full `Assets` source. Only the selected SVG
+bytes are embedded, on both native and WASM; other paths return `Ok(None)`.
+Loading borrows static bytes without a copy or runtime cache. Rendering still
+uses GPUI's normal SVG parsing and rasterization. Selection is explicit because
+runtime string paths cannot be inferred automatically. `IconName` alone does
+not reference SVG bytes; runtime name lookup can retain the name/path table.
+
+`IconName::ALL` lists the full catalog and `IconName::Search.path()` resolves its
+asset path. Existing component imports still work. For `name.view(cx)`, also
+import `gpui_kit::component::IconNameExt`, or use `Icon::new(name).view(cx)`.
+
 ## Use default bundled assets
 
 The [gpui-kit-assets] crate provides a default bundled assets implementation that includes all the icon files in the `assets/icons` folder.
@@ -150,7 +197,7 @@ loading icons, and custom icon types.
 - [Lucide Icons](https://lucide.dev/) - The icon set used in GPUI Component is based on the open-source Lucide Icons library, which provides a wide range of customizable SVG icons.
 
 [rust-embed]: https://docs.rs/rust-embed/latest/rust_embed/
-[IconName]: https://docs.rs/gpui_component/latest/gpui_component/icon/enum.IconName.html
+[IconName]: https://docs.rs/gpui-kit-assets/latest/gpui_kit_assets/enum.IconName.html
 [Icon]: https://docs.rs/gpui_component/latest/gpui_component/icon/struct.Icon.html
 [assets]: https://github.com/longbridge/gpui-kit/tree/main/crates/assets/assets/
 [gpui-kit-assets]: https://crates.io/crates/gpui-kit-assets
