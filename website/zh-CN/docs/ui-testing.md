@@ -85,16 +85,19 @@ TabBar 内的 Tab 使用下标 ID。Select 已有的 `"input"` 子元素是触�
 原生 div 只注册观察，不再填写另一份测试状态：
 
 ```rust
-use gpui_kit::ObserveElement as _;
+use gpui_kit::TestSupportExt as _;
 
-let target = div().id("details").observe().child(content);
+let target = div().id("details").test_support().child(content);
 ```
 
-`ObserveElement` 始终可用。关闭 `test-support` 时，`.observe()` 直接返回原生元素，
+`TestSupportExt` 始终可用。关闭 `test-support` 时，`.test_support()` 直接返回原生元素，
 保留其准确类型；启用后保留身份、布局、事件与无障碍接口，不增加布局容器。
-重复调用只保留一个注册项。先调用 `.observe()`，再调用 `.track_focus(&handle)`，
+重复调用只保留一个注册项。先调用 `.test_support()`，再调用 `.track_focus(&handle)`，
 让包装器观察实际焦点绑定；Kit 控件在内部完成这件事。`focused()` 检查焦点作用域内
-是否存在键盘焦点，也包括 Input 外框中的编辑器；没有观察到焦点绑定时返回 `None`。
+是否存在键盘焦点，也包括 Input 外框中的编辑器。如果 GPUI 声明元素可聚焦，但没有
+观察到绑定，`focused()` 会报错并给出修复提示，不再静默返回 `None`。这能发现
+`.track_focus(&handle).test_support()` 的顺序错误；隐式 `.focusable()` 句柄也无法读取，
+应改用显式句柄。只有既没有观察到绑定、也没有原生焦点能力时才返回 `None`。
 
 快照直接读取 `role`、`aria_toggled`、`aria_selected`、`aria_expanded`、
 `aria_label` 和 `aria_value`。没有 `TestProps` 或手填的备用值。Input 在测试中启用
@@ -109,6 +112,16 @@ let target = div().id("details").observe().child(content);
 `disabled()` 仅在原生节点暴露禁用标志时返回 `Some(true)`，否则返回 `None`。
 当前 GPUI 的 div 接口不能据此提供确定的启用状态。验证禁用行为时，应尝试交互并
 检查应用结果没有变化；不能把 `None` 当作启用。
+这个接口无法可靠地正面断言 enabled 属性。验证按钮接受操作时，应执行操作并断言
+它应该产生的结果，例如：
+
+```rust
+window.click("save", cx);
+assert_eq!(window.find("status").label(), Some("Saved: Ada"));
+```
+
+这里应使用应用真实的预期结果。`assert_ne!(button.disabled(), Some(true))` 或
+`button.disabled().is_none()` 都不能证明按钮可以正常响应。
 
 ID 只需在 GPUI 身份作用域内唯一。窗口级查询遇到重复 ID 会报歧义；可以直接使用已有父级作用域，无须添加测试容器：
 
@@ -135,12 +148,27 @@ assert!(save.visible());
 | `window.right_click(id, cx)` / `double_click(id, cx)` | 原生右键或两次点击序列。 |
 | `window.hover(id, cx)` | 移动指针，不按键。 |
 | `window.scroll(id, delta, cx)` | 原生滚轮事件，`ScrollDelta` 保留 GPUI 的方向与单位。 |
+| `window.drag_to(from_id, to_id, cx)` | 定位两个目标，在其中心之间通过真实命中测试拖拽。 |
 | `window.drag(from, to, cx)` | 窗口坐标之间的左键拖拽，经过真实拖拽创建与放置命中测试。 |
 | `window.press("backspace", cx)` | 使用 GPUI 按键解析器发送特殊键或快捷键。 |
 | `window.input(text, cx)` | 向当前焦点逐字符输入，不自动聚焦或替换整个值。 |
 
-作用域支持 `find`、`try_find`、嵌套 `within`、`click` 和 `click_at`。
-拖拽时可查询不同作用域的目标，将它们的 `bounds().center()` 传给 `window.drag`。
+作用域支持 `find`、`try_find`、嵌套 `within`、`click`、`click_at`、`right_click`、
+`double_click`、`hover`、`scroll`、`drag_to`、`press` 和 `input`。
+`drag_to` 的两个 ID 都在当前作用域中解析。跨作用域拖拽或指定偏移时，可查询目标后
+将窗口坐标传给 `window.drag`。
+
+```rust
+let mut dialog = window.within("dialog");
+dialog.click("name", cx);
+dialog.input("Ada", cx);
+dialog.press("backspace", cx);
+dialog.hover("help", cx);
+```
+
+作用域内的键盘操作不会移动焦点，必须先有一个已观察的焦点绑定位于该作用域中，
+否则派发前就报错。`input` 在每个字符前检查，所以处理器把焦点移到作用域外时，
+剩余文字不会输入到其他控件。需要窗口级快捷键时，使用 `window.press`。
 
 `ElementSnapshot` 是某次完成绘制的独立、不可变记录。它提供 `role()`、`path()`、`bounds()`、
 `visible()`、`focused()`、`disabled()`、`label()`、`value()`、`checked()`、
@@ -197,7 +225,8 @@ element state 的帧完成后消失；虚拟列表行则在滚动后实际绘制
 
 ## 覆盖范围与失败排查
 
-这是逐步扩展的无头交互 API，并未自动覆盖所有 Kit 组件。Table、Menu、Dialog、Dock
+这是逐步扩展的无头交互 API，并未自动覆盖所有 Kit 组件。Table 行、Tree 节点、
+Dialog、Sheet、Notification、Accordion、DatePicker、Slider、Menu、Stepper 和 Dock
 尚未拥有全面的自动语义观察与专门的端到端流程测试。原生滚动与拖放已有测试，
 包括真实虚拟列表与 HoverCard 延迟显示/关闭，但不能据此宣称所有 Table 或 Dock 行为已验证。
 自定义视图需要时可以观察已有原生元素，不支持的属性保持不可用，不提供手填测试值的覆盖入口。
@@ -224,8 +253,9 @@ GPUI 没有公开未观察祖先的继承绘制透明度，因此无法推断该
 cargo test -p gpui-kit --features test-support --test rendering --locked
 ```
 
-该目标设置了 `test = false`，普通 CI 运行可跨平台执行的交互测试；在支持 Metal 的
-runner 上用 `--test rendering` 显式运行像素测试。这使用 Cargo 的
+该目标设置了 `test = false`，默认 Cargo 命令不会选择它。macOS CI job 已增加必须
+通过的独立步骤，显式执行 `--test rendering`；Linux 和 Windows 只运行交互与布局
+测试。这使用 Cargo 的
 [显式目标选择](https://doc.rust-lang.org/cargo/commands/cargo-test.html#target-selection)。
 目标还使用 `harness = false`，因为 AppKit 必须在主线程初始化；普通 Rust
 测试即使指定 `--test-threads=1` 仍运行在工作线程。其他平台明确报告跳过像素验证；
@@ -244,7 +274,8 @@ Checkbox 的图片必须一致。另一个原生事件测试断开 Checkbox 的�
 
 ## 接入 CI
 
-Kit 仓库在 macOS、Linux 和 Windows 矩阵中运行无头测试。以下是用于 Kit 检出目录的最小 macOS workflow：
+Kit 仓库在 macOS、Linux 和 Windows 矩阵中运行交互与布局测试。macOS job 还运行两个
+Metal 像素测试，失败会使 job 失败。以下是用于 Kit 检出目录的最小 macOS workflow：
 
 ```yaml
 name: UI tests
@@ -257,6 +288,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: ./script/bootstrap
       - run: cargo test -p gpui-kit --features test-support --locked
+      - run: cargo test -p gpui-kit --features test-support --test rendering --locked
 ```
 
 应用仓库需要安装自身的平台依赖，并改为在测试 package 中运行 `cargo test --test ui --locked`。将锁定版本的 Kit 源码放到 manifest 声明的路径，再按照普通原生构建的环境配置增加 Linux 和 Windows job。

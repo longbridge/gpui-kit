@@ -109,19 +109,22 @@ index as ID. Select's existing `"input"` child identifies its trigger:
 Native divs opt in without supplying a second description of their state:
 
 ```rust
-use gpui_kit::ObserveElement as _;
+use gpui_kit::TestSupportExt as _;
 
-let target = div().id("details").observe().child(content);
+let target = div().id("details").test_support().child(content);
 ```
 
-`ObserveElement` is available without `test-support`; in normal builds `.observe()`
+`TestSupportExt` is available without `test-support`; in normal builds `.test_support()`
 returns the original native element with its exact type. With the feature enabled,
 it preserves identity, layout, events and accessibility, without adding a layout
-container. Repeated observation keeps one registration. Call `.observe()` before
+container. Repeated observation keeps one registration. Call `.test_support()` before
 `.track_focus(&handle)` so the wrapper sees the actual binding. Kit controls do this
 internally. `focused()` checks whether that focus scope contains keyboard focus,
-including the nested editor inside an Input frame. It returns `None` when no
-focus binding was observed.
+including the nested editor inside an Input frame. If GPUI advertises focus support
+but the binding was not observed, `focused()` panics with a diagnostic instead of
+silently returning `None`. This catches `.track_focus(&handle).test_support()`;
+implicit `.focusable()` handles are also unavailable, so use an explicit handle.
+`None` is reserved for elements with neither an observed binding nor native focus support.
 
 Snapshots read native `role`, `aria_toggled`, `aria_selected`, `aria_expanded`,
 `aria_label` and `aria_value`. There are no `TestProps` or hand-supplied fallback values.
@@ -140,6 +143,16 @@ substitutes model strings for rendered text.
 otherwise it returns `None`. GPUI's div API currently cannot expose a known enabled
 state this way. Test disabled behavior by attempting the interaction and checking
 that the application result did not change; do not interpret `None` as enabled.
+There is no reliable positive enabled-property assertion through this API. To verify
+that a button accepts activation, exercise it and assert its intended result, for example:
+
+```rust
+window.click("save", cx);
+assert_eq!(window.find("status").label(), Some("Saved: Ada"));
+```
+
+Use the actual expected application result; `assert_ne!(button.disabled(), Some(true))`
+or `button.disabled().is_none()` does not establish that activation works.
 
 IDs only need to be unique within their GPUI identity scope. Window-wide queries
 panic on ambiguity. Use existing scopes without adding test containers:
@@ -168,13 +181,28 @@ Import `gpui_kit::test::TestWindowExt` for the following methods:
 | `window.right_click(id, cx)` / `double_click(id, cx)` | Native right-button or two-click sequences. |
 | `window.hover(id, cx)` | Move the pointer without pressing a button. |
 | `window.scroll(id, delta, cx)` | Native wheel event; `ScrollDelta` retains GPUI units and sign. |
+| `window.drag_to(from_id, to_id, cx)` | Resolve both targets and drag between their centers using native hit testing. |
 | `window.drag(from, to, cx)` | Left-button drag between window-local points, through GPUI drag creation and drop hit testing. |
 | `window.press("backspace", cx)` | Named key or shortcut using GPUI's keystroke parser. |
 | `window.input(text, cx)` | Per-character text input to the current focus; does not focus or replace the whole value. |
 
-Scoped queries support `find`, `try_find`, nested `within`, `click` and `click_at`.
-For a coordinate drag, query scoped targets and pass their `bounds().center()`
-to `window.drag`.
+Scoped queries support `find`, `try_find`, nested `within`, `click`, `click_at`,
+`right_click`, `double_click`, `hover`, `scroll`, `drag_to`, `press` and `input`.
+`drag_to` resolves both IDs within the scope. For cross-scope drags or custom offsets,
+query the targets and pass window-local points to `window.drag`.
+
+```rust
+let mut dialog = window.within("dialog");
+dialog.click("name", cx);
+dialog.input("Ada", cx);
+dialog.press("backspace", cx);
+dialog.hover("help", cx);
+```
+
+Scoped keyboard operations do not move focus. They require an observed focus binding
+inside the scope; otherwise they panic before dispatch. `input` checks before every
+character, so a handler moving focus outside the scope cannot redirect the remaining
+text. Use `window.press` for deliberate window-wide shortcuts.
 
 `ElementSnapshot` is an owned, immutable record of a completed paint. Its readers
 are `role()`, `path()`, `bounds()`, `visible()`, `focused()`, `disabled()`, `label()`,
@@ -241,7 +269,8 @@ element state; virtualized rows become queryable when painted after scrolling.
 ## Coverage and failure cases
 
 This is an incrementally growing headless interaction API, not automatic
-coverage of every Kit component. Table, Menu, Dialog and Dock do not yet have
+coverage of every Kit component. Table rows, Tree nodes, Dialog, Sheet, Notification,
+Accordion, DatePicker, Slider, Menu, Stepper and Dock do not yet have
 comprehensive automatic semantic observation or dedicated end-to-end workflows.
 Native scrolling and drag/drop primitives are tested, including a real virtual
 list and delayed HoverCard opening/closing; this does not establish every Table or Dock behavior. Add observation to
@@ -275,8 +304,9 @@ this target on a Mac with Metal available:
 cargo test -p gpui-kit --features test-support --test rendering --locked
 ```
 
-The target uses `test = false`, so ordinary CI runs the portable interaction suite;
-select `--test rendering` explicitly on a runner with Metal. Cargo supports this
+The target uses `test = false`, so the default Cargo command does not select it.
+The macOS CI job explicitly runs `--test rendering` as a required step, alongside
+the portable interaction suite. Linux and Windows run only the portable suite. Cargo supports this
 [explicit target selection](https://doc.rust-lang.org/cargo/commands/cargo-test.html#target-selection).
 It also uses `harness = false` because AppKit initialization requires the main
 thread; `--test-threads=1` would still run an ordinary Rust test on a worker thread.
@@ -298,8 +328,9 @@ correctness. The executable rendering examples are in
 
 ## Run in CI
 
-The Kit repository runs the headless suite in its macOS, Linux and Windows
-matrix. A minimal macOS workflow for a Kit checkout is:
+The Kit repository runs the interaction/layout suite on macOS, Linux and Windows.
+The macOS job additionally runs the two Metal pixel checks; a failure fails the job.
+A minimal macOS workflow for a Kit checkout is:
 
 ```yaml
 name: UI tests
@@ -312,6 +343,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: ./script/bootstrap
       - run: cargo test -p gpui-kit --features test-support --locked
+      - run: cargo test -p gpui-kit --features test-support --test rendering --locked
 ```
 
 For an application repository, install its platform dependencies and run

@@ -14,16 +14,17 @@ pub type ObservedElement<E> = E;
 /// Test-only values cannot override the native control:
 /// ```compile_fail
 /// use gpui::{div, prelude::*};
-/// use gpui_base::ObserveElement;
-/// div().id("input").observe().test_props(|props| props.value("invented"));
+/// use gpui_base::TestSupportExt;
+/// div().id("input").test_support().test_props(|props| props.value("invented"));
 /// ```
-pub trait ObserveElement:
+pub trait TestSupportExt:
     Element<PrepaintState = Option<Hitbox>> + InteractiveElement + Sized
 {
     /// With `test-support`, observes the element without adding a layout node.
     /// Otherwise returns the original element with its exact native type.
     /// Call before `track_focus` so the actual focus binding can be observed.
-    fn observe(self) -> ObservedElement<Self> {
+    /// Querying focus on a focus-capable element with a missed binding panics.
+    fn test_support(self) -> ObservedElement<Self> {
         #[cfg(feature = "test-support")]
         {
             crate::test_support::Observed::new(self)
@@ -34,7 +35,7 @@ pub trait ObserveElement:
         }
     }
 }
-impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> ObserveElement for E {}
+impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> TestSupportExt for E {}
 
 #[cfg(test)]
 mod tests {
@@ -43,7 +44,7 @@ mod tests {
 
     #[test]
     fn observation_preserves_identity_and_native_type_in_normal_builds() {
-        let element = div().id("target").observe().observe();
+        let element = div().id("target").test_support().test_support();
         assert_eq!(Element::id(&element), Some("target".into()));
         #[cfg(not(feature = "test-support"))]
         let _: gpui::Stateful<gpui::Div> = element;

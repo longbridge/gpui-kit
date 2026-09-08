@@ -133,3 +133,74 @@ fn existing_gpui_keyboard_editing_updates_observed_value(cx: &mut TestAppContext
         })
         .unwrap();
 }
+
+struct ScopedInputs {
+    left: Entity<InputState>,
+    right: Entity<InputState>,
+}
+impl Render for ScopedInputs {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(
+                div()
+                    .id("left")
+                    .child(Input::new(&self.left).id("name").w(px(240.))),
+            )
+            .child(
+                div()
+                    .id("right")
+                    .child(Input::new(&self.right).id("name").w(px(240.))),
+            )
+    }
+}
+fn scoped_inputs(cx: &mut TestAppContext) -> WindowHandle<ScopedInputs> {
+    cx.update(gpui_component::init);
+    cx.add_window(|window, cx| ScopedInputs {
+        left: cx.new(|cx| InputState::new(window, cx)),
+        right: cx.new(|cx| InputState::new(window, cx)),
+    })
+}
+
+#[gpui::test]
+fn scoped_keyboard_uses_the_focused_input_in_the_selected_scope(cx: &mut TestAppContext) {
+    let handle = scoped_inputs(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let mut dialog = window.within("right");
+        dialog.click("name", cx);
+        dialog.input("Ada中", cx);
+        dialog.press("backspace", cx);
+        assert_eq!(dialog.find("name").value(), Some("Ada"));
+        assert_eq!(window.within("left").find("name").value(), Some(""));
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn scoped_keyboard_rejects_focus_outside_the_selected_scope(cx: &mut TestAppContext) {
+    let handle = scoped_inputs(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.within("left").click("name", cx);
+        for typing in [false, true] {
+            let error = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let mut dialog = window.within("right");
+                if typing {
+                    dialog.input("wrong", cx);
+                } else {
+                    dialog.press("a", cx);
+                }
+            }))
+            .expect_err("scoped keyboard must reject focus in another scope");
+            let message = error.downcast_ref::<String>().unwrap();
+            assert!(message.contains("no observed keyboard focus inside scope"));
+        }
+        assert_eq!(window.within("left").find("name").value(), Some(""));
+        assert_eq!(window.within("right").find("name").value(), Some(""));
+    })
+    .unwrap();
+}

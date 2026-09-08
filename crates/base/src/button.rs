@@ -8,7 +8,7 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::{ObserveElement as _, RoleOverride, Selectable, StateStyle, StyledExt as _};
+use crate::{RoleOverride, Selectable, StateStyle, StyledExt as _, TestSupportExt as _};
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -38,7 +38,7 @@ impl Button {
     pub fn new(id: impl Into<ElementId>) -> Self {
         let id = id.into();
         Self {
-            base: div().id(id.clone()).observe(),
+            base: div().id(id.clone()).test_support(),
             id,
             style: StyleRefinement::default(),
             semantic_styles: ButtonStyles::default(),

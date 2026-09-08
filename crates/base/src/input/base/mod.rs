@@ -1,4 +1,4 @@
-use crate::{ObserveElement as _, StateStyle, StyledExt as _};
+use crate::{StateStyle, StyledExt as _, TestSupportExt as _};
 use gpui::{
     AnyElement, App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, ParentElement,
     Refineable as _, RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement,
@@ -137,7 +137,7 @@ pub struct InputBase {
 impl InputBase {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            base: div().id(id).observe(),
+            base: div().id(id).test_support(),
             style: StyleRefinement::default(),
             semantic_styles: InputStyles::default(),
             children: Vec::new(),

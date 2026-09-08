@@ -129,7 +129,7 @@ pub use number_input::{
     Decrement, Increment, NumberInput, NumberInputEvent, NumberInputText, NumberStep, StepAction,
     step_value,
 };
-pub use observe::{ObserveElement, ObservedElement};
+pub use observe::{ObservedElement, TestSupportExt};
 pub use otp_input::{OtpEvent, OtpInput, OtpState};
 pub use pagination::{Pagination, PaginationItem, PaginationState};
 pub use popover::{Popover, PopoverState};

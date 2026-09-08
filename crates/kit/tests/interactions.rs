@@ -1,4 +1,4 @@
-use gpui_kit::test::{ObserveElement, TestAppContextExt, TestWindowExt};
+use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, MouseButton, ScrollDelta, ScrollHandle, TestAppContext, Window, div,
     point, prelude::*, px, size,
@@ -16,7 +16,7 @@ impl Render for Scopes {
                 div().id("footer").child(
                     div()
                         .id("save")
-                        .observe()
+                        .test_support()
                         .aria_label(scope)
                         .size(px(40.))
                         .on_click(move |_, _, _| clicks.borrow_mut().push(scope)),
@@ -67,7 +67,7 @@ impl Render for Pointer {
         let right = self.events.clone();
         div()
             .id("surface")
-            .observe()
+            .test_support()
             .size(px(80.))
             .on_hover(move |entered, _, _| {
                 if *entered {
@@ -108,7 +108,7 @@ impl Render for Scrolling {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("list")
-            .observe()
+            .test_support()
             .w(px(100.))
             .h(px(60.))
             .overflow_y_scroll()
@@ -118,7 +118,7 @@ impl Render for Scrolling {
             .children((0..30usize).map(|index| {
                 div()
                     .id(("row", index))
-                    .observe()
+                    .test_support()
                     .h(px(20.))
                     .flex_shrink_0()
                     .child(format!("Row {index}"))
@@ -161,14 +161,14 @@ impl Render for Dropping {
             .child(
                 div()
                     .id("source")
-                    .observe()
+                    .test_support()
                     .size(px(40.))
                     .on_drag(Payload, |payload, _, _, cx| cx.new(|_| payload.clone())),
             )
             .child(
                 div()
                     .id("target")
-                    .observe()
+                    .test_support()
                     .size(px(40.))
                     .on_drop(move |_: &Payload, _, _| *drops.borrow_mut() += 1),
             )
@@ -196,7 +196,7 @@ struct Loading {
 impl Render for Loading {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div().when(self.ready, |this| {
-            this.child(div().id("loaded").observe().size(px(20.)))
+            this.child(div().id("loaded").test_support().size(px(20.)))
         })
     }
 }
@@ -311,25 +311,30 @@ struct VirtualRows {
 }
 impl Render for VirtualRows {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div().id("viewport").observe().w(px(100.)).h(px(60.)).child(
-            gpui_kit::base::v_virtual_list(
-                cx.entity(),
-                "rows",
-                Rc::new(vec![size(px(100.), px(20.)); 1000]),
-                |_, range, _, _| {
-                    range
-                        .map(|index| {
-                            div()
-                                .id(("virtual-row", index))
-                                .observe()
-                                .h(px(20.))
-                                .child(format!("Row {index}"))
-                        })
-                        .collect()
-                },
+        div()
+            .id("viewport")
+            .test_support()
+            .w(px(100.))
+            .h(px(60.))
+            .child(
+                gpui_kit::base::v_virtual_list(
+                    cx.entity(),
+                    "rows",
+                    Rc::new(vec![size(px(100.), px(20.)); 1000]),
+                    |_, range, _, _| {
+                        range
+                            .map(|index| {
+                                div()
+                                    .id(("virtual-row", index))
+                                    .test_support()
+                                    .h(px(20.))
+                                    .child(format!("Row {index}"))
+                            })
+                            .collect()
+                    },
+                )
+                .track_scroll(&self.scroll),
             )
-            .track_scroll(&self.scroll),
-        )
     }
 }
 #[gpui_kit::test]
@@ -350,4 +355,175 @@ fn scrolling_a_real_virtual_list_registers_new_rows_and_releases_old_ones(cx: &m
         assert!(window.try_find(("virtual-row", 0usize)).is_none());
     })
     .unwrap();
+}
+
+struct Pair<T: Render> {
+    left: gpui_kit::Entity<T>,
+    right: gpui_kit::Entity<T>,
+}
+impl<T: Render> Render for Pair<T> {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .gap_4()
+            .p_4()
+            .child(div().id("left").w(px(180.)).child(self.left.clone()))
+            .child(div().id("right").w(px(180.)).child(self.right.clone()))
+    }
+}
+
+#[gpui_kit::test]
+fn scoped_pointer_events_do_not_reach_duplicate_ids_in_another_scope(cx: &mut TestAppContext) {
+    let left = Rc::new(RefCell::new(vec![]));
+    let right = Rc::new(RefCell::new(vec![]));
+    let handle = cx.add_window(|_, cx| Pair {
+        left: cx.new(|_| Pointer {
+            events: left.clone(),
+        }),
+        right: cx.new(|_| Pointer {
+            events: right.clone(),
+        }),
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let mut dialog = window.within("right");
+        dialog.hover("surface", cx);
+        dialog.right_click("surface", cx);
+        dialog.double_click("surface", cx);
+    })
+    .unwrap();
+    assert!(left.borrow().is_empty());
+    let events = right.borrow();
+    assert!(events.iter().any(|event| event == "hover"));
+    assert!(events.iter().any(|event| event == "right"));
+    assert!(events.windows(2).any(|pair| pair == ["left:1", "left:2"]));
+}
+
+#[gpui_kit::test]
+fn scoped_scroll_moves_only_the_selected_list(cx: &mut TestAppContext) {
+    let left = ScrollHandle::new();
+    let right = ScrollHandle::new();
+    let handle = cx.add_window(|_, cx| Pair {
+        left: cx.new(|_| Scrolling {
+            scroll: left.clone(),
+        }),
+        right: cx.new(|_| Scrolling {
+            scroll: right.clone(),
+        }),
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window
+            .within("right")
+            .scroll("list", ScrollDelta::Pixels(point(px(0.), px(-200.))), cx);
+        assert!(window.within("right").find(("row", 10usize)).visible());
+        assert!(!window.within("left").find(("row", 10usize)).visible());
+    })
+    .unwrap();
+    assert_eq!(left.offset().y, px(0.));
+    assert!(right.offset().y < px(0.));
+}
+
+#[gpui_kit::test]
+fn scoped_drag_to_resolves_both_ids_inside_the_scope(cx: &mut TestAppContext) {
+    let left = Rc::new(RefCell::new(0));
+    let right = Rc::new(RefCell::new(0));
+    let handle = cx.add_window(|_, cx| Pair {
+        left: cx.new(|_| Dropping {
+            drops: left.clone(),
+        }),
+        right: cx.new(|_| Dropping {
+            drops: right.clone(),
+        }),
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.within("right").drag_to("source", "target", cx);
+    })
+    .unwrap();
+    assert_eq!(*left.borrow(), 0);
+    assert_eq!(*right.borrow(), 1);
+}
+
+#[gpui_kit::test]
+fn drag_to_uses_native_drop_dispatch(cx: &mut TestAppContext) {
+    let drops = Rc::new(RefCell::new(0));
+    let handle = cx.add_window(|_, _| Dropping {
+        drops: drops.clone(),
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.drag_to("source", "target", cx);
+    })
+    .unwrap();
+    assert_eq!(*drops.borrow(), 1);
+}
+
+struct KeyboardJump {
+    left: gpui_kit::FocusHandle,
+    right: gpui_kit::FocusHandle,
+    keys: Rc<RefCell<Vec<String>>>,
+}
+impl Render for KeyboardJump {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let keys_left = self.keys.clone();
+        let keys_right = self.keys.clone();
+        let next = self.left.clone();
+        div()
+            .flex()
+            .child(
+                div().id("left").child(
+                    div()
+                        .id("field")
+                        .test_support()
+                        .track_focus(&self.left)
+                        .size(px(40.))
+                        .on_key_down(move |event, _, _| {
+                            keys_left.borrow_mut().push(event.keystroke.key.clone())
+                        }),
+                ),
+            )
+            .child(
+                div().id("right").child(
+                    div()
+                        .id("field")
+                        .test_support()
+                        .track_focus(&self.right)
+                        .size(px(40.))
+                        .on_key_down(move |event, window, cx| {
+                            keys_right.borrow_mut().push(event.keystroke.key.clone());
+                            next.focus(window, cx);
+                        }),
+                ),
+            )
+    }
+}
+
+#[gpui_kit::test]
+fn scoped_input_stops_when_a_handler_moves_focus_to_another_scope(cx: &mut TestAppContext) {
+    let keys = Rc::new(RefCell::new(vec![]));
+    let handle = cx.add_window(|_, cx| KeyboardJump {
+        left: cx.focus_handle(),
+        right: cx.focus_handle(),
+        keys: keys.clone(),
+    });
+    handle
+        .update(cx, |view, window, cx| view.right.focus(window, cx))
+        .unwrap();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let error = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            window.within("right").input("ab", cx);
+        }))
+        .expect_err("the second character must not reach the other scope");
+        assert!(
+            error
+                .downcast_ref::<String>()
+                .unwrap()
+                .contains("no observed keyboard focus inside scope")
+        );
+        assert_eq!(window.within("left").find("field").focused(), Some(true));
+    })
+    .unwrap();
+    assert_eq!(&*keys.borrow(), &["a"]);
 }

@@ -9,7 +9,7 @@ use gpui::{
 };
 use std::time::Duration;
 
-pub use gpui_base::ObserveElement;
+pub use gpui_base::TestSupportExt;
 use gpui_base::test_support as observation;
 pub use gpui_base::test_support::ElementSnapshot;
 
@@ -33,6 +33,8 @@ pub trait TestWindowExt {
     fn scroll(&mut self, id: impl Into<ElementId>, delta: ScrollDelta, cx: &mut App);
     /// Drags between window-local positions through native pointer dispatch.
     fn drag(&mut self, from: Point<Pixels>, to: Point<Pixels>, cx: &mut App);
+    /// Drags between two observed element centers, with native hit testing.
+    fn drag_to(&mut self, from: impl Into<ElementId>, to: impl Into<ElementId>, cx: &mut App);
     /// Sends a parsed GPUI keystroke, such as "backspace" or "cmd-a".
     fn press(&mut self, key: &str, cx: &mut App);
     /// Sends text to the current focus; does not focus a target or replace its whole value.
@@ -150,6 +152,47 @@ fn click_target(
     }
 }
 
+fn hover_target(window: &mut Window, scope: &[ElementId], id: ElementId, cx: &mut App) {
+    window.render_frame(cx);
+    let position = target_position(window, scope, &id, None);
+    move_pointer(window, position, None, cx);
+}
+
+fn scroll_target(
+    window: &mut Window,
+    scope: &[ElementId],
+    id: ElementId,
+    delta: ScrollDelta,
+    cx: &mut App,
+) {
+    window.render_frame(cx);
+    let position = target_position(window, scope, &id, None);
+    move_pointer(window, position, None, cx);
+    window.dispatch_event(
+        ScrollWheelEvent {
+            position,
+            delta,
+            ..Default::default()
+        }
+        .to_platform_input(),
+        cx,
+    );
+    window.render_frame(cx);
+}
+
+fn drag_targets(
+    window: &mut Window,
+    scope: &[ElementId],
+    from: ElementId,
+    to: ElementId,
+    cx: &mut App,
+) {
+    window.render_frame(cx);
+    let from = target_position(window, scope, &from, None);
+    let to = target_position(window, scope, &to, None);
+    window.drag(from, to, cx);
+}
+
 impl TestWindowExt for Window {
     fn find(&self, id: impl Into<ElementId>) -> ElementSnapshot {
         require(self, &[], &id.into())
@@ -181,24 +224,13 @@ impl TestWindowExt for Window {
         click_target(self, &[], id.into(), None, MouseButton::Left, 2, cx);
     }
     fn hover(&mut self, id: impl Into<ElementId>, cx: &mut App) {
-        self.render_frame(cx);
-        let position = target_position(self, &[], &id.into(), None);
-        move_pointer(self, position, None, cx);
+        hover_target(self, &[], id.into(), cx);
     }
     fn scroll(&mut self, id: impl Into<ElementId>, delta: ScrollDelta, cx: &mut App) {
-        self.render_frame(cx);
-        let position = target_position(self, &[], &id.into(), None);
-        move_pointer(self, position, None, cx);
-        self.dispatch_event(
-            ScrollWheelEvent {
-                position,
-                delta,
-                ..Default::default()
-            }
-            .to_platform_input(),
-            cx,
-        );
-        self.render_frame(cx);
+        scroll_target(self, &[], id.into(), delta, cx);
+    }
+    fn drag_to(&mut self, from: impl Into<ElementId>, to: impl Into<ElementId>, cx: &mut App) {
+        drag_targets(self, &[], from.into(), to.into(), cx);
     }
     fn drag(&mut self, from: Point<Pixels>, to: Point<Pixels>, cx: &mut App) {
         self.render_frame(cx);
@@ -277,6 +309,59 @@ impl ScopedWindow<'_> {
             MouseButton::Left,
             1,
             cx,
+        );
+    }
+    pub fn right_click(&mut self, id: impl Into<ElementId>, cx: &mut App) {
+        click_target(
+            self.window,
+            &self.scope,
+            id.into(),
+            None,
+            MouseButton::Right,
+            1,
+            cx,
+        );
+    }
+    pub fn double_click(&mut self, id: impl Into<ElementId>, cx: &mut App) {
+        click_target(
+            self.window,
+            &self.scope,
+            id.into(),
+            None,
+            MouseButton::Left,
+            2,
+            cx,
+        );
+    }
+    pub fn hover(&mut self, id: impl Into<ElementId>, cx: &mut App) {
+        hover_target(self.window, &self.scope, id.into(), cx);
+    }
+    pub fn scroll(&mut self, id: impl Into<ElementId>, delta: ScrollDelta, cx: &mut App) {
+        scroll_target(self.window, &self.scope, id.into(), delta, cx);
+    }
+    /// Both IDs resolve within this scope. Use Window::drag for cross-scope coordinates.
+    pub fn drag_to(&mut self, from: impl Into<ElementId>, to: impl Into<ElementId>, cx: &mut App) {
+        drag_targets(self.window, &self.scope, from.into(), to.into(), cx);
+    }
+    /// Dispatches to current focus, requiring an observed focus binding inside this scope.
+    /// Does not move focus; click a scoped input first.
+    pub fn press(&mut self, key: &str, cx: &mut App) {
+        self.require_focus(cx);
+        self.window.press(key, cx);
+    }
+    /// Checks scope membership before every character, including after focus-changing handlers.
+    pub fn input(&mut self, text: &str, cx: &mut App) {
+        for character in text.chars() {
+            self.require_focus(cx);
+            self.window.input(&character.to_string(), cx);
+        }
+    }
+    fn require_focus(&mut self, cx: &mut App) {
+        self.window.render_frame(cx);
+        assert!(
+            observation::scope_has_focus(self.window, &self.scope),
+            "no observed keyboard focus inside scope {:?}; focus a control in this scope before press/input",
+            self.scope
         );
     }
 }

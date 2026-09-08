@@ -1,4 +1,4 @@
-use gpui_kit::test::{ObserveElement, TestWindowExt};
+use gpui_kit::test::{TestSupportExt, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window,
     component::{
@@ -41,7 +41,7 @@ impl Render for Profile {
                 div()
                     .id("status")
                     .role(gpui_kit::Role::Status)
-                    .observe()
+                    .test_support()
                     .aria_label(status.clone())
                     .child(status),
             )

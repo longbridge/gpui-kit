@@ -148,4 +148,4 @@ pub fn init(cx: &mut App) {
 }
 
 /// Fluent UI test observation, inert unless `test-support` is enabled.
-pub use gpui_base::ObserveElement;
+pub use gpui_base::TestSupportExt;

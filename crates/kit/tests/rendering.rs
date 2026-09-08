@@ -146,8 +146,12 @@ mod macos {
     }
 
     pub fn run() {
+        println!("running pixels_detect_missing_check_even_when_checked_state_is_correct");
         pixels_detect_missing_check_even_when_checked_state_is_correct();
+        println!("passed pixels_detect_missing_check_even_when_checked_state_is_correct");
+        println!("running pixels_detect_missing_input_text_even_when_value_is_correct");
         pixels_detect_missing_input_text_even_when_value_is_correct();
+        println!("passed pixels_detect_missing_input_text_even_when_value_is_correct");
         println!("rendering: 2 passed (Metal)");
     }
 }

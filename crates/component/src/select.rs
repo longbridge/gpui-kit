@@ -4,7 +4,7 @@ use gpui::{
     RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window,
     deferred, div, prelude::FluentBuilder, px, rems,
 };
-use gpui_base::ObserveElement as _;
+use gpui_base::TestSupportExt as _;
 use rust_i18n::t;
 
 use crate::ThemeStyled as _;
@@ -489,7 +489,7 @@ where
                 .child(
                     div()
                         .id("input")
-                        .observe()
+                        .test_support()
                         .relative()
                         .flex()
                         .items_center()

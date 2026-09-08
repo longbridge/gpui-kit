@@ -1,7 +1,7 @@
 //! Opt-in headless observation built exclusively on public GPUI APIs.
 //!
 //! Native accessibility properties are read automatically. Applications register
-//! identified GPUI elements with `.observe()`, without supplying test-only state.
+//! identified GPUI elements with `.test_support()`, without supplying test-only state.
 use gpui::{
     App, Bounds, Element, ElementId, FocusHandle, GlobalElementId, Hitbox, InspectorElementId,
     InteractiveElement, IntoElement, LayoutId, Pixels, SharedString, Visibility, Window, px,
@@ -25,6 +25,7 @@ pub struct ElementSnapshot {
     bounds: Bounds<Pixels>,
     visible: bool,
     focused: Option<bool>,
+    focus_action: bool,
     disabled: Option<bool>,
     label: Option<SharedString>,
 }
@@ -59,8 +60,14 @@ impl ElementSnapshot {
         self.visible
     }
     /// Whether the tracked focus scope contains the current keyboard focus.
-    /// `None` means no focus binding was observed.
+    /// `None` means no focus binding or native focus capability was observed.
+    /// Panics if the native element supports focus but its binding was missed.
     pub fn focused(&self) -> Option<bool> {
+        assert!(
+            self.focused.is_some() || !self.focus_action,
+            "focus binding was not observed for {:?}; use .test_support().track_focus(&handle). GPUI does not expose pre-existing or implicit focus handles",
+            self.path
+        );
         self.focused
     }
     /// `None` means the native element does not expose a disabled flag.
@@ -146,6 +153,14 @@ pub fn snapshots(window: &Window) -> Vec<ElementSnapshot> {
     })
 }
 
+/// Internal focus membership check; unsupported bindings are not evidence of focus.
+#[doc(hidden)]
+pub fn scope_has_focus(window: &Window, scope: &[ElementId]) -> bool {
+    snapshots(window)
+        .iter()
+        .any(|element| element.path.starts_with(scope) && element.focused == Some(true))
+}
+
 /// Resolves a scope even when only its descendants are observed.
 #[doc(hidden)]
 pub fn scope(window: &Window, parent: &[ElementId], id: &ElementId) -> Vec<ElementId> {
@@ -192,14 +207,14 @@ pub struct Observed<E> {
 }
 impl<E: Element> Observed<E> {
     /// Repeated observation keeps one registration and the same native identity.
-    pub fn observe(self) -> Self {
+    pub fn test_support(self) -> Self {
         self
     }
 
     pub(crate) fn new(inner: E) -> Self {
         assert!(
             Element::id(&inner).is_some(),
-            "observe requires an existing ElementId"
+            "test_support requires an existing ElementId"
         );
         Self { inner, focus: None }
     }
@@ -253,6 +268,7 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
             bounds,
             visible: false,
             focused: None,
+            focus_action: node.supports_action(gpui::accesskit::Action::Focus),
             disabled: node.is_disabled().then_some(true),
             label: node.label().map(|label| label.to_owned().into()),
         };

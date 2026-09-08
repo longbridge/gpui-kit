@@ -8,7 +8,7 @@ use gpui::{
 };
 
 use crate::actions::{Cancel, Confirm, SelectDown, SelectUp};
-use crate::{ObserveElement as _, StyledExt as _};
+use crate::{StyledExt as _, TestSupportExt as _};
 
 const CONTEXT: &str = "Select";
 
@@ -60,7 +60,7 @@ pub struct Select {
 impl Select {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            base: div().id(id).observe(),
+            base: div().id(id).test_support(),
             open: false,
             disabled: false,
             focus_handle: None,
