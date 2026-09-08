@@ -333,7 +333,8 @@ fn ime_marked_display_range(
 /// heuristic ([`BOTTOM_MARGIN_ROWS`] lines, or one line on small
 /// viewports); `Some(n)` uses `n` lines. The result is saturated against
 /// half the viewport so an oversized override can't invert the
-/// top/bottom thresholds into a scroll feedback loop.
+/// top/bottom thresholds into a scroll feedback loop. `visible_lines` is the
+/// viewport capacity in display rows, independent of logical buffer lines.
 pub(super) fn cursor_surrounding_padding(
     is_auto_grow: bool,
     override_lines: Option<usize>,
@@ -462,7 +463,7 @@ impl<M: InputModeKind> TextElement<M> {
         let top_bottom_margin = cursor_surrounding_padding(
             state.mode.is_auto_grow(),
             state.cursor_surrounding_lines,
-            visible_range.len(),
+            (bounds.size.height / line_height) as usize,
             line_height,
         );
 
