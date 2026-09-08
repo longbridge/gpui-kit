@@ -208,3 +208,6 @@ pub fn init(cx: &mut App) {
     tree::init(cx);
     text::init(cx);
 }
+
+#[cfg(feature = "test-support")]
+pub mod test_support;

@@ -4286,6 +4286,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-test"
+version = "0.6.0"
+dependencies = [
+ "gpui-base",
+ "gpui-component",
+ "gpui-pre",
+]
+
+[[package]]
 name = "gpui-wry"
 version = "0.6.0"
 dependencies = [

@@ -2,7 +2,7 @@ use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AccessibleAction, AnyElement, App, DefiniteLength, Edges, Entity, Hsla,
+    AccessibleAction, AnyElement, App, DefiniteLength, Edges, ElementId, Entity, Hsla,
     InteractiveElement as _, IntoElement, ParentElement as _, Rems, RenderOnce, Role, SharedString,
     StatefulInteractiveElement as _, StyleRefinement, Styled, TextAlign, Window, div, px, relative,
 };
@@ -107,6 +107,7 @@ pub(crate) fn input_style(disabled: bool, cx: &App) -> (Hsla, Hsla) {
 /// A text input element bind to an [`InputState`].
 #[derive(IntoElement)]
 pub struct Input {
+    id: Option<ElementId>,
     state: TextInputState,
     style: StyleRefinement,
     size: Size,
@@ -163,6 +164,12 @@ impl crate::FocusableExt for Input {
 }
 
 impl Input {
+    /// Sets the GPUI identity of the input frame. By default it uses the state entity ID.
+    pub fn id(mut self, id: impl Into<ElementId>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
     /// Create a new [`Input`] element bind to the [`InputState`].
     pub fn new(state: &Entity<InputState>) -> Self {
         Self::with_state(state.clone().into())
@@ -178,6 +185,7 @@ impl Input {
 
     fn with_state(state: TextInputState) -> Self {
         Self {
+            id: None,
             state,
             size: Size::default(),
             style: StyleRefinement::default(),
@@ -538,9 +546,24 @@ impl RenderOnce for Input {
             None if placeholder_is_mask => None,
             None => placeholder.clone(),
         };
-        BaseInput::new(("input", state.entity_id()))
+        let id = self
+            .id
+            .unwrap_or_else(|| ("input", state.entity_id()).into());
+        BaseInput::new(id)
             .focused(focused)
             .disabled(disabled)
+            .map(|this| {
+                #[cfg(feature = "test-support")]
+                let this = {
+                    this.test_metadata(gpui_base::test_support::Metadata {
+                        focus: Some(presentation.focus_handle().clone()),
+                        text: (!presentation.is_masked())
+                            .then(|| state.text(cx).to_string().into()),
+                        ..Default::default()
+                    })
+                };
+                this
+            })
             .track_focus(&frame_focus_handle)
             .styles(|styles| {
                 styles.focused(|style| {

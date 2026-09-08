@@ -18,6 +18,8 @@ type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 /// GPUI's [`Styled`] API.
 #[derive(IntoElement)]
 pub struct Button {
+    #[cfg(feature = "test-support")]
+    test_metadata: crate::test_support::Metadata,
     id: ElementId,
     base: Stateful<Div>,
     style: StyleRefinement,
@@ -35,9 +37,19 @@ pub struct Button {
 }
 
 impl Button {
+    /// Supplies observable facts for headless tests without changing GPUI.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn test_metadata(mut self, metadata: crate::test_support::Metadata) -> Self {
+        self.test_metadata = metadata;
+        self
+    }
+
     pub fn new(id: impl Into<ElementId>) -> Self {
         let id = id.into();
         Self {
+            #[cfg(feature = "test-support")]
+            test_metadata: Default::default(),
             base: div().id(id.clone()),
             id,
             style: StyleRefinement::default(),
@@ -207,11 +219,14 @@ impl StatefulInteractiveElement for Button {}
 impl RenderOnce for Button {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let focus_handle = self.focus_handle(window, cx);
+        #[cfg(feature = "test-support")]
+        let test_focus = focus_handle.clone();
         let disabled = self.disabled;
         let style = self.resolved_style();
         let on_click = self.on_click;
 
-        self.base
+        let element = self
+            .base
             // Centering is part of Button's control geometry. Without a flex
             // formatting context an ordinary child starts at the root's
             // leading edge, so a fixed-height unstyled Button cannot align its
@@ -253,7 +268,16 @@ impl RenderOnce for Button {
                 },
             )
             .children(self.children)
-            .refine_style(&style)
+            .refine_style(&style);
+        #[cfg(feature = "test-support")]
+        let element = {
+            use crate::test_support::ObserveElement as _;
+            let mut metadata = self.test_metadata;
+            metadata.disabled = self.disabled;
+            metadata.focus = Some(test_focus);
+            element.observe().metadata(metadata)
+        };
+        element
     }
 }
 

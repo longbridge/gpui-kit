@@ -15,6 +15,7 @@ edition.workspace = true
 doctest = false
 
 [features]
+test-support = ["gpui/test-support", "gpui-base/test-support"]
 decimal = ["dep:rust_decimal"]
 inspector = ["gpui_macros/inspector", "gpui/inspector", "gpui-base/inspector"]
 tree-sitter = ["dep:tree-sitter", "dep:tree-sitter-json"]

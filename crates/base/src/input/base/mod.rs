@@ -125,6 +125,8 @@ impl InputContextMenuCapabilities {
 /// normal children. Applications remain responsible for all presentation.
 #[derive(IntoElement)]
 pub struct InputBase {
+    #[cfg(feature = "test-support")]
+    test_metadata: crate::test_support::Metadata,
     base: gpui::Stateful<Div>,
     style: StyleRefinement,
     semantic_styles: InputStyles,
@@ -135,8 +137,18 @@ pub struct InputBase {
 }
 
 impl InputBase {
+    /// Supplies observable facts for headless tests without changing GPUI.
+    #[cfg(feature = "test-support")]
+    #[doc(hidden)]
+    pub fn test_metadata(mut self, metadata: crate::test_support::Metadata) -> Self {
+        self.test_metadata = metadata;
+        self
+    }
+
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
+            #[cfg(feature = "test-support")]
+            test_metadata: Default::default(),
             base: div().id(id),
             style: StyleRefinement::default(),
             semantic_styles: InputStyles::default(),
@@ -227,12 +239,21 @@ impl StatefulInteractiveElement for InputBase {}
 impl RenderOnce for InputBase {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let style = self.resolved_style();
-        self.base
+        let element = self
+            .base
             .when_some(self.role.resolve(|| Role::TextInput), |this, role| {
                 this.role(role)
             })
             .children(self.children)
-            .refine_style(&style)
+            .refine_style(&style);
+        #[cfg(feature = "test-support")]
+        let element = {
+            use crate::test_support::ObserveElement as _;
+            let mut metadata = self.test_metadata;
+            metadata.disabled = self.disabled;
+            element.observe().metadata(metadata)
+        };
+        element
     }
 }
 
