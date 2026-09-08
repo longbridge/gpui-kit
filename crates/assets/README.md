@@ -1,5 +1,16 @@
 # GPUI Kit Assets
 
+> [!NOTE]
+> **Embed only the icons you need in your application binary.** Depending on
+> this crate or using `IconName` does not automatically embed the entire SVG
+> catalog or load it into memory. Use `icon_assets!(AppAssets, [Search, Check])`
+> and register `AppAssets` to embed only those two SVGs on native and WASM;
+> optimized builds discard unreferenced SVG data. Selection is explicit at
+> compile time, not automatic runtime loading. Registering the full `Assets`
+> source instead embeds every SVG on native platforms. Selected assets borrow
+> static bytes without copying them; rendering still has normal parsing and
+> rasterization memory costs.
+
 The shared icon names and assets for [GPUI Kit](https://gpui-kit.com), exposed as
 `gpui_kit::assets`. The crate depends on GPUI, not on GPUI Component, so Base,
 GPUI Component, and alternative presentation layers can use the same `IconName`.
