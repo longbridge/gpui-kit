@@ -30,10 +30,12 @@ pub use gpui_base::input::{
     WrappingIndent,
 };
 pub use gpui_base::input::{EditorMode, InputMode, InputModeKind, TextareaMode};
+mod edit_rules;
 #[doc(hidden)]
 mod editor;
 mod state;
 mod textarea;
+pub use edit_rules::{c_style_pairs, language_rules};
 pub use editor::Editor;
 pub use input::*;
 pub use lsp_types::Position;

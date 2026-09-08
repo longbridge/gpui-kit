@@ -23,6 +23,8 @@ mod decorations;
 mod diagnostics;
 #[path = "editor/display_map/mod.rs"]
 mod display_map;
+#[path = "editor/edit_rules.rs"]
+mod edit_rules;
 mod editor;
 #[path = "base/element.rs"]
 mod element;
@@ -70,6 +72,7 @@ pub use diagnostics::{
     DiagnosticSummary, DiagnosticTag, RelatedInformation,
 };
 pub use display_map::{BufferPoint, DisplayMap, DisplayPoint, FoldRange, WrappingIndent};
+pub use edit_rules::{BracketPair, EditRules};
 pub use editor::{Editor, EditorState};
 pub use highlighting::{
     DiagnosticColors, FoldIconRenderer, HighlightStyleResolver, InputEditorStyle, InputHighlighter,

@@ -186,7 +186,8 @@ impl EditorState {
     /// Automatically insert or skip over a closing bracket or quote.
     ///
     /// Called from `on_text_typed` after every edit. Only acts on a single
-    /// freshly typed opener or closer with a collapsed cursor.
+    /// freshly typed opener or closer with a collapsed cursor. Bracket policy
+    /// comes from [`super::EditRules`]; this method names no characters.
     pub(crate) fn handle_auto_close(
         &mut self,
         range: &std::ops::Range<usize>,
@@ -194,7 +195,13 @@ impl EditorState {
         window: &mut Window,
         cx: &mut gpui::Context<Self>,
     ) {
-        if !self.mode.is_auto_close() || !self.is_editable() {
+        if !self.is_editable() {
+            return;
+        }
+        let Some(rules) = self.mode.edit_rules().cloned() else {
+            return;
+        };
+        if !rules.auto_close {
             return;
         }
         if !self.selections.is_single() || !self.active_selection().is_empty() {
@@ -206,61 +213,37 @@ impl EditorState {
         }
         let typed: char = text.chars().next().unwrap_or_default();
         let cursor = self.cursor();
+        // Seek-based neighbor lookup: no linear prefix scan, Unicode-safe.
+        let after: Option<char> = self.text.chars_at(cursor).next();
 
         // Skip-over: typed a closer that already follows the cursor.
         // Remove the just-typed char and move past the existing one.
-        if matches!(typed, ')' | ']' | '}' | '"' | '\'') {
-            let after: Option<char> = self.text.slice(cursor..).chars().next();
-            if after == Some(typed) {
-                // Guard quotes: only skip when not inside a word (e.g. don't).
-                if matches!(typed, '"' | '\'') {
-                    let before: Option<char> =
-                        self.text.slice(..cursor.saturating_sub(1)).chars().last();
-                    if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
-                        return;
-                    }
-                }
-                self.replace_text_in_range_silent(
-                    Some(range.start..range.start + 1),
-                    "",
-                    window,
-                    cx,
-                );
-                self.set_selected_range(range.start + 1..range.start + 1, cx);
-                return;
-            }
+        // No word guard here: a matching follower is always a closer.
+        if rules.is_closer(typed) && after == Some(typed) {
+            let typed_utf16 = self.range_to_utf16(&(range.start..range.start + typed.len_utf8()));
+            self.replace_text_in_range_silent(Some(typed_utf16), "", window, cx);
+            // NOTE: byte target is correct: closers are ASCII (1 byte).
+            let target = range.start + typed.len_utf8();
+            self.set_selected_range(target..target, cx);
+            return;
         }
 
         // Auto-close: typed an opener, insert the matching closer.
-        let Some(closer) = matching_close(typed) else {
+        let Some(closer) = rules.matching_close(typed) else {
             return;
         };
-        if matches!(typed, '"' | '\'') {
-            // Don't pair quotes inside words (e.g. contractions like don't).
-            // Check the char before the just-typed quote.
-            let before_typed: Option<char> = self
-                .text
-                .slice(..range.start.saturating_sub(1))
-                .chars()
-                .last();
+        if closer == typed {
+            // Quotes: don't open a pair inside words (e.g. contractions).
+            // Look at the char before the just-typed quote.
+            let before_typed: Option<char> = (range.start > 0)
+                .then(|| self.text.chars_at(range.start).reversed().next())
+                .flatten();
             if before_typed.is_some_and(|c| c.is_alphanumeric() || c == '_') {
                 return;
             }
         }
         self.replace_text_in_range_silent(None, &closer.to_string(), window, cx);
         self.set_selected_range(cursor..cursor, cx);
-    }
-}
-
-/// The closing counterpart for an opening bracket or quote, if any.
-fn matching_close(opener: char) -> Option<char> {
-    match opener {
-        '(' => Some(')'),
-        '[' => Some(']'),
-        '{' => Some('}'),
-        '"' => Some('"'),
-        '\'' => Some('\''),
-        _ => None,
     }
 }
 

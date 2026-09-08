@@ -7,7 +7,8 @@ use ropey::Rope;
 
 use super::DisplayMap;
 use crate::input::{
-    DiagnosticSet, InputEdit, InputHighlighter, InputHighlighterFactory, RopeExt as _, TabSize,
+    DiagnosticSet, EditRules, InputEdit, InputHighlighter, InputHighlighterFactory, RopeExt as _,
+    TabSize,
 };
 
 /// What changed, handed to the syntax highlighter.
@@ -46,10 +47,10 @@ pub(crate) enum LayoutMode {
         highlighter: Rc<RefCell<Option<Box<dyn InputHighlighter>>>>,
         highlighter_factory: Option<InputHighlighterFactory>,
         diagnostics: DiagnosticSet,
-        /// Automatically insert closing brackets/quotes when typing openers.
-        auto_close: bool,
-        /// Increase indent after lines ending with `{`, `(`, `[`, `:`.
-        smart_indent: bool,
+        /// Bracket pairs, indent triggers, and auto-close/smart-indent policy.
+        edit_rules: EditRules,
+        /// True once the app explicitly set rules; render-time sync skips then.
+        rules_customized: bool,
     },
 }
 
@@ -83,8 +84,8 @@ impl LayoutMode {
             indent_guides: true,
             folding: true,
             diagnostics: DiagnosticSet::new(&Rope::new()),
-            auto_close: true,
-            smart_indent: true,
+            edit_rules: EditRules::default(),
+            rules_customized: false,
         }
     }
 
@@ -107,28 +108,77 @@ impl LayoutMode {
         matches!(self, LayoutMode::CodeEditor { folding: true, .. })
     }
 
+    /// Editing rules for auto-close and smart indent, if a code editor.
+    #[inline]
+    pub(super) fn edit_rules(&self) -> Option<&EditRules> {
+        match self {
+            LayoutMode::CodeEditor { edit_rules, .. } => Some(edit_rules),
+            _ => None,
+        }
+    }
+
+    /// Editing rules for auto-close and smart indent, if a code editor.
+    #[inline]
+    pub(super) fn edit_rules_mut(&mut self) -> Option<&mut EditRules> {
+        match self {
+            LayoutMode::CodeEditor { edit_rules, .. } => Some(edit_rules),
+            _ => None,
+        }
+    }
+
     /// Return true if this layout is a code editor with auto-close enabled.
     #[inline]
     pub(super) fn is_auto_close(&self) -> bool {
-        matches!(
-            self,
-            LayoutMode::CodeEditor {
-                auto_close: true,
-                ..
-            }
-        )
+        self.edit_rules().is_some_and(|rules| rules.auto_close)
     }
 
     /// Return true if this layout is a code editor with smart indent enabled.
     #[inline]
     pub(super) fn is_smart_indent(&self) -> bool {
-        matches!(
-            self,
-            LayoutMode::CodeEditor {
-                smart_indent: true,
-                ..
+        self.edit_rules().is_some_and(|rules| rules.smart_indent)
+    }
+
+    /// Apply rules unless the app explicitly customized them.
+    ///
+    /// Render-time sync (e.g. per-language defaults) calls this: app
+    /// overrides via `edit_rules()` / `set_edit_rules()` always win.
+    #[inline]
+    pub(super) fn ensure_edit_rules(&mut self, rules: EditRules) {
+        if let LayoutMode::CodeEditor {
+            edit_rules,
+            rules_customized,
+            ..
+        } = self
+        {
+            if !*rules_customized {
+                *edit_rules = rules;
             }
-        )
+        }
+    }
+
+    /// Mark rules as app-customized so render-time sync skips them.
+    #[inline]
+    pub(super) fn mark_rules_customized(&mut self) {
+        if let LayoutMode::CodeEditor {
+            rules_customized, ..
+        } = self
+        {
+            *rules_customized = true;
+        }
+    }
+
+    /// Mark rules as app-customized so render-time sync skips them.
+    #[inline]
+    pub(super) fn set_edit_rules_custom(&mut self, rules: EditRules) {
+        if let LayoutMode::CodeEditor {
+            edit_rules,
+            rules_customized,
+            ..
+        } = self
+        {
+            *edit_rules = rules;
+            *rules_customized = true;
+        }
     }
 
     #[inline]
@@ -322,7 +372,7 @@ mod tests {
     use ropey::Rope;
 
     use super::replacement_input_edit;
-    use crate::input::{DiagnosticSet, Point, TabSize, mode::LayoutMode};
+    use crate::input::{DiagnosticSet, EditRules, Point, TabSize, mode::LayoutMode};
 
     #[test]
     fn test_replacement_input_edit_backspace_at_end_uses_old_range() {
@@ -357,8 +407,12 @@ mod tests {
             highlighter: Default::default(),
             highlighter_factory: None,
             diagnostics: DiagnosticSet::new(&Rope::new()),
-            auto_close: false,
-            smart_indent: false,
+            edit_rules: EditRules {
+                auto_close: false,
+                smart_indent: false,
+                ..EditRules::default()
+            },
+            rules_customized: true,
         };
         assert_eq!(mode.line_number(), false);
         assert_eq!(mode.has_indent_guides(), false);
