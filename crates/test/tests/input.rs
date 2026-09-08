@@ -48,10 +48,10 @@ fn text_goes_only_to_the_focused_input(cx: &mut TestAppContext) {
     let handle = inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
         window.click("first", cx);
-        window.type_text("A🦀", cx);
+        window.input("A🦀", cx);
         let previous = window.find("first").unwrap();
         window.click("second", cx);
-        window.type_text("中文", cx);
+        window.input("中文", cx);
         assert!(!window.find("first").unwrap().focused());
         assert!(window.find("second").unwrap().focused());
         assert_eq!(window.find("first").unwrap().text(), Some("A🦀"));
@@ -80,7 +80,7 @@ fn readonly_and_disabled_inputs_reject_native_typing(cx: &mut TestAppContext) {
             .unwrap();
         cx.update_window(handle.into(), |_, window, cx| {
             window.click("guarded", cx);
-            window.type_text("ignored", cx);
+            window.input("ignored", cx);
             let input = window.find("guarded").unwrap();
             assert_eq!(input.disabled(), disabled);
             assert_eq!(input.text(), Some("fixed"));
@@ -99,7 +99,7 @@ fn masked_input_handles_typing_without_reporting_secret_value(cx: &mut TestAppCo
     let handle = inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
         window.click("secret", cx);
-        window.type_text("secret", cx);
+        window.input("secret", cx);
         let secret = window.find("secret").unwrap();
         assert!(secret.focused());
         assert_eq!(secret.text(), None);
@@ -117,7 +117,7 @@ fn existing_gpui_keyboard_editing_updates_observed_value(cx: &mut TestAppContext
     let handle = inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
         window.click("first", cx);
-        window.type_text("ab", cx);
+        window.input("ab", cx);
     })
     .unwrap();
     cx.simulate_keystrokes(handle.into(), "backspace");

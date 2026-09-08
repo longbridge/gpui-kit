@@ -22,7 +22,7 @@ use gpui_test::TestWindowExt;
 // Initialize the component library and create the window with normal GPUI APIs.
 cx.update_window(handle.into(), |_, window, cx| {
     window.click("search", cx);
-    window.type_text("GPUI 中文", cx);
+    window.input("GPUI 中文", cx);
     let input = window.find("search").unwrap();
     assert!(input.focused());
     assert_eq!(input.text(), Some("GPUI 中文"));
@@ -31,7 +31,7 @@ cx.update_window(handle.into(), |_, window, cx| {
 
 - `window.find(id) -> Option<TestElement>` observes the last painted state.
 - `window.click(id, cx)` sends mouse move/down/up through GPUI hit testing.
-- `window.type_text(text, cx)` uses GPUI's keystroke parser and simulated input.
+- `window.input(text, cx)` uses GPUI's keystroke parser and simulated input.
 - Snapshots expose `bounds()`, `visible()`, `focused()`, `disabled()` and `text()`.
 
 Kit Button and Input register automatically when `test-support` is enabled.
@@ -100,7 +100,7 @@ masked input values and unspecified custom text are not reported.
 cargo test -p gpui-test --locked
 ```
 
-The 27 tests cover:
+The 28 tests cover:
 
 - Real Kit Button/Input/Popover interactions, focus switching, Unicode/Shift,
   backspace, read-only/disabled inputs, and masked-value privacy.
@@ -113,3 +113,6 @@ The 27 tests cover:
 
 The same command runs in the existing CI platform matrix. The large-list case
 checks correctness, not rendering performance.
+
+For a complete application workflow and CI setup, see the
+[UI automation testing guide](../../website/docs/ui-testing.md).

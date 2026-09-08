@@ -2,7 +2,7 @@
 //!
 //! Import [`TestWindowExt`] alongside GPUI's prelude. Draw once before the first
 //! query (`window.draw(cx).clear(cx)`). Interactions redraw before and after
-//! dispatch. After external state changes, actions, or resizing, draw again.
+//! dispatch. After external state changes, actions, or resizing, refresh and draw.
 use gpui::{
     App, ElementId, InputEvent, Keystroke, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Window,
@@ -19,8 +19,9 @@ pub trait TestWindowExt {
     /// Panics for missing or geometrically invisible targets. Disabled controls
     /// still receive native events and decide whether to handle them themselves.
     fn click(&mut self, id: impl Into<ElementId>, cx: &mut App);
-    /// Sends Unicode characters through GPUI's existing simulated input path.
-    fn type_text(&mut self, text: &str, cx: &mut App);
+    /// Sends Unicode text to the current keyboard focus through GPUI's simulated
+    /// input path. Does not focus a target or replace the control's whole value.
+    fn input(&mut self, text: &str, cx: &mut App);
 }
 
 impl TestWindowExt for Window {
@@ -71,7 +72,7 @@ impl TestWindowExt for Window {
         redraw(self, cx);
     }
 
-    fn type_text(&mut self, text: &str, cx: &mut App) {
+    fn input(&mut self, text: &str, cx: &mut App) {
         redraw(self, cx);
         for character in text.chars() {
             let text = character.to_string();

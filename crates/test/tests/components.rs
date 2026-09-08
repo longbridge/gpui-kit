@@ -56,7 +56,7 @@ fn kit_controls_use_native_events_and_report_state(cx: &mut TestAppContext) {
         window.click("disabled", cx);
         window.click("search", cx);
         assert!(window.find("search").unwrap().focused());
-        window.type_text("GPUI 中文 🦀", cx);
+        window.input("GPUI 中文 🦀", cx);
         assert_eq!(window.find("search").unwrap().text(), Some("GPUI 中文 🦀"));
         assert!(window.find("popover-content").is_none());
         window.click("open", cx);

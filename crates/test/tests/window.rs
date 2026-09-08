@@ -308,7 +308,7 @@ fn typed_characters_follow_gpui_keystroke_semantics(cx: &mut TestAppContext) {
     let focus = handle.update(cx, |view, _, _| view.focus.clone()).unwrap();
     cx.update_window(handle.into(), |_, window, cx| {
         window.focus(&focus, cx);
-        window.type_text("Aa- 中🦀", cx);
+        window.input("Aa- 中🦀", cx);
     })
     .unwrap();
     let keys = keys.borrow();
