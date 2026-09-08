@@ -8,7 +8,7 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::{StateStyle, StyledExt as _, TestPropsExt as _};
+use crate::{ObserveElement as _, StateStyle, StyledExt as _};
 
 type ChangeHandler = Rc<dyn Fn(bool, &ClickEvent, &mut Window, &mut App)>;
 
@@ -199,7 +199,7 @@ impl RenderOnce for Radio {
         let on_change = self.on_change;
 
         self.base
-            .test_props(|props| props.disabled(disabled).focus(&focus_handle))
+            .observe()
             .role(Role::RadioButton)
             .aria_toggled(if checked {
                 Toggled::True

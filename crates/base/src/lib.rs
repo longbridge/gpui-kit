@@ -39,6 +39,7 @@ mod measure;
 pub mod motion;
 mod nav_stack;
 mod number_input;
+mod observe;
 mod otp_input;
 mod pagination;
 mod popover;
@@ -59,7 +60,6 @@ mod styled;
 mod switch;
 mod table;
 mod tabs;
-mod test_props;
 pub mod text;
 mod text_boundary;
 mod text_selection;
@@ -129,6 +129,7 @@ pub use number_input::{
     Decrement, Increment, NumberInput, NumberInputEvent, NumberInputText, NumberStep, StepAction,
     step_value,
 };
+pub use observe::{ObserveElement, ObservedElement};
 pub use otp_input::{OtpEvent, OtpInput, OtpState};
 pub use pagination::{Pagination, PaginationItem, PaginationState};
 pub use popover::{Popover, PopoverState};
@@ -161,7 +162,6 @@ pub use switch::{
 };
 pub use table::{Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow};
 pub use tabs::{Tab, TabStyles, Tabs};
-pub use test_props::{TestProps, TestPropsElement, TestPropsExt};
 pub use text::{
     MarkdownExtensions, MarkdownNode, MarkdownPlugin, SelectionFormat, TableData, Text, TextView,
     TextViewDefaults, TextViewPlugin, TextViewState, TextViewStyle, html, markdown,

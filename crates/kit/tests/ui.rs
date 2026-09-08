@@ -1,4 +1,4 @@
-use gpui_kit::test::{TestPropsExt, TestWindowExt};
+use gpui_kit::test::{ObserveElement, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window,
     component::{
@@ -40,7 +40,9 @@ impl Render for Profile {
             .child(
                 div()
                     .id("status")
-                    .test_props(|props| props.text(status.clone()))
+                    .role(gpui_kit::Role::Status)
+                    .observe()
+                    .aria_label(status.clone())
                     .child(status),
             )
     }
@@ -62,27 +64,27 @@ fn saves_a_profile_through_the_ui(cx: &mut TestAppContext) {
 
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
-        assert_eq!(window.find("status").text(), Some("Not saved"));
+        assert_eq!(window.find("status").label(), Some("Not saved"));
 
         window.click("name", cx);
         window.input("Ada 中文", cx);
         let name = window.find("name");
-        assert!(name.focused());
-        assert_eq!(name.text(), Some("Ada 中文"));
+        assert_eq!(name.focused(), Some(true));
+        assert_eq!(name.value(), Some("Ada 中文"));
         assert!(name.bounds().size.width > px(0.));
         // Named keys share the same Window API and refresh the resulting frame.
         window.press("backspace", cx);
-        assert_eq!(window.find("name").text(), Some("Ada 中"));
+        assert_eq!(window.find("name").value(), Some("Ada 中"));
 
         window.click("save", cx);
         let status = window.find("status");
         assert!(status.visible());
-        assert_eq!(status.text(), Some("Saved: Ada 中"));
+        assert_eq!(status.label(), Some("Saved: Ada 中"));
         assert!(status.bounds().top() >= window.find("save").bounds().bottom());
     })
     .unwrap();
 
-    // Verify the application result as well as the rendered facts.
+    // Verify the application result as well as the native properties.
     cx.update(|cx| {
         assert_eq!(profile.read(cx).submitted.as_deref(), Some("Ada 中"));
     });

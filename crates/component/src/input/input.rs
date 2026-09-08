@@ -490,9 +490,9 @@ impl RenderOnce for Input {
         let is_multi_line = presentation.is_multi_line();
         let accessibility_role = accessibility_role(is_multi_line, content_type, self.role);
         let accessibility_state = state.clone();
-        // Materializing the whole rope is only observable through the
-        // accessibility tree, so skip it when no client is listening.
-        let accessibility_value = (window.is_a11y_active()
+        // Tests read the same accessibility value as assistive technology.
+        // Avoid materializing the rope in normal builds without a client.
+        let accessibility_value = ((window.is_a11y_active() || cfg!(feature = "test-support"))
             && exposes_accessibility_value(presentation.is_masked(), content_type))
         .then(|| state.text(cx).to_string());
         let input_focused =
@@ -552,14 +552,6 @@ impl RenderOnce for Input {
         BaseInput::new(id)
             .focused(focused)
             .disabled(disabled)
-            .test_props(|props| {
-                props
-                    .focus(presentation.focus_handle())
-                    .when(!presentation.is_masked(), |props| {
-                        let value = state.text(cx).to_string();
-                        props.text(value.clone()).value(value)
-                    })
-            })
             .track_focus(&frame_focus_handle)
             .styles(|styles| {
                 styles.focused(|style| {
@@ -839,9 +831,10 @@ mod tests {
         cx.update(|window, cx| {
             let _ = window.draw(cx);
         });
-        // No assistive technology is attached in tests, so the value stays
-        // unmaterialized while `SetValue` is still advertised.
-        assert_eq!(*captured.lock().unwrap(), Some((None, true)));
+        // Normal builds leave the value lazy without an accessibility client;
+        // test-support reads that same production value path eagerly.
+        let expected_value = cfg!(feature = "test-support").then(|| "initial".to_owned());
+        assert_eq!(*captured.lock().unwrap(), Some((expected_value, true)));
 
         let state = probe.read_with(cx, |probe, _| probe.state.clone());
         let base: TextInputState = state.clone().into();

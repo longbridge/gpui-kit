@@ -1,5 +1,5 @@
 use gpui::{AppContext, Context, TestAppContext, Window, div, prelude::*, px, size};
-use gpui_kit::test::{TestPropsExt, TestWindowExt};
+use gpui_kit::test::{ObserveElement, TestWindowExt};
 
 struct Example {
     open: bool,
@@ -11,7 +11,8 @@ impl Render for Example {
             .child(
                 div()
                     .id("trigger")
-                    .test_props(|props| props.text("Open"))
+                    .observe()
+                    .aria_label("Open")
                     .w(px(120.))
                     .h(px(32.))
                     .child("Open")
@@ -24,7 +25,8 @@ impl Render for Example {
                 this.child(
                     div()
                         .id("popup")
-                        .test_props(|props| props.text("Hello"))
+                        .observe()
+                        .aria_label("Hello")
                         .w(px(200.))
                         .h(px(80.))
                         .child("Hello"),
@@ -40,11 +42,11 @@ fn finds_completed_layout_and_dispatches_click(cx: &mut TestAppContext) {
         window.draw(cx).clear(cx);
         let trigger = window.find("trigger");
         assert_eq!(trigger.bounds().size, size(px(120.), px(32.)));
-        assert_eq!(trigger.text(), Some("Open"));
+        assert_eq!(trigger.label(), Some("Open"));
         assert!(trigger.visible());
         assert!(window.try_find("popup").is_none());
         window.click("trigger", cx);
-        assert_eq!(window.find("popup").text(), Some("Hello"));
+        assert_eq!(window.find("popup").label(), Some("Hello"));
         window.click("trigger", cx);
         assert!(window.try_find("popup").is_none());
     })
@@ -56,34 +58,22 @@ impl Render for Geometry {
     fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
-            .child(
-                div()
-                    .id("fill")
-                    .test_props(|props| props)
-                    .w_full()
-                    .h(px(20.)),
-            )
-            .child(div().id("zero").test_props(|props| props).size(px(0.)))
+            .child(div().id("fill").observe().w_full().h(px(20.)))
+            .child(div().id("zero").observe().size(px(0.)))
             .child(
                 div()
                     .id("hidden")
-                    .test_props(|props| props)
+                    .observe()
                     .size(px(30.))
                     .invisible()
                     .child("Hidden"),
             )
-            .child(
-                div()
-                    .id("transparent")
-                    .test_props(|props| props)
-                    .size(px(30.))
-                    .opacity(0.),
-            )
+            .child(div().id("transparent").observe().size(px(30.)).opacity(0.))
             .child(
                 div().w(px(20.)).h(px(20.)).overflow_hidden().child(
                     div()
                         .id("clipped")
-                        .test_props(|props| props)
+                        .observe()
                         .absolute()
                         .left(px(40.))
                         .size(px(10.)),
@@ -92,13 +82,13 @@ impl Render for Geometry {
             .child(
                 div()
                     .id("offscreen")
-                    .test_props(|props| props)
+                    .observe()
                     .absolute()
                     .left(px(2000.))
                     .size(px(10.)),
             )
             .when(window.viewport_size().width > px(400.), |this| {
-                this.child(div().id("sidebar").test_props(|props| props).size(px(50.)))
+                this.child(div().id("sidebar").observe().size(px(50.)))
             })
     }
 }
@@ -133,7 +123,7 @@ fn windows_and_owned_snapshots_are_independent(cx: &mut TestAppContext) {
         let old = window.find("popup");
         window.click("trigger", cx);
         assert!(window.try_find("popup").is_none());
-        assert_eq!(old.text(), Some("Hello"));
+        assert_eq!(old.label(), Some("Hello"));
     })
     .unwrap();
     cx.update_window(second.into(), |_, window, cx| {
@@ -148,20 +138,16 @@ impl Render for Duplicate {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .child(
-                div().id("one").test_props(|props| props).child(
-                    div()
-                        .id("duplicate")
-                        .test_props(|props| props)
-                        .size(px(10.)),
-                ),
+                div()
+                    .id("one")
+                    .observe()
+                    .child(div().id("duplicate").observe().size(px(10.))),
             )
             .child(
-                div().id("two").test_props(|props| props).child(
-                    div()
-                        .id("duplicate")
-                        .test_props(|props| props)
-                        .size(px(10.)),
-                ),
+                div()
+                    .id("two")
+                    .observe()
+                    .child(div().id("duplicate").observe().size(px(10.))),
             )
     }
 }
@@ -189,14 +175,14 @@ impl Render for Cached {
 }
 
 #[gpui::test]
-fn cached_paint_keeps_identity_and_text(cx: &mut TestAppContext) {
+fn cached_paint_keeps_identity_and_accessibility_label(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, cx| Cached {
         child: cx.new(|_| Example { open: true }),
     });
     cx.update_window(handle.into(), |_, window, cx| {
         for _ in 0..3 {
             window.draw(cx).clear(cx);
-            assert_eq!(window.find("popup").text(), Some("Hello"));
+            assert_eq!(window.find("popup").label(), Some("Hello"));
             assert_eq!(window.find("trigger").bounds().size.height, px(32.));
         }
     })
@@ -214,14 +200,14 @@ impl Render for Covered {
             .child(
                 div()
                     .id("covered")
-                    .test_props(|props| props)
+                    .observe()
                     .size(px(100.))
                     .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
             )
             .child(
                 div()
                     .id("cover")
-                    .test_props(|props| props)
+                    .observe()
                     .absolute()
                     .top_0()
                     .left_0()
@@ -270,7 +256,7 @@ impl Render for FocusedView {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("focus-target")
-            .test_props(|props| props)
+            .observe()
             .size(px(100.))
             .track_focus(&self.focus)
     }
@@ -284,11 +270,11 @@ fn focus_is_from_the_completed_frame(cx: &mut TestAppContext) {
     let focus = handle.update(cx, |view, _, _| view.focus.clone()).unwrap();
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        assert!(!window.find("focus-target").focused());
+        assert_eq!(window.find("focus-target").focused(), Some(false));
         window.focus(&focus, cx);
-        assert!(!window.find("focus-target").focused());
+        assert_eq!(window.find("focus-target").focused(), Some(false));
         window.draw(cx).clear(cx);
-        assert!(window.find("focus-target").focused());
+        assert_eq!(window.find("focus-target").focused(), Some(true));
     })
     .unwrap();
 }
@@ -302,7 +288,7 @@ impl Render for KeyCapture {
         let keys = self.keys.clone();
         div()
             .id("keys")
-            .test_props(|props| props)
+            .observe()
             .size(px(100.))
             .track_focus(&self.focus)
             .on_key_down(move |event, _, _| keys.borrow_mut().push(event.keystroke.clone()))
@@ -344,13 +330,13 @@ impl Render for CenteredLayout {
             .child(
                 div()
                     .id("dialog")
-                    .test_props(|props| props)
+                    .observe()
                     .w(px(200.))
                     .h(px(100.))
                     .flex()
                     .gap(px(10.))
-                    .child(div().id("left").test_props(|props| props).size(px(40.)))
-                    .child(div().id("right").test_props(|props| props).size(px(40.))),
+                    .child(div().id("left").observe().size(px(40.)))
+                    .child(div().id("right").observe().size(px(40.))),
             )
     }
 }
@@ -385,7 +371,7 @@ fn observations_do_not_cross_app_contexts(cx: &mut TestAppContext) {
     other
         .update_window(second.into(), |_, window, cx| {
             window.draw(cx).clear(cx);
-            assert_eq!(window.find("popup").text(), Some("Hello"));
+            assert_eq!(window.find("popup").label(), Some("Hello"));
         })
         .unwrap();
     cx.update_window(first.into(), |_, window, cx| {
@@ -423,24 +409,27 @@ fn native_elements_require_explicit_observation(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-struct RefinedTestProps;
-impl Render for RefinedTestProps {
+struct RepeatedObservation;
+impl Render for RepeatedObservation {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("refined")
-            .test_props(|props| props.text("Original").checked(false))
-            .test_props(|props| props.selected(true))
+            .observe()
+            .aria_label("Original")
+            .aria_toggled(gpui::accesskit::Toggled::False)
+            .aria_selected(true)
+            .observe()
             .size(px(40.))
     }
 }
 
 #[gpui_kit::test]
-fn refining_observation_preserves_existing_facts_and_identity(cx: &mut TestAppContext) {
-    let handle = cx.add_window(|_, _| RefinedTestProps);
+fn repeated_observation_preserves_native_properties_and_identity(cx: &mut TestAppContext) {
+    let handle = cx.add_window(|_, _| RepeatedObservation);
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
         let snapshot = window.find("refined");
-        assert_eq!(snapshot.text(), Some("Original"));
+        assert_eq!(snapshot.label(), Some("Original"));
         assert_eq!(snapshot.checked(), Some(false));
         assert_eq!(snapshot.selected(), Some(true));
         assert_eq!(snapshot.bounds().size, size(px(40.), px(40.)));
@@ -465,14 +454,7 @@ impl Render for NativeProperties {
             .aria_expanded(!self.checked)
             .aria_label("Accessible name")
             .aria_value("Accessible value")
-            // Deliberately conflicting fallbacks must not override native facts.
-            .test_props(|props| {
-                props
-                    .checked(true)
-                    .indeterminate(true)
-                    .selected(true)
-                    .expanded(false)
-            })
+            .observe()
             .size(px(40.))
             .on_click(cx.listener(|this, _, _, cx| {
                 this.checked = !this.checked;
@@ -482,7 +464,7 @@ impl Render for NativeProperties {
 }
 
 #[gpui_kit::test]
-fn native_properties_take_precedence_and_follow_rendered_changes(cx: &mut TestAppContext) {
+fn native_properties_follow_rendered_changes(cx: &mut TestAppContext) {
     let handle = cx.add_window(|_, _| NativeProperties { checked: false });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -493,8 +475,8 @@ fn native_properties_take_precedence_and_follow_rendered_changes(cx: &mut TestAp
         assert_eq!(before.selected(), Some(false));
         assert_eq!(before.expanded(), Some(true));
         // Accessible labels/values are not necessarily logical text/values.
-        assert_eq!(before.text(), None);
-        assert_eq!(before.value(), None);
+        assert_eq!(before.label(), Some("Accessible name"));
+        assert_eq!(before.value(), Some("Accessible value"));
         window.click("native-properties", cx);
         let after = window.find("native-properties");
         assert_eq!(after.checked(), Some(true));
@@ -502,6 +484,43 @@ fn native_properties_take_precedence_and_follow_rendered_changes(cx: &mut TestAp
         assert_eq!(after.selected(), Some(true));
         assert_eq!(after.expanded(), Some(false));
         assert_eq!(before.checked(), Some(false));
+    })
+    .unwrap();
+}
+
+struct UnknownProperties;
+impl Render for UnknownProperties {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("unknown")
+            .observe()
+            .size(px(40.))
+            .child("Drawn text")
+    }
+}
+
+#[gpui_kit::test]
+fn missing_native_properties_stay_unknown(cx: &mut TestAppContext) {
+    let handle = cx.add_window(|_, _| UnknownProperties);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let target = window.find("unknown");
+        assert_eq!(
+            target.label(),
+            None,
+            "child text is not an accessibility label"
+        );
+        assert_eq!(target.value(), None);
+        assert_eq!(target.focused(), None);
+        assert_eq!(target.checked(), None);
+        assert_eq!(target.indeterminate(), None);
+        assert_eq!(target.selected(), None);
+        assert_eq!(target.expanded(), None);
+        assert_eq!(
+            target.disabled(),
+            None,
+            "no disabled flag does not mean enabled"
+        );
     })
     .unwrap();
 }

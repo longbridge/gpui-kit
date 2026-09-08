@@ -1,7 +1,7 @@
 # UI testing in GPUI Kit
 
 Enable `gpui-kit/test-support` under development dependencies and import
-`gpui_kit::test::{TestWindowExt, TestAppContextExt, TestPropsExt, ElementSnapshot}`.
+`gpui_kit::test::{TestWindowExt, TestAppContextExt, ObserveElement, ElementSnapshot}`.
 The implementation uses GPUI public APIs, with no fork, Cargo patch or separate crate.
 
 Read the [complete UI automation guide](../../website/docs/ui-testing.md) for
@@ -15,13 +15,14 @@ The [Chinese guide](../../website/zh-CN/docs/ui-testing.md) covers the same API.
 - `within` follows existing GPUI ID scopes, including unobserved parents.
 - `ElementSnapshot` is immutable. Re-query after interactions; optional state means
   unreported when `None`, not false.
-- `test_props` closures supply missing facts without changing control behavior.
-  Existing GPUI role, toggled, selected and expanded properties are read automatically.
+- `.observe()` registers identity; native accessibility properties supply state.
+  There are no test-only setters. `label` and `value` are accessibility properties,
+  not rendered text. Missing state (including disabled) remains `None`.
 - `render_frame` refreshes external changes. Synchronous interactions refresh their
   frames; deferred/async effects use `wait_for` outside a window update.
 - Clicks use real hit testing. `click_at` provides a local offset for clipped targets.
 - Instrumentation adds no layout container, but evaluates computed style an extra time.
-  It cannot infer an unobserved ancestor's opacity or inspect pixels.
+  Snapshots cannot infer an unobserved ancestor's opacity or inspect pixels.
 - Controls are instrumented incrementally; this is not complete Table/Menu/Dialog/Dock
   coverage or packaged-application automation. See the guide's explicit coverage matrix.
 
@@ -41,4 +42,10 @@ mount/remount, reordered composite IDs, multi-window/App isolation, accessibilit
 and stale registration cleanup when a 1,000-element list shrinks to 10 elements.
 
 The full command runs in the existing CI platform matrix. Large-list cases check
-correctness, not rendering performance.
+correctness, not rendering performance. The `rendering` target additionally checks
+real Metal images on macOS, using a main-thread harness. It is opt-in (`test = false`):
+run `cargo test -p gpui-kit --features test-support --test rendering --locked` on a
+Metal-capable runner; the portable CI suite does not require a GPU. It detects missing checkbox
+marks and invisible input text even when native state stays correct. Other platforms
+explicitly skip this target until GPUI supplies a headless renderer; this is not a
+complete golden-image suite.

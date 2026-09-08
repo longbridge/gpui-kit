@@ -1,7 +1,7 @@
 //! Opt-in headless observation built exclusively on public GPUI APIs.
 //!
-//! Existing GPUI properties are read automatically; controls supply missing facts. Applications can observe an identified
-//! GPUI div with `.test_props(...)`. No accessibility tree or separate test ID is used.
+//! Native accessibility properties are read automatically. Applications register
+//! identified GPUI elements with `.observe()`, without supplying test-only state.
 use gpui::{
     App, Bounds, Element, ElementId, FocusHandle, GlobalElementId, Hitbox, InspectorElementId,
     InteractiveElement, IntoElement, LayoutId, Pixels, SharedString, Visibility, Window, px,
@@ -24,9 +24,9 @@ pub struct ElementSnapshot {
     value: Option<SharedString>,
     bounds: Bounds<Pixels>,
     visible: bool,
-    focused: bool,
-    disabled: bool,
-    text: Option<SharedString>,
+    focused: Option<bool>,
+    disabled: Option<bool>,
+    label: Option<SharedString>,
 }
 impl ElementSnapshot {
     pub fn role(&self) -> Option<gpui::Role> {
@@ -47,6 +47,7 @@ impl ElementSnapshot {
     pub fn expanded(&self) -> Option<bool> {
         self.expanded
     }
+    /// The native accessibility value, not rendered text or pixels.
     pub fn value(&self) -> Option<&str> {
         self.value.as_deref()
     }
@@ -57,14 +58,19 @@ impl ElementSnapshot {
     pub fn visible(&self) -> bool {
         self.visible
     }
-    pub fn focused(&self) -> bool {
+    /// Whether the tracked focus scope contains the current keyboard focus.
+    /// `None` means no focus binding was observed.
+    pub fn focused(&self) -> Option<bool> {
         self.focused
     }
-    pub fn disabled(&self) -> bool {
+    /// `None` means the native element does not expose a disabled flag.
+    /// Absence is not evidence that a control accepts input.
+    pub fn disabled(&self) -> Option<bool> {
         self.disabled
     }
-    pub fn text(&self) -> Option<&str> {
-        self.text.as_deref()
+    /// The accessibility label; it can intentionally differ from visible text.
+    pub fn label(&self) -> Option<&str> {
+        self.label.as_deref()
     }
 }
 
@@ -172,7 +178,7 @@ pub fn registered_paths(window: &Window) -> String {
         .collect();
     paths.sort();
     if paths.is_empty() {
-        "<none; draw a frame and enable props>".into()
+        "<none; draw a frame and observe elements>".into()
     } else {
         paths.join(", ")
     }
@@ -182,24 +188,20 @@ pub fn registered_paths(window: &Window) -> String {
 /// state, so normal state cleanup and cached-view replay determine its lifetime.
 pub struct Observed<E> {
     inner: E,
-    props: crate::TestProps,
+    focus: Option<FocusHandle>,
 }
 impl<E: Element> Observed<E> {
-    /// Refines the existing props without adding another element wrapper.
-    pub fn test_props(
-        mut self,
-        configure: impl FnOnce(crate::TestProps) -> crate::TestProps,
-    ) -> Self {
-        self.props = self.props.configure(configure);
+    /// Repeated observation keeps one registration and the same native identity.
+    pub fn observe(self) -> Self {
         self
     }
 
-    pub(crate) fn new(inner: E, props: crate::TestProps) -> Self {
+    pub(crate) fn new(inner: E) -> Self {
         assert!(
             Element::id(&inner).is_some(),
-            "test_props requires an existing ElementId"
+            "observe requires an existing ElementId"
         );
-        Self { inner, props }
+        Self { inner, focus: None }
     }
 }
 impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> IntoElement for Observed<E> {
@@ -243,20 +245,16 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
         let facts = ElementSnapshot {
             role,
             path: global_id.to_vec(),
-            checked: toggled
-                .map(|value| value == gpui::accesskit::Toggled::True)
-                .or(self.props.checked),
-            indeterminate: toggled
-                .map(|value| value == gpui::accesskit::Toggled::Mixed)
-                .or(self.props.indeterminate),
-            selected: node.is_selected().or(self.props.selected),
-            expanded: node.is_expanded().or(self.props.expanded),
-            value: self.props.value.clone(),
+            checked: toggled.map(|value| value == gpui::accesskit::Toggled::True),
+            indeterminate: toggled.map(|value| value == gpui::accesskit::Toggled::Mixed),
+            selected: node.is_selected(),
+            expanded: node.is_expanded(),
+            value: node.value().map(|value| value.to_owned().into()),
             bounds,
             visible: false,
-            focused: false,
-            disabled: self.props.disabled.unwrap_or_else(|| node.is_disabled()),
-            text: self.props.text.clone(),
+            focused: None,
+            disabled: node.is_disabled().then_some(true),
+            label: node.label().map(|label| label.to_owned().into()),
         };
         let registration =
             window.with_element_state(global_id, |state: Option<Rc<Registration>>, window| {
@@ -307,10 +305,9 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
                 && clipped.size.width > px(0.)
                 && clipped.size.height > px(0.);
             facts.focused = self
-                .props
                 .focus
                 .as_ref()
-                .is_some_and(|focus| focus.is_focused(window));
+                .map(|focus| focus.contains_focused(window, cx));
         }
         self.inner
             .paint(id, inspector, bounds, layout, &mut paint.0, window, cx);
@@ -344,7 +341,7 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Interactiv
         self.inner.interactivity()
     }
     fn track_focus(mut self, focus: &FocusHandle) -> Self {
-        self.props.focus = Some(focus.clone());
+        self.focus = Some(focus.clone());
         self.inner = self.inner.track_focus(focus);
         self
     }

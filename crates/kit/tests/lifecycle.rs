@@ -1,7 +1,7 @@
 use gpui::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window, div, prelude::*, px,
 };
-use gpui_kit::test::{TestPropsExt, TestWindowExt};
+use gpui_kit::test::{ObserveElement, TestWindowExt};
 
 struct Child {
     label: SharedString,
@@ -10,7 +10,8 @@ impl Render for Child {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("child")
-            .test_props(|props| props.text(self.label.clone()))
+            .observe()
+            .aria_label(self.label.clone())
             .size(px(40.))
             .child(self.label.clone())
     }
@@ -97,8 +98,8 @@ fn unmount_and_remount_do_not_retain_old_metadata(cx: &mut TestAppContext) {
     cx.update_window(handle.into(), |_, window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
-        assert_eq!(window.find("child").text(), Some("replacement"));
-        assert_eq!(old.text(), Some("original"));
+        assert_eq!(window.find("child").label(), Some("replacement"));
+        assert_eq!(old.label(), Some("original"));
     })
     .unwrap();
 }
@@ -117,7 +118,8 @@ impl Render for Rows {
             let label = SharedString::from(format!("row {index}"));
             div()
                 .id(("row", index))
-                .test_props(|props| props.text(label.clone()))
+                .observe()
+                .aria_label(label.clone())
                 .h(px(30.))
                 .w(px(100.))
                 .child(label)
@@ -140,8 +142,8 @@ fn composite_ids_follow_reordered_rows(cx: &mut TestAppContext) {
             window.draw(cx).clear(cx);
             let first = window.find(("row", 0usize));
             let last = window.find(("row", 2usize));
-            assert_eq!(first.text(), Some("row 0"));
-            assert_eq!(last.text(), Some("row 2"));
+            assert_eq!(first.label(), Some("row 0"));
+            assert_eq!(last.label(), Some("row 2"));
             assert_eq!(first.bounds().top() > last.bounds().top(), reversed);
         })
         .unwrap();
@@ -168,10 +170,10 @@ fn closing_one_window_preserves_other_window_and_owned_snapshot(cx: &mut TestApp
     cx.update_window(second.into(), |_, window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
-        assert_eq!(window.find("child").text(), Some("second"));
+        assert_eq!(window.find("child").label(), Some("second"));
     })
     .unwrap();
-    assert_eq!(snapshot.text(), Some("first"));
+    assert_eq!(snapshot.label(), Some("first"));
 }
 
 #[test]
@@ -187,7 +189,7 @@ fn observation_preserves_accessibility_role_and_properties() {
         .role(Role::Button)
         .aria_label("Save")
         .aria_description("Save document")
-        .test_props(|props| props);
+        .observe();
     assert_eq!(Element::id(&native), Element::id(&observed));
     assert_eq!(native.a11y_role(), observed.a11y_role());
     let mut expected = gpui::accesskit::Node::new(Role::Button);
@@ -199,9 +201,9 @@ fn observation_preserves_accessibility_role_and_properties() {
 }
 
 #[test]
-#[should_panic(expected = "test_props requires an existing ElementId")]
+#[should_panic(expected = "observe requires an existing ElementId")]
 fn observation_rejects_anonymous_elements() {
-    let _ = div().test_props(|props| props);
+    let _ = div().observe();
 }
 
 struct Clipped {
@@ -213,7 +215,7 @@ impl Render for Clipped {
         div().w(px(20.)).h(px(40.)).overflow_hidden().child(
             div()
                 .id("partly-visible")
-                .test_props(|props| props)
+                .observe()
                 .absolute()
                 .w(px(100.))
                 .h(px(40.))
@@ -253,7 +255,7 @@ impl Render for ManyRows {
             .children((0..self.count).map(|index| {
                 div()
                     .id(("record", index))
-                    .test_props(|props| props)
+                    .observe()
                     .w(px(100.))
                     .h(px(1.))
                     .flex_shrink_0()

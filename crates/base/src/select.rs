@@ -8,7 +8,7 @@ use gpui::{
 };
 
 use crate::actions::{Cancel, Confirm, SelectDown, SelectUp};
-use crate::{StyledExt as _, TestPropsExt as _};
+use crate::{ObserveElement as _, StyledExt as _};
 
 const CONTEXT: &str = "Select";
 
@@ -42,7 +42,7 @@ type ActionHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 /// `aria_active_descendant()`; this root cannot do it on the caller's behalf.
 #[derive(IntoElement)]
 pub struct Select {
-    base: crate::TestPropsElement<gpui::Stateful<gpui::Div>>,
+    base: crate::ObservedElement<gpui::Stateful<gpui::Div>>,
     open: bool,
     disabled: bool,
     focus_handle: Option<FocusHandle>,
@@ -58,18 +58,9 @@ pub struct Select {
 }
 
 impl Select {
-    /// Supplies logical facts to UI tests; the closure is skipped in normal builds.
-    pub fn test_props(
-        mut self,
-        configure: impl FnOnce(crate::TestProps) -> crate::TestProps,
-    ) -> Self {
-        self.base = self.base.test_props(configure);
-        self
-    }
-
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            base: div().id(id).test_props(|props| props),
+            base: div().id(id).observe(),
             open: false,
             disabled: false,
             focus_handle: None,
@@ -202,11 +193,6 @@ impl RenderOnce for Select {
         });
 
         self.base
-            .test_props(|props| {
-                props
-                    .disabled(disabled)
-                    .when_some(focus_handle.as_ref(), |test, focus| test.focus(focus))
-            })
             .role(Role::ComboBox)
             .aria_expanded(open)
             .when_some(self.accessibility_label, |this, label| {

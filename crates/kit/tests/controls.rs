@@ -95,7 +95,7 @@ fn checkbox_switch_and_tabs_report_controlled_state(cx: &mut TestAppContext) {
         window.click("notifications", cx);
         assert_eq!(window.find("notifications").checked(), Some(false));
         window.click("locked", cx);
-        assert!(window.find("locked").disabled());
+        assert_eq!(window.find("locked").disabled(), None);
         assert_eq!(window.find("locked").checked(), Some(true));
         assert_eq!(
             window.within("settings-tabs").find(0usize).selected(),
@@ -132,7 +132,7 @@ async fn select_reports_value_and_keyboard_open_state(cx: &mut TestAppContext) {
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
-        assert_eq!(window.find("language").value(), Some("Rust"));
+        assert_eq!(window.find("language").value(), Some("Language: Rust"));
         assert_eq!(window.find("language").expanded(), Some(false));
         window.within("language").click("input", cx);
         assert_eq!(window.find("language").expanded(), Some(true));
@@ -146,7 +146,7 @@ async fn select_reports_value_and_keyboard_open_state(cx: &mut TestAppContext) {
     // Select commits through defer_in after the dispatch callback returns.
     cx.wait_for(handle.into(), Duration::from_millis(100), |window, _| {
         window.find("language").expanded() == Some(false)
-            && window.find("language").value() == Some("Go")
+            && window.find("language").value() == Some("Language: Go")
     })
     .await;
 }
@@ -155,7 +155,7 @@ struct HoverHelp;
 impl Render for HoverHelp {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         use gpui_kit::component::{button::Button, hover_card::HoverCard};
-        use gpui_kit::test::TestPropsExt as _;
+        use gpui_kit::test::ObserveElement as _;
         div().size_full().flex().flex_col().gap_8().children([
             HoverCard::new("help")
                 .open_delay(Duration::from_millis(30))
@@ -164,7 +164,8 @@ impl Render for HoverHelp {
                 .content(|_, _, _| {
                     div()
                         .id("help-content")
-                        .test_props(|props| props.text("Explanation"))
+                        .observe()
+                        .aria_label("Explanation")
                         .w(px(100.))
                         .h(px(40.))
                         .child("Explanation")
@@ -200,7 +201,7 @@ async fn real_hover_card_opens_and_closes_after_pointer_delays(cx: &mut TestAppC
     })
     .await;
     cx.update_window(handle.into(), |_, window, cx| {
-        assert_eq!(window.find("help-content").text(), Some("Explanation"));
+        assert_eq!(window.find("help-content").label(), Some("Explanation"));
         window.hover("away", cx);
     })
     .unwrap();
@@ -208,4 +209,25 @@ async fn real_hover_card_opens_and_closes_after_pointer_delays(cx: &mut TestAppC
         window.try_find("help-content").is_none()
     })
     .await;
+}
+
+struct DisconnectedCheckbox;
+impl Render for DisconnectedCheckbox {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        // Deliberate application defect: activation never updates the owner.
+        Checkbox::new("agree").label("Agree").checked(false)
+    }
+}
+
+#[gpui_kit::test]
+fn checkbox_click_cannot_fabricate_a_successful_state_change(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let handle = cx.add_window(|_, _| DisconnectedCheckbox);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click("agree", cx);
+        assert_eq!(window.find("agree").checked(), Some(false));
+        window.press("space", cx);
+        assert_eq!(window.find("agree").checked(), Some(false));
+    })
+    .unwrap();
 }

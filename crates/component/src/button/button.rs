@@ -577,11 +577,6 @@ impl RenderOnce for Button {
         };
 
         let root = base
-            .test_props(|props| {
-                props.when_some(self.label.as_ref(), |props, label| {
-                    props.text(label.clone())
-                })
-            })
             .cursor_default()
             .flex()
             .flex_shrink_0()

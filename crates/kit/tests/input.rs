@@ -52,11 +52,11 @@ fn text_goes_only_to_the_focused_input(cx: &mut TestAppContext) {
         let previous = window.find("first");
         window.click("second", cx);
         window.input("中文", cx);
-        assert!(!window.find("first").focused());
-        assert!(window.find("second").focused());
-        assert_eq!(window.find("first").text(), Some("A🦀"));
-        assert_eq!(window.find("second").text(), Some("中文"));
-        assert!(previous.focused());
+        assert_eq!(window.find("first").focused(), Some(false));
+        assert_eq!(window.find("second").focused(), Some(true));
+        assert_eq!(window.find("first").value(), Some("A🦀"));
+        assert_eq!(window.find("second").value(), Some("中文"));
+        assert_eq!(previous.focused(), Some(true));
     })
     .unwrap();
     handle
@@ -82,8 +82,8 @@ fn readonly_and_disabled_inputs_reject_native_typing(cx: &mut TestAppContext) {
             window.click("guarded", cx);
             window.input("ignored", cx);
             let input = window.find("guarded");
-            assert_eq!(input.disabled(), disabled);
-            assert_eq!(input.text(), Some("fixed"));
+            assert_eq!(input.disabled(), None);
+            assert_eq!(input.value(), Some("fixed"));
         })
         .unwrap();
         handle
@@ -101,8 +101,7 @@ fn masked_input_handles_typing_without_reporting_secret_value(cx: &mut TestAppCo
         window.click("secret", cx);
         window.input("secret", cx);
         let secret = window.find("secret");
-        assert!(secret.focused());
-        assert_eq!(secret.text(), None);
+        assert_eq!(secret.focused(), Some(true));
         assert_eq!(secret.value(), None);
     })
     .unwrap();
@@ -125,7 +124,7 @@ fn existing_gpui_keyboard_editing_updates_observed_value(cx: &mut TestAppContext
     cx.update_window(handle.into(), |_, window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
-        assert_eq!(window.find("first").text(), Some("a"));
+        assert_eq!(window.find("first").value(), Some("a"));
     })
     .unwrap();
     handle

@@ -8,7 +8,7 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::{RoleOverride, Selectable, StateStyle, StyledExt as _, TestPropsExt as _};
+use crate::{ObserveElement as _, RoleOverride, Selectable, StateStyle, StyledExt as _};
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -19,7 +19,7 @@ type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 #[derive(IntoElement)]
 pub struct Button {
     id: ElementId,
-    base: crate::TestPropsElement<Stateful<Div>>,
+    base: crate::ObservedElement<Stateful<Div>>,
     style: StyleRefinement,
     semantic_styles: ButtonStyles,
     selected: bool,
@@ -35,19 +35,10 @@ pub struct Button {
 }
 
 impl Button {
-    /// Supplies logical facts to UI tests; the closure is skipped in normal builds.
-    pub fn test_props(
-        mut self,
-        configure: impl FnOnce(crate::TestProps) -> crate::TestProps,
-    ) -> Self {
-        self.base = self.base.test_props(configure);
-        self
-    }
-
     pub fn new(id: impl Into<ElementId>) -> Self {
         let id = id.into();
         Self {
-            base: div().id(id.clone()).test_props(|props| props),
+            base: div().id(id.clone()).observe(),
             id,
             style: StyleRefinement::default(),
             semantic_styles: ButtonStyles::default(),
@@ -221,12 +212,6 @@ impl RenderOnce for Button {
         let on_click = self.on_click;
 
         self.base
-            .test_props(|props| {
-                props
-                    .disabled(self.disabled)
-                    .selected(self.selected)
-                    .focus(&focus_handle)
-            })
             // Centering is part of Button's control geometry. Without a flex
             // formatting context an ordinary child starts at the root's
             // leading edge, so a fixed-height unstyled Button cannot align its

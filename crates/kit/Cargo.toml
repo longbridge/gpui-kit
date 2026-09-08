@@ -106,3 +106,10 @@ required-features = ["test-support", "component"]
 [[test]]
 name = "interactions"
 required-features = ["test-support"]
+
+[[test]]
+name = "rendering"
+# Requires a real Metal device; select explicitly with --test rendering.
+test = false
+harness = false
+required-features = ["test-support", "component", "assets"]

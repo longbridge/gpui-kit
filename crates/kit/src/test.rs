@@ -9,9 +9,9 @@ use gpui::{
 };
 use std::time::Duration;
 
+pub use gpui_base::ObserveElement;
 use gpui_base::test_support as observation;
 pub use gpui_base::test_support::ElementSnapshot;
-pub use gpui_base::{TestProps, TestPropsExt};
 
 /// Testing operations on GPUI's existing window.
 pub trait TestWindowExt {

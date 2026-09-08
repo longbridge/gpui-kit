@@ -1,4 +1,4 @@
-use crate::{StateStyle, StyledExt as _, TestPropsExt as _};
+use crate::{ObserveElement as _, StateStyle, StyledExt as _};
 use gpui::{
     AnyElement, App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, ParentElement,
     Refineable as _, RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement,
@@ -125,7 +125,7 @@ impl InputContextMenuCapabilities {
 /// normal children. Applications remain responsible for all presentation.
 #[derive(IntoElement)]
 pub struct InputBase {
-    base: crate::TestPropsElement<gpui::Stateful<Div>>,
+    base: crate::ObservedElement<gpui::Stateful<Div>>,
     style: StyleRefinement,
     semantic_styles: InputStyles,
     children: Vec<AnyElement>,
@@ -135,18 +135,9 @@ pub struct InputBase {
 }
 
 impl InputBase {
-    /// Supplies logical facts to UI tests; the closure is skipped in normal builds.
-    pub fn test_props(
-        mut self,
-        configure: impl FnOnce(crate::TestProps) -> crate::TestProps,
-    ) -> Self {
-        self.base = self.base.test_props(configure);
-        self
-    }
-
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            base: div().id(id).test_props(|props| props),
+            base: div().id(id).observe(),
             style: StyleRefinement::default(),
             semantic_styles: InputStyles::default(),
             children: Vec::new(),
@@ -226,6 +217,11 @@ impl ParentElement for InputBase {
 }
 
 impl InteractiveElement for InputBase {
+    fn track_focus(mut self, focus: &gpui::FocusHandle) -> Self {
+        self.base = self.base.track_focus(focus);
+        self
+    }
+
     fn interactivity(&mut self) -> &mut Interactivity {
         self.base.interactivity()
     }
@@ -237,7 +233,6 @@ impl RenderOnce for InputBase {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let style = self.resolved_style();
         self.base
-            .test_props(|props| props.disabled(self.disabled))
             .when_some(self.role.resolve(|| Role::TextInput), |this, role| {
                 this.role(role)
             })

@@ -1,4 +1,4 @@
-use gpui_kit::test::{TestAppContextExt, TestPropsExt, TestWindowExt};
+use gpui_kit::test::{ObserveElement, TestAppContextExt, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, MouseButton, ScrollDelta, ScrollHandle, TestAppContext, Window, div,
     point, prelude::*, px, size,
@@ -16,7 +16,8 @@ impl Render for Scopes {
                 div().id("footer").child(
                     div()
                         .id("save")
-                        .test_props(|props| props.text(scope))
+                        .observe()
+                        .aria_label(scope)
                         .size(px(40.))
                         .on_click(move |_, _, _| clicks.borrow_mut().push(scope)),
                 ),
@@ -33,7 +34,7 @@ fn scoped_queries_follow_existing_gpui_paths_without_observed_containers(cx: &mu
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
         assert_eq!(
-            window.within("toolbar").find("save").text(),
+            window.within("toolbar").find("save").label(),
             Some("toolbar")
         );
         window.within("dialog").within("footer").click("save", cx);
@@ -66,7 +67,7 @@ impl Render for Pointer {
         let right = self.events.clone();
         div()
             .id("surface")
-            .test_props(|props| props)
+            .observe()
             .size(px(80.))
             .on_hover(move |entered, _, _| {
                 if *entered {
@@ -107,7 +108,7 @@ impl Render for Scrolling {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("list")
-            .test_props(|props| props)
+            .observe()
             .w(px(100.))
             .h(px(60.))
             .overflow_y_scroll()
@@ -117,7 +118,7 @@ impl Render for Scrolling {
             .children((0..30usize).map(|index| {
                 div()
                     .id(("row", index))
-                    .test_props(|props| props)
+                    .observe()
                     .h(px(20.))
                     .flex_shrink_0()
                     .child(format!("Row {index}"))
@@ -160,14 +161,14 @@ impl Render for Dropping {
             .child(
                 div()
                     .id("source")
-                    .test_props(|props| props)
+                    .observe()
                     .size(px(40.))
                     .on_drag(Payload, |payload, _, _, cx| cx.new(|_| payload.clone())),
             )
             .child(
                 div()
                     .id("target")
-                    .test_props(|props| props)
+                    .observe()
                     .size(px(40.))
                     .on_drop(move |_: &Payload, _, _| *drops.borrow_mut() += 1),
             )
@@ -195,7 +196,7 @@ struct Loading {
 impl Render for Loading {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div().when(self.ready, |this| {
-            this.child(div().id("loaded").test_props(|props| props).size(px(20.)))
+            this.child(div().id("loaded").observe().size(px(20.)))
         })
     }
 }
@@ -310,30 +311,25 @@ struct VirtualRows {
 }
 impl Render for VirtualRows {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .id("viewport")
-            .test_props(|props| props)
-            .w(px(100.))
-            .h(px(60.))
-            .child(
-                gpui_kit::base::v_virtual_list(
-                    cx.entity(),
-                    "rows",
-                    Rc::new(vec![size(px(100.), px(20.)); 1000]),
-                    |_, range, _, _| {
-                        range
-                            .map(|index| {
-                                div()
-                                    .id(("virtual-row", index))
-                                    .test_props(|props| props)
-                                    .h(px(20.))
-                                    .child(format!("Row {index}"))
-                            })
-                            .collect()
-                    },
-                )
-                .track_scroll(&self.scroll),
+        div().id("viewport").observe().w(px(100.)).h(px(60.)).child(
+            gpui_kit::base::v_virtual_list(
+                cx.entity(),
+                "rows",
+                Rc::new(vec![size(px(100.), px(20.)); 1000]),
+                |_, range, _, _| {
+                    range
+                        .map(|index| {
+                            div()
+                                .id(("virtual-row", index))
+                                .observe()
+                                .h(px(20.))
+                                .child(format!("Row {index}"))
+                        })
+                        .collect()
+                },
             )
+            .track_scroll(&self.scroll),
+        )
     }
 }
 #[gpui_kit::test]

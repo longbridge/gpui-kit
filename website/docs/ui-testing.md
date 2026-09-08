@@ -8,12 +8,12 @@ example: false
 # UI Automation Testing
 
 Use `gpui_kit::test` to exercise a GPUI Kit view through real GPUI event dispatch,
-then assert its rendered state and application result with ordinary Rust
+then assert its native accessibility properties, layout and application result with ordinary Rust
 assertions. A test creates a headless window, finds controls by `ElementId`,
 clicks and enters text, and checks focus, values and layout.
 
-This guide covers in-process behavior and layout automation. The harness does
-not launch your packaged application or inspect pixels. Keep native-window,
+This guide covers in-process behavior and layout automation. Element snapshots do not inspect pixels or launch your packaged application.
+For pixel checks, use GPUI’s separate offscreen renderer as described below. Keep native-window,
 platform integration and visual checks alongside these tests when those are
 part of the behavior you need to verify.
 
@@ -61,7 +61,7 @@ initializes the component library and wraps the view in `Root`. It retains the
 input state on the view, as a real application should.
 
 The test enters a Unicode name, edits it with Backspace, clicks Save, checks
-the status text and layout, and verifies the saved application value. The same
+the accessible status announcement and layout, and verifies the saved application value. The same
 source is compiled and run in GPUI Kit's integration suite.
 
 <<< ../../crates/kit/tests/ui.rs{rust}
@@ -90,59 +90,56 @@ cargo test -p gpui-kit --features test-support --test ui --locked
 With `test-support` enabled, these controls register their existing native element;
 observation adds no layout container:
 
-| Control | Reported state beyond geometry and visibility |
+| Control | Native properties beyond geometry and visibility |
 | --- | --- |
-| Button | Label text, focus, disabled, selected |
-| Input | Unmasked text/value, focus, disabled |
-| Checkbox | Checked, indeterminate, focus, disabled |
-| Switch / Toggle | Checked, focus, disabled |
-| Radio | Checked, selected, focus, disabled |
-| Tab | Selected, disabled |
-| Select | Selected title as value, expanded, focus, disabled |
-| ListItem | Selected, disabled |
-| SidebarMenuItem | Label text, selected, expanded, disabled |
+| Button | Accessibility label, focus scope |
+| Input | Non-sensitive accessibility value, label, focus scope |
+| Checkbox | Checked, indeterminate, label, focus scope |
+| Switch / Toggle | Checked, label, focus scope |
+| Radio | Checked, selected, label, focus scope |
+| Tab | Selected, label |
+| Select | Accessibility value (including title prefix), expanded, focus scope |
+| ListItem / SidebarMenuItem | Geometry; additional state only when provided by native accessibility properties |
 
 Use constructor IDs where available. Input and Select accept `.id("name")`;
 their defaults include the state entity ID. Tabs inside a TabBar use their
 index as ID. Select's existing `"input"` child identifies its trigger:
 `window.within("language").click("input", cx)`.
 
-Native divs opt in through a single fluent `test_props` closure:
+Native divs opt in without supplying a second description of their state:
 
 ```rust
-use gpui_kit::TestPropsExt as _;
+use gpui_kit::ObserveElement as _;
 
-let status = div()
-    .id("status")
-    .test_props(|props| props.text(message.clone()))
-    .child(message);
+let target = div().id("details").observe().child(content);
 ```
 
-Here `message` is a `SharedString`. `TestPropsExt` is always available, so render
-chains need no conditional compilation, temporary element or temporary focus clone.
-Without `test-support`, the closure is not called, the original native element
-is returned, and configuration storage is zero-sized. Put test-only conversions
-inside the closure; Rust still creates and drops captured values normally.
+`ObserveElement` is available without `test-support`; in normal builds `.observe()`
+returns the original native element with its exact type. With the feature enabled,
+it preserves identity, layout, events and accessibility, without adding a layout
+container. Repeated observation keeps one registration. Call `.observe()` before
+`.track_focus(&handle)` so the wrapper sees the actual binding. Kit controls do this
+internally. `focused()` checks whether that focus scope contains keyboard focus,
+including the nested editor inside an Input frame. It returns `None` when no
+focus binding was observed.
 
-The closure receives a `TestProps`, which offers `text`, `focus`, `disabled`, `checked`,
-`indeterminate`, `selected`, `expanded` and `value`. These report facts without
-changing control behavior: `props.disabled(true)` does not disable handlers.
-A `TestProps` describes facts for tests; it is not an entity or a second
-copy of the control model. Repeated `.test_props(...)` calls refine the same
-observation and preserve previously supplied facts, without nesting wrappers.
+Snapshots read native `role`, `aria_toggled`, `aria_selected`, `aria_expanded`,
+`aria_label` and `aria_value`. There are no `TestProps` or hand-supplied fallback values.
+Input uses its existing accessibility-value path in tests, with the same masking and
+sensitive-content restrictions. Select's `value()` is its accessible value, including
+any title prefix; it is not a selected item ID.
 
-Role, checked/indeterminate, selected and expanded facts are read from the
-native element's existing `role`, `aria_toggled`, `aria_selected` and
-`aria_expanded` properties. Native properties take precedence; the closure
-provides fallbacks only when they are absent. Focus association, unavailable
-disabled information, and exact logical text/value can still be supplied in
-the closure. Accessible names are not substituted for rendered text, and
-placeholder/prefix-bearing accessible values are not treated as logical values.
-This also avoids exposing masked input values. Snapshots additionally expose `role()`.
+`label()` means accessibility label, not visible text. `value()` means accessibility
+value, not pixels. These properties can still contain component bugs. Do not add
+`aria_label` or `aria_value` solely to make a visual assertion pass. The example's
+Status role and label serve the production accessibility announcement. Arbitrary
+child text is not discovered automatically, and there is no `text()` shortcut that
+substitutes model strings for rendered text.
 
-The wrapper preserves the div's identity, layout, events and accessibility;
-it does not discover arbitrary child text or IDs. For geometry and visibility
-alone, use `.test_props(|props| props)`.
+`disabled()` returns `Some(true)` only when the native node exposes its disabled flag;
+otherwise it returns `None`. GPUI's div API currently cannot expose a known enabled
+state this way. Test disabled behavior by attempting the interaction and checking
+that the application result did not change; do not interpret `None` as enabled.
 
 IDs only need to be unique within their GPUI identity scope. Window-wide queries
 panic on ambiguity. Use existing scopes without adding test containers:
@@ -151,7 +148,7 @@ panic on ambiguity. Use existing scopes without adding test containers:
 window.within("toolbar").click("save", cx);
 window.within("dialog").click("save", cx);
 let save = window.within("dialog").within("footer").find("save");
-assert!(!save.disabled());
+assert!(save.visible());
 ```
 
 A parent scope need not itself be observed: its ID is part of its observed
@@ -180,10 +177,10 @@ For a coordinate drag, query scoped targets and pass their `bounds().center()`
 to `window.drag`.
 
 `ElementSnapshot` is an owned, immutable record of a completed paint. Its readers
-are `path()`, `bounds()`, `visible()`, `focused()`, `disabled()`, `text()`,
+are `role()`, `path()`, `bounds()`, `visible()`, `focused()`, `disabled()`, `label()`,
 `value()`, `checked()`, `indeterminate()`, `selected()` and `expanded()`.
-The last four state readers return `Option<bool>`: `None` means unreported,
-not false. Text/value are also optional. Re-query after interactions:
+Focused, disabled, checked, indeterminate, selected and expanded readers return
+`Option<bool>`: `None` means unavailable, not false. Label/value are also optional. Re-query after interactions:
 
 ```rust
 let before = window.find("agree");
@@ -192,12 +189,12 @@ assert_eq!(before.checked(), Some(false)); // The original frame.
 assert_eq!(window.find("agree").checked(), Some(true)); // The new frame.
 ```
 
-Assert rendered facts and application results together. Checking saved model
+Assert native properties and application results together. Checking saved model
 state or an emitted result is a useful part of an integration test; it should
 not replace verifying the relevant visible control state.
 
 Text input does not model complete OS IME composition. Masked inputs report
-neither text nor value; verify sensitive results through application state.
+no value; verify sensitive results through application state.
 
 ## Complete the frame before querying
 
@@ -248,8 +245,8 @@ coverage of every Kit component. Table, Menu, Dialog and Dock do not yet have
 comprehensive automatic semantic observation or dedicated end-to-end workflows.
 Native scrolling and drag/drop primitives are tested, including a real virtual
 list and delayed HoverCard opening/closing; this does not establish every Table or Dock behavior. Add observation to
-an existing native element in a custom view when necessary, and supply actual
-state rather than a test-only constant.
+an existing native element in a custom view when necessary. Unsupported properties
+remain unavailable; there is no manual test-only override.
 
 Missing or invisible click targets panic. Disabled controls receive real events
 and decide whether to respond. Visibility combines geometry, viewport/content
@@ -265,6 +262,39 @@ No GPUI fork or Cargo patch is used to bypass these limitations.
 
 On failure, check the reported paths, observation, completed frame, keyboard
 focus, clipping/overlays and asynchronous completion, in that order as relevant.
+
+## Verify rendering independently
+
+A correct value or checked flag does not prove the control was drawn correctly.
+GPUI exposes `HeadlessAppContext::with_platform`, `Window::render_to_image` and
+`HeadlessAppContext::capture_screenshot` for real offscreen images. The currently
+pinned platform crate supplies its headless renderer on macOS (Metal) only. Run
+this target on a Mac with Metal available:
+
+```sh
+cargo test -p gpui-kit --features test-support --test rendering --locked
+```
+
+The target uses `test = false`, so ordinary CI runs the portable interaction suite;
+select `--test rendering` explicitly on a runner with Metal. Cargo supports this
+[explicit target selection](https://doc.rust-lang.org/cargo/commands/cargo-test.html#target-selection).
+It also uses `harness = false` because AppKit initialization requires the main
+thread; `--test-threads=1` would still run an ordinary Rust test on a worker thread.
+On other platforms it explicitly reports that pixel verification is skipped.
+Missing renderer support on macOS fails rather than substituting a fake image.
+
+The tests inject two defects into real Kit controls: a missing check-mark asset
+while `checked()` remains true, and transparent input text while `value()` remains
+correct. Images must differ from the working control, and repeated working checkbox
+renders must match. A separate native-event test disconnects a checkbox's change
+handler and checks that clicking cannot fabricate a checked result.
+
+These are sensitivity checks, not a complete golden-image suite. For application
+visual regression, compare images against reviewed expectations under controlled
+fonts, dimensions, theme, focus and animation state. State assertions and image
+assertions detect different defects; neither establishes packaged-app or full IME
+correctness. The executable rendering examples are in
+[`crates/kit/tests/rendering.rs`](https://github.com/longbridge/gpui-kit/blob/testing/crates/kit/tests/rendering.rs).
 
 ## Run in CI
 

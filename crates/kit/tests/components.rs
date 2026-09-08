@@ -5,7 +5,7 @@ use gpui_component::{
     input::{Input, InputState},
     popover::Popover,
 };
-use gpui_kit::test::{TestPropsExt, TestWindowExt};
+use gpui_kit::test::{ObserveElement, TestWindowExt};
 
 struct Controls {
     input: Entity<InputState>,
@@ -34,7 +34,7 @@ impl Render for Controls {
                     .content(|_, _, _| {
                         div()
                             .id("popover-content")
-                            .test_props(|props| props)
+                            .observe()
                             .w(px(120.))
                             .h(px(50.))
                             .child("Details")
@@ -52,12 +52,12 @@ fn kit_controls_use_native_events_and_report_state(cx: &mut TestAppContext) {
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        assert!(window.find("disabled").disabled());
+        assert_eq!(window.find("disabled").disabled(), None);
         window.click("disabled", cx);
         window.click("search", cx);
-        assert!(window.find("search").focused());
+        assert_eq!(window.find("search").focused(), Some(true));
         window.input("GPUI 中文 🦀", cx);
-        assert_eq!(window.find("search").text(), Some("GPUI 中文 🦀"));
+        assert_eq!(window.find("search").value(), Some("GPUI 中文 🦀"));
         assert!(window.try_find("popover-content").is_none());
         window.click("open", cx);
         let content = window.find("popover-content");
@@ -80,12 +80,12 @@ impl Render for NamedButton {
 }
 
 #[gpui::test]
-fn button_reports_its_label_instead_of_accessibility_name(cx: &mut TestAppContext) {
+fn button_reports_accessibility_name_without_claiming_visible_text(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);
     let handle = cx.add_window(|_, _| NamedButton);
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
-        assert_eq!(window.find("save").text(), Some("Save"));
+        assert_eq!(window.find("save").label(), Some("Save this document"));
     })
     .unwrap();
 }

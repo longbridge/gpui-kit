@@ -8,7 +8,7 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::{StateStyle, StyledExt as _, TestPropsExt as _};
+use crate::{ObserveElement as _, StateStyle, StyledExt as _};
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -153,7 +153,7 @@ impl RenderOnce for Tab {
 
         self.base
             .id(self.id)
-            .test_props(|props| props.disabled(disabled))
+            .observe()
             .role(Role::Tab)
             // Match Button's neutral control geometry: a fixed-size tab
             // centers ordinary content, while callers still own its size,
