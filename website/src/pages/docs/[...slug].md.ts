@@ -2,22 +2,30 @@ import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
 import { markdownResponse } from '../../lib/markdown-endpoint';
 
-// The published site serves each page's markdown beside the rendered page, so
-// a reader — or a model — can fetch the source of what they are looking at.
 export async function getStaticPaths() {
-  const entries = await getCollection('docs');
-  return entries.map((entry) => {
+  const docs = await getCollection('docs');
+  const components = await getCollection('component');
+  const routes = docs.map((entry) => {
     const slug = entry.id.replace(/\.md$/, '');
-    return { params: { slug }, props: { entry } };
+    return { params: { slug }, props: { entry, route: `/docs/${slug}` } };
   }).filter((route) => route.params.slug !== 'index');
+
+  // Plain Markdown clients do not follow HTML meta-refresh redirects. Keep the
+  // old endpoints readable and advertise the canonical route in frontmatter.
+  const legacy = components.flatMap((entry) => {
+    const slug = entry.id.replace(/\.md$/, '');
+    const route = `/component${slug === 'index' ? '' : `/${slug}`}`;
+    const aliases = slug === 'index' ? ['components', 'components/index'] : [`components/${slug}`];
+    return aliases.map((slug) => ({ params: { slug }, props: { entry, route } }));
+  });
+  return [...routes, ...legacy];
 }
 
 export const GET: APIRoute = ({ props }) => {
-  const entry = (props as any).entry;
-  const slug = entry.id.replace(/\.md$/, '');
+  const { entry, route } = props;
   return markdownResponse({
     filePath: entry.filePath,
-    route: `/docs${slug === 'index' ? '' : `/${slug}`}`,
+    route,
     description: entry.data.description,
   });
 };

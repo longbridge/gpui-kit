@@ -286,11 +286,11 @@ Icon::new(IconName::Search).small()
 
 Explore the component documentation to learn more about each component:
 
-- [Button](./components/button) - Interactive button component
-- [Input](./components/input) - Text input with validation
-- [Dialog](./components/dialog) - Dialog and modal windows
-- [DataTable](./components/data-table) - High-performance data tables
-- [More components...](./components/index)
+- [Button](../component/button) - Interactive button component
+- [Input](../component/input) - Text input with validation
+- [Dialog](../component/dialog) - Dialog and modal windows
+- [DataTable](../component/data-table) - High-performance data tables
+- [More components...](../component/index)
 
 ## Development
 

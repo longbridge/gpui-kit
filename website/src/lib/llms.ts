@@ -103,7 +103,7 @@ function scanDir(dir: string, baseDir: string, urlPrefix: string): PageEntry[] {
     if (stat.isDirectory()) {
       // `relPath` below is already relative to `baseDir`, so the prefix must
       // stay the tree's root — appending the directory here counted it twice
-      // and produced `/docs/components/components/accordion`.
+      // and repeated the nested directory in every URL.
       const sub = scanDir(fullPath, baseDir, urlPrefix);
       results.push(...sub);
     } else if (extname(name) === '.md') {
@@ -118,7 +118,7 @@ function scanDir(dir: string, baseDir: string, urlPrefix: string): PageEntry[] {
       const relPath = relative(baseDir, fullPath)
         .replace(/\.md$/, '')
         .replace(/index$/, '');
-      const url = `${BASE_URL}/${urlPrefix}/${relPath}`.replace(/\/+/g, '/');
+      const url = `${BASE_URL}/${urlPrefix}/${relPath}`.replace(/\/+/g, '/').replace(/\/$/, '');
       const body = expandSnippets(bodyWithoutFrontmatter(content), dir);
 
       try {
@@ -133,9 +133,11 @@ function scanDir(dir: string, baseDir: string, urlPrefix: string): PageEntry[] {
 
 const SECTIONS = (root: string) => [
   { dir: join(root, 'docs'), prefix: 'docs' },
+  { dir: join(root, 'component'), prefix: 'component' },
   { dir: join(root, 'shell'), prefix: 'shell' },
   { dir: join(root, 'base'), prefix: 'base' },
   { dir: join(root, 'zh-CN/docs'), prefix: 'zh-CN/docs' },
+  { dir: join(root, 'zh-CN/component'), prefix: 'zh-CN/component' },
   { dir: join(root, 'zh-CN/shell'), prefix: 'zh-CN/shell' },
   { dir: join(root, 'zh-CN/base'), prefix: 'zh-CN/base' },
 ];
@@ -157,9 +159,11 @@ export function buildLlmsIndex(websiteRoot: string): string {
 export function buildLlmsContent(websiteRoot: string): string {
   const sections = [
     { dir: join(websiteRoot, 'docs'), prefix: 'docs' },
+    { dir: join(websiteRoot, 'component'), prefix: 'component' },
     { dir: join(websiteRoot, 'shell'), prefix: 'shell' },
     { dir: join(websiteRoot, 'base'), prefix: 'base' },
     { dir: join(websiteRoot, 'zh-CN/docs'), prefix: 'zh-CN/docs' },
+    { dir: join(websiteRoot, 'zh-CN/component'), prefix: 'zh-CN/component' },
     { dir: join(websiteRoot, 'zh-CN/shell'), prefix: 'zh-CN/shell' },
     { dir: join(websiteRoot, 'zh-CN/base'), prefix: 'zh-CN/base' },
   ];

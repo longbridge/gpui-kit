@@ -36,7 +36,7 @@ const stars = props.starCount;
 const starLabel = stars >= 1000 ? `${(stars / 1000).toFixed(1)}k` : `${stars}`;
 
 const gettingStartedHref = computed(() => isZh.value ? url('zh-CN/docs/getting-started') : url('docs/getting-started'));
-const componentsHref = computed(() => isZh.value ? url('zh-CN/docs/components') : url('docs/components'));
+const componentsHref = computed(() => isZh.value ? url('zh-CN/component') : url('component'));
 const baseHref = computed(() => url('base'));
 const shellHref = computed(() => isZh.value ? url('zh-CN/shell') : url('shell'));
 const contributorsHref = computed(() => isZh.value ? url('zh-CN/contributors') : url('contributors'));

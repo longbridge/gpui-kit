@@ -28,7 +28,7 @@ const component = computed(() => {
     if (props.frontmatter.example === false) return undefined;
 
     const match = props.pathname.match(
-        /\/(?:docs\/components|base\/primitives)\/([^/]+)$/,
+        /\/(?:component|base\/primitives)\/([^/]+)$/,
     );
     return match?.[1] === "index" ? undefined : match?.[1];
 });

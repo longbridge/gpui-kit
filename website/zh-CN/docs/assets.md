@@ -145,7 +145,7 @@ Button::new("search")
 
 这样可以省去该图标的资源查找。内置 `IconName` 和组件中使用的其他路径图标仍需要资源源。
 数据所有权、来源替换、加载图标与自定义图标类型的说明见
-[SVG 字节](./components/icon.md#svg-字节)。
+[SVG 字节](../component/icon.md#svg-字节)。
 
 ## 参考资源
 

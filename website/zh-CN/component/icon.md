@@ -7,7 +7,7 @@ description: 以不同尺寸、颜色和变换方式显示 SVG 图标。
 
 Icon 支持通过资源路径或内存中的字节渲染 SVG 图标，并可定制尺寸、颜色与变换。内置的 Lucide 图标使用资源包；自定义 SVG 字节可以通过 `Icon::data` 直接传入。
 
-在开始之前，建议先阅读 [Icons & Assets](../assets.md)，了解如何在 GPUI 与 GPUI Component 应用中使用 SVG。
+在开始之前，建议先阅读 [Icons & Assets](../docs/assets.md)，了解如何在 GPUI 与 GPUI Component 应用中使用 SVG。
 
 ## 导入
 
