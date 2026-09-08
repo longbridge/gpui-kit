@@ -7,7 +7,7 @@ description: Display SVG icons with various sizes, colors, and transformations.
 
 A flexible icon component that renders SVG icons from asset paths or in-memory bytes, with customizable size, color, and transformations. The built-in Lucide icons use the assets bundle; custom SVG bytes can be supplied directly with `Icon::data`.
 
-Before you start, please make sure you have read: [Icons & Assets](../assets.md) to understand how use SVG in GPUI & GPUI Component application.
+Before you start, please make sure you have read: [Icons & Assets](../docs/assets.md) to understand how use SVG in GPUI & GPUI Component application.
 
 ## Import
 

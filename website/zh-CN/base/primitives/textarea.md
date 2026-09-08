@@ -51,7 +51,7 @@ let value = notes.read(cx).value();
 
 ## 表现
 
-该控件没有产品样式；边框、高度、颜色、内边距和 `InputEditorStyle` 由设计系统提供。现成样式控件参见 [`gpui-component` Textarea](../../docs/components/textarea.md)。
+该控件没有产品样式；边框、高度、颜色、内边距和 `InputEditorStyle` 由设计系统提供。现成样式控件参见 [`gpui-component` Textarea](../../component/textarea.md)。
 
 ## 可运行示例
 

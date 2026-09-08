@@ -57,4 +57,4 @@ collapsed: false
 
 组件页已经预置中文路由结构，尚未完成的页面会先显示中文占位说明，并回链到英文原文：
 
-- [English version](/docs/components)
+- [English version](/component)

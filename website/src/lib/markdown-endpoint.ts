@@ -4,14 +4,14 @@ import { bodyWithoutFrontmatter, expandSnippets } from './llms';
 
 /**
  * Serves a page's markdown at its own `.md` address, the way the published site
- * does — `/docs/components/combobox.md` beside `/docs/components/combobox`.
+ * does — `/component/combobox.md` beside `/component/combobox`.
  * The frontmatter is replaced with the two fields a reader of the raw file
  * needs: where it lives, and what it covers.
  */
 export function markdownResponse(options: {
   /** The entry's own path, relative to the project root. */
   filePath: string;
-  /** Public route of the rendered page, e.g. `/docs/components/combobox`. */
+  /** Public route of the rendered page, e.g. `/component/combobox`. */
   route: string;
   description?: string;
 }): Response {

@@ -1,23 +1,23 @@
 ---
 title: Focus Trap
-description: A utility element that traps keyboard focus within a container, preventing Tab navigation from escaping.
+description: 将键盘焦点限制在指定容器内的工具元素。
 ---
 
 # Focus Trap
 
-Focus trap utility for constraining keyboard focus within a specific container. Essential for modal dialogs, sheets, and overlay components to provide proper keyboard navigation accessibility.
+Focus Trap 是一个用于将键盘焦点限制在特定容器内的工具能力，可防止用户通过 Tab 键把焦点移出当前区域。它对对话框、侧边面板和自定义覆盖层的可访问性非常重要。
 
-**Note:** [Dialog](/docs/components/dialog) and [Sheet](/docs/components/sheet) components have focus trap built-in. You only need to manually use `focus_trap()` for custom modal-like components.
+**注意：** [Dialog](/zh-CN/component/dialog) 和 [Sheet](/zh-CN/component/sheet) 已内置 focus trap。只有在构建自定义类模态组件时，才需要手动使用 `focus_trap()`。
 
-## Import
+## 导入
 
 ```rust
 use gpui_kit::component::FocusTrapElement;
 ```
 
-## Usage
+## 用法
 
-### Basic Focus Trap
+### 基础 Focus Trap
 
 ```rust
 let container_handle = cx.focus_handle();
@@ -31,9 +31,9 @@ v_flex()
 // Focus will not escape to elements outside this container
 ```
 
-### Multiple Focus Traps
+### 多个 Focus Trap
 
-You can have multiple independent focus trap areas in your application. Each trap operates independently:
+你可以在同一个应用中放置多个彼此独立的 focus trap 区域：
 
 ```rust
 let trap1_handle = cx.focus_handle();
@@ -41,7 +41,6 @@ let trap2_handle = cx.focus_handle();
 
 v_flex()
     .gap_4()
-    // First focus trap area
     .child(
         h_flex()
             .gap_2()
@@ -50,7 +49,6 @@ v_flex()
             .child(Button::new("trap1-3").label("Area 1 - Button 3"))
             .focus_trap("trap1", &trap1_handle)
     )
-    // Second focus trap area
     .child(
         h_flex()
             .gap_2()
@@ -60,9 +58,9 @@ v_flex()
     )
 ```
 
-### Focus Trap with Dialog
+### 与 Dialog 配合
 
-[Dialog] components have focus trap built-in automatically. You don't need to manually add `focus_trap()`:
+[Dialog] 已自动内置 focus trap，无需手动添加：
 
 ```rust
 window.open_dialog(cx, |dialog, _, _| {
@@ -75,14 +73,12 @@ window.open_dialog(cx, |dialog, _, _| {
                 .child(Button::new("cancel").label("Cancel"))
                 .child(Button::new("reset").label("Reset"))
         )
-    // Dialog internally uses focus_trap()
-    // Tab navigation automatically cycles: save -> cancel -> reset -> save
 })
 ```
 
-### Focus Trap with Sheet
+### 与 Sheet 配合
 
-[Sheet] components also have focus trap built-in automatically:
+[Sheet] 也已自动内置 focus trap：
 
 ```rust
 window.open_sheet(cx, |sheet, _, _| {
@@ -95,41 +91,39 @@ window.open_sheet(cx, |sheet, _, _| {
                 .child(Checkbox::new("option2").label("Option 2"))
                 .child(Button::new("apply").label("Apply Filters"))
         )
-    // Sheet internally uses focus_trap()
-    // Focus automatically cycles within the sheet panel
 })
 ```
 
-## How It Works
+## 工作原理
 
-The focus trap system consists of three key components:
+Focus trap 系统主要由三部分组成：
 
-1. **FocusTrapContainer**: Wraps any container element and registers it as a focus trap area
-2. **FocusTrapManager**: Global state manager that tracks all active focus traps
-3. **Root Integration**: The [Root] view intercepts Tab/Shift-Tab events and enforces focus cycling
+1. **FocusTrapContainer**：包装容器并将其注册为焦点陷阱区域。
+2. **FocusTrapManager**：全局状态管理器，用于跟踪当前所有活跃的 focus trap。
+3. **Root Integration**：由 [Root] 视图拦截 Tab/Shift-Tab 事件，并执行焦点循环。
 
-When Tab or Shift-Tab is pressed:
+当用户按下 Tab 或 Shift-Tab 时：
 
-1. [Root] detects if the currently focused element is inside a focus trap
-2. If yes, it calculates the next focusable element within the same trap
-3. If focus would escape the trap, it cycles back to the beginning (Tab) or end (Shift-Tab)
-4. This prevents focus from leaving the trapped container
+1. [Root] 会判断当前焦点是否位于某个 focus trap 中。
+2. 如果是，则只计算该 trap 内部的下一个可聚焦元素。
+3. 当焦点即将离开 trap 时，会循环回到开头或末尾。
+4. 这样就能阻止焦点逸出当前容器。
 
-### Built-in Focus Trap Components
+### 已内置 Focus Trap 的组件
 
-The following components have focus trap functionality built-in and don't require manual `focus_trap()` calls:
+以下组件已经内置 focus trap，不需要手动调用：
 
-- **[Dialog]** - Modal dialogs automatically trap focus (see `dialog.rs:437`)
-- **[Sheet]** - Side panels automatically trap focus (see `sheet.rs:197`)
+- **[Dialog]**
+- **[Sheet]**
 
-## API Reference
+## API 参考
 
 - [FocusTrapElement](https://docs.rs/gpui-component/latest/gpui_component/trait.FocusTrapElement.html)
 - [FocusTrapContainer](https://docs.rs/gpui-component/latest/gpui_component/struct.FocusTrapContainer.html)
 
-## Examples
+## 示例
 
-### Custom Modal with Focus Trap
+### 自定义模态框
 
 ```rust
 struct CustomModal {
@@ -174,9 +168,9 @@ impl Render for CustomModal {
 }
 ```
 
-### Nested Focus Traps
+### 嵌套 Focus Trap
 
-Focus traps support nesting. When multiple traps are active, the innermost trap takes precedence:
+当多个 trap 嵌套时，最内层 trap 优先：
 
 ```rust
 let outer_handle = cx.focus_handle();
@@ -191,7 +185,6 @@ div()
             .border_color(cx.theme().border)
             .child(Button::new("outer-1").label("Outer Button 1"))
             .child(
-                // Inner trap takes precedence when focused
                 h_flex()
                     .gap_2()
                     .p_4()
@@ -205,9 +198,7 @@ div()
     )
 ```
 
-### Conditional Focus Trap
-
-You can conditionally apply focus trapping based on application state:
+### 条件启用 Focus Trap
 
 ```rust
 struct ModalView {
@@ -224,33 +215,31 @@ impl Render for ModalView {
             .child(Button::new("btn3").label("Button 3"));
 
         if self.is_modal {
-            // Apply focus trap when in modal mode
             content.focus_trap("conditional", &self.container_handle)
                 .into_any_element()
         } else {
-            // Normal behavior without focus trap
             content.into_any_element()
         }
     }
 }
 ```
 
-## Accessibility Notes
+## 可访问性说明
 
-- Focus trapping is essential for modal dialogs and overlays to meet WCAG accessibility guidelines
-- Always provide a way to close or dismiss trapped focus areas (ESC key, close button)
-- The first focusable element in the trap should receive focus when the trap is activated
-- Use focus traps sparingly - only for truly modal interactions
-- Ensure keyboard navigation order is logical within the trapped area
+- Focus trap 对模态对话框和覆盖层满足 WCAG 要求非常关键。
+- 始终要提供关闭方式，例如 ESC、关闭按钮或取消按钮。
+- 激活 trap 后，应让首个可聚焦元素获得焦点。
+- 不要滥用 focus trap，只在真正的模态交互中使用。
+- 保证容器内部的键盘导航顺序合理。
 
-## See Also
+## 另请参阅
 
-- [Root View System](/docs/root) - Manages focus trap behavior at the window level
-- [Dialog](/docs/components/dialog) - Uses focus trap automatically
-- [Sheet](/docs/components/sheet) - Uses focus trap automatically
-- [focus-trap-react](https://github.com/focus-trap/focus-trap-react) - Similar concept for React applications
+- [Root View System](/docs/root)
+- [Dialog](/zh-CN/component/dialog)
+- [Sheet](/zh-CN/component/sheet)
+- [focus-trap-react](https://github.com/focus-trap/focus-trap-react)
 
 [Root]: https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html
 [FocusTrapElement]: https://docs.rs/gpui-component/latest/gpui_component/trait.FocusTrapElement.html
-[Dialog]: /docs/components/dialog
-[Sheet]: /docs/components/sheet
+[Dialog]: /zh-CN/component/dialog
+[Sheet]: /zh-CN/component/sheet

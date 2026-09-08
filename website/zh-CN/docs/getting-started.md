@@ -199,6 +199,6 @@ impl Render for Settings {
 
 ## 后续阅读
 
-- [组件总览](./components/index)
+- [组件总览](../component/index)
 - [资源与图标](./assets.md)
 

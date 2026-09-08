@@ -19,13 +19,9 @@ const { entry } = Astro.props;
 const { Content, headings } = await render(entry);
 
 const pathname = Astro.url.pathname;
-const seoTitle = entry.id === 'index.md'
+const seoTitle = entry.id.replace(/\.md$/, '') === 'index'
   ? 'Documentation'
-  : entry.id === 'components/index.md'
-    ? 'Rust UI Components'
-    : entry.id.startsWith('components/')
-      ? `${entry.data.title} Component`
-      : `${entry.data.title} Guide`;
+  : `${entry.data.title} Guide`;
 const base = import.meta.env.BASE_URL;
 const devVersion = import.meta.env.DEV ? 'dev' : undefined;
 ---

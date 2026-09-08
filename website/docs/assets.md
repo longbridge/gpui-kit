@@ -142,7 +142,7 @@ Button::new("search")
 
 This only removes the asset lookup for that icon. Built-in `IconName` values and
 other path-based component icons still need an asset source. See
-[SVG Bytes](./components/icon.md#svg-bytes) for ownership, source replacement,
+[SVG Bytes](../component/icon.md#svg-bytes) for ownership, source replacement,
 loading icons, and custom icon types.
 
 ## Resources

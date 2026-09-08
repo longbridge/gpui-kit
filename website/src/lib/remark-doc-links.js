@@ -38,7 +38,7 @@ export function remarkDocLinks({ base = '/' } = {}) {
 
       // Every relative link is resolved here rather than left to the browser.
       // The pages are served without a trailing slash, so a bare `accordion`
-      // on `/docs/components` would otherwise resolve against `/docs/`, not
+      // on `/component` would otherwise resolve against `/`, not
       // against the directory the source file sits in — which is the
       // relationship the author wrote.
       const withoutExt = target.endsWith('.md') ? target.slice(0, -'.md'.length) : target;

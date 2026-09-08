@@ -76,7 +76,7 @@ cx.subscribe(&input, |this, state, event: &InputEvent, cx| {
 `gpui-base` does not install product styling. Supply `InputEditorStyle` to the
 state and compose the control inside your own frame. If you want the ready-made
 theme, sizing, borders, prefix/suffix slots, and clear button, use the styled
-[`gpui-component` Input](../../docs/components/input.md).
+[`gpui-component` Input](../../component/input.md).
 
 ## Runnable example
 

@@ -20,8 +20,9 @@ all reachable through the single `gpui-kit` dependency:
 
 Use `gpui-component` for polished controls with one coherent visual language,
 or build your own design system on the reusable behavior and infrastructure in
-`gpui-base`. This section documents GPUI Component; see [GPUI Base](/base)
-and [GPUI Shell](/shell) for the other two layers.
+`gpui-base`. This section covers GPUI Kit setup, shared design and coding guides, and
+application development. For library APIs, see [GPUI Component](/component),
+[GPUI Base](/base), and [GPUI Shell](/shell).
 
 ## Features
 

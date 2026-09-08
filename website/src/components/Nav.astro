@@ -25,15 +25,17 @@ const starLabel = starCount >= 1000 ? `${(starCount / 1000).toFixed(1)}k` : `${s
 
 const navLinks = isZh
   ? [
-      { text: '组件', href: url('zh-CN/docs/components') },
-      { text: 'Shell', href: url('zh-CN/shell') },
+      { text: '文档', href: url('zh-CN/docs') },
+      { text: '组件', href: url('zh-CN/component') },
       { text: 'Base', href: url('zh-CN/base') },
+      { text: 'Shell', href: url('zh-CN/shell') },
       { text: '应用案例', href: url('zh-CN/apps') },
     ]
   : [
-      { text: 'Components', href: url('docs/components') },
-      { text: 'Shell', href: url('shell') },
+      { text: 'Docs', href: url('docs') },
+      { text: 'Component', href: url('component') },
       { text: 'Base', href: url('base') },
+      { text: 'Shell', href: url('shell') },
       { text: 'App Stories', href: url('apps') },
     ];
 

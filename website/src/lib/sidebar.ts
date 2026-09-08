@@ -191,7 +191,8 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, '');
 export const enDocsSidebar = generateSidebar({
   contentDir: join(WEBSITE_ROOT, 'docs'),
   baseUrl: `${BASE}/docs`,
-  rootGroupText: 'Introduction',
+  rootGroupText: 'GPUI Kit',
+  rootLinkText: 'GPUI Kit',
 });
 
 export const enShellSidebar = generateSidebar({
@@ -210,7 +211,8 @@ export const enBaseSidebar = generateSidebar({
 export const zhDocsSidebar = generateSidebar({
   contentDir: join(WEBSITE_ROOT, 'zh-CN/docs'),
   baseUrl: `${BASE}/zh-CN/docs`,
-  rootGroupText: '文档',
+  rootGroupText: 'GPUI Kit',
+  rootLinkText: 'GPUI Kit',
 });
 
 export const zhShellSidebar = generateSidebar({
@@ -224,4 +226,18 @@ export const zhBaseSidebar = generateSidebar({
   contentDir: join(WEBSITE_ROOT, 'zh-CN/base'),
   baseUrl: `${BASE}/zh-CN/base`,
   rootGroupText: 'GPUI Base',
+});
+
+export const enComponentSidebar = generateSidebar({
+  contentDir: join(WEBSITE_ROOT, 'component'),
+  baseUrl: `${BASE}/component`,
+  rootGroupText: 'GPUI Component',
+  rootLinkText: 'Components',
+});
+
+export const zhComponentSidebar = generateSidebar({
+  contentDir: join(WEBSITE_ROOT, 'zh-CN/component'),
+  baseUrl: `${BASE}/zh-CN/component`,
+  rootGroupText: 'GPUI Component',
+  rootLinkText: '组件',
 });

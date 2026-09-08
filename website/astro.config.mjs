@@ -1,3 +1,4 @@
+import { readdirSync } from 'node:fs';
 import { defineConfig } from 'astro/config';
 import vue from '@astrojs/vue';
 import tailwindcss from '@tailwindcss/vite';
@@ -14,11 +15,28 @@ import { shikiConfig, defaultHighlightLang } from './src/lib/markdown.js';
 
 const BASE = '/';
 
+// GitHub Pages serves static HTML redirects for old component bookmarks.
+const componentRedirects = Object.fromEntries(
+  ['', 'zh-CN/'].flatMap((locale) => {
+    const entries = readdirSync(new URL(`./${locale}component/`, import.meta.url))
+      .filter((name) => name.endsWith('.md'))
+      .map((name) => {
+        const slug = name.slice(0, -3);
+        return [
+          `/${locale}docs/components/${slug}`,
+          `/${locale}component${slug === 'index' ? '' : `/${slug}`}`,
+        ];
+      });
+    return [[`/${locale}docs/components`, `/${locale}component`], ...entries];
+  }),
+);
+
 export default defineConfig({
   site: 'https://gpui-kit.com',
   base: BASE,
   output: 'static',
   trailingSlash: 'never',
+  redirects: componentRedirects,
 
   integrations: [
     vue({ devtools: false }),
