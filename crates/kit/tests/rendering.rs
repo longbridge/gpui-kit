@@ -21,7 +21,7 @@ mod macos {
         div,
         prelude::*,
         px, size,
-        test::TestWindowExt,
+        ui_test::TestWindowExt,
     };
     use std::{borrow::Cow, sync::Arc};
 
