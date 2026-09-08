@@ -100,6 +100,16 @@ masked input values and unspecified custom text are not reported.
 cargo test -p gpui-test --locked
 ```
 
-Tests cover real Kit Button/Input/Popover interactions, Unicode/Shift handling,
-resolved geometry, visibility, removal, focus snapshots, caches, window isolation
-and occlusion. The same command runs in the existing CI platform matrix.
+The 27 tests cover:
+
+- Real Kit Button/Input/Popover interactions, focus switching, Unicode/Shift,
+  backspace, read-only/disabled inputs, and masked-value privacy.
+- Resolved geometry, visibility, clipping and native hit testing, including
+  overlays and a partially clipped target whose center cannot receive clicks.
+- Cached child visibility, unmount/remount, composite IDs after list reordering,
+  immutable snapshots, and isolation after closing another window.
+- Anonymous/ambiguous IDs, accessibility forwarding, and stale-record removal
+  when a 1,000-element list shrinks to 10 elements.
+
+The same command runs in the existing CI platform matrix. The large-list case
+checks correctness, not rendering performance.

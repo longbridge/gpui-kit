@@ -69,3 +69,23 @@ fn kit_controls_use_native_events_and_report_state(cx: &mut TestAppContext) {
         .update(cx, |view, _, _| assert_eq!(view.clicks, 0))
         .unwrap();
 }
+
+struct NamedButton;
+impl Render for NamedButton {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Button::new("save")
+            .label("Save")
+            .accessibility_label("Save this document")
+    }
+}
+
+#[gpui::test]
+fn button_reports_its_label_instead_of_accessibility_name(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let handle = cx.add_window(|_, _| NamedButton);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.draw(cx).clear(cx);
+        assert_eq!(window.find("save").unwrap().text(), Some("Save"));
+    })
+    .unwrap();
+}
