@@ -1,4 +1,4 @@
-use gpui_kit::test::{TestAppContextExt, TestStateExt, TestWindowExt};
+use gpui_kit::test::{TestAppContextExt, TestPropsExt, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, MouseButton, ScrollDelta, ScrollHandle, TestAppContext, Window, div,
     point, prelude::*, px, size,
@@ -16,7 +16,7 @@ impl Render for Scopes {
                 div().id("footer").child(
                     div()
                         .id("save")
-                        .test_state(|test| test.text(scope))
+                        .test_props(|props| props.text(scope))
                         .size(px(40.))
                         .on_click(move |_, _, _| clicks.borrow_mut().push(scope)),
                 ),
@@ -66,7 +66,7 @@ impl Render for Pointer {
         let right = self.events.clone();
         div()
             .id("surface")
-            .test_state(|test| test)
+            .test_props(|props| props)
             .size(px(80.))
             .on_hover(move |entered, _, _| {
                 if *entered {
@@ -107,7 +107,7 @@ impl Render for Scrolling {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("list")
-            .test_state(|test| test)
+            .test_props(|props| props)
             .w(px(100.))
             .h(px(60.))
             .overflow_y_scroll()
@@ -117,7 +117,7 @@ impl Render for Scrolling {
             .children((0..30usize).map(|index| {
                 div()
                     .id(("row", index))
-                    .test_state(|test| test)
+                    .test_props(|props| props)
                     .h(px(20.))
                     .flex_shrink_0()
                     .child(format!("Row {index}"))
@@ -160,14 +160,14 @@ impl Render for Dropping {
             .child(
                 div()
                     .id("source")
-                    .test_state(|test| test)
+                    .test_props(|props| props)
                     .size(px(40.))
                     .on_drag(Payload, |payload, _, _, cx| cx.new(|_| payload.clone())),
             )
             .child(
                 div()
                     .id("target")
-                    .test_state(|test| test)
+                    .test_props(|props| props)
                     .size(px(40.))
                     .on_drop(move |_: &Payload, _, _| *drops.borrow_mut() += 1),
             )
@@ -195,7 +195,7 @@ struct Loading {
 impl Render for Loading {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div().when(self.ready, |this| {
-            this.child(div().id("loaded").test_state(|test| test).size(px(20.)))
+            this.child(div().id("loaded").test_props(|props| props).size(px(20.)))
         })
     }
 }
@@ -312,7 +312,7 @@ impl Render for VirtualRows {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("viewport")
-            .test_state(|test| test)
+            .test_props(|props| props)
             .w(px(100.))
             .h(px(60.))
             .child(
@@ -325,7 +325,7 @@ impl Render for VirtualRows {
                             .map(|index| {
                                 div()
                                     .id(("virtual-row", index))
-                                    .test_state(|test| test)
+                                    .test_props(|props| props)
                                     .h(px(20.))
                                     .child(format!("Row {index}"))
                             })

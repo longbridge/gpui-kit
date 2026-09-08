@@ -8,7 +8,7 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::{StateStyle, StyledExt as _, TestStateExt as _};
+use crate::{StateStyle, StyledExt as _, TestPropsExt as _};
 
 type ChangeHandler = Rc<dyn Fn(bool, &ClickEvent, &mut Window, &mut App)>;
 
@@ -350,11 +350,7 @@ impl RenderOnce for Switch {
         let style = self.resolved_style();
 
         self.base
-            .test_state(|test| {
-                test.disabled(disabled)
-                    .focus(&focus_handle)
-                    .checked(checked)
-            })
+            .test_props(|props| props.disabled(disabled).focus(&focus_handle))
             .role(Role::Switch)
             .aria_toggled(if checked {
                 Toggled::True

@@ -1,4 +1,4 @@
-use crate::{StateStyle, StyledExt as _, TestStateExt as _};
+use crate::{StateStyle, StyledExt as _, TestPropsExt as _};
 use gpui::{
     AnyElement, App, Div, ElementId, InteractiveElement, Interactivity, IntoElement, ParentElement,
     Refineable as _, RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement,
@@ -125,8 +125,7 @@ impl InputContextMenuCapabilities {
 /// normal children. Applications remain responsible for all presentation.
 #[derive(IntoElement)]
 pub struct InputBase {
-    test_state: crate::TestState,
-    base: gpui::Stateful<Div>,
+    base: crate::TestPropsElement<gpui::Stateful<Div>>,
     style: StyleRefinement,
     semantic_styles: InputStyles,
     children: Vec<AnyElement>,
@@ -137,18 +136,17 @@ pub struct InputBase {
 
 impl InputBase {
     /// Supplies logical facts to UI tests; the closure is skipped in normal builds.
-    pub fn test_state(
+    pub fn test_props(
         mut self,
-        configure: impl FnOnce(crate::TestState) -> crate::TestState,
+        configure: impl FnOnce(crate::TestProps) -> crate::TestProps,
     ) -> Self {
-        self.test_state = self.test_state.configure(configure);
+        self.base = self.base.test_props(configure);
         self
     }
 
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            test_state: crate::TestState::default(),
-            base: div().id(id),
+            base: div().id(id).test_props(|props| props),
             style: StyleRefinement::default(),
             semantic_styles: InputStyles::default(),
             children: Vec::new(),
@@ -239,7 +237,7 @@ impl RenderOnce for InputBase {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let style = self.resolved_style();
         self.base
-            .test_state(|_| self.test_state.disabled(self.disabled))
+            .test_props(|props| props.disabled(self.disabled))
             .when_some(self.role.resolve(|| Role::TextInput), |this, role| {
                 this.role(role)
             })

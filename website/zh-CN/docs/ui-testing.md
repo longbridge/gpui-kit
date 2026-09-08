@@ -83,29 +83,36 @@ cargo test -p gpui-kit --features test-support --test ui --locked
 TabBar 内的 Tab 使用下标 ID。Select 已有的 `"input"` 子元素是触发区域：
 `window.within("language").click("input", cx)`。
 
-原生 div 通过 fluent API `.test_state(...)` 参与观察，所有测试状态都在同一个闭包中配置：
+原生 div 通过 fluent API `.test_props(...)` 参与观察，额外测试属性在同一个闭包中配置：
 
 ```rust
-use gpui_kit::TestStateExt as _;
+use gpui_kit::TestPropsExt as _;
 
 let status = div()
     .id("status")
-    .test_state(|state| state.text(message.clone()))
+    .test_props(|props| props.text(message.clone()))
     .child(message);
 ```
 
-这里 `message` 是 `SharedString`。`TestStateExt` 始终可用，不需要在渲染代码中写
+这里 `message` 是 `SharedString`。`TestPropsExt` 始终可用，不需要在渲染代码中写
 `#[cfg]`、另建临时元素或克隆临时焦点。关闭 `test-support` 时不调用闭包，直接返回
 原生元素，内部状态存储为零大小。把文本转换等测试专用计算放在闭包内；Rust
 仍会正常创建和释放闭包捕获的值。
 
-闭包中的 `state` 提供 `text`、`focus`、`disabled`、`checked`、`indeterminate`、
+闭包接收 `TestProps`，只补充无法从 GPUI 读取的信息。它提供 `text`、`focus`、`disabled`、`checked`、`indeterminate`、
 `selected`、`expanded` 和 `value`。这些方法只报告事实，不改变控件行为；
-例如 `state.disabled(true)` 不会禁用事件处理器。配置名称为 `test_state`，是为了
-明确它报告测试状态，而不是执行测试或订阅状态变化。
+例如 `props.disabled(true)` 不会禁用事件处理器。`TestProps` 描述可观察的事实，
+不是 Entity，也不是控件模型的另一份 State。连续调用 `.test_props(...)` 会完善同一份
+观察信息，保留已提供的事实，不会嵌套额外包装器。
+
+角色、勾选／半选、选中、展开状态自动从现有 `role`、`aria_toggled`、
+`aria_selected`、`aria_expanded` 读取。已有属性优先，闭包中的对应值只用于缺失时补充，
+避免控件报告两份互相矛盾的状态。焦点关联、未公开的禁用信息，以及准确的逻辑文本和值
+仍可在闭包中提供。无障碍名称不自动当作显示文本，带占位符或前缀的无障碍值也不自动
+当作逻辑值；密码值不会因此被读取出来。快照另提供 `role()`。
 
 观察保留已有 div 的身份、布局、事件与无障碍接口，不自动发现任意子元素的文字或 ID。
-只观察几何与可见性时写 `.test_state(|state| state)`。
+只观察几何与可见性时写 `.test_props(|props| props)`。
 
 ID 只需在 GPUI 身份作用域内唯一。窗口级查询遇到重复 ID 会报歧义；可以直接使用已有父级作用域，无须添加测试容器：
 

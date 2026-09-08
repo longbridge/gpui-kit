@@ -4,7 +4,7 @@ use gpui::{
     RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window,
     deferred, div, prelude::FluentBuilder, px, rems,
 };
-use gpui_base::TestStateExt as _;
+use gpui_base::TestPropsExt as _;
 use rust_i18n::t;
 
 use crate::ThemeStyled as _;
@@ -489,8 +489,9 @@ where
                 .child(
                     div()
                         .id("input")
-                        .test_state(|test| {
-                            test.focus(&self.state.focus_handle)
+                        .test_props(|props| {
+                            props
+                                .focus(&self.state.focus_handle)
                                 .disabled(self.state.disabled)
                                 .expanded(self.state.open)
                         })
@@ -806,10 +807,10 @@ where
             .focus_handle(&focus_handle)
             .content_focus_handle(&content_focus_handle)
             .accessibility_value(accessibility_value)
-            .test_state(|test| {
-                test.when_some(
+            .test_props(|props| {
+                props.when_some(
                     self.state.read(cx).state.selection.first(),
-                    |test, (_, item)| test.value(item.title()),
+                    |props, (_, item)| props.value(item.title()),
                 )
             })
             .on_open_change(move |open, _, cx| {

@@ -103,6 +103,7 @@ fn masked_input_handles_typing_without_reporting_secret_value(cx: &mut TestAppCo
         let secret = window.find("secret");
         assert!(secret.focused());
         assert_eq!(secret.text(), None);
+        assert_eq!(secret.value(), None);
     })
     .unwrap();
     handle

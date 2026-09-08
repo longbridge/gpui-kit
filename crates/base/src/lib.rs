@@ -59,7 +59,7 @@ mod styled;
 mod switch;
 mod table;
 mod tabs;
-mod test_state;
+mod test_props;
 pub mod text;
 mod text_boundary;
 mod text_selection;
@@ -161,7 +161,7 @@ pub use switch::{
 };
 pub use table::{Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow};
 pub use tabs::{Tab, TabStyles, Tabs};
-pub use test_state::{TestState, TestStateElement, TestStateExt};
+pub use test_props::{TestProps, TestPropsElement, TestPropsExt};
 pub use text::{
     MarkdownExtensions, MarkdownNode, MarkdownPlugin, SelectionFormat, TableData, Text, TextView,
     TextViewDefaults, TextViewPlugin, TextViewState, TextViewStyle, html, markdown,

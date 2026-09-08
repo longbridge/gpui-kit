@@ -552,11 +552,12 @@ impl RenderOnce for Input {
         BaseInput::new(id)
             .focused(focused)
             .disabled(disabled)
-            .test_state(|test| {
-                test.focus(presentation.focus_handle())
-                    .when(!presentation.is_masked(), |test| {
+            .test_props(|props| {
+                props
+                    .focus(presentation.focus_handle())
+                    .when(!presentation.is_masked(), |props| {
                         let value = state.text(cx).to_string();
-                        test.text(value.clone()).value(value)
+                        props.text(value.clone()).value(value)
                     })
             })
             .track_focus(&frame_focus_handle)

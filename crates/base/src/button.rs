@@ -8,7 +8,7 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::{RoleOverride, Selectable, StateStyle, StyledExt as _, TestStateExt as _};
+use crate::{RoleOverride, Selectable, StateStyle, StyledExt as _, TestPropsExt as _};
 
 type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
@@ -18,9 +18,8 @@ type ClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 /// GPUI's [`Styled`] API.
 #[derive(IntoElement)]
 pub struct Button {
-    test_state: crate::TestState,
     id: ElementId,
-    base: Stateful<Div>,
+    base: crate::TestPropsElement<Stateful<Div>>,
     style: StyleRefinement,
     semantic_styles: ButtonStyles,
     selected: bool,
@@ -37,19 +36,18 @@ pub struct Button {
 
 impl Button {
     /// Supplies logical facts to UI tests; the closure is skipped in normal builds.
-    pub fn test_state(
+    pub fn test_props(
         mut self,
-        configure: impl FnOnce(crate::TestState) -> crate::TestState,
+        configure: impl FnOnce(crate::TestProps) -> crate::TestProps,
     ) -> Self {
-        self.test_state = self.test_state.configure(configure);
+        self.base = self.base.test_props(configure);
         self
     }
 
     pub fn new(id: impl Into<ElementId>) -> Self {
         let id = id.into();
         Self {
-            test_state: crate::TestState::default(),
-            base: div().id(id.clone()),
+            base: div().id(id.clone()).test_props(|props| props),
             id,
             style: StyleRefinement::default(),
             semantic_styles: ButtonStyles::default(),
@@ -223,8 +221,8 @@ impl RenderOnce for Button {
         let on_click = self.on_click;
 
         self.base
-            .test_state(|_| {
-                self.test_state
+            .test_props(|props| {
+                props
                     .disabled(self.disabled)
                     .selected(self.selected)
                     .focus(&focus_handle)

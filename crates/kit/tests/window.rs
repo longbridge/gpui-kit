@@ -1,5 +1,5 @@
 use gpui::{AppContext, Context, TestAppContext, Window, div, prelude::*, px, size};
-use gpui_kit::test::{TestStateExt, TestWindowExt};
+use gpui_kit::test::{TestPropsExt, TestWindowExt};
 
 struct Example {
     open: bool,
@@ -11,7 +11,7 @@ impl Render for Example {
             .child(
                 div()
                     .id("trigger")
-                    .test_state(|test| test.text("Open"))
+                    .test_props(|props| props.text("Open"))
                     .w(px(120.))
                     .h(px(32.))
                     .child("Open")
@@ -24,7 +24,7 @@ impl Render for Example {
                 this.child(
                     div()
                         .id("popup")
-                        .test_state(|test| test.text("Hello"))
+                        .test_props(|props| props.text("Hello"))
                         .w(px(200.))
                         .h(px(80.))
                         .child("Hello"),
@@ -56,12 +56,18 @@ impl Render for Geometry {
     fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
-            .child(div().id("fill").test_state(|test| test).w_full().h(px(20.)))
-            .child(div().id("zero").test_state(|test| test).size(px(0.)))
+            .child(
+                div()
+                    .id("fill")
+                    .test_props(|props| props)
+                    .w_full()
+                    .h(px(20.)),
+            )
+            .child(div().id("zero").test_props(|props| props).size(px(0.)))
             .child(
                 div()
                     .id("hidden")
-                    .test_state(|test| test)
+                    .test_props(|props| props)
                     .size(px(30.))
                     .invisible()
                     .child("Hidden"),
@@ -69,7 +75,7 @@ impl Render for Geometry {
             .child(
                 div()
                     .id("transparent")
-                    .test_state(|test| test)
+                    .test_props(|props| props)
                     .size(px(30.))
                     .opacity(0.),
             )
@@ -77,7 +83,7 @@ impl Render for Geometry {
                 div().w(px(20.)).h(px(20.)).overflow_hidden().child(
                     div()
                         .id("clipped")
-                        .test_state(|test| test)
+                        .test_props(|props| props)
                         .absolute()
                         .left(px(40.))
                         .size(px(10.)),
@@ -86,13 +92,13 @@ impl Render for Geometry {
             .child(
                 div()
                     .id("offscreen")
-                    .test_state(|test| test)
+                    .test_props(|props| props)
                     .absolute()
                     .left(px(2000.))
                     .size(px(10.)),
             )
             .when(window.viewport_size().width > px(400.), |this| {
-                this.child(div().id("sidebar").test_state(|test| test).size(px(50.)))
+                this.child(div().id("sidebar").test_props(|props| props).size(px(50.)))
             })
     }
 }
@@ -142,16 +148,20 @@ impl Render for Duplicate {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .child(
-                div()
-                    .id("one")
-                    .test_state(|test| test)
-                    .child(div().id("duplicate").test_state(|test| test).size(px(10.))),
+                div().id("one").test_props(|props| props).child(
+                    div()
+                        .id("duplicate")
+                        .test_props(|props| props)
+                        .size(px(10.)),
+                ),
             )
             .child(
-                div()
-                    .id("two")
-                    .test_state(|test| test)
-                    .child(div().id("duplicate").test_state(|test| test).size(px(10.))),
+                div().id("two").test_props(|props| props).child(
+                    div()
+                        .id("duplicate")
+                        .test_props(|props| props)
+                        .size(px(10.)),
+                ),
             )
     }
 }
@@ -204,14 +214,14 @@ impl Render for Covered {
             .child(
                 div()
                     .id("covered")
-                    .test_state(|test| test)
+                    .test_props(|props| props)
                     .size(px(100.))
                     .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
             )
             .child(
                 div()
                     .id("cover")
-                    .test_state(|test| test)
+                    .test_props(|props| props)
                     .absolute()
                     .top_0()
                     .left_0()
@@ -260,7 +270,7 @@ impl Render for FocusedView {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("focus-target")
-            .test_state(|test| test)
+            .test_props(|props| props)
             .size(px(100.))
             .track_focus(&self.focus)
     }
@@ -292,7 +302,7 @@ impl Render for KeyCapture {
         let keys = self.keys.clone();
         div()
             .id("keys")
-            .test_state(|test| test)
+            .test_props(|props| props)
             .size(px(100.))
             .track_focus(&self.focus)
             .on_key_down(move |event, _, _| keys.borrow_mut().push(event.keystroke.clone()))
@@ -334,13 +344,13 @@ impl Render for CenteredLayout {
             .child(
                 div()
                     .id("dialog")
-                    .test_state(|test| test)
+                    .test_props(|props| props)
                     .w(px(200.))
                     .h(px(100.))
                     .flex()
                     .gap(px(10.))
-                    .child(div().id("left").test_state(|test| test).size(px(40.)))
-                    .child(div().id("right").test_state(|test| test).size(px(40.))),
+                    .child(div().id("left").test_props(|props| props).size(px(40.)))
+                    .child(div().id("right").test_props(|props| props).size(px(40.))),
             )
     }
 }
@@ -409,6 +419,89 @@ fn native_elements_require_explicit_observation(cx: &mut TestAppContext) {
     cx.update_window(handle.into(), |_, window, cx| {
         window.draw(cx).clear(cx);
         assert!(window.try_find("native").is_none());
+    })
+    .unwrap();
+}
+
+struct RefinedTestProps;
+impl Render for RefinedTestProps {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("refined")
+            .test_props(|props| props.text("Original").checked(false))
+            .test_props(|props| props.selected(true))
+            .size(px(40.))
+    }
+}
+
+#[gpui_kit::test]
+fn refining_observation_preserves_existing_facts_and_identity(cx: &mut TestAppContext) {
+    let handle = cx.add_window(|_, _| RefinedTestProps);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let snapshot = window.find("refined");
+        assert_eq!(snapshot.text(), Some("Original"));
+        assert_eq!(snapshot.checked(), Some(false));
+        assert_eq!(snapshot.selected(), Some(true));
+        assert_eq!(snapshot.bounds().size, size(px(40.), px(40.)));
+    })
+    .unwrap();
+}
+
+struct NativeProperties {
+    checked: bool,
+}
+impl Render for NativeProperties {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("native-properties")
+            .role(gpui::Role::CheckBox)
+            .aria_toggled(if self.checked {
+                gpui::accesskit::Toggled::True
+            } else {
+                gpui::accesskit::Toggled::False
+            })
+            .aria_selected(self.checked)
+            .aria_expanded(!self.checked)
+            .aria_label("Accessible name")
+            .aria_value("Accessible value")
+            // Deliberately conflicting fallbacks must not override native facts.
+            .test_props(|props| {
+                props
+                    .checked(true)
+                    .indeterminate(true)
+                    .selected(true)
+                    .expanded(false)
+            })
+            .size(px(40.))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.checked = !this.checked;
+                cx.notify();
+            }))
+    }
+}
+
+#[gpui_kit::test]
+fn native_properties_take_precedence_and_follow_rendered_changes(cx: &mut TestAppContext) {
+    let handle = cx.add_window(|_, _| NativeProperties { checked: false });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let before = window.find("native-properties");
+        assert_eq!(before.role(), Some(gpui::Role::CheckBox));
+        assert_eq!(before.checked(), Some(false));
+        assert_eq!(before.indeterminate(), Some(false));
+        assert_eq!(before.selected(), Some(false));
+        assert_eq!(before.expanded(), Some(true));
+        // Accessible labels/values are not necessarily logical text/values.
+        assert_eq!(before.text(), None);
+        assert_eq!(before.value(), None);
+        window.click("native-properties", cx);
+        let after = window.find("native-properties");
+        assert_eq!(after.checked(), Some(true));
+        assert_eq!(after.indeterminate(), Some(false));
+        assert_eq!(after.selected(), Some(true));
+        assert_eq!(after.expanded(), Some(false));
+        assert_eq!(before.checked(), Some(false));
     })
     .unwrap();
 }

@@ -1,30 +1,32 @@
 //! Fluent, feature-independent configuration for headless UI observation.
 use gpui::{Element, FocusHandle, Hitbox, InteractiveElement, SharedString};
 
-/// Facts reported by a control to UI tests. Configure through `.test_state(...)`.
-/// Reporting a fact does not alter the control's behavior.
+/// Facts reported by a control to UI tests. Configure through `.test_props(...)`.
+/// Reporting a fact does not alter the control's behavior. Native toggled,
+/// selected and expanded properties take precedence over supplied fallbacks.
+/// Keep test-only computations inside the closure; it is skipped in normal builds.
 #[cfg(feature = "test-support")]
 #[derive(Default)]
-pub struct TestState {
+pub struct TestProps {
     pub(crate) checked: Option<bool>,
     pub(crate) indeterminate: Option<bool>,
     pub(crate) selected: Option<bool>,
     pub(crate) expanded: Option<bool>,
     pub(crate) value: Option<SharedString>,
     pub(crate) focus: Option<FocusHandle>,
-    pub(crate) disabled: bool,
+    pub(crate) disabled: Option<bool>,
     pub(crate) text: Option<SharedString>,
 }
 
 /// Zero-sized configuration when UI testing is disabled.
 #[cfg(not(feature = "test-support"))]
 #[derive(Default)]
-pub struct TestState {
+pub struct TestProps {
     _private: (),
 }
 
 #[cfg_attr(not(feature = "test-support"), allow(unused_variables, unused_mut))]
-impl TestState {
+impl TestProps {
     pub fn checked(mut self, checked: bool) -> Self {
         #[cfg(feature = "test-support")]
         {
@@ -70,7 +72,7 @@ impl TestState {
     pub fn disabled(mut self, disabled: bool) -> Self {
         #[cfg(feature = "test-support")]
         {
-            self.disabled = disabled;
+            self.disabled = Some(disabled);
         }
         self
     }
@@ -81,37 +83,30 @@ impl TestState {
         }
         self
     }
+    #[cfg(feature = "test-support")]
     pub(crate) fn configure(self, configure: impl FnOnce(Self) -> Self) -> Self {
-        #[cfg(feature = "test-support")]
-        {
-            configure(self)
-        }
-        #[cfg(not(feature = "test-support"))]
-        {
-            let _ = configure;
-            self
-        }
+        configure(self)
     }
 }
-impl gpui::prelude::FluentBuilder for TestState {}
+impl gpui::prelude::FluentBuilder for TestProps {}
 
 #[doc(hidden)]
 #[cfg(feature = "test-support")]
-pub type TestStateElement<E> = crate::test_support::Observed<E>;
+pub type TestPropsElement<E> = crate::test_support::Observed<E>;
 #[doc(hidden)]
 #[cfg(not(feature = "test-support"))]
-pub type TestStateElement<E> = E;
+pub type TestPropsElement<E> = E;
 
 /// Adds test facts inline without splitting a native element's builder chain.
-pub trait TestStateExt:
+pub trait TestPropsExt:
     Element<PrepaintState = Option<Hitbox>> + InteractiveElement + Sized
 {
     /// Runs `configure` only with `test-support`. Otherwise returns the original
     /// element, without calling the closure or creating an observation wrapper.
-    fn test_state(self, configure: impl FnOnce(TestState) -> TestState) -> TestStateElement<Self> {
+    fn test_props(self, configure: impl FnOnce(TestProps) -> TestProps) -> TestPropsElement<Self> {
         #[cfg(feature = "test-support")]
         {
-            crate::test_support::Observed::new(self, TestState::default().configure(configure))
+            crate::test_support::Observed::new(self, TestProps::default().configure(configure))
         }
         #[cfg(not(feature = "test-support"))]
         {
@@ -120,7 +115,7 @@ pub trait TestStateExt:
         }
     }
 }
-impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> TestStateExt for E {}
+impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> TestPropsExt for E {}
 
 #[cfg(test)]
 mod tests {
@@ -131,16 +126,22 @@ mod tests {
     #[test]
     fn configuration_runs_only_with_test_support() {
         let calls = Cell::new(0);
-        let element = div().id("target").test_state(|test| {
-            calls.set(calls.get() + 1);
-            test.text("Target").checked(true)
-        });
-        assert_eq!(calls.get(), usize::from(cfg!(feature = "test-support")));
+        let element = div()
+            .id("target")
+            .test_props(|props| {
+                calls.set(calls.get() + 1);
+                props.text("Target").checked(true)
+            })
+            .test_props(|props| {
+                calls.set(calls.get() + 1);
+                props.selected(true)
+            });
+        assert_eq!(calls.get(), 2 * usize::from(cfg!(feature = "test-support")));
         #[cfg(not(feature = "test-support"))]
         {
             // Normal builds preserve the exact native type, not a no-op wrapper.
             let _: gpui::Stateful<gpui::Div> = element;
-            assert_eq!(std::mem::size_of::<TestState>(), 0);
+            assert_eq!(std::mem::size_of::<TestProps>(), 0);
         }
         #[cfg(feature = "test-support")]
         assert_eq!(Element::id(&element), Some("target".into()));
@@ -149,17 +150,17 @@ mod tests {
     #[test]
     fn component_configuration_skips_normal_builds_too() {
         let calls = Cell::new(0);
-        let _ = crate::Button::new("button").test_state(|test| {
+        let _ = crate::Button::new("button").test_props(|props| {
             calls.set(calls.get() + 1);
-            test.text("Button")
+            props.text("Button")
         });
-        let _ = crate::input::InputBase::new("input").test_state(|test| {
+        let _ = crate::input::InputBase::new("input").test_props(|props| {
             calls.set(calls.get() + 1);
-            test.value("Input")
+            props.value("Input")
         });
-        let _ = crate::Select::new("select").test_state(|test| {
+        let _ = crate::Select::new("select").test_props(|props| {
             calls.set(calls.get() + 1);
-            test.value("Select")
+            props.value("Select")
         });
         assert_eq!(
             calls.get(),

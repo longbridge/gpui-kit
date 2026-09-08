@@ -1,4 +1,4 @@
-use gpui_kit::test::{TestStateExt, TestWindowExt};
+use gpui_kit::test::{TestPropsExt, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window,
     component::{
@@ -40,7 +40,7 @@ impl Render for Profile {
             .child(
                 div()
                     .id("status")
-                    .test_state(|test| test.text(status.clone()))
+                    .test_props(|props| props.text(status.clone()))
                     .child(status),
             )
     }

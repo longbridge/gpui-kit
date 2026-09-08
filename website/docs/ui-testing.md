@@ -107,32 +107,42 @@ their defaults include the state entity ID. Tabs inside a TabBar use their
 index as ID. Select's existing `"input"` child identifies its trigger:
 `window.within("language").click("input", cx)`.
 
-Native divs opt in through a single fluent `test_state` closure:
+Native divs opt in through a single fluent `test_props` closure:
 
 ```rust
-use gpui_kit::TestStateExt as _;
+use gpui_kit::TestPropsExt as _;
 
 let status = div()
     .id("status")
-    .test_state(|state| state.text(message.clone()))
+    .test_props(|props| props.text(message.clone()))
     .child(message);
 ```
 
-Here `message` is a `SharedString`. `TestStateExt` is always available, so render
+Here `message` is a `SharedString`. `TestPropsExt` is always available, so render
 chains need no conditional compilation, temporary element or temporary focus clone.
 Without `test-support`, the closure is not called, the original native element
 is returned, and configuration storage is zero-sized. Put test-only conversions
 inside the closure; Rust still creates and drops captured values normally.
 
-The closure's `state` offers `text`, `focus`, `disabled`, `checked`,
+The closure receives a `TestProps`, which offers `text`, `focus`, `disabled`, `checked`,
 `indeterminate`, `selected`, `expanded` and `value`. These report facts without
-changing control behavior: `state.disabled(true)` does not disable handlers.
-The name `test_state` distinguishes reporting test facts from running a test
-or subscribing to reactive changes.
+changing control behavior: `props.disabled(true)` does not disable handlers.
+A `TestProps` describes facts for tests; it is not an entity or a second
+copy of the control model. Repeated `.test_props(...)` calls refine the same
+observation and preserve previously supplied facts, without nesting wrappers.
 
-Observation preserves the div's identity, layout, events and accessibility;
+Role, checked/indeterminate, selected and expanded facts are read from the
+native element's existing `role`, `aria_toggled`, `aria_selected` and
+`aria_expanded` properties. Native properties take precedence; the closure
+provides fallbacks only when they are absent. Focus association, unavailable
+disabled information, and exact logical text/value can still be supplied in
+the closure. Accessible names are not substituted for rendered text, and
+placeholder/prefix-bearing accessible values are not treated as logical values.
+This also avoids exposing masked input values. Snapshots additionally expose `role()`.
+
+The wrapper preserves the div's identity, layout, events and accessibility;
 it does not discover arbitrary child text or IDs. For geometry and visibility
-alone, use `.test_state(|state| state)`.
+alone, use `.test_props(|props| props)`.
 
 IDs only need to be unique within their GPUI identity scope. Window-wide queries
 panic on ambiguity. Use existing scopes without adding test containers:
@@ -247,8 +257,8 @@ clipping and the target's computed style; it does not detect pixel occlusion.
 Overlays can intercept clicks. `click_at(id, point(px(10.), px(10.)), cx)` can
 choose a visible portion of a clipped target without bypassing hit testing.
 
-Observation is feature-gated and therefore not byte-identical to a production
-build. The transparent wrapper adds no layout box, but visibility inspection
+Test instrumentation is feature-gated, so the test build is not byte-identical
+to a production build. The transparent wrapper adds no layout box, but visibility inspection
 computes style an additional time; style/drag predicates must not rely on call
 counts. GPUI does not expose inherited paint opacity from an unobserved ancestor.
 No GPUI fork or Cargo patch is used to bypass these limitations.

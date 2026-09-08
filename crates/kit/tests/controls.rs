@@ -54,7 +54,12 @@ impl Render for Form {
                         cx.notify();
                     })),
             )
-            .child(Select::new(&self.language).id("language").w(px(240.)))
+            .child(
+                Select::new(&self.language)
+                    .id("language")
+                    .title_prefix("Language: ")
+                    .w(px(240.)),
+            )
     }
 }
 
@@ -150,7 +155,7 @@ struct HoverHelp;
 impl Render for HoverHelp {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         use gpui_kit::component::{button::Button, hover_card::HoverCard};
-        use gpui_kit::test::TestStateExt as _;
+        use gpui_kit::test::TestPropsExt as _;
         div().size_full().flex().flex_col().gap_8().children([
             HoverCard::new("help")
                 .open_delay(Duration::from_millis(30))
@@ -159,7 +164,7 @@ impl Render for HoverHelp {
                 .content(|_, _, _| {
                     div()
                         .id("help-content")
-                        .test_state(|test| test.text("Explanation"))
+                        .test_props(|props| props.text("Explanation"))
                         .w(px(100.))
                         .h(px(40.))
                         .child("Explanation")
