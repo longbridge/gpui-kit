@@ -150,7 +150,7 @@ struct HoverHelp;
 impl Render for HoverHelp {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         use gpui_kit::component::{button::Button, hover_card::HoverCard};
-        use gpui_kit::test::ObserveElement as _;
+        use gpui_kit::test::TestStateExt as _;
         div().size_full().flex().flex_col().gap_8().children([
             HoverCard::new("help")
                 .open_delay(Duration::from_millis(30))
@@ -159,8 +159,7 @@ impl Render for HoverHelp {
                 .content(|_, _, _| {
                     div()
                         .id("help-content")
-                        .observe()
-                        .observe_text("Explanation")
+                        .test_state(|test| test.text("Explanation"))
                         .w(px(100.))
                         .h(px(40.))
                         .child("Explanation")

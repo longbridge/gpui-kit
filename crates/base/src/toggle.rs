@@ -8,7 +8,7 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::{StateStyle, StyledExt as _};
+use crate::{StateStyle, StyledExt as _, TestStateExt as _};
 
 type ChangeHandler = Rc<dyn Fn(bool, &ClickEvent, &mut Window, &mut App)>;
 
@@ -168,10 +168,12 @@ impl RenderOnce for Toggle {
         let style = self.resolved_style();
         let on_change = self.on_change;
 
-        #[cfg(feature = "test-support")]
-        let observed_focus = focus_handle.clone();
-        let element = self
-            .base
+        self.base
+            .test_state(|test| {
+                test.disabled(disabled)
+                    .focus(&focus_handle)
+                    .checked(pressed)
+            })
             .role(Role::Button)
             // Match Button's neutral control geometry: a fixed-size toggle
             // centers ordinary content, while callers still own its size,
@@ -209,17 +211,7 @@ impl RenderOnce for Toggle {
                 },
             )
             .children(self.children)
-            .refine_style(&style);
-        #[cfg(feature = "test-support")]
-        let element = {
-            use crate::test_support::ObserveElement as _;
-            element
-                .observe()
-                .observe_disabled(disabled)
-                .observe_focus(&observed_focus)
-                .observe_checked(pressed)
-        };
-        element
+            .refine_style(&style)
     }
 }
 

@@ -12,6 +12,7 @@ use gpui::{
     ParentElement as _, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled,
     Window, div, percentage, prelude::FluentBuilder,
 };
+use gpui_base::TestStateExt as _;
 use std::rc::Rc;
 
 /// Menu for the [`super::Sidebar`]
@@ -272,17 +273,11 @@ impl SidebarItem for SidebarMenuItem {
 
         div()
             .id(id.clone())
-            .map(|this| {
-                #[cfg(feature = "test-support")]
-                let this = {
-                    use gpui_base::test_support::ObserveElement as _;
-                    this.observe()
-                        .observe_selected(is_active)
-                        .observe_disabled(is_disabled)
-                        .observe_expanded(is_open)
-                        .observe_text(self.label.clone())
-                };
-                this
+            .test_state(|test| {
+                test.selected(is_active)
+                    .disabled(is_disabled)
+                    .expanded(is_open)
+                    .text(self.label.clone())
             })
             .w_full()
             .child(

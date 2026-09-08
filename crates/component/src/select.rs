@@ -4,6 +4,7 @@ use gpui::{
     RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window,
     deferred, div, prelude::FluentBuilder, px, rems,
 };
+use gpui_base::TestStateExt as _;
 use rust_i18n::t;
 
 use crate::ThemeStyled as _;
@@ -488,16 +489,10 @@ where
                 .child(
                     div()
                         .id("input")
-                        .map(|this| {
-                            #[cfg(feature = "test-support")]
-                            let this = {
-                                use gpui_base::test_support::ObserveElement as _;
-                                this.observe()
-                                    .observe_focus(&self.state.focus_handle)
-                                    .observe_disabled(self.state.disabled)
-                                    .observe_expanded(self.state.open)
-                            };
-                            this
+                        .test_state(|test| {
+                            test.focus(&self.state.focus_handle)
+                                .disabled(self.state.disabled)
+                                .expanded(self.state.open)
                         })
                         .relative()
                         .flex()
@@ -802,14 +797,6 @@ where
         let content_focus_handle = self.state.read(cx).state.list.focus_handle(cx);
         let open_state = self.state.clone();
 
-        #[cfg(feature = "test-support")]
-        let observed_value = self
-            .state
-            .read(cx)
-            .state
-            .selection
-            .first()
-            .map(|(_, item)| item.title());
         BaseSelect::new(self.id)
             .open(is_open)
             .disabled(disabled)
@@ -819,10 +806,11 @@ where
             .focus_handle(&focus_handle)
             .content_focus_handle(&content_focus_handle)
             .accessibility_value(accessibility_value)
-            .map(|this| {
-                #[cfg(feature = "test-support")]
-                let this = this.when_some(observed_value, |this, value| this.observe_value(value));
-                this
+            .test_state(|test| {
+                test.when_some(
+                    self.state.read(cx).state.selection.first(),
+                    |test, (_, item)| test.value(item.title()),
+                )
             })
             .on_open_change(move |open, _, cx| {
                 open_state.update(cx, |state, cx| state.set_open(open, cx));

@@ -1,5 +1,5 @@
 use gpui::{AppContext, Context, TestAppContext, Window, div, prelude::*, px, size};
-use gpui_kit::test::{ObserveElement, TestWindowExt};
+use gpui_kit::test::{TestStateExt, TestWindowExt};
 
 struct Example {
     open: bool,
@@ -11,8 +11,7 @@ impl Render for Example {
             .child(
                 div()
                     .id("trigger")
-                    .observe()
-                    .observe_text("Open")
+                    .test_state(|test| test.text("Open"))
                     .w(px(120.))
                     .h(px(32.))
                     .child("Open")
@@ -25,8 +24,7 @@ impl Render for Example {
                 this.child(
                     div()
                         .id("popup")
-                        .observe()
-                        .observe_text("Hello")
+                        .test_state(|test| test.text("Hello"))
                         .w(px(200.))
                         .h(px(80.))
                         .child("Hello"),
@@ -58,22 +56,28 @@ impl Render for Geometry {
     fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
-            .child(div().id("fill").observe().w_full().h(px(20.)))
-            .child(div().id("zero").observe().size(px(0.)))
+            .child(div().id("fill").test_state(|test| test).w_full().h(px(20.)))
+            .child(div().id("zero").test_state(|test| test).size(px(0.)))
             .child(
                 div()
                     .id("hidden")
-                    .observe()
+                    .test_state(|test| test)
                     .size(px(30.))
                     .invisible()
                     .child("Hidden"),
             )
-            .child(div().id("transparent").observe().size(px(30.)).opacity(0.))
+            .child(
+                div()
+                    .id("transparent")
+                    .test_state(|test| test)
+                    .size(px(30.))
+                    .opacity(0.),
+            )
             .child(
                 div().w(px(20.)).h(px(20.)).overflow_hidden().child(
                     div()
                         .id("clipped")
-                        .observe()
+                        .test_state(|test| test)
                         .absolute()
                         .left(px(40.))
                         .size(px(10.)),
@@ -82,13 +86,13 @@ impl Render for Geometry {
             .child(
                 div()
                     .id("offscreen")
-                    .observe()
+                    .test_state(|test| test)
                     .absolute()
                     .left(px(2000.))
                     .size(px(10.)),
             )
             .when(window.viewport_size().width > px(400.), |this| {
-                this.child(div().id("sidebar").observe().size(px(50.)))
+                this.child(div().id("sidebar").test_state(|test| test).size(px(50.)))
             })
     }
 }
@@ -140,14 +144,14 @@ impl Render for Duplicate {
             .child(
                 div()
                     .id("one")
-                    .observe()
-                    .child(div().id("duplicate").observe().size(px(10.))),
+                    .test_state(|test| test)
+                    .child(div().id("duplicate").test_state(|test| test).size(px(10.))),
             )
             .child(
                 div()
                     .id("two")
-                    .observe()
-                    .child(div().id("duplicate").observe().size(px(10.))),
+                    .test_state(|test| test)
+                    .child(div().id("duplicate").test_state(|test| test).size(px(10.))),
             )
     }
 }
@@ -200,14 +204,14 @@ impl Render for Covered {
             .child(
                 div()
                     .id("covered")
-                    .observe()
+                    .test_state(|test| test)
                     .size(px(100.))
                     .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
             )
             .child(
                 div()
                     .id("cover")
-                    .observe()
+                    .test_state(|test| test)
                     .absolute()
                     .top_0()
                     .left_0()
@@ -256,7 +260,7 @@ impl Render for FocusedView {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("focus-target")
-            .observe()
+            .test_state(|test| test)
             .size(px(100.))
             .track_focus(&self.focus)
     }
@@ -288,7 +292,7 @@ impl Render for KeyCapture {
         let keys = self.keys.clone();
         div()
             .id("keys")
-            .observe()
+            .test_state(|test| test)
             .size(px(100.))
             .track_focus(&self.focus)
             .on_key_down(move |event, _, _| keys.borrow_mut().push(event.keystroke.clone()))
@@ -330,13 +334,13 @@ impl Render for CenteredLayout {
             .child(
                 div()
                     .id("dialog")
-                    .observe()
+                    .test_state(|test| test)
                     .w(px(200.))
                     .h(px(100.))
                     .flex()
                     .gap(px(10.))
-                    .child(div().id("left").observe().size(px(40.)))
-                    .child(div().id("right").observe().size(px(40.))),
+                    .child(div().id("left").test_state(|test| test).size(px(40.)))
+                    .child(div().id("right").test_state(|test| test).size(px(40.))),
             )
     }
 }

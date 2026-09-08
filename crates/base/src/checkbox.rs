@@ -8,7 +8,7 @@ use gpui::{
 };
 use smallvec::SmallVec;
 
-use crate::{RoleOverride, StateStyle, StyledExt as _};
+use crate::{RoleOverride, StateStyle, StyledExt as _, TestStateExt as _};
 
 type ChangeHandler = Rc<dyn Fn(CheckboxState, &ClickEvent, &mut Window, &mut App)>;
 
@@ -369,10 +369,13 @@ impl RenderOnce for Checkbox {
         let style = self.resolved_style();
         let on_change = self.on_change;
 
-        #[cfg(feature = "test-support")]
-        let observed_focus = focus_handle.clone();
-        let element = self
-            .base
+        self.base
+            .test_state(|test| {
+                test.disabled(disabled)
+                    .focus(&focus_handle)
+                    .checked(self.state == CheckboxState::Checked)
+                    .indeterminate(self.state == CheckboxState::Indeterminate)
+            })
             .when_some(self.role.resolve(|| Role::CheckBox), |this, role| {
                 this.role(role)
             })
@@ -396,18 +399,7 @@ impl RenderOnce for Checkbox {
                 },
             )
             .children(self.children)
-            .refine_style(&style);
-        #[cfg(feature = "test-support")]
-        let element = {
-            use crate::test_support::ObserveElement as _;
-            element
-                .observe()
-                .observe_disabled(disabled)
-                .observe_focus(&observed_focus)
-                .observe_checked(self.state == CheckboxState::Checked)
-                .observe_indeterminate(self.state == CheckboxState::Indeterminate)
-        };
-        element
+            .refine_style(&style)
     }
 }
 

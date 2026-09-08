@@ -577,6 +577,9 @@ impl RenderOnce for Button {
         };
 
         let root = base
+            .test_state(|test| {
+                test.when_some(self.label.as_ref(), |test, label| test.text(label.clone()))
+            })
             .cursor_default()
             .flex()
             .flex_shrink_0()
@@ -673,8 +676,6 @@ impl RenderOnce for Button {
             .accessibility_label
             .clone()
             .or_else(|| self.label.clone());
-        #[cfg(feature = "test-support")]
-        let observed_label = self.label.clone();
         let content = h_flex()
             .id("label")
             .size_full()
@@ -720,11 +721,6 @@ impl RenderOnce for Button {
         }))
         .selected(self.selected)
         .disabled(disabled)
-        .map(|this| {
-            #[cfg(feature = "test-support")]
-            let this = this.when_some(observed_label, |this, label| this.observe_text(label));
-            this
-        })
         // Base layers semantic states over the builder chain, so the caller's
         // own style is replayed inside each state to keep it the closest layer.
         .styles(|styles| {

@@ -107,23 +107,32 @@ their defaults include the state entity ID. Tabs inside a TabBar use their
 index as ID. Select's existing `"input"` child identifies its trigger:
 `window.within("language").click("input", cx)`.
 
-Native divs opt in with `.id(...).observe()`. Supply facts the view actually
-knows with `observe_text`, `observe_focus`, `observe_disabled`, `observe_checked`,
-`observe_indeterminate`, `observe_selected`, `observe_expanded` and `observe_value`.
-These methods report facts; they do not change control behavior. For example,
-`observe_disabled(true)` does not disable an event handler.
+Native divs opt in through a single fluent `test_state` closure:
 
 ```rust
-let status = div().id("status").child(message.clone());
-#[cfg(feature = "test-support")]
-let status = status.observe().observe_text(message.clone());
+use gpui_kit::TestStateExt as _;
+
+let status = div()
+    .id("status")
+    .test_state(|state| state.text(message.clone()))
+    .child(message);
 ```
 
-Here `message` is a `SharedString`. Import `gpui_kit::test::ObserveElement` under
-the same condition and declare an application `test-support` feature forwarding
-to `gpui-kit/test-support`; run with `--features test-support`.
-`observe()` wraps the existing identified div, preserves its identity, layout,
-events and accessibility, and does not discover arbitrary child text or IDs.
+Here `message` is a `SharedString`. `TestStateExt` is always available, so render
+chains need no conditional compilation, temporary element or temporary focus clone.
+Without `test-support`, the closure is not called, the original native element
+is returned, and configuration storage is zero-sized. Put test-only conversions
+inside the closure; Rust still creates and drops captured values normally.
+
+The closure's `state` offers `text`, `focus`, `disabled`, `checked`,
+`indeterminate`, `selected`, `expanded` and `value`. These report facts without
+changing control behavior: `state.disabled(true)` does not disable handlers.
+The name `test_state` distinguishes reporting test facts from running a test
+or subscribing to reactive changes.
+
+Observation preserves the div's identity, layout, events and accessibility;
+it does not discover arbitrary child text or IDs. For geometry and visibility
+alone, use `.test_state(|state| state)`.
 
 IDs only need to be unique within their GPUI identity scope. Window-wide queries
 panic on ambiguity. Use existing scopes without adding test containers:

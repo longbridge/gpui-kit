@@ -1,7 +1,7 @@
 # UI testing in GPUI Kit
 
 Enable `gpui-kit/test-support` under development dependencies and import
-`gpui_kit::test::{TestWindowExt, TestAppContextExt, ObserveElement, ElementSnapshot}`.
+`gpui_kit::test::{TestWindowExt, TestAppContextExt, TestStateExt, ElementSnapshot}`.
 The implementation uses GPUI public APIs, with no fork, Cargo patch or separate crate.
 
 Read the [complete UI automation guide](../../website/docs/ui-testing.md) for
@@ -15,7 +15,7 @@ The [Chinese guide](../../website/zh-CN/docs/ui-testing.md) covers the same API.
 - `within` follows existing GPUI ID scopes, including unobserved parents.
 - `ElementSnapshot` is immutable. Re-query after interactions; optional state means
   unreported when `None`, not false.
-- `observe_*` builders report facts and do not change control behavior.
+- `test_state` closures report facts and do not change control behavior.
 - `render_frame` refreshes external changes. Synchronous interactions refresh their
   frames; deferred/async effects use `wait_for` outside a window update.
 - Clicks use real hit testing. `click_at` provides a local offset for clipped targets.

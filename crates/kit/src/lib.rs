@@ -146,3 +146,6 @@ pub fn init(cx: &mut App) {
     #[cfg(not(feature = "component"))]
     gpui_base::init(cx);
 }
+
+/// Fluent UI test observation, inert unless `test-support` is enabled.
+pub use gpui_base::TestStateExt;

@@ -1,7 +1,7 @@
 use gpui::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window, div, prelude::*, px,
 };
-use gpui_kit::test::{ObserveElement, TestWindowExt};
+use gpui_kit::test::{TestStateExt, TestWindowExt};
 
 struct Child {
     label: SharedString,
@@ -10,8 +10,7 @@ impl Render for Child {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("child")
-            .observe()
-            .observe_text(self.label.clone())
+            .test_state(|test| test.text(self.label.clone()))
             .size(px(40.))
             .child(self.label.clone())
     }
@@ -118,8 +117,7 @@ impl Render for Rows {
             let label = SharedString::from(format!("row {index}"));
             div()
                 .id(("row", index))
-                .observe()
-                .observe_text(label.clone())
+                .test_state(|test| test.text(label.clone()))
                 .h(px(30.))
                 .w(px(100.))
                 .child(label)
@@ -189,7 +187,7 @@ fn observation_preserves_accessibility_role_and_properties() {
         .role(Role::Button)
         .aria_label("Save")
         .aria_description("Save document")
-        .observe();
+        .test_state(|test| test);
     assert_eq!(Element::id(&native), Element::id(&observed));
     assert_eq!(native.a11y_role(), observed.a11y_role());
     let mut expected = gpui::accesskit::Node::new(Role::Button);
@@ -201,9 +199,9 @@ fn observation_preserves_accessibility_role_and_properties() {
 }
 
 #[test]
-#[should_panic(expected = "observe requires an existing ElementId")]
+#[should_panic(expected = "test_state requires an existing ElementId")]
 fn observation_rejects_anonymous_elements() {
-    let _ = div().observe();
+    let _ = div().test_state(|test| test);
 }
 
 struct Clipped {
@@ -215,7 +213,7 @@ impl Render for Clipped {
         div().w(px(20.)).h(px(40.)).overflow_hidden().child(
             div()
                 .id("partly-visible")
-                .observe()
+                .test_state(|test| test)
                 .absolute()
                 .w(px(100.))
                 .h(px(40.))
@@ -255,7 +253,7 @@ impl Render for ManyRows {
             .children((0..self.count).map(|index| {
                 div()
                     .id(("record", index))
-                    .observe()
+                    .test_state(|test| test)
                     .w(px(100.))
                     .h(px(1.))
                     .flex_shrink_0()

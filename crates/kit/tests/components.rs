@@ -5,7 +5,7 @@ use gpui_component::{
     input::{Input, InputState},
     popover::Popover,
 };
-use gpui_kit::test::{ObserveElement, TestWindowExt};
+use gpui_kit::test::{TestStateExt, TestWindowExt};
 
 struct Controls {
     input: Entity<InputState>,
@@ -34,7 +34,7 @@ impl Render for Controls {
                     .content(|_, _, _| {
                         div()
                             .id("popover-content")
-                            .observe()
+                            .test_state(|test| test)
                             .w(px(120.))
                             .h(px(50.))
                             .child("Details")

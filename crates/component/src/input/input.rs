@@ -552,14 +552,12 @@ impl RenderOnce for Input {
         BaseInput::new(id)
             .focused(focused)
             .disabled(disabled)
-            .map(|this| {
-                #[cfg(feature = "test-support")]
-                let this = this
-                    .observe_focus(presentation.focus_handle())
-                    .when(!presentation.is_masked(), |this| {
-                        this.observe_text(state.text(cx).to_string())
-                    });
-                this
+            .test_state(|test| {
+                test.focus(presentation.focus_handle())
+                    .when(!presentation.is_masked(), |test| {
+                        let value = state.text(cx).to_string();
+                        test.text(value.clone()).value(value)
+                    })
             })
             .track_focus(&frame_focus_handle)
             .styles(|styles| {

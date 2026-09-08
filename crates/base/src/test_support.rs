@@ -1,7 +1,7 @@
 //! Opt-in headless observation built exclusively on public GPUI APIs.
 //!
 //! Kit controls supply their own metadata. Applications can observe an identified
-//! GPUI div with `.observe()`. No accessibility tree or separate test ID is used.
+//! GPUI div with `.test_state(...)`. No accessibility tree or separate test ID is used.
 use gpui::{
     App, Bounds, Element, ElementId, FocusHandle, GlobalElementId, Hitbox, InspectorElementId,
     InteractiveElement, IntoElement, LayoutId, Pixels, SharedString, Visibility, Window, px,
@@ -174,78 +174,19 @@ pub fn registered_paths(window: &Window) -> String {
     }
 }
 
-/// Adds observation to a GPUI div without changing its identity or event handling.
-/// Native builder methods continue to work. Unobserved elements are not indexed.
-pub trait ObserveElement:
-    Element<PrepaintState = Option<Hitbox>> + InteractiveElement + Sized
-{
-    fn observe(self) -> Observed<Self> {
-        assert!(
-            Element::id(&self).is_some(),
-            "observe requires an existing ElementId"
-        );
-        Observed {
-            inner: self,
-            checked: None,
-            indeterminate: None,
-            selected: None,
-            expanded: None,
-            value: None,
-            focus: None,
-            disabled: false,
-            text: None,
-        }
-    }
-}
-impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> ObserveElement for E {}
-
 /// Transparent forwarding element. Its registration is owned by GPUI element
 /// state, so normal state cleanup and cached-view replay determine its lifetime.
 pub struct Observed<E> {
     inner: E,
-    checked: Option<bool>,
-    indeterminate: Option<bool>,
-    selected: Option<bool>,
-    expanded: Option<bool>,
-    value: Option<SharedString>,
-    focus: Option<FocusHandle>,
-    disabled: bool,
-    text: Option<SharedString>,
+    test: crate::TestState,
 }
-impl<E> Observed<E> {
-    pub fn observe_checked(mut self, checked: bool) -> Self {
-        self.checked = Some(checked);
-        self
-    }
-    pub fn observe_indeterminate(mut self, indeterminate: bool) -> Self {
-        self.indeterminate = Some(indeterminate);
-        self
-    }
-    pub fn observe_selected(mut self, selected: bool) -> Self {
-        self.selected = Some(selected);
-        self
-    }
-    pub fn observe_expanded(mut self, expanded: bool) -> Self {
-        self.expanded = Some(expanded);
-        self
-    }
-    pub fn observe_value(mut self, value: impl Into<SharedString>) -> Self {
-        self.value = Some(value.into());
-        self
-    }
-
-    /// Reports whether a custom control is disabled.
-    pub fn observe_disabled(mut self, disabled: bool) -> Self {
-        self.disabled = disabled;
-        self
-    }
-    pub fn observe_text(mut self, text: impl Into<SharedString>) -> Self {
-        self.text = Some(text.into());
-        self
-    }
-    pub fn observe_focus(mut self, focus: &FocusHandle) -> Self {
-        self.focus = Some(focus.clone());
-        self
+impl<E: Element> Observed<E> {
+    pub(crate) fn new(inner: E, test: crate::TestState) -> Self {
+        assert!(
+            Element::id(&inner).is_some(),
+            "test_state requires an existing ElementId"
+        );
+        Self { inner, test }
     }
 }
 impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> IntoElement for Observed<E> {
@@ -284,16 +225,16 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
         let global_id = id.expect("observed elements have an ID");
         let facts = ElementSnapshot {
             path: global_id.to_vec(),
-            checked: self.checked,
-            indeterminate: self.indeterminate,
-            selected: self.selected,
-            expanded: self.expanded,
-            value: self.value.clone(),
+            checked: self.test.checked,
+            indeterminate: self.test.indeterminate,
+            selected: self.test.selected,
+            expanded: self.test.expanded,
+            value: self.test.value.clone(),
             bounds,
             visible: false,
             focused: false,
-            disabled: self.disabled,
-            text: self.text.clone(),
+            disabled: self.test.disabled,
+            text: self.test.text.clone(),
         };
         let registration =
             window.with_element_state(global_id, |state: Option<Rc<Registration>>, window| {
@@ -344,6 +285,7 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Element fo
                 && clipped.size.width > px(0.)
                 && clipped.size.height > px(0.);
             facts.focused = self
+                .test
                 .focus
                 .as_ref()
                 .is_some_and(|focus| focus.is_focused(window));
@@ -380,7 +322,7 @@ impl<E: Element<PrepaintState = Option<Hitbox>> + InteractiveElement> Interactiv
         self.inner.interactivity()
     }
     fn track_focus(mut self, focus: &FocusHandle) -> Self {
-        self.focus = Some(focus.clone());
+        self.test.focus = Some(focus.clone());
         self.inner = self.inner.track_focus(focus);
         self
     }

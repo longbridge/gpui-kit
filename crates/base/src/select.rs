@@ -7,8 +7,8 @@ use gpui::{
     prelude::FluentBuilder as _,
 };
 
-use crate::StyledExt as _;
 use crate::actions::{Cancel, Confirm, SelectDown, SelectUp};
+use crate::{StyledExt as _, TestStateExt as _};
 
 const CONTEXT: &str = "Select";
 
@@ -42,8 +42,7 @@ type ActionHandler = Rc<dyn Fn(&mut Window, &mut App)>;
 /// `aria_active_descendant()`; this root cannot do it on the caller's behalf.
 #[derive(IntoElement)]
 pub struct Select {
-    #[cfg(feature = "test-support")]
-    observed_value: Option<SharedString>,
+    test_state: crate::TestState,
     id: ElementId,
     open: bool,
     disabled: bool,
@@ -60,17 +59,18 @@ pub struct Select {
 }
 
 impl Select {
-    /// Reports the selected item's logical value independently of accessibility naming.
-    #[cfg(feature = "test-support")]
-    pub fn observe_value(mut self, value: impl Into<SharedString>) -> Self {
-        self.observed_value = Some(value.into());
+    /// Supplies logical facts to UI tests; the closure is skipped in normal builds.
+    pub fn test_state(
+        mut self,
+        configure: impl FnOnce(crate::TestState) -> crate::TestState,
+    ) -> Self {
+        self.test_state = self.test_state.configure(configure);
         self
     }
 
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
-            #[cfg(feature = "test-support")]
-            observed_value: None,
+            test_state: crate::TestState::default(),
             id: id.into(),
             open: false,
             disabled: false,
@@ -203,12 +203,14 @@ impl RenderOnce for Select {
             }
         });
 
-        #[cfg(feature = "test-support")]
-        let observed_focus = focus_handle.clone();
-        #[cfg(feature = "test-support")]
-        let observed_value = self.observed_value;
-        let element = div()
+        div()
             .id(self.id)
+            .test_state(|_| {
+                self.test_state
+                    .disabled(disabled)
+                    .expanded(open)
+                    .when_some(focus_handle.as_ref(), |test, focus| test.focus(focus))
+            })
             .role(Role::ComboBox)
             .aria_expanded(open)
             .when_some(self.accessibility_label, |this, label| {
@@ -317,18 +319,7 @@ impl RenderOnce for Select {
                 close(window, cx);
             })
             .children(self.children)
-            .refine_style(&self.style);
-        #[cfg(feature = "test-support")]
-        let element = {
-            use crate::test_support::ObserveElement as _;
-            element
-                .observe()
-                .observe_disabled(disabled)
-                .observe_expanded(open)
-                .when_some(observed_focus, |this, focus| this.observe_focus(&focus))
-                .when_some(observed_value, |this, value| this.observe_value(value))
-        };
-        element
+            .refine_style(&self.style)
     }
 }
 

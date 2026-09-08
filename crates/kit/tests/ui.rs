@@ -1,4 +1,4 @@
-use gpui_kit::test::{ObserveElement, TestWindowExt};
+use gpui_kit::test::{TestStateExt, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window,
     component::{
@@ -40,8 +40,7 @@ impl Render for Profile {
             .child(
                 div()
                     .id("status")
-                    .observe()
-                    .observe_text(status.clone())
+                    .test_state(|test| test.text(status.clone()))
                     .child(status),
             )
     }
