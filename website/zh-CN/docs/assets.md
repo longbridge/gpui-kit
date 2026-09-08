@@ -19,50 +19,53 @@ GPUI Component 中的 [IconName] 和 [Icon] 提供了一套可直接在 GPUI 应
 
 :::note NOTE — 依赖图标 crate 不等于嵌入全部图标
 
-`gpui-kit-assets` 包含完整图标目录，但**仅添加依赖或使用 `IconName`，
-不会自动将全部 SVG 放入最终二进制，也不会将它们全部加载到内存**。
-优化构建会移除未引用的 SVG 数据。
+**补全图标目录不会让现有应用自动嵌入全部图标。** `Assets` 保留原来的
+101 个组件图标，应用仍通过自己的 `AssetSource` 提供额外图标，不需要重新声明
+组件自带的图标。只有显式注册 `AllAssets`，原生程序才会嵌入全部 1,830 个 SVG。
+仅依赖 crate 或使用共享 `IconName` 不会引用全部 SVG 内容。
 
-- 注册完整的 `Assets` 资源源时，原生程序会嵌入**全部** SVG。
-- 使用 `icon_assets!(AppAssets, [Search, Check])` 并注册 `AppAssets`
-  替代 `Assets` 时，原生和 WASM 程序都**只嵌入这两个** SVG。
-- 按需资源加载时借用静态 SVG 字节，不复制数据或分配缓存。
-  实际渲染仍需要 SVG 解析、栅格化和 GPUI 渲染缓存的内存，并非零内存开销。
+| 原生资源配置 | 嵌入的 SVG 总量 | 相对默认 `Assets` 的二进制增量 |
+| --- | ---: | ---: |
+| 默认组件图标（101 个） | 44.28 KiB | 0 B（基线） |
+| 默认 + 2 个应用图标（103 个） | 45.04 KiB | +15.19 KiB |
+| 默认 + 10 个应用图标（111 个） | 48.09 KiB | +19.19 KiB |
+| 显式使用 `AllAssets`（1,830 个） | 731.45 KiB | +1.02 MiB |
 
-下载的 crate 和构建产物中仍包含完整目录。运行时 `IconName` 查找可能保留
-名称到路径的映射表，但不会因此保留 SVG 内容。
-WASM 的完整 `Assets::new(endpoint)` 资源源则按需下载图标，不将其全部嵌入。
+**本例中，额外使用 10 个应用图标增加约 19 KiB，并不会带入整个图标库。**
+这 10 个 SVG 合计 3,903 字节，二进制实际增加 19,648 字节，包含额外资源源的查找、
+列表合并代码、元数据和对齐开销。这不是固定的单图标成本，也不是整个应用的大小。
+
+测量环境：Lucide 1.43.0、Linux x86_64、Rust 1.98.0、`--release` 并移除符号。
+各组使用相同的 `IconName` 查找和运行时资源路径。额外资源源回退到 `Assets`，
+并合并、排序、去重两个资源源的列表。10 个额外图标为 `Accessibility`、
+`AlarmClock`、`Archive`、`Award`、`Backpack`、`Bike`、`Bird`、`Camera`、
+`Coffee` 和 `Compass`；两图标组使用前两个。实际结果取决于 SVG 复杂度、工具链
+和资源源的实现方式。
+
+二进制大小不等于内存占用。按需资源借用静态字节，不复制或创建缓存；实际渲染仍有
+解析、栅格化和渲染缓存的开销。运行时共享名称查找可能保留名称映射表，Cargo 下载包
+和构建产物也仍包含完整目录。WASM 的 `Assets::new(endpoint)` 和
+`AllAssets::new(endpoint)` 沿用按需下载的 CDN 加载器，不嵌入完整资源包。
 
 :::
 
-## 共享名称与按需嵌入
+## 共享名称与兼容性
 
-`IconName` 和 `IconNamed` 定义在 `gpui_kit::assets` 中，由
-`gpui_kit::component` 重导出。Base 和其他表现层无需依赖 GPUI Component
-即可使用完整图标目录。资源包含 Lucide 1.43.0 的全部 1,818 个图标，
-以及保留的 12 个 GPUI Kit 图标。
+`gpui_kit::assets::IconName` 提供不依赖 Component 的完整共享目录。
+`gpui_kit::component::IconName` 保留为原来的兼容枚举：现有导入、穷尽匹配和
+`.view(cx)` 调用均无需改动，也无需新增 trait 导入。`Icon::new(...)` 同时接受
+两种类型；旧名称可以通过 `.into()` 转为共享名称。
 
-只嵌入应用需要的图标：
+对于新的共享枚举，需要组件实体时使用 `Icon::new(name).view(cx)`，也可导入
+`gpui_kit::component::IconNameExt` 后使用 `name.view(cx)`。
 
-```rust
-use gpui_kit::assets::{icon_assets, IconName};
-icon_assets!(AppAssets, [Search, Check]);
-let app = gpui_kit::application().with_assets(AppAssets);
-```
-
-注册 `AppAssets` 替代完整的 `Assets`。原生和 WASM 构建均只嵌入所选 SVG，
-其他路径返回 `Ok(None)`。加载时借用静态字节，不复制数据或创建运行时缓存；
-渲染仍有 GPUI 正常的 SVG 解析和栅格化开销。由于应用可以在运行时传入字符串路径，
-选择需要显式声明，无法自动推断。仅使用 `IconName` 不会引用 SVG 字节，
-但运行时名称查找可能保留名称到路径的映射表。
-
-`IconName::ALL` 列出完整目录，`IconName::Search.path()` 返回资源路径。
-现有 component 导入仍然可用。调用 `name.view(cx)` 时需额外导入
-`gpui_kit::component::IconNameExt`，也可以使用 `Icon::new(name).view(cx)`。
+`IconName::ALL` 列出完整的 1,830 个名称，`IconName::Accessibility.path()` 返回
+`icons/accessibility.svg`。默认资源源只包含原来的 101 个组件图标；额外图标请使用
+下文的自定义资源源，或者显式注册 `AllAssets` 使用完整资源包。
 
 ## 使用默认内置资源
 
-[gpui-kit-assets] 提供了一个默认的资源实现，包含 `assets/icons` 目录下的全部图标文件。
+[gpui-kit-assets] 提供了一个默认的资源实现，包含 `crates/assets/default-icons.txt` 中列出的原有 101 个组件图标。
 
 如果要使用默认资源，需要在 `Cargo.toml` 中添加：
 
@@ -99,8 +102,8 @@ let app = gpui_kit::application().with_assets(Assets);
 在 GPUI 应用中，通常可以结合 [rust-embed] 将这些 SVG 嵌入可执行文件，并通过 `AssetSource` 提供加载能力。
 
 ```rs
-use anyhow::anyhow;
 use gpui_kit::*;
+use gpui_kit::assets::Assets as ComponentAssets;
 use gpui_kit::component::{v_flex, IconName, Root};
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
@@ -117,15 +120,18 @@ impl AssetSource for Assets {
             return Ok(None);
         }
 
-        Self::get(path)
-            .map(|f| Some(f.data))
-            .ok_or_else(|| anyhow!("could not find asset at path \"{path}\""))
+        if let Some(file) = Self::get(path) {
+            return Ok(Some(file.data));
+        }
+        ComponentAssets.load(path)
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
-        Ok(Self::iter()
-            .filter_map(|p| p.starts_with(path).then(|| p.into()))
-            .collect())
+        let mut paths = ComponentAssets.list(path)?;
+        paths.extend(Self::iter().filter_map(|p| p.starts_with(path).then(|| p.into())));
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
     }
 }
 ```

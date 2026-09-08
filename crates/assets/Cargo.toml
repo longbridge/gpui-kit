@@ -11,6 +11,9 @@ edition.workspace = true
 publish = true
 version = "0.6.0"
 
+# Retain Cargo icon-directory metadata for existing build-script consumers.
+links = "gpui-kit-default-icons"
+
 [lib]
 doctest = false
 

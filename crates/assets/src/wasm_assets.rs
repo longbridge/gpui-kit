@@ -102,10 +102,7 @@ impl AssetSource for Assets {
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
-        Ok(crate::IconName::ALL
-            .iter()
-            .map(|icon| icon.path())
-            .filter(|name| name.starts_with(path))
-            .collect())
+        let _ = path;
+        Ok(Vec::new())
     }
 }

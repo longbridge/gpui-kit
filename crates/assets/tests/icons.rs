@@ -1,12 +1,12 @@
 #![cfg(not(target_family = "wasm"))]
 
 use gpui::{AssetSource, IntoElement};
-use gpui_kit_assets::{Assets, IconName};
+use gpui_kit_assets::{AllAssets, Assets, IconName};
 use std::collections::BTreeSet;
 
 #[test]
 fn every_named_icon_is_available_in_the_asset_source() {
-    let assets = Assets;
+    let assets = AllAssets;
     let named: BTreeSet<_> = IconName::ALL.iter().map(|icon| icon.path()).collect();
     let bundled: BTreeSet<_> = assets.list("icons/").unwrap().into_iter().collect();
     assert_eq!(named, bundled);
@@ -52,4 +52,24 @@ gpui_kit_assets::icon_assets!(pub EmptyAssets, []);
 fn empty_selection_is_a_valid_asset_source() {
     assert!(EmptyAssets.list("").unwrap().is_empty());
     assert!(EmptyAssets.load("icons/search.svg").unwrap().is_none());
+}
+
+#[test]
+fn default_assets_preserve_the_component_bundle_without_all_lucide_icons() {
+    let expected: BTreeSet<_> = include_str!("../default-icons.txt")
+        .lines()
+        .map(gpui::SharedString::from)
+        .collect();
+    let actual: BTreeSet<_> = Assets.list("icons/").unwrap().into_iter().collect();
+    assert_eq!(actual, expected);
+    assert_eq!(actual.len(), 101);
+    assert_eq!(Assets::iter().count(), 101);
+    assert!(Assets::get("icons/search.svg").is_some());
+    assert!(Assets::get("icons/accessibility.svg").is_none());
+    for path in actual {
+        assert_eq!(Assets.load(&path).unwrap(), AllAssets.load(&path).unwrap());
+    }
+    assert!(Assets.load("").unwrap().is_none());
+    assert!(Assets.load("icons/accessibility.svg").is_err());
+    assert!(AllAssets.load("icons/accessibility.svg").unwrap().is_some());
 }

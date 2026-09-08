@@ -16,9 +16,16 @@ fn assets_are_usable_through_kit_without_component() {
 
 #[cfg(feature = "component")]
 #[test]
-fn component_reexports_the_shared_type_and_adapts_it() {
+fn component_accepts_shared_names_and_preserves_legacy_views() {
     use gpui_kit::component::{Icon, IconNameExt};
-    let name: gpui_kit::component::IconName = IconName::Search;
-    let _ = Icon::new(name);
+    use gpui_kit::component::{IconName as LegacyIconName, IconNamed};
+    let _: fn(LegacyIconName, &mut gpui_kit::App) -> gpui_kit::Entity<Icon> = LegacyIconName::view;
+    assert_eq!(LegacyIconName::Search.path(), "icons/search.svg");
+    let _: gpui_kit::AnyElement = LegacyIconName::Search.into();
+    let shared: IconName = LegacyIconName::Search.into();
+    assert_eq!(shared, IconName::Search);
+    let _ = Icon::new(shared);
+    let _ = Icon::new(IconName::Accessibility);
+    let _ = Icon::new(LegacyIconName::Search);
     let _: fn(IconName, &mut gpui_kit::App) -> gpui_kit::Entity<Icon> = IconNameExt::view;
 }

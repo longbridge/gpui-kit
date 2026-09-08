@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use crate::{
-    ActiveTheme, Disableable, IconName, RoleOverride, Selectable, Sizable, Size, text::Text,
-    tooltip::ComponentTooltip, v_flex,
+    ActiveTheme, Disableable, IconName, RoleOverride, Selectable, Sizable, Size, icon::IconNamed,
+    text::Text, tooltip::ComponentTooltip, v_flex,
 };
 use crate::{StyledExt as _, ThemeStyled as _};
 use gpui::{

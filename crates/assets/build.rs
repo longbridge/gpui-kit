@@ -1,8 +1,21 @@
-use std::{collections::BTreeMap, env, fmt::Write, fs, path::PathBuf};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    env,
+    fmt::Write,
+    fs,
+    path::PathBuf,
+};
 
 fn main() {
+    let manifest_dir =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("Cargo manifest directory"));
+    println!(
+        "cargo:icons-dir={}",
+        manifest_dir.join("assets/icons").display()
+    );
     println!("cargo:rerun-if-changed=assets/icons");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=default-icons.txt");
     let mut icons = BTreeMap::new();
     for entry in fs::read_dir("assets/icons").expect("bundled icons directory") {
         let path = entry.expect("read icon directory entry").path();
@@ -57,6 +70,43 @@ fn main() {
         writeln!(code, "pub const {variant}: (&str, &[u8]) = ({path:?}, include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/assets/{path}\")));").unwrap();
     }
     code.push_str("}\n");
+    let default_paths: BTreeSet<_> = fs::read_to_string("default-icons.txt")
+        .expect("default component icon list")
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect();
+    let defaults: Vec<_> = icons
+        .iter()
+        .filter(|(_, path)| default_paths.contains(*path))
+        .collect();
+    assert_eq!(
+        defaults.len(),
+        default_paths.len(),
+        "default icon list references a missing SVG"
+    );
+    assert!(
+        !defaults.is_empty(),
+        "default component icon list must not be empty"
+    );
+
+    // The component compatibility enum keeps exactly the original variants,
+    // while the shared assets enum above exposes the complete catalog.
+    code.push_str("#[doc(hidden)]\n#[macro_export]\nmacro_rules! __component_icon_names {\n    ($callback:ident) => { $callback! {\n");
+    for (variant, path) in &defaults {
+        writeln!(code, "        {variant} => {path:?},").unwrap();
+    }
+    code.push_str("    } };\n}\n");
+
+    let mut default_source = String::from(
+        "/// The default component icon bundle.\n#[derive(rust_embed::RustEmbed)]\n#[folder = \"assets\"]\n",
+    );
+    for (_, path) in &defaults {
+        writeln!(default_source, "#[include = {path:?}]").unwrap();
+    }
+    default_source.push_str("pub struct Assets;\n");
     let output = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo OUT_DIR"));
     fs::write(output.join("icon_name.rs"), code).expect("write generated icon names");
+    fs::write(output.join("default_assets.rs"), default_source)
+        .expect("write default asset source");
 }

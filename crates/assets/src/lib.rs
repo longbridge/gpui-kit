@@ -1,7 +1,8 @@
 //! Bundled Lucide icons shared by GPUI Kit presentation and behavior layers.
 //!
 //! [`IconName`] and [`IconNamed`] do not depend on GPUI Component. Register
-//! [`Assets`] with the application to resolve their `icons/*.svg` paths.
+//! [`Assets`] for the default component bundle, or [`AllAssets`] for the full
+//! catalog. Applications can provide their own source for additional icons.
 
 mod icon;
 pub use icon::{IconName, IconNamed};
@@ -33,10 +34,14 @@ mod native_assets;
 mod wasm_assets;
 
 #[cfg(not(target_family = "wasm"))]
-pub use native_assets::Assets;
+pub use native_assets::{AllAssets, Assets};
 
 #[cfg(target_family = "wasm")]
 pub use wasm_assets::Assets;
+
+/// On WASM, the complete catalog uses the same on-demand CDN source.
+#[cfg(target_family = "wasm")]
+pub use wasm_assets::Assets as AllAssets;
 
 // Public only so exported macros can resolve dependencies in downstream crates,
 // including applications that depend solely on the gpui-kit umbrella crate.
@@ -56,7 +61,8 @@ pub mod __private {
 ///
 /// Unlisted paths return `Ok(None)`. The selected SVG bytes are borrowed from
 /// static storage; loading them does not copy them or build a runtime cache.
-/// Register this source instead of `Assets` to avoid embedding the full set.
+/// This source contains only the selected icons. Applications using components
+/// can compose it with `Assets` to retain their default icons.
 #[macro_export]
 macro_rules! icon_assets {
     ($vis:vis $name:ident, [$($icon:ident),* $(,)?]) => {
