@@ -79,27 +79,6 @@ const structuredData = [
   <SiteFooter lang={lang} />
 </BaseLayout>
 
-<script>
-  // The sidebar scrollbar is transparent at rest and appears only while the
-  // reader is scrolling it, so a long navigation tree does not carry a
-  // permanent rail beside it.
-  const sidebar = document.querySelector<HTMLElement>('.docs-sidebar');
-  if (sidebar) {
-    let hideTimer: number | undefined;
-    sidebar.addEventListener(
-      'scroll',
-      () => {
-        sidebar.dataset.scrollbarVisible = '';
-        window.clearTimeout(hideTimer);
-        hideTimer = window.setTimeout(() => {
-          delete sidebar.dataset.scrollbarVisible;
-        }, 800);
-      },
-      { passive: true },
-    );
-  }
-</script>
-
 <style is:global>
   @import '../styles/global.css';
 </style>
