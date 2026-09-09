@@ -144,7 +144,7 @@ cx.subscribe(&state, |this, _, event: &CarouselEvent, cx| {
 | --- | --- |
 | `CarouselEvent::Change(index)` | Emitted when user navigation selects a new item. |
 
-Keyboard navigation and previous/next controls use the same state transition and emit the same event. Pointer and trackpad gestures select the nearest snap point when the gesture ends.
+Keyboard navigation and previous/next controls use the same state transition and emit the same event. Pointer and trackpad gestures select the nearest snap point when the gesture ends. A mouse-wheel notch moves one item, and a gesture that begins at an edge scrolls the surrounding container instead.
 
 ## Pagination indicators
 

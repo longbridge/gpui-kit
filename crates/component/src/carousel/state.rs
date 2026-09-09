@@ -7,7 +7,7 @@ use gpui::{
 const POINTER_AXIS_LOCK_THRESHOLD: Pixels = px(2.);
 // Keep this aligned with GPUI's OngoingScroll timeout. Some platforms only
 // emit `Moved`, so a quiet period is the only signal that a new gesture began.
-const SCROLL_EVENT_SEPARATION: Duration = Duration::from_millis(28);
+pub(super) const SCROLL_EVENT_SEPARATION: Duration = Duration::from_millis(28);
 
 /// An event emitted when user interaction selects another carousel item.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -77,6 +77,8 @@ pub struct CarouselState {
     geometry_has_runway: bool,
     loop_layout_removal_pending: bool,
     loop_motion_target: Option<Point<Pixels>>,
+    wheel_burst_active: bool,
+    wheel_burst_epoch: usize,
 }
 
 impl CarouselState {
@@ -100,6 +102,8 @@ impl CarouselState {
             geometry_has_runway: false,
             loop_layout_removal_pending: false,
             loop_motion_target: None,
+            wheel_burst_active: false,
+            wheel_burst_epoch: 0,
         }
     }
 
@@ -302,6 +306,11 @@ impl CarouselState {
     /// Returns whether pointer or trackpad input is currently active.
     pub(super) fn is_interacting(&self) -> bool {
         self.pointer_gesture.is_some() || self.scroll_gesture.is_some()
+    }
+
+    /// Returns whether a trackpad gesture is being tracked.
+    pub(super) fn has_scroll_gesture(&self) -> bool {
+        self.scroll_gesture.is_some()
     }
 
     /// Returns whether the active pointer gesture has committed to this axis.
@@ -603,6 +612,52 @@ impl CarouselState {
             gesture.total_delta,
             cx,
         )
+    }
+
+    /// Hands a trackpad gesture that began at an edge to an ancestor scroller
+    /// until it ends or goes quiet.
+    pub(super) fn defer_scroll_to_ancestor(&mut self, cx: &mut Context<Self>) {
+        self.scroll_gesture = None;
+        self.invalidate_scroll_settle();
+        self.ignore_scroll_until_quiet = true;
+        self.schedule_ignored_scroll_recovery(cx);
+    }
+
+    /// Applies one mouse-wheel notch.  Line deltas carry no touch phases, so
+    /// the events within one quiet period form a burst that the first event
+    /// assigns: a step keeps the whole burst here, while a burst that cannot
+    /// step belongs to an ancestor scroller.
+    pub(super) fn handle_wheel_step(
+        &mut self,
+        axis: Axis,
+        delta: Pixels,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if axis != self.axis || delta == px(0.) {
+            return false;
+        }
+        if self.ignore_scroll_until_quiet {
+            self.schedule_ignored_scroll_recovery(cx);
+            return false;
+        }
+        if self.wheel_burst_active {
+            self.schedule_wheel_burst_end(cx);
+            return true;
+        }
+
+        let stepped = if delta > px(0.) {
+            self.select_previous(cx)
+        } else {
+            self.select_next(cx)
+        };
+        if stepped {
+            self.wheel_burst_active = true;
+            self.schedule_wheel_burst_end(cx);
+        } else {
+            self.ignore_scroll_until_quiet = true;
+            self.schedule_ignored_scroll_recovery(cx);
+        }
+        stepped
     }
 
     fn select_index_with_wrap(
@@ -950,6 +1005,24 @@ impl CarouselState {
                 this.update(cx, |state, _| {
                     if state.scroll_settle_epoch == epoch {
                         state.ignore_scroll_until_quiet = false;
+                    }
+                });
+            }
+        })
+        .detach();
+    }
+
+    fn schedule_wheel_burst_end(&mut self, cx: &mut Context<Self>) {
+        self.wheel_burst_epoch = self.wheel_burst_epoch.wrapping_add(1);
+        let epoch = self.wheel_burst_epoch;
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(SCROLL_EVENT_SEPARATION)
+                .await;
+            if let Some(this) = this.upgrade() {
+                this.update(cx, |state, _| {
+                    if state.wheel_burst_epoch == epoch {
+                        state.wheel_burst_active = false;
                     }
                 });
             }

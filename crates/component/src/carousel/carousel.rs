@@ -114,43 +114,47 @@ impl RenderOnce for Carousel {
             .key_context(CONTEXT)
             .on_action(
                 window.listener_for(&previous_state, move |state, _: &SelectLeft, _, cx| {
-                    if axis.is_horizontal() && state.select_previous(cx) {
-                        cx.stop_propagation();
+                    let handled = axis.is_horizontal() && state.select_previous(cx);
+                    if !handled {
+                        cx.propagate();
                     }
                 }),
             )
             .on_action(
                 window.listener_for(&next_state, move |state, _: &SelectRight, _, cx| {
-                    if axis.is_horizontal() && state.select_next(cx) {
-                        cx.stop_propagation();
+                    let handled = axis.is_horizontal() && state.select_next(cx);
+                    if !handled {
+                        cx.propagate();
                     }
                 }),
             )
             .on_action(
                 window.listener_for(&previous_state, move |state, _: &SelectUp, _, cx| {
-                    if axis.is_vertical() && state.select_previous(cx) {
-                        cx.stop_propagation();
+                    let handled = axis.is_vertical() && state.select_previous(cx);
+                    if !handled {
+                        cx.propagate();
                     }
                 }),
             )
             .on_action(
                 window.listener_for(&next_state, move |state, _: &SelectDown, _, cx| {
-                    if axis.is_vertical() && state.select_next(cx) {
-                        cx.stop_propagation();
+                    let handled = axis.is_vertical() && state.select_next(cx);
+                    if !handled {
+                        cx.propagate();
                     }
                 }),
             )
             .on_action(
                 window.listener_for(&first_state, |state, _: &SelectFirst, _, cx| {
-                    if state.select_first(cx) {
-                        cx.stop_propagation();
+                    if !state.select_first(cx) {
+                        cx.propagate();
                     }
                 }),
             )
             .on_action(
                 window.listener_for(&last_state, |state, _: &SelectLast, _, cx| {
-                    if state.select_last(cx) {
-                        cx.stop_propagation();
+                    if !state.select_last(cx) {
+                        cx.propagate();
                     }
                 }),
             )
@@ -902,6 +906,8 @@ fn snap_offset(handle: &gpui::ScrollHandle, axis: Axis, index: usize) -> Option<
 
 #[cfg(test)]
 mod tests {
+    use std::{cell::Cell, rc::Rc};
+
     use super::*;
     use gpui::{AppContext as _, Context, Render, point};
     use gpui_base::FocusableExt as _;
@@ -1010,6 +1016,71 @@ mod tests {
     #[gpui::test]
     fn vertical_carousel_dispatches_contextual_navigation_keys(cx: &mut gpui::TestAppContext) {
         assert_contextual_navigation_keys(cx, Axis::Vertical);
+    }
+
+    struct PropagationHarness {
+        state: Entity<CarouselState>,
+        outer_actions: Rc<Cell<usize>>,
+    }
+
+    impl Render for PropagationHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let down = self.outer_actions.clone();
+            let left = self.outer_actions.clone();
+            let right = self.outer_actions.clone();
+            div()
+                .tab_group()
+                .on_action(move |_: &SelectDown, _, _| down.set(down.get() + 1))
+                .on_action(move |_: &SelectLeft, _, _| left.set(left.get() + 1))
+                .on_action(move |_: &SelectRight, _, _| right.set(right.get() + 1))
+                .child(
+                    Carousel::new("carousel", &self.state)
+                        .w(px(100.))
+                        .h(px(100.))
+                        .child(
+                            CarouselContent::new(&self.state)
+                                .h(px(100.))
+                                .children((0..3).map(|index| {
+                                    CarouselItem::new(("carousel-item", index), index, &self.state)
+                                        .child(index.to_string())
+                                })),
+                        ),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn unhandled_navigation_keys_reach_ancestors(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|_| CarouselState::new(3)));
+        let outer_actions = Rc::new(Cell::new(0));
+        let (_, cx) = cx.add_window_view({
+            let state = state.clone();
+            let outer_actions = outer_actions.clone();
+            move |_, _| PropagationHarness {
+                state,
+                outer_actions,
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.focus_next(cx));
+
+        cx.simulate_keystrokes("down");
+        assert_eq!(outer_actions.get(), 1);
+
+        cx.simulate_keystrokes("left");
+        assert_eq!(outer_actions.get(), 2);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_index()),
+            Some(0)
+        );
+
+        cx.simulate_keystrokes("right");
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_index()),
+            Some(1)
+        );
+        assert_eq!(outer_actions.get(), 2);
     }
 
     #[gpui::test]

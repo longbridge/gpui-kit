@@ -211,24 +211,27 @@ impl Element for CarouselScrollMask {
                 } else {
                     delta.y
                 };
-                let consumed = if precise {
-                    if primary_delta.is_zero()
-                        || matches!(event.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled)
-                    {
-                        false
-                    } else {
-                        state.update(cx, |state, cx| {
-                            state.handle_scroll_delta(axis, primary_delta, event.touch_phase, cx)
-                        })
-                    }
+                let consumed = if primary_delta.is_zero() {
+                    false
+                } else if !precise {
+                    state.update(cx, |state, cx| {
+                        state.handle_wheel_step(axis, primary_delta, cx)
+                    })
+                } else if matches!(event.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+                    false
                 } else {
-                    if primary_delta.is_zero() {
-                        false
-                    } else if primary_delta > gpui::Pixels::ZERO {
-                        state.update(cx, |state, cx| state.select_previous(cx))
-                    } else {
-                        state.update(cx, |state, cx| state.select_next(cx))
+                    // A gesture this carousel already owns stays here even at
+                    // an edge, so its leftover never scrolls an ancestor. One
+                    // that begins at an edge belongs to the ancestor until it
+                    // ends.
+                    let owned = state.read(cx).has_scroll_gesture();
+                    let moved = state.update(cx, |state, cx| {
+                        state.handle_scroll_delta(axis, primary_delta, event.touch_phase, cx)
+                    });
+                    if !moved && !owned {
+                        state.update(cx, |state, cx| state.defer_scroll_to_ancestor(cx));
                     }
+                    moved || owned
                 };
 
                 if precise {
@@ -243,9 +246,9 @@ impl Element for CarouselScrollMask {
                     }
                 }
 
-                // Horizontal carousels retain the gesture at their edge. A
-                // vertical carousel chains at an edge so an ancestor can
-                // continue scrolling the surrounding document.
+                // Horizontal carousels retain every gesture at their edge. A
+                // vertical carousel hands a gesture that begins at an edge to
+                // an ancestor so the surrounding document keeps scrolling.
                 if consumed || (axis.is_horizontal() && !primary_delta.is_zero()) {
                     cx.stop_propagation();
                 }
@@ -266,13 +269,15 @@ mod tests {
     use gpui::{
         AppContext as _, Axis, Context, Entity, InteractiveElement as _, IntoElement, Modifiers,
         MouseButton, ParentElement as _, Render, ScrollDelta, ScrollHandle, ScrollWheelEvent,
-        StatefulInteractiveElement as _, Styled as _, TestAppContext, VisualTestContext, Window,
-        div, point, px,
+        StatefulInteractiveElement as _, Styled as _, TestAppContext, TouchPhase,
+        VisualTestContext, Window, div, point, px,
     };
 
     use crate::{
         button::Button,
-        carousel::{Carousel, CarouselContent, CarouselItem, CarouselState},
+        carousel::{
+            Carousel, CarouselContent, CarouselItem, CarouselState, state::SCROLL_EVENT_SEPARATION,
+        },
     };
 
     struct ButtonDragHarness {
@@ -381,6 +386,40 @@ mod tests {
         }
     }
 
+    fn nested_vertical_carousel<'a>(
+        cx: &'a mut TestAppContext,
+        state: &Entity<CarouselState>,
+    ) -> (ScrollHandle, &'a mut VisualTestContext) {
+        let outer_handle = ScrollHandle::new();
+        let (_, cx) = cx.add_window_view({
+            let state = state.clone();
+            let outer_handle = outer_handle.clone();
+            move |_, _| NestedVerticalCarouselHarness {
+                state,
+                outer_handle,
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        (outer_handle, cx)
+    }
+
+    fn wheel_line(cx: &mut VisualTestContext, lines: f32) {
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(20.), px(20.)),
+            delta: ScrollDelta::Lines(point(0., lines)),
+            ..Default::default()
+        });
+    }
+
+    fn swipe(cx: &mut VisualTestContext, delta: f32, touch_phase: TouchPhase) {
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(20.), px(20.)),
+            delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
+            touch_phase,
+            ..Default::default()
+        });
+    }
+
     #[gpui::test]
     fn vertical_carousel_hands_scroll_to_parent_at_edge(cx: &mut TestAppContext) {
         cx.update(crate::init);
@@ -391,28 +430,62 @@ mod tests {
                     .with_selected_index(1)
             })
         });
-        let outer_handle = ScrollHandle::new();
-        let (_, cx) = cx.add_window_view({
-            let state = state.clone();
-            let outer_handle = outer_handle.clone();
-            move |_, _| NestedVerticalCarouselHarness {
-                state,
-                outer_handle,
-            }
-        });
-        let cx: &mut VisualTestContext = cx;
-        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let (outer_handle, cx) = nested_vertical_carousel(cx, &state);
 
-        cx.simulate_event(ScrollWheelEvent {
-            position: point(px(20.), px(20.)),
-            delta: ScrollDelta::Lines(point(0., -1.)),
-            ..Default::default()
-        });
+        wheel_line(cx, -1.);
 
         assert_eq!(
             state.read_with(cx, |state, _| state.selected_index()),
             Some(1)
         );
+        assert!(outer_handle.offset().y < px(0.));
+    }
+
+    #[gpui::test]
+    fn vertical_carousel_keeps_a_wheel_burst_away_from_the_parent(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|_| CarouselState::new(2).with_axis(Axis::Vertical)));
+        let (outer_handle, cx) = nested_vertical_carousel(cx, &state);
+
+        // One notch steps once; the rest of its burst stays here.
+        wheel_line(cx, -1.);
+        wheel_line(cx, -1.);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_index()),
+            Some(1)
+        );
+        assert_eq!(outer_handle.offset().y, px(0.));
+
+        // A new notch at the edge scrolls the surrounding document instead.
+        cx.executor().advance_clock(SCROLL_EVENT_SEPARATION);
+        cx.run_until_parked();
+        wheel_line(cx, -1.);
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_index()),
+            Some(1)
+        );
+        assert!(outer_handle.offset().y < px(0.));
+    }
+
+    #[gpui::test]
+    fn vertical_carousel_owns_a_trackpad_gesture_until_it_ends(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|_| CarouselState::new(2).with_axis(Axis::Vertical)));
+        let (outer_handle, cx) = nested_vertical_carousel(cx, &state);
+
+        // The swipe overshoots the last item; the leftover stays here.
+        swipe(cx, -50., TouchPhase::Started);
+        swipe(cx, -50., TouchPhase::Moved);
+        swipe(cx, -50., TouchPhase::Moved);
+        swipe(cx, 0., TouchPhase::Ended);
+        assert_eq!(outer_handle.offset().y, px(0.));
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_index()),
+            Some(1)
+        );
+
+        // A gesture that begins at the edge scrolls the document instead.
+        swipe(cx, -50., TouchPhase::Started);
         assert!(outer_handle.offset().y < px(0.));
     }
 }
