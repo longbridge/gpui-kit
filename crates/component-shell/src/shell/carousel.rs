@@ -228,7 +228,8 @@ fn nonnegative_usize(argument: &ComponentArgument, callable: &str) -> Result<usi
             if value.is_finite()
                 && *value >= 0.
                 && value.fract() == 0.
-                && *value <= usize::MAX as f64 =>
+                // `usize::MAX as f64` rounds up to 2^64 on 64-bit targets.
+                && *value < usize::MAX as f64 =>
         {
             Ok(*value as usize)
         }
@@ -567,5 +568,12 @@ mod tests {
         );
         assert!(nonnegative_usize(&ComponentArgument::Number(-1.), "CarouselItem").is_err());
         assert!(nonnegative_usize(&ComponentArgument::Number(1.5), "CarouselItem").is_err());
+        assert!(
+            nonnegative_usize(
+                &ComponentArgument::Number(usize::MAX as f64),
+                "CarouselItem"
+            )
+            .is_err()
+        );
     }
 }
