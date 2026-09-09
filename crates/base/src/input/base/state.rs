@@ -1540,7 +1540,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         // Smart indent: one extra level after lines ending with a trigger.
         // Skipped inside strings and comments: the trigger is literal text.
         if let Some(rules) = self.mode.edit_rules() {
-            if rules.smart_indent
+            if self.mode.is_smart_indent()
                 && M::editing_syntax_context(self, offset) == crate::input::SyntaxContext::Code
             {
                 let line_before: String = self
@@ -1555,6 +1555,21 @@ impl<M: InputModeKind> InputBaseState<M> {
                     } else {
                         for _ in 0..tab.tab_size {
                             current_indent.push(' ');
+                        }
+                    }
+                } else {
+                    let line_after = self.text.slice(offset..next_line_start_pos).to_string();
+                    if rules.closes_indent(&line_after) {
+                        let tab = self.mode.tab_size();
+                        if current_indent.ends_with('\t') {
+                            current_indent.pop();
+                        } else {
+                            for _ in 0..tab.tab_size {
+                                if !current_indent.ends_with(' ') {
+                                    break;
+                                }
+                                current_indent.pop();
+                            }
                         }
                     }
                 }
@@ -1621,42 +1636,64 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Decide pairing against the pre-edit text, before an opening quote can
     /// change its own syntax context. Ordinary characters never query syntax.
-    fn auto_close_target(&self, range: &Range<usize>, text: &str) -> Option<char> {
+    fn auto_close_target(&self, range: &Range<usize>, text: &str) -> Option<(usize, SharedString)> {
         if self.silent_replace_text
             || self.ime_marked_range.is_some()
             || !self.selections.is_single()
             || !self.active_selection().is_empty()
             || !range.is_empty()
             || range.start != self.cursor()
+            || text.chars().count() != 1
+            || !self.mode.is_auto_close()
         {
             return None;
         }
         let rules = self.mode.edit_rules()?;
-        if !rules.auto_close {
+        if self
+            .text
+            .chars_at(range.start)
+            .next()
+            .is_some_and(|c| !c.is_whitespace() && !rules.auto_close_before.contains(c))
+        {
             return None;
         }
-        let mut chars = text.chars();
-        let typed = chars.next()?;
-        if chars.next().is_some() {
-            return None;
-        }
-        let closer = rules.matching_close(typed)?;
-        if closer == typed {
-            if self.is_escaped_at(range.start) {
-                return None;
+        for (open, close, not_in) in rules.closing_pairs() {
+            let Some(prefix) = open.strip_suffix(text) else {
+                continue;
+            };
+            if !self.text_before_matches(range.start, prefix) {
+                continue;
             }
-            if self
-                .text
-                .chars_at(range.start)
-                .reversed()
-                .next()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_')
+            let start = range.start - prefix.len();
+            if open == close
+                && (self.is_escaped_at(start)
+                    || self
+                        .text
+                        .chars_at(start)
+                        .reversed()
+                        .next()
+                        .is_some_and(|c| c.is_alphanumeric() || c == '_'))
             {
-                return None;
+                continue;
             }
+            if not_in.contains(&M::editing_syntax_context(self, start)) {
+                continue;
+            }
+            return Some((open.len(), close.into()));
         }
-        (M::editing_syntax_context(self, range.start) == crate::input::SyntaxContext::Code)
-            .then_some(closer)
+        None
+    }
+
+    fn text_before_matches(&self, offset: usize, text: &str) -> bool {
+        offset >= text.len()
+            && self.text.is_char_boundary(offset - text.len())
+            && self.text.slice(offset - text.len()..offset) == text
+    }
+
+    fn text_after_matches(&self, offset: usize, text: &str) -> bool {
+        offset + text.len() <= self.text.len()
+            && self.text.is_char_boundary(offset + text.len())
+            && self.text.slice(offset..offset + text.len()) == text
     }
 
     fn is_escaped_at(&self, offset: usize) -> bool {
@@ -1676,32 +1713,38 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// not escaped. The caller then moves the cursor without editing text or
     /// history. `None` means insert normally.
     fn skip_over_target(&self, new_text: &str) -> Option<usize> {
+        if !self.mode.is_auto_close() || new_text.chars().count() != 1 {
+            return None;
+        }
         let rules = self.mode.edit_rules()?;
-        if !rules.auto_close {
-            return None;
-        }
-        if new_text.chars().count() != 1 {
-            return None;
-        }
-        let typed = new_text.chars().next()?;
-        if !rules.is_closer(typed) {
-            return None;
-        }
         let cursor = self.cursor();
-        if self.text.chars_at(cursor).next() != Some(typed) {
-            return None;
-        }
-        match M::editing_syntax_context(self, cursor) {
-            crate::input::SyntaxContext::Comment => return None,
-            crate::input::SyntaxContext::String if rules.matching_close(typed) != Some(typed) => {
-                return None;
+        for (open, close, not_in) in rules.closing_pairs() {
+            for (index, _) in close.char_indices() {
+                if !close[index..].starts_with(new_text)
+                    || !self.text_before_matches(cursor, &close[..index])
+                    || !self.text_after_matches(cursor, &close[index..])
+                {
+                    continue;
+                }
+                let context = M::editing_syntax_context(self, cursor);
+                let generated = self
+                    .mode
+                    .automatic_pairs()
+                    .iter()
+                    .any(|(_, end)| end.start + index == cursor && end.len() == close.len());
+                if !generated
+                    && not_in.contains(&context)
+                    && !(context == crate::input::SyntaxContext::String && open == close)
+                {
+                    continue;
+                }
+                if self.is_escaped_at(cursor - index) {
+                    continue;
+                }
+                return Some(cursor + new_text.len());
             }
-            _ => {}
         }
-        if self.is_escaped_at(cursor) {
-            return None;
-        }
-        Some(cursor + typed.len_utf8())
+        None
     }
 
     pub(super) fn backspace(&mut self, _: &Backspace, window: &mut Window, cx: &mut Context<Self>) {
@@ -1715,34 +1758,35 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         }
 
-        // Paired bracket deletion: Backspace between `()` deletes both.
-        // Only fires on truly empty pairs; content like `{d|}` deletes `d` alone.
-        if self.is_code_editor()
+        // Pair deletion follows automatic closing rules, independently of
+        // structural brackets used by Enter.
+        if self.mode.is_auto_close()
             && self.selections.is_single()
             && self.active_selection().is_empty()
         {
-            if let Some(rules) = self.mode.edit_rules() {
-                if rules.auto_close {
-                    let off = self.cursor();
-                    // Seek-based lookups: no linear prefix scan, Unicode-safe.
-                    let before: Option<char> = (off > 0)
-                        .then(|| self.text.chars_at(off).reversed().next())
-                        .flatten();
-                    let after: Option<char> = self.text.chars_at(off).next();
-                    if let (Some(b), Some(a)) = (before, after) {
-                        if rules.pairs.iter().any(|p| p.open == b && p.close == a)
-                            && !self.is_escaped_at(off - b.len_utf8())
-                            && M::editing_syntax_context(self, off - b.len_utf8())
-                                == crate::input::SyntaxContext::Code
-                        {
-                            let start = off - b.len_utf8();
-                            let end = off + a.len_utf8();
-                            let utf16 = self.range_to_utf16(&(start..end));
-                            self.replace_text_in_range_silent(Some(utf16), "", window, cx);
-                            return;
-                        }
+            let off = self.cursor();
+            let deletion = self.mode.edit_rules().and_then(|rules| {
+                rules.closing_pairs().find_map(|(open, close, not_in)| {
+                    if !self.text_before_matches(off, open) || !self.text_after_matches(off, close)
+                    {
+                        return None;
                     }
-                }
+                    let start = off - open.len();
+                    let generated = self.mode.automatic_pairs().iter().any(|(begin, end)| {
+                        *begin == (start..off) && *end == (off..off + close.len())
+                    });
+                    if self.is_escaped_at(start)
+                        || (!generated && not_in.contains(&M::editing_syntax_context(self, start)))
+                    {
+                        return None;
+                    }
+                    Some(start..off + close.len())
+                })
+            });
+            if let Some(range) = deletion {
+                let utf16 = self.range_to_utf16(&range);
+                self.replace_text_in_range_silent(Some(utf16), "", window, cx);
+                return;
             }
         }
 
@@ -1872,29 +1916,25 @@ impl<M: InputModeKind> InputBaseState<M> {
                 self.pause_blink_cursor(cx);
             } else {
                 // Bracket split: Enter between `{|}` produces `{\n  \n}`
-                // with the cursor on the middle line. Requires auto_close;
-                // the extra indent level additionally requires smart_indent.
+                // with the cursor on the middle line. Controlled by smart_indent,
+                // independently of automatic closing.
                 // Skipped inside strings and comments: splitting there would
                 // restructure literal text.
                 let mut split = false;
                 if self.is_code_editor() && self.active_selection().is_empty() {
                     if let Some(rules) = self.mode.edit_rules() {
-                        if rules.auto_close
+                        if self.mode.is_smart_indent()
                             && M::editing_syntax_context(self, self.cursor())
                                 == crate::input::SyntaxContext::Code
                         {
                             let off = self.cursor();
-                            let before: Option<char> = (off > 0)
-                                .then(|| self.text.chars_at(off).reversed().next())
-                                .flatten();
-                            let after: Option<char> = self.text.chars_at(off).next();
-                            let is_pair = match (before, after) {
-                                (Some(b), Some(a)) => rules
-                                    .pairs
-                                    .iter()
-                                    .any(|p| p.open == b && p.close == a && b != a),
-                                _ => false,
-                            };
+                            let is_pair = rules.brackets.iter().any(|p| {
+                                !p.open.is_empty()
+                                    && !p.close.is_empty()
+                                    && p.open != p.close
+                                    && self.text_before_matches(off, p.open.as_ref())
+                                    && self.text_after_matches(off, p.close.as_ref())
+                            });
                             if is_pair {
                                 // Base indent: leading whitespace only.
                                 let line_end_affinity = self.line_end_affinity_at(off);
@@ -1908,7 +1948,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                                 }
                                 // Extra level only with smart indent enabled.
                                 let mut inner = indent.clone();
-                                if rules.smart_indent {
+                                if self.mode.is_smart_indent() {
                                     let tab = self.mode.tab_size();
                                     if tab.hard_tabs {
                                         inner.push('\t');
@@ -2647,6 +2687,8 @@ impl<M: InputModeKind> InputBaseState<M> {
                 self.replace_text_in_range_silent(Some(range_utf16), &change.old_text, window, cx);
             }
             self.restore_selections(replay.selections);
+            self.mode
+                .restore_automatic_pairs(replay.automatic_pairs.unwrap_or_default());
         }
         self.undo_manager.set_ignoring(false);
     }
@@ -2660,6 +2702,8 @@ impl<M: InputModeKind> InputBaseState<M> {
                 self.replace_text_in_range_silent(Some(range_utf16), &change.new_text, window, cx);
             }
             self.restore_selections(replay.selections);
+            self.mode
+                .restore_automatic_pairs(replay.automatic_pairs.unwrap_or_default());
         }
         self.undo_manager.set_ignoring(false);
     }
@@ -3429,9 +3473,11 @@ impl<M: InputModeKind> InputBaseState<M> {
             self.undo_manager.begin_transaction();
         }
 
+        let automatic_pairs_before = self.mode.automatic_pairs().to_vec();
         let mut recorded = false;
         for (range, new_text) in &sorted {
             let old_text = self.text.clone();
+            self.mode.adjust_automatic_pair(range, new_text.len());
             self.text.replace(range.clone(), new_text);
 
             M::adjust_annotations(self, range, new_text.len());
@@ -3520,6 +3566,10 @@ impl<M: InputModeKind> InputBaseState<M> {
         // Record the cursor snapshots for undo/redo restore.
         let selections_after: Vec<CursorSelection> = self.selections.iter().copied().collect();
         if recorded {
+            self.undo_manager.record_automatic_pairs(
+                automatic_pairs_before,
+                self.mode.automatic_pairs().to_vec(),
+            );
             self.undo_manager
                 .record_selections(selections_before, selections_after);
         }
@@ -3706,11 +3756,18 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 if let Some(intent) = requested_intent {
                     self.undo_manager.set_pending_intent(intent);
                 }
-                if let Some(closer) = self.auto_close_target(&range, new_text) {
+                if let Some((open_len, closer)) = self.auto_close_target(&range, new_text) {
                     // One edit keeps the pair atomic even at undo coalescing limits.
                     let replacement = format!("{new_text}{closer}");
                     self.replace_text_in_ranges(&[(range.clone(), replacement)], window, cx);
-                    self.set_cursor_to(range.start + new_text.len());
+                    let cursor = range.start + new_text.len();
+                    self.mode.track_automatic_pair(
+                        cursor - open_len..cursor,
+                        cursor..cursor + closer.len(),
+                    );
+                    self.undo_manager
+                        .record_automatic_pairs_after(self.mode.automatic_pairs().to_vec());
+                    self.set_cursor_to(cursor);
                     self.update_preferred_column();
                     self.undo_manager.record_selections(
                         vec![selection_before],
@@ -3736,6 +3793,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
 
         // Single-line path
         let old_text = self.text.clone();
+        self.mode.adjust_automatic_pair(&range, new_text.len());
         self.text.replace(range.clone(), new_text);
 
         let mut new_offset = (range.start + new_text.len()).min(self.text.len());
@@ -3884,7 +3942,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             }))
             .unwrap_or(self.selected_range());
 
+        let automatic_pairs_before = self.mode.automatic_pairs().to_vec();
         let old_text = self.text.clone();
+        self.mode.adjust_automatic_pair(&range, new_text.len());
         self.text.replace(range.clone(), new_text);
 
         if self.is_single_line() {
@@ -3954,6 +4014,10 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         ) {
             self.undo_manager
                 .record_selections(vec![selection_before], vec![*self.active_selection()]);
+            self.undo_manager.record_automatic_pairs(
+                automatic_pairs_before,
+                self.mode.automatic_pairs().to_vec(),
+            );
         }
         if new_text.is_empty() {
             self.undo_manager.commit_transaction();
@@ -7303,12 +7367,12 @@ mod tests {
                 );
             });
         });
-        // Split still happens (auto_close on) but middle line has base indent.
-        assert_cursors(&mut cx, &view.input, "{\n|\n}");
+        // Smart indent controls both structural splitting and extra indentation.
+        assert_cursors(&mut cx, &view.input, "{\n|}");
     }
 
     #[gpui::test]
-    fn test_enter_no_split_when_auto_close_off(cx: &mut TestAppContext) {
+    fn test_enter_split_is_independent_of_auto_close(cx: &mut TestAppContext) {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         setup_cursors(&mut cx, &view.input, "{|}");
@@ -7325,8 +7389,357 @@ mod tests {
                 );
             });
         });
-        // No three-way split; smart indent still applies to the new line.
-        assert_cursors(&mut cx, &view.input, "{\n  |}");
+        // Disabling automatic insertion does not disable structural indentation.
+        assert_cursors(&mut cx, &view.input, "{\n  |\n}");
+    }
+
+    #[gpui::test]
+    fn test_edit_rule_override_can_return_to_current_language(cx: &mut TestAppContext) {
+        use crate::input::{AutoClosingPair, BracketPair};
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_auto_close(false, window, cx);
+                state.set_smart_indent(false, window, cx);
+                state.set_edit_rules(
+                    Some(EditRules::default().auto_closing_pairs([])),
+                    window,
+                    cx,
+                );
+                state.ensure_edit_rules(
+                    EditRules::default()
+                        .brackets([BracketPair::new("«", "»")])
+                        .auto_closing_pairs([AutoClosingPair::new("«", "»")]),
+                    cx,
+                );
+                assert!(
+                    state
+                        .mode
+                        .edit_rules()
+                        .unwrap()
+                        .closing_pairs()
+                        .next()
+                        .is_none()
+                );
+                state.set_edit_rules(None, window, cx);
+                assert_eq!(
+                    state.mode.edit_rules().unwrap().brackets[0].open.as_ref(),
+                    "«"
+                );
+                assert!(!state.mode.is_auto_close());
+                assert!(!state.mode.is_smart_indent());
+                state.set_auto_close(true, window, cx);
+                state.replace_text_in_range(None, "«", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "«|»");
+    }
+
+    #[gpui::test]
+    fn test_auto_close_before_is_language_configurable(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|word");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "(", window, cx)
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "(|word");
+        setup_cursors(&mut cx, &view.input, "|word");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_edit_rules(
+                    Some(EditRules::default().auto_close_before("w")),
+                    window,
+                    cx,
+                );
+                state.replace_text_in_range(None, "(", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "(|)word");
+    }
+
+    #[gpui::test]
+    fn test_pair_context_restrictions_are_per_pair(cx: &mut TestAppContext) {
+        use crate::input::{AutoClosingPair, SyntaxContext};
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
+                state.set_edit_rules(
+                    Some(EditRules::default().auto_closing_pairs([
+                        AutoClosingPair::new("(", ")").not_in([SyntaxContext::String]),
+                        AutoClosingPair::new("[", "]").not_in([SyntaxContext::Comment]),
+                    ])),
+                    window,
+                    cx,
+                );
+                state.replace_text_in_range(None, "(", window, cx);
+                state.replace_text_in_range(None, "[", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "([|)");
+    }
+
+    #[gpui::test]
+    fn test_multichar_delimiters_insert_delete_and_skip(cx: &mut TestAppContext) {
+        use crate::input::{AutoClosingPair, SyntaxContext};
+        struct BlockComment;
+        impl crate::input::SyntaxContextProvider for BlockComment {
+            fn context_at(&self, text: &ropey::Rope, _: usize) -> SyntaxContext {
+                if text.to_string().contains("/*") {
+                    SyntaxContext::Comment
+                } else {
+                    SyntaxContext::Code
+                }
+            }
+        }
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_syntax_context_provider(std::rc::Rc::new(BlockComment), cx);
+                state.set_edit_rules(
+                    Some(
+                        EditRules::default().auto_closing_pairs([AutoClosingPair::new("/*", "*/")
+                            .not_in([SyntaxContext::String, SyntaxContext::Comment])]),
+                    ),
+                    window,
+                    cx,
+                );
+                state.replace_text_in_range(None, "/", window, cx);
+                state.replace_text_in_range(None, "*", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "/*|*/");
+        cx.update(|window, cx| {
+            view.input
+                .update(cx, |state, cx| state.backspace(&Backspace, window, cx));
+        });
+        assert_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.undo(&Undo, window, cx);
+                state.replace_text_in_range(None, "*", window, cx);
+                state.replace_text_in_range(None, "/", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "/**/|");
+    }
+
+    #[gpui::test]
+    fn test_automatic_pairs_fallback_and_explicit_disable(cx: &mut TestAppContext) {
+        use crate::input::BracketPair;
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                let mut rules = EditRules::default().brackets([BracketPair::new("«", "»")]);
+                rules.auto_closing_pairs = None;
+                state.set_edit_rules(Some(rules.clone()), window, cx);
+                state.replace_text_in_range(None, "«", window, cx);
+                state.set_edit_rules(Some(rules.auto_closing_pairs([])), window, cx);
+                state.replace_text_in_range(None, "«", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "««|»");
+    }
+
+    #[gpui::test]
+    fn test_undo_open_composition_preserves_generated_pairs(cx: &mut TestAppContext) {
+        use crate::input::{AutoClosingPair, SyntaxContext};
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_edit_rules(
+                    Some(EditRules::default().auto_closing_pairs([
+                        AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment]),
+                    ])),
+                    window,
+                    cx,
+                );
+                state.replace_text_in_range(None, "/", window, cx);
+                state.replace_text_in_range(None, "*", window, cx);
+                state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
+                state.replace_and_mark_text_in_range(None, "x", Some(1..1), window, cx);
+                state.undo(&Undo, window, cx);
+                state.replace_text_in_range(None, "*", window, cx);
+                state.replace_text_in_range(None, "/", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "/**/|");
+    }
+
+    #[gpui::test]
+    fn test_undo_does_not_promote_literal_comment_delimiters(cx: &mut TestAppContext) {
+        use crate::input::{AutoClosingPair, SyntaxContext};
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "/*|*/");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
+                state.set_edit_rules(
+                    Some(EditRules::default().auto_closing_pairs([
+                        AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment]),
+                    ])),
+                    window,
+                    cx,
+                );
+                state.delete_to_end_of_line(&DeleteToEndOfLine, window, cx);
+                state.undo(&Undo, window, cx);
+                state.backspace(&Backspace, window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "/|*/");
+    }
+
+    #[gpui::test]
+    fn test_multiple_generated_pairs_retain_their_identity(cx: &mut TestAppContext) {
+        use crate::input::{AutoClosingPair, SyntaxContext};
+        struct CommentScope;
+        impl crate::input::SyntaxContextProvider for CommentScope {
+            fn context_at(&self, text: &ropey::Rope, offset: usize) -> SyntaxContext {
+                if text
+                    .to_string()
+                    .find("*/")
+                    .is_some_and(|end| offset < end + 2)
+                {
+                    SyntaxContext::Comment
+                } else {
+                    SyntaxContext::Code
+                }
+            }
+        }
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_syntax_context_provider(std::rc::Rc::new(CommentScope), cx);
+                state.set_edit_rules(
+                    Some(EditRules::default().auto_closing_pairs([
+                        AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment]),
+                        AutoClosingPair::new("(", ")").not_in([SyntaxContext::Comment]),
+                    ])),
+                    window,
+                    cx,
+                );
+                state.replace_text_in_range(None, "/", window, cx);
+                state.replace_text_in_range(None, "*", window, cx);
+                state.set_selected_range(4..4, cx);
+                state.replace_text_in_range(None, "(", window, cx);
+                state.set_selected_range(2..2, cx);
+                state.replace_text_in_range(None, "*", window, cx);
+                state.replace_text_in_range(None, "/", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "/**/|()");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_selected_range(2..2, cx);
+                state.backspace(&Backspace, window, cx);
+                state.undo(&Undo, window, cx);
+                state.redo(&Redo, window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "|()");
+    }
+
+    #[gpui::test]
+    fn test_replacing_generated_opener_invalidates_the_pair(cx: &mut TestAppContext) {
+        use crate::input::{AutoClosingPair, SyntaxContext};
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_edit_rules(
+                    Some(EditRules::default().auto_closing_pairs([
+                        AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment]),
+                    ])),
+                    window,
+                    cx,
+                );
+                state.replace_text_in_range(None, "/", window, cx);
+                state.replace_text_in_range(None, "*", window, cx);
+                state.replace_text_in_range(Some(0..2), "//", window, cx);
+                state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
+                state.replace_text_in_range(None, "*", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "//*|*/");
+    }
+
+    #[gpui::test]
+    fn test_language_sync_preserves_compiled_regex_options(cx: &mut TestAppContext) {
+        use crate::input::IndentationRules;
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "BEGIN|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                let rules = |insensitive| {
+                    EditRules::default().indentation_rules(IndentationRules::new(
+                        regex::RegexBuilder::new("begin$")
+                            .case_insensitive(insensitive)
+                            .build()
+                            .unwrap(),
+                        regex::Regex::new("^end").unwrap(),
+                    ))
+                };
+                state.ensure_edit_rules(rules(false), cx);
+                state.set_edit_rules(Some(EditRules::default()), window, cx);
+                state.ensure_edit_rules(rules(true), cx);
+                state.set_edit_rules(None, window, cx);
+                state.enter(
+                    &Enter {
+                        secondary: false,
+                        shift: false,
+                    },
+                    window,
+                    cx,
+                );
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "BEGIN\n  |");
+    }
+
+    #[gpui::test]
+    fn test_indent_patterns_are_applied_on_enter(cx: &mut TestAppContext) {
+        use crate::input::IndentationRules;
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        let rules = EditRules::default().indentation_rules(IndentationRules::new(
+            regex::Regex::new(r"\bbegin\s*$").unwrap(),
+            regex::Regex::new(r"^\s*end\b").unwrap(),
+        ));
+        for (before, expected) in [("begin|", "begin\n  |"), ("  |end", "  \n|end")] {
+            setup_cursors(&mut cx, &view.input, before);
+            cx.update(|window, cx| {
+                view.input.update(cx, |state, cx| {
+                    state.set_edit_rules(Some(rules.clone()), window, cx);
+                    state.enter(
+                        &Enter {
+                            secondary: false,
+                            shift: false,
+                        },
+                        window,
+                        cx,
+                    );
+                });
+            });
+            assert_cursors(&mut cx, &view.input, expected);
+        }
     }
 
     #[gpui::test]
@@ -7336,15 +7749,11 @@ mod tests {
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
                 state.set_edit_rules(
-                    crate::input::EditRules {
-                        pairs: vec![crate::input::BracketPair {
-                            open: '«',
-                            close: '»',
-                        }],
-                        indent_triggers: vec![':'],
-                        auto_close: true,
-                        smart_indent: true,
-                    },
+                    Some(
+                        crate::input::EditRules::default()
+                            .brackets([crate::input::BracketPair::new("«", "»")])
+                            .auto_closing_pairs([crate::input::AutoClosingPair::new("«", "»")]),
+                    ),
                     window,
                     cx,
                 );
@@ -7444,34 +7853,27 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_flag_pins_survive_language_sync(cx: &mut TestAppContext) {
+    fn test_editor_options_survive_language_sync(cx: &mut TestAppContext) {
         use crate::input::{BracketPair, EditRules};
 
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                // Pin smart_indent off, then simulate render-time language sync
-                // with a table that enables it: pairs follow sync, pin wins.
+                // Language changes update rules without changing editor preferences.
                 state.set_smart_indent(false, window, cx);
                 state.ensure_edit_rules(
-                    EditRules {
-                        pairs: vec![BracketPair {
-                            open: '«',
-                            close: '»',
-                        }],
-                        ..EditRules::default()
-                    },
+                    EditRules::default().brackets([BracketPair::new("«", "»")]),
                     cx,
                 );
             });
         });
         view.input.read_with(&cx, |state, _| {
-            assert!(!state.mode.is_smart_indent(), "pinned flag preserved");
+            assert!(!state.mode.is_smart_indent(), "editor option preserved");
             assert!(state.mode.is_auto_close());
-            let pairs = &state.mode.edit_rules().unwrap().pairs;
+            let pairs = &state.mode.edit_rules().unwrap().brackets;
             assert_eq!(pairs.len(), 1, "pairs follow synced table");
-            assert_eq!(pairs[0].open, '«');
+            assert_eq!(pairs[0].open.as_ref(), "«");
         });
     }
 
@@ -8683,21 +9085,26 @@ impl InputBaseState<crate::input::EditorMode> {
 
     /// Replace the editing rules for brackets and indentation.
     ///
-    /// See [`EditRules`] for the pairs, indent triggers, and policy flags.
+    /// See [`EditRules`] for language pairs and indentation patterns.
     /// `gpui-component` supplies per-language tables; apps can override.
-    /// Explicit calls mark rules customized so render-time sync skips them.
+    /// Explicit rules override language defaults until `set_edit_rules(None, ..)` restores them.
     pub fn edit_rules(mut self, rules: EditRules) -> Self {
-        self.mode.set_edit_rules_custom(rules);
+        self.mode.set_edit_rules_custom(Some(rules));
         self
     }
 
-    /// Replace the editing rules at runtime.
-    pub fn set_edit_rules(&mut self, rules: EditRules, _: &mut Window, cx: &mut Context<Self>) {
+    /// Override language editing rules. Pass `None` to restore current language defaults.
+    pub fn set_edit_rules(
+        &mut self,
+        rules: Option<EditRules>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.mode.set_edit_rules_custom(rules);
         cx.notify();
     }
 
-    /// Apply rules unless the app explicitly customized them.
+    /// Update language defaults without changing application overrides or editor options.
     ///
     /// Render-time per-language sync calls this; explicit `edit_rules()` /
     /// `set_edit_rules()` calls always win. Notifies only when the stored
@@ -8710,47 +9117,35 @@ impl InputBaseState<crate::input::EditorMode> {
 
     /// Set enable/disable automatic closing brackets and quotes.
     ///
-    /// When enabled, typing an opener from [`EditRules::pairs`] inserts the
+    /// When enabled, typing an opener from [`EditRules::auto_closing_pairs`] inserts the
     /// matching closer and places the cursor inside. Typing a closer that is
     /// already present just moves past it. Default: true
     #[doc(hidden)]
     pub fn auto_close(mut self, auto_close: bool) -> Self {
-        if let Some(rules) = self.mode.edit_rules_mut() {
-            rules.auto_close = auto_close;
-        }
-        self.mode.pin_auto_close();
+        self.mode.set_auto_close(auto_close);
         self
     }
 
     /// Set automatic closing brackets and quotes at runtime.
     pub fn set_auto_close(&mut self, auto_close: bool, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(rules) = self.mode.edit_rules_mut() {
-            rules.auto_close = auto_close;
-        }
-        self.mode.pin_auto_close();
+        self.mode.set_auto_close(auto_close);
         cx.notify();
     }
 
     /// Set enable/disable smart indent on Enter.
     ///
-    /// When enabled, pressing Enter after a line ending with an
-    /// [`EditRules::indent_triggers`] character adds one extra indent level.
+    /// When enabled, Enter uses structural brackets and
+    /// [`EditRules::indentation_rules`] to choose indentation.
     /// Default: true
     #[doc(hidden)]
     pub fn smart_indent(mut self, smart_indent: bool) -> Self {
-        if let Some(rules) = self.mode.edit_rules_mut() {
-            rules.smart_indent = smart_indent;
-        }
-        self.mode.pin_smart_indent();
+        self.mode.set_smart_indent(smart_indent);
         self
     }
 
     /// Set smart indent on Enter at runtime.
     pub fn set_smart_indent(&mut self, smart_indent: bool, _: &mut Window, cx: &mut Context<Self>) {
-        if let Some(rules) = self.mode.edit_rules_mut() {
-            rules.smart_indent = smart_indent;
-        }
-        self.mode.pin_smart_indent();
+        self.mode.set_smart_indent(smart_indent);
         cx.notify();
     }
 }

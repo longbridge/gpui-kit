@@ -384,7 +384,7 @@ Reusable component 应遵守：
 - explicit compound part 优于检查 arbitrary descendant；
 - reusable behavior 不能强制 product-level visual choice。
 
-需要持续演进的行为状态默认使用私有字段。配置、主题令牌、几何数据和序列化结构如果本来就是记录类型，并且直接构造属于公开契约，可以有意暴露字段，同时接受相应的兼容成本。调用方可以读取、但不应依赖穷举构造或匹配时，使用 `#[non_exhaustive]`。
+需要持续演进的行为状态默认使用私有字段。配置、主题令牌、几何数据和序列化结构可以有意暴露字段，但所有包含公开字段的 `pub struct` 必须标注 `#[non_exhaustive]`，并提供构造函数、`Default` 或 builder，避免调用方依赖穷举结构体字面量。这使后续增加字段无需破坏调用方。新类型及公开 API 调整必须遵守此规则；无关的已有类型另行迁移。
 
 内部重组时保持 public module path：通过稳定 module seam 和明确 re-export，让 folder 变化不影响 downstream import。命名优先使用平台 control 术语和项目既有词汇，不使用偶然的 web-framework 词汇。
 

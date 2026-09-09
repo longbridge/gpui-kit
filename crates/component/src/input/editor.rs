@@ -229,4 +229,42 @@ mod tests {
             });
         }
     }
+    #[cfg(feature = "tree-sitter-rust")]
+    #[gpui::test]
+    fn generated_comment_closer_survives_syntax_changes(cx: &mut TestAppContext) {
+        use crate::input::{AutoClosingPair, EditRules, SyntaxContext};
+        use gpui::EntityInputHandler as _;
+        cx.update(crate::init);
+        let mut state = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| EditorState::new(window, cx));
+            state = Some(editor.clone());
+            Harness {
+                state: editor,
+                text_size: None,
+            }
+        });
+        let state = state.unwrap();
+        VisualTestContext::update(cx, |window, cx| {
+            state.update(cx, |state, cx| {
+                let provider =
+                    crate::input::syntax_context::syntax_context_provider("rust").unwrap();
+                state.set_syntax_context_provider(provider, cx);
+                state.set_edit_rules(
+                    Some(
+                        EditRules::default().auto_closing_pairs([AutoClosingPair::new("/*", "*/")
+                            .not_in([SyntaxContext::String, SyntaxContext::Comment])]),
+                    ),
+                    window,
+                    cx,
+                );
+                for text in ["/", "*", "x", "*", "/"] {
+                    state.replace_text_in_range(None, text, window, cx);
+                }
+                assert_eq!(state.text().to_string(), "/*x*/");
+                state.replace_text_in_range(None, "!", window, cx);
+                assert_eq!(state.text().to_string(), "/*x*/!");
+            });
+        });
+    }
 }

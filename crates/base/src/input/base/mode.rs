@@ -47,14 +47,14 @@ pub(crate) enum LayoutMode {
         highlighter: Rc<RefCell<Option<Box<dyn InputHighlighter>>>>,
         highlighter_factory: Option<InputHighlighterFactory>,
         diagnostics: DiagnosticSet,
-        /// Bracket pairs, indent triggers, and auto-close/smart-indent policy.
-        edit_rules: EditRules,
-        /// True after explicit `edit_rules()`; render-time sync skips then.
-        rules_customized: bool,
-        /// Individual flags pinned by `auto_close()` / `smart_indent()`
-        /// setters; sync preserves pinned flags while updating pairs.
-        pinned_auto_close: bool,
-        pinned_smart_indent: bool,
+        /// Defaults provided by the current language.
+        edit_rules: Box<EditRules>,
+        /// Explicit application override; None follows the language.
+        custom_edit_rules: Option<Box<EditRules>>,
+        /// Automatic delimiter ranges, adjusted with document edits.
+        automatic_pairs: super::undo_manager::AutomaticPairs,
+        auto_close: bool,
+        smart_indent: bool,
     },
 }
 
@@ -88,10 +88,11 @@ impl LayoutMode {
             indent_guides: true,
             folding: true,
             diagnostics: DiagnosticSet::new(&Rope::new()),
-            edit_rules: EditRules::default(),
-            rules_customized: false,
-            pinned_auto_close: false,
-            pinned_smart_indent: false,
+            edit_rules: Box::default(),
+            custom_edit_rules: None,
+            automatic_pairs: Vec::new(),
+            auto_close: true,
+            smart_indent: true,
         }
     }
 
@@ -114,125 +115,124 @@ impl LayoutMode {
         matches!(self, LayoutMode::CodeEditor { folding: true, .. })
     }
 
-    /// Editing rules for auto-close and smart indent, if a code editor.
-    #[inline]
     pub(super) fn edit_rules(&self) -> Option<&EditRules> {
         match self {
-            LayoutMode::CodeEditor { edit_rules, .. } => Some(edit_rules),
+            Self::CodeEditor {
+                edit_rules,
+                custom_edit_rules,
+                ..
+            } => Some(custom_edit_rules.as_deref().unwrap_or(edit_rules)),
             _ => None,
         }
     }
 
-    /// Editing rules for auto-close and smart indent, if a code editor.
-    #[inline]
-    pub(super) fn edit_rules_mut(&mut self) -> Option<&mut EditRules> {
-        match self {
-            LayoutMode::CodeEditor { edit_rules, .. } => Some(edit_rules),
-            _ => None,
-        }
-    }
-
-    /// Return true if this layout is a code editor with auto-close enabled.
-    #[inline]
     pub(super) fn is_auto_close(&self) -> bool {
-        self.edit_rules().is_some_and(|rules| rules.auto_close)
+        matches!(
+            self,
+            Self::CodeEditor {
+                auto_close: true,
+                ..
+            }
+        )
     }
 
-    /// Return true if this layout is a code editor with smart indent enabled.
-    #[inline]
     pub(super) fn is_smart_indent(&self) -> bool {
-        self.edit_rules().is_some_and(|rules| rules.smart_indent)
+        matches!(
+            self,
+            Self::CodeEditor {
+                smart_indent: true,
+                ..
+            }
+        )
     }
 
-    /// Apply language rules unless the app explicitly customized them.
-    ///
-    /// Render-time sync calls this: whole-table `edit_rules()` overrides win
-    /// entirely; individual `auto_close()` / `smart_indent()` pins preserve
-    /// their flag while pairs and triggers still follow the language.
-    /// Returns whether the stored rules changed.
-    #[inline]
+    pub(super) fn set_auto_close(&mut self, enabled: bool) {
+        if let Self::CodeEditor { auto_close, .. } = self {
+            *auto_close = enabled;
+        }
+    }
+
+    pub(super) fn set_smart_indent(&mut self, enabled: bool) {
+        if let Self::CodeEditor { smart_indent, .. } = self {
+            *smart_indent = enabled;
+        }
+    }
+
+    /// Always retain current language defaults, even while overridden.
     pub(super) fn ensure_edit_rules(&mut self, rules: EditRules) -> bool {
-        if let LayoutMode::CodeEditor {
+        if let Self::CodeEditor {
             edit_rules,
-            rules_customized,
-            pinned_auto_close,
-            pinned_smart_indent,
+            custom_edit_rules,
             ..
         } = self
         {
-            if *rules_customized {
-                return false;
-            }
-            let auto_close = if *pinned_auto_close {
-                edit_rules.auto_close
-            } else {
-                rules.auto_close
-            };
-            let smart_indent = if *pinned_smart_indent {
-                edit_rules.smart_indent
-            } else {
-                rules.smart_indent
-            };
-            let merged = EditRules {
-                pairs: rules.pairs,
-                indent_triggers: rules.indent_triggers,
-                auto_close,
-                smart_indent,
-            };
-            if *edit_rules != merged {
-                *edit_rules = merged;
-                return true;
+            if **edit_rules != rules {
+                **edit_rules = rules;
+                return custom_edit_rules.is_none();
             }
         }
         false
     }
 
-    /// Mark rules as app-customized so render-time sync skips them.
-    #[inline]
-    pub(super) fn mark_rules_customized(&mut self) {
-        if let LayoutMode::CodeEditor {
-            rules_customized, ..
+    pub(super) fn set_edit_rules_custom(&mut self, rules: Option<EditRules>) {
+        if let Self::CodeEditor {
+            custom_edit_rules, ..
         } = self
         {
-            *rules_customized = true;
+            *custom_edit_rules = rules.map(Box::new);
         }
     }
 
-    /// Pin one policy flag; sync still updates pairs and triggers.
-    #[inline]
-    pub(super) fn pin_auto_close(&mut self) {
-        if let LayoutMode::CodeEditor {
-            pinned_auto_close, ..
-        } = self
-        {
-            *pinned_auto_close = true;
+    pub(super) fn automatic_pairs(&self) -> &[(Range<usize>, Range<usize>)] {
+        match self {
+            Self::CodeEditor {
+                automatic_pairs, ..
+            } => automatic_pairs,
+            _ => &[],
         }
     }
 
-    /// Pin one policy flag; sync still updates pairs and triggers.
-    #[inline]
-    pub(super) fn pin_smart_indent(&mut self) {
-        if let LayoutMode::CodeEditor {
-            pinned_smart_indent,
-            ..
+    pub(super) fn restore_automatic_pairs(&mut self, pairs: super::undo_manager::AutomaticPairs) {
+        if let Self::CodeEditor {
+            automatic_pairs, ..
         } = self
         {
-            *pinned_smart_indent = true;
+            *automatic_pairs = pairs;
         }
     }
 
-    /// Mark rules as app-customized so render-time sync skips them.
-    #[inline]
-    pub(super) fn set_edit_rules_custom(&mut self, rules: EditRules) {
-        if let LayoutMode::CodeEditor {
-            edit_rules,
-            rules_customized,
-            ..
+    pub(super) fn track_automatic_pair(&mut self, open: Range<usize>, close: Range<usize>) {
+        if let Self::CodeEditor {
+            automatic_pairs, ..
         } = self
         {
-            *edit_rules = rules;
-            *rules_customized = true;
+            automatic_pairs.push((open, close));
         }
+    }
+
+    pub(super) fn adjust_automatic_pair(&mut self, edit: &Range<usize>, new_len: usize) {
+        let Self::CodeEditor {
+            automatic_pairs, ..
+        } = self
+        else {
+            return;
+        };
+        let delta = new_len as isize - edit.len() as isize;
+        let shift = |range: &mut Range<usize>| {
+            range.start = range.start.saturating_add_signed(delta);
+            range.end = range.end.saturating_add_signed(delta);
+        };
+        automatic_pairs.retain_mut(|(open, close)| {
+            if edit.end <= open.start {
+                shift(open);
+                shift(close);
+            } else if edit.start >= open.end && edit.end <= close.start {
+                shift(close);
+            } else if edit.start < close.end {
+                return false;
+            }
+            true
+        });
     }
 
     #[inline]
@@ -426,7 +426,7 @@ mod tests {
     use ropey::Rope;
 
     use super::replacement_input_edit;
-    use crate::input::{DiagnosticSet, EditRules, Point, TabSize, mode::LayoutMode};
+    use crate::input::{DiagnosticSet, Point, TabSize, mode::LayoutMode};
 
     #[test]
     fn test_replacement_input_edit_backspace_at_end_uses_old_range() {
@@ -461,14 +461,11 @@ mod tests {
             highlighter: Default::default(),
             highlighter_factory: None,
             diagnostics: DiagnosticSet::new(&Rope::new()),
-            edit_rules: EditRules {
-                auto_close: false,
-                smart_indent: false,
-                ..EditRules::default()
-            },
-            rules_customized: true,
-            pinned_auto_close: false,
-            pinned_smart_indent: false,
+            edit_rules: Box::default(),
+            custom_edit_rules: None,
+            automatic_pairs: Vec::new(),
+            auto_close: false,
+            smart_indent: false,
         };
         assert_eq!(mode.line_number(), false);
         assert_eq!(mode.has_indent_guides(), false);

@@ -13,6 +13,15 @@ decorations, highlighting, search infrastructure, diagnostics, and LSP hooks.
 Use [Input](./input.md) for single-line values and
 [Textarea](./textarea.md) for ordinary multi-line text.
 
+## Language editing rules
+
+The Base editor accepts `EditRules` and independent `auto_close` / `smart_indent`
+preferences. It does not select language-specific defaults or load a parser.
+See [Language editing rules](../../component/editor.md#language-editing-rules)
+for the configuration fields and override/reset behavior; import the same types
+from `gpui_kit::base::input` when using Base directly.
+
+
 ## Keyboard shortcuts
 
 The base and styled editors share keyboard and mouse behavior. See

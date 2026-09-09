@@ -96,6 +96,7 @@ tree-sitter-yaml = ["tree-sitter", "dep:tree-sitter-yaml"]
 tree-sitter-zig = ["tree-sitter", "dep:tree-sitter-zig"]
 
 [dependencies]
+regex = "1"
 anyhow.workspace = true
 gpui = { workspace = true }
 gpui_macros.workspace = true

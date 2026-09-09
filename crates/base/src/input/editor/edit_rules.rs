@@ -1,80 +1,193 @@
-/// A bracket or quote pair for automatic closing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+use gpui::SharedString;
+use regex::Regex;
+use std::sync::Arc;
+
+use super::SyntaxContext;
+
+/// A structural pair, used for indentation and splitting Enter between delimiters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BracketPair {
-    /// The typed character, e.g. `(`.
-    pub open: char,
-    /// The inserted or skipped character, e.g. `)`.
-    pub close: char,
+    pub open: SharedString,
+    pub close: SharedString,
 }
 
-/// Editing rules for automatic brackets and indentation.
+impl BracketPair {
+    pub fn new(open: impl Into<SharedString>, close: impl Into<SharedString>) -> Self {
+        Self {
+            open: open.into(),
+            close: close.into(),
+        }
+    }
+}
+
+/// An automatic closing pair and the syntax contexts in which insertion is disabled.
+/// Empty delimiters are ignored. Strings support delimiters such as `/*` and `*/`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AutoClosingPair {
+    pub open: SharedString,
+    pub close: SharedString,
+    pub not_in: Vec<SyntaxContext>,
+}
+
+impl AutoClosingPair {
+    pub fn new(open: impl Into<SharedString>, close: impl Into<SharedString>) -> Self {
+        Self {
+            open: open.into(),
+            close: close.into(),
+            not_in: Vec::new(),
+        }
+    }
+
+    pub fn not_in(mut self, contexts: impl IntoIterator<Item = SyntaxContext>) -> Self {
+        self.not_in = contexts.into_iter().collect();
+        self
+    }
+}
+
+/// Language indentation patterns, using Rust's `regex` syntax.
+/// Patterns are compiled by the caller, so invalid expressions are reported at setup.
+/// Applied on Enter: increase matches text before the caret; decrease matches text
+/// after it. This does not reformat existing lines or indentation on paste.
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
+pub struct IndentationRules {
+    pub increase_indent_pattern: Option<Arc<Regex>>,
+    pub decrease_indent_pattern: Option<Arc<Regex>>,
+}
+
+impl IndentationRules {
+    pub fn new(increase: Regex, decrease: Regex) -> Self {
+        Self {
+            increase_indent_pattern: Some(Arc::new(increase)),
+            decrease_indent_pattern: Some(Arc::new(decrease)),
+        }
+    }
+}
+
+impl PartialEq for IndentationRules {
+    fn eq(&self, other: &Self) -> bool {
+        fn same(a: &Option<Arc<Regex>>, b: &Option<Arc<Regex>>) -> bool {
+            match (a, b) {
+                (None, None) => true,
+                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+                _ => false,
+            }
+        }
+        // Compiled regex options are not represented by as_str(). Shared
+        // identity preserves clones while treating newly compiled rules as new.
+        same(
+            &self.increase_indent_pattern,
+            &other.increase_indent_pattern,
+        ) && same(
+            &self.decrease_indent_pattern,
+            &other.decrease_indent_pattern,
+        )
+    }
+}
+
+/// Declarative language editing rules, independent of editor preferences and parsers.
 ///
-/// Language-independent configuration consumed by the shared editing engine.
-/// The engine never names a bracket or language; `gpui-component` supplies
-/// per-language tables through [`crate::input::EditorState`] builders.
+/// Mirrors the supported subset of Monaco's language configuration. `None` for
+/// `auto_closing_pairs` uses `brackets`; `Some(vec![])` disables all automatic pairs.
+/// Use the builders to configure a default value; additional language capabilities
+/// can be added without breaking callers. Tree-sitter queries are configured in
+/// the parser implementation, not in these rules.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct EditRules {
-    /// Pairs inserted or skipped by auto-close, in priority order.
-    pub pairs: Vec<BracketPair>,
-    /// Line-end characters that add one indent level on Enter.
-    pub indent_triggers: Vec<char>,
-    /// Insert or skip matching closers when typing openers.
-    pub auto_close: bool,
-    /// Add one indent level after lines ending with an indent trigger.
-    pub smart_indent: bool,
+    pub brackets: Vec<BracketPair>,
+    pub auto_closing_pairs: Option<Vec<AutoClosingPair>>,
+    /// Automatic insertion is allowed before these characters, whitespace, or EOF.
+    pub auto_close_before: SharedString,
+    pub indentation_rules: Option<IndentationRules>,
 }
 
 impl Default for EditRules {
     fn default() -> Self {
+        let brackets = vec![
+            BracketPair::new("(", ")"),
+            BracketPair::new("[", "]"),
+            BracketPair::new("{", "}"),
+        ];
+        let mut pairs: Vec<_> = brackets
+            .iter()
+            .map(|p| {
+                AutoClosingPair::new(p.open.clone(), p.close.clone())
+                    .not_in([SyntaxContext::String, SyntaxContext::Comment])
+            })
+            .collect();
+        pairs.extend(
+            [
+                AutoClosingPair::new("\"", "\""),
+                AutoClosingPair::new("'", "'"),
+            ]
+            .into_iter()
+            .map(|p| p.not_in([SyntaxContext::String, SyntaxContext::Comment])),
+        );
         Self {
-            pairs: vec![
-                BracketPair {
-                    open: '(',
-                    close: ')',
-                },
-                BracketPair {
-                    open: '[',
-                    close: ']',
-                },
-                BracketPair {
-                    open: '{',
-                    close: '}',
-                },
-                BracketPair {
-                    open: '"',
-                    close: '"',
-                },
-                BracketPair {
-                    open: '\'',
-                    close: '\'',
-                },
-            ],
-            indent_triggers: vec!['{', '(', '[', ':'],
-            auto_close: true,
-            smart_indent: true,
+            brackets,
+            auto_closing_pairs: Some(pairs),
+            auto_close_before: ";:.,=}])>".into(),
+            indentation_rules: None,
         }
     }
 }
 
 impl EditRules {
-    /// The closing counterpart for an opening bracket or quote, if any.
-    pub fn matching_close(&self, opener: char) -> Option<char> {
-        self.pairs
+    pub fn brackets(mut self, pairs: impl IntoIterator<Item = BracketPair>) -> Self {
+        self.brackets = pairs.into_iter().collect();
+        self
+    }
+    pub fn auto_closing_pairs(mut self, pairs: impl IntoIterator<Item = AutoClosingPair>) -> Self {
+        self.auto_closing_pairs = Some(pairs.into_iter().collect());
+        self
+    }
+    pub fn auto_close_before(mut self, characters: impl Into<SharedString>) -> Self {
+        self.auto_close_before = characters.into();
+        self
+    }
+    pub fn indentation_rules(mut self, rules: IndentationRules) -> Self {
+        self.indentation_rules = Some(rules);
+        self
+    }
+
+    pub(crate) fn closing_pairs(&self) -> impl Iterator<Item = (&str, &str, &[SyntaxContext])> {
+        let configured = self
+            .auto_closing_pairs
+            .as_ref()
+            .into_iter()
+            .flatten()
+            .map(|p| (p.open.as_ref(), p.close.as_ref(), p.not_in.as_slice()));
+        let fallback = self
+            .brackets
             .iter()
-            .find(|pair| pair.open == opener)
-            .map(|pair| pair.close)
+            .filter(|_| self.auto_closing_pairs.is_none())
+            .map(|p| (p.open.as_ref(), p.close.as_ref(), &[][..]));
+        configured
+            .chain(fallback)
+            .filter(|(open, close, _)| !open.is_empty() && !close.is_empty())
     }
 
-    /// Whether `typed` is a recognized closer.
-    pub fn is_closer(&self, typed: char) -> bool {
-        self.pairs.iter().any(|pair| pair.close == typed)
+    pub(crate) fn opens_indent(&self, text: &str) -> bool {
+        self.indentation_rules
+            .as_ref()
+            .and_then(|r| r.increase_indent_pattern.as_ref())
+            .map_or_else(
+                || {
+                    self.brackets
+                        .iter()
+                        .any(|p| !p.open.is_empty() && text.trim_end().ends_with(p.open.as_ref()))
+                },
+                |r| r.is_match(text),
+            )
     }
 
-    /// Whether `line` (already trimmed at the end) opens a new indent level.
-    pub fn opens_indent(&self, trimmed_line_end: &str) -> bool {
-        trimmed_line_end
-            .chars()
-            .next_back()
-            .is_some_and(|c| self.indent_triggers.contains(&c))
+    pub(crate) fn closes_indent(&self, text: &str) -> bool {
+        self.indentation_rules
+            .as_ref()
+            .and_then(|r| r.decrease_indent_pattern.as_ref())
+            .is_some_and(|r| r.is_match(text))
     }
 }

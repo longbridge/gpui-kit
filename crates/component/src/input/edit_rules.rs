@@ -1,92 +1,33 @@
-use gpui_base::input::{BracketPair, EditRules};
+use gpui_base::input::{AutoClosingPair, BracketPair, EditRules, IndentationRules, SyntaxContext};
+use regex::Regex;
+use std::sync::LazyLock;
 
-/// Default editing rules for a language name.
-///
-/// Accepts names case-insensitively (`"Rust"`, `"rs"` aliases are resolved by
-/// the caller through `Language::from_name` where available; this table keys
-/// on canonical lowercase names). Unknown languages get [`EditRules::default`].
-/// Plain text gets no pairs or triggers: prose and single-line fields should
-/// not auto-close quotes.
+/// Language editing defaults. Editor preferences are stored separately on EditorState.
+/// Unknown languages use structural bracket indentation; only Python treats a colon
+/// as a block opener. Plain text has no structural or automatic pairs.
 pub fn language_rules(language: &str) -> EditRules {
+    static PYTHON_INDENT: LazyLock<IndentationRules> = LazyLock::new(|| {
+        IndentationRules::new(
+            Regex::new(r"[\{\(\[:]\s*$").unwrap(),
+            Regex::new(r"^\s*[\}\)\]]").unwrap(),
+        )
+    });
     match language.to_lowercase().as_str() {
-        "text" | "plain" | "plaintext" => EditRules {
-            pairs: Vec::new(),
-            indent_triggers: Vec::new(),
-            auto_close: true,
-            smart_indent: true,
-        },
-        // JSON has no single-quoted strings and `:` never opens a block
-        // (`"key": value` must not indent).
-        "json" | "jsonc" => EditRules {
-            pairs: vec![
-                BracketPair {
-                    open: '(',
-                    close: ')',
-                },
-                BracketPair {
-                    open: '[',
-                    close: ']',
-                },
-                BracketPair {
-                    open: '{',
-                    close: '}',
-                },
-                BracketPair {
-                    open: '"',
-                    close: '"',
-                },
-            ],
-            indent_triggers: vec!['{', '(', '['],
-            auto_close: true,
-            smart_indent: true,
-        },
-        // Rust: `::` paths and labels mean `:` never opens a block.
-        // Quotes pair (char literals); lifetimes fall back to the word guard.
-        "rust" | "rs" => EditRules {
-            pairs: c_style_pairs(),
-            indent_triggers: vec!['{', '(', '['],
-            auto_close: true,
-            smart_indent: true,
-        },
-        // HTML: `:` never opens a block (e.g. inline `style="color: red"`).
-        // `<`/`>` are intentionally not pairs: angle brackets in text
-        // would misfire far more often than tags benefit.
-        "html" | "htm" | "xml" | "svg" | "vue" | "svelte" | "astro" => EditRules {
-            pairs: c_style_pairs(),
-            indent_triggers: vec!['{', '(', '['],
-            auto_close: true,
-            smart_indent: true,
-        },
-        // Python: `:` opens blocks; standard pairs.
-        "python" | "py" | "pyi" => EditRules::default(),
+        "text" | "plain" | "plaintext" => EditRules::default().brackets([]).auto_closing_pairs([]),
+        "json" | "jsonc" => EditRules::default()
+            .brackets([BracketPair::new("{", "}"), BracketPair::new("[", "]")])
+            .auto_closing_pairs(
+                [
+                    AutoClosingPair::new("{", "}"),
+                    AutoClosingPair::new("[", "]"),
+                    AutoClosingPair::new("\"", "\""),
+                ]
+                .into_iter()
+                .map(|p| p.not_in([SyntaxContext::String, SyntaxContext::Comment])),
+            ),
+        "python" | "py" | "pyi" => EditRules::default().indentation_rules(PYTHON_INDENT.clone()),
         _ => EditRules::default(),
     }
-}
-
-/// Bracket pairs shared by C-like languages, for tables built elsewhere.
-pub fn c_style_pairs() -> Vec<BracketPair> {
-    vec![
-        BracketPair {
-            open: '(',
-            close: ')',
-        },
-        BracketPair {
-            open: '[',
-            close: ']',
-        },
-        BracketPair {
-            open: '{',
-            close: '}',
-        },
-        BracketPair {
-            open: '"',
-            close: '"',
-        },
-        BracketPair {
-            open: '\'',
-            close: '\'',
-        },
-    ]
 }
 
 #[cfg(test)]
@@ -94,60 +35,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn known_languages_get_default_pairs() {
-        for language in ["rust", "python", "rs", "javascript", "go"] {
-            let rules = language_rules(language);
-            assert!(!rules.pairs.is_empty(), "{language}");
-            assert!(rules.auto_close, "{language}");
-            assert!(rules.smart_indent, "{language}");
-        }
+    fn plain_text_has_no_editing_rules() {
+        let rules = language_rules("text");
+        assert!(rules.brackets.is_empty());
+        assert!(rules.auto_closing_pairs.unwrap().is_empty());
+        assert!(rules.indentation_rules.is_none());
     }
 
     #[test]
-    fn plain_text_gets_no_pairs_or_triggers() {
-        for language in ["text", "plain", "plaintext", "TEXT"] {
-            let rules = language_rules(language);
-            assert!(rules.pairs.is_empty(), "{language}");
-            assert!(rules.indent_triggers.is_empty(), "{language}");
-        }
-    }
-
-    #[test]
-    fn json_has_no_single_quotes_or_colon_trigger() {
+    fn json_only_closes_json_delimiters() {
         let rules = language_rules("json");
+        let pairs = rules.auto_closing_pairs.unwrap();
+        assert_eq!(pairs.len(), 3);
         assert!(
-            rules.pairs.iter().all(|p| p.open != '\''),
-            "no single quotes"
-        );
-        assert!(
-            !rules.indent_triggers.contains(&':'),
-            "colon must not indent JSON"
-        );
-        assert!(rules.indent_triggers.contains(&'{'), "brace still indents");
-    }
-
-    #[test]
-    fn rust_has_no_colon_trigger() {
-        let rules = language_rules("rust");
-        assert!(
-            !rules.indent_triggers.contains(&':'),
-            "colon must not indent Rust (`::` paths)"
-        );
-        assert!(rules.indent_triggers.contains(&'{'), "brace still indents");
-    }
-
-    #[test]
-    fn python_keeps_colon_trigger() {
-        let rules = language_rules("python");
-        assert!(
-            rules.indent_triggers.contains(&':'),
-            "colon must indent Python blocks"
+            pairs
+                .iter()
+                .all(|p| p.open.as_ref() != "'" && p.open.as_ref() != "(")
         );
     }
 
     #[test]
-    fn unknown_language_falls_back_to_default() {
-        let rules = language_rules("not-a-language");
-        assert_eq!(rules, EditRules::default());
+    fn colon_indentation_is_language_specific() {
+        assert!(
+            language_rules("python")
+                .indentation_rules
+                .unwrap()
+                .increase_indent_pattern
+                .unwrap()
+                .is_match("if enabled:")
+        );
+        for language in ["rust", "javascript", "json", "unknown"] {
+            assert!(language_rules(language).indentation_rules.is_none());
+        }
     }
 }

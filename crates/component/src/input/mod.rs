@@ -36,8 +36,11 @@ pub use gpui_base::input::{EditorMode, InputMode, InputModeKind, TextareaMode};
 mod editor;
 mod state;
 mod textarea;
-pub use edit_rules::{c_style_pairs, language_rules};
+pub use edit_rules::language_rules;
 pub use editor::Editor;
+pub use gpui_base::input::{
+    AutoClosingPair, BracketPair, EditRules, IndentationRules, SyntaxContext,
+};
 pub use input::*;
 pub use lsp_types::Position;
 pub use number_input::{NumberInput, NumberInputEvent, NumberStep, StepAction};
