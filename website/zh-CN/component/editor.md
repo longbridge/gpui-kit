@@ -15,17 +15,17 @@ use gpui_kit::component::input::{Editor, EditorState, TabSize};
 
 ## 语言编辑规则
 
-`EditRules` 描述语言规则；`.auto_close(bool)` 和 `.smart_indent(bool)` 是独立的编辑器选项。
+`LanguageConfig` 描述语言规则；`.auto_close(bool)` 和 `.smart_indent(bool)` 是独立的编辑器选项。
 切换语言或替换规则不会重置这两个选项。自动补全、跳过结束符和成对 Backspace 使用
 `auto_closing_pairs`；Enter 使用 `brackets` 和 `indentation_rules`，因此关闭自动补全后，
 仍可在已有括号内换行并缩进。
 
 ```rust
 use gpui_kit::component::input::{
-    AutoClosingPair, BracketPair, EditRules, SyntaxContext,
+    AutoClosingPair, BracketPair, LanguageConfig, SyntaxContext, set_language_config,
 };
 
-let rules = EditRules::default()
+let rules = LanguageConfig::default()
     .brackets([BracketPair::new("{", "}"), BracketPair::new("(", ")")])
     .auto_closing_pairs([
         AutoClosingPair::new("{", "}")
@@ -34,17 +34,19 @@ let rules = EditRules::default()
             .not_in([SyntaxContext::String, SyntaxContext::Comment]),
     ]);
 
+set_language_config("rust", rules, cx);
+
 let editor = cx.new(|cx| {
     EditorState::new(window, cx)
         .language("rust")
-        .edit_rules(rules)
         .auto_close(true)
         .smart_indent(true)
 });
-
-// 恢复当前语言的默认规则，保留编辑器选项。
-editor.update(cx, |state, cx| state.set_edit_rules(None, window, cx));
 ```
+
+`set_language_config` 替换当前应用中指定语言的配置，并更新已有编辑器。
+自定义配置应在 `gpui_kit::init(cx)` 之后注册。新建编辑器和切换语言时直接使用已注册的配置，
+渲染不会覆盖它；未知语言使用 `LanguageConfig::default()`。
 
 配对使用字符串，支持多字符定界符。`auto_closing_pairs = None` 表示使用 `brackets`；
 `Some(vec![])` 表示禁用全部自动配对，其 builder 设置的是 `Some`。

@@ -1,6 +1,7 @@
-use gpui::SharedString;
+use gpui::{App, BorrowAppContext as _, Global, SharedString};
 use regex::Regex;
 use std::sync::Arc;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use super::SyntaxContext;
 
@@ -96,7 +97,7 @@ impl PartialEq for IndentationRules {
 /// the parser implementation, not in these rules.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
-pub struct EditRules {
+pub struct LanguageConfig {
     pub brackets: Vec<BracketPair>,
     pub auto_closing_pairs: Option<Vec<AutoClosingPair>>,
     /// Automatic insertion is allowed before these characters, whitespace, or EOF.
@@ -104,7 +105,7 @@ pub struct EditRules {
     pub indentation_rules: Option<IndentationRules>,
 }
 
-impl Default for EditRules {
+impl Default for LanguageConfig {
     fn default() -> Self {
         let brackets = vec![
             BracketPair::new("(", ")"),
@@ -135,7 +136,7 @@ impl Default for EditRules {
     }
 }
 
-impl EditRules {
+impl LanguageConfig {
     pub fn brackets(mut self, pairs: impl IntoIterator<Item = BracketPair>) -> Self {
         self.brackets = pairs.into_iter().collect();
         self
@@ -190,4 +191,46 @@ impl EditRules {
             .and_then(|r| r.decrease_indent_pattern.as_ref())
             .is_some_and(|r| r.is_match(text))
     }
+}
+
+/// Language configurations shared by editors in one application.
+#[derive(Clone, Default)]
+pub(crate) struct LanguageConfigs {
+    configurations: Rc<RefCell<HashMap<String, LanguageConfig>>>,
+}
+
+impl Global for LanguageConfigs {}
+
+impl LanguageConfigs {
+    pub(crate) fn global(cx: &mut App) -> Self {
+        if !cx.has_global::<Self>() {
+            cx.set_global(Self::default());
+        }
+        cx.global::<Self>().clone()
+    }
+
+    pub(crate) fn get(&self, language: &str) -> LanguageConfig {
+        self.configurations
+            .borrow()
+            .get(&language.to_lowercase())
+            .cloned()
+            .unwrap_or_default()
+    }
+}
+
+/// Set the editing configuration for a language in this application.
+///
+/// Replaces the whole configuration and updates existing editors using that
+/// language. Language identifiers are case-insensitive. This does not change
+/// editor preferences such as `auto_close` or `smart_indent`.
+/// Unknown languages use [`LanguageConfig::default`].
+pub fn set_language_config(language: impl AsRef<str>, configuration: LanguageConfig, cx: &mut App) {
+    LanguageConfigs::global(cx);
+    cx.update_global::<LanguageConfigs, _>(|registry, _| {
+        let language = language.as_ref().to_lowercase();
+        registry
+            .configurations
+            .borrow_mut()
+            .insert(language, configuration);
+    });
 }

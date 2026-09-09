@@ -15,10 +15,11 @@ Use [Input](./input.md) for single-line values and
 
 ## Language editing rules
 
-The Base editor accepts `EditRules` and independent `auto_close` / `smart_indent`
-preferences. It does not select language-specific defaults or load a parser.
+The Base editor accepts `LanguageConfig` and independent `auto_close` / `smart_indent`
+preferences. It loads registered language configurations without a parser;
+Component registers the built-in language defaults during initialization.
 See [Language editing rules](../../component/editor.md#language-editing-rules)
-for the configuration fields and override/reset behavior; import the same types
+for the configuration fields and language registration; import the same types
 from `gpui_kit::base::input` when using Base directly.
 
 

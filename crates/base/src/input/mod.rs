@@ -23,8 +23,6 @@ mod decorations;
 mod diagnostics;
 #[path = "editor/display_map/mod.rs"]
 mod display_map;
-#[path = "editor/edit_rules.rs"]
-mod edit_rules;
 mod editor;
 #[path = "base/element.rs"]
 mod element;
@@ -35,6 +33,8 @@ mod indent;
 mod input;
 #[path = "base/kind.rs"]
 mod kind;
+#[path = "editor/language_config.rs"]
+mod language_config;
 #[path = "base/layout.rs"]
 mod layout;
 #[path = "editor/lsp/mod.rs"]
@@ -72,7 +72,6 @@ pub use diagnostics::{
     DiagnosticSummary, DiagnosticTag, RelatedInformation,
 };
 pub use display_map::{BufferPoint, DisplayMap, DisplayPoint, FoldRange, WrappingIndent};
-pub use edit_rules::{AutoClosingPair, BracketPair, EditRules, IndentationRules};
 pub use editor::{Editor, EditorState};
 pub use highlighting::{
     DiagnosticColors, FoldIconRenderer, HighlightStyleResolver, InputEditorStyle, InputHighlighter,
@@ -82,6 +81,10 @@ pub use indent::TabSize;
 pub use input::{Input, InputState};
 pub use kind::{
     EditorExtras, EditorMode, InputExtras, InputMode, InputModeKind, MultiLineMode, TextareaMode,
+};
+pub(crate) use language_config::LanguageConfigs;
+pub use language_config::{
+    AutoClosingPair, BracketPair, IndentationRules, LanguageConfig, set_language_config,
 };
 pub use lsp::{
     CodeActionItem, CodeActionMenuState, CodeActionProvider, CompletionMenuOptions,

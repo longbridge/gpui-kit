@@ -1,7 +1,7 @@
 mod clear_button;
 mod content_type;
-mod edit_rules;
 mod input;
+mod language_config;
 mod number_input;
 mod otp_input;
 mod overlay;
@@ -36,10 +36,10 @@ pub use gpui_base::input::{EditorMode, InputMode, InputModeKind, TextareaMode};
 mod editor;
 mod state;
 mod textarea;
-pub use edit_rules::language_rules;
 pub use editor::Editor;
 pub use gpui_base::input::{
-    AutoClosingPair, BracketPair, EditRules, IndentationRules, SyntaxContext,
+    AutoClosingPair, BracketPair, IndentationRules, LanguageConfig, SyntaxContext,
+    set_language_config,
 };
 pub use input::*;
 pub use lsp_types::Position;
@@ -47,3 +47,7 @@ pub use number_input::{NumberInput, NumberInputEvent, NumberStep, StepAction};
 pub use otp_input::*;
 pub use state::AnyInputState;
 pub use textarea::Textarea;
+
+pub(crate) fn init(cx: &mut gpui::App) {
+    language_config::init(cx);
+}

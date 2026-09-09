@@ -35,7 +35,7 @@ use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use crate::input::blink_cursor::CURSOR_WIDTH;
 use crate::input::movement::MoveDirection;
 use crate::input::{
-    EditRules, InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
+    InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
 };
 use crate::{AutoScroll, StepAction};
 
@@ -782,6 +782,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             }
             _ => {}
         }
+        self.mode.reload_language_config();
         self.refresh(cx);
     }
 
@@ -1539,7 +1540,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         // Smart indent: one extra level after lines ending with a trigger.
         // Skipped inside strings and comments: the trigger is literal text.
-        if let Some(rules) = self.mode.edit_rules() {
+        if let Some(rules) = self.mode.language_config() {
             if self.mode.is_smart_indent()
                 && M::editing_syntax_context(self, offset) == crate::input::SyntaxContext::Code
             {
@@ -1648,7 +1649,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         {
             return None;
         }
-        let rules = self.mode.edit_rules()?;
+        let rules = self.mode.language_config()?;
         if self
             .text
             .chars_at(range.start)
@@ -1709,14 +1710,14 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Cursor target when a typed closer should skip over an existing one.
     ///
     /// Returns `Some(offset)` when `new_text` is a single closer from the
-    /// active [`EditRules`] that already follows the collapsed cursor and is
+    /// active [`LanguageConfig`](crate::input::LanguageConfig) that already follows the collapsed cursor and is
     /// not escaped. The caller then moves the cursor without editing text or
     /// history. `None` means insert normally.
     fn skip_over_target(&self, new_text: &str) -> Option<usize> {
         if !self.mode.is_auto_close() || new_text.chars().count() != 1 {
             return None;
         }
-        let rules = self.mode.edit_rules()?;
+        let rules = self.mode.language_config()?;
         let cursor = self.cursor();
         for (open, close, not_in) in rules.closing_pairs() {
             for (index, _) in close.char_indices() {
@@ -1729,7 +1730,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 let context = M::editing_syntax_context(self, cursor);
                 let generated = self
                     .mode
-                    .automatic_pairs()
+                    .auto_closed_pairs()
                     .iter()
                     .any(|(_, end)| end.start + index == cursor && end.len() == close.len());
                 if !generated
@@ -1765,14 +1766,14 @@ impl<M: InputModeKind> InputBaseState<M> {
             && self.active_selection().is_empty()
         {
             let off = self.cursor();
-            let deletion = self.mode.edit_rules().and_then(|rules| {
+            let deletion = self.mode.language_config().and_then(|rules| {
                 rules.closing_pairs().find_map(|(open, close, not_in)| {
                     if !self.text_before_matches(off, open) || !self.text_after_matches(off, close)
                     {
                         return None;
                     }
                     let start = off - open.len();
-                    let generated = self.mode.automatic_pairs().iter().any(|(begin, end)| {
+                    let generated = self.mode.auto_closed_pairs().iter().any(|(begin, end)| {
                         *begin == (start..off) && *end == (off..off + close.len())
                     });
                     if self.is_escaped_at(start)
@@ -1922,7 +1923,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 // restructure literal text.
                 let mut split = false;
                 if self.is_code_editor() && self.active_selection().is_empty() {
-                    if let Some(rules) = self.mode.edit_rules() {
+                    if let Some(rules) = self.mode.language_config() {
                         if self.mode.is_smart_indent()
                             && M::editing_syntax_context(self, self.cursor())
                                 == crate::input::SyntaxContext::Code
@@ -2688,7 +2689,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             }
             self.restore_selections(replay.selections);
             self.mode
-                .restore_automatic_pairs(replay.automatic_pairs.unwrap_or_default());
+                .restore_auto_closed_pairs(replay.auto_closed_pairs.unwrap_or_default());
         }
         self.undo_manager.set_ignoring(false);
     }
@@ -2703,7 +2704,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             }
             self.restore_selections(replay.selections);
             self.mode
-                .restore_automatic_pairs(replay.automatic_pairs.unwrap_or_default());
+                .restore_auto_closed_pairs(replay.auto_closed_pairs.unwrap_or_default());
         }
         self.undo_manager.set_ignoring(false);
     }
@@ -3473,11 +3474,11 @@ impl<M: InputModeKind> InputBaseState<M> {
             self.undo_manager.begin_transaction();
         }
 
-        let automatic_pairs_before = self.mode.automatic_pairs().to_vec();
+        let auto_closed_pairs_before = self.mode.auto_closed_pairs().to_vec();
         let mut recorded = false;
         for (range, new_text) in &sorted {
             let old_text = self.text.clone();
-            self.mode.adjust_automatic_pair(range, new_text.len());
+            self.mode.adjust_auto_closed_pair(range, new_text.len());
             self.text.replace(range.clone(), new_text);
 
             M::adjust_annotations(self, range, new_text.len());
@@ -3566,9 +3567,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         // Record the cursor snapshots for undo/redo restore.
         let selections_after: Vec<CursorSelection> = self.selections.iter().copied().collect();
         if recorded {
-            self.undo_manager.record_automatic_pairs(
-                automatic_pairs_before,
-                self.mode.automatic_pairs().to_vec(),
+            self.undo_manager.record_auto_closed_pairs(
+                auto_closed_pairs_before,
+                self.mode.auto_closed_pairs().to_vec(),
             );
             self.undo_manager
                 .record_selections(selections_before, selections_after);
@@ -3761,12 +3762,12 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                     let replacement = format!("{new_text}{closer}");
                     self.replace_text_in_ranges(&[(range.clone(), replacement)], window, cx);
                     let cursor = range.start + new_text.len();
-                    self.mode.track_automatic_pair(
+                    self.mode.track_auto_closed_pair(
                         cursor - open_len..cursor,
                         cursor..cursor + closer.len(),
                     );
                     self.undo_manager
-                        .record_automatic_pairs_after(self.mode.automatic_pairs().to_vec());
+                        .record_auto_closed_pairs_after(self.mode.auto_closed_pairs().to_vec());
                     self.set_cursor_to(cursor);
                     self.update_preferred_column();
                     self.undo_manager.record_selections(
@@ -3793,7 +3794,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
 
         // Single-line path
         let old_text = self.text.clone();
-        self.mode.adjust_automatic_pair(&range, new_text.len());
+        self.mode.adjust_auto_closed_pair(&range, new_text.len());
         self.text.replace(range.clone(), new_text);
 
         let mut new_offset = (range.start + new_text.len()).min(self.text.len());
@@ -3942,9 +3943,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             }))
             .unwrap_or(self.selected_range());
 
-        let automatic_pairs_before = self.mode.automatic_pairs().to_vec();
+        let auto_closed_pairs_before = self.mode.auto_closed_pairs().to_vec();
         let old_text = self.text.clone();
-        self.mode.adjust_automatic_pair(&range, new_text.len());
+        self.mode.adjust_auto_closed_pair(&range, new_text.len());
         self.text.replace(range.clone(), new_text);
 
         if self.is_single_line() {
@@ -4014,9 +4015,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         ) {
             self.undo_manager
                 .record_selections(vec![selection_before], vec![*self.active_selection()]);
-            self.undo_manager.record_automatic_pairs(
-                automatic_pairs_before,
-                self.mode.automatic_pairs().to_vec(),
+            self.undo_manager.record_auto_closed_pairs(
+                auto_closed_pairs_before,
+                self.mode.auto_closed_pairs().to_vec(),
             );
         }
         if new_text.is_empty() {
@@ -4250,7 +4251,7 @@ mod tests {
     use crate::theme::Theme;
     use gpui::{TestAppContext, VisualTestContext, size};
 
-    use crate::input::{EditorMode, InputMode, TextareaMode};
+    use crate::input::{EditorMode, EditorState, InputMode, LanguageConfig, TextareaMode};
 
     struct TestRoot<M: InputModeKind>(Entity<InputBaseState<M>>);
 
@@ -7394,40 +7395,67 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_edit_rule_override_can_return_to_current_language(cx: &mut TestAppContext) {
-        use crate::input::{AutoClosingPair, BracketPair};
+    fn test_language_config_applies_before_render_and_on_language_change(cx: &mut TestAppContext) {
+        use crate::input::{AutoClosingPair, set_language_config};
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.update(|window, cx| {
+            set_language_config(
+                "alpha",
+                LanguageConfig::default().auto_closing_pairs([AutoClosingPair::new("«", "»")]),
+                cx,
+            );
+            set_language_config(
+                "beta",
+                LanguageConfig::default().auto_closing_pairs([AutoClosingPair::new("‹", "›")]),
+                cx,
+            );
+            let first = cx.new(|cx| EditorState::new(window, cx).language("ALPHA"));
+            let second = cx.new(|cx| EditorState::new(window, cx).language("beta"));
+            first.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "«", window, cx);
+                assert_eq!(state.text().to_string(), "«»");
+                state.set_value("", window, cx);
+                state.set_smart_indent(false, window, cx);
+                state.set_highlighter("beta", cx);
+                assert!(!state.mode.is_smart_indent());
+                state.replace_text_in_range(None, "‹", window, cx);
+                assert_eq!(state.text().to_string(), "‹›");
+                state.set_value("", window, cx);
+                state.set_highlighter("unknown", cx);
+                state.replace_text_in_range(None, "(", window, cx);
+                assert_eq!(state.text().to_string(), "()");
+            });
+            second.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "‹", window, cx);
+                assert_eq!(state.text().to_string(), "‹›");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_language_config_updates_existing_editors(cx: &mut TestAppContext) {
+        use crate::input::{AutoClosingPair, set_language_config};
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         setup_cursors(&mut cx, &view.input, "|");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
+                state.set_highlighter("CUSTOM", cx);
                 state.set_auto_close(false, window, cx);
                 state.set_smart_indent(false, window, cx);
-                state.set_edit_rules(
-                    Some(EditRules::default().auto_closing_pairs([])),
-                    window,
-                    cx,
-                );
-                state.ensure_edit_rules(
-                    EditRules::default()
-                        .brackets([BracketPair::new("«", "»")])
-                        .auto_closing_pairs([AutoClosingPair::new("«", "»")]),
-                    cx,
-                );
-                assert!(
-                    state
-                        .mode
-                        .edit_rules()
-                        .unwrap()
-                        .closing_pairs()
-                        .next()
-                        .is_none()
-                );
-                state.set_edit_rules(None, window, cx);
-                assert_eq!(
-                    state.mode.edit_rules().unwrap().brackets[0].open.as_ref(),
-                    "«"
-                );
+            });
+            set_language_config(
+                "custom",
+                LanguageConfig::default().auto_closing_pairs([AutoClosingPair::new("«", "»")]),
+                cx,
+            );
+            // Batched registrations must update every affected language.
+            set_language_config("other", LanguageConfig::default(), cx);
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
                 assert!(!state.mode.is_auto_close());
                 assert!(!state.mode.is_smart_indent());
                 state.set_auto_close(true, window, cx);
@@ -7451,11 +7479,9 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "|word");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state.set_edit_rules(
-                    Some(EditRules::default().auto_close_before("w")),
-                    window,
-                    cx,
-                );
+                state
+                    .mode
+                    .set_language_config(LanguageConfig::default().auto_close_before("w"));
                 state.replace_text_in_range(None, "(", window, cx);
             });
         });
@@ -7471,14 +7497,12 @@ mod tests {
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
                 state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
-                state.set_edit_rules(
-                    Some(EditRules::default().auto_closing_pairs([
+                state
+                    .mode
+                    .set_language_config(LanguageConfig::default().auto_closing_pairs([
                         AutoClosingPair::new("(", ")").not_in([SyntaxContext::String]),
                         AutoClosingPair::new("[", "]").not_in([SyntaxContext::Comment]),
-                    ])),
-                    window,
-                    cx,
-                );
+                    ]));
                 state.replace_text_in_range(None, "(", window, cx);
                 state.replace_text_in_range(None, "[", window, cx);
             });
@@ -7505,13 +7529,10 @@ mod tests {
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
                 state.set_syntax_context_provider(std::rc::Rc::new(BlockComment), cx);
-                state.set_edit_rules(
-                    Some(
-                        EditRules::default().auto_closing_pairs([AutoClosingPair::new("/*", "*/")
+                state.mode.set_language_config(
+                    LanguageConfig::default()
+                        .auto_closing_pairs([AutoClosingPair::new("/*", "*/")
                             .not_in([SyntaxContext::String, SyntaxContext::Comment])]),
-                    ),
-                    window,
-                    cx,
                 );
                 state.replace_text_in_range(None, "/", window, cx);
                 state.replace_text_in_range(None, "*", window, cx);
@@ -7534,18 +7555,18 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_automatic_pairs_fallback_and_explicit_disable(cx: &mut TestAppContext) {
+    fn test_auto_closed_pairs_fallback_and_explicit_disable(cx: &mut TestAppContext) {
         use crate::input::BracketPair;
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         setup_cursors(&mut cx, &view.input, "|");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                let mut rules = EditRules::default().brackets([BracketPair::new("«", "»")]);
+                let mut rules = LanguageConfig::default().brackets([BracketPair::new("«", "»")]);
                 rules.auto_closing_pairs = None;
-                state.set_edit_rules(Some(rules.clone()), window, cx);
+                state.mode.set_language_config(rules.clone());
                 state.replace_text_in_range(None, "«", window, cx);
-                state.set_edit_rules(Some(rules.auto_closing_pairs([])), window, cx);
+                state.mode.set_language_config(rules.auto_closing_pairs([]));
                 state.replace_text_in_range(None, "«", window, cx);
             });
         });
@@ -7560,13 +7581,11 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "|");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state.set_edit_rules(
-                    Some(EditRules::default().auto_closing_pairs([
+                state
+                    .mode
+                    .set_language_config(LanguageConfig::default().auto_closing_pairs([
                         AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment]),
-                    ])),
-                    window,
-                    cx,
-                );
+                    ]));
                 state.replace_text_in_range(None, "/", window, cx);
                 state.replace_text_in_range(None, "*", window, cx);
                 state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
@@ -7588,13 +7607,11 @@ mod tests {
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
                 state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
-                state.set_edit_rules(
-                    Some(EditRules::default().auto_closing_pairs([
+                state
+                    .mode
+                    .set_language_config(LanguageConfig::default().auto_closing_pairs([
                         AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment]),
-                    ])),
-                    window,
-                    cx,
-                );
+                    ]));
                 state.delete_to_end_of_line(&DeleteToEndOfLine, window, cx);
                 state.undo(&Undo, window, cx);
                 state.backspace(&Backspace, window, cx);
@@ -7626,14 +7643,12 @@ mod tests {
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
                 state.set_syntax_context_provider(std::rc::Rc::new(CommentScope), cx);
-                state.set_edit_rules(
-                    Some(EditRules::default().auto_closing_pairs([
+                state
+                    .mode
+                    .set_language_config(LanguageConfig::default().auto_closing_pairs([
                         AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment]),
                         AutoClosingPair::new("(", ")").not_in([SyntaxContext::Comment]),
-                    ])),
-                    window,
-                    cx,
-                );
+                    ]));
                 state.replace_text_in_range(None, "/", window, cx);
                 state.replace_text_in_range(None, "*", window, cx);
                 state.set_selected_range(4..4, cx);
@@ -7663,13 +7678,11 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "|");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state.set_edit_rules(
-                    Some(EditRules::default().auto_closing_pairs([
+                state
+                    .mode
+                    .set_language_config(LanguageConfig::default().auto_closing_pairs([
                         AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment]),
-                    ])),
-                    window,
-                    cx,
-                );
+                    ]));
                 state.replace_text_in_range(None, "/", window, cx);
                 state.replace_text_in_range(None, "*", window, cx);
                 state.replace_text_in_range(Some(0..2), "//", window, cx);
@@ -7681,7 +7694,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_language_sync_preserves_compiled_regex_options(cx: &mut TestAppContext) {
+    fn test_configuration_preserves_compiled_regex_options(cx: &mut TestAppContext) {
         use crate::input::IndentationRules;
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
@@ -7689,7 +7702,7 @@ mod tests {
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
                 let rules = |insensitive| {
-                    EditRules::default().indentation_rules(IndentationRules::new(
+                    LanguageConfig::default().indentation_rules(IndentationRules::new(
                         regex::RegexBuilder::new("begin$")
                             .case_insensitive(insensitive)
                             .build()
@@ -7697,10 +7710,8 @@ mod tests {
                         regex::Regex::new("^end").unwrap(),
                     ))
                 };
-                state.ensure_edit_rules(rules(false), cx);
-                state.set_edit_rules(Some(EditRules::default()), window, cx);
-                state.ensure_edit_rules(rules(true), cx);
-                state.set_edit_rules(None, window, cx);
+                state.mode.set_language_config(rules(false));
+                state.mode.set_language_config(rules(true));
                 state.enter(
                     &Enter {
                         secondary: false,
@@ -7719,7 +7730,7 @@ mod tests {
         use crate::input::IndentationRules;
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
-        let rules = EditRules::default().indentation_rules(IndentationRules::new(
+        let rules = LanguageConfig::default().indentation_rules(IndentationRules::new(
             regex::Regex::new(r"\bbegin\s*$").unwrap(),
             regex::Regex::new(r"^\s*end\b").unwrap(),
         ));
@@ -7727,7 +7738,7 @@ mod tests {
             setup_cursors(&mut cx, &view.input, before);
             cx.update(|window, cx| {
                 view.input.update(cx, |state, cx| {
-                    state.set_edit_rules(Some(rules.clone()), window, cx);
+                    state.mode.set_language_config(rules.clone());
                     state.enter(
                         &Enter {
                             secondary: false,
@@ -7743,19 +7754,15 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_custom_edit_rules(cx: &mut TestAppContext) {
+    fn test_custom_language_config(cx: &mut TestAppContext) {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
-        cx.update(|window, cx| {
-            view.input.update(cx, |state, cx| {
-                state.set_edit_rules(
-                    Some(
-                        crate::input::EditRules::default()
-                            .brackets([crate::input::BracketPair::new("«", "»")])
-                            .auto_closing_pairs([crate::input::AutoClosingPair::new("«", "»")]),
-                    ),
-                    window,
-                    cx,
+        cx.update(|_window, cx| {
+            view.input.update(cx, |state, _cx| {
+                state.mode.set_language_config(
+                    crate::input::LanguageConfig::default()
+                        .brackets([crate::input::BracketPair::new("«", "»")])
+                        .auto_closing_pairs([crate::input::AutoClosingPair::new("«", "»")]),
                 );
             });
         });
@@ -7853,8 +7860,8 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_editor_options_survive_language_sync(cx: &mut TestAppContext) {
-        use crate::input::{BracketPair, EditRules};
+    fn test_editor_options_survive_configuration_replacement(cx: &mut TestAppContext) {
+        use crate::input::{BracketPair, LanguageConfig};
 
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
@@ -7862,17 +7869,16 @@ mod tests {
             view.input.update(cx, |state, cx| {
                 // Language changes update rules without changing editor preferences.
                 state.set_smart_indent(false, window, cx);
-                state.ensure_edit_rules(
-                    EditRules::default().brackets([BracketPair::new("«", "»")]),
-                    cx,
+                state.mode.set_language_config(
+                    LanguageConfig::default().brackets([BracketPair::new("«", "»")]),
                 );
             });
         });
         view.input.read_with(&cx, |state, _| {
             assert!(!state.mode.is_smart_indent(), "editor option preserved");
             assert!(state.mode.is_auto_close());
-            let pairs = &state.mode.edit_rules().unwrap().brackets;
-            assert_eq!(pairs.len(), 1, "pairs follow synced table");
+            let pairs = &state.mode.language_config().unwrap().brackets;
+            assert_eq!(pairs.len(), 1, "pairs follow configuration");
             assert_eq!(pairs[0].open.as_ref(), "«");
         });
     }
@@ -8979,6 +8985,15 @@ impl InputBaseState<crate::input::EditorMode> {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut state = Self::new_in_mode(window, cx);
         state.mode = LayoutMode::code_editor();
+        state
+            .mode
+            .set_language_configs(super::LanguageConfigs::global(cx));
+        state
+            ._subscriptions
+            .push(cx.observe_global::<super::LanguageConfigs>(|state, cx| {
+                state.mode.reload_language_config();
+                cx.notify();
+            }));
         state.searchable = true;
         state
     }
@@ -8996,6 +9011,7 @@ impl InputBaseState<crate::input::EditorMode> {
             *l = language.into();
             *highlighter.borrow_mut() = None;
         }
+        self.mode.reload_language_config();
         self
     }
 
@@ -9083,41 +9099,9 @@ impl InputBaseState<crate::input::EditorMode> {
         cx.notify();
     }
 
-    /// Replace the editing rules for brackets and indentation.
-    ///
-    /// See [`EditRules`] for language pairs and indentation patterns.
-    /// `gpui-component` supplies per-language tables; apps can override.
-    /// Explicit rules override language defaults until `set_edit_rules(None, ..)` restores them.
-    pub fn edit_rules(mut self, rules: EditRules) -> Self {
-        self.mode.set_edit_rules_custom(Some(rules));
-        self
-    }
-
-    /// Override language editing rules. Pass `None` to restore current language defaults.
-    pub fn set_edit_rules(
-        &mut self,
-        rules: Option<EditRules>,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.mode.set_edit_rules_custom(rules);
-        cx.notify();
-    }
-
-    /// Update language defaults without changing application overrides or editor options.
-    ///
-    /// Render-time per-language sync calls this; explicit `edit_rules()` /
-    /// `set_edit_rules()` calls always win. Notifies only when the stored
-    /// rules actually changed, so idle renders stay quiet.
-    pub fn ensure_edit_rules(&mut self, rules: EditRules, cx: &mut Context<Self>) {
-        if self.mode.ensure_edit_rules(rules) {
-            cx.notify();
-        }
-    }
-
     /// Set enable/disable automatic closing brackets and quotes.
     ///
-    /// When enabled, typing an opener from [`EditRules::auto_closing_pairs`] inserts the
+    /// When enabled, typing an opener from [`LanguageConfig::auto_closing_pairs`](crate::input::LanguageConfig::auto_closing_pairs) inserts the
     /// matching closer and places the cursor inside. Typing a closer that is
     /// already present just moves past it. Default: true
     #[doc(hidden)]
@@ -9135,7 +9119,7 @@ impl InputBaseState<crate::input::EditorMode> {
     /// Set enable/disable smart indent on Enter.
     ///
     /// When enabled, Enter uses structural brackets and
-    /// [`EditRules::indentation_rules`] to choose indentation.
+    /// [`LanguageConfig::indentation_rules`](crate::input::LanguageConfig::indentation_rules) to choose indentation.
     /// Default: true
     #[doc(hidden)]
     pub fn smart_indent(mut self, smart_indent: bool) -> Self {

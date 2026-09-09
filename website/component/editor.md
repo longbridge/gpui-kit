@@ -16,7 +16,7 @@ use gpui_kit::component::input::{Editor, EditorState, TabSize};
 
 ## Language editing rules
 
-`EditRules` describes a language; `.auto_close(bool)` and `.smart_indent(bool)`
+`LanguageConfig` describes a language; `.auto_close(bool)` and `.smart_indent(bool)`
 are independent editor preferences. Changing languages or replacing rules does
 not reset either preference. Automatic closing, skip-over, and paired Backspace
 use `auto_closing_pairs`. Enter uses `brackets` and `indentation_rules`, so it
@@ -24,10 +24,10 @@ can still split an existing pair when automatic closing is disabled.
 
 ```rust
 use gpui_kit::component::input::{
-    AutoClosingPair, BracketPair, EditRules, SyntaxContext,
+    AutoClosingPair, BracketPair, LanguageConfig, SyntaxContext, set_language_config,
 };
 
-let rules = EditRules::default()
+let rules = LanguageConfig::default()
     .brackets([BracketPair::new("{", "}"), BracketPair::new("(", ")")])
     .auto_closing_pairs([
         AutoClosingPair::new("{", "}")
@@ -37,17 +37,21 @@ let rules = EditRules::default()
     ])
     .auto_close_before(";:.,=}])>");
 
+set_language_config("rust", rules, cx);
+
 let editor = cx.new(|cx| {
     EditorState::new(window, cx)
         .language("rust")
-        .edit_rules(rules)
         .auto_close(true)
         .smart_indent(true)
 });
-
-// Restore the defaults for the current language, keeping editor preferences.
-editor.update(cx, |state, cx| state.set_edit_rules(None, window, cx));
 ```
+
+`set_language_config` replaces the configuration for a language in the current
+application, including existing editors. Register custom configurations after
+`gpui_kit::init(cx)`. New editors and language changes use the registered
+configuration immediately; rendering does not overwrite it. Unknown languages
+use `LanguageConfig::default()`.
 
 Pairs use strings, including multi-character delimiters. `auto_closing_pairs`
 is optional: `None` uses the structural `brackets`, while `Some(vec![])` disables

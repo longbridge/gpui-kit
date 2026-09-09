@@ -1,11 +1,28 @@
-use gpui_base::input::{AutoClosingPair, BracketPair, EditRules, IndentationRules, SyntaxContext};
+use gpui_base::input::{
+    AutoClosingPair, BracketPair, IndentationRules, LanguageConfig, SyntaxContext,
+};
 use regex::Regex;
 use std::sync::LazyLock;
+
+pub(crate) fn init(cx: &mut gpui::App) {
+    for language in [
+        "text",
+        "plain",
+        "plaintext",
+        "json",
+        "jsonc",
+        "python",
+        "py",
+        "pyi",
+    ] {
+        gpui_base::input::set_language_config(language, default_language_config(language), cx);
+    }
+}
 
 /// Language editing defaults. Editor preferences are stored separately on EditorState.
 /// Unknown languages use structural bracket indentation; only Python treats a colon
 /// as a block opener. Plain text has no structural or automatic pairs.
-pub fn language_rules(language: &str) -> EditRules {
+fn default_language_config(language: &str) -> LanguageConfig {
     static PYTHON_INDENT: LazyLock<IndentationRules> = LazyLock::new(|| {
         IndentationRules::new(
             Regex::new(r"[\{\(\[:]\s*$").unwrap(),
@@ -13,8 +30,10 @@ pub fn language_rules(language: &str) -> EditRules {
         )
     });
     match language.to_lowercase().as_str() {
-        "text" | "plain" | "plaintext" => EditRules::default().brackets([]).auto_closing_pairs([]),
-        "json" | "jsonc" => EditRules::default()
+        "text" | "plain" | "plaintext" => LanguageConfig::default()
+            .brackets([])
+            .auto_closing_pairs([]),
+        "json" | "jsonc" => LanguageConfig::default()
             .brackets([BracketPair::new("{", "}"), BracketPair::new("[", "]")])
             .auto_closing_pairs(
                 [
@@ -25,8 +44,10 @@ pub fn language_rules(language: &str) -> EditRules {
                 .into_iter()
                 .map(|p| p.not_in([SyntaxContext::String, SyntaxContext::Comment])),
             ),
-        "python" | "py" | "pyi" => EditRules::default().indentation_rules(PYTHON_INDENT.clone()),
-        _ => EditRules::default(),
+        "python" | "py" | "pyi" => {
+            LanguageConfig::default().indentation_rules(PYTHON_INDENT.clone())
+        }
+        _ => LanguageConfig::default(),
     }
 }
 
@@ -36,7 +57,7 @@ mod tests {
 
     #[test]
     fn plain_text_has_no_editing_rules() {
-        let rules = language_rules("text");
+        let rules = default_language_config("text");
         assert!(rules.brackets.is_empty());
         assert!(rules.auto_closing_pairs.unwrap().is_empty());
         assert!(rules.indentation_rules.is_none());
@@ -44,7 +65,7 @@ mod tests {
 
     #[test]
     fn json_only_closes_json_delimiters() {
-        let rules = language_rules("json");
+        let rules = default_language_config("json");
         let pairs = rules.auto_closing_pairs.unwrap();
         assert_eq!(pairs.len(), 3);
         assert!(
@@ -57,7 +78,7 @@ mod tests {
     #[test]
     fn colon_indentation_is_language_specific() {
         assert!(
-            language_rules("python")
+            default_language_config("python")
                 .indentation_rules
                 .unwrap()
                 .increase_indent_pattern
@@ -65,7 +86,11 @@ mod tests {
                 .is_match("if enabled:")
         );
         for language in ["rust", "javascript", "json", "unknown"] {
-            assert!(language_rules(language).indentation_rules.is_none());
+            assert!(
+                default_language_config(language)
+                    .indentation_rules
+                    .is_none()
+            );
         }
     }
 }

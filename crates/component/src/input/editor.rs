@@ -195,6 +195,55 @@ mod tests {
         assert_eq!(line_height(cx, Some(px(24.))), px(36.));
         assert_eq!(line_height(cx, Some(px(40.))), px(60.));
     }
+    #[gpui::test]
+    fn language_config_works_without_render_sync(cx: &mut TestAppContext) {
+        use crate::input::{AutoClosingPair, LanguageConfig, set_language_config};
+        use gpui::EntityInputHandler as _;
+        cx.update(crate::init);
+        let mut state = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| EditorState::new(window, cx).language("plaintext"));
+            // Plain-text defaults apply before the first render.
+            editor.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "(", window, cx);
+                assert_eq!(state.text().to_string(), "(");
+                state.set_value("", window, cx);
+                state.set_highlighter("json", cx);
+                state.replace_text_in_range(None, "[", window, cx);
+                assert_eq!(state.text().to_string(), "[]");
+            });
+            state = Some(editor.clone());
+            Harness {
+                state: editor,
+                text_size: None,
+            }
+        });
+        let state = state.unwrap();
+        VisualTestContext::update(cx, |_, cx| {
+            set_language_config(
+                "json",
+                LanguageConfig::default().auto_closing_pairs([AutoClosingPair::new("«", "»")]),
+                cx,
+            );
+        });
+        // A styled render must preserve the registered configuration.
+        VisualTestContext::update(cx, |window, cx| window.draw(cx).clear(cx));
+        VisualTestContext::update(cx, |window, cx| {
+            state.update(cx, |state, cx| {
+                state.set_value("", window, cx);
+                state.replace_text_in_range(None, "«", window, cx);
+                assert_eq!(state.text().to_string(), "«»");
+                state.set_value("if enabled:", window, cx);
+                state.set_selected_range(11..11, cx);
+                state.set_highlighter("python", cx);
+                state.focus(window, cx);
+            });
+        });
+        VisualTestContext::update(cx, |window, cx| window.draw(cx).clear(cx));
+        cx.simulate_keystrokes("enter");
+        cx.read(|cx| assert_eq!(state.read(cx).text().to_string(), "if enabled:\n  "));
+    }
+
     #[cfg(feature = "tree-sitter-python")]
     #[gpui::test]
     fn python_pairing_uses_pre_edit_context(cx: &mut TestAppContext) {
@@ -232,12 +281,20 @@ mod tests {
     #[cfg(feature = "tree-sitter-rust")]
     #[gpui::test]
     fn generated_comment_closer_survives_syntax_changes(cx: &mut TestAppContext) {
-        use crate::input::{AutoClosingPair, EditRules, SyntaxContext};
+        use crate::input::{AutoClosingPair, LanguageConfig, SyntaxContext};
         use gpui::EntityInputHandler as _;
         cx.update(crate::init);
+        cx.update(|cx| {
+            crate::input::set_language_config(
+                "rust",
+                LanguageConfig::default().auto_closing_pairs([AutoClosingPair::new("/*", "*/")
+                    .not_in([SyntaxContext::String, SyntaxContext::Comment])]),
+                cx,
+            )
+        });
         let mut state = None;
         let (_, cx) = cx.add_window_view(|window, cx| {
-            let editor = cx.new(|cx| EditorState::new(window, cx));
+            let editor = cx.new(|cx| EditorState::new(window, cx).language("rust"));
             state = Some(editor.clone());
             Harness {
                 state: editor,
@@ -250,14 +307,7 @@ mod tests {
                 let provider =
                     crate::input::syntax_context::syntax_context_provider("rust").unwrap();
                 state.set_syntax_context_provider(provider, cx);
-                state.set_edit_rules(
-                    Some(
-                        EditRules::default().auto_closing_pairs([AutoClosingPair::new("/*", "*/")
-                            .not_in([SyntaxContext::String, SyntaxContext::Comment])]),
-                    ),
-                    window,
-                    cx,
-                );
+
                 for text in ["/", "*", "x", "*", "/"] {
                     state.replace_text_in_range(None, text, window, cx);
                 }

@@ -7,8 +7,8 @@ use ropey::Rope;
 
 use super::DisplayMap;
 use crate::input::{
-    DiagnosticSet, EditRules, InputEdit, InputHighlighter, InputHighlighterFactory, RopeExt as _,
-    TabSize,
+    DiagnosticSet, InputEdit, InputHighlighter, InputHighlighterFactory, LanguageConfig,
+    LanguageConfigs, RopeExt as _, TabSize,
 };
 
 /// What changed, handed to the syntax highlighter.
@@ -47,12 +47,11 @@ pub(crate) enum LayoutMode {
         highlighter: Rc<RefCell<Option<Box<dyn InputHighlighter>>>>,
         highlighter_factory: Option<InputHighlighterFactory>,
         diagnostics: DiagnosticSet,
-        /// Defaults provided by the current language.
-        edit_rules: Box<EditRules>,
-        /// Explicit application override; None follows the language.
-        custom_edit_rules: Option<Box<EditRules>>,
+        /// Effective editing configuration for the current language.
+        language_config: Box<LanguageConfig>,
+        language_configs: LanguageConfigs,
         /// Automatic delimiter ranges, adjusted with document edits.
-        automatic_pairs: super::undo_manager::AutomaticPairs,
+        auto_closed_pairs: super::undo_manager::AutoClosedPairs,
         auto_close: bool,
         smart_indent: bool,
     },
@@ -88,9 +87,9 @@ impl LayoutMode {
             indent_guides: true,
             folding: true,
             diagnostics: DiagnosticSet::new(&Rope::new()),
-            edit_rules: Box::default(),
-            custom_edit_rules: None,
-            automatic_pairs: Vec::new(),
+            language_config: Box::default(),
+            language_configs: LanguageConfigs::default(),
+            auto_closed_pairs: Vec::new(),
             auto_close: true,
             smart_indent: true,
         }
@@ -115,14 +114,34 @@ impl LayoutMode {
         matches!(self, LayoutMode::CodeEditor { folding: true, .. })
     }
 
-    pub(super) fn edit_rules(&self) -> Option<&EditRules> {
+    pub(super) fn language_config(&self) -> Option<&LanguageConfig> {
         match self {
             Self::CodeEditor {
-                edit_rules,
-                custom_edit_rules,
-                ..
-            } => Some(custom_edit_rules.as_deref().unwrap_or(edit_rules)),
+                language_config, ..
+            } => Some(language_config),
             _ => None,
+        }
+    }
+
+    pub(super) fn set_language_configs(&mut self, configurations: LanguageConfigs) {
+        if let Self::CodeEditor {
+            language_configs, ..
+        } = self
+        {
+            *language_configs = configurations;
+        }
+        self.reload_language_config();
+    }
+
+    pub(super) fn reload_language_config(&mut self) {
+        if let Self::CodeEditor {
+            language,
+            language_config,
+            language_configs,
+            ..
+        } = self
+        {
+            **language_config = language_configs.get(language);
         }
     }
 
@@ -158,61 +177,49 @@ impl LayoutMode {
         }
     }
 
-    /// Always retain current language defaults, even while overridden.
-    pub(super) fn ensure_edit_rules(&mut self, rules: EditRules) -> bool {
+    #[cfg(test)]
+    pub(super) fn set_language_config(&mut self, configuration: LanguageConfig) {
         if let Self::CodeEditor {
-            edit_rules,
-            custom_edit_rules,
-            ..
+            language_config, ..
         } = self
         {
-            if **edit_rules != rules {
-                **edit_rules = rules;
-                return custom_edit_rules.is_none();
-            }
-        }
-        false
-    }
-
-    pub(super) fn set_edit_rules_custom(&mut self, rules: Option<EditRules>) {
-        if let Self::CodeEditor {
-            custom_edit_rules, ..
-        } = self
-        {
-            *custom_edit_rules = rules.map(Box::new);
+            **language_config = configuration;
         }
     }
 
-    pub(super) fn automatic_pairs(&self) -> &[(Range<usize>, Range<usize>)] {
+    pub(super) fn auto_closed_pairs(&self) -> &[(Range<usize>, Range<usize>)] {
         match self {
             Self::CodeEditor {
-                automatic_pairs, ..
-            } => automatic_pairs,
+                auto_closed_pairs, ..
+            } => auto_closed_pairs,
             _ => &[],
         }
     }
 
-    pub(super) fn restore_automatic_pairs(&mut self, pairs: super::undo_manager::AutomaticPairs) {
+    pub(super) fn restore_auto_closed_pairs(
+        &mut self,
+        pairs: super::undo_manager::AutoClosedPairs,
+    ) {
         if let Self::CodeEditor {
-            automatic_pairs, ..
+            auto_closed_pairs, ..
         } = self
         {
-            *automatic_pairs = pairs;
+            *auto_closed_pairs = pairs;
         }
     }
 
-    pub(super) fn track_automatic_pair(&mut self, open: Range<usize>, close: Range<usize>) {
+    pub(super) fn track_auto_closed_pair(&mut self, open: Range<usize>, close: Range<usize>) {
         if let Self::CodeEditor {
-            automatic_pairs, ..
+            auto_closed_pairs, ..
         } = self
         {
-            automatic_pairs.push((open, close));
+            auto_closed_pairs.push((open, close));
         }
     }
 
-    pub(super) fn adjust_automatic_pair(&mut self, edit: &Range<usize>, new_len: usize) {
+    pub(super) fn adjust_auto_closed_pair(&mut self, edit: &Range<usize>, new_len: usize) {
         let Self::CodeEditor {
-            automatic_pairs, ..
+            auto_closed_pairs, ..
         } = self
         else {
             return;
@@ -222,7 +229,7 @@ impl LayoutMode {
             range.start = range.start.saturating_add_signed(delta);
             range.end = range.end.saturating_add_signed(delta);
         };
-        automatic_pairs.retain_mut(|(open, close)| {
+        auto_closed_pairs.retain_mut(|(open, close)| {
             if edit.end <= open.start {
                 shift(open);
                 shift(close);
@@ -426,7 +433,7 @@ mod tests {
     use ropey::Rope;
 
     use super::replacement_input_edit;
-    use crate::input::{DiagnosticSet, Point, TabSize, mode::LayoutMode};
+    use crate::input::{DiagnosticSet, LanguageConfigs, Point, TabSize, mode::LayoutMode};
 
     #[test]
     fn test_replacement_input_edit_backspace_at_end_uses_old_range() {
@@ -461,9 +468,9 @@ mod tests {
             highlighter: Default::default(),
             highlighter_factory: None,
             diagnostics: DiagnosticSet::new(&Rope::new()),
-            edit_rules: Box::default(),
-            custom_edit_rules: None,
-            automatic_pairs: Vec::new(),
+            language_config: Box::default(),
+            language_configs: LanguageConfigs::default(),
+            auto_closed_pairs: Vec::new(),
             auto_close: false,
             smart_indent: false,
         };

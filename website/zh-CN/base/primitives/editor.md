@@ -10,8 +10,9 @@ order: 16
 
 ## 语言编辑规则
 
-Base 编辑器接受 `EditRules` 及独立的 `auto_close` / `smart_indent` 选项，不自动选择
-语言默认规则或加载解析器。配置字段及覆盖、恢复规则的方式参见
+Base 编辑器接受 `LanguageConfig` 及独立的 `auto_close` / `smart_indent` 选项。
+它读取已注册的语言配置，不加载解析器；Component 在初始化时注册内置语言默认配置。
+配置字段及语言注册方式参见
 [语言编辑规则](../../component/editor.md#语言编辑规则)。直接使用 Base 时，从
 `gpui_kit::base::input` 导入相同的配置类型。
 
