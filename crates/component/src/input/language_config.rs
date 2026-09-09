@@ -4,19 +4,39 @@ use gpui_base::input::{
 use regex::Regex;
 use std::sync::LazyLock;
 
-pub(crate) fn init(cx: &mut gpui::App) {
-    for language in [
-        "text",
-        "plain",
-        "plaintext",
-        "json",
-        "jsonc",
-        "python",
-        "py",
-        "pyi",
-    ] {
-        gpui_base::input::set_language_config(language, default_language_config(language), cx);
+struct ComponentLanguages {
+    defaults: std::collections::HashMap<&'static str, std::rc::Rc<LanguageConfig>>,
+    fallback: std::rc::Rc<LanguageConfig>,
+}
+
+impl gpui_base::input::LanguageProvider for ComponentLanguages {
+    fn language_name(&self, name: &str) -> gpui::SharedString {
+        crate::highlighter::language_name(name)
     }
+
+    fn config(&self, name: &str) -> std::rc::Rc<LanguageConfig> {
+        self.defaults.get(name).unwrap_or(&self.fallback).clone()
+    }
+
+    fn syntax_context_provider(
+        &self,
+        name: &str,
+    ) -> Option<std::rc::Rc<dyn gpui_base::input::SyntaxContextProvider>> {
+        super::syntax_context::syntax_context_provider(name)
+    }
+}
+
+pub(crate) fn init(cx: &mut gpui::App) {
+    gpui_base::input::set_language_provider(
+        std::rc::Rc::new(ComponentLanguages {
+            defaults: ["text", "json", "python"]
+                .into_iter()
+                .map(|name| (name, std::rc::Rc::new(default_language_config(name))))
+                .collect(),
+            fallback: std::rc::Rc::new(LanguageConfig::default()),
+        }),
+        cx,
+    );
 }
 
 /// Language editing defaults. Editor preferences are stored separately on EditorState.
@@ -30,10 +50,10 @@ fn default_language_config(language: &str) -> LanguageConfig {
         )
     });
     match language.to_lowercase().as_str() {
-        "text" | "plain" | "plaintext" => LanguageConfig::default()
+        "text" => LanguageConfig::default()
             .brackets([])
             .auto_closing_pairs([]),
-        "json" | "jsonc" => LanguageConfig::default()
+        "json" => LanguageConfig::default()
             .brackets([BracketPair::new("{", "}"), BracketPair::new("[", "]")])
             .auto_closing_pairs(
                 [
@@ -44,9 +64,7 @@ fn default_language_config(language: &str) -> LanguageConfig {
                 .into_iter()
                 .map(|p| p.not_in([SyntaxContext::String, SyntaxContext::Comment])),
             ),
-        "python" | "py" | "pyi" => {
-            LanguageConfig::default().indentation_rules(PYTHON_INDENT.clone())
-        }
+        "python" => LanguageConfig::default().indentation_rules(PYTHON_INDENT.clone()),
         _ => LanguageConfig::default(),
     }
 }

@@ -116,20 +116,6 @@ impl TextInputState {
             .update(cx, |state, _| state.ensure_highlighter_factory(factory)))
     }
 
-    /// Install the syntax provider for the current language.
-    pub(crate) fn sync_syntax_context(&self, cx: &mut App) {
-        if let TextInputState::Editor(state) = self {
-            state.update(cx, |state, cx| {
-                let language = state.language_name();
-                if state.ensure_syntax_context_provider(&language, || {
-                    super::syntax_context::syntax_context_provider(&language)
-                }) {
-                    cx.notify();
-                }
-            });
-        }
-    }
-
     pub(crate) fn on_context_menu(
         &self,
         handler: std::rc::Rc<

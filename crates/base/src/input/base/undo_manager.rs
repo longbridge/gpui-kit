@@ -1,7 +1,5 @@
+use super::auto_close::AutoClosedPairs;
 use crate::input::change::Change;
-use std::ops::Range;
-
-pub(super) type AutoClosedPairs = Vec<(Range<usize>, Range<usize>)>;
 
 use super::cursor::CursorSelection;
 

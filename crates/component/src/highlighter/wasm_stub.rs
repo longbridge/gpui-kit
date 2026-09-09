@@ -72,8 +72,8 @@ impl Language {
         "unknown"
     }
 
-    pub fn config(&self) -> LanguageConfig {
-        LanguageConfig {
+    pub fn config(&self) -> GrammarConfig {
+        GrammarConfig {
             name: "unknown".into(),
         }
     }
@@ -88,6 +88,9 @@ impl Language {
 pub struct LanguageConfig {
     pub name: SharedString,
 }
+
+/// Explicit name for grammar resources; editing rules use `input::LanguageConfig`.
+pub type GrammarConfig = LanguageConfig;
 
 impl LanguageConfig {
     pub fn has_grammar(&self) -> bool {
@@ -450,7 +453,7 @@ impl gpui_base::input::HighlightStyleResolver for HighlightTheme {
 
 // Language registry stub
 pub struct LanguageRegistry {
-    languages: Mutex<HashMap<SharedString, LanguageConfig>>,
+    languages: Mutex<HashMap<SharedString, GrammarConfig>>,
 }
 
 impl LanguageRegistry {
@@ -461,18 +464,22 @@ impl LanguageRegistry {
         &INSTANCE
     }
 
-    pub fn register(&self, lang: &str, config: &LanguageConfig) {
+    pub fn register(&self, lang: &str, config: &GrammarConfig) {
         self.languages
             .lock()
             .unwrap()
-            .insert(lang.to_string().into(), config.clone());
+            .insert(super::language_name(lang), config.clone());
     }
 
     pub fn languages(&self) -> Vec<SharedString> {
         self.languages.lock().unwrap().keys().cloned().collect()
     }
 
-    pub fn language(&self, name: &str) -> Option<LanguageConfig> {
-        self.languages.lock().unwrap().get(name).cloned()
+    pub fn language(&self, name: &str) -> Option<GrammarConfig> {
+        self.languages
+            .lock()
+            .unwrap()
+            .get(super::language_name(name).as_ref())
+            .cloned()
     }
 }

@@ -44,9 +44,16 @@ let editor = cx.new(|cx| {
 });
 ```
 
-`set_language_config` 替换当前应用中指定语言的配置，并更新已有编辑器。
-自定义配置应在 `gpui_kit::init(cx)` 之后注册。新建编辑器和切换语言时直接使用已注册的配置，
-渲染不会覆盖它；未知语言使用 `LanguageConfig::default()`。
+`set_language_config` 替换当前应用中指定语言的配置，已有编辑器在下一次编辑时立即使用它，
+即使配置修改和编辑发生在同一个事件处理函数内。语言别名共享配置，例如 `python`、`py`、
+`pyi`，不受对应 grammar feature 是否启用影响。自定义配置在 Component 初始化后仍然保留。
+未知语言使用 `LanguageConfig::default()`。
+
+Component 安装 `LanguageProvider`，统一提供语言名称、默认规则及每个编辑器的语法提供者。
+首次编辑和切换语言后的语法选择都不依赖 render。直接使用 Base 时，可通过
+`set_language_provider` 安装自己的语言服务；普通 Component 使用者只需调用
+`set_language_config`。高亮的 grammar 资源可使用 `highlighter::GrammarConfig`，
+原有 `highlighter::LanguageConfig` 名称保持兼容。
 
 配对使用字符串，支持多字符定界符。`auto_closing_pairs = None` 表示使用 `brackets`；
 `Some(vec![])` 表示禁用全部自动配对，其 builder 设置的是 `Some`。

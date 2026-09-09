@@ -1,7 +1,6 @@
-use gpui::{App, BorrowAppContext as _, Global, SharedString};
+use gpui::SharedString;
 use regex::Regex;
 use std::sync::Arc;
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use super::SyntaxContext;
 
@@ -67,27 +66,6 @@ impl IndentationRules {
     }
 }
 
-impl PartialEq for IndentationRules {
-    fn eq(&self, other: &Self) -> bool {
-        fn same(a: &Option<Arc<Regex>>, b: &Option<Arc<Regex>>) -> bool {
-            match (a, b) {
-                (None, None) => true,
-                (Some(a), Some(b)) => Arc::ptr_eq(a, b),
-                _ => false,
-            }
-        }
-        // Compiled regex options are not represented by as_str(). Shared
-        // identity preserves clones while treating newly compiled rules as new.
-        same(
-            &self.increase_indent_pattern,
-            &other.increase_indent_pattern,
-        ) && same(
-            &self.decrease_indent_pattern,
-            &other.decrease_indent_pattern,
-        )
-    }
-}
-
 /// Declarative language editing rules, independent of editor preferences and parsers.
 ///
 /// Mirrors the supported subset of Monaco's language configuration. `None` for
@@ -95,7 +73,7 @@ impl PartialEq for IndentationRules {
 /// Use the builders to configure a default value; additional language capabilities
 /// can be added without breaking callers. Tree-sitter queries are configured in
 /// the parser implementation, not in these rules.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct LanguageConfig {
     pub brackets: Vec<BracketPair>,
@@ -191,46 +169,4 @@ impl LanguageConfig {
             .and_then(|r| r.decrease_indent_pattern.as_ref())
             .is_some_and(|r| r.is_match(text))
     }
-}
-
-/// Language configurations shared by editors in one application.
-#[derive(Clone, Default)]
-pub(crate) struct LanguageConfigs {
-    configurations: Rc<RefCell<HashMap<String, LanguageConfig>>>,
-}
-
-impl Global for LanguageConfigs {}
-
-impl LanguageConfigs {
-    pub(crate) fn global(cx: &mut App) -> Self {
-        if !cx.has_global::<Self>() {
-            cx.set_global(Self::default());
-        }
-        cx.global::<Self>().clone()
-    }
-
-    pub(crate) fn get(&self, language: &str) -> LanguageConfig {
-        self.configurations
-            .borrow()
-            .get(&language.to_lowercase())
-            .cloned()
-            .unwrap_or_default()
-    }
-}
-
-/// Set the editing configuration for a language in this application.
-///
-/// Replaces the whole configuration and updates existing editors using that
-/// language. Language identifiers are case-insensitive. This does not change
-/// editor preferences such as `auto_close` or `smart_indent`.
-/// Unknown languages use [`LanguageConfig::default`].
-pub fn set_language_config(language: impl AsRef<str>, configuration: LanguageConfig, cx: &mut App) {
-    LanguageConfigs::global(cx);
-    cx.update_global::<LanguageConfigs, _>(|registry, _| {
-        let language = language.as_ref().to_lowercase();
-        registry
-            .configurations
-            .borrow_mut()
-            .insert(language, configuration);
-    });
 }

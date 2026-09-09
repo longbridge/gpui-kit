@@ -23,7 +23,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use gpui::{Div, Entity, SharedString, Stateful, Window};
+use gpui::{Div, Entity, Stateful, Window};
 use ropey::Rope;
 
 use super::decorations::DecorationCollections;
@@ -341,9 +341,6 @@ pub struct EditorExtras {
     pub(crate) hover_popover: Option<HoverPopoverState>,
     pub(crate) hover_definition: HoverDefinition,
     pub(crate) context_menu_task: Task<anyhow::Result<()>>,
-    pub(crate) syntax_context_provider: Option<std::rc::Rc<dyn super::SyntaxContextProvider>>,
-    pub(crate) syntax_provider_customized: bool,
-    pub(crate) syntax_provider_language: Option<SharedString>,
 }
 
 impl Default for EditorExtras {
@@ -356,9 +353,6 @@ impl Default for EditorExtras {
             hover_popover: None,
             hover_definition: HoverDefinition::default(),
             context_menu_task: Task::ready(Ok(())),
-            syntax_context_provider: None,
-            syntax_provider_customized: false,
-            syntax_provider_language: None,
         }
     }
 }

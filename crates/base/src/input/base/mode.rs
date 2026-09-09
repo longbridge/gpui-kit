@@ -2,13 +2,13 @@ use crate::input::InputModeKind;
 use std::rc::Rc;
 use std::{cell::RefCell, ops::Range};
 
-use gpui::{Context, SharedString, Window};
+use gpui::{Context, Window};
 use ropey::Rope;
 
 use super::DisplayMap;
 use crate::input::{
-    DiagnosticSet, InputEdit, InputHighlighter, InputHighlighterFactory, LanguageConfig,
-    LanguageConfigs, RopeExt as _, TabSize,
+    DiagnosticSet, EditorLanguage, InputEdit, InputHighlighter, InputHighlighterFactory,
+    LanguageConfig, RopeExt as _, TabSize,
 };
 
 /// What changed, handed to the syntax highlighter.
@@ -41,17 +41,14 @@ pub(crate) enum LayoutMode {
         rows: usize,
         /// Show line number
         line_number: bool,
-        language: SharedString,
+        language: Box<EditorLanguage>,
         indent_guides: bool,
         folding: bool,
         highlighter: Rc<RefCell<Option<Box<dyn InputHighlighter>>>>,
         highlighter_factory: Option<InputHighlighterFactory>,
         diagnostics: DiagnosticSet,
-        /// Effective editing configuration for the current language.
-        language_config: Box<LanguageConfig>,
-        language_configs: LanguageConfigs,
         /// Automatic delimiter ranges, adjusted with document edits.
-        auto_closed_pairs: super::undo_manager::AutoClosedPairs,
+        auto_closed_pairs: super::auto_close::AutoClosedPairs,
         auto_close: bool,
         smart_indent: bool,
     },
@@ -76,20 +73,18 @@ impl LayoutMode {
     /// Create a code editor input mode with default settings.
     ///
     /// Starts with no language; the state sets one through its own builder.
-    pub(super) fn code_editor() -> Self {
+    pub(super) fn code_editor(language: EditorLanguage) -> Self {
         LayoutMode::CodeEditor {
             rows: 2,
             tab: TabSize::default(),
-            language: SharedString::default(),
+            language: Box::new(language),
             highlighter: Rc::new(RefCell::new(None)),
             highlighter_factory: None,
             line_number: true,
             indent_guides: true,
             folding: true,
             diagnostics: DiagnosticSet::new(&Rope::new()),
-            language_config: Box::default(),
-            language_configs: LanguageConfigs::default(),
-            auto_closed_pairs: Vec::new(),
+            auto_closed_pairs: Default::default(),
             auto_close: true,
             smart_indent: true,
         }
@@ -114,34 +109,21 @@ impl LayoutMode {
         matches!(self, LayoutMode::CodeEditor { folding: true, .. })
     }
 
-    pub(super) fn language_config(&self) -> Option<&LanguageConfig> {
+    pub(super) fn language_config(&self) -> Option<Rc<LanguageConfig>> {
         match self {
-            Self::CodeEditor {
-                language_config, ..
-            } => Some(language_config),
+            Self::CodeEditor { language, .. } => Some(language.config()),
             _ => None,
         }
     }
 
-    pub(super) fn set_language_configs(&mut self, configurations: LanguageConfigs) {
-        if let Self::CodeEditor {
-            language_configs, ..
-        } = self
-        {
-            *language_configs = configurations;
-        }
-        self.reload_language_config();
-    }
-
-    pub(super) fn reload_language_config(&mut self) {
-        if let Self::CodeEditor {
-            language,
-            language_config,
-            language_configs,
-            ..
-        } = self
-        {
-            **language_config = language_configs.get(language);
+    pub(super) fn syntax_context_at(
+        &self,
+        text: &Rope,
+        offset: usize,
+    ) -> crate::input::SyntaxContext {
+        match self {
+            Self::CodeEditor { language, .. } => language.context_at(text, offset),
+            _ => crate::input::SyntaxContext::Code,
         }
     }
 
@@ -177,29 +159,16 @@ impl LayoutMode {
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn set_language_config(&mut self, configuration: LanguageConfig) {
-        if let Self::CodeEditor {
-            language_config, ..
-        } = self
-        {
-            **language_config = configuration;
-        }
-    }
-
-    pub(super) fn auto_closed_pairs(&self) -> &[(Range<usize>, Range<usize>)] {
+    pub(super) fn auto_closed_pairs(&self) -> &super::auto_close::AutoClosedPairs {
         match self {
             Self::CodeEditor {
                 auto_closed_pairs, ..
             } => auto_closed_pairs,
-            _ => &[],
+            _ => super::auto_close::AutoClosedPairs::empty(),
         }
     }
 
-    pub(super) fn restore_auto_closed_pairs(
-        &mut self,
-        pairs: super::undo_manager::AutoClosedPairs,
-    ) {
+    pub(super) fn restore_auto_closed_pairs(&mut self, pairs: super::auto_close::AutoClosedPairs) {
         if let Self::CodeEditor {
             auto_closed_pairs, ..
         } = self
@@ -213,7 +182,7 @@ impl LayoutMode {
             auto_closed_pairs, ..
         } = self
         {
-            auto_closed_pairs.push((open, close));
+            auto_closed_pairs.record(open, close);
         }
     }
 
@@ -224,22 +193,7 @@ impl LayoutMode {
         else {
             return;
         };
-        let delta = new_len as isize - edit.len() as isize;
-        let shift = |range: &mut Range<usize>| {
-            range.start = range.start.saturating_add_signed(delta);
-            range.end = range.end.saturating_add_signed(delta);
-        };
-        auto_closed_pairs.retain_mut(|(open, close)| {
-            if edit.end <= open.start {
-                shift(open);
-                shift(close);
-            } else if edit.start >= open.end && edit.end <= close.start {
-                shift(close);
-            } else if edit.start < close.end {
-                return false;
-            }
-            true
-        });
+        auto_closed_pairs.adjust(edit, new_len);
     }
 
     #[inline]
@@ -336,7 +290,7 @@ impl LayoutMode {
                     let Some(factory) = highlighter_factory else {
                         return;
                     };
-                    *highlighter_ref = factory(language);
+                    *highlighter_ref = factory(&language.name());
                 }
 
                 if highlighter_ref.is_none() {
@@ -433,7 +387,7 @@ mod tests {
     use ropey::Rope;
 
     use super::replacement_input_edit;
-    use crate::input::{DiagnosticSet, LanguageConfigs, Point, TabSize, mode::LayoutMode};
+    use crate::input::{DiagnosticSet, Point, TabSize, mode::LayoutMode};
 
     #[test]
     fn test_replacement_input_edit_backspace_at_end_uses_old_range() {
@@ -451,7 +405,7 @@ mod tests {
 
     #[test]
     fn test_code_editor() {
-        let mode = LayoutMode::code_editor();
+        let mode = LayoutMode::code_editor(Default::default());
         assert_eq!(mode.line_number(), true);
         assert_eq!(mode.has_indent_guides(), true);
         assert_eq!(mode.max_rows(), usize::MAX);
@@ -464,13 +418,11 @@ mod tests {
             folding: false,
             rows: 0,
             tab: Default::default(),
-            language: "rust".into(),
+            language: Box::default(),
             highlighter: Default::default(),
             highlighter_factory: None,
             diagnostics: DiagnosticSet::new(&Rope::new()),
-            language_config: Box::default(),
-            language_configs: LanguageConfigs::default(),
-            auto_closed_pairs: Vec::new(),
+            auto_closed_pairs: Default::default(),
             auto_close: false,
             smart_indent: false,
         };

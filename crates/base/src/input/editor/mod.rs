@@ -186,50 +186,9 @@ impl EditorState {
         &mut self.extras.lsp
     }
 
-    /// Install a syntax-context provider for editing decisions.
-    ///
-    /// Pairing, skip-over, and indent consult it; without one the engine
-    /// uses character heuristics. `gpui-component` supplies a tree-sitter
-    /// backed implementation. Explicit installs win over render-time sync.
-    pub fn set_syntax_context_provider(
-        &mut self,
-        provider: std::rc::Rc<dyn super::SyntaxContextProvider>,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        self.extras.syntax_context_provider = Some(provider);
-        self.extras.syntax_provider_customized = true;
-        cx.notify();
-    }
-
-    /// Install a provider unless the app explicitly installed one.
-    ///
-    /// Render-time per-language sync calls this with the editor's current
-    /// language. Reinstalls only on language change, preserving the
-    /// provider's parse cache across renders. Returns whether
-    /// anything changed.
-    pub fn ensure_syntax_context_provider(
-        &mut self,
-        language: &gpui::SharedString,
-        make_provider: impl FnOnce() -> Option<std::rc::Rc<dyn super::SyntaxContextProvider>>,
-    ) -> bool {
-        if self.extras.syntax_provider_customized {
-            return false;
-        }
-        if self.extras.syntax_provider_language.as_ref() == Some(language) {
-            return false;
-        }
-        self.extras.syntax_provider_language = Some(language.clone());
-        self.extras.syntax_context_provider = make_provider();
-        true
-    }
-
-    /// Syntax context at `offset`, or `Code` when no provider is installed.
+    /// Syntax context at `offset`, or `Code` when the language has no provider.
     pub(crate) fn syntax_context_at(&self, offset: usize) -> super::SyntaxContext {
-        self.extras
-            .syntax_context_provider
-            .as_ref()
-            .map(|provider| provider.context_at(&self.text, offset))
-            .unwrap_or(super::SyntaxContext::Code)
+        self.mode.syntax_context_at(&self.text, offset)
     }
 }
 

@@ -99,7 +99,7 @@ impl SyntaxContextProvider for TreeSitterSyntaxContext {
             };
             *cached = Some((source, tree));
         }
-        let (_, tree) = cached.as_ref().unwrap();
+        let (source, tree) = cached.as_ref().unwrap();
         let mut node = tree.root_node().descendant_for_byte_range(offset, offset);
         // At the very end the range may match nothing; try the last byte.
         if node.is_none() && offset > 0 {
@@ -131,6 +131,28 @@ impl SyntaxContextProvider for TreeSitterSyntaxContext {
             }
             current = n.parent();
         }
+        // A zero-width query at a line comment's end may select the enclosing
+        // node. Insertion there still extends the comment, unlike insertion
+        // after a block comment's closing delimiter.
+        if offset > 0 && !matches!(source.as_bytes()[offset - 1], b'\n' | b'\r') {
+            let mut previous = tree
+                .root_node()
+                .descendant_for_byte_range(offset - 1, offset);
+            while let Some(node) = previous {
+                if node.end_byte() == offset
+                    && Self::classify(node.kind()) == Some(gpui_base::input::SyntaxContext::Comment)
+                {
+                    let comment = &source[node.start_byte()..node.end_byte()];
+                    if node.kind() == "line_comment"
+                        || (node.kind() == "comment"
+                            && (comment.starts_with('#') || comment.starts_with("//")))
+                    {
+                        return gpui_base::input::SyntaxContext::Comment;
+                    }
+                }
+                previous = node.parent();
+            }
+        }
         gpui_base::input::SyntaxContext::Code
     }
 }
@@ -141,6 +163,37 @@ mod tests {
 
     fn json_provider() -> Rc<dyn SyntaxContextProvider> {
         syntax_context_provider("json").expect("json grammar must be compiled in")
+    }
+
+    #[cfg(all(feature = "tree-sitter-python", feature = "tree-sitter-rust"))]
+    #[test]
+    fn comment_end_tracks_insertion_context() {
+        use gpui_base::input::{Rope, SyntaxContext};
+        for (language, source, offset, expected) in [
+            ("python", "# note", 6, SyntaxContext::Comment),
+            ("python", "# note\n", 6, SyntaxContext::Comment),
+            ("python", "# note\n", 7, SyntaxContext::Code),
+            ("rust", "// note", 7, SyntaxContext::Comment),
+            ("rust", "/// note\n", 8, SyntaxContext::Comment),
+            ("rust", "/// note\n", 9, SyntaxContext::Code),
+            ("rust", "/* note */", 10, SyntaxContext::Code),
+        ] {
+            let provider = syntax_context_provider(language).unwrap();
+            assert_eq!(
+                provider.context_at(&Rope::from_str(source), offset),
+                expected,
+                "{source:?} at {offset}"
+            );
+        }
+    }
+
+    #[cfg(feature = "tree-sitter-cmake")]
+    #[test]
+    fn closed_bracket_comment_is_not_a_line_comment() {
+        use gpui_base::input::{Rope, SyntaxContext};
+        let provider = syntax_context_provider("cmake").unwrap();
+        let text = Rope::from_str("#[[ note ]]");
+        assert_eq!(provider.context_at(&text, text.len()), SyntaxContext::Code);
     }
 
     #[test]

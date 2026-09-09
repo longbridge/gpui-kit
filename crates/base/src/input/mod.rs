@@ -10,6 +10,8 @@ use gpui::App;
 /// Character used by masked editor modes.
 pub(crate) const MASK_CHAR: char = '•';
 
+#[path = "editor/auto_close.rs"]
+mod auto_close;
 mod base;
 #[path = "base/blink_cursor.rs"]
 pub(crate) mod blink_cursor;
@@ -33,6 +35,8 @@ mod indent;
 mod input;
 #[path = "base/kind.rs"]
 mod kind;
+#[path = "editor/language.rs"]
+mod language;
 #[path = "editor/language_config.rs"]
 mod language_config;
 #[path = "base/layout.rs"]
@@ -82,10 +86,9 @@ pub use input::{Input, InputState};
 pub use kind::{
     EditorExtras, EditorMode, InputExtras, InputMode, InputModeKind, MultiLineMode, TextareaMode,
 };
-pub(crate) use language_config::LanguageConfigs;
-pub use language_config::{
-    AutoClosingPair, BracketPair, IndentationRules, LanguageConfig, set_language_config,
-};
+pub(crate) use language::EditorLanguage;
+pub use language::{LanguageProvider, set_language_config, set_language_provider};
+pub use language_config::{AutoClosingPair, BracketPair, IndentationRules, LanguageConfig};
 pub use lsp::{
     CodeActionItem, CodeActionMenuState, CodeActionProvider, CompletionMenuOptions,
     CompletionMenuState, CompletionProvider, DefinitionProvider, DocumentColorProvider,

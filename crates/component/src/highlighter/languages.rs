@@ -1,6 +1,6 @@
 use gpui::SharedString;
 
-use crate::highlighter::LanguageConfig;
+use crate::highlighter::GrammarConfig;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, enum_iterator::Sequence)]
 pub enum Language {
@@ -176,29 +176,30 @@ impl Language {
     }
 
     pub(crate) fn from_name(s: &str) -> Option<Self> {
-        match s {
-            "text" | "plain" | "plaintext" => Some(Self::Plain),
-            "json" | "jsonc" => Some(Self::Json),
+        let name = super::language_name(s);
+        match name.as_ref() {
+            "text" => Some(Self::Plain),
+            "json" => Some(Self::Json),
             #[cfg(feature = "tree-sitter-astro")]
             "astro" => Some(Self::Astro),
             #[cfg(feature = "tree-sitter-bash")]
-            "bash" | "sh" => Some(Self::Bash),
+            "bash" => Some(Self::Bash),
             #[cfg(feature = "tree-sitter-c")]
             "c" => Some(Self::C),
             #[cfg(feature = "tree-sitter-cmake")]
             "cmake" => Some(Self::CMake),
             #[cfg(feature = "tree-sitter-cpp")]
-            "cpp" | "c++" => Some(Self::Cpp),
+            "cpp" => Some(Self::Cpp),
             #[cfg(feature = "tree-sitter-csharp")]
-            "csharp" | "cs" => Some(Self::CSharp),
+            "csharp" => Some(Self::CSharp),
             #[cfg(feature = "tree-sitter-css")]
-            "css" | "scss" => Some(Self::Css),
+            "css" => Some(Self::Css),
             #[cfg(feature = "tree-sitter-diff")]
             "diff" => Some(Self::Diff),
             #[cfg(feature = "tree-sitter-ejs")]
             "ejs" => Some(Self::Ejs),
             #[cfg(feature = "tree-sitter-elixir")]
-            "elixir" | "ex" => Some(Self::Elixir),
+            "elixir" => Some(Self::Elixir),
             #[cfg(feature = "tree-sitter-erb")]
             "erb" => Some(Self::Erb),
             #[cfg(feature = "tree-sitter-go")]
@@ -210,29 +211,29 @@ impl Language {
             #[cfg(feature = "tree-sitter-java")]
             "java" => Some(Self::Java),
             #[cfg(feature = "tree-sitter-javascript")]
-            "javascript" | "js" => Some(Self::JavaScript),
+            "javascript" => Some(Self::JavaScript),
             #[cfg(feature = "tree-sitter-jsdoc")]
             "jsdoc" => Some(Self::JsDoc),
             #[cfg(feature = "tree-sitter-kotlin")]
-            "kt" | "kts" | "ktm" | "kotlin" => Some(Self::Kotlin),
+            "kotlin" => Some(Self::Kotlin),
             #[cfg(feature = "tree-sitter-lua")]
             "lua" => Some(Self::Lua),
             #[cfg(feature = "tree-sitter-make")]
-            "make" | "makefile" => Some(Self::Make),
+            "make" => Some(Self::Make),
             #[cfg(feature = "tree-sitter-markdown")]
-            "markdown" | "md" | "mdx" => Some(Self::Markdown),
+            "markdown" => Some(Self::Markdown),
             #[cfg(feature = "tree-sitter-markdown")]
-            "markdown_inline" | "markdown-inline" => Some(Self::MarkdownInline),
+            "markdown_inline" => Some(Self::MarkdownInline),
             #[cfg(feature = "tree-sitter-php")]
-            "php" | "php3" | "php4" | "php5" | "phtml" => Some(Self::Php),
+            "php" => Some(Self::Php),
             #[cfg(feature = "tree-sitter-proto")]
-            "proto" | "protobuf" => Some(Self::Proto),
+            "proto" => Some(Self::Proto),
             #[cfg(feature = "tree-sitter-python")]
-            "python" | "py" => Some(Self::Python),
+            "python" => Some(Self::Python),
             #[cfg(feature = "tree-sitter-ruby")]
-            "ruby" | "rb" => Some(Self::Ruby),
+            "ruby" => Some(Self::Ruby),
             #[cfg(feature = "tree-sitter-rust")]
-            "rust" | "rs" => Some(Self::Rust),
+            "rust" => Some(Self::Rust),
             #[cfg(feature = "tree-sitter-scala")]
             "scala" => Some(Self::Scala),
             #[cfg(feature = "tree-sitter-sql")]
@@ -246,9 +247,9 @@ impl Language {
             #[cfg(feature = "tree-sitter-tsx")]
             "tsx" => Some(Self::Tsx),
             #[cfg(feature = "tree-sitter-typescript")]
-            "typescript" | "ts" => Some(Self::TypeScript),
+            "typescript" => Some(Self::TypeScript),
             #[cfg(feature = "tree-sitter-yaml")]
-            "yaml" | "yml" => Some(Self::Yaml),
+            "yaml" => Some(Self::Yaml),
             #[cfg(feature = "tree-sitter-zig")]
             "zig" => Some(Self::Zig),
             _ => None,
@@ -368,9 +369,9 @@ impl Language {
     /// Return the language info for the language.
     ///
     /// (language, query, injection, locals)
-    pub(super) fn config(&self) -> LanguageConfig {
+    pub(super) fn config(&self) -> GrammarConfig {
         let (language, query, injection, locals) = match self {
-            Self::Plain => return LanguageConfig::plain(self.name()),
+            Self::Plain => return GrammarConfig::plain(self.name()),
             Self::Json => (
                 tree_sitter_json::LANGUAGE,
                 include_str!("languages/json/highlights.scm"),
@@ -608,7 +609,7 @@ impl Language {
 
         let language = tree_sitter::Language::new(language);
 
-        LanguageConfig::new(
+        GrammarConfig::new(
             self.name(),
             language,
             self.injection_languages(),

@@ -777,12 +777,11 @@ impl<M: InputModeKind> InputBaseState<M> {
                 highlighter,
                 ..
             } => {
-                *language = new_language.into();
+                language.set_name(new_language.into());
                 *highlighter.borrow_mut() = None;
             }
             _ => {}
         }
-        self.mode.reload_language_config();
         self.refresh(cx);
     }
 
@@ -1728,11 +1727,10 @@ impl<M: InputModeKind> InputBaseState<M> {
                     continue;
                 }
                 let context = M::editing_syntax_context(self, cursor);
-                let generated = self
-                    .mode
-                    .auto_closed_pairs()
-                    .iter()
-                    .any(|(_, end)| end.start + index == cursor && end.len() == close.len());
+                let generated =
+                    self.mode
+                        .auto_closed_pairs()
+                        .contains_closer(cursor, index, close.len());
                 if !generated
                     && not_in.contains(&context)
                     && !(context == crate::input::SyntaxContext::String && open == close)
@@ -1773,9 +1771,10 @@ impl<M: InputModeKind> InputBaseState<M> {
                         return None;
                     }
                     let start = off - open.len();
-                    let generated = self.mode.auto_closed_pairs().iter().any(|(begin, end)| {
-                        *begin == (start..off) && *end == (off..off + close.len())
-                    });
+                    let generated = self
+                        .mode
+                        .auto_closed_pairs()
+                        .contains(start..off, off..off + close.len());
                     if self.is_escaped_at(start)
                         || (!generated && not_in.contains(&M::editing_syntax_context(self, start)))
                     {
@@ -3474,7 +3473,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             self.undo_manager.begin_transaction();
         }
 
-        let auto_closed_pairs_before = self.mode.auto_closed_pairs().to_vec();
+        let auto_closed_pairs_before = self.mode.auto_closed_pairs().clone();
         let mut recorded = false;
         for (range, new_text) in &sorted {
             let old_text = self.text.clone();
@@ -3569,7 +3568,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         if recorded {
             self.undo_manager.record_auto_closed_pairs(
                 auto_closed_pairs_before,
-                self.mode.auto_closed_pairs().to_vec(),
+                self.mode.auto_closed_pairs().clone(),
             );
             self.undo_manager
                 .record_selections(selections_before, selections_after);
@@ -3767,7 +3766,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                         cursor..cursor + closer.len(),
                     );
                     self.undo_manager
-                        .record_auto_closed_pairs_after(self.mode.auto_closed_pairs().to_vec());
+                        .record_auto_closed_pairs_after(self.mode.auto_closed_pairs().clone());
                     self.set_cursor_to(cursor);
                     self.update_preferred_column();
                     self.undo_manager.record_selections(
@@ -3943,7 +3942,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
             }))
             .unwrap_or(self.selected_range());
 
-        let auto_closed_pairs_before = self.mode.auto_closed_pairs().to_vec();
+        let auto_closed_pairs_before = self.mode.auto_closed_pairs().clone();
         let old_text = self.text.clone();
         self.mode.adjust_auto_closed_pair(&range, new_text.len());
         self.text.replace(range.clone(), new_text);
@@ -4017,7 +4016,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 .record_selections(vec![selection_before], vec![*self.active_selection()]);
             self.undo_manager.record_auto_closed_pairs(
                 auto_closed_pairs_before,
-                self.mode.auto_closed_pairs().to_vec(),
+                self.mode.auto_closed_pairs().clone(),
             );
         }
         if new_text.is_empty() {
@@ -4252,6 +4251,22 @@ mod tests {
     use gpui::{TestAppContext, VisualTestContext, size};
 
     use crate::input::{EditorMode, EditorState, InputMode, LanguageConfig, TextareaMode};
+
+    fn set_test_syntax_provider(
+        provider: Rc<dyn crate::input::SyntaxContextProvider>,
+        cx: &mut App,
+    ) {
+        struct TestLanguages(Rc<dyn crate::input::SyntaxContextProvider>);
+        impl crate::input::LanguageProvider for TestLanguages {
+            fn syntax_context_provider(
+                &self,
+                _: &str,
+            ) -> Option<Rc<dyn crate::input::SyntaxContextProvider>> {
+                Some(self.0.clone())
+            }
+        }
+        crate::input::set_language_provider(Rc::new(TestLanguages(provider)), cx);
+    }
 
     struct TestRoot<M: InputModeKind>(Entity<InputBaseState<M>>);
 
@@ -7114,7 +7129,7 @@ mod tests {
         setup_cursors(&mut cx, &view.input, r#"{"s":"\"|"}"#);
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state.set_syntax_context_provider(std::rc::Rc::new(StringAllProvider), cx);
+                set_test_syntax_provider(std::rc::Rc::new(StringAllProvider), cx);
                 state.backspace(&Backspace, window, cx);
             });
         });
@@ -7134,7 +7149,7 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "|");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state.set_syntax_context_provider(std::rc::Rc::new(UnexpectedQuery), cx);
+                set_test_syntax_provider(std::rc::Rc::new(UnexpectedQuery), cx);
                 for c in ["a", "b", "c"] {
                     state.replace_text_in_range(None, c, window, cx);
                 }
@@ -7170,7 +7185,7 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "// (|)");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
+                set_test_syntax_provider(std::rc::Rc::new(CommentAllProvider), cx);
                 state.replace_text_in_range(None, ")", window, cx);
             });
         });
@@ -7434,6 +7449,41 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_language_service_replacement_updates_syntax_without_render(cx: &mut TestAppContext) {
+        use crate::input::{LanguageProvider, SyntaxContextProvider, set_language_provider};
+        struct StringLanguages(Rc<Cell<usize>>);
+        impl LanguageProvider for StringLanguages {
+            fn syntax_context_provider(&self, _: &str) -> Option<Rc<dyn SyntaxContextProvider>> {
+                self.0.set(self.0.get() + 1);
+                Some(Rc::new(StringAllProvider))
+            }
+        }
+        struct CodeLanguages;
+        impl LanguageProvider for CodeLanguages {}
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.update(|window, cx| {
+            let creations = Rc::new(Cell::new(0));
+            set_language_provider(Rc::new(StringLanguages(creations.clone())), cx);
+            view.input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "(", window, cx);
+                state.replace_text_in_range(None, "[", window, cx);
+                assert_eq!(state.text().to_string(), "([");
+                assert_eq!(
+                    creations.get(),
+                    1,
+                    "retain the document provider between edits"
+                );
+            });
+            set_language_provider(Rc::new(CodeLanguages), cx);
+            view.input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "{", window, cx);
+                assert_eq!(state.text().to_string(), "([{}");
+            });
+        });
+    }
+
+    #[gpui::test]
     fn test_language_config_updates_existing_editors(cx: &mut TestAppContext) {
         use crate::input::{AutoClosingPair, set_language_config};
         let view = InputView::<EditorMode>::new(cx);
@@ -7452,9 +7502,6 @@ mod tests {
             );
             // Batched registrations must update every affected language.
             set_language_config("other", LanguageConfig::default(), cx);
-        });
-        cx.run_until_parked();
-        cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
                 assert!(!state.mode.is_auto_close());
                 assert!(!state.mode.is_smart_indent());
@@ -7479,9 +7526,11 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "|word");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state
-                    .mode
-                    .set_language_config(LanguageConfig::default().auto_close_before("w"));
+                crate::input::set_language_config(
+                    state.language_name(),
+                    LanguageConfig::default().auto_close_before("w"),
+                    cx,
+                );
                 state.replace_text_in_range(None, "(", window, cx);
             });
         });
@@ -7496,13 +7545,15 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "|");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
-                state
-                    .mode
-                    .set_language_config(LanguageConfig::default().auto_closing_pairs([
+                set_test_syntax_provider(std::rc::Rc::new(CommentAllProvider), cx);
+                crate::input::set_language_config(
+                    state.language_name(),
+                    LanguageConfig::default().auto_closing_pairs([
                         AutoClosingPair::new("(", ")").not_in([SyntaxContext::String]),
                         AutoClosingPair::new("[", "]").not_in([SyntaxContext::Comment]),
-                    ]));
+                    ]),
+                    cx,
+                );
                 state.replace_text_in_range(None, "(", window, cx);
                 state.replace_text_in_range(None, "[", window, cx);
             });
@@ -7528,11 +7579,13 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "|");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state.set_syntax_context_provider(std::rc::Rc::new(BlockComment), cx);
-                state.mode.set_language_config(
+                set_test_syntax_provider(std::rc::Rc::new(BlockComment), cx);
+                crate::input::set_language_config(
+                    state.language_name(),
                     LanguageConfig::default()
                         .auto_closing_pairs([AutoClosingPair::new("/*", "*/")
                             .not_in([SyntaxContext::String, SyntaxContext::Comment])]),
+                    cx,
                 );
                 state.replace_text_in_range(None, "/", window, cx);
                 state.replace_text_in_range(None, "*", window, cx);
@@ -7564,9 +7617,13 @@ mod tests {
             view.input.update(cx, |state, cx| {
                 let mut rules = LanguageConfig::default().brackets([BracketPair::new("«", "»")]);
                 rules.auto_closing_pairs = None;
-                state.mode.set_language_config(rules.clone());
+                crate::input::set_language_config(state.language_name(), rules.clone(), cx);
                 state.replace_text_in_range(None, "«", window, cx);
-                state.mode.set_language_config(rules.auto_closing_pairs([]));
+                crate::input::set_language_config(
+                    state.language_name(),
+                    rules.auto_closing_pairs([]),
+                    cx,
+                );
                 state.replace_text_in_range(None, "«", window, cx);
             });
         });
@@ -7581,14 +7638,17 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "|");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state
-                    .mode
-                    .set_language_config(LanguageConfig::default().auto_closing_pairs([
-                        AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment]),
-                    ]));
+                crate::input::set_language_config(
+                    state.language_name(),
+                    LanguageConfig::default()
+                        .auto_closing_pairs([
+                            AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment])
+                        ]),
+                    cx,
+                );
                 state.replace_text_in_range(None, "/", window, cx);
                 state.replace_text_in_range(None, "*", window, cx);
-                state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
+                set_test_syntax_provider(std::rc::Rc::new(CommentAllProvider), cx);
                 state.replace_and_mark_text_in_range(None, "x", Some(1..1), window, cx);
                 state.undo(&Undo, window, cx);
                 state.replace_text_in_range(None, "*", window, cx);
@@ -7606,12 +7666,15 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "/*|*/");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
-                state
-                    .mode
-                    .set_language_config(LanguageConfig::default().auto_closing_pairs([
-                        AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment]),
-                    ]));
+                set_test_syntax_provider(std::rc::Rc::new(CommentAllProvider), cx);
+                crate::input::set_language_config(
+                    state.language_name(),
+                    LanguageConfig::default()
+                        .auto_closing_pairs([
+                            AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment])
+                        ]),
+                    cx,
+                );
                 state.delete_to_end_of_line(&DeleteToEndOfLine, window, cx);
                 state.undo(&Undo, window, cx);
                 state.backspace(&Backspace, window, cx);
@@ -7642,13 +7705,15 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "|");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state.set_syntax_context_provider(std::rc::Rc::new(CommentScope), cx);
-                state
-                    .mode
-                    .set_language_config(LanguageConfig::default().auto_closing_pairs([
+                set_test_syntax_provider(std::rc::Rc::new(CommentScope), cx);
+                crate::input::set_language_config(
+                    state.language_name(),
+                    LanguageConfig::default().auto_closing_pairs([
                         AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment]),
                         AutoClosingPair::new("(", ")").not_in([SyntaxContext::Comment]),
-                    ]));
+                    ]),
+                    cx,
+                );
                 state.replace_text_in_range(None, "/", window, cx);
                 state.replace_text_in_range(None, "*", window, cx);
                 state.set_selected_range(4..4, cx);
@@ -7678,15 +7743,18 @@ mod tests {
         setup_cursors(&mut cx, &view.input, "|");
         cx.update(|window, cx| {
             view.input.update(cx, |state, cx| {
-                state
-                    .mode
-                    .set_language_config(LanguageConfig::default().auto_closing_pairs([
-                        AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment]),
-                    ]));
+                crate::input::set_language_config(
+                    state.language_name(),
+                    LanguageConfig::default()
+                        .auto_closing_pairs([
+                            AutoClosingPair::new("/*", "*/").not_in([SyntaxContext::Comment])
+                        ]),
+                    cx,
+                );
                 state.replace_text_in_range(None, "/", window, cx);
                 state.replace_text_in_range(None, "*", window, cx);
                 state.replace_text_in_range(Some(0..2), "//", window, cx);
-                state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
+                set_test_syntax_provider(std::rc::Rc::new(CommentAllProvider), cx);
                 state.replace_text_in_range(None, "*", window, cx);
             });
         });
@@ -7710,8 +7778,8 @@ mod tests {
                         regex::Regex::new("^end").unwrap(),
                     ))
                 };
-                state.mode.set_language_config(rules(false));
-                state.mode.set_language_config(rules(true));
+                crate::input::set_language_config(state.language_name(), rules(false), cx);
+                crate::input::set_language_config(state.language_name(), rules(true), cx);
                 state.enter(
                     &Enter {
                         secondary: false,
@@ -7738,7 +7806,7 @@ mod tests {
             setup_cursors(&mut cx, &view.input, before);
             cx.update(|window, cx| {
                 view.input.update(cx, |state, cx| {
-                    state.mode.set_language_config(rules.clone());
+                    crate::input::set_language_config(state.language_name(), rules.clone(), cx);
                     state.enter(
                         &Enter {
                             secondary: false,
@@ -7758,11 +7826,13 @@ mod tests {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         cx.update(|_window, cx| {
-            view.input.update(cx, |state, _cx| {
-                state.mode.set_language_config(
+            view.input.update(cx, |state, cx| {
+                crate::input::set_language_config(
+                    state.language_name(),
                     crate::input::LanguageConfig::default()
                         .brackets([crate::input::BracketPair::new("«", "»")])
                         .auto_closing_pairs([crate::input::AutoClosingPair::new("«", "»")]),
+                    cx,
                 );
             });
         });
@@ -7869,8 +7939,10 @@ mod tests {
             view.input.update(cx, |state, cx| {
                 // Language changes update rules without changing editor preferences.
                 state.set_smart_indent(false, window, cx);
-                state.mode.set_language_config(
+                crate::input::set_language_config(
+                    state.language_name(),
                     LanguageConfig::default().brackets([BracketPair::new("«", "»")]),
+                    cx,
                 );
             });
         });
@@ -7904,9 +7976,7 @@ mod tests {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         cx.update(|_window, cx| {
-            view.input.update(cx, |state, cx| {
-                state.set_syntax_context_provider(Rc::new(StringAllProvider), cx);
-            });
+            set_test_syntax_provider(Rc::new(StringAllProvider), cx);
         });
         // Trigger `{` inside a string: no extra level, base indent only.
         setup_cursors(&mut cx, &view.input, "  x = {|");
@@ -7932,9 +8002,7 @@ mod tests {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         cx.update(|_window, cx| {
-            view.input.update(cx, |state, cx| {
-                state.set_syntax_context_provider(Rc::new(StringAllProvider), cx);
-            });
+            set_test_syntax_provider(Rc::new(StringAllProvider), cx);
         });
         // No three-way split inside strings: plain newline instead.
         setup_cursors(&mut cx, &view.input, "{|}");
@@ -7960,9 +8028,7 @@ mod tests {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         cx.update(|_window, cx| {
-            view.input.update(cx, |state, cx| {
-                state.set_syntax_context_provider(Rc::new(CommentAllProvider), cx);
-            });
+            set_test_syntax_provider(Rc::new(CommentAllProvider), cx);
         });
         setup_cursors(&mut cx, &view.input, "|");
         cx.update(|window, cx| {
@@ -8984,16 +9050,7 @@ impl InputBaseState<crate::input::EditorMode> {
     /// line numbers, and handles large text up to about 50K lines.
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut state = Self::new_in_mode(window, cx);
-        state.mode = LayoutMode::code_editor();
-        state
-            .mode
-            .set_language_configs(super::LanguageConfigs::global(cx));
-        state
-            ._subscriptions
-            .push(cx.observe_global::<super::LanguageConfigs>(|state, cx| {
-                state.mode.reload_language_config();
-                cx.notify();
-            }));
+        state.mode = LayoutMode::code_editor(super::EditorLanguage::new(cx));
         state.searchable = true;
         state
     }
@@ -9008,17 +9065,16 @@ impl InputBaseState<crate::input::EditorMode> {
             ..
         } = &mut self.mode
         {
-            *l = language.into();
+            l.set_name(language.into());
             *highlighter.borrow_mut() = None;
         }
-        self.mode.reload_language_config();
         self
     }
 
     /// The current language name, e.g. `"rust"`.
     pub fn language_name(&self) -> SharedString {
         match &self.mode {
-            LayoutMode::CodeEditor { language, .. } => language.clone(),
+            LayoutMode::CodeEditor { language, .. } => language.name(),
             _ => SharedString::default(),
         }
     }

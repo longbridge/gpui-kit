@@ -244,6 +244,70 @@ mod tests {
         cx.read(|cx| assert_eq!(state.read(cx).text().to_string(), "if enabled:\n  "));
     }
 
+    #[gpui::test]
+    fn aliases_share_config_even_when_registered_before_init(cx: &mut TestAppContext) {
+        use crate::input::{AutoClosingPair, LanguageConfig, set_language_config};
+        use gpui::EntityInputHandler as _;
+        cx.update(|cx| {
+            set_language_config(
+                "py",
+                LanguageConfig::default().auto_closing_pairs([AutoClosingPair::new("«", "»")]),
+                cx,
+            )
+        });
+        cx.update(crate::init);
+        cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| EditorState::new(window, cx).language("PYTHON"));
+            editor.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "«", window, cx);
+                assert_eq!(state.text().to_string(), "«»");
+            });
+            set_language_config("pyi", LanguageConfig::default().auto_closing_pairs([]), cx);
+            editor.update(cx, |state, cx| {
+                state.set_value("", window, cx);
+                state.set_highlighter("py", cx);
+                state.replace_text_in_range(None, "(", window, cx);
+                assert_eq!(state.text().to_string(), "(");
+            });
+            Harness {
+                state: editor,
+                text_size: None,
+            }
+        });
+    }
+
+    #[cfg(all(feature = "tree-sitter-python", feature = "tree-sitter-rust"))]
+    #[gpui::test]
+    fn syntax_follows_language_before_first_render_and_after_switch(cx: &mut TestAppContext) {
+        use gpui::EntityInputHandler as _;
+        cx.update(crate::init);
+        cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| {
+                EditorState::new(window, cx)
+                    .language("python")
+                    .default_value("\"hello world\"")
+            });
+            editor.update(cx, |state, cx| {
+                state.set_selected_range(6..6, cx);
+                state.replace_text_in_range(None, "(", window, cx);
+                assert_eq!(state.text().to_string(), "\"hello( world\"");
+                state.set_value("# comment ", window, cx);
+                state.set_selected_range(10..10, cx);
+                state.replace_text_in_range(None, "(", window, cx);
+                assert_eq!(state.text().to_string(), "# comment (");
+                state.set_value("# comment ", window, cx);
+                state.set_selected_range(10..10, cx);
+                state.set_highlighter("rust", cx);
+                state.replace_text_in_range(None, "(", window, cx);
+                assert_eq!(state.text().to_string(), "# comment ()");
+            });
+            Harness {
+                state: editor,
+                text_size: None,
+            }
+        });
+    }
+
     #[cfg(feature = "tree-sitter-python")]
     #[gpui::test]
     fn python_pairing_uses_pre_edit_context(cx: &mut TestAppContext) {
@@ -268,9 +332,7 @@ mod tests {
             let state = state.unwrap();
             VisualTestContext::update(cx, |window, cx| {
                 state.update(cx, |state, cx| {
-                    let provider =
-                        crate::input::syntax_context::syntax_context_provider("python").unwrap();
-                    state.set_syntax_context_provider(provider, cx);
+                    state.set_highlighter("python", cx);
                     state.set_selected_range(cursor..cursor, cx);
                     state.replace_text_in_range(None, typed, window, cx);
                     assert_eq!(state.text().to_string(), expected);
@@ -304,9 +366,7 @@ mod tests {
         let state = state.unwrap();
         VisualTestContext::update(cx, |window, cx| {
             state.update(cx, |state, cx| {
-                let provider =
-                    crate::input::syntax_context::syntax_context_provider("rust").unwrap();
-                state.set_syntax_context_provider(provider, cx);
+                state.set_highlighter("rust", cx);
 
                 for text in ["/", "*", "x", "*", "/"] {
                     state.replace_text_in_range(None, text, window, cx);

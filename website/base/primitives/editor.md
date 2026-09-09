@@ -17,7 +17,9 @@ Use [Input](./input.md) for single-line values and
 
 The Base editor accepts `LanguageConfig` and independent `auto_close` / `smart_indent`
 preferences. It loads registered language configurations without a parser;
-Component registers the built-in language defaults during initialization.
+Component installs a `LanguageProvider` for built-in names, defaults, and syntax
+providers during initialization. Base clients can install their own service
+with `set_language_provider`; configurations are set with `set_language_config`.
 See [Language editing rules](../../component/editor.md#language-editing-rules)
 for the configuration fields and language registration; import the same types
 from `gpui_kit::base::input` when using Base directly.

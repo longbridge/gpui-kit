@@ -48,10 +48,19 @@ let editor = cx.new(|cx| {
 ```
 
 `set_language_config` replaces the configuration for a language in the current
-application, including existing editors. Register custom configurations after
-`gpui_kit::init(cx)`. New editors and language changes use the registered
-configuration immediately; rendering does not overwrite it. Unknown languages
-use `LanguageConfig::default()`.
+application. Existing editors use the replacement on their next edit, including
+within the same event handler. Aliases share configurations: `python`, `py`, and
+`pyi` refer to the same language even without its grammar feature. Custom
+configurations survive component initialization. Unknown languages use
+`LanguageConfig::default()`.
+
+Component installs a `LanguageProvider` for language names, editing defaults,
+and editor-owned syntax providers. Syntax selection follows the language on the
+first edit and after language changes, independently of rendering. Base clients
+can install their own service with `set_language_provider`; ordinary Component
+clients only need `set_language_config`. Grammar resources are available as
+`highlighter::GrammarConfig`; its existing `highlighter::LanguageConfig` name
+remains compatible.
 
 Pairs use strings, including multi-character delimiters. `auto_closing_pairs`
 is optional: `None` uses the structural `brackets`, while `Some(vec![])` disables

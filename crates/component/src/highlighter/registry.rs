@@ -8,10 +8,7 @@ use std::{
     sync::{Arc, LazyLock, Mutex},
 };
 
-use crate::{
-    ActiveTheme, DEFAULT_THEME_COLORS, ThemeMode,
-    highlighter::{Language, languages},
-};
+use crate::{ActiveTheme, DEFAULT_THEME_COLORS, ThemeMode, highlighter::languages};
 
 pub(super) const HIGHLIGHT_NAMES: [&str; 41] = [
     "attribute",
@@ -66,6 +63,9 @@ pub struct LanguageConfig {
     pub injections: SharedString,
     pub locals: SharedString,
 }
+
+/// Explicit name for grammar resources; editing rules use `input::LanguageConfig`.
+pub type GrammarConfig = LanguageConfig;
 
 impl LanguageConfig {
     pub fn new(
@@ -493,7 +493,7 @@ impl gpui_base::input::HighlightStyleResolver for HighlightTheme {
 
 /// Registry for code highlighter languages.
 pub struct LanguageRegistry {
-    languages: Mutex<HashMap<SharedString, LanguageConfig>>,
+    languages: Mutex<HashMap<SharedString, GrammarConfig>>,
 }
 
 impl LanguageRegistry {
@@ -510,11 +510,11 @@ impl LanguageRegistry {
     }
 
     /// Registers a new language configuration to the registry.
-    pub fn register(&self, lang: &str, config: &LanguageConfig) {
+    pub fn register(&self, lang: &str, config: &GrammarConfig) {
         self.languages
             .lock()
             .unwrap()
-            .insert(lang.to_string().into(), config.clone());
+            .insert(super::language_name(lang), config.clone());
     }
 
     /// Returns a list of all registered language names.
@@ -523,19 +523,15 @@ impl LanguageRegistry {
     }
 
     /// Returns the language configuration for the given language name.
-    pub fn language(&self, name: &str) -> Option<LanguageConfig> {
-        // Try to get by name first, there may have a custom language registered
-        // Then try to get built-in language to support short language names, e.g. "js" for "javascript"
-        let languages = self.languages.lock().unwrap();
-        languages.get(name).cloned().or_else(|| {
-            Language::from_name(name).and_then(|language| languages.get(language.name()).cloned())
-        })
+    pub fn language(&self, name: &str) -> Option<GrammarConfig> {
+        let name = super::language_name(name);
+        self.languages.lock().unwrap().get(name.as_ref()).cloned()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::highlighter::LanguageConfig;
+    use crate::highlighter::GrammarConfig;
 
     #[test]
     fn test_registry() {
@@ -544,7 +540,7 @@ mod tests {
 
         registry.register(
             "foo",
-            &LanguageConfig::new("foo", tree_sitter_json::LANGUAGE.into(), vec![], "", "", ""),
+            &GrammarConfig::new("foo", tree_sitter_json::LANGUAGE.into(), vec![], "", "", ""),
         );
 
         assert!(registry.language("foo").is_some());

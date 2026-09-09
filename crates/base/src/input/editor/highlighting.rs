@@ -72,7 +72,7 @@ pub enum SyntaxContext {
 
 /// Answers syntax context for editing decisions (pairing, skip, indent).
 ///
-/// Installed per editor via `EditorState::set_syntax_context_provider`.
+/// Created per editor by the application's [`super::LanguageProvider`].
 /// Base never imports a parser; implementations live in UI crates or apps.
 pub trait SyntaxContextProvider {
     fn context_at(&self, text: &Rope, offset: usize) -> SyntaxContext;

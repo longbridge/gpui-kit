@@ -38,8 +38,8 @@ mod state;
 mod textarea;
 pub use editor::Editor;
 pub use gpui_base::input::{
-    AutoClosingPair, BracketPair, IndentationRules, LanguageConfig, SyntaxContext,
-    set_language_config,
+    AutoClosingPair, BracketPair, IndentationRules, LanguageConfig, LanguageProvider,
+    SyntaxContext, SyntaxContextProvider, set_language_config, set_language_provider,
 };
 pub use input::*;
 pub use lsp_types::Position;
