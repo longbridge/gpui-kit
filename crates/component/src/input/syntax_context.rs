@@ -24,14 +24,14 @@ pub(crate) fn syntax_context_provider(_language: &str) -> Option<Rc<dyn SyntaxCo
 
 /// Tree-sitter backed syntax context for editing decisions.
 ///
-/// Parses incrementally (previous tree reused) and classifies an offset by
+/// Caches the tree for unchanged text and classifies an offset by
 /// walking the named node and its ancestors for `string` / `comment` kinds.
 /// Generic across grammars: no per-language queries needed for this coarse
 /// classification.
 #[cfg(feature = "tree-sitter")]
 struct TreeSitterSyntaxContext {
     parser: std::cell::RefCell<tree_sitter::Parser>,
-    tree: std::cell::RefCell<Option<tree_sitter::Tree>>,
+    tree: std::cell::RefCell<Option<(String, tree_sitter::Tree)>>,
 }
 
 #[cfg(feature = "tree-sitter")]
@@ -50,7 +50,9 @@ impl TreeSitterSyntaxContext {
 
     fn classify(kind: &str) -> Option<gpui_base::input::SyntaxContext> {
         let lower = kind.to_lowercase();
-        if lower.contains("comment") {
+        if lower == "interpolation" || lower == "template_substitution" {
+            Some(gpui_base::input::SyntaxContext::Code)
+        } else if lower.contains("comment") {
             Some(gpui_base::input::SyntaxContext::Comment)
         } else if lower.contains("string") {
             Some(gpui_base::input::SyntaxContext::String)
@@ -67,30 +69,37 @@ impl SyntaxContextProvider for TreeSitterSyntaxContext {
 
         let source = text.to_string();
         let offset = offset.min(source.len());
-        let start = std::time::Instant::now();
-        let mut progress = |_: &tree_sitter::ParseState| -> ControlFlow<()> {
-            if start.elapsed() > Self::PARSE_BUDGET {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        };
-        let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
-        let mut parser = self.parser.borrow_mut();
-        let new_tree = parser.parse_with_options(
-            &mut |byte_offset, _| {
-                if byte_offset >= source.len() {
-                    ""
+        let mut cached = self.tree.borrow_mut();
+        if cached
+            .as_ref()
+            .is_none_or(|(previous, _)| previous != &source)
+        {
+            let start = std::time::Instant::now();
+            let mut progress = |_: &tree_sitter::ParseState| -> ControlFlow<()> {
+                if start.elapsed() > Self::PARSE_BUDGET {
+                    ControlFlow::Break(())
                 } else {
-                    &source[byte_offset..]
+                    ControlFlow::Continue(())
                 }
-            },
-            self.tree.borrow().as_ref(),
-            Some(options),
-        );
-        let Some(tree) = new_tree else {
-            return gpui_base::input::SyntaxContext::Code;
-        };
+            };
+            let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
+            let mut parser = self.parser.borrow_mut();
+            // No InputEdit is available here, so an old tree cannot be reused
+            // after the source changes.
+            let tree = parser.parse_with_options(
+                &mut |byte_offset, _| source.get(byte_offset..).unwrap_or(""),
+                None,
+                Some(options),
+            );
+            let Some(tree) = tree else {
+                // A timed-out parse must not resume against a different source.
+                parser.reset();
+                *cached = None;
+                return gpui_base::input::SyntaxContext::Code;
+            };
+            *cached = Some((source, tree));
+        }
+        let (_, tree) = cached.as_ref().unwrap();
         let mut node = tree.root_node().descendant_for_byte_range(offset, offset);
         // At the very end the range may match nothing; try the last byte.
         if node.is_none() && offset > 0 {
@@ -102,13 +111,26 @@ impl SyntaxContextProvider for TreeSitterSyntaxContext {
         while let Some(n) = current {
             if n.is_named() {
                 if let Some(context) = Self::classify(n.kind()) {
-                    *self.tree.borrow_mut() = Some(tree);
+                    // String delimiters delimit the scope: inserting at its start
+                    // is outside, while inserting before its end is inside.
+                    if context == gpui_base::input::SyntaxContext::String
+                        && offset == n.start_byte()
+                        && matches!(
+                            n.kind(),
+                            "string"
+                                | "string_literal"
+                                | "raw_string_literal"
+                                | "template_string"
+                                | "string_start"
+                        )
+                    {
+                        return gpui_base::input::SyntaxContext::Code;
+                    }
                     return context;
                 }
             }
             current = n.parent();
         }
-        *self.tree.borrow_mut() = Some(tree);
         gpui_base::input::SyntaxContext::Code
     }
 }
@@ -151,6 +173,18 @@ mod tests {
             SyntaxContext::Code,
             "colon between pairs"
         );
+    }
+
+    #[test]
+    fn test_changed_source_matches_fresh_provider() {
+        use gpui_base::input::{Rope, SyntaxContext};
+        let provider = json_provider();
+        let old = Rope::from_str(r#"{"key": "value"}"#);
+        assert_eq!(provider.context_at(&old, 10), SyntaxContext::String);
+        let new = Rope::from_str(r#"{"key": 1234567}"#);
+        let fresh = json_provider().context_at(&new, 10);
+        assert_eq!(fresh, SyntaxContext::Code);
+        assert_eq!(provider.context_at(&new, 10), fresh);
     }
 
     #[test]

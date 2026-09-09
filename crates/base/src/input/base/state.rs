@@ -1619,6 +1619,56 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.pause_blink_cursor(cx);
     }
 
+    /// Decide pairing against the pre-edit text, before an opening quote can
+    /// change its own syntax context. Ordinary characters never query syntax.
+    fn auto_close_target(&self, range: &Range<usize>, text: &str) -> Option<char> {
+        if self.silent_replace_text
+            || self.ime_marked_range.is_some()
+            || !self.selections.is_single()
+            || !self.active_selection().is_empty()
+            || !range.is_empty()
+            || range.start != self.cursor()
+        {
+            return None;
+        }
+        let rules = self.mode.edit_rules()?;
+        if !rules.auto_close {
+            return None;
+        }
+        let mut chars = text.chars();
+        let typed = chars.next()?;
+        if chars.next().is_some() {
+            return None;
+        }
+        let closer = rules.matching_close(typed)?;
+        if closer == typed {
+            if self.is_escaped_at(range.start) {
+                return None;
+            }
+            if self
+                .text
+                .chars_at(range.start)
+                .reversed()
+                .next()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_')
+            {
+                return None;
+            }
+        }
+        (M::editing_syntax_context(self, range.start) == crate::input::SyntaxContext::Code)
+            .then_some(closer)
+    }
+
+    fn is_escaped_at(&self, offset: usize) -> bool {
+        self.text
+            .chars_at(offset)
+            .reversed()
+            .take_while(|c| *c == '\\')
+            .count()
+            % 2
+            == 1
+    }
+
     /// Cursor target when a typed closer should skip over an existing one.
     ///
     /// Returns `Some(offset)` when `new_text` is a single closer from the
@@ -1641,15 +1691,14 @@ impl<M: InputModeKind> InputBaseState<M> {
         if self.text.chars_at(cursor).next() != Some(typed) {
             return None;
         }
-        // Escaped followers (odd backslash run) are literals, not closers.
-        let mut backslashes = 0;
-        for c in self.text.chars_at(cursor).reversed() {
-            if c != '\\' {
-                break;
+        match M::editing_syntax_context(self, cursor) {
+            crate::input::SyntaxContext::Comment => return None,
+            crate::input::SyntaxContext::String if rules.matching_close(typed) != Some(typed) => {
+                return None;
             }
-            backslashes += 1;
+            _ => {}
         }
-        if backslashes % 2 == 1 {
+        if self.is_escaped_at(cursor) {
             return None;
         }
         Some(cursor + typed.len_utf8())
@@ -1681,7 +1730,11 @@ impl<M: InputModeKind> InputBaseState<M> {
                         .flatten();
                     let after: Option<char> = self.text.chars_at(off).next();
                     if let (Some(b), Some(a)) = (before, after) {
-                        if rules.pairs.iter().any(|p| p.open == b && p.close == a) {
+                        if rules.pairs.iter().any(|p| p.open == b && p.close == a)
+                            && !self.is_escaped_at(off - b.len_utf8())
+                            && M::editing_syntax_context(self, off - b.len_utf8())
+                                == crate::input::SyntaxContext::Code
+                        {
                             let start = off - b.len_utf8();
                             let end = off + a.len_utf8();
                             let utf16 = self.range_to_utf16(&(start..end));
@@ -1868,6 +1921,10 @@ impl<M: InputModeKind> InputBaseState<M> {
                                 let new_line_text = format!("\n{inner}\n{indent}");
                                 self.replace_text_in_range_silent(None, &new_line_text, window, cx);
                                 self.set_cursor_to(off + 1 + inner.len());
+                                self.update_preferred_column();
+                                let cursors = self.selections.iter().copied().collect::<Vec<_>>();
+                                self.undo_manager
+                                    .record_selections(cursors.clone(), cursors);
                                 self.pause_blink_cursor(cx);
                                 split = true;
                             }
@@ -3317,23 +3374,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.silent_replace_text = false;
     }
 
-    /// Replace text without typing hooks and without recording history.
-    ///
-    /// For corrective edits that must not appear in undo (e.g. removing the
-    /// just-typed closer during skip-over, where the insertion alone is the
-    /// undoable unit). Mirrors `set_value`'s ignoring pattern.
-    pub(crate) fn replace_silent_ignoring_history(
-        &mut self,
-        range_utf16: Option<Range<usize>>,
-        new_text: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.undo_manager.set_ignoring(true);
-        self.replace_text_in_range_silent(range_utf16, new_text, window, cx);
-        self.undo_manager.set_ignoring(false);
-    }
-
     /// Apply a batch of edits as one atomic history transaction.
     ///
     /// `edits` are `(byte range in the current pre-edit document, replacement)`
@@ -3608,12 +3648,22 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         let new_text = self.normalize_input(new_text);
         let new_text: &str = &new_text;
 
+        let range = range_utf16
+            .as_ref()
+            .map(|range_utf16| self.range_from_utf16(range_utf16))
+            .or(self.ime_marked_range.map(|range| {
+                let range = self.range_to_utf16(&(range.start..range.end));
+                self.range_from_utf16(&range)
+            }))
+            .unwrap_or(self.selected_range());
+
         // Skip-over as a pure cursor move: a typed closer that already follows
         // the cursor moves past it without touching text or history, so Undo
         // never exposes a transient duplicate. Only for interactive single
         // keystrokes (current selection, no IME mark, not silent replays).
         // `take_pending_intent` above already consumed any request.
-        if range_utf16.is_none()
+        if range.is_empty()
+            && range.start == self.cursor()
             && self.ime_marked_range.is_none()
             && !self.silent_replace_text
             && self.is_code_editor()
@@ -3627,15 +3677,6 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 return;
             }
         }
-
-        let range = range_utf16
-            .as_ref()
-            .map(|range_utf16| self.range_from_utf16(range_utf16))
-            .or(self.ime_marked_range.map(|range| {
-                let range = self.range_to_utf16(&(range.start..range.end));
-                self.range_from_utf16(&range)
-            }))
-            .unwrap_or(self.selected_range());
 
         if self.is_multi_line() {
             let multi_cursor = range_utf16.is_none()
@@ -3665,7 +3706,23 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
                 if let Some(intent) = requested_intent {
                     self.undo_manager.set_pending_intent(intent);
                 }
-                self.replace_text_in_ranges(&[(range.clone(), new_text.to_string())], window, cx);
+                if let Some(closer) = self.auto_close_target(&range, new_text) {
+                    // One edit keeps the pair atomic even at undo coalescing limits.
+                    let replacement = format!("{new_text}{closer}");
+                    self.replace_text_in_ranges(&[(range.clone(), replacement)], window, cx);
+                    self.set_cursor_to(range.start + new_text.len());
+                    self.update_preferred_column();
+                    self.undo_manager.record_selections(
+                        vec![selection_before],
+                        self.selections.iter().copied().collect(),
+                    );
+                } else {
+                    self.replace_text_in_ranges(
+                        &[(range.clone(), new_text.to_string())],
+                        window,
+                        cx,
+                    );
+                }
             }
             if ends_composition {
                 self.undo_manager.commit_transaction();
@@ -6983,6 +7040,152 @@ mod tests {
                 assert_eq!(layers.into_iter().flatten().next().unwrap().range, 5..8);
             });
         });
+    }
+
+    #[gpui::test]
+    fn test_backspace_preserves_escaped_quote_terminator(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, r#"{"s":"\"|"}"#);
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_syntax_context_provider(std::rc::Rc::new(StringAllProvider), cx);
+                state.backspace(&Backspace, window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, r#"{"s":"\|"}"#);
+    }
+
+    #[gpui::test]
+    fn test_ordinary_typing_does_not_query_syntax(cx: &mut TestAppContext) {
+        struct UnexpectedQuery;
+        impl crate::input::SyntaxContextProvider for UnexpectedQuery {
+            fn context_at(&self, _: &ropey::Rope, _: usize) -> crate::input::SyntaxContext {
+                panic!("ordinary typing must not query syntax");
+            }
+        }
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_syntax_context_provider(std::rc::Rc::new(UnexpectedQuery), cx);
+                for c in ["a", "b", "c"] {
+                    state.replace_text_in_range(None, c, window, cx);
+                }
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "abc|");
+    }
+
+    #[gpui::test]
+    fn test_auto_close_is_atomic_at_history_limit(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                for _ in 0..999 {
+                    state.replace_text_in_range(None, "a", window, cx);
+                }
+                state.replace_text_in_range(None, "(", window, cx);
+                state.undo(&Undo, window, cx);
+                assert!(!state.text.to_string().contains('('));
+                assert!(!state.text.to_string().contains(')'));
+                state.redo(&Redo, window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, &format!("{}(|)", "a".repeat(999)));
+    }
+
+    #[gpui::test]
+    fn test_comment_closer_is_inserted_literally(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "// (|)");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_syntax_context_provider(std::rc::Rc::new(CommentAllProvider), cx);
+                state.replace_text_in_range(None, ")", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "// ()|)");
+    }
+
+    #[gpui::test]
+    fn test_explicit_range_skip_does_not_delete_existing_closer_on_undo(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "(a|)");
+        let before = view.input.read_with(&cx, |state, _| state.text.to_string());
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.replace_text_in_range(Some(2..2), ")", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "(a)|");
+        cx.update(|window, cx| {
+            view.input
+                .update(cx, |state, cx| state.undo(&Undo, window, cx));
+        });
+        view.input.read_with(&cx, |state, _| {
+            assert_eq!(
+                state.text.to_string(),
+                before,
+                "skip must not remove an existing closer on undo"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn test_pair_redo_restores_interior_cursor(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "|");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "(", window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "(|)");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.undo(&Undo, window, cx);
+                state.redo(&Redo, window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "(|)");
+    }
+
+    #[gpui::test]
+    fn test_pair_enter_redo_restores_interior_cursor(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        setup_cursors(&mut cx, &view.input, "{|}");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.enter(
+                    &Enter {
+                        secondary: false,
+                        shift: false,
+                    },
+                    window,
+                    cx,
+                );
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "{\n  |\n}");
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.undo(&Undo, window, cx);
+            });
+        });
+        assert_cursors(&mut cx, &view.input, "{|}");
+        cx.update(|window, cx| {
+            view.input
+                .update(cx, |state, cx| state.redo(&Redo, window, cx));
+        });
+        assert_cursors(&mut cx, &view.input, "{\n  |\n}");
     }
 
     #[gpui::test]

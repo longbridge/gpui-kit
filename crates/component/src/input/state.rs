@@ -129,8 +129,9 @@ impl TextInputState {
                 let language = state.language_name();
                 let rules = super::edit_rules::language_rules(&language);
                 state.ensure_edit_rules(rules, cx);
-                let provider = super::syntax_context::syntax_context_provider(&language);
-                if state.ensure_syntax_context_provider(&language, provider) {
+                if state.ensure_syntax_context_provider(&language, || {
+                    super::syntax_context::syntax_context_provider(&language)
+                }) {
                     cx.notify();
                 }
             });

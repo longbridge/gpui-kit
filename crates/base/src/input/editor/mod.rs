@@ -98,7 +98,6 @@ impl InputModeKind for EditorMode {
         cx: &mut gpui::Context<InputBaseState<Self>>,
     ) {
         state.handle_completion_trigger(range, text, window, cx);
-        state.handle_auto_close(range, text, window, cx);
     }
 
     fn clear_inline_completion(
@@ -206,23 +205,21 @@ impl EditorState {
     ///
     /// Render-time per-language sync calls this with the editor's current
     /// language. Reinstalls only on language change, preserving the
-    /// provider's incremental parse cache across renders. Returns whether
+    /// provider's parse cache across renders. Returns whether
     /// anything changed.
     pub fn ensure_syntax_context_provider(
         &mut self,
         language: &gpui::SharedString,
-        provider: Option<std::rc::Rc<dyn super::SyntaxContextProvider>>,
+        make_provider: impl FnOnce() -> Option<std::rc::Rc<dyn super::SyntaxContextProvider>>,
     ) -> bool {
         if self.extras.syntax_provider_customized {
             return false;
         }
-        if self.extras.syntax_provider_language.as_ref() == Some(language)
-            && self.extras.syntax_context_provider.is_some() == provider.is_some()
-        {
+        if self.extras.syntax_provider_language.as_ref() == Some(language) {
             return false;
         }
         self.extras.syntax_provider_language = Some(language.clone());
-        self.extras.syntax_context_provider = provider;
+        self.extras.syntax_context_provider = make_provider();
         true
     }
 
@@ -233,100 +230,6 @@ impl EditorState {
             .as_ref()
             .map(|provider| provider.context_at(&self.text, offset))
             .unwrap_or(super::SyntaxContext::Code)
-    }
-
-    /// Automatically insert or skip over a closing bracket or quote.
-    ///
-    /// Called from `on_text_typed` after every edit. Only acts on a single
-    /// freshly typed opener or closer with a collapsed cursor. Bracket policy
-    /// comes from [`super::EditRules`]; this method names no characters.
-    pub(crate) fn handle_auto_close(
-        &mut self,
-        range: &std::ops::Range<usize>,
-        text: &str,
-        window: &mut Window,
-        cx: &mut gpui::Context<Self>,
-    ) {
-        if !self.is_editable() {
-            return;
-        }
-        let Some(rules) = self.mode.edit_rules().cloned() else {
-            return;
-        };
-        if !rules.auto_close {
-            return;
-        }
-        if !self.selections.is_single() || !self.active_selection().is_empty() {
-            return;
-        }
-        // Only single characters typed over a collapsed cursor.
-        if text.chars().count() != 1 || range.start != range.end {
-            return;
-        }
-        let typed: char = text.chars().next().unwrap_or_default();
-        let cursor = self.cursor();
-        // Syntax context: comments are literal text (no pairing, no skip);
-        // inside strings only terminator skip-over applies, never new pairs.
-        // Without a provider everything is Code (previous behavior).
-        let in_string = self.syntax_context_at(range.start) == super::SyntaxContext::String;
-        if self.syntax_context_at(range.start) == super::SyntaxContext::Comment {
-            return;
-        }
-
-        // Escape check first: a quote preceded by an odd run of backslashes
-        // is escaped (e.g. `"hello\"|`), so it is a literal — neither skip
-        // nor pair, just leave the typed character alone.
-        if typed == '"' || typed == '\'' {
-            let mut backslashes = 0;
-            for c in self.text.chars_at(range.start).reversed() {
-                if c != '\\' {
-                    break;
-                }
-                backslashes += 1;
-            }
-            if backslashes % 2 == 1 {
-                return;
-            }
-        }
-
-        // Seek-based neighbor lookup: no linear prefix scan, Unicode-safe.
-        let after: Option<char> = self.text.chars_at(cursor).next();
-
-        // Skip-over: typed a closer that already follows the cursor.
-        // Remove the just-typed char and move past the existing one.
-        // No word guard here: a matching follower is always a closer.
-        if rules.is_closer(typed) && after == Some(typed) {
-            // History-ignoring: the framework's insertion alone stays as
-            // the undoable unit; undo never exposes the transient duplicate.
-            let typed_utf16 = self.range_to_utf16(&(range.start..range.start + typed.len_utf8()));
-            self.replace_silent_ignoring_history(Some(typed_utf16), "", window, cx);
-            // NOTE: byte target is correct: closers are ASCII (1 byte).
-            let target = range.start + typed.len_utf8();
-            self.set_selected_range(target..target, cx);
-            return;
-        }
-
-        // Auto-close: typed an opener, insert the matching closer.
-        // Inside strings no new pairs open (the terminator skip above
-        // already handled closing).
-        if in_string {
-            return;
-        }
-        let Some(closer) = rules.matching_close(typed) else {
-            return;
-        };
-        if closer == typed {
-            // Quotes: don't open a pair inside words (e.g. contractions).
-            // Look at the char before the just-typed quote.
-            let before_typed: Option<char> = (range.start > 0)
-                .then(|| self.text.chars_at(range.start).reversed().next())
-                .flatten();
-            if before_typed.is_some_and(|c| c.is_alphanumeric() || c == '_') {
-                return;
-            }
-        }
-        self.replace_text_in_range_silent(None, &closer.to_string(), window, cx);
-        self.set_selected_range(cursor..cursor, cx);
     }
 }
 

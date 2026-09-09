@@ -195,4 +195,38 @@ mod tests {
         assert_eq!(line_height(cx, Some(px(24.))), px(36.));
         assert_eq!(line_height(cx, Some(px(40.))), px(60.));
     }
+    #[cfg(feature = "tree-sitter-python")]
+    #[gpui::test]
+    fn python_pairing_uses_pre_edit_context(cx: &mut TestAppContext) {
+        use gpui::EntityInputHandler as _;
+        cx.update(crate::init);
+        for (before, cursor, typed, expected) in [
+            ("x = ", 4, "\"", "x = \"\""),
+            ("x = f\"{value}\"", 8, "(", "x = f\"{v()alue}\""),
+            ("x = \"value\"", 7, "(", "x = \"va(lue\""),
+            ("x = \"value\"", 5, "(", "x = \"(value\""),
+            ("x = \"value\"", 10, "(", "x = \"value(\""),
+        ] {
+            let mut state = None;
+            let (_, cx) = cx.add_window_view(|window, cx| {
+                let editor = cx.new(|cx| EditorState::new(window, cx).default_value(before));
+                state = Some(editor.clone());
+                Harness {
+                    state: editor,
+                    text_size: None,
+                }
+            });
+            let state = state.unwrap();
+            VisualTestContext::update(cx, |window, cx| {
+                state.update(cx, |state, cx| {
+                    let provider =
+                        crate::input::syntax_context::syntax_context_provider("python").unwrap();
+                    state.set_syntax_context_provider(provider, cx);
+                    state.set_selected_range(cursor..cursor, cx);
+                    state.replace_text_in_range(None, typed, window, cx);
+                    assert_eq!(state.text().to_string(), expected);
+                });
+            });
+        }
+    }
 }
