@@ -1,7 +1,8 @@
-use std::time::Duration;
+use std::{cell::OnceCell, time::Duration};
 
 use gpui::{
-    Along, Axis, Bounds, Context, EventEmitter, Pixels, Point, ScrollHandle, TouchPhase, px,
+    Along, App, Axis, Bounds, Context, EventEmitter, FocusHandle, Focusable, Pixels, Point,
+    ScrollHandle, TouchPhase, px,
 };
 
 const POINTER_AXIS_LOCK_THRESHOLD: Pixels = px(2.);
@@ -80,6 +81,8 @@ pub struct CarouselState {
     loop_motion_target: Option<Point<Pixels>>,
     wheel_burst_active: bool,
     wheel_burst_epoch: usize,
+    focus_handle: OnceCell<FocusHandle>,
+    focus_ring_suppressed: bool,
 }
 
 impl CarouselState {
@@ -105,6 +108,8 @@ impl CarouselState {
             loop_motion_target: None,
             wheel_burst_active: false,
             wheel_burst_epoch: 0,
+            focus_handle: OnceCell::new(),
+            focus_ring_suppressed: false,
         }
     }
 
@@ -302,6 +307,16 @@ impl CarouselState {
     /// Returns the shared scroll handle used by the content viewport.
     pub(super) fn scroll_handle(&self) -> &ScrollHandle {
         &self.scroll_handle
+    }
+
+    /// Hides or restores the focus ring. Focus that arrives through the
+    /// pointer keeps the arrow keys working without drawing the ring.
+    pub(super) fn suppress_focus_ring(&mut self, suppressed: bool) {
+        self.focus_ring_suppressed = suppressed;
+    }
+
+    pub(super) fn is_focus_ring_suppressed(&self) -> bool {
+        self.focus_ring_suppressed
     }
 
     /// Returns whether pointer or trackpad input is currently active.
@@ -1244,6 +1259,14 @@ impl CarouselState {
 }
 
 impl EventEmitter<CarouselEvent> for CarouselState {}
+
+impl Focusable for CarouselState {
+    /// The keyboard focus shared by every part: the root tracks it, and a
+    /// clicked control moves focus here so the arrow keys keep working.
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.focus_handle.get_or_init(|| cx.focus_handle()).clone()
+    }
+}
 
 #[cfg(test)]
 mod tests {

@@ -106,7 +106,7 @@ let state = cx.new(|_| {
 横向 Carousel 使用 Left 和 Right，纵向 Carousel 使用 Up 和 Down。
 纵向 `CarouselContent` 需要设置明确的高度，让每个全高 item 都有可供吸附的 viewport。
 
-Carousel 根节点可通过 Tab 获得焦点，因此省略可选控制按钮时仍可使用键盘导航。Home 和 End 用于选择第一项和最后一项。
+Carousel 根节点可通过 Tab 获得焦点，因此省略可选控制按钮时仍可使用键盘导航。Home 和 End 用于选择第一项和最后一项。点击 Carousel 内部或它的控制按钮同样会让它获得焦点以便键盘导航，但不会显示焦点环；焦点环只在通过键盘聚焦时出现。
 
 ## 循环
 

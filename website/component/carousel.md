@@ -106,7 +106,7 @@ let state = cx.new(|_| {
 Horizontal carousels use Left and Right. Vertical carousels use Up and Down.
 Give vertical `CarouselContent` an explicit height so each full-height item has a viewport to snap within.
 
-The Carousel root is a tab stop, so keyboard navigation also works when optional controls are omitted. Home and End select the first and last items.
+The Carousel root is a tab stop, so keyboard navigation also works when optional controls are omitted. Home and End select the first and last items. Clicking inside the carousel or on one of its controls focuses it for keyboard navigation without drawing the focus ring; the ring appears only when focus arrives from the keyboard.
 
 ## Looping
 

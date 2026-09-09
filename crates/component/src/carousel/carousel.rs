@@ -1,10 +1,11 @@
 use std::{panic::Location, sync::Arc};
 
 use gpui::{
-    AnyElement, App, Axis, Bounds, Element, ElementId, Entity, GlobalElementId, InspectorElementId,
-    InteractiveElement as _, IntoElement, LayoutId, ParentElement, Pixels, Point, RenderOnce, Role,
-    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Subscription, Window,
-    div, prelude::FluentBuilder as _, px,
+    AnyElement, App, Axis, Bounds, ClickEvent, Element, ElementId, Entity, FocusHandle, Focusable,
+    GlobalElementId, InspectorElementId, InteractiveElement as _, IntoElement, LayoutId,
+    MouseButton, ParentElement, Pixels, Point, RenderOnce, Role, SharedString,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_base::spring;
 use rust_i18n::t;
@@ -34,6 +35,12 @@ pub struct Carousel {
 }
 
 struct CarouselStateObserver {
+    _subscription: Subscription,
+}
+
+/// Restores the focus ring once the carousel loses focus, so the next
+/// keyboard focus draws it again.
+struct CarouselFocusOut {
     _subscription: Subscription,
 }
 
@@ -93,13 +100,20 @@ impl RenderOnce for Carousel {
         let snapshot = self.state.read(cx);
         let axis = snapshot.axis();
         let frame_size = snapshot.frame_size();
-        let focus_handle = window
-            .use_keyed_state(("carousel-focus", self.state.entity_id()), cx, |_, cx| {
-                cx.focus_handle()
-            })
-            .read(cx)
-            .clone();
-        let focus_visible = focus_handle.is_focused(window) && self.focus_ring_enabled;
+        let focus_handle = snapshot.focus_handle(cx);
+        let ring_suppressed = snapshot.is_focus_ring_suppressed();
+        let _focus_out =
+            window.use_keyed_state(("carousel-focus-out", self.state.entity_id()), cx, {
+                let state = self.state.clone();
+                let focus_handle = focus_handle.clone();
+                move |window, cx| CarouselFocusOut {
+                    _subscription: window.on_focus_out(&focus_handle, cx, move |_, _, cx| {
+                        state.update(cx, |state, _| state.suppress_focus_ring(false));
+                    }),
+                }
+            });
+        let is_focused = focus_handle.is_focused(window);
+        let focus_visible = is_focused && !ring_suppressed && self.focus_ring_enabled;
         let previous_state = self.state.clone();
         let next_state = self.state.clone();
         let first_state = self.state.clone();
@@ -115,6 +129,16 @@ impl RenderOnce for Carousel {
             .aria_label(self.accessibility_label)
             .track_focus(&focus_handle.tab_stop(true))
             .key_context(CONTEXT)
+            .on_mouse_down(MouseButton::Left, {
+                let state = self.state.clone();
+                move |_, window, cx| {
+                    // Runs before GPUI moves focus here. A child such as
+                    // Button that keeps focus has already prevented the default.
+                    if !is_focused && !window.default_prevented() {
+                        state.update(cx, |state, _| state.suppress_focus_ring(true));
+                    }
+                }
+            })
             .on_action(
                 window.listener_for(&previous_state, move |state, _: &SelectLeft, _, cx| {
                     let handled = axis.is_horizontal() && state.select_previous(cx);
@@ -695,6 +719,7 @@ fn carousel_control(
     let snapshot = state.read(cx);
     let axis = snapshot.axis();
     let frame_size = snapshot.frame_size();
+    let focus_handle = snapshot.focus_handle(cx);
     let disabled = if next {
         !snapshot.has_next()
     } else {
@@ -742,7 +767,7 @@ fn carousel_control(
                     this.top_full().mt_4().left_0().right_0().mx_auto()
                 })
                 .when(!disabled, |this| {
-                    this.on_click(move |_, _, cx| {
+                    this.on_click(move |event, window, cx| {
                         state.update(cx, |state, cx| {
                             if next {
                                 state.select_next(cx);
@@ -750,6 +775,7 @@ fn carousel_control(
                                 state.select_previous(cx);
                             }
                         });
+                        focus_after_pointer_click(&state, &focus_handle, event, window, cx);
                     })
                 })
                 .children(children)
@@ -868,6 +894,7 @@ impl RenderOnce for CarouselPaginationItem {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let selected = self.state.read(cx).selected_index() == Some(self.index);
         let disabled = self.index >= self.state.read(cx).item_count();
+        let focus_handle = self.state.read(cx).focus_handle(cx);
         let label = self.accessibility_label.unwrap_or_else(|| {
             t!(
                 "Carousel.go_to_slide",
@@ -886,14 +913,32 @@ impl RenderOnce for CarouselPaginationItem {
             .disabled(disabled)
             .children(self.children)
             .when(!disabled, |this| {
-                this.on_click(move |_, _, cx| {
+                this.on_click(move |event, window, cx| {
                     state.update(cx, |state, cx| {
                         state.select_index(index, cx);
                     });
+                    focus_after_pointer_click(&state, &focus_handle, event, window, cx);
                 })
             })
             .refine_style(&self.style)
     }
+}
+
+/// Moves keyboard focus to the carousel after a pointer click on one of its
+/// controls, so the arrow keys keep working without drawing the ring. A
+/// keyboard activation leaves focus on the control.
+fn focus_after_pointer_click(
+    state: &Entity<CarouselState>,
+    focus_handle: &FocusHandle,
+    event: &ClickEvent,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if event.is_keyboard() || focus_handle.contains_focused(window, cx) {
+        return;
+    }
+    state.update(cx, |state, _| state.suppress_focus_ring(true));
+    window.focus(focus_handle, cx);
 }
 
 fn axis_value(point: Point<Pixels>, axis: Axis) -> Pixels {
@@ -929,7 +974,7 @@ mod tests {
     use std::{cell::Cell, rc::Rc};
 
     use super::*;
-    use gpui::{AppContext as _, Context, Render, point};
+    use gpui::{AppContext as _, Context, Render, VisualTestContext, point};
     use gpui_base::FocusableExt as _;
 
     #[test]
@@ -1131,6 +1176,94 @@ mod tests {
             assert_eq!(track, expected, "{axis:?}");
             assert_eq!(first_item, expected, "{axis:?}");
         }
+    }
+
+    #[gpui::test]
+    fn clicking_a_slide_focuses_the_carousel_for_keyboard_navigation(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|_| CarouselState::new(3)));
+        let (_, cx) = cx.add_window_view({
+            let state = state.clone();
+            move |_, _| KeyboardHarness { state }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.update(|window, cx| window.focused(cx).is_none()));
+
+        cx.simulate_click(point(px(50.), px(50.)), gpui::Modifiers::default());
+        assert!(cx.update(|window, cx| window.focused(cx).is_some()));
+
+        cx.simulate_keystrokes("right");
+        assert_eq!(
+            state.read_with(cx, |state, _| state.selected_index()),
+            Some(1)
+        );
+    }
+
+    struct ControlsHarness {
+        state: Entity<CarouselState>,
+    }
+
+    impl Render for ControlsHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().tab_group().child(
+                Carousel::new("carousel", &self.state)
+                    .w(px(100.))
+                    .h(px(100.))
+                    .child(
+                        CarouselContent::new(&self.state)
+                            .h(px(100.))
+                            .children((0..3).map(|index| {
+                                CarouselItem::new(("carousel-item", index), index, &self.state)
+                                    .child(index.to_string())
+                            })),
+                    )
+                    .child(CarouselPrevious::new(&self.state))
+                    .child(CarouselNext::new(&self.state)),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn clicking_a_control_focuses_the_carousel_for_keyboard_navigation(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|_| CarouselState::new(3)));
+        let (_, cx) = cx.add_window_view({
+            let state = state.clone();
+            move |_, _| ControlsHarness { state }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let selected =
+            |cx: &mut VisualTestContext| state.read_with(cx, |state, _| state.selected_index());
+        let root_focused = |cx: &mut VisualTestContext| {
+            cx.update(|window, cx| state.read(cx).focus_handle(cx).is_focused(window))
+        };
+
+        // A pointer click on Next moves focus to the carousel.
+        cx.simulate_click(point(px(134.), px(50.)), gpui::Modifiers::default());
+        assert_eq!(selected(cx), Some(1));
+        assert!(root_focused(cx));
+        cx.simulate_keystrokes("right");
+        assert_eq!(selected(cx), Some(2));
+
+        // Keyboard activation of a control leaves focus on the control.
+        cx.simulate_keystrokes("left");
+        cx.update(|window, cx| window.focus_next(cx));
+        cx.update(|window, cx| window.focus_next(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let keystroke = gpui::Keystroke::parse("enter").unwrap();
+        cx.simulate_event(gpui::KeyDownEvent {
+            keystroke: keystroke.clone(),
+            is_held: false,
+            prefer_character_input: false,
+        });
+        cx.simulate_event(gpui::KeyUpEvent { keystroke });
+        assert_eq!(selected(cx), Some(2));
+        assert!(!root_focused(cx));
+        assert!(cx.update(|window, cx| window.focused(cx).is_some()));
     }
 
     #[gpui::test]
