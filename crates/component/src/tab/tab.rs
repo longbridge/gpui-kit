@@ -704,7 +704,7 @@ impl RenderOnce for Tab {
         let inner_content = h_flex()
             .flex_1()
             .h(inner_height)
-            .line_height(relative(1.))
+            .line_height(relative(1.25))
             .whitespace_nowrap()
             .items_center()
             .justify_center()

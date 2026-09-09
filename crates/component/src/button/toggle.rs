@@ -3,7 +3,7 @@ use std::{cell::Cell, rc::Rc};
 use gpui::{
     AnyElement, App, Axis, Corners, Edges, ElementId, InteractiveElement, IntoElement,
     ParentElement, RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled,
-    Window, prelude::FluentBuilder as _,
+    Window, prelude::FluentBuilder as _, relative,
 };
 use gpui_base::{Toggle as BaseToggle, ToggleGroup as BaseToggleGroup};
 use smallvec::{SmallVec, smallvec};
@@ -168,6 +168,7 @@ impl RenderOnce for Toggle {
             })
             .flex()
             .flex_row()
+            .line_height(relative(1.25))
             .items_center()
             .justify_center()
             .map(|this| match self.size {

@@ -323,7 +323,7 @@ impl RenderOnce for Checkbox {
                     v_flex()
                         .flex_1()
                         .overflow_hidden()
-                        .line_height(relative(1.2))
+                        .line_height(relative(1.25))
                         .gap_1()
                         .map(|this| {
                             if let Some(label) = self.label {
@@ -334,7 +334,6 @@ impl RenderOnce for Checkbox {
                                         .when(self.disabled, |this| {
                                             this.text_color(cx.theme().muted_foreground)
                                         })
-                                        .line_height(relative(1.))
                                         .child(label),
                                 )
                             } else {

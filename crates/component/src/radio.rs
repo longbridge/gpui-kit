@@ -244,13 +244,12 @@ impl RenderOnce for Radio {
                 this.child(
                     v_flex()
                         .w_full()
-                        .line_height(relative(1.2))
+                        .line_height(relative(1.25))
                         .gap_1()
                         .when_some(self.label, |this, label| {
                             this.child(
                                 div()
                                     .size_full()
-                                    .line_height(relative(1.))
                                     .when(self.disabled, |this| {
                                         this.text_color(cx.theme().muted_foreground)
                                     })
