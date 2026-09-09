@@ -174,17 +174,17 @@ Previous and next controls default to `Size::Medium`. Pagination items default t
 
 ## Custom controls
 
-`CarouselPrevious` and `CarouselNext` implement `ParentElement` and `Styled`. Without children they display the direction-appropriate chevron. Add a child to replace that visible content while preserving automatic navigation and disabled boundary states. `with_accessibility_label` also replaces the control's tooltip.
+`CarouselPrevious` and `CarouselNext` implement `ParentElement` and `Styled`. Without children they display the direction-appropriate chevron. Add a child to replace that visible content while preserving automatic navigation and disabled boundary states. `accessibility_label` also replaces the control's tooltip.
 
 ```rust
 use gpui_kit::ParentElement as _;
 
 CarouselPrevious::new(&state)
-    .with_accessibility_label("Previous project")
+    .accessibility_label("Previous project")
     .child("Back");
 
 CarouselNext::new(&state)
-    .with_accessibility_label("Next project")
+    .accessibility_label("Next project")
     .child("Forward");
 ```
 
@@ -209,6 +209,6 @@ Button::new("projects-previous")
 
 ## Accessibility
 
-The carousel exposes a labelled region and each item reports its position within the set. Use `with_accessibility_label` when the default "Carousel" label does not describe the content.
+The carousel exposes a labelled region and each item reports its position within the set. Use `accessibility_label` when the default "Carousel" label does not describe the content.
 
 Carousel animation follows the application's reduced-motion preference.

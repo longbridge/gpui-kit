@@ -56,6 +56,8 @@ enum Op {
     AccessibilityLabel(String),
     FocusRing(bool),
     Size(Size),
+    SelectedIndex(usize),
+    ItemCount(usize),
     OnChange(ComponentArgument),
 }
 
@@ -85,12 +87,28 @@ impl ComponentMaterializer for Materializer {
                     .next_back()
                     .map(|argument| request.resolve_callback(argument))
                     .transpose()?;
+                let selected_index = operations
+                    .iter()
+                    .filter_map(|operation| match operation {
+                        Op::SelectedIndex(index) => Some(*index),
+                        _ => None,
+                    })
+                    .next_back();
+                let item_count = operations
+                    .iter()
+                    .filter_map(|operation| match operation {
+                        Op::ItemCount(count) => Some(*count),
+                        _ => None,
+                    })
+                    .next_back();
                 let mut carousel = Carousel::new(id.clone(), &state);
                 for operation in operations {
                     carousel = match operation {
-                        Op::AccessibilityLabel(value) => carousel.with_accessibility_label(value),
+                        Op::AccessibilityLabel(value) => carousel.accessibility_label(value),
                         Op::FocusRing(value) => carousel.focus_ring(value),
-                        Op::Size(_) | Op::OnChange(_) => carousel,
+                        Op::Size(_) | Op::SelectedIndex(_) | Op::ItemCount(_) | Op::OnChange(_) => {
+                            carousel
+                        }
                     };
                 }
                 let child = finish_typed_children(
@@ -108,6 +126,8 @@ impl ComponentMaterializer for Materializer {
                     id,
                     state,
                     callback,
+                    selected_index,
+                    item_count,
                     child,
                 }
                 .into_any_element())
@@ -126,7 +146,7 @@ impl ComponentMaterializer for Materializer {
                 let mut item = CarouselItem::new(id, index, &state);
                 for operation in operations {
                     if let Op::AccessibilityLabel(value) = operation {
-                        item = item.with_accessibility_label(value);
+                        item = item.accessibility_label(value);
                     }
                 }
                 finish_part(&mut request, item)
@@ -136,9 +156,12 @@ impl ComponentMaterializer for Materializer {
                 let mut previous = CarouselPrevious::new(&state);
                 for operation in operations {
                     previous = match operation {
-                        Op::AccessibilityLabel(value) => previous.with_accessibility_label(value),
+                        Op::AccessibilityLabel(value) => previous.accessibility_label(value),
                         Op::Size(value) => previous.with_size(value),
-                        Op::FocusRing(_) | Op::OnChange(_) => previous,
+                        Op::FocusRing(_)
+                        | Op::SelectedIndex(_)
+                        | Op::ItemCount(_)
+                        | Op::OnChange(_) => previous,
                     };
                 }
                 finish_part(&mut request, previous)
@@ -148,26 +171,42 @@ impl ComponentMaterializer for Materializer {
                 let mut next = CarouselNext::new(&state);
                 for operation in operations {
                     next = match operation {
-                        Op::AccessibilityLabel(value) => next.with_accessibility_label(value),
+                        Op::AccessibilityLabel(value) => next.accessibility_label(value),
                         Op::Size(value) => next.with_size(value),
-                        Op::FocusRing(_) | Op::OnChange(_) => next,
+                        Op::FocusRing(_)
+                        | Op::SelectedIndex(_)
+                        | Op::ItemCount(_)
+                        | Op::OnChange(_) => next,
                     };
                 }
                 finish_part(&mut request, next)
             }
-            Payload::Pagination => finish_typed_children(
-                &mut request,
-                CarouselPagination::new(),
-                "CarouselPagination",
-                &["CarouselPaginationItem"],
-            ),
+            Payload::Pagination => {
+                let mut pagination = CarouselPagination::new();
+                for operation in operations {
+                    if let Op::AccessibilityLabel(value) = operation {
+                        pagination = pagination.accessibility_label(value);
+                    }
+                }
+                finish_typed_children(
+                    &mut request,
+                    pagination,
+                    "CarouselPagination",
+                    &["CarouselPaginationItem"],
+                )
+            }
             Payload::PaginationItem { id, index, state } => {
                 let state = request.with_state::<Entity<CarouselState>, _>(&state, Clone::clone)?;
                 let mut item = CarouselPaginationItem::new(id, index, &state);
                 for operation in operations {
-                    if let Op::Size(value) = operation {
-                        item = item.with_size(value);
-                    }
+                    item = match operation {
+                        Op::AccessibilityLabel(value) => item.accessibility_label(value),
+                        Op::Size(value) => item.with_size(value),
+                        Op::FocusRing(_)
+                        | Op::SelectedIndex(_)
+                        | Op::ItemCount(_)
+                        | Op::OnChange(_) => item,
+                    };
                 }
                 finish_part(&mut request, item)
             }
@@ -185,11 +224,32 @@ struct BoundCarousel {
     id: String,
     state: Entity<CarouselState>,
     callback: Option<ComponentCallback>,
+    selected_index: Option<usize>,
+    item_count: Option<usize>,
     child: gpui::AnyElement,
 }
 
 impl RenderOnce for BoundCarousel {
     fn render(self, window: &mut Window, cx: &mut App) -> impl gpui::IntoElement {
+        // A script that passes `item_count` or `selected_index` owns that
+        // value, so every frame reasserts it. Both setters are silent and only
+        // run when the value actually differs, which keeps a gesture in
+        // progress from being cancelled and cannot loop through `on_change`.
+        if let Some(count) = self.item_count.filter(|count| {
+            let state = self.state.read(cx);
+            state.item_count() != *count
+        }) {
+            self.state
+                .update(cx, |state, cx| state.set_item_count(count, cx));
+        }
+        if let Some(index) = self.selected_index.filter(|index| {
+            let state = self.state.read(cx);
+            state.item_count() > 0 && state.selected_index() != Some(*index)
+        }) {
+            self.state
+                .update(cx, |state, cx| state.set_selected_index(index, cx));
+        }
+
         let initial_callback = self.callback.clone();
         let state = self.state.clone();
         let host: Entity<ChangeHost> = window.use_keyed_state(
@@ -327,6 +387,26 @@ fn accessibility_label_method(component: &'static str) -> MethodDescriptor {
     )
 }
 
+fn usize_method(
+    component: &'static str,
+    name: &'static str,
+    documentation: &'static str,
+    make: fn(usize) -> Op,
+) -> MethodDescriptor {
+    MethodDescriptor::new(
+        name,
+        vec![ArgumentDescriptor::new("value", ArgumentSchema::Number)],
+        move |arguments| match arguments {
+            [argument] => Ok(ComponentPayload::new(make(nonnegative_usize(
+                argument,
+                &format!("{component}.{name}(value)"),
+            )?))),
+            _ => Err(format!("{component}.{name}(value) expects one number")),
+        },
+    )
+    .with_documentation(documentation)
+}
+
 fn size_method(component: &'static str) -> MethodDescriptor {
     MethodDescriptor::new(
         "size",
@@ -443,6 +523,18 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
                 "Controls whether keyboard focus draws a focus ring.",
                 Op::FocusRing,
             ),
+            usize_method(
+                "Carousel",
+                "item_count",
+                "Sets the number of logical items the state tracks.",
+                Op::ItemCount,
+            ),
+            usize_method(
+                "Carousel",
+                "selected_index",
+                "Selects an item without emitting a change event, for a script that owns the selection.",
+                Op::SelectedIndex,
+            ),
             MethodDescriptor::new(
                 "on_change",
                 vec![ArgumentDescriptor::new(
@@ -499,7 +591,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
         ConstructorDescriptor::new("CarouselPagination", vec![], |_| {
             Ok(ComponentPayload::new(Payload::Pagination))
         }),
-        vec![],
+        vec![accessibility_label_method("CarouselPagination")],
         "A container that accepts only CarouselPaginationItem children.",
     ))?;
     registry.register(descriptor(
@@ -507,7 +599,10 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
         indexed_state_constructor("CarouselPaginationItem", |id, index, state| {
             Payload::PaginationItem { id, index, state }
         }),
-        vec![size_method("CarouselPaginationItem")],
+        vec![
+            accessibility_label_method("CarouselPaginationItem"),
+            size_method("CarouselPaginationItem"),
+        ],
         "One indexed Carousel pagination control.",
     ))?;
 
@@ -556,6 +651,49 @@ mod tests {
                     .iter()
                     .all(|method| method.documentation().is_some())
         }));
+    }
+
+    #[test]
+    fn every_part_exposes_its_scriptable_surface() {
+        let mut registry =
+            ComponentRegistry::new(COMPONENT_REGISTRY_API_VERSION, DEFAULT_COMPONENT_MODULE)
+                .unwrap();
+        register(&mut registry).unwrap();
+        let frozen = registry.freeze().unwrap();
+        let methods = |component: &str| {
+            frozen
+                .descriptors()
+                .find(|descriptor| descriptor.name() == component)
+                .map(|descriptor| {
+                    descriptor
+                        .methods()
+                        .iter()
+                        .map(|method| method.name().to_owned())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap()
+        };
+
+        // A script owns the selection and the item count through the root.
+        let root = methods("Carousel");
+        assert!(root.contains(&"item_count".to_owned()), "{root:?}");
+        assert!(root.contains(&"selected_index".to_owned()), "{root:?}");
+
+        // Every part whose Rust builder takes an accessibility label exposes it.
+        for component in [
+            "Carousel",
+            "CarouselItem",
+            "CarouselPrevious",
+            "CarouselNext",
+            "CarouselPagination",
+            "CarouselPaginationItem",
+        ] {
+            let names = methods(component);
+            assert!(
+                names.contains(&"accessibility_label".to_owned()),
+                "{component}: {names:?}"
+            );
+        }
     }
 
     #[test]

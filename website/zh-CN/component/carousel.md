@@ -174,17 +174,17 @@ CarouselNext::new(&state).with_size(Size::Large);
 
 ## 自定义控制按钮
 
-`CarouselPrevious` 和 `CarouselNext` 实现了 `ParentElement` 与 `Styled`。没有子元素时，它们会根据方向显示对应的箭头；添加子元素后，可以替换可见内容，同时保留自动导航和边界禁用状态。`with_accessibility_label` 也会同步替换控件的 tooltip。
+`CarouselPrevious` 和 `CarouselNext` 实现了 `ParentElement` 与 `Styled`。没有子元素时，它们会根据方向显示对应的箭头；添加子元素后，可以替换可见内容，同时保留自动导航和边界禁用状态。`accessibility_label` 也会同步替换控件的 tooltip。
 
 ```rust
 use gpui_kit::ParentElement as _;
 
 CarouselPrevious::new(&state)
-    .with_accessibility_label("上一个项目")
+    .accessibility_label("上一个项目")
     .child("返回");
 
 CarouselNext::new(&state)
-    .with_accessibility_label("下一个项目")
+    .accessibility_label("下一个项目")
     .child("继续");
 ```
 
@@ -209,6 +209,6 @@ Button::new("projects-previous")
 
 ## 无障碍
 
-Carousel 会提供带 label 的区域，每个 item 会报告自己在内容集合中的位置。当默认的“轮播”无法准确描述内容时，使用 `with_accessibility_label` 设置更明确的名称。
+Carousel 会提供带 label 的区域，每个 item 会报告自己在内容集合中的位置。当默认的“轮播”无法准确描述内容时，使用 `accessibility_label` 设置更明确的名称。
 
 Carousel 动画会遵循应用的减少动效设置。

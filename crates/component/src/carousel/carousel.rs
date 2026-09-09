@@ -58,7 +58,7 @@ impl Carousel {
     }
 
     /// Sets the name announced for the carousel region.
-    pub fn with_accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = label.into();
         self
     }
@@ -535,7 +535,7 @@ impl CarouselItem {
     }
 
     /// Replaces the generated "Slide N of M" accessibility label.
-    pub fn with_accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
         self
     }
@@ -606,7 +606,7 @@ impl CarouselPrevious {
     }
 
     /// Replaces the generated previous-slide accessibility label and tooltip.
-    pub fn with_accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
         self
     }
@@ -668,7 +668,7 @@ impl CarouselNext {
     }
 
     /// Replaces the generated next-slide accessibility label and tooltip.
-    pub fn with_accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
         self
     }
@@ -805,7 +805,7 @@ impl CarouselPagination {
     }
 
     /// Sets the name announced for the pagination group.
-    pub fn with_accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = label.into();
         self
     }
@@ -865,7 +865,7 @@ impl CarouselPaginationItem {
     }
 
     /// Replaces the generated "Go to slide N" accessibility label.
-    pub fn with_accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
         self
     }
@@ -1270,10 +1270,10 @@ mod tests {
     fn carousel_controls_accept_accessibility_labels_and_children(cx: &mut gpui::TestAppContext) {
         let state = cx.update(|cx| cx.new(|_| CarouselState::new(2)));
         let previous = CarouselPrevious::new(&state)
-            .with_accessibility_label("Previous project")
+            .accessibility_label("Previous project")
             .child("Back");
         let next = CarouselNext::new(&state)
-            .with_accessibility_label("Next project")
+            .accessibility_label("Next project")
             .child("Forward");
 
         assert_eq!(

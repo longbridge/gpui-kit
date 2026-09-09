@@ -218,13 +218,13 @@ impl Render for CarouselStory {
                             .child(
                                 CarouselPrevious::new(&self.custom_controls)
                                     .with_size(self.size)
-                                    .with_accessibility_label("Previous project")
+                                    .accessibility_label("Previous project")
                                     .child("Back"),
                             )
                             .child(
                                 CarouselNext::new(&self.custom_controls)
                                     .with_size(self.size)
-                                    .with_accessibility_label("Next project")
+                                    .accessibility_label("Next project")
                                     .child("Forward"),
                             ),
                     ),

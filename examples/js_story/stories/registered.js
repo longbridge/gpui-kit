@@ -1399,6 +1399,7 @@ export function registeredExamples(surface, cx) {
             new Carousel("story-carousel", carouselState)
               .w(384)
               .max_w_full()
+              .selected_index(/** @type {number} */ (state("carousel-index", 0)))
               .on_change((index, cx) => setState("carousel-index", index, cx))
               .child(
                 new CarouselContent(carouselState)
