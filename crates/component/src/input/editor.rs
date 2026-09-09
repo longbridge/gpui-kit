@@ -202,7 +202,7 @@ mod tests {
         cx.update(crate::init);
         for (before, cursor, typed, expected) in [
             ("x = ", 4, "\"", "x = \"\""),
-            ("x = f\"{value}\"", 8, "(", "x = f\"{v()alue}\""),
+            ("x = f\"{value}\"", 12, "(", "x = f\"{value()}\""),
             ("x = \"value\"", 7, "(", "x = \"va(lue\""),
             ("x = \"value\"", 5, "(", "x = \"(value\""),
             ("x = \"value\"", 10, "(", "x = \"value(\""),
