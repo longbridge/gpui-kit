@@ -10,8 +10,8 @@
 
 use std::time::Instant;
 
-use gpui::*;
 use gpui_fps::fps_monitor;
+use gpui_kit::*;
 
 /// Matches the original demo: a one-iteration Hilbert curve of 64 control
 /// points, resampled at six points each.
@@ -394,7 +394,7 @@ fn lerp3(a: Vec3, b: Vec3, t: f32) -> Vec3 {
 actions!(fps_monitor, [Quit]);
 
 fn main() {
-    gpui_platform::application().run(move |cx: &mut App| {
+    gpui_kit::application().run(move |cx: &mut App| {
         cx.bind_keys([
             #[cfg(target_os = "macos")]
             KeyBinding::new("cmd-q", Quit, None),

@@ -1,16 +1,16 @@
-use gpui::{
-    App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, Styled, Window, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, Size, avatar::Avatar, badge::Badge,
     dock::PanelControl, v_flex,
+};
+use gpui_kit::{
+    App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    ParentElement, Render, Styled, Window, px,
 };
 
 use crate::{ChangeStorySize, section, story_toolbar};
 
 pub struct BadgeStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     size: Size,
 }
 

@@ -1,14 +1,14 @@
 use crate::section;
-use gpui::{
+use gpui_kit::component::{ActiveTheme, h_flex, label::Label, separator::Separator, v_flex};
+use gpui_kit::{
     App, AppContext, Context, Entity, Focusable, IntoElement, ParentElement, Render, Styled,
     Window, px,
 };
-use gpui_component::{ActiveTheme, h_flex, label::Label, separator::Separator, v_flex};
 
 const DESCRIPTION: &str = "GPUI Component is a Rust GUI components for building fantastic cross-platform desktop application by using GPUI.";
 
 pub struct SeparatorStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
 }
 
 impl super::Story for SeparatorStory {
@@ -34,7 +34,7 @@ impl SeparatorStory {
 }
 
 impl Focusable for SeparatorStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

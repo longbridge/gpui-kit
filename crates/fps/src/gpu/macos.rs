@@ -11,13 +11,13 @@
 
 use std::{ffi::c_char, ptr::NonNull};
 
-use instant::Instant;
 use objc2_core_foundation::{CFArray, CFDictionary, CFNumber, CFNumberType, CFRetained, CFString};
 use objc2_io_kit::{
     IOIteratorNext, IOObjectRelease, IORegistryEntryCreateCFProperties,
     IORegistryEntryGetChildIterator, IOServiceGetMatchingServices, IOServiceMatching,
     io_iterator_t, io_registry_entry_t, kIOMainPortDefault, kIOReturnSuccess,
 };
+use web_time::Instant;
 
 /// The registry plane the accelerator's clients hang off, as the fixed size
 /// buffer the call takes.

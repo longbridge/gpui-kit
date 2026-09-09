@@ -39,7 +39,7 @@ ui.js                  呈现层，以函数形式导出
 storage.js             持久化，以及没拿到授权时怎么办
 confirm.js             确认 dialog，它自己也是一个 View
 icons/                 四个 SVG，相对应用根目录解析
-gpui.d.ts              自动生成；jsconfig.json 与 types.d.ts 把类型接上
+gpui-kit.d.ts              自动生成；jsconfig.json 与 types.d.ts 把类型接上
 ```
 
 其中有四件事值得照抄。
@@ -74,7 +74,7 @@ export function load() {
 
 **dialog 是一个函数，不是一个元素。** `confirm.js` default 导出一个返回内容函数的函数；`main.js` 用 `window.open_dialog(confirmClear(count, onConfirm))` 打开它。数量和回调是闭包捕获的，不是交接过去的。见 [Overlays](./overlays.md)。
 
-**类型是配好的，一共三个文件。** `jsconfig.json` 打开 `checkJs`，`gpui.d.ts` 由 `gpui-shell types` 生成，`types.d.ts` 放这个应用自己的形状——`Todo`、`Filter`。编辑器补全与 `checkJs` 报错从此就能用，不需要任何构建步骤。
+**类型是配好的，一共三个文件。** `jsconfig.json` 打开 `checkJs`，`gpui-kit.d.ts` 由 `gpui-shell types` 生成，`types.d.ts` 放这个应用自己的形状——`Todo`、`Filter`。编辑器补全与 `checkJs` 报错从此就能用，不需要任何构建步骤。
 
 ## 工作区
 

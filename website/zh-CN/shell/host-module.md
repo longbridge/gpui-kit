@@ -11,9 +11,9 @@ order: 12
 脚本无法加载 native 扩展。`dlopen` 进来的 Rust 没有稳定 ABI，而且一旦进了进程，它就持有进程的全部权限——允许这种事的沙箱等于没有沙箱。所以方向是反的：**Host 在编译期注册它愿意暴露的那部分 Rust**，脚本能够到的就只有这些，一点不多。
 
 ```rust
-use gpui_shell::{HostModule, HostValue};
+use gpui_kit::shell::{HostModule, HostValue};
 
-gpui_shell::export_module(
+gpui_kit::shell::export_module(
     HostModule::new("workspace")
         .function("project_name", |_| Ok(HostValue::from("gpui-component")))
         .function("version", |_| Ok(HostValue::from("0.1.0"))),
@@ -23,10 +23,10 @@ gpui_shell::export_module(
 ```js
 import { project_name } from "workspace";
 
-project_name();      // "gpui-component"
+project_name(); // "gpui-component"
 ```
 
-注册好的模块就是一个普通的 ES module，由解析 `gpui` 和 `path` 的同一个 loader 负责。一次调用注册一个模块，重名会替换掉先前那个而不是合并进去——有三个模块的 Host 就调三次 `export_module`。本页余下的部分讲它的代价和它拒绝的东西。
+注册好的模块就是一个普通的 ES module，由解析 `gpui-kit` 和 `path` 的同一个 loader 负责。一次调用注册一个模块，重名会替换掉先前那个而不是合并进去——有三个模块的 Host 就调三次 `export_module`。本页余下的部分讲它的代价和它拒绝的东西。
 
 ## 为什么是 import 而不是查表
 
@@ -35,12 +35,12 @@ project_name();      // "gpui-component"
 ```js
 // 这里没有采用的形态。
 const workspace = native("workspace");
-workspace.projectName();          // 拼错了：迟早会抛
+workspace.projectName(); // 拼错了：迟早会抛
 ```
 
 ```js
 // 实际采用的形态。
-import { projectName } from "workspace";   // 拼错了：链接阶段就失败
+import { projectName } from "workspace"; // 拼错了：链接阶段就失败
 ```
 
 它输两次，而且都输在**你什么时候才发现**上：
@@ -57,7 +57,7 @@ import **没有**冻结的是名字背后的那个函数。每个导出都是一
 ```text
 HostModule `market` is not available: this Host registered none.
 HostModule access is granted by the embedding application, with
-gpui_shell::export_module(...).
+gpui_kit::shell::export_module(...).
 ```
 
 注册了东西之后，消息就变成告诉你有什么：
@@ -87,7 +87,7 @@ are: gpui, gpui-base, gpui-fps, buffer, console, crypto, fs/promises, net, os,
 path, process, url, websocket, zlib
 ```
 
-完整名单是 `gpui_shell::RESERVED_SPECIFIERS`。除此之外的名字都归你——也不会被应用目录里的同名文件遮蔽，因为 HostModule 的解析顺序在应用自己的文件之前。
+完整名单是 `gpui_kit::shell::RESERVED_SPECIFIERS`。除此之外的名字都归你——也不会被应用目录里的同名文件遮蔽，因为 HostModule 的解析顺序在应用自己的文件之前。
 
 ## 边界上只有纯数据
 
@@ -97,19 +97,19 @@ Host function 收到的是 `HostArguments`，返回的是 `HostValue`：null、�
 
 参数按位置取出，类型检查和错误消息都是现成的：
 
-| 调用 | 得到 |
-| --- | --- |
-| `arguments.string(0)` | `&str`，或一个说明实际来的是什么的错误 |
-| `arguments.number(0)` | `f64` |
-| `arguments.integer(0)` | `i64`，拒绝带小数的数字 |
-| `arguments.boolean(0)` | `bool` |
-| `arguments.value(0)` | 原始的 `HostValue`，给那些接受多种形状的函数 |
-| `arguments.get(0)` | `Option<&HostValue>`，给可选参数 |
+| 调用                   | 得到                                         |
+| ---------------------- | -------------------------------------------- |
+| `arguments.string(0)`  | `&str`，或一个说明实际来的是什么的错误       |
+| `arguments.number(0)`  | `f64`                                        |
+| `arguments.integer(0)` | `i64`，拒绝带小数的数字                      |
+| `arguments.boolean(0)` | `bool`                                       |
+| `arguments.value(0)`   | 原始的 `HostValue`，给那些接受多种形状的函数 |
+| `arguments.get(0)`     | `Option<&HostValue>`，给可选参数             |
 
 返回一条记录用的是 builder 而不是 map，因为对象往往**就是**脚本要渲染的那一行，字段顺序应该由 Host 说了算：
 
 ```rust
-use gpui_shell::HostObject;
+use gpui_kit::shell::HostObject;
 
 HostObject::new()
     .field("symbol", "AAPL.US")
@@ -123,11 +123,11 @@ HostObject::new()
 
 **不许回调进脚本引擎。** 一次 host 调用发生在一次脚本调用里面，而后者又在一次 Host 调用里面；从这里重新进入 VM，就是在引擎栈帧还在、渲染过程还没结束的时候去跑脚本代码。不持有任何脚本句柄让这件事很难被误写出来，而 dispatcher 干脆直接拒绝嵌套调用，这样即使 Host 找到了别的路径，得到的也是一个可诊断的错误而不是未定义行为。
 
-**读写 Host 状态才是重点。** 函数通过 `gpui_shell::with_current_app` 拿到环境里的 `App`，不在一次活跃调用中时它是 `None`：
+**读写 Host 状态才是重点。** 函数通过 `gpui_kit::shell::with_current_app` 拿到环境里的 `App`，不在一次活跃调用中时它是 `None`：
 
 ```rust
 fn with_app<R>(read: impl FnOnce(&mut App) -> R) -> Result<R, HostError> {
-    gpui_shell::with_current_app(read)
+    gpui_kit::shell::with_current_app(read)
         .ok_or_else(|| HostError::new("only reachable while a script call is in progress"))
 }
 ```
@@ -193,7 +193,7 @@ HostModule::new("market")
     .function("watch", /* … */)
 ```
 
-生成的 `gpui.d.ts` 会把这段原样放进 `declare module "market"`，于是 `import { quotes } from "market"` 得到的检查和 `import { div } from "gpui"` 完全一样。
+生成的 `gpui-kit.d.ts` 会把这段原样放进 `declare module "market"`，于是 `import { quotes } from "market"` 得到的检查和 `import { div } from "gpui-kit"` 完全一样。
 
 把它写在这里、而不是脚本旁边的 `.d.ts` 里，是让两半保持为一件事的关键。`.d.ts` 会是第二个文件、第二种语言，而且没有任何东西把它绑在注册表上。`export_module` 会拿声明的导出和实际注册的对账，不一致就拒绝：
 
@@ -208,7 +208,7 @@ registered but not declared: quotes; declared but not registered: prices
 
 ```ts
 declare module "audit" {
-  import { HostValue } from "gpui";
+  import { HostValue } from "gpui-kit";
 
   export function observe(...args: HostValue[]): HostValue;
 }
@@ -242,7 +242,7 @@ fn market_module(market: &Entity<Market>) -> HostModule {
         })
 }
 
-gpui_shell::export_module(market_module(&market))?;
+gpui_kit::shell::export_module(market_module(&market))?;
 ```
 
 用它的脚本是这样——读的是旁边那个 Rust 面板正在渲染的同一个 `Market` entity：

@@ -1,8 +1,8 @@
-use gpui::{
+use gpui_kit::component::{Disableable, Sizable, Size, pagination::Pagination, v_flex};
+use gpui_kit::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     ParentElement, Render, Styled, Window,
 };
-use gpui_component::{Disableable, Sizable, Size, pagination::Pagination, v_flex};
 
 use crate::{ChangeStorySize, section, story_toolbar};
 
@@ -41,7 +41,7 @@ impl PaginationStory {
 }
 
 impl Focusable for PaginationStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

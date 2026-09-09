@@ -8,7 +8,7 @@ exampleKind: base
 
 # 虚拟列表
 
-Virtual List 只绘制当前屏幕内的项目，因此可处理任意长度的列表。不同于 `gpui::uniform_list`，每一项可以有不同尺寸，适合可变行高表格、聊天记录和大纲树。它属于基础设施而不是带外观的组件：你预先提供尺寸，再提供渲染范围的闭包。
+Virtual List 只绘制当前屏幕内的项目，因此可处理任意长度的列表。不同于 `gpui_kit::uniform_list`，每一项可以有不同尺寸，适合可变行高表格、聊天记录和大纲树。它属于基础设施而不是带外观的组件：你预先提供尺寸，再提供渲染范围的闭包。
 
 ## 为什么要预先提供尺寸
 
@@ -18,8 +18,8 @@ Virtual List 只绘制当前屏幕内的项目，因此可处理任意长度的�
 
 ```rust
 use std::rc::Rc;
-use gpui_base::{v_virtual_list, VirtualListScrollHandle};
-use gpui::{px, size};
+use gpui_kit::base::{v_virtual_list, VirtualListScrollHandle};
+use gpui_kit::{px, size};
 
 let sizes = Rc::new(vec![size(px(280.), px(32.)); 100_000]);
 v_virtual_list(cx.entity(), "customers", sizes, |_this, range, _window, _cx| {
@@ -47,12 +47,12 @@ v_virtual_list(cx.entity(), "customers", sizes, |_this, range, _window, _cx| {
 
 `ListSizingBehavior::Auto`（默认）使用父级提供的空间；`Infer` 根据项目推导尺寸。虚拟列表必须放在有边界的父级中。可见范围变化的每一帧都会运行渲染闭包，因此其中不要做 I/O、排序或过滤，也不要为每行创建持久 GPUI entity。元素 ID 应来自稳定数据键或项目索引，状态更新放在回调中并调用 `cx.notify()`。
 
-每帧工作量与可见项目数而非总数成正比；只有尺寸表随总数增长。大量统一高度项目更适合 `gpui::uniform_list`。
+每帧工作量与可见项目数而非总数成正比；只有尺寸表随总数增长。大量统一高度项目更适合 `gpui_kit::uniform_list`。
 
 ## 完整 Rust 示例
 
 ```bash
-cargo run -p gpui-base --example components -- virtual-list
+cargo run -p gpui-base-examples -- virtual-list
 ```
 
 <<< ../../../crates/base/examples/showcase/components/virtual_list.rs{rust}

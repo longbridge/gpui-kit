@@ -1,9 +1,7 @@
-use gpui::{
-    Action, App, AppContext as _, Axis, ClickEvent, Context, Entity, Focusable, InteractiveElement,
-    IntoElement, ParentElement as _, Render, Styled as _, Window, prelude::FluentBuilder, px,
-};
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Disableable as _, Icon, IconName, Selectable as _, Sizable as _, Size, Theme,
     button::{Button, ButtonCustomVariant, ButtonGroup, ButtonVariants as _},
     h_flex,
@@ -26,7 +24,7 @@ enum ButtonAction {
 }
 
 pub struct ButtonStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     disabled: bool,
     loading: bool,
     selected: bool,
@@ -76,7 +74,7 @@ impl super::Story for ButtonStory {
 }
 
 impl Focusable for ButtonStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

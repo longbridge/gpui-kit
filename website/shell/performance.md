@@ -49,7 +49,7 @@ That is what makes a large View expensive. Everything it draws shares one Snapsh
 Splitting is the fix. Give each part that changes on its own a View of its own with `cx.new`, and a change reaches one Snapshot instead of all of them:
 
 ```js
-import { View } from "gpui";
+import { View } from "gpui-kit";
 
 export default class Terminal extends View {
   init(props, cx) {
@@ -152,7 +152,7 @@ The runtime counts the two events apart, and the host can read them with `runtim
 | Reading | The question it answers |
 | --- | --- |
 | `script_renders()` | How often JavaScript ran. Follows `cx.notify()`, reloads and theme changes — never frames |
-| `materializations()` | How often a Snapshot became elements. Follows frames |
+| `materializations()` | How often a dirty Snapshot became elements. Clean window frames reuse the cached GPUI subtree |
 | `mean_script_render()` | What one description costs, host calls included |
 | `mean_native()` | How much of that was inside HostModule functions rather than describing |
 | `slowest_script_render()` | The worst single build in the run |
@@ -165,6 +165,12 @@ What the shape of a reading says:
 - **`script_renders` reasonable, `mean_script_render` high** — the boundary is too large. Split the View.
 - **`mean_native` most of `mean_script_render`** — the cost is in the host functions the description calls, not in the description. Read them once into fields before `render`, not per node.
 - **`slowest_script_render` far above the mean** — one build is paying for something the rest are not: a collection materialized on first render, or a rarely-taken branch that describes far more than the common one. A mean that drifts as a whole is system load instead.
+
+Repeated `cx.theme()` calls do not repeatedly cross the native snapshot
+boundary. The runtime synchronizes a lightweight theme revision before a
+description starts; components then share one frozen JavaScript object until
+the semantic tokens or appearance change. Reading the theme in each component
+is therefore a cache lookup, not a reason to serialize the palette again.
 
 ## Where the Snapshot cache stops
 

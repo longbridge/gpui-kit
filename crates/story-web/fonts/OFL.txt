@@ -3,6 +3,7 @@ Font copyrights:
 - Copyright 2016 The Inter Project Authors (https://github.com/rsms/inter)
 - Copyright 2020 The JetBrains Mono Project Authors
 - Copyright 2013 Google Inc. (Noto fonts)
+- Copyright 2017 IBM Corp. with Reserved Font Name 'Plex'
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:

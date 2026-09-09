@@ -19,7 +19,7 @@
 // twenty times a second with the default feed. The counters under the panels
 // report what that costs, and what a repaint costs when nothing here changed.
 
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import {
   quotes as readQuotes,
@@ -64,7 +64,7 @@ export default class QuoteBoard extends View {
    * @param {number} total
    * @param {number} watched
    * @param {number} ticks
-   * @param {import("gpui").Context} cx
+   * @param {import("gpui-kit").Context} cx
    */
   heading(total, watched, ticks, cx) {
     return h_flex()
@@ -89,7 +89,7 @@ export default class QuoteBoard extends View {
 
   /**
    * @param {Quote[]} quotes
-   * @param {import("gpui").Context} cx
+   * @param {import("gpui-kit").Context} cx
    */
   rows(quotes, cx) {
     if (quotes.length === 0) {
@@ -109,7 +109,7 @@ export default class QuoteBoard extends View {
   /**
    * @param {number} total
    * @param {number} watched
-   * @param {import("gpui").Context} cx
+   * @param {import("gpui-kit").Context} cx
    */
   actions(total, watched, cx) {
     return h_flex()
@@ -131,7 +131,6 @@ export default class QuoteBoard extends View {
           )
           .child(
             action("watch-all", "Watch all", () => watch_all(true), cx, {
-              primary: true,
               disabled: watched === total,
             }),
           )
@@ -161,7 +160,7 @@ export default class QuoteBoard extends View {
    * board keeps ticking while it is in flight — which is the whole reason that
    * function is `async_function` on the Rust side rather than `function`.
    *
-   * @param {import("gpui").Context} cx
+   * @param {import("gpui-kit").Context} cx
    */
   loadSummary(cx) {
     this.loading = true;

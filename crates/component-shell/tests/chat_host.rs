@@ -52,7 +52,7 @@ fn chat_components_materialize_through_the_public_host(cx: &mut TestAppContext) 
     let runtime = gpui_component_shell::new_isolated_runtime().expect("runtime");
     let app = TempApp::new(
         r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import {
   Attachment, Bubble, Marker, Message, MessageScroller,
   MessageScrollerState, ShimmerText,

@@ -9,7 +9,7 @@ use std::{
     fs,
 };
 
-use instant::Instant;
+use web_time::Instant;
 
 /// One file per open file descriptor of this process, a few of which are the
 /// DRM devices it renders through.

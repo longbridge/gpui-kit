@@ -1,15 +1,13 @@
 [package]
 name = "focus_trap"
 description = "Example demonstrating focus trap functionality."
-version = "0.5.0"
+version = "0.6.0"
 publish = false
 edition.workspace = true
 
 [dependencies]
+gpui-kit.workspace = true
 anyhow.workspace = true
-gpui.workspace = true
-gpui_platform.workspace = true
-gpui-component = { workspace = true }
 
 [lints]
 workspace = true

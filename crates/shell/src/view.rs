@@ -1,13 +1,14 @@
 //! The single bridge between a script view and GPUI's render loop.
 //!
 //! Every script-defined view, panel, or dialog body is carried by a `ScriptView`
-//! entity. GPUI calls `render` whenever the view is notified — and it is
-//! notified for reasons the script never hears about, from a hover to a cursor
-//! blink to an animation frame. So `render` here is deliberately *not* a script
-//! call:
+//! entity. [`ShellRoot`](crate::root::ShellRoot) mounts the entity through
+//! GPUI's cached-view path, so a clean window frame reuses its rendered subtree
+//! without calling this `render` at all. When the entity or one of its retained
+//! descendants is dirty, `render` remains deliberately *not* necessarily a
+//! script call:
 //!
 //! ```text
-//! GPUI render ──▶ snapshot still valid? ──yes──▶ materialize   (no VM)
+//! dirty view render ─▶ snapshot still valid? ──yes──▶ materialize   (no VM)
 //!                          │
 //!                          no
 //!                          ▼
@@ -16,8 +17,10 @@
 //!
 //! The script runs only when something invalidated its snapshot: `cx.notify()`
 //! from an event or a task, a hot reload, or a palette change. Everything else
-//! replays the description the script already produced. That is what keeps
-//! script cost proportional to application activity rather than to frame rate.
+//! replays the description the script already produced. Clean frames skip both
+//! operations through GPUI's subtree cache. That is what keeps script and
+//! materialization cost proportional to application activity rather than frame
+//! rate.
 
 use std::rc::Rc;
 
@@ -57,8 +60,8 @@ pub struct ScriptView {
     /// Set when the script-visible handle has been released. GPUI may retain
     /// the entity for an older frame, but it must never rebuild after release.
     retired: bool,
-    /// The palette the current snapshot resolved its colors against.
-    theme_tokens: Option<gpui_base::SemanticThemeTokens>,
+    /// The tokens and appearance the current snapshot resolved against.
+    theme: Option<crate::theme_tokens::ThemeSnapshotKey>,
     /// The failure of the most recent build, if it failed.
     ///
     /// Held rather than re-derived so a script that throws is not re-run on
@@ -121,7 +124,7 @@ impl ScriptView {
             dirty: true,
             retired: false,
             policy,
-            theme_tokens: None,
+            theme: None,
             error: None,
             ownership,
             runtime,
@@ -286,9 +289,9 @@ impl Render for ScriptView {
         if self.retired {
             return div().into_any_element();
         }
-        let tokens = crate::theme_tokens::sync(cx);
-        if self.theme_tokens.as_ref() != Some(&tokens) {
-            self.theme_tokens = Some(tokens);
+        let theme = crate::theme_tokens::sync(cx);
+        if self.theme.as_ref() != Some(&theme) {
+            self.theme = Some(theme);
             self.dirty = true;
         }
         if self.is_dirty() {

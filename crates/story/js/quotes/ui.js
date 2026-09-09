@@ -6,9 +6,9 @@
 // read from the render's call-scoped `cx.theme()`, so changing the shell theme
 // moves this half too.
 
-import { div } from "gpui";
+import { div } from "gpui-kit";
 import { h_flex, v_flex, Button } from "gpui-base";
-/** @import { AbsoluteLength, ClickEvent, Context } from "gpui" */
+/** @import { AbsoluteLength, ClickEvent, Context } from "gpui-kit" */
 /** @import { Quote } from "market" */
 
 /// Every measurement here is in **rems**, so the panel scales with the window's
@@ -182,10 +182,10 @@ export const watchMarker = (watched, cx) =>
  * @param {string} caption
  * @param {(event: ClickEvent, cx: Context) => void} onClick
  * @param {Context} cx
- * @param {{ primary?: boolean, disabled?: boolean }} [options]
+ * @param {{ disabled?: boolean }} [options]
  */
 export const action = (id, caption, onClick, cx, options = {}) => {
-  const { primary = false, disabled = false } = options;
+  const { disabled = false } = options;
 
   return Button.new(id)
     .disabled(disabled)
@@ -196,25 +196,17 @@ export const action = (id, caption, onClick, cx, options = {}) => {
     .px(SPACE.sm)
     .rounded(cx.theme().radius.md)
     .border(1)
-    .border_color(primary ? cx.theme().colors.primary : cx.theme().colors.border)
-    .bg(primary ? cx.theme().colors.primary : cx.theme().colors.background)
+    .border_color(cx.theme().colors.border)
+    .bg(cx.theme().colors.background)
     .when(disabled, (el) => el.opacity(0.5))
     .when(!disabled, (el) =>
-      el
-        .hover((style) =>
-          style.bg(primary ? cx.theme().colors.accent : cx.theme().colors.muted),
-        )
-        .on_click(onClick),
+      el.hover((style) => style.bg(cx.theme().colors.muted)).on_click(onClick),
     )
     .child(
       div()
         .text_size(TYPE.body)
         .line_height(1)
-        .text_color(
-          primary
-            ? cx.theme().colors.primary_foreground
-            : cx.theme().colors.foreground,
-        )
+        .text_color(cx.theme().colors.foreground)
         .child(caption),
     );
 };

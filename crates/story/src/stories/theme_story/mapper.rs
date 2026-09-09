@@ -10,12 +10,12 @@
 /// follow these steps to remove this "temporary bridge":
 ///
 /// 1. **Update `ThemeColor`**:
-///    In `crates/ui/src/theme/theme_color.rs`, add `#[serde(rename = "...")]` attributes
+///    In `crates/component/src/theme/theme_color.rs`, add `#[serde(rename = "...")]` attributes
 ///    to all fields of the `ThemeColor` struct to match their canonical dot-notation
 ///    names (e.g., `accent_foreground` -> `#[serde(rename = "accent.foreground")]`).
 ///
 /// 2. **Update JSON Themes**:
-///    Ensure `crates/ui/src/theme/default-theme.json` and any files in `themes/`
+///    Ensure `crates/component/src/theme/default-theme.json` and any files in `themes/`
 ///    strictly use the dot-notation keys.
 ///
 /// 3. **Refactor the Viewer**:

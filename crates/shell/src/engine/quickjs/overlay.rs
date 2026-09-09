@@ -95,7 +95,8 @@ use rquickjs::{
 };
 
 use crate::{
-    root::{DialogOptions, ShellRoot, ToastLevel, ToastRequest},
+    materialize::{ANCHOR_NAMES, anchor_from_name},
+    root::{DialogOptions, FpsHudRequest, ShellRoot, ToastLevel, ToastRequest},
     scope::{self, ScopePhase},
     view::ScriptView,
 };
@@ -113,6 +114,9 @@ const CLOSE_SHEET: &str = "window.close_sheet()";
 const PUSH_TOAST: &str = "window.push_toast(options)";
 const REMOVE_TOAST: &str = "window.remove_toast(id)";
 const CLEAR_TOASTS: &str = "window.clear_toasts()";
+const SHOW_FPS_MONITOR: &str = "show_fps_monitor(options)";
+const HIDE_FPS_MONITOR: &str = "hide_fps_monitor()";
+const FPS_MONITOR_VISIBLE: &str = "fps_monitor_visible()";
 
 /// Installs the host half of the script-side `window`.
 ///
@@ -260,6 +264,42 @@ pub fn install(_ctx: &Ctx<'_>, globals: &Object<'_>) -> JsResult<()> {
                 Ok(())
             })
         }),
+    )?;
+
+    // The performance HUD is the root's, not the script's: the script says
+    // whether and where, the host draws it above everything and keeps its
+    // history across a hide and a show. Nothing crosses back but a flag.
+    globals.set(
+        "__show_fps_monitor",
+        Func::from(
+            |ctx: Ctx<'_>, options: Opt<FpsHudArgument>| -> JsResult<()> {
+                guard(&ctx, SHOW_FPS_MONITOR)?;
+                let request = options.0.map(|argument| argument.0).unwrap_or_default();
+                with_root(&ctx, SHOW_FPS_MONITOR, |root, _, cx| {
+                    root.show_fps_monitor(request, cx);
+                    Ok(())
+                })
+            },
+        ),
+    )?;
+
+    globals.set(
+        "__hide_fps_monitor",
+        Func::from(|ctx: Ctx<'_>| -> JsResult<bool> {
+            guard(&ctx, HIDE_FPS_MONITOR)?;
+            with_root(&ctx, HIDE_FPS_MONITOR, |root, _, cx| {
+                Ok(root.hide_fps_monitor(cx))
+            })
+        }),
+    )?;
+
+    globals.set(
+        "__fps_monitor_visible",
+        Func::from(|ctx: Ctx<'_>| -> JsResult<bool> {
+            with_root(&ctx, FPS_MONITOR_VISIBLE, |root, _, _| {
+                Ok(root.fps_monitor_visible())
+            })
+        }),
     )
 }
 
@@ -389,6 +429,54 @@ impl<'js> FromJs<'js> for DialogRequest {
         }
 
         Ok(Self { options })
+    }
+}
+
+/// `{ anchor, frame_budget }`, every key optional; `undefined` or `null` is
+/// the default HUD.
+struct FpsHudArgument(FpsHudRequest);
+
+const FPS_HUD_KEYS: &[&str] = &["anchor", "frame_budget"];
+
+impl<'js> FromJs<'js> for FpsHudArgument {
+    fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> JsResult<Self> {
+        if value.is_undefined() || value.is_null() {
+            return Ok(Self(FpsHudRequest::default()));
+        }
+        let Some(object) = value.as_object() else {
+            return Err(Exception::throw_type(
+                ctx,
+                &format!(
+                    "{SHOW_FPS_MONITOR} expects an object, such as {{ anchor: \"bottom_left\" }}"
+                ),
+            ));
+        };
+        reject_unknown_keys(ctx, object, FPS_HUD_KEYS, SHOW_FPS_MONITOR)?;
+
+        let mut request = FpsHudRequest::default();
+        if let Some(anchor) = object.get::<_, Option<String>>("anchor")? {
+            request.anchor = anchor_from_name(&anchor).ok_or_else(|| {
+                Exception::throw_type(
+                    ctx,
+                    &format!(
+                        "{SHOW_FPS_MONITOR}: unknown anchor `{anchor}`; expected one of {}",
+                        ANCHOR_NAMES.join(", ")
+                    ),
+                )
+            })?;
+        }
+        if let Some(millis) = object.get::<_, Option<f64>>("frame_budget")? {
+            if !(millis.is_finite() && millis > 0.) {
+                return Err(Exception::throw_type(
+                    ctx,
+                    &format!(
+                        "{SHOW_FPS_MONITOR}: frame_budget must be a positive number of milliseconds"
+                    ),
+                ));
+            }
+            request.frame_budget = Some(std::time::Duration::from_secs_f64(millis / 1000.));
+        }
+        Ok(Self(request))
     }
 }
 
@@ -795,6 +883,54 @@ mod tests {
         )
         .expect("remove_toast");
         assert!(dismissed);
+    }
+
+    #[gpui::test]
+    fn a_script_puts_the_performance_hud_on_the_root_and_takes_it_down(cx: &mut TestAppContext) {
+        let (runtime, root, cx) = shell(cx);
+        assert!(!root.read_with(cx, |root, _| root.fps_monitor_visible()));
+
+        eval::<()>(
+            &runtime,
+            cx,
+            ScopePhase::Event,
+            r#"__show_fps_monitor({ anchor: "bottom_left", frame_budget: 8.33 })"#,
+        )
+        .expect("show");
+        assert!(root.read_with(cx, |root, _| root.fps_monitor_visible()));
+        let visible: bool =
+            eval(&runtime, cx, ScopePhase::Event, "__fps_monitor_visible()").expect("visible");
+        assert!(visible);
+
+        // Up means drawn: the root's own layer carries the HUD, not the script's tree.
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let hidden: bool =
+            eval(&runtime, cx, ScopePhase::Event, "__hide_fps_monitor()").expect("hide");
+        assert!(hidden);
+        assert!(!root.read_with(cx, |root, _| root.fps_monitor_visible()));
+        let hidden_again: bool =
+            eval(&runtime, cx, ScopePhase::Event, "__hide_fps_monitor()").expect("hide again");
+        assert!(!hidden_again, "nothing was up to take down");
+    }
+
+    #[gpui::test]
+    fn an_unknown_hud_anchor_names_the_valid_ones(cx: &mut TestAppContext) {
+        let (runtime, root, cx) = shell(cx);
+
+        let error = eval::<()>(
+            &runtime,
+            cx,
+            ScopePhase::Event,
+            r#"__show_fps_monitor({ anchor: "middle" })"#,
+        )
+        .expect_err("an unknown anchor must be refused");
+        let message = error.to_string();
+        assert!(
+            message.contains("middle") && message.contains("bottom_left"),
+            "{message}"
+        );
+        assert!(!root.read_with(cx, |root, _| root.fps_monitor_visible()));
     }
 
     /// The render pass is reading the window an overlay would mutate, so the

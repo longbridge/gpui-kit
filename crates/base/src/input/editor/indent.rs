@@ -1,11 +1,11 @@
 use crate::input::InputModeKind;
 use crate::input::{
-    Indent, IndentInline, InputBaseState, Outdent, OutdentInline, RopeExt, element::TextElement,
-    layout::LastLayout, mode::LayoutMode,
+    Indent, IndentInline, InputBaseState, Outdent, OutdentInline, RopeExt, cursor::CursorSelection,
+    element::TextElement, layout::LastLayout, mode::LayoutMode,
 };
 use gpui::{
-    Bounds, Context, EntityInputHandler as _, Hsla, Path, PathBuilder, Pixels, SharedString,
-    TextRun, TextStyle, Window, point, px,
+    Bounds, Context, Hsla, Path, PathBuilder, Pixels, SharedString, TextRun, TextStyle, Window,
+    point, px,
 };
 use ropey::RopeSlice;
 
@@ -231,137 +231,214 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     pub(super) fn indent(&mut self, block: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.is_multi_line() || !self.mode.is_indentable() {
-            cx.propagate();
-            return;
-        };
-
-        let tab_indent = self.mode.tab_size().to_string();
-        let selected_range = self.selected_range;
-        let mut added_len = 0;
-        let is_selected = !self.selected_range.is_empty();
-
-        if is_selected || block {
-            let start_offset = self.start_of_line_of_selection(window, cx);
-            let mut offset = start_offset;
-
-            let selected_text = self
-                .text_for_range(
-                    self.range_to_utf16(&(offset..selected_range.end)),
-                    &mut None,
-                    window,
-                    cx,
-                )
-                .unwrap_or("".into());
-
-            for line in selected_text.split('\n') {
-                self.replace_text_in_range_silent(
-                    Some(self.range_to_utf16(&(offset..offset))),
-                    &tab_indent,
-                    window,
-                    cx,
-                );
-                added_len += tab_indent.len();
-                // +1 for "\n", the `\r` is included in the `line`.
-                offset += line.len() + tab_indent.len() + 1;
-            }
-
-            if is_selected {
-                self.selected_range = (start_offset..selected_range.end + added_len).into();
-            } else {
-                self.selected_range =
-                    (selected_range.start + added_len..selected_range.end + added_len).into();
-            }
-        } else {
-            // Selected none
-            let offset = self.selected_range.start;
-            self.replace_text_in_range_silent(
-                Some(self.range_to_utf16(&(offset..offset))),
-                &tab_indent,
-                window,
-                cx,
-            );
-            added_len = tab_indent.len();
-
-            self.selected_range =
-                (selected_range.start + added_len..selected_range.end + added_len).into();
-        }
+        self.apply_indent(IndentDirection::Indent, block, window, cx);
     }
 
     pub(super) fn outdent(&mut self, block: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.is_multi_line() || !self.mode.is_indentable() {
+        self.apply_indent(IndentDirection::Outdent, block, window, cx);
+    }
+
+    /// Apply an indent or outdent across all selections as one batch edit.
+    ///
+    /// A batch keeps the whole operation a single undo transaction (instead of
+    /// one push per line) and restores the correct multi-selection extents on
+    /// undo/redo.
+    fn apply_indent(
+        &mut self,
+        direction: IndentDirection,
+        block: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.is_editable() || !self.is_multi_line() || !self.mode.is_indentable() {
             cx.propagate();
             return;
-        };
+        }
 
         let tab_indent = self.mode.tab_size().to_string();
-        let selected_range = self.selected_range;
-        let mut removed_len = 0;
-        let is_selected = !self.selected_range.is_empty();
+        let tab_len = tab_indent.len();
 
-        if is_selected || block {
-            let start_offset = self.start_of_line_of_selection(window, cx);
-            let mut offset = start_offset;
+        // Non-collapsed selections and explicit block operations indent whole lines.
+        let has_non_collapsed = self.selections.iter().any(|sel| !sel.is_collapsed());
+        let use_block = has_non_collapsed || block;
 
-            let selected_text = self
-                .text_for_range(
-                    self.range_to_utf16(&(offset..selected_range.end)),
-                    &mut None,
-                    window,
-                    cx,
-                )
-                .unwrap_or("".into());
+        let before: Vec<CursorSelection> = self.selections.iter().copied().collect();
 
-            for line in selected_text.split('\n') {
-                if line.starts_with(tab_indent.as_ref()) {
-                    self.replace_text_in_range_silent(
-                        Some(self.range_to_utf16(&(offset..offset + tab_indent.len()))),
-                        "",
-                        window,
-                        cx,
-                    );
-                    removed_len += tab_indent.len();
-
-                    // +1 for "\n"
-                    offset += line.len().saturating_sub(tab_indent.len()) + 1;
-                } else {
-                    offset += line.len() + 1;
-                }
-            }
-
-            if is_selected {
-                self.selected_range =
-                    (start_offset..selected_range.end.saturating_sub(removed_len)).into();
-            } else {
-                self.selected_range = (selected_range.start.saturating_sub(removed_len)
-                    ..selected_range.end.saturating_sub(removed_len))
-                    .into();
-            }
+        let (edits, new_selections) = if use_block {
+            self.compute_block_indent(direction, &tab_indent, tab_len)
         } else {
-            // Selected none
-            let start_offset = self.selected_range.start;
-            let offset = self.start_of_line_of_selection(window, cx);
-            let offset = self.offset_from_utf16(self.offset_to_utf16(offset));
+            self.compute_inline_indent(direction, tab_len)
+        };
 
-            if self
-                .text
-                .slice(offset..self.text.len())
-                .chars()
-                .take(tab_indent.chars().count())
-                .eq(tab_indent.chars())
-            {
-                self.replace_text_in_range_silent(
-                    Some(self.range_to_utf16(&(offset..offset + tab_indent.len()))),
-                    "",
-                    window,
-                    cx,
-                );
-                removed_len = tab_indent.len();
-                let new_offset = start_offset.saturating_sub(removed_len);
-                self.selected_range = (new_offset..new_offset).into();
+        if edits.is_empty() {
+            return;
+        }
+
+        self.undo_manager.begin_transaction();
+        self.replace_text_in_ranges(&edits, window, cx);
+        self.selections.replace_all(new_selections);
+        let after: Vec<CursorSelection> = self.selections.iter().copied().collect();
+        self.undo_manager.record_selections(before, after);
+        self.undo_manager.commit_transaction();
+
+        self.scroll_to(self.cursor(), None, cx);
+        cx.notify();
+    }
+
+    /// Build the per-line edits and resulting selections for a block
+    /// indent/outdent across every selection.
+    fn compute_block_indent(
+        &self,
+        direction: IndentDirection,
+        tab_indent: &str,
+        tab_len: usize,
+    ) -> (Vec<(std::ops::Range<usize>, String)>, Vec<CursorSelection>) {
+        let mut rows: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for sel in self.selections.iter() {
+            let start_row = self.text.offset_to_point(sel.start).row;
+            let end_row = self.text.offset_to_point(sel.end).row;
+            for row in start_row..=end_row {
+                rows.insert(row);
             }
         }
+
+        let mut rows: Vec<usize> = rows.into_iter().collect();
+        rows.sort_unstable();
+
+        let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+        for row in rows {
+            let line_start = self.text.line_start_offset(row);
+            match direction {
+                IndentDirection::Indent => {
+                    edits.push((line_start..line_start, tab_indent.to_string()));
+                }
+                IndentDirection::Outdent => {
+                    if self
+                        .text
+                        .slice(line_start..)
+                        .chars()
+                        .take(tab_indent.chars().count())
+                        .eq(tab_indent.chars())
+                    {
+                        edits.push((line_start..line_start + tab_len, String::new()));
+                    }
+                }
+            }
+        }
+
+        // Map both endpoints through every earlier edit, including edits belonging
+        // to other cursors. A point inside removed indentation stays on its line.
+        let map_offset = |offset: usize| match direction {
+            IndentDirection::Indent => {
+                offset + edits.partition_point(|(range, _)| range.start <= offset) * tab_len
+            }
+            IndentDirection::Outdent => {
+                let preceding = edits.partition_point(|(range, _)| range.end <= offset);
+                let partial = edits
+                    .get(preceding)
+                    .map_or(0, |(range, _)| offset.saturating_sub(range.start));
+                offset - preceding * tab_len - partial
+            }
+        };
+        let new_selections = self
+            .selections
+            .iter()
+            .map(|sel| {
+                let mut selection = *sel;
+                selection.start = map_offset(sel.start);
+                selection.end = map_offset(sel.end);
+                selection.column_anchor = None;
+                selection
+            })
+            .collect();
+
+        (edits, new_selections)
     }
+
+    /// Build the per-cursor edits and resulting cursors for a collapsed inline
+    /// indent/outdent.
+    fn compute_inline_indent(
+        &self,
+        direction: IndentDirection,
+        tab_len: usize,
+    ) -> (Vec<(std::ops::Range<usize>, String)>, Vec<CursorSelection>) {
+        let tab_indent = self.mode.tab_size().to_string();
+
+        // The edit range for each cursor: an insertion point for indent, the
+        // removed range for a removable outdent.
+        let mut ranges: Vec<std::ops::Range<usize>> = Vec::with_capacity(self.selections.len());
+        for sel in self.selections.iter() {
+            let cursor = sel.cursor_offset();
+            match direction {
+                IndentDirection::Indent => ranges.push(cursor..cursor),
+                IndentDirection::Outdent => {
+                    let row = self.text.offset_to_point(cursor).row;
+                    let start = self.text.line_start_offset(row);
+                    if self
+                        .text
+                        .slice(start..)
+                        .chars()
+                        .take(tab_indent.chars().count())
+                        .eq(tab_indent.chars())
+                    {
+                        ranges.push(start..start + tab_len);
+                    }
+                }
+            }
+        }
+
+        // Build disjoint edits, dropping any that would overlap a previous one.
+        ranges.sort_by_key(|range| range.start);
+        let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
+        let mut last_end: Option<usize> = None;
+        for range in ranges {
+            if let Some(last_end) = last_end {
+                if range.start < last_end {
+                    continue;
+                }
+            }
+            last_end = Some(range.end);
+            let text = match direction {
+                IndentDirection::Indent => tab_indent.to_string(),
+                IndentDirection::Outdent => String::new(),
+            };
+            edits.push((range, text));
+        }
+
+        // Shift every cursor by the surviving edits before (or at) it. Cursors
+        // whose own edit was dropped or not applicable keep their position.
+        let mut new_selections: Vec<CursorSelection> = Vec::with_capacity(self.selections.len());
+        for sel in self.selections.iter() {
+            let cursor = sel.cursor_offset();
+            let new_offset = match direction {
+                IndentDirection::Indent => {
+                    let inserted_before = edits
+                        .iter()
+                        .filter(|(range, _)| range.start <= cursor)
+                        .count();
+                    cursor + inserted_before * tab_len
+                }
+                IndentDirection::Outdent => {
+                    let removed_before: usize = edits
+                        .iter()
+                        .map(|(range, _)| range.end.min(cursor) - range.start.min(cursor))
+                        .sum();
+                    cursor - removed_before
+                }
+            };
+            let mut selection = CursorSelection::new(sel.id, new_offset, new_offset);
+            selection.column_anchor = None;
+            new_selections.push(selection);
+        }
+
+        (edits, new_selections)
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum IndentDirection {
+    Indent,
+    Outdent,
 }
 
 #[cfg(test)]

@@ -26,6 +26,7 @@ GPUI Base 原语只提供行为，不规定视觉表现。每个页面都会说�
 - [Textarea](./textarea.md) — 支持固定行数、换行和自动增高的多行文本框。
 - [Editor](./editor.md) — 支持高亮、行号槽、折叠、装饰和 LSP 扩展的代码编辑器基础。
 - [Link](./link.md) — 样式由应用定义的可访问链接控件。
+- [Nav Stack](./nav-stack.md) — 支持 push、pop、forward 与 replace 的视图导航栈，过渡生命周期可动画。
 - [Number Input](./number-input.md) — 带递增、递减和步进行为的数字输入。
 - [OTP Input](./otp-input.md) — 由共享文本状态驱动的多单元格验证码输入。
 - [Pagination](./pagination.md) — 显式管理当前页与总页数的受控分页器。

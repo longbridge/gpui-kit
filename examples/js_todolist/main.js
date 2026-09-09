@@ -7,9 +7,9 @@
 //
 //   cargo run -p gpui-shell -- examples/js_todolist
 
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { v_flex, h_flex, InputState } from "gpui-base";
-/** @import { AsyncContext, Context } from "gpui" */
+/** @import { AsyncContext, Context } from "gpui-kit" */
 import { load, save } from "./storage.js";
 import confirmClear from "./confirm.js";
 import {

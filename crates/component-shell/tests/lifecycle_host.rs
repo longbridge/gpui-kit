@@ -67,7 +67,7 @@ fn tooltip_uses_the_native_managed_overlay_on_hover(cx: &mut TestAppContext) {
     });
     let app = TempApp::new(
         r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { Tooltip } from "gpui-component";
 export default class Example extends View {
   render() { return new Tooltip("help", "Help", "Open documentation"); }
@@ -120,7 +120,7 @@ fn menu_bar_installs_native_and_component_menu_models_after_render(cx: &mut Test
     });
     let app = TempApp::new(
         r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { MenuBar, Menu, MenuItem, MenuSeparator } from "gpui-component";
 export default class Example extends View {
   render() {

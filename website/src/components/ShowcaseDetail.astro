@@ -1,0 +1,45 @@
+---
+import DocsLayout from '../layouts/DocsLayout.astro';
+import { getShowcaseReadme } from '../lib/showcases.ts';
+const { app, lang = 'en' } = Astro.props;
+const isZh = lang === 'zh-CN';
+const html = await getShowcaseReadme(app);
+---
+<DocsLayout title={`${app.name} — GPUI Kit`} description={app.description} lang={lang}>
+  <div class="showcase-detail">
+    <a class="showcase-detail__back" href={isZh ? '/zh-CN/apps' : '/apps'}>← {isZh ? '全部应用' : 'All apps'}</a>
+    <header>
+      {app.featured && <span class="showcase-detail__featured">Featured</span>}
+      <h1>{app.name}</h1>
+      <p class="showcase-detail__author">{app.author}</p>
+      <p class="showcase-detail__description">{app.description}</p>
+      <p class="showcase-detail__meta">{app.platforms.join(' / ')}{app.stars !== null && ` · ★ ${app.stars.toLocaleString()} GitHub Stars`}</p>
+      <nav aria-label={isZh ? '应用链接' : 'App links'}>
+        {app.website && <a href={app.website} target="_blank" rel="noopener noreferrer">{isZh ? '官网' : 'Website'} ↗</a>}
+        {app.source && <a href={app.source} target="_blank" rel="noopener noreferrer">{isZh ? '源码' : 'Source'} ↗</a>}
+      </nav>
+    </header>
+    <div class="showcase-detail__previews">
+      {app.previews.map((src, index) => <img src={src} alt={`${app.name} — ${index + 1}`} loading={index ? 'lazy' : 'eager'} decoding="async" />)}
+    </div>
+    <div class="showcase-detail__readme" set:html={html} />
+  </div>
+</DocsLayout>
+<style>
+.showcase-detail { max-width: 62rem; margin: 0 auto; }
+.showcase-detail__back { display: inline-block; margin-bottom: 1.75rem; color: var(--muted-foreground); }
+.showcase-detail__featured { font-size: 0.8rem; color: var(--brand); }
+.showcase-detail h1 { margin: 0.6rem 0; padding: 0; border: 0; font-size: clamp(2rem, 4vw, 3rem); font-weight: 660; letter-spacing: -0.035em; line-height: 1.15; }
+.showcase-detail__author, .showcase-detail__meta { color: var(--muted-foreground); font-size: 0.9rem; }
+.showcase-detail__description { max-width: 46rem; font-size: 1.1rem; line-height: 1.7; }
+.showcase-detail nav { display: flex; gap: 1.5rem; margin: 1.25rem 0 2rem; }
+.showcase-detail__previews { display: grid; gap: 1.5rem; }
+.showcase-detail__previews img { display: block; width: 100%; height: auto; border: 1px solid var(--border); border-radius: var(--radius-card); }
+.showcase-detail__readme { margin-top: 2.5rem; overflow-wrap: anywhere; }
+.showcase-detail__readme :global(h2) { margin: 2rem 0 0.8rem; font-size: 1.5rem; font-weight: 620; line-height: 1.3; }
+.showcase-detail__readme :global(h3), .showcase-detail__readme :global(h4) { margin: 1.5rem 0 0.6rem; font-size: 1.15rem; font-weight: 600; }
+.showcase-detail__readme :global(p), .showcase-detail__readme :global(ul), .showcase-detail__readme :global(ol) { margin: 1rem 0; line-height: 1.75; }
+.showcase-detail__readme :global(ul) { list-style: disc; padding-left: 1.5rem; }
+.showcase-detail__readme :global(ol) { list-style: decimal; padding-left: 1.5rem; }
+.showcase-detail__readme :global(img), .showcase-detail__readme :global(video) { display: block; max-width: 100%; height: auto; margin: 1.5rem 0; }
+</style>

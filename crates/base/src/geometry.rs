@@ -1,4 +1,4 @@
-// crates/ui/src/geometry.rs
+// crates/component/src/geometry.rs
 use std::fmt::{self, Debug, Display, Formatter};
 
 use gpui::{AbsoluteLength, Axis, Length, Pixels};

@@ -1,12 +1,12 @@
-use gpui::{
-    App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, Styled, Window, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, IconName, Sizable as _, Size, StyledExt,
     avatar::{Avatar, AvatarGroup},
     dock::PanelControl,
     v_flex,
+};
+use gpui_kit::{
+    App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    ParentElement, Render, Styled, Window, px,
 };
 
 use crate::{ChangeStorySize, section, story_toolbar};
@@ -26,7 +26,7 @@ const AVATARS: [&str; 11] = [
 ];
 
 pub struct AvatarStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     size: Size,
 }
 

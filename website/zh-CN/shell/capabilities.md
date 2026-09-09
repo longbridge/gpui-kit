@@ -13,7 +13,7 @@ order: 8
 授权由 Host 决定，因为只有 Host 知道它对即将运行的这段代码信任到什么程度。至于它主动**递出去**的东西——它自己的、有意暴露的那部分 Rust——见 [HostModule](./host-module.md)。 View 在加载时冻结 capabilities；修改默认值只影响之后加载的应用，不会悄悄改变已经按某项授权运行的代码。
 
 ```rust
-gpui_shell::set_capabilities(
+gpui_kit::shell::set_capabilities(
     Capabilities::new()
         .read_roots([application_root.clone()])
         .write_roots([data_directory.clone()])
@@ -72,7 +72,7 @@ process.exit() is not granted; set capabilities.process.exit to true in the mani
   "id": "com.example.quotes",
   "name": "Quotes",
   "version": "1.0.0",
-  "shell-version": "0.1.0",
+  "shell-version": "0.6.0",
   "entry": "main.js",
   "dependencies": {
     "omarchy-ui": "huacnlee/omarchy-ui"
@@ -81,7 +81,14 @@ process.exit() is not granted; set capabilities.process.exit to true in the mani
     "fs": { "read": ["${pluginDir}"], "write": ["${dataDir}"] },
     "network": {
       "hosts": ["stream.example.com"],
-      "http": [{ "scheme": "https", "host": "api.example.com", "methods": ["GET"], "path_prefixes": ["/v1/"] }]
+      "http": [
+        {
+          "scheme": "https",
+          "host": "api.example.com",
+          "methods": ["GET"],
+          "path_prefixes": ["/v1/"]
+        }
+      ]
     },
     "storage": true,
     "clipboard": { "read": false, "write": true },
@@ -99,7 +106,7 @@ module 运行之前从 Git 抓取它——`import { Title } from "omarchy-ui"`�
 
 这个块里的每项授权省略时都默认**拒绝**，只有 `storage` 默认给予——要拒绝它就写 `"storage": false`。
 
-未知字段、非法 reverse-DNS id、显式填写但不合法的 SemVer、不兼容的 `shell-version`、逃出目录的 entry，以及未知 `${...}` placeholder 都会在代码执行前令 manifest 失效。省略 `version` 时显示为 `unknown`。省略 `shell-version` 时接受当前 runtime；显式填写时，它表示应用所需的最早兼容 gpui-shell 版本。兼容规则遵循 SemVer：`0.x` 应用保持相同 minor，稳定版本保持相同 major。独立 CLI 会拒绝非法 manifest，不会在假设已经不一致时继续执行 entry。
+未知字段、非法 reverse-DNS id、显式填写但不合法的 SemVer、不兼容的 `shell-version`、逃出目录的 entry，以及未知 `${...}` placeholder 都会在代码执行前令 manifest 失效。省略 `version` 时显示为 `unknown`。省略 `shell-version` 时接受当前 runtime；显式填写时，它表示应用所需的最早兼容 gpui-shell 版本。版本不低于该要求的 runtime 都会被接受。独立 CLI 会拒绝非法 manifest，不会在假设已经不一致时继续执行 entry。
 
 每条 scoped `network.http` 规则除了 host、method 与 path 外，还会绑定请求的 scheme 与有效端口。`scheme` 默认为 `https`；`port` 默认为该 scheme 的标准端口，仅非默认 endpoint 需要显式填写。
 
@@ -111,17 +118,17 @@ import * as fs from "fs/promises";
 
 每个调用都返回 promise。`await` 它们，或者接 `.then`——另见下面关于 `render` 的提示。
 
-| 调用                            | resolve 结果                     |
-| ------------------------------- | -------------------------------- |
-| `fs.readFile(path)`             | `Uint8Array`                     |
-| `fs.readFile(path, "utf8")`     | UTF-8 文本                       |
-| `fs.writeFile(path, contents)`  | —                                |
-| `fs.readdir(path)`              | 按名字排序的名称数组             |
+| 调用                                        | resolve 结果                     |
+| ------------------------------------------- | -------------------------------- |
+| `fs.readFile(path)`                         | `Uint8Array`                     |
+| `fs.readFile(path, "utf8")`                 | UTF-8 文本                       |
+| `fs.writeFile(path, contents)`              | —                                |
+| `fs.readdir(path)`                          | 按名字排序的名称数组             |
 | `fs.readdir(path, { withFileTypes: true })` | 带 `isDirectory()` 的 `Dirent[]` |
-| `fs.exists(path)`               | `true` / `false`                 |
-| `fs.unlink(path)`               | —                                |
-| `fs.rmdir(path)`                | —                                |
-| `fs.mkdir(path, options?)`      | —                                |
+| `fs.exists(path)`                           | `true` / `false`                 |
+| `fs.unlink(path)`                           | —                                |
+| `fs.rmdir(path)`                            | —                                |
+| `fs.mkdir(path, options?)`                  | —                                |
 
 ```js
 const source = await fs.readFile("notes.md", "utf8");
@@ -169,22 +176,25 @@ localStorage.key(0);
 localStorage.clear();
 ```
 
-| 成员                | 说明                           |
-| ------------------- | ------------------------------ |
-| `length`            | 已存的键数量                   |
-| `key(index)`        | 该位置上的键，越界为 `null`    |
-| `getItem(key)`      | 值，键不存在时为 `null`        |
-| `setItem(key, val)` | 存入，值会被转成字符串         |
-| `removeItem(key)`   | 忘掉一个键                     |
-| `clear()`           | 全部忘掉                       |
-| `flush()`           | 写入落盘后 resolve             |
+| 成员                | 说明                        |
+| ------------------- | --------------------------- |
+| `length`            | 已存的键数量                |
+| `key(index)`        | 该位置上的键，越界为 `null` |
+| `getItem(key)`      | 值，键不存在时为 `null`     |
+| `setItem(key, val)` | 存入，值会被转成字符串      |
+| `removeItem(key)`   | 忘掉一个键                  |
+| `clear()`           | 全部忘掉                    |
+| `flush()`           | 写入落盘后 resolve          |
 
 **两者只差在活多久。** `localStorage` 是 Host 放好的一个文件，跨重启存活；`sessionStorage` 是内存，随进程一起消失。这也是只有前者是一项 capability 的原因：`sessionStorage` 里的东西从不离开进程，没有什么可授权的，因此在一个什么都没授权的 Host 上它照样能用。
 
 **值是字符串**，和 web 上完全一样——`setItem` 会把拿到的东西转成字符串。有结构的东西进出各走一趟 `JSON.stringify` 和 `JSON.parse`，这跟你在浏览器里会写的代码是同一段：
 
 ```js
-localStorage.setItem("window", JSON.stringify({ title: "Notes", size: [640, 480] }));
+localStorage.setItem(
+  "window",
+  JSON.stringify({ title: "Notes", size: [640, 480] }),
+);
 const window = JSON.parse(localStorage.getItem("window") ?? "{}");
 ```
 
@@ -203,21 +213,21 @@ cache 与等待队列都有上限：单个存储文件序列化后最多 8 MiB�
 **Host 给应用起名字，数据跟着这个名字走：**
 
 ```rust
-let data = gpui_shell::set_bundle_id("com.example.notes")?;
-gpui_shell::set_capabilities(Capabilities::new().write_roots([data]));
+let data = gpui_kit::shell::set_bundle_id("com.example.notes")?;
+gpui_kit::shell::set_capabilities(Capabilities::new().write_roots([data]));
 ```
 
-| 平台              | 位置                                                                  |
-| ----------------- | --------------------------------------------------------------------- |
+| 平台              | 位置                                                                    |
+| ----------------- | ----------------------------------------------------------------------- |
 | Linux 与其他 Unix | `$XDG_DATA_HOME/gpui-shell/apps/<id>/store.json`，默认 `~/.local/share` |
 | macOS             | `~/Library/Application Support/gpui-shell/apps/<id>/store.json`         |
-| Windows           | `%APPDATA%\gpui-shell\apps\<id>\store.json`                            |
+| Windows           | `%APPDATA%\gpui-shell\apps\<id>\store.json`                             |
 
 id 就是身份，所以目录被改名、被移动、被一次升级整个替换掉，数据都还在——这正是用户说"我的设置"时指的东西。改用路径作 key，一次升级就等于悄悄让用户从头开始。
 
 **运行时不会去某个文件里找这个 id。** 只有安装了这个应用的那一层知道它叫什么；运行时自己挑一个 manifest 去读，等于对一件不属于它的事情宣称权威。
 
-被"指向"某个目录的 Host——这个命令行、一个 dev server——没有这样一个名字，而在那种情况下路径确实就是身份。`gpui_shell::bundle_id_for_path(root)` 用目录名加完整路径的摘要造一个，于是同一个目录总是访问到同一份数据，同一份源码的两个 checkout 也互不干扰。这在你正在编辑它时是对的，在它已经被安装之后是错的——而这正是声明一个真名字带来的区别。
+被"指向"某个目录的 Host——这个命令行、一个 dev server——没有这样一个名字，而在那种情况下路径确实就是身份。`gpui_kit::shell::bundle_id_for_path(root)` 用目录名加完整路径的摘要造一个，于是同一个目录总是访问到同一份数据，同一份源码的两个 checkout 也互不干扰。这在你正在编辑它时是对的，在它已经被安装之后是错的——而这正是声明一个真名字带来的区别。
 
 id 允许 `a-z`、`0-9`、`.`、`-`、`_`，不允许 `..`。这不是整洁问题：它会被拼到用户数据目录后面，没检查的 id 能够到目录里的其他东西。数据放在那里而不是应用内部，因为应用目录可能只读、往往是一个 git checkout，也不是用户预期自己数据所在的地方。
 
@@ -278,7 +288,7 @@ console.warn("could not save");
 
 多余的参数会以空格分隔追加在后面，与 `console.log` 的行为一致。结构化的值以 JSON 打印，因为那是读日志的人想看到的形式。
 
-输出通过 `tracing` 走，target 是 `gpui_shell::script`，所以在日志过滤里脚本输出与 Host 输出是可分开的。**没有安装 `tracing` subscriber 的 Host 会把这些全部丢弃**——连同运行时自己报告的抛异常的处理函数、未处理的 rejection 与 phase 非法的调用。`gpui-shell` 二进制安装的是一个 `INFO` 级别的 stderr sink，`--dev` 下是 `DEBUG`。
+输出通过 `tracing` 走，target 是 `gpui_kit::shell::script`，所以在日志过滤里脚本输出与 Host 输出是可分开的。**没有安装 `tracing` subscriber 的 Host 会把这些全部丢弃**——连同运行时自己报告的抛异常的处理函数、未处理的 rejection 与 phase 非法的调用。`gpui-shell` 二进制安装的是一个 `INFO` 级别的 stderr sink，`--dev` 下是 `DEBUG`。
 
 ## `process`
 
@@ -317,22 +327,22 @@ process.exit(0);
 
 **资源上限**，让失控的脚本报错而不是把窗口一起带走：
 
-| 上限                                       | 值                                                                         |
-| ------------------------------------------ | -------------------------------------------------------------------------- |
+| 上限                                       | 值                                                                           |
+| ------------------------------------------ | ---------------------------------------------------------------------------- |
 | 堆                                         | 256 MiB——泄漏表现为一个可捕获的 JavaScript 异常，而不是整个 Host 被 OOM kill |
-| 解释器栈                                   | 1 MiB——深递归表现为 `RangeError`，而不是原生栈溢出                         |
-| 已加载的 JavaScript module                 | 每个源码文件 8 MiB                                                         |
-| 尚未完成的 host task                       | 每个 runtime 1,024 个                                                       |
-| 单次调用耗时：render 与 layout             | 50 ms                                                                      |
-| 单次调用耗时：event 与 task                | 500 ms                                                                     |
-| 单次调用耗时：不在任何调用中，例如模块求值 | 5 秒                                                                       |
+| 解释器栈                                   | 1 MiB——深递归表现为 `RangeError`，而不是原生栈溢出                           |
+| 已加载的 JavaScript module                 | 每个源码文件 8 MiB                                                           |
+| 尚未完成的 host task                       | 每个 runtime 1,024 个                                                        |
+| 单次调用耗时：render 与 layout             | 50 ms                                                                        |
+| 单次调用耗时：event 与 task                | 500 ms                                                                       |
+| 单次调用耗时：不在任何调用中，例如模块求值 | 5 秒                                                                         |
 
 时钟在每一次 Host 调用时重置，这正是渲染路径能比事件回调有更紧预算的原因。**中断无法被 `catch` 吞掉**——这一点有测试来度量，因为如果能被吞掉，中断就根本不是一道防线。每个 WebSocket 另有一条由 `read`、`write` 与 `close` 共用的 8-command 队列；队列已满时新操作会 reject，并要求调用方等待 outstanding work。
 
 这里没有 quickjs-libc 的 `std`：quickjs-libc 从一开始就没有被编进这个构建。运行时仍提供下文列出的、经过审计的小型 `os` 模块。
 
 ::: tip 开发模式
-`--dev` 会启用源码监听，并在构造运行时之前调用 `gpui_shell::set_development_mode(true)`。它会恢复动态代码构造器并让内建原型保持可写。
+`--dev` 会启用源码监听，并在构造运行时之前调用 `gpui_kit::shell::set_development_mode(true)`。它会恢复动态代码构造器并让内建原型保持可写。
 
 开发模式从不放宽能力约束。它让语言更好摆弄，但不会发出任何人没有声明过的访问权限——因为一项作者从没写下来的授权，就是一项在生产环境里会缺失的授权。
 :::
@@ -345,7 +355,7 @@ process.exit(0);
 
 DNS 解析是有界的进程级共享服务：所有应用共用两个 resolver worker 和一个最多 64 个请求的队列。排队沿用每次连接已有的 deadline，所以饱和时会以 timeout 失败，不会无界增长内存或线程。这是资源收敛，不是每应用的服务质量保证；同一进程中运行互不信任应用的 Host，不会获得应用之间的 DNS 公平性。
 
-运行时还提供 `buffer`、`path`、`url`、`crypto`、`zlib`、`console`、`process` 与 `os`。它们是生成的 `gpui.d.ts` 所声明、经过审计的 LLRT/Host 子集；`node:` 别名和任意 Node 内建模块不属于 shell 契约。
+运行时还提供 `buffer`、`path`、`url`、`crypto`、`zlib`、`console`、`process` 与 `os`。它们是生成的 `gpui-kit.d.ts` 所声明、经过审计的 LLRT/Host 子集；`node:` 别名和任意 Node 内建模块不属于 shell 契约。
 
 ## 还没有的东西
 

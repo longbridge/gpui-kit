@@ -1,12 +1,14 @@
 [workspace]
 default-members = ["crates/story"]
 members = [
+    "crates/kit",
     "crates/base",
     "crates/base/examples/wasm",
-    "crates/macros",
+    "crates/base/examples/native",
+    "crates/component-macros",
     "crates/story",
     "crates/story-web",
-    "crates/ui",
+    "crates/component",
     "crates/assets",
     "crates/fps",
     "crates/webview",
@@ -14,6 +16,14 @@ members = [
     "examples/fps_monitor",
     "examples/hello_world",
     "examples/input",
+    "examples/editor",
+    "examples/brush",
+    "examples/dock",
+    "examples/html",
+    "examples/large-text",
+    "examples/markdown",
+    "examples/stream-markdown",
+    "examples/tiles",
     "examples/window_title",
     "examples/dialog_overlay",
     "examples/webview",
@@ -36,23 +46,24 @@ publish = false
 edition = "2024"
 
 [workspace.dependencies]
-gpui-component = { path = "crates/ui", version = "0.5.2" }
-gpui-base = { path = "crates/base", version = "0.5.2" }
-gpui-component-macros = { path = "crates/macros", version = "0.5.1" }
-gpui-component-assets = { path = "crates/assets", version = "0.5.1" }
-gpui-fps = { path = "crates/fps", version = "0.1.0" }
-gpui-shell = { path = "crates/shell", version = "0.1.0" }
-gpui-component-shell = { path = "crates/component-shell", version = "0.1.0" }
+gpui-kit = { path = "crates/kit", version = "0.6.0" }
+gpui-component = { path = "crates/component", version = "0.6.0" }
+gpui-base = { path = "crates/base", version = "0.6.0" }
+gpui-component-macros = { path = "crates/component-macros", version = "0.6.0" }
+gpui-kit-assets = { path = "crates/assets", version = "0.6.0" }
+gpui-fps = { path = "crates/fps", version = "0.6.0" }
+gpui-shell = { path = "crates/shell", version = "0.6.0" }
+gpui-wry = { path = "crates/webview", version = "0.6.0" }
+gpui-component-shell = { path = "crates/component-shell", version = "0.6.0" }
 story = { path = "crates/story" }
 
-gpui = { version = "0.2.2", git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { git = "https://github.com/zed-industries/zed" }
-gpui_macros = { version = "0.1.0", git = "https://github.com/zed-industries/zed" }
-reqwest_client = { git = "https://github.com/zed-industries/zed" }
-sum-tree = { version = "0.2.0", package = "zed-sum-tree" }
-# reqwest = { version = "0.12.15-zed", package = "zed-reqwest" }
-reqwest = { git = "https://github.com/zed-industries/reqwest.git", rev = "c15662463bda39148ba154100dd44d3fba5873a4", default-features = false, features = [
+gpui = { package = "gpui-pre", version = "0.3.1" }
+gpui_platform = { package = "gpui-pre-platform", version = "0.3.1", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { package = "gpui-pre-web", version = "0.3.1" }
+gpui_macros = { package = "gpui-pre-macros", version = "0.3.1" }
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "0.3.1" }
+sum-tree = { package = "gpui-pre-sum-tree", version = "0.3.1" }
+reqwest = { package = "gpui-pre-reqwest", version = "0.12.15", default-features = false, features = [
     "charset",
     "http2",
     "macos-system-configuration",
@@ -60,7 +71,7 @@ reqwest = { git = "https://github.com/zed-industries/reqwest.git", rev = "c15662
     "rustls-tls-native-roots",
     "socks",
     "stream",
-], package = "zed-reqwest", version = "0.12.15-zed" }
+] }
 
 anyhow = "1"
 instant = { version = "0.1", features = ["wasm-bindgen"] }
@@ -111,7 +122,7 @@ style = { level = "allow", priority = -1 }
 todo = "deny"
 type_complexity = "allow"
 # Temporarily allow this until we can migrate to the new APIs.
-# https://github.com/longbridge/gpui-component/pull/2149
+# https://github.com/longbridge/gpui-kit/pull/2149
 useless_conversion = "allow"
 
 [profile.dev]
@@ -125,14 +136,14 @@ rustybuzz = { opt-level = 3 }
 taffy = { opt-level = 3 }
 ttf-parser = { opt-level = 3 }
 smol = { opt-level = 3 }
-gpui = { opt-level = 3 }
-gpui_platform = { opt-level = 3 }
-gpui_macros = { opt-level = 3 }
+gpui-pre = { opt-level = 3 }
+gpui-pre-platform = { opt-level = 3 }
+gpui-pre-macros = { opt-level = 3 }
 tree-sitter = { opt-level = 3 }
-sum_tree = { opt-level = 3 }
+gpui-pre-sum-tree = { opt-level = 3 }
 ropey = { opt-level = 3 }
 lsp-types = { opt-level = 3 }
-reqwest_client = { opt-level = 3 }
+gpui-pre-reqwest-client = { opt-level = 3 }
 markdown = { opt-level = 3 }
 xml5ever = { opt-level = 3 }
 # `rquickjs` is a facade that re-exports `rquickjs-core`, so naming it alone

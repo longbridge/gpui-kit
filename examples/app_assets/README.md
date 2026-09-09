@@ -1,6 +1,6 @@
 ## Icon assets in GPUI Component
 
-The [IconName](https://github.com/longbridge/gpui-component/blob/6998708b817024c2ac0f1ea164d74ddfc024e124/crates/ui/src/icon.rs#L9) is a enum that defined a bunch of icon names, because some internal components in GPUI Component will use them.
+The [IconName](https://github.com/longbridge/gpui-kit/blob/6998708b817024c2ac0f1ea164d74ddfc024e124/crates/component/src/icon.rs#L9) is a enum that defined a bunch of icon names, because some internal components in GPUI Component will use them.
 
 You can see, we have a lot of svg icon files in the `assets/icons` folder, but we are not embed all of the icon files in the library by default. This for keep the library size small.
 
@@ -30,7 +30,7 @@ You need define a `Assets` struct with rust-embed to register assets to GPUI app
 
 ```rs
 use anyhow::anyhow;
-use gpui::*;
+use gpui_kit::*;
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
 
@@ -55,7 +55,7 @@ impl AssetSource for Assets {
 
 fn main() {
     // Call with_assets to register assets
-    let app = gpui_platform::application().with_assets(Assets);
+    let app = gpui_kit::application().with_assets(Assets);
 
     // ...
 }
@@ -63,20 +63,20 @@ fn main() {
 
 ## Use default bundled assets.
 
-The `gpui-component-assets` crate provide a default bundled assets implementation that include all the icon files in the `assets/icons` folder.
+The `gpui-kit-assets` crate provide a default bundled assets implementation that include all the icon files in the `assets/icons` folder.
 
 If you don't want to manage your own icon files, you can just use the default bundled assets.
 
-Just add `gpui-component-assets` as a dependency in your `Cargo.toml`:
+Just add `gpui-kit-assets` as a dependency in your `Cargo.toml`:
 
 ```toml
 [dependencies]
 gpui-component = "*"
-gpui-component-assets = "*"
+gpui-kit-assets = "*"
 ```
 
 And then use it in your application:
 
 ```rs
-let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
+let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
 ```

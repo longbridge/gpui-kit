@@ -14,5 +14,5 @@
     "strictNullChecks": false,
     "noEmit": true
   },
-  "include": ["*.js", "stories/*.js", "gpui.d.ts"]
+  "include": ["*.js", "stories/*.js", "gpui-kit.d.ts"]
 }

@@ -1,11 +1,7 @@
 use std::rc::Rc;
 
-use gpui::{
-    Action, App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement,
-    ParentElement, Pixels, Render, Size, Styled, UniformListScrollHandle, Window, div, px, size,
-    uniform_list,
-};
-use gpui_component::{ActiveTheme as _, button::Button, scroll::ScrollableElement, v_flex};
+use gpui_kit::component::{ActiveTheme as _, button::Button, scroll::ScrollableElement, v_flex};
+use gpui_kit::*;
 use serde::Deserialize;
 
 use crate::story_toolbar_group;
@@ -89,7 +85,7 @@ impl super::Story for ScrollbarStory {
 }
 
 impl Focusable for ScrollbarStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }
@@ -97,9 +93,9 @@ impl Focusable for ScrollbarStory {
 impl Render for ScrollbarStory {
     fn render(
         &mut self,
-        _: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> impl gpui::IntoElement {
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
         v_flex()
             .size_full()
             .gap_4()

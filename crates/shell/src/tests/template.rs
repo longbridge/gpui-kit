@@ -21,7 +21,7 @@ fn tree(cx: &mut TestAppContext, source: &str) -> Result<String, String> {
 }
 
 const INLINE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 
 export default class Board extends View {
@@ -36,7 +36,7 @@ export default class Board extends View {
 "#;
 
 const TEMPLATED: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 const template = globalThis.__template;
 
@@ -68,7 +68,7 @@ fn a_style_argument_and_a_handler_are_slots_too(cx: &mut TestAppContext) {
     let tree = tree(
         cx,
         r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, Button } from "gpui-base";
 const template = globalThis.__template;
 
@@ -108,7 +108,7 @@ fn every_call_mints_its_own_handler(cx: &mut TestAppContext) {
     let (runtime, mut context, object) = script_object(
         cx,
         r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { v_flex, Button } from "gpui-base";
 const template = globalThis.__template;
 
@@ -153,7 +153,7 @@ fn a_template_argument_may_not_be_computed_on(cx: &mut TestAppContext) {
     let error = tree(
         cx,
         r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 const template = globalThis.__template;
 const Row = template((price) => div().child(`$${price}`));
 export default class Board extends View {
@@ -174,7 +174,7 @@ fn a_body_may_not_register_its_own_handler(cx: &mut TestAppContext) {
     let error = tree(
         cx,
         r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { Button } from "gpui-base";
 const template = globalThis.__template;
 const Row = template((label) => Button.new("pick").on_click(() => 1).child(label));
@@ -196,7 +196,7 @@ fn a_parameter_that_fills_nothing_is_refused(cx: &mut TestAppContext) {
     let error = tree(
         cx,
         r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 const template = globalThis.__template;
 const Row = template((symbol, unused) => div().child(symbol));
 export default class Board extends View {
@@ -217,7 +217,7 @@ fn a_template_body_may_not_use_another_template(cx: &mut TestAppContext) {
     let error = tree(
         cx,
         r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 const template = globalThis.__template;
 const Cell = template((value) => div().child(value));
 const Row = template((value) => div().child(Cell(value)));
@@ -239,7 +239,7 @@ fn a_slot_in_a_position_a_template_cannot_fill_is_refused(cx: &mut TestAppContex
     let error = tree(
         cx,
         r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { Checkbox } from "gpui-base";
 const template = globalThis.__template;
 const Row = template((flag) => Checkbox.new("pick").disabled(flag));
@@ -261,7 +261,7 @@ fn calling_a_template_with_the_wrong_number_of_arguments_is_refused(cx: &mut Tes
     let error = tree(
         cx,
         r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 const template = globalThis.__template;
 const Row = template((symbol, price) => div().child(symbol).child(price));
 export default class Board extends View {
@@ -282,7 +282,7 @@ fn a_bad_style_argument_still_reports_at_the_call(cx: &mut TestAppContext) {
     let error = tree(
         cx,
         r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 const template = globalThis.__template;
 const Row = template((color) => div().bg(color));
 export default class Board extends View {
@@ -359,7 +359,7 @@ fn time_board(
 }
 
 const INLINE_WATCHLIST: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Button } from "gpui-base";
 
 export default class Watchlist extends View {
@@ -385,7 +385,7 @@ export default class Watchlist extends View {
 "#;
 
 const TEMPLATED_WATCHLIST: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Button } from "gpui-base";
 const template = globalThis.__template;
 
@@ -421,7 +421,7 @@ fn a_whole_view_can_be_one_template(cx: &mut TestAppContext) {
     let tree = tree(
         cx,
         r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 const template = globalThis.__template;
 
@@ -496,7 +496,7 @@ fn what_automatic_templating_of_the_safe_helpers_would_buy(cx: &mut TestAppConte
 
 /// The story's `ui.js` shape: leaf helpers, a row that composes them, a header.
 const BOARD_PLAIN: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Button } from "gpui-base";
 
 const label = (value) =>
@@ -548,7 +548,7 @@ export default class Board extends View {
 
 /// The same board, with only the helpers a wrapper could safely take.
 const BOARD_TEMPLATED_HELPERS: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Button } from "gpui-base";
 
 const template = globalThis.__template;
@@ -614,7 +614,7 @@ fn a_state_style_survives_being_grafted_twice(cx: &mut TestAppContext) {
     let tree = tree(
         cx,
         r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex } from "gpui-base";
 
 const template = globalThis.__template;
@@ -651,7 +651,7 @@ fn a_named_slot_survives_being_grafted_twice(cx: &mut TestAppContext) {
     let tree = tree(
         cx,
         r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, Collapsible } from "gpui-base";
 
 const template = globalThis.__template;
@@ -690,7 +690,7 @@ fn a_body_that_throws_leaves_the_render_it_interrupted_intact(cx: &mut TestAppCo
     let tree = tree(
         cx,
         r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex } from "gpui-base";
 
 const template = globalThis.__template;

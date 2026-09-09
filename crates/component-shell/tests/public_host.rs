@@ -74,7 +74,7 @@ fn mount(
 #[gpui_shell::gpui::test]
 fn public_host_api_mounts_and_materializes_registered_component_js(cx: &mut TestAppContext) {
     let source = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { Spinner } from "gpui-component";
 
 export default class ComponentApp extends View {
@@ -108,7 +108,7 @@ export default class ComponentApp extends View {
 #[gpui_shell::gpui::test]
 fn registered_component_argument_errors_are_reported_during_render(cx: &mut TestAppContext) {
     let source = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { Spinner } from "gpui-component";
 
 export default class InvalidComponentApp extends View {
@@ -146,7 +146,7 @@ fn all_retained_form_bindings_materialize_and_keep_their_state_across_frames(
     cx: &mut TestAppContext,
 ) {
     let source = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import {
   Calendar, CalendarState, ColorPicker, ColorPickerState,
   DatePicker, DatePickerState, Input, InputState, NumberInput,
@@ -216,7 +216,7 @@ fn retained_otp_rejects_an_ordinary_child_during_public_host_materialization(
     cx: &mut TestAppContext,
 ) {
     let source = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { OtpInput, OtpState } from "gpui-component";
 export default class InvalidOtp extends View {
   init() { this.otp = OtpState(6); }
@@ -246,7 +246,7 @@ export default class InvalidOtp extends View {
 #[gpui_shell::gpui::test]
 fn retained_state_constructor_rejects_rounded_overflow_from_js(cx: &mut TestAppContext) {
     let source = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { OtpInput, OtpState } from "gpui-component";
 export default class InvalidOtpState extends View {
   init() { this.otp = OtpState(18446744073709551616); }
@@ -276,7 +276,7 @@ fn loaded_applications_are_single_mount_and_runtime_bound(cx: &mut TestAppContex
     });
     let app = TempApp::new(
         r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 export default class Reusable extends View { render() { return div().child("ok"); } }
 "#,
     );
@@ -314,7 +314,7 @@ fn failed_owner_mount_consumes_the_loaded_application(cx: &mut TestAppContext) {
     });
     let app = TempApp::new(
         r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 export default class Broken extends View {
   init() { throw new Error("init failed"); }
   render() { return "unreachable"; }
@@ -344,7 +344,7 @@ export default class Broken extends View {
 #[gpui_shell::gpui::test]
 fn public_host_materializes_real_typed_compound_children_in_script_order(cx: &mut TestAppContext) {
     let source = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import {
   Accordion, AccordionItem, Radio, RadioGroup,
   Stepper, StepperItem, Tab, TabBar,
@@ -404,7 +404,7 @@ export default class TypedCompounds extends View {
 #[gpui_shell::gpui::test]
 fn component_state_exports_do_not_shadow_same_named_gpui_base_exports(cx: &mut TestAppContext) {
     let source = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { InputState as BaseInputState } from "gpui-base";
 import { Input, InputState as ComponentInputState } from "gpui-component";
 export default class CoexistingStates extends View {

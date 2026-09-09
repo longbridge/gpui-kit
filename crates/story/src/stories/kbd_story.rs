@@ -1,14 +1,14 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext, Context, Entity, Focusable, IntoElement, Keystroke, ParentElement, Render,
     Styled, Window, px,
 };
 
-use gpui_component::{h_flex, kbd::Kbd, v_flex};
+use gpui_kit::component::{h_flex, kbd::Kbd, v_flex};
 
 use crate::section;
 
 pub struct KbdStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
 }
 
 impl super::Story for KbdStory {
@@ -37,7 +37,7 @@ impl KbdStory {
     }
 }
 impl Focusable for KbdStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

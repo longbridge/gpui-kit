@@ -1,12 +1,12 @@
-use gpui::{
-    App, AppContext, Context, Entity, Focusable, Hsla, InteractiveElement, IntoElement,
-    ParentElement as _, Render, Styled as _, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Colorize, Sizable, Size, StyledExt,
     color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState},
     h_flex, indigo_500, v_flex,
+};
+use gpui_kit::{
+    App, AppContext, Context, Entity, Focusable, Hsla, InteractiveElement, IntoElement,
+    ParentElement as _, Render, Styled as _, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::{ChangeStorySize, section, story_toolbar};
@@ -57,7 +57,7 @@ impl ColorPickerStory {
 }
 
 impl Focusable for ColorPickerStory {
-    fn focus_handle(&self, cx: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, cx: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.color.read(cx).focus_handle(cx)
     }
 }

@@ -8,12 +8,12 @@ order: 8
 
 A script gets **nothing** by default. No file access, no clipboard, no process execution, no network. `Capabilities::default()` is the empty set, and an assertion holds it there.
 
-The one exception is storage, and only at the manifest layer: an application that does not mention `storage` gets its own `localStorage`, the way a browser hands one to every origin without being asked. That is a convention about what an author has to *write*, not a hole in the model — the Rust `Capabilities` still deny it until a host says otherwise, and a manifest may still say `"storage": false`. See [Storage](#storage).
+The one exception is storage, and only at the manifest layer: an application that does not mention `storage` gets its own `localStorage`, the way a browser hands one to every origin without being asked. That is a convention about what an author has to _write_, not a hole in the model — the Rust `Capabilities` still deny it until a host says otherwise, and a manifest may still say `"storage": false`. See [Storage](#storage).
 
-The host grants what it grants, because only the host knows how far it trusts the code it is about to run. What it hands *out* — its own Rust, exposed on purpose — is [HostModule](./host-module.md). A View freezes its capabilities when it is loaded; changing the default affects applications loaded afterward, never code that is already running under an approved grant.
+The host grants what it grants, because only the host knows how far it trusts the code it is about to run. What it hands _out_ — its own Rust, exposed on purpose — is [HostModule](./host-module.md). A View freezes its capabilities when it is loaded; changing the default affects applications loaded afterward, never code that is already running under an approved grant.
 
 ```rust
-gpui_shell::set_capabilities(
+gpui_kit::shell::set_capabilities(
     Capabilities::new()
         .read_roots([application_root.clone()])
         .write_roots([data_directory.clone()])
@@ -72,7 +72,7 @@ A directory is recognized by **`gpui-shell.json`**. The manifest is inert data �
   "id": "com.example.quotes",
   "name": "Quotes",
   "version": "1.0.0",
-  "shell-version": "0.1.0",
+  "shell-version": "0.6.0",
   "entry": "main.js",
   "dependencies": {
     "omarchy-ui": "huacnlee/omarchy-ui"
@@ -81,7 +81,14 @@ A directory is recognized by **`gpui-shell.json`**. The manifest is inert data �
     "fs": { "read": ["${pluginDir}"], "write": ["${dataDir}"] },
     "network": {
       "hosts": ["stream.example.com"],
-      "http": [{ "scheme": "https", "host": "api.example.com", "methods": ["GET"], "path_prefixes": ["/v1/"] }]
+      "http": [
+        {
+          "scheme": "https",
+          "host": "api.example.com",
+          "methods": ["GET"],
+          "path_prefixes": ["/v1/"]
+        }
+      ]
     },
     "storage": true,
     "clipboard": { "read": false, "write": true },
@@ -99,9 +106,9 @@ carries the package's own types and documentation. See
 [Dependencies](./dependencies.md) for version selection, the package entry,
 the cache, and what an editor sees.
 
-Every grant in that block defaults to *denied* when omitted, except `storage`, which defaults to granted — write `"storage": false` to refuse it.
+Every grant in that block defaults to _denied_ when omitted, except `storage`, which defaults to granted — write `"storage": false` to refuse it.
 
-Unknown fields, invalid reverse-DNS ids, invalid explicitly declared SemVer values, incompatible `shell-version` values, escaping entries, and unknown `${...}` placeholders invalidate the manifest before code runs. Omitted `version` is reported as `unknown`. Omitted `shell-version` accepts the current runtime; when present, it names the oldest compatible gpui-shell release the application requires. Compatibility follows SemVer: `0.x` applications stay on the same minor line; stable releases stay on the same major line. The standalone CLI refuses an invalid manifest instead of executing its entry with silently different assumptions.
+Unknown fields, invalid reverse-DNS ids, invalid explicitly declared SemVer values, incompatible `shell-version` values, escaping entries, and unknown `${...}` placeholders invalidate the manifest before code runs. Omitted `version` is reported as `unknown`. Omitted `shell-version` accepts the current runtime; when present, it names the oldest compatible gpui-shell release the application requires. Any runtime at or above that version is accepted. The standalone CLI refuses an invalid manifest instead of executing its entry with silently different assumptions.
 
 Each scoped `network.http` rule binds the request scheme and effective port as well as its host, method and path. `scheme` defaults to `https`; `port` defaults to that scheme's standard port and only needs to be written for a non-default endpoint.
 
@@ -113,17 +120,17 @@ import * as fs from "fs/promises";
 
 Every call returns a promise. `await` them, or chain `.then` — and see the note below about `render`.
 
-| Call                            | Resolves to                          |
-| ------------------------------- | ------------------------------------ |
-| `fs.readFile(path)`             | `Uint8Array`                         |
-| `fs.readFile(path, "utf8")`     | UTF-8 text                           |
-| `fs.writeFile(path, contents)`  | —                                    |
-| `fs.readdir(path)`              | Names sorted by name                 |
+| Call                                        | Resolves to                     |
+| ------------------------------------------- | ------------------------------- |
+| `fs.readFile(path)`                         | `Uint8Array`                    |
+| `fs.readFile(path, "utf8")`                 | UTF-8 text                      |
+| `fs.writeFile(path, contents)`              | —                               |
+| `fs.readdir(path)`                          | Names sorted by name            |
 | `fs.readdir(path, { withFileTypes: true })` | `Dirent[]` with `isDirectory()` |
-| `fs.exists(path)`               | `true` / `false`                     |
-| `fs.unlink(path)`               | —                                    |
-| `fs.rmdir(path)`                | —                                    |
-| `fs.mkdir(path, options?)`      | —                                    |
+| `fs.exists(path)`                           | `true` / `false`                |
+| `fs.unlink(path)`                           | —                               |
+| `fs.rmdir(path)`                            | —                               |
+| `fs.mkdir(path, options?)`                  | —                               |
 
 ```js
 const source = await fs.readFile("notes.md", "utf8");
@@ -171,22 +178,25 @@ localStorage.key(0);
 localStorage.clear();
 ```
 
-| Member              | Description                                     |
-| ------------------- | ----------------------------------------------- |
-| `length`            | How many keys are stored                        |
-| `key(index)`        | The key at that position, or `null`             |
-| `getItem(key)`      | The value, or `null` when the key is unset      |
-| `setItem(key, val)` | Stores it, converting the value to a string     |
-| `removeItem(key)`   | Forgets one key                                 |
-| `clear()`           | Forgets all of them                             |
-| `flush()`           | Resolves once the writes have reached the disk  |
+| Member              | Description                                    |
+| ------------------- | ---------------------------------------------- |
+| `length`            | How many keys are stored                       |
+| `key(index)`        | The key at that position, or `null`            |
+| `getItem(key)`      | The value, or `null` when the key is unset     |
+| `setItem(key, val)` | Stores it, converting the value to a string    |
+| `removeItem(key)`   | Forgets one key                                |
+| `clear()`           | Forgets all of them                            |
+| `flush()`           | Resolves once the writes have reached the disk |
 
 **The two differ only in how long they last.** `localStorage` is a file the host placed, and it survives a restart. `sessionStorage` is memory that goes with the process. That is also why only one of them is a capability: nothing `sessionStorage` holds ever leaves the process, so there is nothing to grant, and it works on a host that granted nothing.
 
 **Values are strings**, exactly as on the web — `setItem` converts whatever it is handed. Anything with structure goes through `JSON.stringify` on the way in and `JSON.parse` on the way out, which is the same code you would write in a browser:
 
 ```js
-localStorage.setItem("window", JSON.stringify({ title: "Notes", size: [640, 480] }));
+localStorage.setItem(
+  "window",
+  JSON.stringify({ title: "Notes", size: [640, 480] }),
+);
 const window = JSON.parse(localStorage.getItem("window") ?? "{}");
 ```
 
@@ -205,21 +215,21 @@ Storage is per application, and the host chooses the location — an application
 **The host names the application, and its data follows that name:**
 
 ```rust
-let data = gpui_shell::set_bundle_id("com.example.notes")?;
-gpui_shell::set_capabilities(Capabilities::new().write_roots([data]));
+let data = gpui_kit::shell::set_bundle_id("com.example.notes")?;
+gpui_kit::shell::set_capabilities(Capabilities::new().write_roots([data]));
 ```
 
-| Platform             | Location                                                                       |
-| -------------------- | ------------------------------------------------------------------------------ |
+| Platform             | Location                                                                         |
+| -------------------- | -------------------------------------------------------------------------------- |
 | Linux and other Unix | `$XDG_DATA_HOME/gpui-shell/apps/<id>/store.json`, defaulting to `~/.local/share` |
 | macOS                | `~/Library/Application Support/gpui-shell/apps/<id>/store.json`                  |
-| Windows              | `%APPDATA%\gpui-shell\apps\<id>\store.json`                                     |
+| Windows              | `%APPDATA%\gpui-shell\apps\<id>\store.json`                                      |
 
 The id is the identity, so the data survives the directory being renamed, moved, or replaced by an upgrade — which is what a user means by "my settings". Keying on the path instead means an upgrade silently starts them over.
 
 **The runtime does not go looking for the id in a file.** Only the layer that installed the application knows what it is called; a runtime that read it out of a manifest of its own choosing would be claiming authority over something it does not own.
 
-A host that was merely *pointed at* a directory — this command line, a dev server — has no such name, and there the path really is the identity. `gpui_shell::bundle_id_for_path(root)` builds one from the directory's name and a digest of its full path, so the same directory always reaches the same data and two checkouts of one source stay apart. That is right while you are editing something and wrong once it is installed, which is exactly the difference declaring a real id makes.
+A host that was merely _pointed at_ a directory — this command line, a dev server — has no such name, and there the path really is the identity. `gpui_kit::shell::bundle_id_for_path(root)` builds one from the directory's name and a digest of its full path, so the same directory always reaches the same data and two checkouts of one source stay apart. That is right while you are editing something and wrong once it is installed, which is exactly the difference declaring a real id makes.
 
 The id may hold `a-z`, `0-9`, `.`, `-` and `_`, and no `..`. That is not tidiness: it is joined onto the user's data directory, so an unchecked one reaches the rest of it. Data lives there rather than inside the application because an application directory may be read-only, is often a git checkout, and is not where a user expects their data to be.
 
@@ -280,7 +290,7 @@ console.warn("could not save");
 
 Extra arguments are appended space-separated, the way `console.log` behaves. Structured values print as JSON, because that is what an author reading a log wants to see.
 
-Output goes through `tracing` with the target `gpui_shell::script`, so script output is separable from host output in a log filter. **A host with no `tracing` subscriber installed discards all of it** — along with the runtime's own reports of throwing handlers, unhandled rejections and illegal-phase calls. The `gpui-shell` binary installs a stderr sink at `INFO`, or `DEBUG` under `--dev`.
+Output goes through `tracing` with the target `gpui_kit::shell::script`, so script output is separable from host output in a log filter. **A host with no `tracing` subscriber installed discards all of it** — along with the runtime's own reports of throwing handlers, unhandled rejections and illegal-phase calls. The `gpui-shell` binary installs a stderr sink at `INFO`, or `DEBUG` under `--dev`.
 
 ## `process`
 
@@ -323,8 +333,8 @@ Beyond the capability grants, the runtime trims the language itself. All of it a
 | ------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | Heap                                                          | 256 MiB — a leak becomes a catchable JavaScript exception, not an OOM kill |
 | Interpreter stack                                             | 1 MiB — deep recursion becomes a `RangeError`, not a native stack overflow |
-| Loaded JavaScript module                                      | 8 MiB per source file                                                       |
-| Outstanding host tasks                                        | 1,024 per runtime                                                           |
+| Loaded JavaScript module                                      | 8 MiB per source file                                                      |
+| Outstanding host tasks                                        | 1,024 per runtime                                                          |
 | Time in one call: render and layout                           | 50 ms                                                                      |
 | Time in one call: event and task                              | 500 ms                                                                     |
 | Time in one call: outside any call, such as module evaluation | 5 s                                                                        |
@@ -334,7 +344,7 @@ The clock restarts on every host call, which is what lets the render path have a
 There is no quickjs-libc `std`: quickjs-libc is not compiled into the build. The runtime does provide the small audited `os` module listed below.
 
 ::: tip Development mode
-`--dev` enables source watching and calls `gpui_shell::set_development_mode(true)` before constructing the runtime. That restores dynamic-code constructors and leaves built-in prototypes writable.
+`--dev` enables source watching and calls `gpui_kit::shell::set_development_mode(true)` before constructing the runtime. That restores dynamic-code constructors and leaves built-in prototypes writable.
 
 Development mode never relaxes capability gating. It makes the language easier to poke at; it does not hand out access nobody declared, because a grant the author never wrote down is a grant that will be missing in production.
 :::
@@ -347,7 +357,7 @@ Global `fetch(url, options?)` is promise-based and returns `{ status, ok, url, ,
 
 DNS resolution is a bounded process-wide service: all applications share two resolver workers and a 64-request queue. Queueing observes each connection's existing deadline, so saturation fails as a timeout instead of growing memory or threads without limit. This is resource containment, not per-application quality-of-service; a host that runs mutually untrusted applications in one process does not get DNS fairness between them.
 
-The runtime also provides `buffer`, `path`, `url`, `crypto`, `zlib`, `console`, `process`, and `os`. These are the audited LLRT/host-backed subset declared in generated `gpui.d.ts`; `node:` aliases and arbitrary Node built-ins are not part of the shell contract.
+The runtime also provides `buffer`, `path`, `url`, `crypto`, `zlib`, `console`, `process`, and `os`. These are the audited LLRT/host-backed subset declared in generated `gpui-kit.d.ts`; `node:` aliases and arbitrary Node built-ins are not part of the shell contract.
 
 ## Not there yet
 

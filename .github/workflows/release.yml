@@ -14,19 +14,14 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          cargo publish -p gpui-component-assets
-          cargo publish -p gpui-component-macros
-          cargo publish -p gpui-base
-          cargo publish -p gpui-wry
-
-          # crates.io may take a short while to expose newly published
-          # dependencies to the index used while packaging the facade crate.
-          for attempt in {1..12}; do
-            if cargo publish -p gpui-component; then
-              exit 0
-            fi
-            if [ "$attempt" -eq 12 ]; then
-              exit 1
-            fi
-            sleep 10
-          done
+          # One invocation publishes the whole set: Cargo orders the packages by
+          # dependency and waits for each one to appear in the index before
+          # publishing the next. `gpui-kit` depends on every layer, so it goes last.
+          cargo publish \
+            -p gpui-kit-assets \
+            -p gpui-component-macros \
+            -p gpui-base \
+            -p gpui-fps \
+            -p gpui-component \
+            -p gpui-wry \
+            -p gpui-kit

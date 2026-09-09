@@ -1,9 +1,9 @@
-use gpui::{
+use gpui_kit::component::{
+    IconName, Sizable as _, Size, alert::Alert, dock::PanelControl, text::markdown, v_flex,
+};
+use gpui_kit::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     ParentElement, Render, Styled, Window,
-};
-use gpui_component::{
-    IconName, Sizable as _, Size, alert::Alert, dock::PanelControl, text::markdown, v_flex,
 };
 
 use crate::{ChangeStorySize, section, story_toolbar};
@@ -11,7 +11,7 @@ use crate::{ChangeStorySize, section, story_toolbar};
 pub struct AlertStory {
     size: Size,
     banner_visible: bool,
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
 }
 
 impl AlertStory {

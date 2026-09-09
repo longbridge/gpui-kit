@@ -32,7 +32,7 @@ const ENTRY: &str = "structure.js";
 
 /// A view whose every render changes a value and nothing else.
 const VALUES_ONLY: &str = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 
 export default class Quote extends View {
@@ -54,7 +54,7 @@ export default class Quote extends View {
 /// minted fresh on every render and retired with the snapshot generation, so a
 /// fingerprint that kept it would report a change every single time.
 const VALUES_ONLY_WITH_HANDLERS: &str = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { v_flex, h_flex, Button } from "gpui-base";
 
 export default class Quote extends View {
@@ -74,7 +74,7 @@ export default class Quote extends View {
 
 /// A view that alternates between two shapes.
 const ALTERNATING_BRANCH: &str = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 
 export default class Branch extends View {
@@ -94,7 +94,7 @@ export default class Branch extends View {
 
 /// A view that grows by one row per render.
 const GROWING_LIST: &str = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 
 export default class Growing extends View {
@@ -116,7 +116,7 @@ export default class Growing extends View {
 /// The census panel: a watchlist of the shape §20.7 names as the best case —
 /// repeated rows, a handler each, and only the numbers moving.
 const WATCHLIST: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Button } from "gpui-base";
 
 export default class Watchlist extends View {
@@ -155,7 +155,7 @@ export default class Watchlist extends View {
 /// [`WATCHLIST`] is what minting forty closures and registering forty callbacks
 /// costs.
 const WATCHLIST_WITHOUT_HANDLERS: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Button } from "gpui-base";
 
 export default class Watchlist extends View {
@@ -491,7 +491,7 @@ fn one_row_against_the_panel_that_holds_it(cx: &mut TestAppContext) {
 
 /// One row of [`WATCHLIST`], as a view of its own.
 const ONE_ROW: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { h_flex, Button } from "gpui-base";
 
 export default class Row extends View {

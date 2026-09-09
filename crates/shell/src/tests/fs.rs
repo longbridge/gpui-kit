@@ -17,7 +17,7 @@ use gpui::{Entity, IntoElement as _, TestAppContext, VisualTestContext};
 /// the assertion can be made on what the script saw rather than on what the host
 /// did.
 const PROBE: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import * as fs from "fs/promises";
 
@@ -59,7 +59,7 @@ export default class Probe extends View {
 "#;
 
 const DENIAL_PROBE: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import * as fs from "fs/promises";
 export default class Probe extends View {
@@ -264,7 +264,7 @@ impl gpui::Render for Empty {
 /// happens on a background thread. `flush` is for a script that has to know the
 /// write landed.
 const STORE_PROBE: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 
 export default class Probe extends View {
@@ -357,7 +357,7 @@ fn the_store_answers_from_memory_and_persists_off_thread(cx: &mut TestAppContext
 }
 
 const STORE_RETRY_PROBE: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex, Checkbox } from "gpui-base";
 
 export default class Probe extends View {

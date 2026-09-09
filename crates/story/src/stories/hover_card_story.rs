@@ -1,10 +1,10 @@
-use gpui::{
-    Anchor, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
-    Styled as _, Window, div, px, relative,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, StyledExt, avatar::Avatar, button::Button, h_flex, hover_card::HoverCard,
     link::Link, v_flex,
+};
+use gpui_kit::{
+    Anchor, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
+    Styled as _, Window, div, px, relative,
 };
 use std::time::Duration;
 

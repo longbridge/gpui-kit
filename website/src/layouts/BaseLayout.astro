@@ -1,0 +1,115 @@
+---
+import { SITE_URL } from '../lib/site';
+
+export interface Props {
+  title?: string;
+  description?: string;
+  lang?: string;
+  ogTitle?: string;
+  canonical?: string;
+  robots?: string;
+  alternates?: boolean;
+  structuredData?: Record<string, unknown> | Record<string, unknown>[];
+}
+
+const {
+  title,
+  description = 'A comprehensive Rust framework for building fantastic, high-performance desktop apps with GPUI.',
+  lang = 'en',
+  ogTitle,
+  canonical = new URL(Astro.url.pathname, SITE_URL).href,
+  robots,
+  alternates = true,
+  structuredData,
+} = Astro.props;
+
+const SITE_TITLE = 'GPUI Kit';
+const OG_IMAGE = `${SITE_URL}/og.png`;
+
+const pageTitle = !title || title === SITE_TITLE
+  ? SITE_TITLE
+  : title.includes(SITE_TITLE) ? title : `${title} · ${SITE_TITLE}`;
+const socialTitle = ogTitle ?? pageTitle;
+const base = import.meta.env.BASE_URL;
+
+const path = Astro.url.pathname;
+const isZh = lang.toLowerCase().startsWith('zh');
+const englishPath = isZh ? path.replace(/^\/zh-CN(?=\/|$)/, '') || '/' : path;
+const chinesePath = isZh ? path : `/zh-CN${path === '/' ? '' : path}`;
+const englishUrl = new URL(englishPath, SITE_URL).href;
+const chineseUrl = new URL(chinesePath, SITE_URL).href;
+
+const defaultStructuredData = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: SITE_TITLE,
+  url: SITE_URL,
+  description,
+};
+const jsonLd = JSON.stringify(structuredData ?? defaultStructuredData).replace(/</g, '\\u003c');
+---
+
+<!DOCTYPE html>
+<html lang={lang}>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    {robots && <meta name="robots" content={robots} />}
+    <title>{pageTitle}</title>
+
+    <!-- Favicon -->
+    <link rel="icon" href={`${base}logo.svg`} />
+
+    <!-- OG / Twitter -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={SITE_TITLE} />
+    <meta property="og:title" content={socialTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={OG_IMAGE} />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="2400" />
+    <meta property="og:image:height" content="1260" />
+    <meta property="og:image:alt" content={SITE_TITLE} />
+    <meta property="og:url" content={canonical} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={socialTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={OG_IMAGE} />
+    <link rel="canonical" href={canonical} />
+    {alternates && <link rel="alternate" hreflang="en" href={englishUrl} />}
+    {alternates && <link rel="alternate" hreflang="zh-CN" href={chineseUrl} />}
+    {alternates && <link rel="alternate" hreflang="x-default" href={englishUrl} />}
+    <script type="application/ld+json" set:html={jsonLd} />
+
+    <!-- Theme: apply before paint to avoid FOUC -->
+    <script is:inline>
+      (function () {
+        const stored = localStorage.getItem('theme');
+        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (stored === 'dark' || (!stored && prefersDark)) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
+
+    <!-- Favicon follows theme toggle -->
+    <script is:inline define:vars={{ base }}>
+      (function () {
+        function updateFavicon() {
+          const isDark = document.documentElement.classList.contains('dark');
+          const link = document.querySelector('link[rel="icon"]');
+          if (link) link.href = isDark ? base + 'logo-dark.svg' : base + 'logo.svg';
+        }
+        updateFavicon();
+        new MutationObserver(updateFavicon).observe(document.documentElement, {
+          attributes: true,
+          attributeFilter: ['class'],
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

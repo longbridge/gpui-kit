@@ -8,7 +8,7 @@ exampleKind: base
 
 # Virtual List
 
-Render a list of any length by drawing only the items currently on screen. Unlike `gpui::uniform_list`, **each item may have a different size** — which is what makes it usable for tables with variable row heights, chat transcripts, and outline trees.
+Render a list of any length by drawing only the items currently on screen. Unlike `gpui_kit::uniform_list`, **each item may have a different size** — which is what makes it usable for tables with variable row heights, chat transcripts, and outline trees.
 
 Virtual List is infrastructure rather than a component: it has no appearance of its own, contributes no chrome, and imposes nothing on the items you return. You give it the sizes up front and a closure that renders a range.
 
@@ -16,11 +16,11 @@ Virtual List is infrastructure rather than a component: it has no appearance of 
 
 Virtualization needs to know the total extent of the list and which items intersect the viewport **without rendering anything**. Two designs solve this:
 
-| Approach | How | Cost |
-| --- | --- | --- |
-| `gpui::uniform_list` | Every item is the same size, so offsets are multiplication | No per-item data, but no variable sizes |
-| Measure as you scroll | Render, measure, correct | Scrollbar jumps; scroll position drifts |
-| **`VirtualList`** | You supply every item's size | Exact offsets and a stable scrollbar, at the cost of knowing sizes in advance |
+| Approach                 | How                                                        | Cost                                                                          |
+| ------------------------ | ---------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `gpui_kit::uniform_list` | Every item is the same size, so offsets are multiplication | No per-item data, but no variable sizes                                       |
+| Measure as you scroll    | Render, measure, correct                                   | Scrollbar jumps; scroll position drifts                                       |
+| **`VirtualList`**        | You supply every item's size                               | Exact offsets and a stable scrollbar, at the cost of knowing sizes in advance |
 
 The third is why `item_sizes` is a required argument rather than a callback. If your items are genuinely unmeasurable until drawn, compute a good estimate, or use a fixed row height and let content clip.
 
@@ -28,8 +28,8 @@ The third is why `item_sizes` is a required argument rather than a callback. If 
 
 ```rust
 use std::rc::Rc;
-use gpui_base::{v_virtual_list, VirtualListScrollHandle};
-use gpui::{px, size};
+use gpui_kit::base::{v_virtual_list, VirtualListScrollHandle};
+use gpui_kit::{px, size};
 
 let sizes = Rc::new(vec![size(px(280.), px(32.)); 100_000]);
 
@@ -128,12 +128,12 @@ State lives outside the closure. Update it in your own callbacks and call `cx.no
 
 Work per frame is proportional to the number of **visible** items, not total items — the example on this page holds 100,000 rows and draws about a dozen. The size table is the one part that scales with the total: it is one `Size<Pixels>` per item, held once behind an `Rc`.
 
-The tradeoff is that the size table must exist before the first frame. For a million rows of uniform height that is a megabyte of sizes for information a single number could carry — that is the case `gpui::uniform_list` exists for, and it is the better choice there.
+The tradeoff is that the size table must exist before the first frame. For a million rows of uniform height that is a megabyte of sizes for information a single number could carry — that is the case `gpui_kit::uniform_list` exists for, and it is the better choice there.
 
 ## Complete Rust example
 
 ```bash
-cargo run -p gpui-base --example components -- virtual-list
+cargo run -p gpui-base-examples -- virtual-list
 ```
 
 <<< ../../crates/base/examples/showcase/components/virtual_list.rs{rust}

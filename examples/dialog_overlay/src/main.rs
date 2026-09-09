@@ -1,6 +1,6 @@
-use gpui::*;
-use gpui_component::{button::*, menu::ContextMenuExt, text::TextView, *};
-use gpui_component_assets::Assets;
+use gpui_kit::assets::Assets;
+use gpui_kit::component::{button::*, menu::ContextMenuExt, text::TextView, *};
+use gpui_kit::*;
 
 actions!(class_menu, [Open, Delete, Export, Info]);
 
@@ -37,7 +37,7 @@ impl HelloWorld {
 impl Render for HelloWorld {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .bg(gpui::white())
+            .bg(gpui_kit::white())
             .size_full()
             .child(TitleBar::new().child("Dialog & Sheet"))
             .child(
@@ -81,10 +81,10 @@ impl Render for HelloWorld {
                             .h_40()
                             .border_1()
                             .border_dashed()
-                            .border_color(gpui::black())
+                            .border_color(gpui_kit::black())
                             .items_center()
                             .justify_center()
-                            .hover(|this| this.bg(gpui::yellow().opacity(0.2)))
+                            .hover(|this| this.bg(gpui_kit::yellow().opacity(0.2)))
                             .child("Hover test here.")
                             .child("Right click to show Context Menu")
                             .context_menu({
@@ -105,10 +105,10 @@ impl Render for HelloWorld {
 }
 
 fn main() {
-    let app = gpui_platform::application().with_assets(Assets);
+    let app = gpui_kit::application().with_assets(Assets);
 
     app.run(move |cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
 
         cx.spawn(async move |cx| {
             cx.open_window(TitleBar::window_options(), |window, cx| {

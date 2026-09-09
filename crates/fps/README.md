@@ -1,6 +1,6 @@
 # gpui-fps
 
-A realtime performance HUD for [GPUI](https://gpui.rs) applications: frames per
+A realtime performance HUD for GPUI applications: frames per
 second, frame time, dropped frame rate, and this process' GPU, CPU and memory
 usage.
 
@@ -29,13 +29,13 @@ It does not depend on `gpui-component`, so it works in any GPUI application.
 
 ```toml
 [dependencies]
-gpui-fps = { git = "https://github.com/longbridge/gpui-component" }
+gpui-fps = { git = "https://github.com/longbridge/gpui-kit" }
 ```
 
-It must resolve to the same `gpui` as your application. Both being git
-dependencies on `zed-industries/zed` is enough — Cargo unifies them — but a
-`[patch]` or a second checkout that pins a different revision will produce two
-incompatible `gpui` crates, and the error will be about mismatched `Window`
+It must resolve to the same `gpui` as your application. Both depending on the
+same `gpui-pre` version is enough — Cargo unifies them — but a `[patch]`, a
+different `gpui-pre` version, or a checkout of the Zed repository will produce
+two incompatible `gpui` crates, and the error will be about mismatched `Window`
 types rather than about versions.
 
 ### 2. Render it
@@ -157,7 +157,7 @@ window redraws for its own reasons, and reads zero while the window is idle.
 - Frame tracing is a global switch that clears its buffer when disabled, so
   monitors reference count it and never turn it off while another monitor — or
   the host application's own profiling — still needs it.
-- The headline is graded on the frame *rate* and `FRAME` on the frame *time*,
+- The headline is graded on the frame _rate_ and `FRAME` on the frame _time_,
   which is why they can disagree. A window that is idle draws a handful of
   frames a second, so the headline goes red while every one of those frames was
   in fact drawn well inside the budget — `FRAME` staying green is what says the
@@ -172,7 +172,7 @@ window redraws for its own reasons, and reads zero while the window is idle.
   every redraw the window was asked for became a frame; well above one means it
   was asked far more often than it could answer, and the excess is work being
   thrown away. It does not show up in the frame times at all, since each frame
-  that *is* drawn may be perfectly quick. It is the one reading the HUD does not
+  that _is_ drawn may be perfectly quick. It is the one reading the HUD does not
   grade: in continuous mode the monitor requests an animation frame of its own
   every render, so an application invalidating once a frame measures two, and
   the baseline depends on a switch the HUD cannot judge against.
@@ -187,7 +187,7 @@ window redraws for its own reasons, and reads zero while the window is idle.
   the same work read 12% on a four core laptop and 2% on a twenty-four core
   desktop, and pushes every interesting value into the bottom of the range,
   where a UI thread pinning a core looks idle.
-- `MEM` is the memory this process is *responsible for*, not its resident set.
+- `MEM` is the memory this process is _responsible for_, not its resident set.
   RSS counts the read-only pages of every shared library the process maps, which
   on a windowed application is a graphics stack running to hundreds of megabytes
   of code it neither allocated nor can release — and which every other window on
@@ -218,6 +218,7 @@ window redraws for its own reasons, and reads zero while the window is idle.
   Where several engines can run at once — Windows and Linux — the reading is the
   busiest engine type rather than their sum, so it stays inside 100% while the
   GPU still has headroom.
+
 - **The GPU row is left out entirely where no per-process counter is reachable**,
   rather than reading a flat zero: the web, an Intel Mac, whose accelerator
   clients do not publish `AppUsage`, and a Linux driver such as nvidia's

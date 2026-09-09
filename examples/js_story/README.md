@@ -17,7 +17,7 @@ the explicit imports, routes, and `coveredBy` metadata in `stories/coverage.js`:
 node examples/js_story/fixtures/verify-coverage.mjs
 ```
 
-The gallery imports only public `gpui`, `gpui-base`, and `gpui-component`
+The gallery imports only public `gpui-kit`, `gpui-base`, and `gpui-component`
 script modules. `catalog.js` explicitly imports each family module and every
 route records its Rust Story source. The inventory currently supplies 69 mirrored Story
 entries and 70 tracked catalog surfaces. The check fails if either side changes
@@ -59,7 +59,7 @@ so the list cannot quietly hide a component that has something to show.
 
 ## Editor checking
 
-`gpui.d.ts` is generated from the public component-shell host's declaration
+`gpui-kit.d.ts` is generated from the public component-shell host's declaration
 API and is not hand-authored by this example:
 
 ```bash

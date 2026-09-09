@@ -18,8 +18,8 @@ use gpui::{
     Anchor, AnyElement, AnyView, App, AppContext as _, ClickEvent, ClipboardItem, Context,
     ElementId, Entity, FocusHandle, Global, Hsla, InteractiveElement as _, IntoElement, KeyBinding,
     MouseButton, MouseDownEvent, ParentElement as _, Render, SharedString,
-    StatefulInteractiveElement as _, Styled as _, WeakFocusHandle, Window, actions, deferred, div,
-    hsla, prelude::FluentBuilder as _, px,
+    StatefulInteractiveElement as _, StyleRefinement, Styled as _, WeakFocusHandle, Window,
+    actions, deferred, div, hsla, prelude::FluentBuilder as _, px,
 };
 use gpui_base::{
     ColorTokens, Dialog, POPUP_PRIORITY, Placement, RadiusTokens, Sheet, SpacingTokens,
@@ -151,6 +151,31 @@ pub struct ShellRoot {
     /// between two triggers and the paint priority; the root owns only the
     /// decision to have one, and what an appearing tooltip looks like.
     tooltip_overlay: Entity<TooltipOverlay>,
+    /// The performance HUD, while a script has asked for one. See
+    /// [`ShellRoot::show_fps_monitor`].
+    fps_hud: Option<FpsHudRequest>,
+}
+
+/// Where the performance HUD sits over the window and how it behaves.
+///
+/// What a script's `show_fps_monitor(options)` names, with the same defaults
+/// `gpui_fps` gives an overlay a Rust host places by hand.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FpsHudRequest {
+    /// Corner or edge of the window.
+    pub anchor: Anchor,
+    /// The per-frame budget the HUD grades frame cost against. `None` keeps
+    /// the HUD's own default.
+    pub frame_budget: Option<Duration>,
+}
+
+impl Default for FpsHudRequest {
+    fn default() -> Self {
+        Self {
+            anchor: Anchor::TopRight,
+            frame_budget: None,
+        }
+    }
 }
 
 pub(crate) struct MountedApplication {
@@ -206,6 +231,7 @@ impl ShellRoot {
             toast_focus_handle: cx.focus_handle().tab_stop(true),
             next_toast_ordinal: 0,
             tooltip_overlay: cx.new(|_| TooltipOverlay::new().render_with(render_tooltip)),
+            fps_hud: None,
         }
     }
 
@@ -280,6 +306,58 @@ impl ShellRoot {
     /// How many toasts are mounted, including ones playing their exit.
     pub fn toast_count(&self) -> usize {
         self.toasts.len()
+    }
+
+    /// Draws the performance HUD over the window, above every other layer,
+    /// until [`hide_fps_monitor`](Self::hide_fps_monitor). Calling it again
+    /// moves or reconfigures the HUD that is already up.
+    ///
+    /// The root owns the HUD rather than the script's tree: the script says
+    /// whether and where, and what it renders can neither move the HUD nor
+    /// rebuild it. The monitor behind the overlay is `gpui_fps`'s own, one per
+    /// window, so a HUD hidden and shown again keeps its history.
+    ///
+    /// Refused, with `false`, from a render pass; see `overlay_mutation_allowed`.
+    pub fn show_fps_monitor(&mut self, request: FpsHudRequest, cx: &mut Context<Self>) -> bool {
+        if !overlay_mutation_allowed("show_fps_monitor") {
+            return false;
+        }
+        self.fps_hud = Some(request);
+        cx.notify();
+        true
+    }
+
+    /// Takes the performance HUD down. `true` if one was up.
+    pub fn hide_fps_monitor(&mut self, cx: &mut Context<Self>) -> bool {
+        if !overlay_mutation_allowed("hide_fps_monitor") {
+            return false;
+        }
+        let was_visible = self.fps_hud.take().is_some();
+        if was_visible {
+            cx.notify();
+        }
+        was_visible
+    }
+
+    /// Whether the performance HUD is up.
+    pub fn fps_monitor_visible(&self) -> bool {
+        self.fps_hud.is_some()
+    }
+
+    /// The HUD, when a script has asked for one. Above every other layer: it
+    /// is a diagnostic, and a dialog over it would hide the reading the
+    /// dialog's own frames are producing.
+    fn fps_layer(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<gpui_fps::FpsOverlay> {
+        let request = self.fps_hud?;
+        let mut overlay = gpui_fps::fps_monitor(window, cx).anchor(request.anchor);
+        if let Some(budget) = request.frame_budget {
+            overlay = overlay.frame_budget(budget);
+        }
+        Some(overlay)
     }
 
     /// Opens a dialog on top of the stack, with default dismissal.
@@ -476,10 +554,7 @@ impl ShellRoot {
         cx.spawn_in(window, async move |this, cx| {
             loop {
                 cx.background_executor().timer(TOAST_TICK).await;
-                if this
-                    .update_in(cx, |this, window, cx| this.advance_toasts(window, cx))
-                    .is_err()
-                {
+                if this.update(cx, |this, cx| this.advance_toasts(cx)).is_err() {
                     break;
                 }
             }
@@ -487,11 +562,10 @@ impl ShellRoot {
         .detach();
     }
 
-    fn advance_toasts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        // Timers pause while the user is reading the stack, and while the
-        // window is in the background — a toast that expired unseen behind
-        // another window was never delivered.
-        let paused = self.toast_state.is_expanded() || !window.is_window_active();
+    fn advance_toasts(&mut self, cx: &mut Context<Self>) {
+        // Timers pause while the user is reading the stack, not while the window
+        // is inactive: a visible side-by-side window would hold its toasts forever.
+        let paused = self.toast_state.is_expanded();
         if self
             .toasts
             .advance(cx.background_executor().now(), paused)
@@ -730,7 +804,7 @@ impl ShellRoot {
 }
 
 impl Render for ShellRoot {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tokens = Theme::global(cx).tokens;
         let (colors, radius, spacing) = (tokens.colors, tokens.radius, tokens.spacing);
 
@@ -771,11 +845,16 @@ impl Render for ShellRoot {
             .text_color(colors.foreground)
             // Painted back to front; see the stacking order on `ShellRoot`.
             .child(TextSelectionLayer)
-            .child(self.content.clone())
+            .child(
+                self.content
+                    .clone()
+                    .cached(StyleRefinement::default().size_full()),
+            )
             .children(self.sheet_layer(&colors, &spacing, cx))
             .children(self.dialog_layer(&colors, &radius, &spacing, cx))
             .child(self.toast_layer(&colors, &radius, &spacing, cx))
             .child(self.tooltip_overlay.clone())
+            .children(self.fps_layer(window, cx))
     }
 }
 
@@ -1409,8 +1488,6 @@ mod tests {
     #[gpui::test]
     fn a_toast_retires_itself_when_its_timeout_elapses(cx: &mut TestAppContext) {
         let (root, cx) = shell_root(cx);
-        // Timeouts only run while the window is active, so the test has to say
-        // that it is.
         cx.update(|window, _| window.activate_window());
         cx.run_until_parked();
 
@@ -1428,10 +1505,11 @@ mod tests {
     }
 
     #[gpui::test]
-    fn a_toast_does_not_expire_while_the_window_is_in_the_background(cx: &mut TestAppContext) {
+    fn a_toast_expires_while_the_window_is_in_the_background(cx: &mut TestAppContext) {
         let (root, cx) = shell_root(cx);
 
         root.update_in(cx, |root, window, cx| {
+            assert!(!window.is_window_active());
             root.push_toast(
                 ToastRequest::new("Saved").with_timeout(Some(Duration::from_secs(1))),
                 window,
@@ -1441,7 +1519,7 @@ mod tests {
 
         cx.executor().advance_clock(Duration::from_secs(10));
         cx.run_until_parked();
-        assert_eq!(root.read_with(cx, |root, _| root.toast_count()), 1);
+        assert_eq!(root.read_with(cx, |root, _| root.toast_count()), 0);
     }
 
     #[gpui::test]

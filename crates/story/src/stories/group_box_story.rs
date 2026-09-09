@@ -1,9 +1,9 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext, Context, Entity, Focusable, IntoElement, ParentElement, Render,
     StyleRefinement, Styled, Window, relative,
 };
 
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, StyledExt,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
@@ -18,7 +18,7 @@ use gpui_component::{
 use crate::section;
 
 pub struct GroupBoxStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     email_options: [bool; 3],
     profile_private: bool,
     private_contributions: bool,
@@ -59,7 +59,7 @@ impl GroupBoxStory {
 }
 
 impl Focusable for GroupBoxStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

@@ -116,7 +116,7 @@ fn mount(
 #[gpui::test]
 fn full_settings_hierarchy_rebuilds_lazy_native_slots_across_draws(cx: &mut TestAppContext) {
     let source = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { LazyMarker, Settings, SettingPage, SettingGroup, SettingItem } from "gpui-component";
 export default class App extends View { render(){ return new Settings("prefs").size("small").sidebar_width(220).sidebar_size_range(160,320)
  .child(new SettingPage("General").description("Application preferences").default_open(true).content(new LazyMarker("suffix-built"))

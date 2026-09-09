@@ -21,7 +21,7 @@ use crate::{
 use gpui::{AppContext as _, Entity, IntoElement as _, TestAppContext, VisualTestContext};
 
 const TOGGLE: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex, Checkbox } from "gpui-base";
 
 export default class Toggle extends View {
@@ -44,8 +44,19 @@ export default class Toggle extends View {
 
 const ENTRY: &str = "toggle.js";
 
+const FPS_MONITOR: &str = r#"
+import { View, div } from "gpui-kit";
+import { fps_monitor } from "gpui-fps";
+
+export default class Monitor extends View {
+  render() {
+    return div().relative().size_full().child(fps_monitor());
+  }
+}
+"#;
+
 const PATH: &str = r##"
-import { div, View, PathBuilder, Background } from "gpui";
+import { div, View, PathBuilder, Background } from "gpui-kit";
 
 export default class NativePath extends View {
   render() {
@@ -91,7 +102,7 @@ fn path_builder_freezes_commands_in_the_render_snapshot(cx: &mut TestAppContext)
 #[gpui::test]
 fn path_dash_rejects_values_that_round_to_zero_pixels(cx: &mut TestAppContext) {
     let source = r##"
-import { div, View, PathBuilder } from "gpui";
+import { div, View, PathBuilder } from "gpui-kit";
 export default class TinyDash extends View {
   render() {
     const path = PathBuilder.stroke(1)
@@ -117,7 +128,7 @@ export default class TinyDash extends View {
 /// A script whose `render` throws every other call, so a failed build can be
 /// observed next to a successful one.
 const FLAKY: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 
 export default class Flaky extends View {
@@ -135,7 +146,7 @@ export default class Flaky extends View {
 "#;
 
 const ASYNC_FAILURE: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 
 export default class AsyncFailure extends View {
@@ -153,14 +164,14 @@ export default class AsyncFailure extends View {
 "#;
 
 const ALWAYS_FAILS: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 export default class AlwaysFails extends View {
   render() { throw new Error("first render failed on purpose"); }
 }
 "#;
 
 const INPUT_SUBSCRIPTION: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex, InputState } from "gpui-base";
 
 export default class InputSubscription extends View {
@@ -202,9 +213,69 @@ fn repeated_gpui_renders_do_not_re_enter_the_script(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn shell_root_reuses_a_clean_views_materialized_subtree(cx: &mut TestAppContext) {
+    let (runtime, mut context, view) = script_view(cx, TOGGLE);
+    context.update(|window, cx| {
+        window.replace_root(cx, |window, cx| {
+            crate::root::ShellRoot::new(view.clone().into(), window, cx)
+        })
+    });
+
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let first = runtime.metrics().read();
+    let started = std::time::Instant::now();
+    for _ in 0..64 {
+        context.update(|window, cx| window.draw(cx).clear(cx));
+    }
+    let elapsed = started.elapsed();
+
+    let clean = runtime.metrics().read().since(&first);
+    eprintln!(
+        "clean_frames=64 elapsed={elapsed:?} materializations={} materialize_time={:?}",
+        clean.materializations(),
+        clean.materialize_time(),
+    );
+    assert_eq!(clean.script_renders(), 0);
+    assert_eq!(
+        clean.materializations(),
+        0,
+        "64 clean window frames must reuse the subtree produced by the first materialization"
+    );
+
+    view.update(&mut context, |view, cx| view.refresh(cx));
+    context.update(|window, cx| window.draw(cx).clear(cx));
+
+    let refreshed = runtime.metrics().read().since(&first);
+    assert_eq!(refreshed.script_renders(), 1);
+    assert_eq!(
+        refreshed.materializations(),
+        1,
+        "refreshing the script view must invalidate and replace the cached subtree once"
+    );
+}
+
+#[gpui::test]
+fn shell_fps_monitor_never_requests_a_frame(cx: &mut TestAppContext) {
+    let (_runtime, mut context, view) = script_view(cx, FPS_MONITOR);
+    context.update(|window, cx| {
+        window.replace_root(cx, |window, cx| {
+            crate::root::ShellRoot::new(view.clone().into(), window, cx)
+        })
+    });
+
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let requested = context.update(|window, cx| window.simulate_next_frame(cx));
+
+    assert_eq!(
+        requested, 0,
+        "a HUD that asked for frames would be reporting a cost it was causing:          one dirty view redraws the whole window"
+    );
+}
+
+#[gpui::test]
 fn a_changed_motion_target_requests_native_frames_without_reentering_js(cx: &mut TestAppContext) {
     let source = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { Checkbox } from "gpui-base";
 
 export default class Panel extends View {
@@ -257,7 +328,7 @@ export default class Panel extends View {
 #[gpui::test]
 fn a_changed_spring_target_requests_native_frames_without_reentering_js(cx: &mut TestAppContext) {
     let source = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { Checkbox } from "gpui-base";
 
 export default class Indicator extends View {
@@ -592,6 +663,25 @@ fn a_palette_change_rebuilds_the_snapshot(cx: &mut TestAppContext) {
         runtime.metrics().read().script_renders(),
         2,
         "a palette change must reach script views"
+    );
+}
+
+#[gpui::test]
+fn an_appearance_only_change_rebuilds_the_snapshot(cx: &mut TestAppContext) {
+    let (runtime, mut context, view) = script_view(cx, TOGGLE);
+
+    render_once(&mut context, &view);
+    assert_eq!(runtime.metrics().read().script_renders(), 1);
+
+    context.update(|_, cx| {
+        gpui_base::Theme::global_mut(cx).appearance = gpui_base::ThemeAppearance::Dark;
+    });
+    render_once(&mut context, &view);
+
+    assert_eq!(
+        runtime.metrics().read().script_renders(),
+        2,
+        "appearance is part of cx.theme(), so changing it must invalidate script views"
     );
 }
 

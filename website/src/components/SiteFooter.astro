@@ -1,0 +1,100 @@
+---
+export interface Props {
+  lang?: 'en' | 'zh-CN';
+}
+
+const { lang = 'en' } = Astro.props;
+const isZh = lang === 'zh-CN';
+const base = import.meta.env.BASE_URL;
+
+function url(path: string) {
+  return `${base}${path}`.replace(/\/+/g, '/');
+}
+
+const prefix = isZh ? 'zh-CN/' : '';
+
+const links = isZh
+  ? [
+      { text: '设计指南', href: url(`${prefix}docs/design-guides`) },
+      { text: '编码指南', href: url(`${prefix}docs/coding-guides`) },
+      { text: '应用案例', href: url(`${prefix}apps`) },
+      { text: '贡献者', href: url(`${prefix}contributors`) },
+      { text: '版本发布', href: url(`${prefix}releases`) },
+      { text: 'Skills', href: url(`${prefix}skills`) },
+      { text: 'llms-full.txt', href: url('llms-full.txt'), external: true },
+      { text: '报告问题', href: 'https://github.com/longbridge/gpui-kit/issues', external: true },
+      { text: '讨论', href: 'https://github.com/longbridge/gpui-kit/discussions', external: true },
+    ]
+  : [
+      { text: 'Design Guides', href: url('docs/design-guides') },
+      { text: 'Coding Guides', href: url('docs/coding-guides') },
+      { text: 'App Stories', href: url('apps') },
+      { text: 'Contributors', href: url('contributors') },
+      { text: 'Releases', href: url('releases') },
+      { text: 'Skills', href: url('skills') },
+      { text: 'llms-full.txt', href: url('llms-full.txt'), external: true },
+      { text: 'Report Bug', href: 'https://github.com/longbridge/gpui-kit/issues', external: true },
+      { text: 'Discussion', href: 'https://github.com/longbridge/gpui-kit/discussions', external: true },
+    ];
+
+const copy = isZh
+  ? {
+      nav: '页脚导航',
+      prefix: '基于 Apache-2.0 许可证开源，由',
+      suffix: ' 开发。',
+      builtOn: '构建于',
+      attributionMid: ' 之上，GPUI 来自 ',
+      attributionEnd: '，同样采用 Apache-2.0。',
+      iconCredits: '图标资源来自',
+      and: '与',
+      period: '。',
+    }
+  : {
+      nav: 'Footer navigation',
+      prefix: 'Open source under the Apache-2.0 License, developed by',
+      suffix: '.',
+      builtOn: 'Built on',
+      attributionMid: ', the UI framework from ',
+      attributionEnd: ', also Apache-2.0.',
+      iconCredits: 'Icons by',
+      and: 'and',
+      period: '.',
+    };
+---
+
+<footer class="site-footer">
+  <div class="site-footer__brand">
+    <strong>GPUI Kit</strong>
+    <p>
+      {copy.prefix}{' '}<a href="https://longbridge.com" target="_blank" rel="noopener noreferrer">Longbridge</a
+      >{copy.suffix}
+    </p>
+    <!-- The one place the site names GPUI's origin. See DESIGN.md, "Attribution". -->
+    <p>
+      {copy.builtOn}{' '}<a href="https://gpui.rs" target="_blank" rel="noopener noreferrer">GPUI</a
+      >{copy.attributionMid}<a
+        href="https://zed.dev"
+        target="_blank"
+        rel="noopener noreferrer">Zed Industries</a
+      >{copy.attributionEnd}
+    </p>
+  </div>
+
+  <nav aria-label={copy.nav}>
+    {links.map((link) => (
+      <a
+        href={link.href}
+        target={link.external ? '_blank' : undefined}
+        rel={link.external ? 'noopener noreferrer' : undefined}
+      >
+        {link.text}
+      </a>
+    ))}
+  </nav>
+
+  <p class="site-footer__credits">
+    {copy.iconCredits}{' '}<a href="https://lucide.dev" target="_blank" rel="noopener noreferrer">Lucide</a
+    >{' '}{copy.and}{' '}<a href="https://isocons.app" target="_blank" rel="noopener noreferrer">Isocons</a
+    >{copy.period}
+  </p>
+</footer>

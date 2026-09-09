@@ -64,7 +64,7 @@ pub const MANIFEST_FILE: &str = "gpui-shell.json";
 /// The JSON Schema for a manifest, for editor validation.
 ///
 /// §18.1 keeps the schema worth generating but small enough to read: six
-/// fields, one nested permission object. `crates/ui/src/theme/schema.rs` is the
+/// fields, one nested permission object. `crates/component/src/theme/schema.rs` is the
 /// precedent for generating rather than hand-writing it — the schema and the
 /// parser then cannot disagree, because both come from the same type.
 pub fn manifest_schema() -> serde_json::Value {
@@ -544,13 +544,8 @@ fn validate_shell_version(version: &str) -> Result<(), ManifestProblem> {
     let required = Version::parse(version)
         .map_err(|_| ManifestProblem::InvalidShellVersion(version.to_owned()))?;
     let runtime = Version::parse(SHELL_VERSION).expect("the crate version is semantic");
-    let compatible_line = if required.major == 0 {
-        runtime.major == 0 && runtime.minor == required.minor
-    } else {
-        runtime.major == required.major
-    };
 
-    if compatible_line && runtime >= required {
+    if runtime >= required {
         Ok(())
     } else {
         Err(ManifestProblem::IncompatibleShellVersion {
@@ -1318,11 +1313,14 @@ impl ShellRuntime {
         Ok(cx.new(|cx| ShellRoot::with_application(view, root, entry, policy, window, cx)))
     }
 
-    /// Loads and renders an application once, returning its description.
+    /// Loads an application, builds its description, and materializes its
+    /// eager native elements once, returning the checked description.
     ///
-    /// This is the headless host path used by source checks. It keeps engine
+    /// Source checks use this with a hidden window. It keeps engine
     /// handles and the `ScriptView` construction protocol inside the shell
-    /// facade while preserving structured load and render errors.
+    /// facade while preserving structured load, render, and registered-component
+    /// materialization errors. It does not run layout, paint, deferred slots,
+    /// nested view renders, or later interaction and asynchronous states.
     pub fn check(
         self: &Rc<Self>,
         root: impl AsRef<Path>,
@@ -1337,7 +1335,12 @@ impl ShellRuntime {
             .view
             .clone();
         let object = view.read(cx).object().clone();
-        self.render_to_spec(&object, Some(view), window, cx)
+        let policy = view.read(cx).policy();
+        let snapshot = self.build_snapshot(&object, Some(view), policy, window, cx)?;
+        // Keep the application and its callback-owning snapshot alive until
+        // the native elements have been built and dropped.
+        crate::materialize::try_materialize(self, &snapshot, window, cx)?;
+        Ok(snapshot.debug_tree())
     }
 }
 
@@ -1619,11 +1622,18 @@ mod tests {
     use std::ops::Deref as _;
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    const VALID: &str = r#"{
+    /// A complete manifest, requiring the runtime this test binary is. The
+    /// crate version moves with every release and a `0.x` line accepts only
+    /// its own minor, so a fixture that spelled a version out would expire at
+    /// the next bump.
+    const VALID: &str = concat!(
+        r#"{
         "id": "com.example.inbox",
         "name": "Inbox",
         "version": "1.2.0",
-        "shell-version": "0.1.0",
+        "shell-version": ""#,
+        env!("CARGO_PKG_VERSION"),
+        r#"",
         "entry": "main.js",
         "capabilities": {
             "fs": {
@@ -1644,7 +1654,8 @@ mod tests {
             "clipboard": { "write": true },
             "process": { "exit": true }
         }
-    }"#;
+    }"#
+    );
 
     /// A directory that removes itself. `tempfile` is not a dependency of this
     /// crate and one test module is not a reason to add one.
@@ -1713,7 +1724,7 @@ mod tests {
         std::fs::write(
             application.path().join("main.js"),
             r#"
-                import { div, View } from "gpui";
+                import { div, View } from "gpui-kit";
                 export default class App extends View {
                   render(cx) { return "loaded"; }
                 }
@@ -1788,9 +1799,12 @@ mod tests {
         std::fs::write(
             application.path().join("main.js"),
             r#"
-                import { div, View } from "gpui";
+                import { div, View } from "gpui-kit";
+                import { Button } from "gpui-base";
                 export default class App extends View {
-                  render(cx) { return "checked through the facade"; }
+                  render(cx) {
+                    return Button.new("checked").child("checked through the facade");
+                  }
                 }
             "#,
         )
@@ -1804,6 +1818,9 @@ mod tests {
             .expect("check application through the high-level facade");
 
         assert!(description.contains("checked through the facade"));
+        let metrics = runtime.metrics().read();
+        assert_eq!(metrics.script_renders(), 1);
+        assert_eq!(metrics.materializations(), 1);
     }
 
     #[gpui::test]
@@ -1828,7 +1845,7 @@ mod tests {
         std::fs::write(
             application.path().join("application.js"),
             r#"
-                import { div, View } from "gpui";
+                import { div, View } from "gpui-kit";
                 export default class App extends View {
                   render() { return "manifest entry loaded"; }
                 }
@@ -1872,7 +1889,7 @@ mod tests {
         std::fs::write(
             application.path().join("main.js"),
             r#"
-                import { div, View } from "gpui";
+                import { div, View } from "gpui-kit";
                 export default class Broken extends View {
                   init(_props, cx) {
                     cx.timer.every(1_000, () => {});
@@ -1917,7 +1934,6 @@ mod tests {
             "id": "com.example.async-init",
             "name": "Async Init",
             "version": "1.0.0",
-            "shell-version": "0.1.0",
             "entry": "main.js",
             "capabilities": {
                 "fs": { "read": ["${pluginDir}"] }
@@ -1929,7 +1945,7 @@ mod tests {
         std::fs::write(
             root.join("main.js"),
             r#"
-                import { div, View } from "gpui";
+                import { div, View } from "gpui-kit";
                 import { v_flex } from "gpui-base";
                 import * as fs from "fs/promises";
                 export default class Panel extends View {
@@ -2012,7 +2028,7 @@ mod tests {
         std::fs::write(
             root.join("main.js"),
             r#"
-                import { div, View } from "gpui";
+                import { div, View } from "gpui-kit";
                 import { Input, InputState } from "gpui-base";
                 export default class Panel extends View {
                   init() {
@@ -2061,7 +2077,7 @@ mod tests {
         std::fs::write(
             root.join("main.js"),
             r#"
-                import { div, View } from "gpui";
+                import { div, View } from "gpui-kit";
                 import { Input, InputState } from "gpui-base";
                 export default class Panel extends View {
                   init(_props, cx) {
@@ -2372,7 +2388,7 @@ mod tests {
             "name": "Shadow",
             "entry": "main.js",
             "dependencies": {
-                "gpui": {
+                "gpui-kit": {
                     "git": "https://github.com/example/not-gpui.git",
                     "branch": "main"
                 }
@@ -2410,7 +2426,10 @@ mod tests {
 
     #[test]
     fn an_omitted_shell_version_accepts_the_current_runtime() {
-        let source = VALID.replace("        \"shell-version\": \"0.1.0\",\n", "");
+        let source = VALID.replace(
+            &format!("        \"shell-version\": \"{SHELL_VERSION}\",\n"),
+            "",
+        );
         let manifest = PluginManifest::parse(&source)
             .expect("omitting shell-version supports the runtime loading the application");
         assert_eq!(manifest.shell_version(), SHELL_VERSION);
@@ -2500,7 +2519,7 @@ mod tests {
     #[test]
     fn an_absent_capabilities_block_grants_nothing_but_storage() {
         let manifest = PluginManifest::parse(
-            r#"{"id": "a.b", "name": "B", "version": "0.1.0", "shell-version": "0.1.0", "entry": "main.js"}"#,
+            r#"{"id": "a.b", "name": "B", "version": "0.1.0", "entry": "main.js"}"#,
         )
         .expect("capabilities may be omitted");
 
@@ -2517,7 +2536,7 @@ mod tests {
     #[test]
     fn a_manifest_may_still_refuse_storage() {
         let manifest = PluginManifest::parse(
-            r#"{"id": "a.b", "name": "B", "version": "0.1.0", "shell-version": "0.1.0",
+            r#"{"id": "a.b", "name": "B", "version": "0.1.0",
                 "entry": "main.js", "capabilities": {"storage": false}}"#,
         )
         .expect("storage may be declined");
@@ -2534,7 +2553,7 @@ mod tests {
     #[test]
     fn declaring_another_grant_does_not_cost_an_application_its_storage() {
         let manifest = PluginManifest::parse(
-            r#"{"id": "a.b", "name": "B", "version": "0.1.0", "shell-version": "0.1.0",
+            r#"{"id": "a.b", "name": "B", "version": "0.1.0",
                 "entry": "main.js", "capabilities": {"network": {"hosts": ["example.com"]}}}"#,
         )
         .expect("a network grant is legal on its own");
@@ -2572,7 +2591,7 @@ mod tests {
     #[test]
     fn a_field_of_the_wrong_type_says_which_and_what() {
         let error = PluginManifest::parse(
-            r#"{"id": "a.b", "name": 7, "version": "0.1.0", "shell-version": "0.1.0", "entry": "main.js"}"#,
+            r#"{"id": "a.b", "name": 7, "version": "0.1.0", "entry": "main.js"}"#,
         )
         .expect_err("a numeric name is not a name");
 
@@ -2874,8 +2893,15 @@ mod tests {
 
     #[test]
     fn incompatible_shell_versions_are_rejected_before_discovery() {
-        for required in ["0.2.0", "1.0.0"] {
-            let source = VALID.replacen("\"0.1.0\"", &format!("\"{required}\""), 1);
+        let runtime = Version::parse(SHELL_VERSION).expect("the crate version is semantic");
+        let next_minor = Version::new(runtime.major, runtime.minor + 1, 0);
+        let next_major = Version::new(runtime.major + 1, 0, 0);
+        for required in [next_minor, next_major] {
+            let source = VALID.replacen(
+                &format!("\"{SHELL_VERSION}\""),
+                &format!("\"{required}\""),
+                1,
+            );
             let error = PluginManifest::parse(&source).expect_err("incompatible shell version");
             assert!(
                 matches!(
@@ -2888,9 +2914,20 @@ mod tests {
     }
 
     #[test]
+    fn older_shell_minor_versions_remain_compatible() {
+        let source = VALID.replacen("\"0.1.0\"", "\"0.0.0\"", 1);
+        PluginManifest::parse(&source)
+            .expect("a manifest's shell-version is its minimum runtime version");
+    }
+
+    #[test]
     fn malformed_shell_versions_are_errors_not_panics() {
         for required in ["0.1.0-", "00.1.0", "0.1.184467440737095516160", "latest"] {
-            let source = VALID.replacen("\"0.1.0\"", &format!("\"{required}\""), 1);
+            let source = VALID.replacen(
+                &format!("\"{SHELL_VERSION}\""),
+                &format!("\"{required}\""),
+                1,
+            );
             let error = PluginManifest::parse(&source).expect_err("invalid semantic version");
             assert_eq!(
                 error.problem(),

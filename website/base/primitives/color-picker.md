@@ -12,16 +12,16 @@ Like every `gpui-base` primitive, Color Picker supplies behavior and semantic st
 
 ## Example
 
-The [single native Cargo entrypoint](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
+The [single native Cargo entrypoint](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/native/src/bin/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
 
 ```bash
-cargo run -p gpui-base --example components -- color-picker
+cargo run -p gpui-base-examples -- color-picker
 ```
 
 ## Import
 
 ```rust
-use gpui_base::{ColorPicker, ColorPickerEvent, ColorPickerState, ColorSwatch};
+use gpui_kit::base::{ColorPicker, ColorPickerEvent, ColorPickerState, ColorSwatch};
 ```
 
 ## Anatomy and API
@@ -30,7 +30,7 @@ The example composes `ColorPicker`, `ColorSwatch`, and `ColorPickerState`. GPUI'
 
 `ColorPicker` is the controlled root: it carries the trigger's accessibility semantics and focus, opens on Confirm, and dismisses on Cancel. `ColorSwatch` is one selectable color in a palette, carrying radio semantics, an accessible hex name, and the hover and activation callbacks a picker previews and commits with.
 
-The authoritative module is [`components/color_picker.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/color_picker.rs). Native and browser previews compile this same file.
+The authoritative module is [`components/color_picker.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/color_picker.rs). Native and browser previews compile this same file.
 
 ## State and events
 

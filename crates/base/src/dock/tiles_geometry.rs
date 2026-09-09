@@ -4,11 +4,9 @@
 //!
 //! This module decides *where* a tile lands. It draws nothing: the tile
 //! frame, the drag-bar chrome, and the resize-handle visuals are appearance
-//! and live in `crates/ui`.
+//! and live in `crates/component`.
 
 use gpui::{Bounds, EntityId, Pixels, Point, Size, px, size};
-
-use crate::history::HistoryItem;
 
 /// A tile smaller than this on either axis cannot be usefully manipulated.
 /// This is behavior, not presentation: it bounds what resize/drag arithmetic
@@ -17,7 +15,7 @@ pub const MINIMUM_SIZE: Size<Pixels> = size(px(100.), px(100.));
 
 /// Height of the tile's drag bar. This is hit-target geometry the skin must
 /// agree with when it paints the drag bar, not a visual constant, so it
-/// lives here rather than in `crates/ui`.
+/// lives here rather than in `crates/component`.
 pub const DRAG_BAR_HEIGHT: Pixels = px(30.);
 
 /// Size of the resize-handle hit target at a tile's corner/edge. Same
@@ -33,7 +31,6 @@ pub struct TileChange {
     tile_id: EntityId,
     old_bounds: Option<Bounds<Pixels>>,
     new_bounds: Option<Bounds<Pixels>>,
-    version: usize,
 }
 
 impl TileChange {
@@ -47,7 +44,6 @@ impl TileChange {
             tile_id,
             old_bounds: Some(old_bounds),
             new_bounds: Some(new_bounds),
-            version: 0,
         }
     }
 
@@ -61,16 +57,6 @@ impl TileChange {
 
     pub fn new_bounds(&self) -> Option<Bounds<Pixels>> {
         self.new_bounds
-    }
-}
-
-impl HistoryItem for TileChange {
-    fn version(&self) -> usize {
-        self.version
-    }
-
-    fn set_version(&mut self, version: usize) {
-        self.version = version;
     }
 }
 

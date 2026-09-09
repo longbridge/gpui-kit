@@ -8,10 +8,20 @@ order: 16
 
 `Editor` 是源代码编辑控件。它建立在共享文本引擎之上，增加语言、行号槽、折叠、空白字符显示、文本装饰、高亮、搜索基础、诊断与 LSP 扩展。单行值使用 [Input](./input.md)，普通多行文本使用 [Textarea](./textarea.md)。
 
+## 快捷键
+
+Base 与样式组件共享键盘和鼠标行为。各平台快捷键、多光标编辑和矩形列选的细节请参阅
+[快捷键与矩形列选](../../component/editor.md#快捷键与矩形列选)。
+
+## 搜索
+
+编辑器内置搜索面板。编辑器聚焦时按 `Ctrl-F`（Windows/Linux）或 `Cmd-F`（macOS）打开。编程式 API（`open_search`、`close_search`、`set_searchable`）与只读行为参见
+[搜索](../../component/editor.md#搜索)。
+
 ## 导入
 
 ```rust
-use gpui_base::input::{Editor, EditorState, TabSize};
+use gpui_kit::base::input::{Editor, EditorState, TabSize};
 ```
 
 ## 基本用法
@@ -40,10 +50,10 @@ Editor::new(&editor)
 
 ## 字体与表现
 
-Editor 没有独立字体设置，而是使用环境文本样式。可在外层元素设置 `font_family`、`text_size`、字重和行高。应用负责编辑器颜色、行号槽、折叠图标和覆盖层；使用 `InputEditorStyle`、`FoldIconRenderer` 与 provider trait 接入。现成视觉方案参见 [`gpui-component` Editor](../../docs/components/editor.md)。
+Editor 没有独立字体设置，而是使用环境文本样式。可在外层元素设置 `font_family`、`text_size`、字重和行高。应用负责编辑器颜色、行号槽、折叠图标和覆盖层；使用 `InputEditorStyle`、`FoldIconRenderer` 与 provider trait 接入。现成视觉方案参见 [`gpui-component` Editor](../../component/editor.md)。
 
 ## 可运行示例
 
 ```bash
-cargo run -p gpui-base --example components -- editor
+cargo run -p gpui-base-examples -- editor
 ```

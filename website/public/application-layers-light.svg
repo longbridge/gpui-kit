@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720" role="img" aria-labelledby="title description">
   <title id="title">GPUI application architecture</title>
-  <description id="description">Six compact nodes form a downward dependency path from the App Shell through capability-oriented Feature Crates and GPUI Component to GPUI.</description>
+  <description id="description">Six compact nodes form a downward dependency path from the App Shell through capability-oriented Feature Crates and GPUI Kit to GPUI.</description>
   <defs>
     <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse"><path d="M24 0H0V24" fill="none" stroke="#e5e5e5" opacity=".52"/></pattern>
     <filter id="shadow" x="-18%" y="-24%" width="136%" height="168%"><feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#171717" flood-opacity=".10"/></filter>
@@ -56,7 +56,7 @@
     <path d="M88 394H1112" stroke="#a3a3a3" stroke-dasharray="4 6"/>
     <g filter="url(#shadow)">
       <rect class="hub" x="372" y="410" width="456" height="74" rx="6" fill="#f5f5f5" stroke="#525252" stroke-width="1.5"/>
-      <text x="600" y="454" text-anchor="middle" font-size="21" font-weight="700" fill="#171717">GPUI Component</text>
+      <text x="600" y="454" text-anchor="middle" font-size="21" font-weight="700" fill="#171717">GPUI Kit</text>
       <circle class="port p4" cx="600" cy="484" r="5" fill="#fafafa" stroke="#525252" stroke-width="1.5"/>
     </g>
 

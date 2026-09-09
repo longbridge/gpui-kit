@@ -1,9 +1,9 @@
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Root, h_flex,
     input::{Input, InputEvent, InputState},
     v_flex,
 };
+use gpui_kit::*;
 use gpui_wry::WebView;
 
 pub struct Example {
@@ -51,9 +51,8 @@ impl Example {
             WebView::new(webview, window, cx)
         });
 
-        let address_input = cx.new(|cx| {
-            InputState::new(window, cx).default_value("https://longbridge.github.io/gpui-component")
-        });
+        let address_input =
+            cx.new(|cx| InputState::new(window, cx).default_value("https://gpui-kit.com"));
 
         let url = address_input.read(cx).value().clone();
         webview.update(cx, |view, _| {
@@ -98,7 +97,7 @@ impl Example {
 }
 
 impl Focusable for Example {
-    fn focus_handle(&self, _cx: &gpui::App) -> FocusHandle {
+    fn focus_handle(&self, _cx: &gpui_kit::App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
@@ -121,7 +120,7 @@ impl Render for Example {
                 div()
                     .flex_1()
                     .border_1()
-                    .h(gpui::px(400.))
+                    .h(gpui_kit::px(400.))
                     .border_color(cx.theme().border)
                     .child(webview.clone()),
             )
@@ -135,9 +134,9 @@ fn main() {
         std::env::set_var("GPUI_DISABLE_DIRECT_COMPOSITION", "true");
     }
 
-    gpui_platform::application().run(move |cx| {
+    gpui_kit::application().run(move |cx| {
         // This must be called before using any GPUI Component features.
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
 
         cx.spawn(async move |cx| {
             cx.open_window(WindowOptions::default(), |window, cx| {

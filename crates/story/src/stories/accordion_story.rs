@@ -1,9 +1,4 @@
-use gpui::{
-    Action, App, AppContext, Context, Entity, FocusHandle, Focusable, Hsla, InteractiveElement,
-    IntoElement, ParentElement as _, Pixels, Render, StyleRefinement, Styled as _, Window, div,
-    prelude::FluentBuilder as _, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable, Size, StyledExt as _,
     accordion::{Accordion, AccordionItem},
     button::Button,
@@ -13,6 +8,8 @@ use gpui_component::{
     tag::Tag,
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 use serde::Deserialize;
 
 use crate::{ChangeStorySize, section, story_toolbar};
@@ -136,7 +133,7 @@ impl AccordionStory {
 }
 
 impl Focusable for AccordionStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

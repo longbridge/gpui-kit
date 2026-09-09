@@ -51,7 +51,7 @@ View 是整体重建的，内部没有局部重建：如果一个 View 的描述
 拆分就是解法。把各自独立变化的部分用 `cx.new` 拆成各自的 View，一次变化就只会落到一份 Snapshot 上，而不是全部：
 
 ```js
-import { View } from "gpui";
+import { View } from "gpui-kit";
 
 export default class Terminal extends View {
   init(props, cx) {

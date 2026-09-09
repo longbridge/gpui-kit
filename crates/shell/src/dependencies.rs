@@ -209,7 +209,7 @@ impl GitDependencyStore {
     /// JSDoc it shows are the package's own and cannot drift from what runs.
     ///
     /// The links live in `node_modules` — already ignored by every JavaScript
-    /// project — rather than in `gpui.d.ts` or a `tsconfig.json`, because they
+    /// project — rather than in `gpui-kit.d.ts` or a `tsconfig.json`, because they
     /// name a machine-specific cache path and both of those files are committed.
     ///
     /// Only entries this store owns are ever replaced or removed: a symlink

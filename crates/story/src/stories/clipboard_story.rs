@@ -1,9 +1,9 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext, Context, Entity, Focusable, IntoElement, ParentElement, Render, SharedString,
     Styled, Window, px,
 };
 
-use gpui_component::{
+use gpui_kit::component::{
     WindowExt,
     clipboard::Clipboard,
     h_flex,
@@ -15,7 +15,7 @@ use gpui_component::{
 use crate::section;
 
 pub struct ClipboardStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     url_state: Entity<InputState>,
     masked: bool,
 }
@@ -51,7 +51,7 @@ impl ClipboardStory {
     }
 }
 impl Focusable for ClipboardStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

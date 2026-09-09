@@ -1566,7 +1566,7 @@ impl ComponentDescriptor {
         self
     }
 
-    /// The doc comment carried into `gpui.d.ts` for this component's element
+    /// The doc comment carried into `gpui-kit.d.ts` for this component's element
     /// interface and every one of its constructor exports.
     pub fn with_documentation(mut self, documentation: &'static str) -> Self {
         self.documentation = Some(documentation);
@@ -1668,7 +1668,8 @@ pub enum RegistryError {
 
 /// Module names the runtime answers to itself. A component catalog may not
 /// claim one: the runtime's resolvers run first.
-const RUNTIME_MODULE_SPECIFIERS: &[&str] = &["gpui", "gpui-base", "gpui-shell", "gpui-fps"];
+const RUNTIME_MODULE_SPECIFIERS: &[&str] =
+    &["gpui-kit", "gpui", "gpui-base", "gpui-shell", "gpui-fps"];
 
 /// Opens the window a catalog's components need.
 ///
@@ -1931,7 +1932,7 @@ impl ComponentRegistry {
                     literal,
                 });
             }
-            // Every method becomes a line of `gpui.d.ts` that a script author
+            // Every method becomes a line of `gpui-kit.d.ts` that a script author
             // reads in an editor. Filling a default sentence in here would make
             // the published surface look documented without anyone having
             // described it, so an omission is refused instead.

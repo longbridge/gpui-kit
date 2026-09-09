@@ -97,7 +97,7 @@ fn command_catalog_is_closed() {
 #[gpui::test]
 fn retained_command_typed_entries_query_and_confirm_callbacks_are_native(cx: &mut TestAppContext) {
     let source = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { CommandState, Command, CommandItem, CommandGroup, CommandSeparator } from "gpui-component";
 export default class App extends View {
  init(){this.state=CommandState();this.query="";this.confirm="none";this.actions=0;}
@@ -166,7 +166,7 @@ export default class App extends View {
 }
 
 const NATIVE_MENU_SOURCE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { NativeMenuTrigger, NativeMenuItem, NativeMenuSeparator } from "gpui-component";
 export default class App extends View { init(_props,cx){this.hits=0;this.errors=0;this.focus=cx.focus_handle();this.focus.focus();} render(){return div().size_full().track_focus(this.focus).on_action("open",(_event,cx)=>{this.hits++;cx.notify();})
  .child(new NativeMenuTrigger("native","Actions").absolute().left(0).top(0).w(140).h(40).on_effect_error((_message,cx)=>{this.errors+=10;cx.notify();}).on_effect_error((_message,cx)=>{this.errors++;cx.notify();})

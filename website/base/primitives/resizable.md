@@ -12,23 +12,23 @@ Like every `gpui-base` primitive, Resizable supplies behavior and semantic struc
 
 ## Example
 
-The [single native Cargo entrypoint](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
+The [single native Cargo entrypoint](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/native/src/bin/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
 
 ```bash
-cargo run -p gpui-base --example components -- resizable
+cargo run -p gpui-base-examples -- resizable
 ```
 
 ## Import
 
 ```rust
-use gpui_base::{ResizablePanel, ResizablePanelGroup, ResizableState, h_resizable, resizable_panel};
+use gpui_kit::base::{ResizablePanel, ResizablePanelGroup, ResizableState, h_resizable, resizable_panel};
 ```
 
 ## Anatomy and API
 
 The example composes `ResizablePanel`, `ResizablePanelGroup`, `ResizableState`. GPUI's standard styling and event traits provide presentation; these base types provide the interaction structure.
 
-The authoritative module is [`components/resizable.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/resizable.rs). Native and browser previews compile this same file.
+The authoritative module is [`components/resizable.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/resizable.rs). Native and browser previews compile this same file.
 
 ## State and events
 

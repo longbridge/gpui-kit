@@ -1,12 +1,12 @@
 use crate::section;
-use gpui::{
+use gpui_kit::component::{ActiveTheme as _, dock::PanelControl, v_flex};
+use gpui_kit::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement as _,
     Render, Styled, Window, div, img, px,
 };
-use gpui_component::{ActiveTheme as _, dock::PanelControl, v_flex};
 
 pub struct ImageStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
 }
 
 impl super::Story for ImageStory {

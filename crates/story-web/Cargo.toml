@@ -1,6 +1,6 @@
 [package]
 name = "gpui-component-story-web"
-version = "0.5.1"
+version = "0.6.0"
 publish = false
 edition.workspace = true
 
@@ -8,10 +8,7 @@ edition.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-gpui.workspace = true
-gpui_platform.workspace = true
-gpui-component = { path = "../ui", default-features = false }
-gpui-component-assets.workspace = true
+gpui-kit.workspace = true
 gpui-component-story = { path = "../story", default-features = false }
 
 # Web specific dependencies

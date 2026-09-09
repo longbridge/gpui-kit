@@ -7,11 +7,13 @@
 //! [`RuntimeMetrics::script_renders`] has not moved, and the shell story shows
 //! both counters live while a feed drives the view.
 //!
-//! Two counters, and the gap between them is the whole point:
+//! Two counters, and the gap between them is the whole point. The window root
+//! caches a clean view's GPUI subtree, so neither counter follows frames that
+//! have no dirty script view:
 //!
 //! ```text
 //! script_renders    ── follows cx.notify(), reloads, theme changes
-//! materializations  ── follows GPUI frames
+//! materializations  ── follows dirty script-view renders
 //! ```
 //!
 //! # What a `VirtualList` does to the two
@@ -118,8 +120,8 @@ impl RuntimeMetrics {
         mean(self.native_time, self.script_renders)
     }
 
-    /// How many times a snapshot has been turned into GPUI elements. This one
-    /// follows frames.
+    /// How many times a snapshot has been turned into GPUI elements. A cached,
+    /// clean window frame does not move this counter.
     pub fn materializations(&self) -> u64 {
         self.materializations
     }

@@ -499,7 +499,7 @@ git commit -m "component-shell: register complex component catalog"
 **Interfaces:**
 - Consumes: public module list in `crates/ui/src/lib.rs`, Story exports in `crates/story/src/stories/mod.rs`, and frozen descriptors.
 - Produces: auditable inventory classifications `component`, `infrastructure`, and `platform`.
-- Produces: complete deterministic `gpui.d.ts`.
+- Produces: complete deterministic `gpui-kit.d.ts`.
 
 - [ ] **Step 1: Write failing inventory audit**
 
@@ -552,7 +552,7 @@ git commit -m "component-shell: enforce complete binding inventory"
 - Create: `examples/js_story/stories/*.js`
 - Create: `examples/js_story/fixtures/*.json`
 - Create: `examples/js_story/jsconfig.json`
-- Create: `examples/js_story/gpui.d.ts`
+- Create: `examples/js_story/gpui-kit.d.ts`
 - Create: `examples/js_story/README.md`
 - Test: `crates/component-shell/tests/js_story.rs`
 - Modify: `website/shell/examples.md`
@@ -596,7 +596,7 @@ Each module exports `{ id, title, group, render }`. Cover normal and relevant in
 
 Run: `cargo run -p gpui-shell -- types examples/js_story`
 
-Expected: writes `examples/js_story/gpui.d.ts` without errors.
+Expected: writes `examples/js_story/gpui-kit.d.ts` without errors.
 
 - [ ] **Step 6: Run gallery coverage and load tests**
 

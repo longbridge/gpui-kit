@@ -710,12 +710,13 @@ impl Element for TextView {
         GlobalState::global_mut(cx).text_view_state_stack.pop();
 
         if self.selectable {
-            let (adapter, scroll_offset, content_bounds) = {
+            let (adapter, scroll_offset, content_bounds, self_scroll) = {
                 let state = state.read(cx);
                 (
                     state.selection_adapter.clone(),
                     state.scroll_offset(),
                     state.bounds(),
+                    state.scrollable,
                 )
             };
             let document_order = GlobalState::global_mut(cx).next_selection_document_order();
@@ -724,6 +725,7 @@ impl Element for TextView {
                 content_bounds,
                 scroll_offset,
                 document_order,
+                self_scroll,
                 window,
                 cx,
             );
@@ -749,6 +751,92 @@ mod tests {
 
     struct TextViewTestRoot {
         text_view: Entity<TextViewState>,
+    }
+
+    /// A scrollable viewport, so the list has a bounded height to measure
+    /// against and `max_offset_for_scrollbar` reports a real scroll extent.
+    struct ScrollExtentTestRoot {
+        text_view: Entity<TextViewState>,
+    }
+
+    impl Render for ScrollExtentTestRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(400.))
+                .h(px(200.))
+                .overflow_hidden()
+                .child(TextView::new(&self.text_view).scrollable(true))
+        }
+    }
+
+    /// `count` paragraphs, each `words` words long, so two documents can share
+    /// a block count while differing wildly in height.
+    fn document_of(count: usize, words: usize) -> String {
+        (1..=count)
+            .map(|i| format!("Block {i}: {}", "lorem ipsum dolor ".repeat(words)))
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    }
+
+    /// Replacing a document with one that happens to have the *same* block
+    /// count must still re-measure. `Document::render_root` only resets the
+    /// list when the count changes, so without an explicit re-measure every
+    /// cached height stays with the previous document and the scroll extent
+    /// keeps describing it.
+    #[gpui::test]
+    fn replacing_a_document_with_an_equal_block_count_remeasures(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+
+        const BLOCKS: usize = 24;
+        let short = document_of(BLOCKS, 1);
+        let tall = document_of(BLOCKS, 60);
+
+        let (root, cx) = cx.add_window_view(|_, cx| ScrollExtentTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown(&short, cx)),
+        });
+        let cx: &mut VisualTestContext = cx;
+
+        // The list is populated and measured during layout, so every
+        // assertion below has to follow a real frame.
+        let settle = |cx: &mut VisualTestContext| {
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.run_until_parked();
+        };
+        settle(cx);
+
+        let scroll_extent = |cx: &mut VisualTestContext| {
+            root.read_with(cx, |root, cx| {
+                root.text_view
+                    .read(cx)
+                    .list_state()
+                    .max_offset_for_scrollbar()
+                    .y
+            })
+        };
+
+        let short_extent = scroll_extent(cx);
+
+        root.update(cx, |root, cx| {
+            root.text_view
+                .update(cx, |state, cx| state.set_text(&tall, cx));
+        });
+        settle(cx);
+
+        root.read_with(cx, |root, cx| {
+            assert_eq!(
+                root.text_view.read(cx).list_state().item_count(),
+                BLOCKS,
+                "the replacement must keep the block count, or the list resets and the bug cannot occur"
+            );
+        });
+
+        let tall_extent = scroll_extent(cx);
+        assert!(
+            tall_extent > short_extent * 5.,
+            "a much taller document must grow the scroll extent, but it went from \
+             {short_extent:?} to {tall_extent:?}"
+        );
     }
 
     struct StatelessMarkdownRoot {
@@ -1352,6 +1440,67 @@ mod tests {
         cx.simulate_click(point(px(10.), px(150.)), Modifiers::default());
 
         assert_eq!(cx.opened_url(), None);
+    }
+
+    #[gpui::test]
+    fn scaled_inline_code_keeps_links_and_drag_selection(cx: &mut TestAppContext) {
+        struct SelectionRoot {
+            text_view: Entity<TextViewState>,
+            format: crate::text::SelectionFormat,
+        }
+        impl Render for SelectionRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(160.))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).selection_format(self.format))
+            }
+        }
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, cx| SelectionRoot {
+            format: crate::text::SelectionFormat::Plain,
+            text_view: cx
+                .new(|cx| TextViewState::markdown("[`code`](https://example.com) after", cx)),
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.simulate_click(point(px(10.), px(10.)), Modifiers::default());
+        assert_eq!(cx.opened_url(), Some("https://example.com".to_string()));
+        cx.simulate_mouse_down(
+            point(px(3.), px(8.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.simulate_mouse_move(
+            point(px(155.), px(20.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.simulate_mouse_up(
+            point(px(155.), px(20.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let selected = view.read_with(cx, |view, cx| view.text_view.read(cx).selected_text());
+        assert_eq!(selected.trim(), "code after");
+        view.update(cx, |view, cx| {
+            view.format = crate::text::SelectionFormat::Source;
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let selected = view.read_with(cx, |view, cx| view.text_view.read(cx).selected_text());
+        assert_eq!(selected.trim(), "[`code`](https://example.com) after");
     }
 
     #[gpui::test]

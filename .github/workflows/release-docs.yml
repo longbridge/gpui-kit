@@ -28,9 +28,21 @@ jobs:
           # other events carry no such sha and check out their own ref.
           ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
+      - name: Checkout latest approved showcases
+        uses: actions/checkout@v4
+        with:
+          repository: longbridge/gpui-kit-showcases
+          ref: main
+          path: .showcases
+          persist-credentials: false
+
       - uses: oven-sh/setup-bun@v1
         with:
-          bun-version: 1.3.6
+          bun-version: 1.4.0
+
+      - name: Install Showcase validation and rendering dependencies
+        working-directory: .showcases
+        run: bun install --frozen-lockfile
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -69,17 +81,20 @@ jobs:
 
       - name: Build Website
         working-directory: website
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHOWCASES_DIR: ${{ github.workspace }}/.showcases
         run: |
           bun install
+          bun run test:showcases
           bun run build
-          cp .vitepress/dist/index.html .vitepress/dist/404.html
 
       - name: Copy WASM apps to Website
         run: |
-          mkdir -p website/.vitepress/dist/gallery
-          cp -r crates/story-web/www/dist/* website/.vitepress/dist/gallery/
-          mkdir -p website/.vitepress/dist/examples/base
-          cp -r crates/base/examples/wasm/www/dist/* website/.vitepress/dist/examples/base/
+          mkdir -p website/dist/gallery
+          cp -r crates/story-web/www/dist/* website/dist/gallery/
+          mkdir -p website/dist/examples/base
+          cp -r crates/base/examples/wasm/www/dist/* website/dist/examples/base/
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -87,7 +102,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: "website/.vitepress/dist"
+          path: "website/dist"
 
       - name: Deploy to GitHub Pages
         id: deployment

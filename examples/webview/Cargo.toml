@@ -1,7 +1,7 @@
 [package]
 name = "webview"
 description = "A minimal example of webview inside the GPUI application."
-version = "0.5.0"
+version = "0.6.0"
 publish = false
 edition.workspace = true
 
@@ -9,10 +9,8 @@ edition.workspace = true
 inspector = []
 
 [dependencies]
+gpui-kit.workspace = true
 anyhow.workspace = true
-gpui.workspace = true
-gpui_platform.workspace = true
-gpui-component = { workspace = true }
 
 # WebView dependencies
 gpui-wry = { path = "../../crates/webview" }

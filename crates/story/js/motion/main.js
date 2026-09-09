@@ -1,9 +1,9 @@
 // A standalone native-motion ScriptView.  Every animated length target is a
 // number, therefore an absolute pixel length that materialize::animate_length
 // can sample on GPUI frames.
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { Button, h_flex, v_flex } from "gpui-base";
-/** @import { Context, Element } from "gpui" */
+/** @import { Context, Element } from "gpui-kit" */
 
 // The stage is `w_full()`, so its width belongs to whatever panel holds it,
 // while a motion target has to be an absolute pixel length. These are therefore

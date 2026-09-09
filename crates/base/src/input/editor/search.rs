@@ -4,7 +4,9 @@ use gpui::{Context, Window};
 use ropey::Rope;
 use std::{ops::Range, rc::Rc};
 
-use super::{InputBaseState, Replace, RopeExt as _, Search, movement::MoveDirection};
+use super::{
+    InputBaseState, Replace, RopeExt as _, Search, movement::MoveDirection, state::ScrollPadding,
+};
 
 /// Stateful, presentation-independent search engine used by text inputs.
 #[derive(Debug, Clone)]
@@ -52,33 +54,54 @@ impl SearchSession {
     }
 
     pub(crate) fn update_query(&mut self, query: impl Into<String>, case_insensitive: bool) {
-        self.query = query.into();
+        let query = query.into();
+        if self.query == query && self.case_insensitive == case_insensitive {
+            return;
+        }
+
+        self.query = query;
         self.case_insensitive = case_insensitive;
         self.matcher.update_query(&self.query, case_insensitive);
     }
 }
 
 impl<M: InputModeKind> InputBaseState<M> {
+    /// Open the search session, or re-invoke it if it is already open.
+    ///
+    /// This is not idempotent: every call advances
+    /// [`InputBaseState::search_activation_revision`], and the presentation
+    /// layer answers that by re-focusing the search field and selecting its
+    /// contents, the same as pressing the shortcut a second time. Call it from
+    /// an action or another user gesture, never from a render pass or an
+    /// observer that runs every frame — that would re-select the field under
+    /// the user on every frame and make it impossible to type.
     pub fn open_search(&mut self, replace_mode: bool, cx: &mut Context<Self>) {
         if !self.searchable {
             return;
         }
+        self.search_activation_revision = self.search_activation_revision.wrapping_add(1);
         self.search_session
             .open(replace_mode, self.is_replaceable());
         let selected = self.selected_text().to_string();
-        if !selected.is_empty() {
-            self.search_session.query = selected;
-        }
-        self.search_session.anchor_offset = self
-            .last_layout
-            .as_ref()
-            .map(|layout| layout.visible_range_offset.start);
-        self.search_session.matcher.update_query(
-            &self.search_session.query,
-            self.search_session.case_insensitive,
-        );
+        let query = if selected.is_empty() {
+            self.search_session.query.clone()
+        } else {
+            selected
+        };
+        let query_changed = query != self.search_session.query;
+        // A retained query resumes its previous occurrence. Only a new query
+        // is anchored to the current viewport.
+        self.search_session.anchor_offset = if query_changed {
+            self.last_layout
+                .as_ref()
+                .map(|layout| layout.visible_range_offset.start)
+        } else {
+            None
+        };
+        let case_insensitive = self.search_session.case_insensitive;
+        self.search_session.update_query(query, case_insensitive);
         self.search_session.matcher.update(&self.text);
-        if let Some(anchor) = self.search_session.anchor_offset {
+        if query_changed && let Some(anchor) = self.search_session.anchor_offset {
             self.search_session.matcher.update_cursor_by_offset(anchor);
         }
         cx.notify();
@@ -86,6 +109,16 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     pub fn search_session(&self) -> &SearchSession {
         &self.search_session
+    }
+
+    /// A counter that advances every time [`InputBaseState::open_search`] runs,
+    /// including while the session is already open.
+    ///
+    /// Re-invoking search leaves the session itself identical, so a presentation
+    /// layer that decides what to rebuild by comparing session state cannot see
+    /// the second request. Fold this into that comparison to notice it.
+    pub fn search_activation_revision(&self) -> u64 {
+        self.search_activation_revision
     }
 
     #[doc(hidden)]
@@ -119,20 +152,18 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     pub fn next_search_match(&mut self, cx: &mut Context<Self>) -> Option<Range<usize>> {
-        let previous = self.search_session.matcher.current_match_index();
         let range = self.search_session.matcher.next()?;
-        let direction = (self.search_session.matcher.current_match_index() > previous)
-            .then_some(MoveDirection::Down);
-        self.scroll_to(range.end, direction, cx);
+        // Match order does not describe viewport direction after a manual
+        // scroll. Always allow search navigation to reveal the active match.
+        self.scroll_to_with_padding(range.end, None, ScrollPadding::SurroundingLines, cx);
         Some(range)
     }
 
     pub fn previous_search_match(&mut self, cx: &mut Context<Self>) -> Option<Range<usize>> {
-        let previous = self.search_session.matcher.current_match_index();
         let range = self.search_session.matcher.next_back()?;
-        let direction = (self.search_session.matcher.current_match_index() < previous)
-            .then_some(MoveDirection::Up);
-        self.scroll_to(range.start, direction, cx);
+        // Match order does not describe viewport direction after a manual
+        // scroll. Always allow search navigation to reveal the active match.
+        self.scroll_to_with_padding(range.start, None, ScrollPadding::SurroundingLines, cx);
         Some(range)
     }
 
@@ -382,6 +413,23 @@ mod tests {
         matcher.update_query("aaaaa", false);
         matcher.set_current_match_index(2);
         assert_eq!(matcher.next(), Some(5..10));
+    }
+
+    #[test]
+    fn identical_query_keeps_the_current_match() {
+        let mut session = SearchSession::default();
+        session.update_query("foo", true);
+        session.matcher.update(&Rope::from("foo bar foo baz foo"));
+        session.matcher.update_cursor_by_offset(12);
+        assert_eq!(session.matcher.current_match_index(), 2);
+
+        // Reopening Find and the styled search panel's initial query echo both
+        // update the session with the same query. Neither should reset the
+        // previously active occurrence.
+        session.update_query("foo", true);
+
+        assert_eq!(session.matcher.current_match_index(), 2);
+        assert_eq!(session.matcher.label(), "3/3");
     }
 
     #[test]

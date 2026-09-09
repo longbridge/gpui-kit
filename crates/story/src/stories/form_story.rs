@@ -1,8 +1,4 @@
-use gpui::{
-    Action, App, AppContext, Axis, Context, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ParentElement as _, Render, Styled, Window, div, prelude::FluentBuilder as _, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     AxisExt, IndexPath, Sizable, Size,
     button::Button,
     checkbox::Checkbox,
@@ -15,6 +11,8 @@ use gpui_component::{
     switch::Switch,
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 use serde::Deserialize;
 
 use crate::{ChangeStorySize, story_toolbar};
@@ -108,7 +106,7 @@ impl FormStory {
 }
 
 impl Focusable for FormStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

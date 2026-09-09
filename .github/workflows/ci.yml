@@ -33,6 +33,11 @@ jobs:
       - name: Install system dependencies
         if: ${{ matrix.run_on != 'windows-latest' }}
         run: script/bootstrap
+      - name: Headless UI integration tests
+        run: cargo test -p gpui-kit --features test-support --locked
+      - name: Metal UI rendering tests
+        if: ${{ matrix.run_on == 'macos-latest' }}
+        run: cargo test -p gpui-kit --features test-support --test rendering --locked
       - name: Machete
         if: ${{ matrix.run_on == 'macos-latest' }}
         uses: bnjbvr/cargo-machete@v0.9.1
@@ -54,17 +59,23 @@ jobs:
       - name: Skill guides are in sync
         if: ${{ matrix.run_on == 'macos-latest' }}
         run: |
-          for guide in coding-guides design-guides; do
-            if ! diff -u "website/docs/$guide.md" "skills/gpui-component/references/$guide.md"; then
-              echo "::error::skills/gpui-component/references/$guide.md is stale."
-              echo "Run: cp website/docs/$guide.md skills/gpui-component/references/$guide.md"
+          for pair in "coding-guides skills/gpui-kit" "design-guides skills/gpui-kit-design-guides"; do
+            set -- $pair
+            if ! diff -u "website/docs/$1.md" "$2/references/$1.md"; then
+              echo "::error::$2/references/$1.md is stale."
+              echo "Run: cp website/docs/$1.md $2/references/$1.md"
               exit 1
             fi
           done
+      - name: Verify executable application recipes
+        if: ${{ matrix.run_on == 'macos-latest' }}
+        run: |
+          python3 script/check-ai docs
+          python3 script/check-ai rust
       - name: Lint
         if: ${{ matrix.run_on == 'macos-latest' }}
         run: |
-          cargo clippy -p gpui-component -p gpui-component-story -p gpui-component-assets -- --deny warnings
+          cargo clippy -p gpui-component -p gpui-component-story -p gpui-kit-assets -- --deny warnings
       - name: Check without default features (tree-sitter disabled)
         if: ${{ matrix.run_on == 'ubuntu-latest' }}
         run: |
@@ -141,6 +152,10 @@ jobs:
           key: component-shell-cargo-x86_64-linux-gnu-${{ hashFiles('**/Cargo.lock') }}
       - name: Test component bindings
         run: cargo test -p gpui-component-shell --all-targets
+      - name: Verify generated TypeScript contracts
+        run: |
+          npm --prefix crates/component-shell/tests/types ci
+          npm --prefix crates/component-shell/tests/types test
       - name: Lint component bindings
         run: cargo clippy -p gpui-component-shell --all-targets -- -D warnings
       # The inventory test proves every public component is registered or

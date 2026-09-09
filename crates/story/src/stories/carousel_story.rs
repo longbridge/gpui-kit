@@ -1,10 +1,4 @@
-use gpui::{
-    App, AppContext as _, Axis, Context, Entity, FocusHandle, Focusable, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, StyleRefinement, Styled as _,
-    Subscription, Window, div, prelude::FluentBuilder as _, relative, rems,
-};
-
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, Size, StyledExt as _,
     button::Button,
     carousel::{
@@ -13,6 +7,8 @@ use gpui_component::{
     },
     h_flex, v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 
 use crate::{ChangeStorySize, section, story_toolbar};
 

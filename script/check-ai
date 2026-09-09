@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Run task-scoped acceptance checks for AI-assisted development."""
+import argparse
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+PROFILES = {
+    "docs": [
+        [sys.executable, "script/check-ai-recipes", "--docs-only"],
+        [sys.executable, "-m", "unittest", "discover", "-s", "script/tests"],
+    ],
+    "rust": [
+        [sys.executable, "script/check-ai-recipes"],
+        ["cargo", "test", "--locked", "-p", "gpui-component", "--no-default-features",
+         "--test", "controlled_change_callbacks", "--test", "legacy_controls_compat"],
+        ["cargo", "test", "--locked", "-p", "gpui-component", "--no-default-features",
+         "--lib", "form::form::tests"],
+    ],
+    "shell": [
+        ["cargo", "test", "--locked", "-p", "gpui-shell", "--lib", "typings"],
+        ["cargo", "test", "--locked", "-p", "gpui-shell", "--lib", "tests::render"],
+        ["cargo", "test", "--locked", "-p", "gpui-component-shell", "--all-targets"],
+        ["npm", "--prefix", "crates/component-shell/tests/types", "ci"],
+        ["npm", "--prefix", "crates/component-shell/tests/types", "test"],
+    ],
+}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("profile", choices=[*PROFILES, "all"])
+    args = parser.parse_args()
+    profiles = list(PROFILES) if args.profile == "all" else [args.profile]
+    env = dict(os.environ)
+    env.setdefault("CARGO_TARGET_DIR", str(ROOT / "target"))
+    for profile in profiles:
+        for command in PROFILES[profile]:
+            print(f"[{profile}] {' '.join(command)}", flush=True)
+            try:
+                subprocess.run(command, cwd=ROOT, env=env, check=True)
+            except (OSError, subprocess.CalledProcessError) as error:
+                print(f"FAIL [{profile}]: {error}", file=sys.stderr)
+                return 1
+    print(f"PASS: {', '.join(profiles)}. Native visual/accessibility review and model success rates are not measured by this command.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

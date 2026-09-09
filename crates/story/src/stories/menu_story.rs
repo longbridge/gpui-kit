@@ -1,14 +1,11 @@
-use gpui::{
-    Action, Anchor, App, AppContext, Context, Entity, InteractiveElement, IntoElement, KeyBinding,
-    ParentElement as _, Render, SharedString, Styled as _, Window, actions, div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, IconName, Side, StyledExt,
     button::Button,
     h_flex,
     menu::{ContextMenuExt, DropdownMenu as _, PopupMenuItem},
     v_flex,
 };
+use gpui_kit::*;
 use serde::Deserialize;
 
 use crate::section;
@@ -141,7 +138,7 @@ impl Render for MenuStory {
                             .label("Edit")
                             .dropdown_menu(move |this, window, cx| {
                                 this.min_w(250.)
-                                    .link("About", "https://github.com/longbridge/gpui-component")
+                                    .link("About", "https://github.com/longbridge/gpui-kit")
                                     .check_side(check_side.unwrap_or(Side::Left))
                                     .separator()
                                     .item(PopupMenuItem::new("Handle Click").on_click(
@@ -212,10 +209,10 @@ impl Render for MenuStory {
                                         menu.link_with_icon(
                                             "GPUI Component",
                                             IconName::Github,
-                                            "https://github.com/longbridge/gpui-component",
+                                            "https://github.com/longbridge/gpui-kit",
                                         )
                                         .separator()
-                                        .link("GPUI", "https://gpui.rs")
+                                        .link("GPUI Kit", "https://gpui-kit.com")
                                         .link("Zed", "https://zed.dev")
                                     })
                                     .separator()
@@ -227,7 +224,10 @@ impl Render for MenuStory {
                                                 menu.link("Docs.rs", "https://docs.rs")
                                                     .separator()
                                                     .submenu("Deeper", window, cx, |menu, _, _| {
-                                                        menu.link("GPUI", "https://gpui.rs")
+                                                        menu.link(
+                                                            "GPUI Kit",
+                                                            "https://gpui-kit.com",
+                                                        )
                                                     })
                                             })
                                     })
@@ -257,10 +257,7 @@ impl Render for MenuStory {
                                 move |this, window, cx| {
                                     this.check_side(check_side.unwrap_or(Side::Left))
                                         .external_link_icon(false)
-                                        .link(
-                                            "About",
-                                            "https://github.com/longbridge/gpui-component",
-                                        )
+                                        .link("About", "https://github.com/longbridge/gpui-kit")
                                         .separator()
                                         .menu("Cut", Box::new(Cut))
                                         .menu("Copy", Box::new(Copy))
@@ -355,12 +352,9 @@ impl Render for MenuStory {
                             .child("Here is another area with context menu.")
                             .context_menu({
                                 move |this, _, _| {
-                                    this.link(
-                                        "About",
-                                        "https://github.com/longbridge/gpui-component",
-                                    )
-                                    .separator()
-                                    .menu("Item 1", Box::new(Info(1)))
+                                    this.link("About", "https://github.com/longbridge/gpui-kit")
+                                        .separator()
+                                        .menu("Item 1", Box::new(Info(1)))
                                 }
                             }),
                     )
@@ -380,12 +374,9 @@ impl Render for MenuStory {
                             .child("ContextMenu area 1")
                             .context_menu({
                                 move |this, _, _| {
-                                    this.link(
-                                        "About",
-                                        "https://github.com/longbridge/gpui-component",
-                                    )
-                                    .separator()
-                                    .menu("Item 1", Box::new(Info(1)))
+                                    this.link("About", "https://github.com/longbridge/gpui-kit")
+                                        .separator()
+                                        .menu("Item 1", Box::new(Info(1)))
                                 }
                             }),
                     ),

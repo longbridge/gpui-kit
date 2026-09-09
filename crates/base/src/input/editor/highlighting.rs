@@ -93,7 +93,7 @@ impl InputEditorStyle {
     /// means for ink, which is what makes it usable as "unset" here.
     ///
     /// This is resolution, not assignment: whatever a consumer did project is
-    /// kept exactly. `crates/ui` projects the whole style on every render and
+    /// kept exactly. `crates/component` projects the whole style on every render and
     /// never reaches this; a consumer that projects once at construction gets
     /// the palette that is current now rather than the one that happened to be
     /// installed when the state was built.

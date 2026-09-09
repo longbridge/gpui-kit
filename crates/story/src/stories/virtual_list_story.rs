@@ -1,17 +1,13 @@
 use std::{ops::Range, rc::Rc};
 
-use gpui::{
-    Action, App, AppContext, Context, Div, Entity, FocusHandle, Focusable, InteractiveElement,
-    IntoElement, ParentElement, Pixels, Render, ScrollStrategy, Size, Styled, Window, div, px,
-    size,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, VirtualListScrollHandle,
     button::Button,
     h_flex,
     scroll::{ScrollableElement, ScrollbarAxis},
     v_flex, v_virtual_list,
 };
+use gpui_kit::*;
 use serde::Deserialize;
 
 use crate::story_toolbar_group;
@@ -196,7 +192,7 @@ impl super::Story for VirtualListStory {
 }
 
 impl Focusable for VirtualListStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }
@@ -204,9 +200,9 @@ impl Focusable for VirtualListStory {
 impl Render for VirtualListStory {
     fn render(
         &mut self,
-        _: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
-    ) -> impl gpui::IntoElement {
+        _: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
         let columns_count = self.columns_count;
 
         fn render_item(cx: &App) -> Div {

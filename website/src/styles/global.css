@@ -1,0 +1,1385 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ====================================================================
+   Dark-mode image visibility helpers
+   ==================================================================== */
+.architecture-dark { display: none; }
+.alignment-dark { display: none; }
+html.dark .architecture-light { display: none; }
+html.dark .architecture-dark { display: block; }
+html.dark .alignment-light { display: none; }
+html.dark .alignment-dark { display: block; }
+
+/* ====================================================================
+   CSS Design Tokens, light + dark. Do NOT change values — ported as-is
+   from the pre-Astro VitePress theme.
+   ==================================================================== */
+
+:root {
+  --radius-control: 0.375rem;
+  --radius-card: 0.5rem;
+  --radius-surface: 0.75rem;
+  --radius: var(--radius-control);
+
+  --brand: #171717;
+  --brand-hover: #262626;
+  --brand-contrast: #fafafa;
+  --brand-subtle: #f5f5f5;
+  --brand-line: color-mix(in srgb, var(--foreground) 24%, transparent);
+  --border-hover: color-mix(in srgb, var(--foreground) 11%, var(--border));
+
+  --data-1: #93c5fd;
+  --data-2: #3b82f6;
+  --data-3: #2563eb;
+  --data-4: #1d4ed8;
+  --data-5: #1e40af;
+
+  --selection: #55a0fc;
+  --success: #22c55e;
+  --warning: #d97706;
+
+  --code-bg: #ffffff;
+  --code-fg: #000000;
+  --code-keyword: #0433ff;
+  --code-string: #036a07;
+  --code-comment: #9a9a9a;
+  --code-fn: #0000a2;
+  --code-type: #571ab7;
+
+  --grid-line: color-mix(in srgb, var(--foreground) 7%, transparent);
+
+  --scrollbar-track: rgb(10 10 10 / 4%);
+  --scrollbar-thumb: rgb(10 10 10 / 8%);
+  --scrollbar-thumb-hover: rgb(10 10 10 / 42%);
+
+  --shadow-hairline: 0 0 0 0.5px rgb(0 0 0 / 22%);
+  --shadow-raise: 0 1px 2px rgb(0 0 0 / 7%);
+  --shadow-window:
+    0 1px 1px rgb(0 0 0 / 4%), 0 10px 24px -8px rgb(0 0 0 / 14%),
+    0 40px 72px -28px rgb(0 0 0 / 20%);
+  --shadow-panel: 0 20px 50px -24px rgb(0 0 0 / 20%);
+  --shadow-dialog: 0 25px 50px -12px rgb(0 0 0 / 25%);
+
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --card: #ffffff;
+  --card-foreground: #0a0a0a;
+  --popover: #ffffff;
+  --popover-foreground: #0a0a0a;
+  --primary: #171717;
+  --primary-foreground: #fafafa;
+  --secondary: #f5f5f5;
+  --secondary-foreground: #171717;
+  --muted: #f5f5f5;
+  --muted-foreground: #737373;
+  --accent: #f5f5f5;
+  --accent-foreground: #171717;
+  --destructive: #ef4444;
+  --border: #e5e5e5;
+  --input: #e5e5e5;
+  --ring: #0a0a0a;
+  --titlebar: #f8f8f8;
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: #fafafa;
+  --sidebar-foreground: #171717;
+  --sidebar-primary: #171717;
+  --sidebar-primary-foreground: #fafafa;
+  --sidebar-accent: #e5e5e5;
+  --sidebar-accent-foreground: #171717;
+  --sidebar-border: #e5e5e5;
+  --sidebar-ring: #0a0a0a;
+
+  /* Font stacks */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text",
+    "Segoe UI", "Noto Sans SC", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
+  --font-mono:
+    ui-monospace, "SF Mono", "JetBrains Mono Variable", Menlo, "Cascadia Mono",
+    "Segoe UI Mono", monospace;
+
+  /* Layout */
+  --nav-height: 56px;
+  --sidebar-width: 220px;
+  --toc-width: 200px;
+  --layout-max-width: 1280px;
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --card: #171717;
+  --card-foreground: #fafafa;
+  --popover: #171717;
+  --popover-foreground: #fafafa;
+  --primary: #fafafa;
+  --primary-foreground: #171717;
+  --secondary: #262626;
+  --secondary-foreground: #fafafa;
+  --muted: #262626;
+  --muted-foreground: #a3a3a3;
+  --accent: #262626;
+  --accent-foreground: #fafafa;
+  --destructive: #e44a4f;
+  --warning: #f0a03c;
+  --border: #262626;
+  --input: #2f2f2f;
+  --ring: #d4d4d4;
+  --titlebar: #171717;
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: #0f0f0f;
+  --sidebar-foreground: #f5f5f5;
+  --sidebar-primary: #fafafa;
+  --sidebar-primary-foreground: #171717;
+  --sidebar-accent: #262626;
+  --sidebar-accent-foreground: #fafafa;
+  --sidebar-border: #262626;
+  --sidebar-ring: #d4d4d4;
+
+  --brand: #fafafa;
+  --brand-hover: #f5f5f5;
+  --brand-contrast: #171717;
+  --brand-subtle: #262626;
+  --brand-line: color-mix(in srgb, var(--foreground) 26%, transparent);
+  --border-hover: color-mix(in srgb, var(--foreground) 13%, var(--border));
+
+  --data-1: #93c5fd;
+  --data-2: #419cff;
+  --data-3: #2563eb;
+  --data-4: #1d4ed8;
+  --data-5: #1e40af;
+
+  --selection: #c2610a;
+  --grid-line: color-mix(in srgb, var(--foreground) 8%, transparent);
+
+  --scrollbar-track: rgb(250 250 250 / 8%);
+  --scrollbar-thumb: rgb(250 250 250 / 22%);
+  --scrollbar-thumb-hover: rgb(250 250 250 / 40%);
+
+  --shadow-hairline: 0 0 0 0.5px rgb(0 0 0 / 70%);
+  --shadow-raise: 0 1px 2px rgb(0 0 0 / 45%);
+  --shadow-window:
+    0 1px 1px rgb(0 0 0 / 40%), 0 10px 24px -8px rgb(0 0 0 / 55%),
+    0 40px 72px -28px rgb(0 0 0 / 70%);
+  --shadow-panel: 0 20px 50px -24px rgb(0 0 0 / 65%);
+  --shadow-dialog: 0 25px 50px -12px rgb(0 0 0 / 55%);
+
+  --code-bg: #151515;
+  --code-fg: #caccca;
+  --code-keyword: #87b1f6;
+  --code-string: #a3e09f;
+  --code-comment: #9d9d9d;
+  --code-fn: #b3c5f3;
+  --code-type: #cba6f7;
+}
+
+/* ====================================================================
+   Base styles
+   ==================================================================== */
+
+html {
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-family: var(--font-sans);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 15px;
+  letter-spacing: -0.003em;
+}
+
+html[lang^="zh"] body,
+html[lang^="ja"] body {
+  letter-spacing: normal;
+}
+
+html[lang^="zh"] :is(h1, h2, h3, h4),
+html[lang^="ja"] :is(h1, h2, h3, h4) {
+  letter-spacing: -0.015em;
+}
+
+:is(table, kbd) {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--selection) 38%, transparent);
+}
+
+/* ====================================================================
+   Scrollbars
+   ==================================================================== */
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--scrollbar-thumb);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
+@supports (scrollbar-width: thin) and (not selector(::-webkit-scrollbar)) {
+  * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
+}
+
+:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+/* ====================================================================
+   shiki dual-theme: align with .dark class
+   ==================================================================== */
+html.dark .astro-code,
+html.dark .astro-code span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+}
+
+/* ====================================================================
+   macOS window chrome
+   ==================================================================== */
+
+.mac-window {
+  position: relative;
+  overflow: hidden;
+  border-radius: 0.75rem;
+  background: var(--background);
+  box-shadow: var(--shadow-hairline), var(--shadow-window);
+}
+
+.mac-window::after {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 55%, transparent);
+  content: "";
+  pointer-events: none;
+}
+
+.dark .mac-window::after {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, white 9%, transparent);
+}
+
+.mac-window__bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  height: 2.35rem;
+  padding: 0 0.85rem;
+  box-shadow: inset 0 -1px 0 var(--border);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--sidebar) 55%, var(--background)),
+    var(--sidebar)
+  );
+}
+
+.mac-window__lights {
+  display: flex;
+  flex-shrink: 0;
+  gap: 0.5rem;
+}
+
+.mac-window__lights i,
+.mac-window__lights button {
+  width: 0.75rem;
+  height: 0.75rem;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #ff5f57;
+  box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 12%);
+}
+
+.mac-window__lights > :nth-child(2) { background: #febc2e; }
+.mac-window__lights > :nth-child(3) { background: #28c840; }
+
+.mac-window__zoom { cursor: pointer; }
+
+.mac-window__zoom::before {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: rgb(0 0 0 / 55%);
+  font-size: 0.5rem;
+  line-height: 1;
+  opacity: 0;
+  content: "⤢";
+  transition: opacity 0.12s ease;
+}
+
+.mac-window--zoomed .mac-window__zoom::before { content: "⤡"; }
+
+.mac-window__bar:hover .mac-window__zoom::before,
+.mac-window__zoom:focus-visible::before { opacity: 1; }
+
+.mac-window__action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.55rem;
+  height: 1.55rem;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0.375rem;
+  opacity: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: opacity 0.12s ease, background-color 0.12s ease, color 0.12s ease;
+}
+
+.mac-window__bar:hover .mac-window__action,
+.mac-window__action:focus-visible { opacity: 1; }
+
+.mac-window__action:hover {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+  color: var(--foreground);
+}
+
+.mac-window__bar > :not(.mac-window__title) + .mac-window__action { margin-left: 0; }
+.mac-window__action--always { opacity: 1; }
+
+.mac-window__title {
+  position: absolute;
+  left: 50%;
+  max-width: min(60%, 28rem);
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+/* ====================================================================
+   Component example (docs pages)
+   ==================================================================== */
+
+.component-example { margin-bottom: 2rem; }
+
+.component-example__label {
+  margin-bottom: 0.5rem;
+  color: var(--muted-foreground);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font: 0.68rem/1 var(--font-mono);
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.component-example__live {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.component-example__live::before {
+  width: 0.2rem;
+  height: 0.2rem;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 20%, transparent);
+  content: "";
+}
+
+.component-example iframe {
+  display: block;
+  width: 100%;
+  height: 680px;
+  border: 0;
+}
+
+/* These four match the background of the GPUI application inside the frame,
+   not this site's surface, so the frame does not flash a different colour
+   while the WASM loads. An external surface is the one place the guides allow
+   a raw value. */
+.component-example--component iframe {
+  background: white;
+}
+
+.dark .component-example--component iframe {
+  background: #0e0e0e;
+}
+
+.component-example--base iframe {
+  height: 600px;
+  color-scheme: light;
+  background: white;
+}
+
+.dark .component-example--base iframe {
+  color-scheme: dark;
+  background: #0a0a0a;
+}
+
+@media (max-width: 640px) {
+  .mac-window__title { display: none; }
+  .component-example iframe { height: 560px; }
+  .component-example--base iframe { height: min(520px, 75vh); }
+}
+
+.has-zoomed-window,
+.has-zoomed-window body { overflow: hidden; }
+
+.mac-window.mac-window--zoomed {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.mac-window.mac-window--zoomed::after { display: none; }
+
+.mac-window.mac-window--zoomed iframe,
+.mac-window.mac-window--zoomed .showcase__placeholder {
+  flex: 1;
+  height: auto;
+}
+
+/* ====================================================================
+   Doc content styles (.doc-content replaces .vp-doc)
+   ==================================================================== */
+
+.doc-content {
+  color: var(--foreground);
+
+  h1 { margin-bottom: 1rem; }
+
+  > h1:first-child {
+    margin-bottom: 1rem;
+    font-size: clamp(1.75rem, 2.6vw, 2rem);
+    font-weight: 660;
+    letter-spacing: -0.03em;
+    line-height: 1.25;
+  }
+
+  /* The page's standfirst: muted, and set at the body size — a larger measure
+     read as a second heading under the title. */
+  > h1:first-child + p {
+    max-width: 46rem;
+    color: var(--muted-foreground);
+  }
+
+  h2 {
+    margin-top: 3rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 1.35rem;
+    font-weight: 640;
+    letter-spacing: -0.022em;
+  }
+
+  h3 {
+    margin-top: 2rem;
+    font-size: 1.02rem;
+    font-weight: 640;
+    letter-spacing: -0.012em;
+  }
+
+  /* A heading with an id can be linked to, so it offers the link: a mark that
+     appears on hover or keyboard focus and copies nothing away from the text
+     when idle. */
+  :is(h2, h3, h4)[id] {
+    position: relative;
+  }
+
+  .heading-anchor {
+    position: absolute;
+    right: 100%;
+    padding-right: 0.35rem;
+    color: var(--muted-foreground);
+    font-weight: 400;
+    opacity: 0;
+    text-decoration: none;
+    transition: opacity 120ms ease, color 120ms ease;
+  }
+
+  :is(h2, h3, h4):hover .heading-anchor,
+  .heading-anchor:focus-visible { opacity: 1; }
+  .heading-anchor:hover { color: var(--foreground); }
+
+  /* The bar is sticky, so an anchored heading would land underneath it. */
+  :where(h1, h2, h3, h4, h5, h6)[id] {
+    scroll-margin-top: calc(var(--nav-height) + 1.25rem);
+  }
+
+  /* Tailwind's preflight zeroes block margins, so prose needs its own vertical
+     rhythm: without this every paragraph, list and code block butted directly
+     against the next one. Headings set their own top margin below. */
+  p, ul, ol, pre, table, blockquote, .callout, details {
+    margin-block: 1rem;
+  }
+
+  > :first-child { margin-top: 0; }
+  > :last-child { margin-bottom: 0; }
+
+  p, ul, ol, blockquote { max-width: 46rem; }
+  p, li { line-height: 1.75; }
+  /* Tailwind's preflight sets `list-style: none`, so prose lists lost their
+     markers — a bulleted list read as a run of indented lines. */
+  ul { list-style: disc; padding-left: 1.2rem; }
+  ol { list-style: decimal; padding-left: 1.2rem; }
+  ul ul { list-style: circle; }
+  ul ul ul { list-style: square; }
+  li::marker { color: var(--muted-foreground); }
+  li + li { margin-top: 0.25rem; }
+  li > p { margin: 0; }
+  li > ul, li > ol { margin: 0.25rem 0 0; }
+
+  :is(h2, h3, h4) + :not(h2, h3, h4) { margin-top: 0.9rem; }
+  > h1:first-child + h2 { margin-top: 2.25rem; }
+
+  a {
+    text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 0.18em;
+    transition: text-decoration-color 140ms ease;
+  }
+  a:hover { text-decoration-color: currentColor; }
+
+  /* VitePress-style containers (`:::tip`), turned into asides by
+     `remark-callouts`. One shape, tinted by kind. */
+  .callout {
+    padding: 0.9rem 1.1rem;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--callout-accent, var(--border));
+    border-radius: var(--radius-card);
+    background: color-mix(in srgb, var(--callout-accent, var(--secondary)) 6%, transparent);
+  }
+
+  .callout > :first-child { margin-top: 0; }
+  .callout > :last-child { margin-bottom: 0; }
+  .callout p { max-width: none; }
+
+  .callout__title {
+    margin-bottom: 0.4rem;
+    color: var(--foreground);
+    font-size: 0.9rem;
+    font-weight: 640;
+    letter-spacing: -0.01em;
+  }
+
+  .callout--tip { --callout-accent: var(--brand); }
+  .callout--info,
+  .callout--note { --callout-accent: var(--muted-foreground); }
+  .callout--warning,
+  .callout--caution,
+  .callout--important { --callout-accent: var(--warning); }
+  .callout--danger { --callout-accent: var(--destructive); }
+
+  /* GFM footnotes. The markdown pipeline emits `<h2 class="sr-only">` as the
+     section's accessible name, but Tailwind only generates classes it finds in
+     source, and this one comes out of rendered markdown — so without a rule
+     here the label rendered as a full-size heading in the middle of the page. */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .footnotes {
+    margin-top: 3.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted-foreground);
+    font-size: 0.85rem;
+  }
+
+  .footnotes ol { padding-left: 1.1rem; }
+  .footnotes p { max-width: none; line-height: 1.65; }
+
+  /* Footnotes are where bare URLs turn up; let them wrap instead of pushing
+     the page sideways. */
+  .footnotes a { overflow-wrap: anywhere; }
+
+  .footnotes .data-footnote-backref {
+    text-decoration: none;
+    margin-left: 0.15rem;
+  }
+
+  table {
+    display: table;
+    width: 100%;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: hidden;
+    background: var(--background);
+    font-size: 0.82rem;
+  }
+
+  tr { border-top: 0; }
+  thead tr { background: color-mix(in srgb, var(--secondary) 10%, transparent); }
+
+  th {
+    color: var(--muted-foreground);
+    font: 620 0.67rem/1.35 var(--font-mono);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  th, td {
+    padding: 0.52rem 0.65rem;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    line-height: 1.5;
+    text-align: left;
+    vertical-align: top;
+  }
+
+  tbody tr:last-child td { border-bottom: 0; }
+  th:first-child, td:first-child { padding-left: 0.75rem; }
+
+  blockquote {
+    padding: 0.25rem 0 0.25rem 1.25rem;
+    border-left: 2px solid var(--brand);
+    color: var(--muted-foreground);
+  }
+
+  :not(pre) > code {
+    border: 1px solid var(--border);
+    border-radius: 0.25rem;
+    background: var(--secondary);
+    font-size: 0.84em;
+    line-height: 1.2;
+    padding: 0.1em 0.35em;
+  }
+
+  pre {
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--code-bg) !important;
+    font-size: 0.875rem;
+  }
+
+  pre code { display: block; padding: 1rem; overflow-x: auto; font-size: 0.875em; line-height: 1.7; }
+
+  td:first-child code {
+    border: 0;
+    background: transparent;
+    color: var(--foreground);
+    font-weight: 500;
+    padding-inline: 0;
+  }
+
+  kbd {
+    padding: 0.1rem 0.35rem;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: 0.3rem;
+    background: var(--secondary);
+    font: 0.78em/1.5 var(--font-mono);
+  }
+}
+
+/* ====================================================================
+   Nav bar (docs layout)
+   ==================================================================== */
+
+.site-nav {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: var(--nav-height);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--background) 80%, transparent);
+  backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: var(--shadow-raise);
+}
+
+.site-nav__inner {
+  display: flex;
+  align-items: center;
+  gap: 1.9rem;
+  width: min(100% - 3rem, var(--layout-max-width));
+  height: 100%;
+  margin-inline: auto;
+}
+
+.site-nav__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-shrink: 0;
+  color: var(--foreground) !important;
+  font-size: 0.875rem;
+  font-weight: 620;
+  letter-spacing: -0.022em;
+  text-decoration: none !important;
+}
+
+.site-nav__brand img { width: 1.35rem; height: 1.4rem; }
+
+.site-nav__links {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.site-nav__link {
+  display: inline-flex;
+  align-items: center;
+  height: 2rem;
+  padding: 0 0.6rem;
+  border-radius: var(--radius-control);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background 140ms ease, color 140ms ease;
+}
+
+.site-nav__link:hover { background: var(--secondary); }
+.site-nav__link.active { color: var(--brand); font-weight: 600; }
+
+.site-nav__actions {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  gap: 0.3rem;
+}
+
+/* Resources dropdown */
+.site-nav__dropdown {
+  position: relative;
+}
+
+.site-nav__dropdown-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  height: 2rem;
+  padding: 0 0.6rem;
+  border-radius: var(--radius-control);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+.site-nav__dropdown:hover .site-nav__dropdown-btn,
+.site-nav__dropdown:focus-within .site-nav__dropdown-btn { background: var(--secondary); }
+
+.site-nav__dropdown-menu {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  min-width: 11rem;
+  padding: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--popover);
+  box-shadow: var(--shadow-panel);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 140ms ease, visibility 140ms ease;
+}
+
+/* One rule decides visibility. `.is-dismissed` — set by Escape, which closes
+   the menu while the trigger keeps focus, a state neither `:hover` nor
+   `:focus-within` can express — is folded in as `:not()` rather than as a
+   second rule of equal specificity, whose outcome would depend on the order
+   the bundler happens to emit. */
+.site-nav__dropdown:not(.is-dismissed):hover .site-nav__dropdown-menu,
+.site-nav__dropdown:not(.is-dismissed):focus-within .site-nav__dropdown-menu {
+  opacity: 1;
+  visibility: visible;
+}
+
+.site-nav__dropdown-item {
+  display: block;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--radius-control);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  font-weight: 450;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 140ms ease;
+}
+
+.site-nav__dropdown-item:hover { background: var(--secondary); }
+
+/* ====================================================================
+   Sidebar (docs layout)
+   ==================================================================== */
+
+.docs-sidebar {
+  position: sticky;
+  top: var(--nav-height);
+  width: var(--sidebar-width);
+  height: calc(100vh - var(--nav-height));
+  overflow-y: auto;
+  flex-shrink: 0;
+  padding: 1.5rem 1rem 1.5rem 0;
+  border-right: 1px solid var(--border);
+  scrollbar-gutter: stable;
+}
+
+/* The sidebar's scrollbar stays out of the way: invisible at rest, fading in
+   while the reader scrolls (`data-scrollbar-visible`, set in DocsLayout) and
+   out again shortly after. `scrollbar-width`/`-color` are reset to `auto`
+   against the global `thin` rule — with a non-auto value, macOS Chrome uses
+   its own scrollbar and ignores the ::-webkit geometry below. */
+.docs-sidebar {
+  scrollbar-width: auto;
+  scrollbar-color: auto;
+}
+
+.docs-sidebar::-webkit-scrollbar { width: 8px; }
+
+.docs-sidebar::-webkit-scrollbar-track {
+  margin-block: 2rem;
+  border-radius: 2px;
+  background: transparent;
+  transition: background-color 180ms ease;
+}
+
+.docs-sidebar::-webkit-scrollbar-thumb {
+  min-height: 2.5rem;
+  /* A transparent trailing border, with the background clipped inside it,
+     leaves a 4px gap between the thumb and the sidebar's own border. */
+  border: 0 solid transparent;
+  border-right-width: 4px;
+  background-clip: padding-box;
+  border-radius: 2px;
+  background-color: transparent;
+  transition: background-color 180ms ease;
+}
+
+.docs-sidebar[data-scrollbar-visible]::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+}
+
+.docs-sidebar[data-scrollbar-visible]::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+/* Sidebar group heading */
+.sidebar-group__title {
+  color: var(--muted-foreground);
+  font: 620 0.68rem/1 var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.4rem 0;
+  margin-bottom: 0.2rem;
+}
+
+.sidebar-group__items { list-style: none; padding: 0; margin: 0 0 1.25rem; }
+
+.sidebar-item {
+  display: block;
+  margin-inline: -0.5rem;
+  padding: 0.28rem 0.5rem;
+  border-radius: var(--radius-control);
+  color: var(--foreground);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  text-decoration: none;
+  transition: color 140ms ease, background 140ms ease;
+}
+
+.sidebar-item:hover { background: var(--secondary); }
+.sidebar-item.active { color: var(--foreground); font-weight: 650; }
+
+.sidebar-subgroup-title {
+  padding: 0.28rem 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+
+.sidebar-subgroup__items { list-style: none; padding-left: 0.75rem; margin: 0; }
+
+/* ====================================================================
+   Docs layout wrapper
+   ==================================================================== */
+
+.docs-layout {
+  display: flex;
+  min-height: calc(100vh - var(--nav-height));
+  width: min(100% - 3rem, var(--layout-max-width));
+  margin-inline: auto;
+}
+
+.docs-main {
+  flex: 1;
+  min-width: 0;
+  padding: 3rem 3.5rem 4rem;
+  max-width: 860px;
+}
+
+/* ====================================================================
+   On-this-page (docs layout)
+   ==================================================================== */
+
+.toc {
+  position: sticky;
+  top: var(--nav-height);
+  flex-shrink: 0;
+  align-self: flex-start;
+  width: var(--toc-width);
+  max-height: calc(100vh - var(--nav-height));
+  overflow-y: auto;
+  padding: 3rem 0 3rem 1.75rem;
+  font-size: 0.8125rem;
+
+  /* A long outline still scrolls; it just does not draw a rail of its own
+     beside the page's. `scrollbar-width` overrides the global `thin`. */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.toc::-webkit-scrollbar { display: none; }
+
+/* This names the column, so it takes the foreground while the entries under it
+   stay muted — that contrast is the whole separation; a rule under it competed
+   with the rail beside the entries. */
+.toc__label {
+  margin: 0 0 0.7rem;
+  color: var(--foreground);
+  font: 620 0.7rem/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* A rail down the list gives the entries a shared edge and somewhere for the
+   current one to be marked — the segment lights up in place rather than the
+   text colour changing alone, so the reader's position is visible without
+   reading the labels. */
+.toc ul {
+  margin: 0;
+  padding: 0;
+  border-left: 1px solid var(--border);
+  list-style: none;
+}
+
+.toc__item a {
+  display: block;
+  margin-left: -1px;
+  padding: 0.2rem 0 0.2rem 0.75rem;
+  border-left: 1px solid transparent;
+  color: var(--muted-foreground);
+  line-height: 1.4;
+  text-decoration: none;
+  transition: color 140ms ease, border-color 140ms ease;
+}
+
+.toc__item a:hover {
+  border-left-color: var(--border-hover);
+  color: var(--foreground);
+}
+
+.toc__item a.is-current {
+  border-left-color: var(--brand);
+  color: var(--brand);
+}
+
+.toc__item--sub a { padding-left: 1.5rem; font-size: 0.78rem; }
+
+/* Below this the three columns stop fitting inside the content box. */
+@media (max-width: 1180px) {
+  .toc { display: none; }
+}
+
+.docs-main--full {
+  max-width: 100%;
+  padding: 3rem 0 4rem;
+}
+
+/* ====================================================================
+   Footer (shared by the landing page and every content page)
+   ==================================================================== */
+
+.site-footer {
+  display: grid;
+  grid-template-columns: minmax(16rem, 1fr) minmax(22rem, auto);
+  gap: 2rem 4rem;
+  width: min(100% - 3rem, var(--layout-max-width));
+  margin: clamp(4.5rem, 8vw, 7rem) auto 0;
+  padding: 2.5rem 0;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.site-footer strong { color: var(--foreground); font-size: 0.82rem; }
+.site-footer__brand p { max-width: 32rem; margin: 0.55rem 0 0; line-height: 1.6; }
+
+.site-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-content: start;
+  gap: 0.5rem 1.25rem;
+}
+
+.site-footer a { color: var(--muted-foreground); text-decoration: none; }
+.site-footer a:hover { color: var(--brand); }
+
+.site-footer__credits {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+@media (max-width: 640px) {
+  .site-footer {
+    grid-template-columns: 1fr;
+    width: calc(100% - 2rem);
+  }
+  .site-footer nav { justify-content: flex-start; }
+}
+
+/* ====================================================================
+   Theme toggle button
+   ==================================================================== */
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-control);
+  color: var(--foreground);
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.theme-toggle:hover { background: var(--secondary); }
+.theme-toggle svg { width: 1rem; height: 1rem; }
+
+/* ====================================================================
+   Pagefind search UI overrides
+   ==================================================================== */
+
+.pagefind-ui {
+  --pagefind-ui-font: var(--font-sans);
+  --pagefind-ui-primary: var(--brand);
+  --pagefind-ui-text: var(--foreground);
+  --pagefind-ui-background: var(--background);
+  --pagefind-ui-border: var(--border);
+  --pagefind-ui-border-radius: var(--radius-control);
+}
+
+/* ====================================================================
+   Prev/Next navigation
+   ==================================================================== */
+
+.doc-prev-next {
+  display: flex;
+  gap: 1rem;
+  margin-top: 4rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--border);
+}
+
+.doc-pager {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  text-decoration: none;
+  color: var(--foreground);
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+
+.doc-pager:hover {
+  border-color: var(--brand);
+  transform: translateY(-1px);
+}
+
+.doc-pager--next { text-align: right; margin-left: auto; }
+
+.doc-pager__label {
+  font-size: 0.72rem;
+  color: var(--muted-foreground);
+  margin-bottom: 0.25rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.doc-pager__title { font-size: 0.9rem; font-weight: 560; }
+
+/* ====================================================================
+   Search button (nav)
+   ==================================================================== */
+
+.site-nav__search-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 13rem;
+  min-width: 0;
+  height: 2rem;
+  padding: 0 0.5rem 0 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--background);
+  color: var(--muted-foreground);
+  font-size: 0.8125rem;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.site-nav__search-btn:hover {
+  border-color: color-mix(in srgb, var(--foreground) 18%, var(--border));
+  background: var(--secondary);
+}
+
+.site-nav__search-hint { margin-right: auto; white-space: nowrap; }
+
+/* Tracking that reads as restrained emphasis on Latin caps pulls short CJK
+   labels apart — `文档`, `本页内容` — because Chinese has no case for the
+   uppercase to act on, leaving only the extra space. The Vue components already
+   narrow their own kickers this way; these four had been left behind. */
+html[lang^="zh"] :is(
+  .sidebar-group__title,
+  .toc__label,
+  .doc-pager__label,
+  .component-example__label
+) {
+  letter-spacing: 0.05em;
+}
+
+/* ====================================================================
+   Mobile: the docs shell (the bar styles itself in Nav.astro)
+   ==================================================================== */
+
+/* The published site folds its sidebar away below 960px, and for the same
+   reason: a 280px column beside the article leaves the prose near 560px at
+   900px wide, and narrower still below that. The bar keeps its own 767px
+   breakpoint — its links fit far longer than the sidebar does. */
+@media (max-width: 959px) {
+  .docs-layout { flex-direction: column; width: calc(100% - 3rem); }
+
+  .docs-sidebar {
+    position: static;
+    width: auto;
+    height: auto;
+    max-height: 60vh;
+    padding: 1rem 0;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .docs-main,
+  .docs-main--full { padding: 1.75rem 0 3rem; }
+}
+
+/* The bar runs out of room for a full-width field before it runs out of room
+   for its links, so the field gives up width in steps: full, narrower, then
+   an icon button once the label goes. */
+@media (max-width: 1080px) {
+  .site-nav__search-btn { width: 9.5rem; }
+}
+
+@media (max-width: 900px) {
+  .site-nav__search-btn {
+    width: 2rem;
+    padding: 0;
+    justify-content: center;
+  }
+
+  /* Once it is an icon it belongs to the row of icon buttons beside it, not to
+     the input it was: the frame and fill go, leaving hover as the only
+     background — the same treatment the star, language and theme controls get. */
+  .site-nav__search-btn {
+    border-color: transparent;
+    background: transparent;
+    color: var(--foreground);
+  }
+
+  .site-nav__search-btn:hover {
+    border-color: transparent;
+    background: var(--secondary);
+  }
+
+  /* Scoped to the button so it outranks the shared key-cap rule, which is
+     defined further down the file and would otherwise win on source order. */
+  .site-nav__search-btn .site-nav__search-key { display: none; }
+
+  /* Once the labels go, these are five icons in a row and each needs the same
+     square target — otherwise the star and language controls shrink to their
+     glyphs and the gaps between the five read as uneven. */
+  .site-nav__search-btn,
+  .github-star-btn,
+  .site-nav__lang-btn,
+  .theme-toggle,
+  .site-nav__burger {
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .site-nav__actions { gap: 0.25rem; }
+
+  /* Hidden from view but kept in the accessibility tree, so the button keeps
+     its name once only the icon shows. */
+  .site-nav__search-hint {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/* The docs shell keeps its own, narrower gutter at phone width. */
+@media (max-width: 640px) {
+  .docs-layout { width: calc(100% - 2rem); }
+}
+
+/* Visually hidden, still announced. Also defined inside `.doc-content` for
+   the heading the markdown pipeline emits. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ====================================================================
+   Search dialog
+   ==================================================================== */
+
+/* A native <dialog>: the browser owns the backdrop, the top layer, focus
+   trapping and Escape, so none of that is reimplemented here. */
+/* A closed dialog is `display: none` by the UA stylesheet; setting `display`
+   unconditionally overrode that and left the panel sitting in the page flow. */
+#search-modal { display: none; }
+
+#search-modal[open] {
+  display: flex;
+  flex-direction: column;
+  width: min(42rem, calc(100% - 2rem));
+  max-height: min(32rem, calc(100vh - 8rem));
+  margin: 8vh auto auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--popover);
+  color: var(--foreground);
+  box-shadow: var(--shadow-dialog);
+}
+
+#search-modal::backdrop {
+  background: color-mix(in srgb, var(--background) 45%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+#search-ui { flex: 1; min-height: 0; overflow-y: auto; padding: 0.5rem; }
+
+.search-blank { padding: 2rem 1.5rem 2.5rem; text-align: center; }
+.search-blank__title { margin: 0; color: var(--foreground); font-size: 0.95rem; font-weight: 620; }
+.search-blank__body { margin: 0.35rem 0 0; color: var(--muted-foreground); font-size: 0.85rem; }
+
+.search-footer {
+  display: flex;
+  gap: 1rem;
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  border-top: 1px solid var(--border);
+  background: var(--background);
+  color: var(--muted-foreground);
+  font-size: 0.72rem;
+}
+
+.search-footer span { display: inline-flex; align-items: center; gap: 0.3rem; }
+
+/* A key cap is a hint, not a control: a filled chip carries it without the
+   border, which at this size read heavier than the label beside it. Foreground
+   colour because a cap names a key you can press — inheriting the muted text
+   around it left it at 4.35:1 on the secondary surface, under 4.5:1. */
+.search-footer kbd,
+.site-nav__search-key {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.35rem;
+  border-radius: 0.25rem;
+  background: var(--secondary);
+  color: var(--foreground);
+  font: 0.78em/1.5 var(--font-mono);
+}
+
+/* Pagefind's own UI, re-skinned onto the site's tokens. */
+#search-ui .pagefind-ui {
+  --pagefind-ui-primary: var(--foreground);
+  --pagefind-ui-text: var(--foreground);
+  --pagefind-ui-background: var(--popover);
+  --pagefind-ui-border: var(--border);
+  --pagefind-ui-tag: var(--secondary);
+  --pagefind-ui-border-width: 1px;
+  --pagefind-ui-border-radius: var(--radius-control);
+  --pagefind-ui-font: inherit;
+}
+
+#search-ui .pagefind-ui__search-input {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 0.95rem;
+}
+
+#search-ui .pagefind-ui__search-clear { background: transparent; color: var(--muted-foreground); }
+#search-ui .pagefind-ui__result { border-top: 1px solid var(--border); }
+#search-ui .pagefind-ui__result-link { color: var(--foreground); font-weight: 560; }
+#search-ui .pagefind-ui__result-excerpt { color: var(--muted-foreground); font-size: 0.85rem; }
+#search-ui mark {
+  background: color-mix(in srgb, var(--brand) 22%, transparent);
+  color: var(--foreground);
+}

@@ -1,10 +1,10 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext as _, ClickEvent, Context, Entity, Focusable, InteractiveElement, IntoElement,
     ParentElement as _, Render, Styled, Subscription, Window, div, px,
 };
 
 use crate::section;
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Sizable,
     button::Button,
     h_flex,
@@ -169,7 +169,7 @@ impl TextareaStory {
 }
 
 impl Focusable for TextareaStory {
-    fn focus_handle(&self, cx: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, cx: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.textarea.focus_handle(cx)
     }
 }

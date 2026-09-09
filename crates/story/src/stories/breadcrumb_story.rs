@@ -1,9 +1,9 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render,
     Styled, Window, prelude::FluentBuilder as _, px,
 };
 
-use gpui_component::{
+use gpui_kit::component::{
     breadcrumb::{Breadcrumb, BreadcrumbItem},
     v_flex,
 };
@@ -11,7 +11,7 @@ use gpui_component::{
 use crate::section;
 
 pub struct BreadcrumbStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     clicked_item: Option<String>,
 }
 

@@ -1,9 +1,6 @@
-use gpui::{
-    Action, App, AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, Styled, Subscription, Window, div, px, rems,
-};
+use gpui_kit::*;
 
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, IconName, StyledExt,
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -20,7 +17,7 @@ use crate::{section, story_toolbar_group};
 struct TogglePrefix;
 
 pub struct LabelStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     masked: bool,
     highlights_text: SharedString,
     highlights_input: Entity<InputState>,
@@ -88,7 +85,7 @@ impl LabelStory {
     }
 }
 impl Focusable for LabelStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

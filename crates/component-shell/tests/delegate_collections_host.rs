@@ -44,7 +44,7 @@ fn list_uses_a_fresh_immutable_snapshot_and_lazy_row_renderer(cx: &mut TestAppCo
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("main.js"),
-        r#"import { View, div } from "gpui";
+        r#"import { View, div } from "gpui-kit";
 import { List } from "gpui-component";
 export default class App extends View {
   init() { this.updated = false; }

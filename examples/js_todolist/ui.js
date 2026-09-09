@@ -9,33 +9,33 @@
 // Spacing follows the semantic scale (2/4/8/12/16/24/32) and type stays on
 // 12/13/16/20.
 
-import { div, svg } from "gpui";
+import { div, svg } from "gpui-kit";
 import { h_flex, v_flex, Button, Checkbox, Input } from "gpui-base";
-/** @import { ClickEvent, Color, Context, Element } from "gpui" */
+/** @import { ClickEvent, Color, Context, Element } from "gpui-kit" */
 /** @import { InputState } from "gpui-base" */
 
 export const SPACE = { xxs: 2, xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 };
 
 /// Body text. 12px is the showcase's `text_xs`, and at this density it is the
 /// size that keeps a row scannable.
-/** @param {string} value @param {import("gpui").Context} cx */
+/** @param {string} value @param {import("gpui-kit").Context} cx */
 export const label = (value, cx) =>
   div().text_size(12).line_height(1).text_color(cx.theme().colors.foreground).child(value);
 
-/** @param {string} value @param {import("gpui").Context} cx */
+/** @param {string} value @param {import("gpui-kit").Context} cx */
 export const muted = (value, cx) =>
   div().text_size(12).line_height(1).text_color(cx.theme().colors.muted_foreground).child(value);
 
-/** @param {string} value @param {import("gpui").Context} cx */
+/** @param {string} value @param {import("gpui-kit").Context} cx */
 export const title = (value, cx) =>
   div().text_size(16).line_height(1).font_semibold().text_color(cx.theme().colors.foreground).child(value);
 
-/** @param {import("gpui").Context} cx */
+/** @param {import("gpui-kit").Context} cx */
 export const rule = (cx) => div().h(1).w_full().bg(cx.theme().colors.border);
 
 /// The one content surface. Square, hairline bordered, no elevation: hierarchy
 /// comes from the border and the spacing, not from a shadow.
-/** @param {import("gpui").Context} cx */
+/** @param {import("gpui-kit").Context} cx */
 export const surface = (cx) =>
   v_flex().flex_1().bg(cx.theme().colors.surface).border(1).border_color(cx.theme().colors.border).overflow_hidden();
 
@@ -51,7 +51,7 @@ export const icon = (name, size = 14) =>
 // Two variants, not five. The showcase has exactly this pair — a filled
 // primary and an outlined secondary — and a third would be a decision nobody
 // asked for.
-/** @param {import("gpui").Context} cx @returns {Record<Variant, { bg: Color, fg: Color, border: Color, hover: Color }>} */
+/** @param {import("gpui-kit").Context} cx @returns {Record<Variant, { bg: Color, fg: Color, border: Color, hover: Color }>} */
 const variants = (cx) => ({
   primary: { bg: cx.theme().colors.foreground, fg: cx.theme().colors.surface, border: cx.theme().colors.foreground, hover: cx.theme().colors.muted_foreground },
   secondary: { bg: cx.theme().colors.surface, fg: cx.theme().colors.foreground, border: cx.theme().colors.border, hover: cx.theme().colors.muted },
@@ -63,7 +63,7 @@ const variants = (cx) => ({
  * @param {string} id
  * @param {string} caption
  * @param {(event: ClickEvent, cx: Context) => void} onClick
- * @param {import("gpui").Context} cx
+ * @param {import("gpui-kit").Context} cx
  * @param {ButtonOptions} [options]
  */
 export const button = (id, caption, onClick, cx, options = {}) => {
@@ -99,7 +99,7 @@ export const button = (id, caption, onClick, cx, options = {}) => {
  * @param {string} name
  * @param {string} description
  * @param {(event: ClickEvent, cx: Context) => void} onClick
- * @param {import("gpui").Context} cx
+ * @param {import("gpui-kit").Context} cx
  * @param {{ disabled?: boolean }} [options]
  */
 export const iconButton = (id, name, description, onClick, cx, options = {}) => {
@@ -126,7 +126,7 @@ export const iconButton = (id, name, description, onClick, cx, options = {}) => 
 
 /// A text field. The runtime frames an input as a centered row that focuses on
 /// click; height, padding and color are still ours.
-/** @param {InputState} state @param {import("gpui").Context} cx */
+/** @param {InputState} state @param {import("gpui-kit").Context} cx */
 export const field = (state, cx) =>
   Input.new(state)
     .flex_1()
@@ -143,7 +143,7 @@ export const field = (state, cx) =>
  * @param {boolean} checked
  * @param {(checked: boolean, cx: Context) => void} onChange
  * @param {Element} content
- * @param {import("gpui").Context} cx
+ * @param {import("gpui-kit").Context} cx
  */
 export const checkbox = (id, checked, onChange, content, cx) =>
   Checkbox.new(id)
@@ -170,7 +170,7 @@ export const checkbox = (id, checked, onChange, content, cx) =>
     )
     .child(content);
 
-/** @param {string} heading @param {string} hint @param {import("gpui").Context} cx */
+/** @param {string} heading @param {string} hint @param {import("gpui-kit").Context} cx */
 export const emptyState = (heading, hint, cx) =>
   v_flex()
     .flex_1()

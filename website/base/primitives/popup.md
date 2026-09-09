@@ -10,23 +10,23 @@ order: 22
 
 ## Example
 
-The [single native Cargo entrypoint](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
+The [single native Cargo entrypoint](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/native/src/bin/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
 
 ```bash
-cargo run -p gpui-base --example components -- popup
+cargo run -p gpui-base-examples -- popup
 ```
 
 ## Import
 
 ```rust
-use gpui_base::Popup;
+use gpui_kit::base::Popup;
 ```
 
 ## Anatomy and API
 
 The example composes `Popup`. GPUI's standard styling and event traits provide presentation; these base types provide the interaction structure.
 
-The authoritative module is [`components/popup.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/popup.rs). Native and browser previews compile this same file.
+The authoritative module is [`components/popup.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/popup.rs). Native and browser previews compile this same file.
 
 ## State and events
 

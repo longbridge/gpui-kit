@@ -1,8 +1,4 @@
-use gpui::{
-    Action, App, AppContext, Context, Entity, Focusable, Hsla, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, Styled, Subscription, Window, div, hsla, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Colorize as _, StyledExt, WindowExt,
     button::Button,
     clipboard::Clipboard,
@@ -10,6 +6,7 @@ use gpui_component::{
     slider::{Slider, SliderEvent, SliderScale, SliderState, SliderValue},
     v_flex,
 };
+use gpui_kit::*;
 use serde::Deserialize;
 
 use crate::{section, story_toolbar_group};
@@ -19,7 +16,7 @@ use crate::{section, story_toolbar_group};
 struct ToggleDisabled;
 
 pub struct SliderStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     slider1: Entity<SliderState>,
     slider1_value: f32,
     slider1_released_value: f32,
@@ -169,7 +166,7 @@ impl SliderStory {
             slider3_released_value: (12.0, 45.0).into(),
             slider3,
             slider_hsl,
-            slider_hsl_value: gpui::red(),
+            slider_hsl_value: gpui_kit::red(),
             slider_logarithmic,
             slider_reverse,
             disabled: false,
@@ -179,7 +176,7 @@ impl SliderStory {
 }
 
 impl Focusable for SliderStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

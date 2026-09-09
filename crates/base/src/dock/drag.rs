@@ -2,7 +2,7 @@
 //!
 //! This module decides *where* a drop would land and what shape a hovering
 //! drag session occupies. It draws nothing: the styled drag preview and the
-//! rendered drop indicator are appearance and live in `crates/ui`.
+//! rendered drop indicator are appearance and live in `crates/component`.
 
 use std::{
     any::Any,
@@ -98,7 +98,7 @@ impl DragPanel {
 
 impl Render for DragPanel {
     /// Base draws nothing: the styled drag preview is appearance and belongs
-    /// to `crates/ui`, which reintroduces it as a separate render type.
+    /// to `crates/component`, which reintroduces it as a separate render type.
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         Empty
     }

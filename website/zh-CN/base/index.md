@@ -1,12 +1,12 @@
 ---
 title: GPUI Base
-description: GPUI Component Rust 桌面框架中无样式的行为与基础设施层。
+description: GPUI Kit Rust 桌面框架中无样式的行为与基础设施层。
 order: 1
 ---
 
 # GPUI Base
 
-`gpui-base` 是 GPUI Component 的无样式基础层。它提供交互行为、受控状态、焦点管理、无障碍语义、动画、虚拟列表和主题 token，同时将布局与视觉设计完整留给应用。
+`gpui-base` 是 GPUI Kit 的无样式基础层。它提供交互行为、受控状态、焦点管理、无障碍语义、动画、虚拟列表和主题 token，同时将布局与视觉设计完整留给应用。
 
 ## 如何选择
 
@@ -27,3 +27,5 @@ order: 1
 ## 开始使用
 
 从[入门指南](./getting-started.md)开始，使用 [TextView](./text-view.md) 渲染可选择的 Markdown 与 HTML，或阅读[文本选择](./text-selection.md)为自定义 renderer 接入窗口级选择。每个页面都提供 Rust 代码和可运行的 WASM 示例。
+
+[History](./history.md) 介绍两种用途明确不同的状态结构：`History` 是包含根条目、当前条目、后退与前进分支的导航轨迹，`UndoHistory` 则记录分组的 undo 与 redo 事务。

@@ -1,10 +1,7 @@
-use gpui::{
-    Action, App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement as _,
-    IntoElement, ParentElement, Render, SharedString, Styled, Window, div, prelude::FluentBuilder,
-    px,
-};
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Icon, IconName, StyledExt, WindowExt as _,
     button::{Button, ButtonVariants as _},
     date_picker::{DatePicker, DatePickerState},
@@ -607,7 +604,7 @@ impl DialogStory {
 }
 
 impl Focusable for DialogStory {
-    fn focus_handle(&self, _cx: &gpui::App) -> FocusHandle {
+    fn focus_handle(&self, _cx: &gpui_kit::App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }

@@ -1,5 +1,6 @@
 //! A tiles canvas's behavior, with no appearance of its own.
 
+use crate::TestSupportExt as _;
 use std::{rc::Rc, sync::Arc};
 
 use gpui::{
@@ -8,7 +9,7 @@ use gpui::{
     Stateful, Styled as _, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
 
-use crate::history::History;
+use crate::UndoHistory;
 
 use super::{
     drag::AnyDrag,
@@ -92,7 +93,7 @@ pub struct TilesState {
     zoomed: Option<PanelId>,
     moving: Option<TileMove>,
     resizing: Option<TileResize>,
-    history: History<TileChange>,
+    history: UndoHistory<TileChange>,
     renderer: Rc<dyn TilesRenderer>,
 }
 
@@ -108,7 +109,7 @@ impl TilesState {
             zoomed: None,
             moving: None,
             resizing: None,
-            history: History::new().group_interval(std::time::Duration::from_millis(100)),
+            history: UndoHistory::new().group_interval(std::time::Duration::from_millis(100)),
             renderer: Rc::new(BareTiles),
         }
     }
@@ -581,6 +582,7 @@ impl Render for TilesState {
 
         renderer
             .frame(window, cx)
+            .test_support()
             .track_focus(&focus_handle)
             .on_drop(cx.listener(|_, item: &AnyDrag, _, cx| {
                 cx.emit(TilesEvent::DragDrop { item: item.clone() });

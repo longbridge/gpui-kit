@@ -15,18 +15,18 @@ order: 25
 原生示例和页面上方的 WASM 预览共用同一份实现：
 
 ```bash
-cargo run -p gpui-base --example components -- select
+cargo run -p gpui-base-examples -- select
 ```
 
 ## 导入
 
 ```rust
-use gpui_base::{Select};
+use gpui_kit::base::{Select};
 ```
 
 ## 结构与 API
 
-示例组合上述公开类型。GPUI 的标准样式和事件 trait 负责表现，Base 类型负责交互结构。权威实现位于 [`components/select.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/select.rs)，原生与浏览器预览编译的是同一文件。
+示例组合上述公开类型。GPUI 的标准样式和事件 trait 负责表现，Base 类型负责交互结构。权威实现位于 [`components/select.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/select.rs)，原生与浏览器预览编译的是同一文件。
 
 ## 状态与事件
 
@@ -40,9 +40,11 @@ use gpui_base::{Select};
 
 ## 可访问性
 
-提供标签，暴露当前值，并保留上下键、Enter、Escape 与类型检索。
+在受控根节点上设置 `.accessibility_label(...)`，并把 `.accessibility_value(...)`
+设为已提交的选中项，而不是临时的搜索游标。根节点会暴露展开状态与可访问的激活操作。
+激活会请求切换展开状态，并在 trigger 与内容之间移动焦点。禁用的控件不暴露激活操作。
+带样式的 `Select` 会自动提供已提交的值，未选中时回退到 placeholder。
 
 ## 注意事项
 
 在支持的位置使用稳定元素 ID，并在消费端设计系统中验证焦点、悬停、按下、选中、禁用、减少动态效果和高对比度状态。
-

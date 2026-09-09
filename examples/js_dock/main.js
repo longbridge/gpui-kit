@@ -7,9 +7,9 @@
 //
 //   cargo run -p gpui-shell -- examples/js_dock
 
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { DockArea, dock_area, dock_content, v_flex } from "gpui-base";
-/** @import { AsyncContext, Context } from "gpui" */
+/** @import { AsyncContext, Context } from "gpui-kit" */
 import {
   BAR,
   dockBar,

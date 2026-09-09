@@ -35,7 +35,7 @@ order: 3
 ## 完整 Rust 示例
 
 ```bash
-cargo run -p gpui-base --example text-selection
+cargo run -p gpui-base-examples -- text-selection
 ```
 
 <<< ../../../crates/base/examples/showcase/components/text_selection.rs{rust}

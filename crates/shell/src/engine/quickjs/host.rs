@@ -1,4 +1,4 @@
-//! System capability APIs on the `gpui` module: `fs`, `store`, `clipboard` and
+//! System capability APIs on the `gpui-kit` module: `fs`, `store`, `clipboard` and
 //! `log` (design doc §17).
 //!
 //! Nothing here is available by default (§19.2). Each loaded application keeps

@@ -1,12 +1,12 @@
 use chrono::{Datelike, Days, Duration, Utc};
-use gpui::{
-    App, AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement,
-    ParentElement as _, Render, Styled as _, Subscription, Window, div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, Size, StyledExt, calendar,
     date_picker::{DatePicker, DatePickerEvent, DatePickerState, DateRangePreset},
     v_flex,
+};
+use gpui_kit::{
+    App, AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement,
+    ParentElement as _, Render, Styled as _, Subscription, Window, div, px,
 };
 
 use crate::{ChangeStorySize, section, story_toolbar};
@@ -133,7 +133,7 @@ impl DatePickerStory {
 }
 
 impl Focusable for DatePickerStory {
-    fn focus_handle(&self, cx: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, cx: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.date_picker.focus_handle(cx)
     }
 }

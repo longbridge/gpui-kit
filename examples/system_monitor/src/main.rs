@@ -1,9 +1,8 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use gpui::{actions, prelude::FluentBuilder as _, *};
-use gpui_component::ThemeMode;
-use gpui_component::{
+use gpui_kit::component::ThemeMode;
+use gpui_kit::component::{
     ActiveTheme, Icon, IconName, Root, Sizable, Theme, TitleBar,
     chart::AreaChart,
     h_flex,
@@ -12,6 +11,7 @@ use gpui_component::{
     table::{Column, ColumnSort, DataTable, TableDelegate, TableState},
     v_flex,
 };
+use gpui_kit::{actions, prelude::FluentBuilder as _, *};
 use smol::Timer;
 use sysinfo::{Disks, Pid, System};
 
@@ -599,10 +599,10 @@ impl Render for SystemMonitor {
 }
 
 fn main() {
-    let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
+    let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
 
     app.run(move |cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
 
         cx.bind_keys([
             #[cfg(target_os = "macos")]

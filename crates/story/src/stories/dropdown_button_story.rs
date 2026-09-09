@@ -1,12 +1,9 @@
-use gpui::{
-    Action, Anchor, App, AppContext as _, Context, Entity, Focusable, InteractiveElement,
-    IntoElement, ParentElement as _, Render, SharedString, Styled as _, Window,
-    prelude::FluentBuilder as _,
-};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 use serde::Deserialize;
 
 use crate::{ChangeStorySize, section, story_toolbar};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Disableable, Selectable as _, Sizable as _, Size, Theme,
     button::{Button, ButtonVariants as _, DropdownButton},
     h_flex, v_flex,
@@ -29,7 +26,7 @@ enum ButtonAction {
 }
 
 pub struct DropdownButtonStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     disabled: bool,
     loading: bool,
     selected: bool,
@@ -71,7 +68,7 @@ impl super::Story for DropdownButtonStory {
 }
 
 impl Focusable for DropdownButtonStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

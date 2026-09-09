@@ -15,7 +15,7 @@ use super::layout::PanelId;
 /// rendering falls back to the first visible panel.
 ///
 /// `TabGroup` owns one of these, and is the only thing that does: the skin in
-/// `crates/ui` draws tab bars and keeps no active-state map of its own.
+/// `crates/component` draws tab bars and keeps no active-state map of its own.
 #[derive(Default)]
 pub(crate) struct ActiveTracker {
     notified: HashMap<PanelId, bool>,

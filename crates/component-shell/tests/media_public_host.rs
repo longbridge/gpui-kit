@@ -145,7 +145,7 @@ fn draw(context: &mut VisualTestContext, view: Entity<gpui_shell::ScriptView>) {
 #[gpui::test]
 fn local_image_and_retained_editor_cross_the_public_host_and_draw(cx: &mut TestAppContext) {
     let source = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { Editor, EditorProbe, EditorState, Image } from "gpui-component";
 export default class Media extends View {
   init() { this.editor = EditorState("fn main() {}"); }
@@ -219,7 +219,7 @@ impl gpui::Render for ScriptRoot {
 fn native_image_draw_loads_through_the_installed_application_assets() {
     let app_dir = TempApp::new(
         r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { Image } from "gpui-component";
 export default class MediaImage extends View { render() { return new Image("assets/pixel.svg").size(32); } }
 "#,

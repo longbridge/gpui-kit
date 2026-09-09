@@ -1,9 +1,9 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext as _, Context, Entity, HighlightStyle, IntoElement, ParentElement, Pixels,
     Render, SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, button::Button, h_flex, input::*, menu::PopupMenuItem, tab::TabBar, v_flex,
 };
 
@@ -93,7 +93,7 @@ impl EditorStory {
                         marker_start..marker_start + marker.len(),
                         HighlightStyle {
                             background_color: Some(cx.theme().warning.opacity(0.2)),
-                            font_weight: Some(gpui::FontWeight::BOLD),
+                            font_weight: Some(gpui_kit::FontWeight::BOLD),
                             color: Some(cx.theme().danger),
                             ..Default::default()
                         },
@@ -102,8 +102,8 @@ impl EditorStory {
                         color_start..color_start + color_range.len(),
                         HighlightStyle {
                             color: Some(cx.theme().success),
-                            font_weight: Some(gpui::FontWeight::BOLD),
-                            font_style: Some(gpui::FontStyle::Italic),
+                            font_weight: Some(gpui_kit::FontWeight::BOLD),
+                            font_style: Some(gpui_kit::FontStyle::Italic),
                             ..Default::default()
                         },
                     ),
@@ -111,16 +111,16 @@ impl EditorStory {
                         italic_start..italic_start + italic_range.len(),
                         HighlightStyle {
                             color: Some(cx.theme().info),
-                            font_style: Some(gpui::FontStyle::Italic),
+                            font_style: Some(gpui_kit::FontStyle::Italic),
                             ..Default::default()
                         },
                     ),
                     TextDecoration::new(
                         underline_start..underline_start + underline_range.len(),
                         HighlightStyle {
-                            underline: Some(gpui::UnderlineStyle {
+                            underline: Some(gpui_kit::UnderlineStyle {
                                 color: Some(cx.theme().warning),
-                                thickness: gpui::px(2.),
+                                thickness: gpui_kit::px(2.),
                                 wavy: true,
                             }),
                             ..Default::default()
@@ -246,8 +246,8 @@ impl Render for EditorStory {
 mod syntect_highlighter {
     use std::{collections::HashMap, ops::Range, sync::LazyLock};
 
-    use gpui::{Context, HighlightStyle, SharedString, Window};
-    use gpui_component::input::*;
+    use gpui_kit::component::input::*;
+    use gpui_kit::{Context, HighlightStyle, SharedString, Window};
     use syntect::{
         parsing::{ParseState, Scope, ScopeStack, SyntaxSet},
         util::LinesWithEndings,

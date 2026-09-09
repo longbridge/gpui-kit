@@ -12,18 +12,16 @@ Add dependencies to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-gpui = { git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
-gpui-component = { git = "https://github.com/longbridge/gpui-component" }
-# Optional, for default bundled assets
-gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+gpui-kit = "0.6"
 anyhow = "1.0"
 ```
 
 :::tip
-The `gpui-component-assets` crate is optional.
+`gpui-kit` always pulls in GPUI and `gpui-base`, and by default `gpui-component` and the default icon set. To manage your own assets, keep only the features you need:
 
-It provides a default set of icon assets. If you want to manage your own assets, you can skip adding this dependency.
+```toml
+gpui-kit = { version = "0.6", default-features = false, features = ["component"] }
+```
 
 See [Icons & Assets](./assets.md) for more details.
 :::
@@ -33,8 +31,9 @@ See [Icons & Assets](./assets.md) for more details.
 Here's a simple example to get you started:
 
 ```rust
-use gpui::*;
-use gpui_component::{button::*, *};
+use gpui_kit::component::button::*;
+use gpui_kit::component::*;
+use gpui_kit::*;
 
 pub struct HelloWorld;
 
@@ -57,11 +56,11 @@ impl Render for HelloWorld {
 }
 
 fn main() {
-    let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
+    let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
 
     app.run(move |cx| {
         // This must be called before using any GPUI Component features.
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
 
         cx.spawn(async move |cx| {
             cx.open_window(WindowOptions::default(), |window, cx| {
@@ -77,7 +76,7 @@ fn main() {
 ```
 
 :::info
-Make sure to call `gpui_component::init(cx);` at first line inside the `app.run` closure. This initializes the GPUI Component system.
+Make sure to call `gpui_kit::init(cx);` at first line inside the `app.run` closure. This initializes the GPUI Component system.
 
 This is required for theming and other global settings to work correctly.
 :::
@@ -106,35 +105,133 @@ impl Render for MyView {
 
 ### Stateful Components
 
-There are some stateful components like `Dropdown`, `List`, and `Table` that manage their own internal state for convenience, these components implement the [Render] trait.
+See the [tested application recipes](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes) for a complete window with retained subscriptions, icons, and overlay layers. `Root` must wrap each window, and the application content must render the dialog, sheet, and notification layers it uses.
 
-Those components to use are a bit different, we need create the [Entity] and hold it in the view struct.
+Controls such as Input, List, and DataTable use retained state entities. Store that state on the owning view and construct the styled element from it during render.
 
-```rs
-struct MyView {
-    input: Entity<InputState>,
+Create the [Entity] once, outside render:
+
+<!-- recipe:settings:start -->
+```rust
+use gpui_kit::component::{
+    ActiveTheme, IconName, Root, WindowExt,
+    button::Button,
+    checkbox::Checkbox,
+    form::{Field, Form},
+    input::{Input, InputEvent, InputState},
+    radio::RadioGroup,
+    switch::Switch,
+};
+use gpui_kit::{
+    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
+    Styled as _, Subscription, Window, div,
+};
+
+pub struct Settings {
+    pub name: Entity<InputState>,
+    pub preview: SharedString,
+    pub changes: usize,
+    enabled: bool,
+    remember: bool,
+    delivery: Option<usize>,
+    _subscriptions: Vec<Subscription>,
 }
 
-impl MyView {
-    fn new(window: &Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx).default_value("Hello 世界"));
-        Self { input }
+impl Settings {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder("Name"));
+        let subscription = cx.subscribe_in(&name, window, |this, state, event, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.preview = state.read(cx).value().to_string().into();
+                this.changes += 1;
+                cx.notify();
+            }
+        });
+        Self {
+            name,
+            preview: "".into(),
+            changes: 0,
+            enabled: false,
+            remember: false,
+            delivery: Some(0),
+            _subscriptions: vec![subscription],
+        }
     }
 }
 
-impl Render for MyView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        self.input.clone()
+impl Render for Settings {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .p_4()
+            .gap_3()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .child("Profile")
+            .child(
+                Form::new()
+                    .child(Field::new().label("Name").child(Input::new(&self.name)))
+                    .child(Field::new().label("Preview").child(self.preview.clone()))
+                    .child(
+                        Field::new().label_indent(false).child(
+                            Checkbox::new("remember")
+                                .label("Remember name")
+                                .checked(self.remember)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.remember = *value;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(
+                        Field::new().label_indent(false).child(
+                            Switch::new("enabled")
+                                .label("Enable notifications")
+                                .checked(self.enabled)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.enabled = *value;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(
+                        Field::new().label("Delivery").child(
+                            RadioGroup::new("delivery")
+                                .children(["Immediately", "Daily summary"])
+                                .selected_index(self.delivery)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.delivery = Some(*value);
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .footer(
+                        Button::new("about")
+                            .label("About…")
+                            .icon(IconName::Info)
+                            .on_click(|_, window, cx| {
+                                window.open_dialog(cx, |dialog, _, _| {
+                                    dialog.title("About").child("A complete GPUI Kit window")
+                                });
+                            }),
+                    ),
+            )
+            .children(Root::render_dialog_layer(window, cx))
+            .children(Root::render_sheet_layer(window, cx))
+            .children(Root::render_notification_layer(window, cx))
     }
 }
 ```
+<!-- recipe:settings:end -->
 
 ### Theming
 
 All components support theming through the built-in `Theme` system:
 
 ```rust
-use gpui_component::{ActiveTheme, Theme};
+use gpui_kit::component::{ActiveTheme, Theme};
 
 // Access theme colors in your components
 cx.theme().primary
@@ -179,7 +276,7 @@ GPUI Component has an `Icon` element, but does not include SVG files by default.
 The examples use [Lucide](https://lucide.dev) icons. You can use any icons you like by naming the SVG files as defined in `IconName`. Add the icons you need to your project.
 
 ```rust
-use gpui_component::{Icon, IconName};
+use gpui_kit::component::{Icon, IconName};
 
 Icon::new(IconName::Check)
 Icon::new(IconName::Search).small()
@@ -189,11 +286,11 @@ Icon::new(IconName::Search).small()
 
 Explore the component documentation to learn more about each component:
 
-- [Button](./components/button) - Interactive button component
-- [Input](./components/input) - Text input with validation
-- [Dialog](./components/dialog) - Dialog and modal windows
-- [DataTable](./components/data-table) - High-performance data tables
-- [More components...](./components/index)
+- [Button](../component/button) - Interactive button component
+- [Input](../component/input) - Text input with validation
+- [Dialog](../component/dialog) - Dialog and modal windows
+- [DataTable](../component/data-table) - High-performance data tables
+- [More components...](../component/index)
 
 ## Development
 

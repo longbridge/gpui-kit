@@ -1,0 +1,11 @@
+[
+  {
+    "id": "settings",
+    "source": "examples/ai_recipes/src/lib.rs",
+    "documents": [
+      "website/docs/getting-started.md",
+      "website/zh-CN/docs/getting-started.md",
+      "skills/gpui-kit/references/recipes.md"
+    ]
+  }
+]

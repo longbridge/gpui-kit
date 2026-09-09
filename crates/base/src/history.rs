@@ -1,186 +1,131 @@
-use instant::{Duration, Instant};
-use std::fmt::Debug;
-
-/// A HistoryItem represents a single change in the history.
-/// It must implement Clone and PartialEq to be used in the History.
-pub trait HistoryItem: Clone + PartialEq {
-    fn version(&self) -> usize;
-    fn set_version(&mut self, version: usize);
-}
-
-/// The History is used to keep track of changes to a model and to allow undo and redo operations.
+/// A browser-style linear trail with a current entry.
 ///
-/// This is now used in Input for undo/redo operations. You can also use this in
-/// your own models to keep track of changes, for example to track the tab
-/// history for prev/next features.
-///
-/// ## Use cases
-///
-/// - Undo/redo operations in Input
-/// - Tracking tab history for prev/next features
+/// Entries before the current one can be revisited with [`back`](Self::back),
+/// and entries left behind by going back can be restored with
+/// [`forward`](Self::forward). Pushing after going back starts a new branch
+/// and drops the forward entries.
 #[derive(Debug)]
-pub struct History<I: HistoryItem> {
-    undos: Vec<I>,
-    redos: Vec<I>,
-    last_changed_at: Instant,
-    version: usize,
-    ignore: bool,
-    max_undos: usize,
-    group_interval: Option<Duration>,
-    grouping: bool,
-    unique: bool,
+pub struct History<T> {
+    entries: Vec<T>,
+    forward_entries: Vec<T>,
+    max_entries: usize,
 }
 
-impl<I> History<I>
-where
-    I: HistoryItem,
-{
+impl<T> History<T> {
     pub fn new() -> Self {
         Self {
-            undos: Default::default(),
-            redos: Default::default(),
-            ignore: false,
-            last_changed_at: Instant::now(),
-            version: 0,
-            max_undos: 1000,
-            group_interval: None,
-            grouping: false,
-            unique: false,
+            entries: Vec::new(),
+            forward_entries: Vec::new(),
+            max_entries: 1000,
         }
     }
 
-    /// Set the maximum number of undo steps to keep, defaults to 1000.
-    pub fn max_undos(mut self, max_undos: usize) -> Self {
-        self.max_undos = max_undos;
+    /// Sets the maximum number of root-to-current entries to keep, defaults to 1000.
+    ///
+    /// Lowering the limit immediately removes the oldest entries.
+    pub fn max_entries(mut self, max_entries: usize) -> Self {
+        self.max_entries = max_entries;
+        self.enforce_max_entries();
         self
     }
 
-    /// Set the history to be unique, defaults to false.
-    /// If set to true, the history will only keep unique changes.
-    pub fn unique(mut self) -> Self {
-        self.unique = true;
-        self
-    }
-
-    /// Set the interval in milliseconds to group changes, defaults to None.
-    pub fn group_interval(mut self, group_interval: Duration) -> Self {
-        self.group_interval = Some(group_interval);
-        self
-    }
-
-    /// Start grouping changes, this will prevent the version from being incremented until `end_grouping` is called.
-    pub fn start_grouping(&mut self) {
-        self.grouping = true;
-    }
-
-    /// End grouping changes, this will allow the version to be incremented again.
-    pub fn end_grouping(&mut self) {
-        self.grouping = false;
-    }
-
-    /// Increment the version number if the last change was made more than `GROUP_INTERVAL` milliseconds ago.
-    fn inc_version(&mut self) -> usize {
-        let t = Instant::now();
-        if !self.grouping && Some(self.last_changed_at.elapsed()) > self.group_interval {
-            self.version += 1;
+    /// Pushes an entry and drops the forward branch.
+    pub fn push(&mut self, entry: T) {
+        self.forward_entries.clear();
+        if self.max_entries == 0 {
+            return;
         }
-
-        self.last_changed_at = t;
-        self.version
+        self.entries.push(entry);
+        self.enforce_max_entries();
     }
 
-    /// Get the current version number.
-    pub fn version(&self) -> usize {
-        self.version
+    /// Returns the current entry.
+    pub fn current(&self) -> Option<&T> {
+        self.entries.last()
     }
 
-    /// Returns whether history recording is currently ignored.
-    pub fn is_ignoring(&self) -> bool {
-        self.ignore
-    }
-
-    /// Sets whether history recording is currently ignored.
-    pub fn set_ignoring(&mut self, ignoring: bool) {
-        self.ignore = ignoring;
-    }
-
-    /// Push a new change to the history.
-    pub fn push(&mut self, item: I) {
-        let version = self.inc_version();
-
-        if self.undos.len() >= self.max_undos {
-            self.undos.remove(0);
+    /// Replaces the current entry, or pushes when the trail is empty.
+    pub fn replace_current(&mut self, entry: T) {
+        match self.entries.last_mut() {
+            Some(current) => *current = entry,
+            None => self.push(entry),
         }
+    }
 
-        if self.unique {
-            self.undos.retain(|c| *c != item);
-            self.redos.retain(|c| *c != item);
+    /// Removes and returns the current entry without changing the forward branch.
+    pub fn remove_current(&mut self) -> Option<T> {
+        self.entries.pop()
+    }
+
+    /// Returns whether moving back would keep a root entry current.
+    pub fn can_back(&self) -> bool {
+        self.entries.len() > 1
+    }
+
+    /// Returns whether a forward entry is available.
+    pub fn can_forward(&self) -> bool {
+        !self.forward_entries.is_empty()
+    }
+
+    /// Moves back one entry and returns the new current entry.
+    pub fn back(&mut self) -> Option<T>
+    where
+        T: Clone,
+    {
+        if self.entries.len() <= 1 {
+            return None;
         }
-
-        let mut item = item;
-        item.set_version(version);
-        self.undos.push(item);
+        self.forward_entries.push(self.entries.pop().unwrap());
+        self.current().cloned()
     }
 
-    /// Get the undo stack.
-    pub fn undos(&self) -> &Vec<I> {
-        &self.undos
+    /// Moves forward one entry and returns the restored entry.
+    pub fn forward(&mut self) -> Option<T>
+    where
+        T: Clone,
+    {
+        if self.max_entries == 0 {
+            return None;
+        }
+        let entry = self.forward_entries.pop()?;
+        self.entries.push(entry);
+        self.enforce_max_entries();
+        self.current().cloned()
     }
 
-    /// Get the redo stack.
-    pub fn redos(&self) -> &Vec<I> {
-        &self.redos
+    /// Iterates from the root entry to the current entry.
+    pub fn entries(&self) -> impl DoubleEndedIterator<Item = &T> + ExactSizeIterator {
+        self.entries.iter()
     }
 
-    /// Clear the undo and redo stacks.
+    /// Iterates from the nearest forward entry to the furthest.
+    pub fn forward_entries(&self) -> impl DoubleEndedIterator<Item = &T> + ExactSizeIterator {
+        self.forward_entries.iter().rev()
+    }
+
+    /// Keeps only entries accepted by `keep` on both sides of the current position.
+    pub fn retain(&mut self, mut keep: impl FnMut(&T) -> bool) {
+        self.entries.retain(&mut keep);
+        self.forward_entries.retain(&mut keep);
+    }
+
+    /// Clears current, back, and forward entries.
     pub fn clear(&mut self) {
-        self.undos.clear();
-        self.redos.clear();
+        self.entries.clear();
+        self.forward_entries.clear();
     }
 
-    /// Undo the last change and return the changes that were undone.
-    pub fn undo(&mut self) -> Option<Vec<I>> {
-        if let Some(first_change) = self.undos.pop() {
-            let mut changes = vec![first_change.clone()];
-            // pick the next all changes with the same version
-            while self
-                .undos
-                .iter()
-                .filter(|c| c.version() == first_change.version())
-                .count()
-                > 0
-            {
-                let change = self.undos.pop().unwrap();
-                changes.push(change);
-            }
-
-            self.redos.extend(changes.clone());
-            Some(changes)
-        } else {
-            None
+    fn enforce_max_entries(&mut self) {
+        let excess = self.entries.len().saturating_sub(self.max_entries);
+        if excess > 0 {
+            self.entries.drain(..excess);
         }
     }
+}
 
-    /// Redo the last undone change and return the changes that were redone.
-    pub fn redo(&mut self) -> Option<Vec<I>> {
-        if let Some(first_change) = self.redos.pop() {
-            let mut changes = vec![first_change.clone()];
-            // pick the next all changes with the same version
-            while self
-                .redos
-                .iter()
-                .filter(|c| c.version() == first_change.version())
-                .count()
-                > 0
-            {
-                let change = self.redos.pop().unwrap();
-                changes.push(change);
-            }
-            self.undos.extend(changes.clone());
-            Some(changes)
-        } else {
-            None
-        }
+impl<T> Default for History<T> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -188,126 +133,151 @@ where
 mod tests {
     use super::*;
 
-    #[derive(Clone)]
-    struct TabIndex {
-        tab_index: usize,
-        version: usize,
-    }
+    #[test]
+    fn navigation_moves_between_entries_without_backing_past_the_root() {
+        let mut history = History::new().max_entries(3);
+        history.push(1);
+        history.push(2);
+        history.push(3);
 
-    impl PartialEq for TabIndex {
-        fn eq(&self, other: &Self) -> bool {
-            self.tab_index == other.tab_index
-        }
-    }
-
-    impl From<usize> for TabIndex {
-        fn from(value: usize) -> Self {
-            TabIndex {
-                tab_index: value,
-                version: 0,
-            }
-        }
-    }
-
-    impl HistoryItem for TabIndex {
-        fn version(&self) -> usize {
-            self.version
-        }
-        fn set_version(&mut self, version: usize) {
-            self.version = version;
-        }
+        assert_eq!(history.current(), Some(&3));
+        assert_eq!(history.back(), Some(2));
+        assert_eq!(history.back(), Some(1));
+        assert_eq!(history.back(), None);
+        assert_eq!(history.forward(), Some(2));
+        assert_eq!(history.entries().copied().collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(history.entries().rev().copied().collect::<Vec<_>>(), [2, 1]);
+        assert_eq!(history.forward_entries().copied().collect::<Vec<_>>(), [3]);
+        assert!(history.can_back());
+        assert!(history.can_forward());
     }
 
     #[test]
-    fn test_history() {
-        let mut history: History<TabIndex> = History::new().max_undos(100);
-        history.push(0.into());
-        history.push(3.into());
-        history.push(2.into());
-        history.push(1.into());
+    fn pushing_after_back_truncates_the_forward_branch() {
+        let mut history = History::new();
+        history.push(1);
+        history.push(2);
+        history.push(3);
+        assert_eq!(history.back(), Some(2));
 
-        assert_eq!(history.version(), 4);
-        let changes = history.undo().unwrap();
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].tab_index, 1);
+        history.push(4);
 
-        let changes = history.undo().unwrap();
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].tab_index, 2);
-
-        history.push(5.into());
-
-        let changes = history.redo().unwrap();
-        assert_eq!(changes[0].tab_index, 2);
-
-        let changes = history.redo().unwrap();
-        assert_eq!(changes[0].tab_index, 1);
-
-        let changes = history.undo().unwrap();
-        assert_eq!(changes[0].tab_index, 1);
-
-        let changes = history.undo().unwrap();
-        assert_eq!(changes[0].tab_index, 2);
-
-        let changes = history.undo().unwrap();
-        assert_eq!(changes[0].tab_index, 5);
-
-        let changes = history.undo().unwrap();
-        assert_eq!(changes[0].tab_index, 3);
-
-        let changes = history.undo().unwrap();
-        assert_eq!(changes[0].tab_index, 0);
-
-        assert_eq!(history.undo().is_none(), true);
+        assert_eq!(history.entries().copied().collect::<Vec<_>>(), [1, 2, 4]);
+        assert!(!history.can_forward());
+        assert_eq!(history.forward(), None);
     }
 
     #[test]
-    fn test_unique_history() {
-        let mut history: History<TabIndex> = History::new().max_undos(100).unique();
+    fn repeated_entries_preserve_every_navigation_step() {
+        let mut history = History::new();
+        history.push(1);
+        history.push(2);
+        history.push(1);
 
-        // Push some items
-        history.push(0.into());
-        history.push(1.into());
-        history.push(1.into()); // Duplicate, should be ignored
-        history.push(2.into());
-        history.push(1.into()); // Duplicate, should be remove old, and add new
+        assert_eq!(history.entries().copied().collect::<Vec<_>>(), [1, 2, 1]);
+        assert_eq!(history.back(), Some(2));
+        assert_eq!(history.back(), Some(1));
+    }
 
-        // Check the version and undo stack
-        assert_eq!(history.version(), 5);
-        assert_eq!(history.undos().len(), 3);
-        assert_eq!(history.undos().last().unwrap().tab_index, 1);
+    #[test]
+    fn max_entries_evicts_the_oldest_entry() {
+        let mut history = History::new().max_entries(2);
+        history.push(1);
+        history.push(2);
+        history.push(3);
 
-        // Undo the last change
-        let changes = history.undo().unwrap();
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].tab_index, 1);
+        assert_eq!(history.entries().copied().collect::<Vec<_>>(), [2, 3]);
+        assert_eq!(history.back(), Some(2));
+        assert_eq!(history.back(), None);
+    }
 
-        assert_eq!(history.redos().len(), 1);
-        // Push duplicate, should be ignored
-        history.push(2.into());
+    #[test]
+    fn lowering_max_entries_truncates_populated_entries_and_caps_forward_restores() {
+        let mut history = History::new();
+        history.push(1);
+        history.push(2);
+        history.push(3);
+        assert_eq!(history.back(), Some(2));
 
-        assert_eq!(history.undos().len(), 2);
-        assert_eq!(history.redos().len(), 1);
+        history = history.max_entries(1);
 
-        // Redo the last undone change
-        let changes = history.redo().unwrap();
-        assert_eq!(changes.len(), 1);
-        assert_eq!(changes[0].tab_index, 1);
+        assert_eq!(history.entries().copied().collect::<Vec<_>>(), [2]);
+        assert_eq!(history.forward(), Some(3));
+        assert_eq!(history.entries().copied().collect::<Vec<_>>(), [3]);
+        assert_eq!(history.back(), None);
+    }
 
-        // Push another item
-        history.push(3.into());
+    #[test]
+    fn zero_max_entries_retains_nothing() {
+        let mut history = History::new().max_entries(0);
+        history.push(1);
 
-        // Check the version and undo stack
-        assert_eq!(history.version(), 7);
-        assert_eq!(history.undos().len(), 4);
+        assert_eq!(history.current(), None);
+        assert_eq!(history.entries().len(), 0);
+        assert!(!history.can_back());
+        assert!(!history.can_forward());
+    }
 
-        // Undo all changes
-        for _ in 0..4 {
-            history.undo();
+    #[test]
+    fn replace_current_updates_in_place_and_pushes_when_empty() {
+        let mut history = History::new();
+        history.replace_current(1);
+        history.push(2);
+        history.replace_current(3);
+
+        assert_eq!(history.entries().copied().collect::<Vec<_>>(), [1, 3]);
+    }
+
+    #[test]
+    fn remove_current_preserves_forward_entries() {
+        let mut history = History::new();
+        history.push(1);
+        history.push(2);
+        history.push(3);
+        assert_eq!(history.back(), Some(2));
+
+        assert_eq!(history.remove_current(), Some(2));
+
+        assert_eq!(history.current(), Some(&1));
+        assert_eq!(history.forward_entries().copied().collect::<Vec<_>>(), [3]);
+        assert_eq!(history.forward(), Some(3));
+    }
+
+    #[test]
+    fn retain_filters_back_and_forward_entries_without_reordering() {
+        let mut history = History::new();
+        for entry in 1..=8 {
+            history.push(entry);
         }
+        history.back();
+        history.back();
+        history.back();
+        history.back();
 
-        // Check the undo stack is empty and redo stack has all changes
-        assert_eq!(history.undos().len(), 0);
-        assert_eq!(history.redos().len(), 4);
+        history.retain(|entry| entry % 2 == 0);
+
+        assert_eq!(history.entries().copied().collect::<Vec<_>>(), [2, 4]);
+        assert_eq!(
+            history.forward_entries().copied().collect::<Vec<_>>(),
+            [6, 8]
+        );
+        assert_eq!(history.forward(), Some(6));
+        assert_eq!(history.forward(), Some(8));
+    }
+
+    #[test]
+    fn clear_removes_back_and_forward_entries() {
+        let mut history = History::new();
+        history.push(1);
+        history.push(2);
+        history.back();
+
+        history.clear();
+
+        assert_eq!(history.current(), None);
+        assert_eq!(history.entries().len(), 0);
+        assert_eq!(history.forward_entries().len(), 0);
+        assert!(!history.can_back());
+        assert!(!history.can_forward());
     }
 }

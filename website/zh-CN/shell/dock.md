@@ -9,18 +9,24 @@ order: 13
 只能铺满整个窗口的 View 算不上一个应用。**dock area** 把脚本 View 变成*面板*：可拖动、可停靠、可放大，重启之后仍然停在用户上次放的位置。
 
 ```js
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { DockArea, dock_area, v_flex } from "gpui-base";
 
 class Notes extends View {
-  render() { return div().p(16).child("Notes"); }
+  render() {
+    return div().p(16).child("Notes");
+  }
 }
 
 export default class Workspace extends View {
   init(_props, cx) {
     DockArea.register_panel("notes", Notes);
     this.dock = DockArea.new("workspace");
-    this.dock.add_panel(cx.new(Notes), { name: "notes", placement: "left", size: 240 });
+    this.dock.add_panel(cx.new(Notes), {
+      name: "notes",
+      placement: "left",
+      size: 240,
+    });
   }
 
   render() {
@@ -33,7 +39,7 @@ export default class Workspace extends View {
 
 ## base 给了什么，没给什么
 
-`gpui_base::dock` 已经把停靠系统里难做的那一半做好了：一棵**纯数据**的布局树、一个能按持久化文件里的名字重建面板的 `PanelRegistry`，以及跟着每块面板走的一份 payload。容器用稳定的 node id 寻址，面板用稳定的 panel id 寻址，因此一次拖动改的是一个值，而不是拆掉再重建一堆 View。
+`gpui_kit::base::dock` 已经把停靠系统里难做的那一半做好了：一棵**纯数据**的布局树、一个能按持久化文件里的名字重建面板的 `PanelRegistry`，以及跟着每块面板走的一份 payload。容器用稳定的 node id 寻址，面板用稳定的 panel id 寻址，因此一次拖动改的是一个值，而不是拆掉再重建一堆 View。
 
 它没有的是外观。引擎什么都不画——没有标签栏、没有 dock 外框、没有拖拽条、没有落点提示——这些全都作为「返回元素的回调」交还给你。这不是需要绕开的限制，而正是这套东西能被脚本用起来的原因：外观不是覆盖在某个默认外观之上的一层，因为根本没有默认外观。
 
@@ -76,9 +82,9 @@ init(_props, cx) {
 
 ```js
 this.dock.add_panel(cx.new(Editor, { file }), {
-  name: "editor",        // 必填——保存布局时用它归档
-  placement: "center",   // "center" | "left" | "right" | "bottom"
-  size: 240,             // 当这块面板是该 dock 里的第一块时，用它作为初始尺寸
+  name: "editor", // 必填——保存布局时用它归档
+  placement: "center", // "center" | "left" | "right" | "bottom"
+  size: 240, // 当这块面板是该 dock 里的第一块时，用它作为初始尺寸
   closable: true,
   zoomable: true,
   visible: true,
@@ -124,10 +130,10 @@ init(_props, cx) {
 
 面板自己的状态会跟着位置一起走。 View 类上有两个可选方法负责这件事：
 
-| 方法 | 何时调用 | 说明 |
-| --- | --- | --- |
-| `serialize()` | 保存布局时 | 运行时**没有 Host 调用**：返回纯数据，别碰别的——不要碰 entity，不要碰 `cx` |
-| `deserialize(data)` | View 刚重建之后 | 有一次真正的 Host 调用，因此可以碰 entity |
+| 方法                | 何时调用        | 说明                                                                       |
+| ------------------- | --------------- | -------------------------------------------------------------------------- |
+| `serialize()`       | 保存布局时      | 运行时**没有 Host 调用**：返回纯数据，别碰别的——不要碰 entity，不要碰 `cx` |
+| `deserialize(data)` | View 刚重建之后 | 有一次真正的 Host 调用，因此可以碰 entity                                  |
 
 `version` 由你在保存格式变化时递增；base 会拒绝加载在别的 version 下写出的布局，于是旧文件是被忽略，而不是被一知半解地读进来。
 
@@ -143,14 +149,14 @@ init(_props, cx) {
 
 六个 handler，全都可选，挂在 `dock_area(...)` 元素上：
 
-| Handler | 画什么 |
-| --- | --- |
-| `tab_bar(group => …)` | 一个 group 当前显示面板上方的标签栏 |
-| `empty_group(group => …)` | 没有可显示面板的 group 显示什么 |
-| `drop_indicator(drop => …)` | 被拖动的面板会落在哪里 |
-| `dock(dock => …)` | 一侧 dock 包住内容的外框 |
-| `tile_drag_bar(tile => …)` | 拖动 tile 用的那条拖拽条 |
-| `tile_resize_handles(tile => …)` | tile 的缩放把手 |
+| Handler                          | 画什么                              |
+| -------------------------------- | ----------------------------------- |
+| `tab_bar(group => …)`            | 一个 group 当前显示面板上方的标签栏 |
+| `empty_group(group => …)`        | 没有可显示面板的 group 显示什么     |
+| `drop_indicator(drop => …)`      | 被拖动的面板会落在哪里              |
+| `dock(dock => …)`                | 一侧 dock 包住内容的外框            |
+| `tile_drag_bar(tile => …)`       | 拖动 tile 用的那条拖拽条            |
+| `tile_resize_handles(tile => …)` | tile 的缩放把手                     |
 
 每一个都会先在 GPUI 的 layout pass 内部被调用，拿到的是 base **已经解析好的**状态——从不包含拖拽事件、鼠标位置或命中测试，因为 base 会把这些自己挂到拿回去的元素上。生成的描述按 handler 与解析后的状态缓存；未变化的帧只在 Rust 中重放，不会进入 JavaScript。
 
@@ -162,17 +168,28 @@ dock_area(this.dock)
       .h(30)
       .bg(cx.theme().colors.secondary)
       .children(
-        group.tabs.filter((tab) => tab.visible).map((tab) =>
-          h_flex()
-            .id("tab-" + tab.id)
-            .px(10)
-            .items_center()
-            .bg(tab.active ? cx.theme().colors.background : cx.theme().colors.secondary)
-            .select_tab(group, tab.index)
-            .drag_tab(group, tab.index)
-            .child(tab.name)
-            .child(div().id("x-" + tab.id).close_panel(group, tab.id).child("×")),
-        ),
+        group.tabs
+          .filter((tab) => tab.visible)
+          .map((tab) =>
+            h_flex()
+              .id("tab-" + tab.id)
+              .px(10)
+              .items_center()
+              .bg(
+                tab.active
+                  ? cx.theme().colors.background
+                  : cx.theme().colors.secondary,
+              )
+              .select_tab(group, tab.index)
+              .drag_tab(group, tab.index)
+              .child(tab.name)
+              .child(
+                div()
+                  .id("x-" + tab.id)
+                  .close_panel(group, tab.id)
+                  .child("×"),
+              ),
+          ),
       ),
   );
 ```
@@ -185,20 +202,20 @@ chrome 描述会被缓存，并且可以比生成它的 handler 调用活得更�
 
 **命令**完全不携带脚本值。它只是指名 area 里的某个容器、以及要请它做什么，剩下的由 base 完成：
 
-| 命令 | 触发 | 作用 |
-| --- | --- | --- |
-| `select_tab(group, index)` | 点击 | 显示那个标签页 |
-| `close_panel(group, panel_id)` | 点击 | 关闭该面板（如果它所在的 group 允许） |
-| `toggle_zoom(group)` | 点击 | 放大 group，或还原 |
-| `drag_tab(group, index)` | 拖动 | 让该元素成为这个标签页的拖动源 |
-| `drop_tab(group, index?)` | 放下 | 在此接收被拖来的面板；不给 index 就追加到末尾 |
-| `toggle_dock(dock)` | 点击 | 展开或收起这侧 dock |
-| `resize_dock(dock)` | 拖动 | 拖动 dock 的边 |
-| `move_tile(tile)` | 拖动 | 在画布上移动这个 tile |
-| `resize_tile(tile, side)` | 拖动 | 拖动某条边或某个角 |
-| `raise_tile(tile)` | 按下 | 把这个 tile 提到最上层 |
-| `toggle_tile_zoom(tile)` | 点击 | 让 tile 放大占满所在 dock |
-| `close_tile(tile)` | 点击 | 关闭这个 tile |
+| 命令                           | 触发 | 作用                                          |
+| ------------------------------ | ---- | --------------------------------------------- |
+| `select_tab(group, index)`     | 点击 | 显示那个标签页                                |
+| `close_panel(group, panel_id)` | 点击 | 关闭该面板（如果它所在的 group 允许）         |
+| `toggle_zoom(group)`           | 点击 | 放大 group，或还原                            |
+| `drag_tab(group, index)`       | 拖动 | 让该元素成为这个标签页的拖动源                |
+| `drop_tab(group, index?)`      | 放下 | 在此接收被拖来的面板；不给 index 就追加到末尾 |
+| `toggle_dock(dock)`            | 点击 | 展开或收起这侧 dock                           |
+| `resize_dock(dock)`            | 拖动 | 拖动 dock 的边                                |
+| `move_tile(tile)`              | 拖动 | 在画布上移动这个 tile                         |
+| `resize_tile(tile, side)`      | 拖动 | 拖动某条边或某个角                            |
+| `raise_tile(tile)`             | 按下 | 把这个 tile 提到最上层                        |
+| `toggle_tile_zoom(tile)`       | 点击 | 让 tile 放大占满所在 dock                     |
+| `close_tile(tile)`             | 点击 | 关闭这个 tile                                 |
 
 每一个的第一个参数都是它所在 handler 拿到的那个对象。它们只能挂在 `div`、`h_flex` 或 `v_flex` 上：`Button` 自己构造内部结构，没有地方安放这些命令。
 
@@ -244,15 +261,24 @@ tile 需要自己的那两个 handler，因为 base 在那里同样什么都不�
 ## 完整接口
 
 ```js
-area.add_panel(view, options);          area.remove_panel(id);
-area.panels();                          area.dump();          area.load(state);
-area.has_dock(placement);               area.is_dock_open(placement);
-area.toggle_dock(placement);            area.remove_dock(placement);
-area.dock_size(placement);              area.set_dock_size(placement, size);
+area.add_panel(view, options);
+area.remove_panel(id);
+area.panels();
+area.dump();
+area.load(state);
+area.has_dock(placement);
+area.is_dock_open(placement);
+area.toggle_dock(placement);
+area.remove_dock(placement);
+area.dock_size(placement);
+area.set_dock_size(placement, size);
 area.set_dock_collapsible(placement, collapsible);
-area.is_locked();                       area.set_locked(locked);
-area.is_zoomed();                       area.zoom_out();
-area.on("layout_changed", handler);     area.release();
+area.is_locked();
+area.set_locked(locked);
+area.is_zoomed();
+area.zoom_out();
+area.on("layout_changed", handler);
+area.release();
 ```
 
 被锁定的 area 不能重新排列，也不能接受放入操作；dock 和 tile 仍可调整大小。因此「锁定布局」固定的是面板所在位置，而不是面板的可用尺寸。
@@ -267,4 +293,4 @@ cargo run -p gpui-shell -- examples/js_dock
 
 ## 从 Rust 使用
 
-`gpui_shell::dock` 是公开的，因此 Host 不写脚本也能接到同一处接缝。`ScriptPanel` 把 `ScriptView` 包成 `gpui_base::dock::Panel`；`register_panel(application, panel, script, cx)` 教会注册表用一个 `PanelScript` 重建它；`ScriptDockSkin` 把 base 的三个 renderer trait 统一转发给一个 `DockChrome`。`tab_group_data`、`dock_data`、`tile_data` 与 `drop_indicator_data` 是引擎交给脚本代码的那几个 JSON 转换，Host 自己写绑定时同样用得上。
+`gpui_kit::shell::dock` 是公开的，因此 Host 不写脚本也能接到同一处接缝。`ScriptPanel` 把 `ScriptView` 包成 `gpui_kit::base::dock::Panel`；`register_panel(application, panel, script, cx)` 教会注册表用一个 `PanelScript` 重建它；`ScriptDockSkin` 把 base 的三个 renderer trait 统一转发给一个 `DockChrome`。`tab_group_data`、`dock_data`、`tile_data` 与 `drop_indicator_data` 是引擎交给脚本代码的那几个 JSON 转换，Host 自己写绑定时同样用得上。

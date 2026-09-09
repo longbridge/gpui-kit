@@ -50,7 +50,7 @@ fn types_uses_the_adapter_component_registry() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let declarations = std::fs::read_to_string(directory.join("gpui.d.ts")).unwrap();
+    let declarations = std::fs::read_to_string(directory.join("gpui-kit.d.ts")).unwrap();
     assert!(
         declarations.contains("export const Spinner:"),
         "{declarations}"

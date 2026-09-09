@@ -13,10 +13,23 @@ decorations, highlighting, search infrastructure, diagnostics, and LSP hooks.
 Use [Input](./input.md) for single-line values and
 [Textarea](./textarea.md) for ordinary multi-line text.
 
+## Keyboard shortcuts
+
+The base and styled editors share keyboard and mouse behavior. See
+[Keyboard shortcuts and column selection](../../component/editor.md#keyboard-shortcuts-and-column-selection)
+for the macOS, Linux, and Windows bindings, multi-cursor editing, and column-selection details.
+
+## Search
+
+The editor has a built-in search panel. Press `Ctrl-F` (Windows/Linux) or
+`Cmd-F` (macOS) while the editor is focused to open it. See
+[Search](../../component/editor.md#search) for the programmatic API
+(`open_search`, `close_search`, `set_searchable`) and read-only behavior.
+
 ## Import
 
 ```rust
-use gpui_base::input::{Editor, EditorState, TabSize};
+use gpui_kit::base::input::{Editor, EditorState, TabSize};
 ```
 
 ## Basic usage
@@ -88,17 +101,17 @@ div()
 
 A relative `line_height` keeps the rows in step with the glyphs at any size; an
 absolute one stays put. For a ready-made monospace treatment, see the
-[`gpui-component` Editor](../../docs/components/editor.md).
+[`gpui-component` Editor](../../component/editor.md).
 
 ## Presentation
 
 The application owns editor colors, gutter appearance, fold icons, and overlay
 content. Use `InputEditorStyle`, `FoldIconRenderer`, and the provider traits to
 connect those adapters. For the repository's ready-made visual treatment, see
-the [`gpui-component` Editor](../../docs/components/editor.md).
+the [`gpui-component` Editor](../../component/editor.md).
 
 ## Runnable example
 
 ```bash
-cargo run -p gpui-base --example components -- editor
+cargo run -p gpui-base-examples -- editor
 ```

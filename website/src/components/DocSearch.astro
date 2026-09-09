@@ -1,0 +1,141 @@
+---
+import '@pagefind/default-ui/css/ui.css';
+
+export interface Props {
+  lang?: 'en' | 'zh-CN';
+}
+
+const { lang = 'en' } = Astro.props;
+const isZh = lang === 'zh-CN';
+
+const copy = isZh
+  ? { label: '搜索', title: '搜索文档',
+      emptyTitle: '搜索文档', emptyBody: '查找组件、指南、API 与示例。',
+      navigate: '选择', enter: '打开', esc: '关闭' }
+  : { label: 'Search', title: 'Search documentation',
+      emptyTitle: 'Search documentation', emptyBody: 'Find components, guides, API references and examples.',
+      navigate: 'Navigate', enter: 'Open', esc: 'Close' };
+---
+
+<div class="docsearch">
+  <button type="button" id="search-open" class="site-nav__search-btn">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+      <circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" />
+    </svg>
+    <span class="site-nav__search-hint">{copy.label}</span>
+    <kbd class="site-nav__search-key" aria-hidden="true">/</kbd>
+  </button>
+
+  <dialog id="search-modal" aria-labelledby="search-modal-title">
+    <h2 id="search-modal-title" class="sr-only">{copy.title}</h2>
+    <div id="search-ui"></div>
+
+    <div id="search-empty" class="search-blank" hidden>
+      <p class="search-blank__title">{copy.emptyTitle}</p>
+      <p class="search-blank__body">{copy.emptyBody}</p>
+    </div>
+
+    <p class="search-footer" aria-hidden="true">
+      <span><kbd>↑</kbd><kbd>↓</kbd> {copy.navigate}</span>
+      <span><kbd>↵</kbd> {copy.enter}</span>
+      <span><kbd>Esc</kbd> {copy.esc}</span>
+    </p>
+  </dialog>
+</div>
+
+<script>
+  import { PagefindUI } from '@pagefind/default-ui';
+
+  const modal = document.getElementById('search-modal') as HTMLDialogElement | null;
+  const trigger = document.getElementById('search-open');
+  let ui: PagefindUI | null = null;
+
+  const input = () => modal?.querySelector<HTMLInputElement>('.pagefind-ui__search-input') ?? null;
+
+  /** `/shell/#anchor` → `/shell#anchor`; the site root keeps its slash. */
+  function withoutTrailingSlash(url: string) {
+    const [path, hash] = url.split('#');
+    const trimmed = path.length > 1 ? path.replace(/\/+$/, '') : path;
+    return hash === undefined ? trimmed : `${trimmed}#${hash}`;
+  }
+
+  // The empty state stands in for results while the field is blank. Driven off
+  // the input's value rather than Pagefind's internal DOM, so it survives the
+  // library's own re-renders.
+  function syncEmptyState() {
+    const empty = document.getElementById('search-empty');
+    if (empty) empty.hidden = (input()?.value.trim() ?? '') !== '';
+  }
+
+  function open() {
+    if (!modal) return;
+    // Built by the Pagefind CLI after the Astro build, so in `astro dev` there
+    // is no index to search; the dialog still opens and says so.
+    ui ??= new PagefindUI({
+      element: '#search-ui',
+      showImages: false,
+      resetStyles: false,
+      showSubResults: true,
+      // Pagefind derives a result's URL from the file it indexed, so every one
+      // ends in a slash — and this site is `trailingSlash: 'never'`, where such
+      // a URL is a 404. Trim it here rather than at the click, so the status
+      // bar shows the address the link actually goes to.
+      processResult: (result) => {
+        result.url = withoutTrailingSlash(result.url);
+        for (const sub of result.sub_results ?? []) sub.url = withoutTrailingSlash(sub.url);
+        return result;
+      },
+    });
+    if (!modal.open) modal.showModal();
+    requestAnimationFrame(() => {
+      input()?.focus();
+      syncEmptyState();
+    });
+  }
+
+  trigger?.addEventListener('click', open);
+
+  modal?.addEventListener('input', syncEmptyState);
+  // A dialog's backdrop is part of the element, so a click landing outside the
+  // panel's own box is a click on the backdrop.
+  modal?.addEventListener('click', (event) => {
+    const box = modal.getBoundingClientRect();
+    const outside =
+      event.clientX < box.left || event.clientX > box.right ||
+      event.clientY < box.top || event.clientY > box.bottom;
+    if (outside) modal.close();
+  });
+
+  // ⌘K / Ctrl-K from anywhere, and `/` when not already typing.
+  document.addEventListener('keydown', (event) => {
+    const key = event.key.toLowerCase();
+    if ((event.metaKey || event.ctrlKey) && key === 'k') {
+      event.preventDefault();
+      modal?.open ? modal.close() : open();
+      return;
+    }
+    if (key === '/' && !modal?.open) {
+      const target = event.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      if (target?.isContentEditable) return;
+      event.preventDefault();
+      open();
+    }
+  });
+
+  // Arrow keys walk the results; Enter follows the focused one, which is the
+  // browser's own behaviour once a link holds focus.
+  modal?.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const links = [...modal.querySelectorAll<HTMLAnchorElement>('.pagefind-ui__result-link')]
+      .filter((link) => link.getClientRects().length > 0);
+    if (links.length === 0) return;
+    event.preventDefault();
+    const at = links.indexOf(document.activeElement as HTMLAnchorElement);
+    const next =
+      event.key === 'ArrowDown'
+        ? at < links.length - 1 ? at + 1 : 0
+        : at > 0 ? at - 1 : links.length - 1;
+    links[next].focus();
+  });
+</script>

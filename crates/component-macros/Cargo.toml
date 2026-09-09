@@ -1,0 +1,22 @@
+[package]
+name = "gpui-component-macros"
+description = "Procedural macros for GPUI Component, the styled layer of GPUI Kit."
+version = "0.6.0"
+license = "Apache-2.0"
+publish = true
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
+
+[dependencies]
+proc-macro2 = "1.0"
+proc-macro-crate = "3.5"
+quote = "1.0"
+syn = "2.0"
+
+[package.metadata.cargo-machete]
+ignored = ["proc-macro2", "core-text"]

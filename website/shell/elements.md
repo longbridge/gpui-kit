@@ -13,7 +13,7 @@ An element in `gpui-shell` is a **description**, not an object. It exists for on
 Each module carries what its own crate provides:
 
 ```js
-import { div, svg, image } from "gpui";
+import { div, svg, image } from "gpui-kit";
 import {
   h_flex,
   v_flex,
@@ -29,20 +29,20 @@ import { fps_monitor } from "gpui-fps";
 
 Functions are lowercase, and component types are capitalized and constructed through `.new`. That mirrors the Rust side one for one: `div()` is a free function there too, and `Button::new(id)` is an associated function on a type.
 
-| Constructor | From | Produces |
-| --- | --- | --- |
-| `div()` | `gpui` | An element with no layout of its own |
-| `"a string"` | `gpui` | Text. A string is an element, so it goes straight into `.child(...)` |
-| `svg(path)` | `gpui` | A theme-tinted vector icon from the application's own directory |
-| `image(path)` | `gpui` | A full-colour image from the application's own directory |
-| `h_flex()` | `gpui-base` | A row |
-| `v_flex()` | `gpui-base` | A column |
-| `Button.new(id)` | `gpui-base` | A base `Button`: activation, focus, disabled and selected state, no styling |
-| `Link.new(id)` | `gpui-base` | A focusable external HTTP(S) link; set its target with `.href(url)` |
-| `Checkbox.new(id)` | `gpui-base` | A base controlled checkbox, no styling and no indicator |
-| `Switch.new(id)` | `gpui-base` | A base controlled switch, no styling |
-| `Input.new(state)` | `gpui-base` | A text field backed by an [`InputState`](./state.md#retained-state) |
-| `fps_monitor()` | `gpui-fps` | The native `gpui-fps` performance HUD, shared once per window |
+| Constructor        | From        | Produces                                                                    |
+| ------------------ | ----------- | --------------------------------------------------------------------------- |
+| `div()`            | `gpui-kit`  | An element with no layout of its own                                        |
+| `"a string"`       | `gpui-kit`  | Text. A string is an element, so it goes straight into `.child(...)`        |
+| `svg(path)`        | `gpui-kit`  | A theme-tinted vector icon from the application's own directory             |
+| `image(path)`      | `gpui-kit`  | A full-colour image from the application's own directory                    |
+| `h_flex()`         | `gpui-base` | A row                                                                       |
+| `v_flex()`         | `gpui-base` | A column                                                                    |
+| `Button.new(id)`   | `gpui-base` | A base `Button`: activation, focus, disabled and selected state, no styling |
+| `Link.new(id)`     | `gpui-base` | A focusable external HTTP(S) link; set its target with `.href(url)`         |
+| `Checkbox.new(id)` | `gpui-base` | A base controlled checkbox, no styling and no indicator                     |
+| `Switch.new(id)`   | `gpui-base` | A base controlled switch, no styling                                        |
+| `Input.new(state)` | `gpui-base` | A text field backed by an [`InputState`](./state.md#retained-state)         |
+| `fps_monitor()`    | `gpui-fps`  | The native `gpui-fps` performance HUD, shared once per window               |
 
 This is the set you need to get started, not the whole of it. The full inventory of bound components — `Select`, `Combobox`, `Tabs`, `Table`, `VirtualList`, `Slider`, `Popover`, `Avatar`, `Accordion`, `Pagination`, `CalendarState` and the rest — is in the [API reference](./api.md#the-gpui-base-module).
 
@@ -51,11 +51,7 @@ This is the set you need to get started, not the whole of it. The full inventory
 `fps_monitor()` exposes the native `gpui-fps` HUD without moving its sampling or painting into JavaScript. The monitor is created on first use and reused per window. Render it at most once in a window, inside a `relative()` parent:
 
 ```js
-div()
-  .relative()
-  .size_full()
-  .child(content)
-  .child(fps_monitor());
+div().relative().size_full().child(content).child(fps_monitor());
 ```
 
 It is pinned to the top right by default. Use the existing anchor vocabulary to move it, for example `fps_monitor().anchor("bottom_left")`. The HUD owns its presentation; ordinary element styles, children, and interaction states do not apply to it.
@@ -77,7 +73,7 @@ Anything else — a `div`, an `h_flex` — is identified by **where it sits in t
 ```js
 div()
   .id("toolbar")
-  .active((el) => el.opacity(0.7))
+  .active((el) => el.opacity(0.7));
 ```
 
 Name anything whose identity has to survive its neighbours changing. `Button`, `Link`, `Checkbox` and `Switch` already have an identity from `new(id)` and ignore this one (with a warning, rather than silently).
@@ -87,9 +83,7 @@ Name anything whose identity has to survive its neighbours changing. `Button`, `
 **A string is an element.** GPUI implements `IntoElement` for `&str`, `String` and `SharedString`, so text is written by handing the string to whatever holds it, and there is no `text()` to call:
 
 ```js
-v_flex()
-  .child(`${this.remaining} of ${this.items.length} remaining`)
-  .child(42);
+v_flex().child(`${this.remaining} of ${this.items.length} remaining`).child(42);
 ```
 
 The style comes from the element holding it, exactly as it does in Rust:
@@ -126,10 +120,10 @@ renderIcon(cx) {
 
 ## Composition
 
-| Method | Effect |
-| --- | --- |
-| `.child(element)` | Adds one child. The child is consumed |
-| `.children(iterable)` | Adds several, in order |
+| Method                     | Effect                                           |
+| -------------------------- | ------------------------------------------------ |
+| `.child(element)`          | Adds one child. The child is consumed            |
+| `.children(iterable)`      | Adds several, in order                           |
 | `.when(condition, branch)` | Applies `branch` only when `condition` is truthy |
 
 ```js
@@ -162,27 +156,27 @@ For a condition that chooses between two elements, an ordinary ternary is cleare
 
 These are not styles; they report state to the base layer, which handles the interaction and leaves the appearance to you.
 
-| Method | On | Effect |
-| --- | --- | --- |
-| `.on_click(handler)` | `Button` | `handler(event, cx)`, on click **and** on keyboard activation |
-| `.on_change(handler)` | `Checkbox`, `Switch` | `handler(checked, cx)`; the script stores the value |
-| `.disabled(value)` | `Button`, `Checkbox`, `Switch` | Blocks activation and reports the state |
-| `.selected(value)` | `Button` | Reports the selected state |
-| `.checked(value)` | `Checkbox`, `Switch` | The controlled value |
-| `.accessibility_label(text)` | `Button`, `Checkbox` | What a screen reader announces |
-| `.tooltip(text)` | `div`, `h_flex`, `v_flex`, `Button` | A label shown after the pointer rests on the element |
-| `.id(name)` | `div`, `h_flex`, `v_flex` | A stable identity, instead of position in the tree |
-| `.overflow_scrollbar()` | `div`, `h_flex`, `v_flex` | Scrolls both axes and paints native scrollbars |
-| `.overflow_x_scrollbar()` | `div`, `h_flex`, `v_flex` | Scrolls horizontally and paints a native scrollbar |
-| `.overflow_y_scrollbar()` | `div`, `h_flex`, `v_flex` | Scrolls vertically and paints a native scrollbar |
-| `.on_key_down(handler)` | [input-capable](#where-input-is-installed) | `handler(event, cx)` while this element holds the keyboard |
-| `.on_key_up(handler)` | [input-capable](#where-input-is-installed) | The same on release |
-| `.on_mouse_down(button, handler)` | [input-capable](#where-input-is-installed) | A press of `"left"`, `"right"` or `"middle"` |
-| `.on_mouse_up(button, handler)` | [input-capable](#where-input-is-installed) | Its release |
-| `.on_mouse_down_out(handler)` | [input-capable](#where-input-is-installed) | A press anywhere **outside** this element |
-| `.on_scroll_wheel(handler)` | [input-capable](#where-input-is-installed) | Wheel and trackpad scrolling over it |
-| `.on_action(action, handler)` | [input-capable](#where-input-is-installed) | A named action dispatched to it or into it |
-| `.key_context(name)` | [input-capable](#where-input-is-installed) | The key-binding context this element and its subtree sit in |
+| Method                            | On                                         | Effect                                                        |
+| --------------------------------- | ------------------------------------------ | ------------------------------------------------------------- |
+| `.on_click(handler)`              | `Button`                                   | `handler(event, cx)`, on click **and** on keyboard activation |
+| `.on_change(handler)`             | `Checkbox`, `Switch`                       | `handler(checked, cx)`; the script stores the value           |
+| `.disabled(value)`                | `Button`, `Checkbox`, `Switch`             | Blocks activation and reports the state                       |
+| `.selected(value)`                | `Button`                                   | Reports the selected state                                    |
+| `.checked(value)`                 | `Checkbox`, `Switch`                       | The controlled value                                          |
+| `.accessibility_label(text)`      | `Button`, `Checkbox`                       | What a screen reader announces                                |
+| `.tooltip(text)`                  | `div`, `h_flex`, `v_flex`, `Button`        | A label shown after the pointer rests on the element          |
+| `.id(name)`                       | `div`, `h_flex`, `v_flex`                  | A stable identity, instead of position in the tree            |
+| `.overflow_scrollbar()`           | `div`, `h_flex`, `v_flex`                  | Scrolls both axes and paints native scrollbars                |
+| `.overflow_x_scrollbar()`         | `div`, `h_flex`, `v_flex`                  | Scrolls horizontally and paints a native scrollbar            |
+| `.overflow_y_scrollbar()`         | `div`, `h_flex`, `v_flex`                  | Scrolls vertically and paints a native scrollbar              |
+| `.on_key_down(handler)`           | [input-capable](#where-input-is-installed) | `handler(event, cx)` while this element holds the keyboard    |
+| `.on_key_up(handler)`             | [input-capable](#where-input-is-installed) | The same on release                                           |
+| `.on_mouse_down(button, handler)` | [input-capable](#where-input-is-installed) | A press of `"left"`, `"right"` or `"middle"`                  |
+| `.on_mouse_up(button, handler)`   | [input-capable](#where-input-is-installed) | Its release                                                   |
+| `.on_mouse_down_out(handler)`     | [input-capable](#where-input-is-installed) | A press anywhere **outside** this element                     |
+| `.on_scroll_wheel(handler)`       | [input-capable](#where-input-is-installed) | Wheel and trackpad scrolling over it                          |
+| `.on_action(action, handler)`     | [input-capable](#where-input-is-installed) | A named action dispatched to it or into it                    |
+| `.key_context(name)`              | [input-capable](#where-input-is-installed) | The key-binding context this element and its subtree sit in   |
 
 Disabled, selected and checked **appearance** is yours to draw. The base layer only reports the state; nothing changes on screen unless the script says so:
 
@@ -207,8 +201,9 @@ A base checkbox does not change its own state. It reports what the user asked fo
 
 ```js
 Checkbox.new(`item-${item.id}`)
-  .checked(item.done)                       // the value comes from script state
-  .on_change((done, cx) => {                // the callback is a request
+  .checked(item.done) // the value comes from script state
+  .on_change((done, cx) => {
+    // the callback is a request
     this.toggle(item.id, done, cx);
   })
   .child(indicator(item.done))
@@ -332,22 +327,22 @@ render() {
 
 `cx.focus_handle()` needs a live host call, and a handle created inside `render` would be a new one on every frame — so the focus it tracked would be dropped by the next repaint. It belongs in `init` or in an event handler; calling it in `render` throws.
 
-| On the handle | Answers |
-| --- | --- |
-| `handle.focus()` | Moves the keyboard onto the element tracking it |
+| On the handle         | Answers                                         |
+| --------------------- | ----------------------------------------------- |
+| `handle.focus()`      | Moves the keyboard onto the element tracking it |
 | `handle.is_focused()` | Whether that element currently has the keyboard |
-| `handle.release()` | Drops the handle |
+| `handle.release()`    | Drops the handle                                |
 
 `Tab` and `Shift-Tab` are handled by the window root, which walks the order below in both directions and honours the focus trap of an open dialog or sheet.
 
-| Method | On | Effect |
-| --- | --- | --- |
-| `.track_focus(handle)` | `div`, `h_flex`, `v_flex`, `Button`, `Checkbox`, `Radio`, `Toggle` | Binds the element to a handle the script owns |
-| `.tab_index(n)` | those, and `Link`, `Switch` | Where the element sits in the window's Tab order; it also makes the element a tab stop |
-| `.tab_stop(value)` | the same set | Whether Tab can land on it at all. `false` keeps its place in the order without making it reachable |
-| `.role(name)` | `div`, `h_flex`, `v_flex`, `Button`, `Checkbox` | What the element announces itself as |
-| `.aria_selected(value)` | `div`, `h_flex`, `v_flex` | The selected state of an option in a list the script built |
-| `.aria_active_descendant()` | `div`, `h_flex`, `v_flex` | Announces this element as the focused one while an ancestor holds the keyboard — the highlighted option of a combobox whose input keeps focus |
+| Method                      | On                                                                 | Effect                                                                                                                                        |
+| --------------------------- | ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `.track_focus(handle)`      | `div`, `h_flex`, `v_flex`, `Button`, `Checkbox`, `Radio`, `Toggle` | Binds the element to a handle the script owns                                                                                                 |
+| `.tab_index(n)`             | those, and `Link`, `Switch`                                        | Where the element sits in the window's Tab order; it also makes the element a tab stop                                                        |
+| `.tab_stop(value)`          | the same set                                                       | Whether Tab can land on it at all. `false` keeps its place in the order without making it reachable                                           |
+| `.role(name)`               | `div`, `h_flex`, `v_flex`, `Button`, `Checkbox`                    | What the element announces itself as                                                                                                          |
+| `.aria_selected(value)`     | `div`, `h_flex`, `v_flex`                                          | The selected state of an option in a list the script built                                                                                    |
+| `.aria_active_descendant()` | `div`, `h_flex`, `v_flex`                                          | Announces this element as the focused one while an ancestor holds the keyboard — the highlighted option of a combobox whose input keeps focus |
 
 The sets differ because the components differ. `Button`, `Checkbox`, `Radio` and `Toggle` build their focus handle from a value you can replace; `Link` and `Switch` build their own and have no builder to replace it. Every component except `Button` and `Checkbox` announces a role of its own — a `Tab` is a tab, a `Radio` is a radio — and only those two treat the role as an override, which is what lets a button announce itself as a menu item. A call a component cannot honour is **reported in the log**, not silently dropped:
 
@@ -364,14 +359,14 @@ div()
   .role("list_box_option")
   .aria_selected(index === this.chosen)
   .when(index === this.chosen, (el) => el.aria_active_descendant())
-  .child(name)
+  .child(name);
 ```
 
-Role names mirror `gpui::Role` in snake_case — `list_box`, `list_box_option`, `combo_box`, `menu_item` — and the whole set is in `gpui.d.ts` as the `Role` union, so an editor completes them and a name that is not one fails at the call site:
+Role names mirror `gpui_kit::Role` in snake_case — `list_box`, `list_box_option`, `combo_box`, `menu_item` — and the whole set is in `gpui-kit.d.ts` as the `Role` union, so an editor completes them and a name that is not one fails at the call site:
 
 ```text
-unknown accessibility role `listbox`; the names mirror gpui::Role in snake_case
-— see the Role type in gpui.d.ts
+unknown accessibility role `listbox`; the names mirror gpui_kit::Role in snake_case
+— see the Role type in gpui-kit.d.ts
 ```
 
 ## Elements are single-use
@@ -381,9 +376,7 @@ This is the rule that most often surprises a new reader, so here is what it look
 ```js
 const row = h_flex().child("hello");
 
-v_flex()
-  .child(row)
-  .child(row);   // throws
+v_flex().child(row).child(row); // throws
 ```
 
 ```text
@@ -429,7 +422,7 @@ render(cx) {
 }
 ```
 
-That is how the [example application](https://github.com/longbridge/gpui-component/tree/main/examples/js_todolist) is written: `ui.js` exports `button`, `label`, `icon`, `checkbox` and the rest as functions, and `main.js` calls them. It reads like a component library and costs nothing, because a function call is where a fresh description comes from.
+That is how the [example application](https://github.com/longbridge/gpui-kit/tree/main/examples/js_todolist) is written: `ui.js` exports `button`, `label`, `icon`, `checkbox` and the rest as functions, and `main.js` calls them. It reads like a component library and costs nothing, because a function call is where a fresh description comes from.
 
 ## Callbacks belong to their render
 
@@ -466,7 +459,7 @@ deliberately:
 
 Focus is now the script's to own, but not all of it. Still missing:
 
-- **Keyboard navigation inside a composite, which is yours to write.** Tab and Shift-Tab move between controls; the arrow keys that move *within* a listbox, a menu or a tab list do not appear on their own. The pieces exist now — `on_key_down`, `cx.bind_keys` and `key_context` — but turning ↑ / ↓ into a moving highlight is still the script's job.
+- **Keyboard navigation inside a composite, which is yours to write.** Tab and Shift-Tab move between controls; the arrow keys that move _within_ a listbox, a menu or a tab list do not appear on their own. The pieces exist now — `on_key_down`, `cx.bind_keys` and `key_context` — but turning ↑ / ↓ into a moving highlight is still the script's job.
 - **The first Tab into an unfocused window.** While nothing at all holds focus, the root's Tab binding has no dispatch path to reach; focus has to arrive some other way first — a click, or `handle.focus()`.
 - **`Tab`, `Tabs`, and the table, group and progress parts** stay out of the Tab order. Base leaves them out of keyboard focus, and `tab_index` on one of them is reported rather than honoured.
 - **`track_focus` on `Link` and `Switch`**, for the same reason: they build their own handle and expose no builder to replace it.

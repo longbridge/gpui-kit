@@ -3,7 +3,7 @@
 //! This lives beside the production modules rather than inside one module's
 //! `mod tests` so `tab_group`, `dock_area`, and the cutover tests can share a
 //! single panel double and a single ordered delivery log. Ported from the
-//! `TabPanel` tests in `crates/ui/src/dock/tab_panel.rs`.
+//! `TabPanel` tests in `crates/component/src/dock/tab_panel.rs`.
 
 use std::sync::{Arc, Mutex};
 
@@ -22,7 +22,7 @@ use super::tab_group::{TabGroup, TabGroupConstraints};
 /// relative order is itself part of the contract under test: a panel joining a
 /// group must see `Added` before it is told it is active.
 ///
-/// `Removed` is also where a deliberate divergence from `crates/ui` shows up.
+/// `Removed` is also where a deliberate divergence from `crates/component` shows up.
 /// The old `TabPanel::detach_panel` calls `on_removed` on every detach,
 /// including the detach half of a drag between groups, so a moved panel is
 /// told it was removed and then added again. In the tree world a move never

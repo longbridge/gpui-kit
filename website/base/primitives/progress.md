@@ -12,23 +12,23 @@ Like every `gpui-base` primitive, Progress supplies behavior and semantic struct
 
 ## Example
 
-The [single native Cargo entrypoint](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
+The [single native Cargo entrypoint](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/native/src/bin/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
 
 ```bash
-cargo run -p gpui-base --example components -- progress
+cargo run -p gpui-base-examples -- progress
 ```
 
 ## Import
 
 ```rust
-use gpui_base::{Progress, ProgressIndicator, ProgressTrack};
+use gpui_kit::base::{Progress, ProgressIndicator, ProgressTrack};
 ```
 
 ## Anatomy and API
 
 The example composes `Progress`, `ProgressIndicator`, `ProgressTrack`. GPUI's standard styling and event traits provide presentation; these base types provide the interaction structure.
 
-The authoritative module is [`components/progress.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/progress.rs). Native and browser previews compile this same file.
+The authoritative module is [`components/progress.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/progress.rs). Native and browser previews compile this same file.
 
 ## State and events
 

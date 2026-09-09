@@ -1,4 +1,4 @@
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { Input, InputState, h_flex, v_flex } from "gpui-base";
 import { catalog, filterCatalog, route } from "./catalog.js";
 import { createDockStory, renderDockStory } from "./stories/dock.js";
@@ -10,7 +10,7 @@ import {
 
 /** A sidebar gallery that stays entirely on the documented script surface. */
 export default class StoryGallery extends View {
-  /** @param {unknown} _props @param {import("gpui").AsyncContext} _cx */
+  /** @param {unknown} _props @param {import("gpui-kit").AsyncContext} _cx */
   init(_props, cx) {
     initializeRegisteredExamples();
     this.search = InputState.new({ placeholder: "Search components…" });
@@ -36,7 +36,7 @@ export default class StoryGallery extends View {
     });
   }
 
-  /** @param {string} id @param {import("gpui").Context} cx */
+  /** @param {string} id @param {import("gpui-kit").Context} cx */
   select(id, cx) {
     this.activeId = id;
     this.highlightedId = id;
@@ -59,7 +59,7 @@ export default class StoryGallery extends View {
     this.routeFocus.get(id)?.focus();
   }
 
-  /** @param {number} direction @param {import("gpui").Context} cx */
+  /** @param {number} direction @param {import("gpui-kit").Context} cx */
   moveHighlight(direction, cx) {
     const visible = this.visibleRoutes();
     if (visible.length === 0) return;
@@ -76,7 +76,7 @@ export default class StoryGallery extends View {
     cx.notify();
   }
 
-  /** @param {import("gpui").KeyEvent} event @param {import("gpui").Context} cx */
+  /** @param {import("gpui-kit").KeyEvent} event @param {import("gpui-kit").Context} cx */
   handleNavigationKey(event, cx) {
     if (event.key === "down") this.moveHighlight(1, cx);
     if (event.key === "up") this.moveHighlight(-1, cx);
@@ -85,7 +85,7 @@ export default class StoryGallery extends View {
     }
   }
 
-  /** @param {import("gpui").Context} cx */
+  /** @param {import("gpui-kit").Context} cx */
   render(cx) {
     const active = route(this.activeId);
     const colors = cx.theme().colors;
@@ -131,7 +131,7 @@ export default class StoryGallery extends View {
       );
   }
 
-  /** @param {import("gpui").Context} cx */
+  /** @param {import("gpui-kit").Context} cx */
   sidebar(cx) {
     const colors = cx.theme().colors;
     const visible = this.visibleRoutes();
@@ -219,7 +219,7 @@ export default class StoryGallery extends View {
       );
   }
 
-  /** @param {import("./catalog.js").StoryRoute} story @param {import("gpui").Context} cx */
+  /** @param {import("./catalog.js").StoryRoute} story @param {import("gpui-kit").Context} cx */
   navigationItem(story, cx) {
     const colors = cx.theme().colors;
     const selected = story.id === this.activeId;

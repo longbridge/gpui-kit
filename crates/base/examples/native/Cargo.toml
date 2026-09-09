@@ -1,0 +1,21 @@
+[package]
+name = "gpui-base-examples"
+default-run = "components"
+version = "0.6.0"
+publish = false
+edition.workspace = true
+
+[dependencies]
+gpui.workspace = true
+gpui-base = { path = "../.." }
+gpui_platform.workspace = true
+reqwest_client.workspace = true
+syntect.workspace = true
+
+[lints]
+workspace = true
+
+# The shared showcase is included with `#[path]`, which cargo-machete cannot
+# follow when detecting its `gpui`, `gpui_base`, and `syntect` imports.
+[package.metadata.cargo-machete]
+ignored = ["gpui", "gpui-base", "syntect"]

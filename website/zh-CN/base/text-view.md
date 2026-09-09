@@ -14,12 +14,12 @@ exampleKind: base
 
 ## 设置窗口
 
-应用启动时调用一次 `gpui_base::init`，并在每个窗口渲染一个 `TextSelectionLayer`。它统一协调 `TextView`、[`SelectableText`](./text-selection.md) 和自定义文本 renderer 的选择行为。
+应用启动时调用一次 `gpui_kit::base::init`，并在每个窗口渲染一个 `TextSelectionLayer`。它统一协调 `TextView`、[`SelectableText`](./text-selection.md) 和自定义文本 renderer 的选择行为。
 
 ```rust
-use gpui::prelude::*;
-use gpui::{Context, Render, Window};
-use gpui_base::{TextSelectionLayer, TextView};
+use gpui_kit::prelude::*;
+use gpui_kit::{Context, Render, Window};
+use gpui_kit::base::{TextSelectionLayer, TextView};
 
 impl Render for AppView {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
@@ -34,7 +34,7 @@ impl Render for AppView {
 }
 ```
 
-如果应用已经调用 `gpui_component::init`，其中已包含 Base 初始化；`gpui-component::Root` 也会安装窗口选择层。
+如果应用已经调用 `gpui_kit::component::init`，其中已包含 Base 初始化；`gpui-component::Root` 也会安装窗口选择层。
 
 TextView 默认支持选择。拖动选区靠近视口边缘时，共享选择层会自动滚动相关的 `overflow_*_scroll` 区域，不需要额外设置 TextView 的滚动或选择参数。只有明确需要禁用选择时才使用 `.selectable(false)`。
 
@@ -43,7 +43,7 @@ TextView 默认支持选择。拖动选区靠近视口边缘时，共享选择�
 短内容可以使用自动生成调用点 ID 的 helper，需要明确稳定 ID 时使用构造器：
 
 ```rust
-use gpui_base::{html, markdown, TextView};
+use gpui_kit::base::{html, markdown, TextView};
 
 let short_markdown = markdown("一段 **Markdown**。");
 let short_html = html("<p>一段 <strong>HTML</strong>。</p>");
@@ -62,7 +62,7 @@ let article = TextView::html("article", html_source);
 应用可以只覆盖自己设计系统负责的颜色：
 
 ```rust
-use gpui_base::TextViewStyle;
+use gpui_kit::base::TextViewStyle;
 
 let style = TextViewStyle::default()
     .with_foreground(app_colors.foreground)
@@ -73,7 +73,7 @@ let style = TextViewStyle::default()
 TextView::markdown("themed", source).style(style)
 ```
 
-`TextViewStyle::from_theme(&theme)` 可读取 `gpui_base::Theme` 的语义颜色。使用上层组件主题时，可调用 `gpui_component::text::text_view_style(cx.theme())`。
+`TextViewStyle::from_theme(&theme)` 可读取 `gpui_kit::base::Theme` 的语义颜色。使用上层组件主题时，可调用 `gpui_kit::component::text::text_view_style(cx.theme())`。
 
 ## 语法高亮由使用者开启
 
@@ -82,8 +82,8 @@ TextView::markdown("themed", source).style(style)
 回调接收 `CodeBlock`，并返回 UTF-8 字节范围及对应的 GPUI `HighlightStyle`：
 
 ```rust
-use gpui::HighlightStyle;
-use gpui_base::TextView;
+use gpui_kit::HighlightStyle;
+use gpui_kit::base::TextView;
 
 TextView::markdown("highlighted", source).code_block_highlighter(|block| {
     my_highlighter(block.lang(), block.code())
@@ -103,12 +103,32 @@ TextView::markdown("highlighted", source).code_block_highlighter(|block| {
 
 范围相对于 `CodeBlock::code()`；无效范围会被丢弃。高亮器实现和语言注册完全由应用管理。
 
+## Markdown 扩展
+
+`MarkdownExtensions` 默认使用兼容 CommonMark/GFM 的解析方式。YAML
+frontmatter 不属于这两项标准，因此默认关闭。当 block parser 或插件处理
+`markdown_ast::Node::Yaml` 时，需要明确启用该 construct：
+
+```rust
+use gpui_base::{MarkdownExtensions, TextView};
+
+let extensions = MarkdownExtensions::default().frontmatter();
+
+TextView::markdown("metadata", source)
+    .markdown_extensions(extensions)
+```
+
+如果没有匹配的插件，已启用的 YAML frontmatter 会使用现有的 YAML
+code-block fallback。可以通过 `.plugin(...)` 挂载自定义插件；
+`gpui-component` 提供带主题样式的
+`FrontmatterPlugin`；Base 不依赖该 presentation。
+
 ## 保留状态与动态更新
 
 内容需要持续更新时使用 `TextViewState`：
 
 ```rust
-use gpui_base::{TextView, TextViewState};
+use gpui_kit::base::{TextView, TextViewState};
 
 let document = cx.new(|cx| TextViewState::markdown(initial_source, cx));
 
@@ -117,7 +137,7 @@ TextView::new(&document)
 document.update(cx, |state, cx| state.set_text(updated_source, cx));
 ```
 
-通过 `SelectionFormat` 可以选择复制渲染文本或 Markdown 源码。链接路由、代码块操作、表格操作、图片和 Markdown 插件继续使用与兼容 API 相同的 builder，详见 [gpui-component TextView 文档](../docs/components/text-view.md)。
+通过 `SelectionFormat` 可以选择复制渲染文本或 Markdown 源码。链接路由、代码块操作、表格操作、图片和 Markdown 插件继续使用与兼容 API 相同的 builder，详见 [gpui-component TextView 文档](../component/text-view.md)。
 
 ## 可运行源码
 
@@ -126,5 +146,5 @@ document.update(cx, |state, cx| state.set_text(updated_source, cx));
 <<< ../../../crates/base/examples/showcase/components/text_view.rs{rust}
 
 ```bash
-cargo run -p gpui-base --example components -- text-view
+cargo run -p gpui-base-examples -- text-view
 ```

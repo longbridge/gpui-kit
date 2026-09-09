@@ -26,7 +26,7 @@
 //! # Why an import rather than a lookup
 //!
 //! A registered module is resolved by the engine's module loader, so a host
-//! module is imported exactly like `gpui` or `path` is. The obvious alternative
+//! module is imported exactly like `gpui-kit` or `path` is. The obvious alternative
 //! is a lookup — `native("workspace")` answering with a bag of functions — and
 //! it loses twice, both times on *when* a mistake surfaces.
 //!
@@ -757,6 +757,7 @@ impl HostModule {
 /// test rather than a name a host can quietly lose.
 pub const RESERVED_SPECIFIERS: &[&str] = &[
     // The runtime's own modules.
+    "gpui-kit",
     "gpui",
     "gpui-base",
     "gpui-component",

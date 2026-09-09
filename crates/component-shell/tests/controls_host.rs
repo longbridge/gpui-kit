@@ -73,7 +73,7 @@ fn draw(context: &mut VisualTestContext) {
 #[gpui::test]
 fn clicking_a_two_state_control_reports_its_new_state(cx: &mut TestAppContext) {
     let source = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { Checkbox, Switch, Toggle } from "gpui-component";
 export default class App extends View {
   init(_props, _cx) { this.checkbox = false; this.switch = false; this.toggle = false; }
@@ -118,7 +118,7 @@ export default class App extends View {
 #[gpui::test]
 fn clicking_a_button_reaches_the_script(cx: &mut TestAppContext) {
     let source = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { Button } from "gpui-component";
 export default class App extends View {
   init(_props, _cx) { this.hits = 0; }

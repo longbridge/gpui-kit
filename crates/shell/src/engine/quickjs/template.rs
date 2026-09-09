@@ -522,7 +522,7 @@ mod tests {
         }
 
         const SOURCE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 const template = globalThis.__template;
 const Row = template((value) => div().child(value));
 export default class Board extends View {

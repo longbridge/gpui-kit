@@ -1,8 +1,4 @@
-use gpui::{
-    App, AppContext as _, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement as _,
-    Render, StyleRefinement, Styled as _, Window, rems,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     link::Link,
@@ -10,6 +6,10 @@ use gpui_component::{
     shimmer::{ShimmerStyle, ShimmerText},
     spinner::Spinner,
     v_flex,
+};
+use gpui_kit::{
+    App, AppContext as _, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement as _,
+    Render, StyleRefinement, Styled as _, Window, rems,
 };
 use std::time::Duration;
 
@@ -281,7 +281,7 @@ impl Render for MarkerStory {
                             .content(
                                 MarkerContent::new().child(
                                     Link::new("marker-documentation-link")
-                                        .href("https://longbridge.github.io/gpui-component/")
+                                        .href("https://gpui-kit.com/")
                                         .child("Open the component documentation"),
                                 ),
                             ),

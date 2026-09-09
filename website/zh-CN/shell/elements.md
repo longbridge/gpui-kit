@@ -13,7 +13,7 @@ order: 4
 每个模块只装它自己那个包提供的东西：
 
 ```js
-import { div, svg, image } from "gpui";
+import { div, svg, image } from "gpui-kit";
 import {
   h_flex,
   v_flex,
@@ -29,20 +29,20 @@ import { fps_monitor } from "gpui-fps";
 
 函数是小写的，组件类型首字母大写并通过 `.new` 构造。这与 Rust 侧一一对应：那边 `div()` 同样是自由函数，`Button::new(id)` 同样是类型上的关联函数。
 
-| 构造器 | 来自 | 产出 |
-| --- | --- | --- |
-| `div()` | `gpui` | 自身不带布局的元素 |
-| `value` | `gpui` | 文本元素，参数会被转成字符串 |
-| `svg(path)` | `gpui` | 来自应用自身目录、跟随主题着色的矢量图标 |
-| `image(path)` | `gpui` | 来自应用自身目录的全彩图片 |
-| `h_flex()` | `gpui-base` | 一行 |
-| `v_flex()` | `gpui-base` | 一列 |
-| `Button.new(id)` | `gpui-base` | base 的 `Button`：激活、焦点、disabled 与 selected 状态，无样式 |
-| `Link.new(id)` | `gpui-base` | 可聚焦的外部 HTTP(S) 链接；用 `.href(url)` 设置目标 |
-| `Checkbox.new(id)` | `gpui-base` | base 的受控 checkbox，无样式也无勾选标记 |
-| `Switch.new(id)` | `gpui-base` | base 的受控 switch，无样式 |
-| `Input.new(state)` | `gpui-base` | 由 [`InputState`](./state.md#留存状态) 支撑的文本框 |
-| `fps_monitor()` | `gpui-fps` | 原生 `gpui-fps` 性能 HUD，每个窗口共享一个 monitor |
+| 构造器             | 来自        | 产出                                                            |
+| ------------------ | ----------- | --------------------------------------------------------------- |
+| `div()`            | `gpui-kit`  | 自身不带布局的元素                                              |
+| `value`            | `gpui-kit`  | 文本元素，参数会被转成字符串                                    |
+| `svg(path)`        | `gpui-kit`  | 来自应用自身目录、跟随主题着色的矢量图标                        |
+| `image(path)`      | `gpui-kit`  | 来自应用自身目录的全彩图片                                      |
+| `h_flex()`         | `gpui-base` | 一行                                                            |
+| `v_flex()`         | `gpui-base` | 一列                                                            |
+| `Button.new(id)`   | `gpui-base` | base 的 `Button`：激活、焦点、disabled 与 selected 状态，无样式 |
+| `Link.new(id)`     | `gpui-base` | 可聚焦的外部 HTTP(S) 链接；用 `.href(url)` 设置目标             |
+| `Checkbox.new(id)` | `gpui-base` | base 的受控 checkbox，无样式也无勾选标记                        |
+| `Switch.new(id)`   | `gpui-base` | base 的受控 switch，无样式                                      |
+| `Input.new(state)` | `gpui-base` | 由 [`InputState`](./state.md#留存状态) 支撑的文本框             |
+| `fps_monitor()`    | `gpui-fps`  | 原生 `gpui-fps` 性能 HUD，每个窗口共享一个 monitor              |
 
 这是入门够用的一组，不是全部。base 绑定的组件——`Select`、`Combobox`、`Tabs`、`Table`、`VirtualList`、`Slider`、`Popover`、`Avatar`、`Accordion`、`Pagination`、`CalendarState` 等等——完整清单在 [API 参考](./api.md#gpui-base-模块)里。
 
@@ -51,11 +51,7 @@ import { fps_monitor } from "gpui-fps";
 `fps_monitor()` 直接公开原生 `gpui-fps` HUD，不会把采样或绘制搬进 JavaScript。monitor 在首次使用时创建，并按窗口复用。一个窗口最多渲染一次，并把它放在设置了 `relative()` 的父元素中：
 
 ```js
-div()
-  .relative()
-  .size_full()
-  .child(content)
-  .child(fps_monitor());
+div().relative().size_full().child(content).child(fps_monitor());
 ```
 
 默认固定在右上角。可以沿用已有的 anchor 取值调整位置，例如 `fps_monitor().anchor("bottom_left")`。HUD 自己拥有完整外观，普通元素样式、children 和交互状态不会作用于它。
@@ -77,7 +73,7 @@ View 是相反的情形，用的就是标准写法：`class Counter extends View
 ```js
 div()
   .id("toolbar")
-  .active((el) => el.opacity(0.7))
+  .active((el) => el.opacity(0.7));
 ```
 
 凡是身份必须扛得住邻居变化的元素，都给它取个名字。`Button`、`Link`、`Checkbox` 与 `Switch` 已经从 `new(id)` 拿到了身份，会忽略这里的名字——并且是给出警告，而不是默不作声。
@@ -87,9 +83,7 @@ div()
 **字符串本身就是元素。** GPUI 为 `&str`、`String` 与 `SharedString` 实现了 `IntoElement`，所以文本的写法就是把字符串交给承载它的元素，没有 `text()` 可调：
 
 ```js
-v_flex()
-  .child(`${this.remaining} of ${this.items.length} remaining`)
-  .child(42);
+v_flex().child(`${this.remaining} of ${this.items.length} remaining`).child(42);
 ```
 
 样式由承载它的元素带，和 Rust 那边完全一致：
@@ -126,10 +120,10 @@ renderIcon(cx) {
 
 ## 组合
 
-| 方法 | 作用 |
-| --- | --- |
-| `.child(element)` | 添加一个子元素，该子元素随即被消费 |
-| `.children(iterable)` | 按顺序添加多个 |
+| 方法                       | 作用                                 |
+| -------------------------- | ------------------------------------ |
+| `.child(element)`          | 添加一个子元素，该子元素随即被消费   |
+| `.children(iterable)`      | 按顺序添加多个                       |
 | `.when(condition, branch)` | 仅当 `condition` 为真时应用 `branch` |
 
 ```js
@@ -162,27 +156,27 @@ when(...) must return the element
 
 这些不是样式。它们把状态报告给基础层，由基础层处理交互，外观仍然交给你。
 
-| 方法 | 用于 | 作用 |
-| --- | --- | --- |
-| `.on_click(handler)` | `Button` | `handler(event, cx)`，点击**以及**键盘激活都会触发 |
-| `.on_change(handler)` | `Checkbox`、`Switch` | `handler(checked, cx)`，由脚本保存新值 |
-| `.disabled(value)` | `Button`、`Checkbox`、`Switch` | 阻止激活并报告该状态 |
-| `.selected(value)` | `Button` | 报告 selected 状态 |
-| `.checked(value)` | `Checkbox`、`Switch` | 受控值 |
-| `.accessibility_label(text)` | `Button`、`Checkbox` | 屏幕阅读器读出的内容 |
-| `.tooltip(text)` | `div`、`h_flex`、`v_flex`、`Button` | 指针停留后显示的说明文字 |
-| `.id(name)` | `div`、`h_flex`、`v_flex` | 一个稳定的身份，取代“在树中的位置” |
-| `.overflow_scrollbar()` | `div`、`h_flex`、`v_flex` | 双轴滚动并绘制原生 scrollbar |
-| `.overflow_x_scrollbar()` | `div`、`h_flex`、`v_flex` | 水平滚动并绘制原生 scrollbar |
-| `.overflow_y_scrollbar()` | `div`、`h_flex`、`v_flex` | 垂直滚动并绘制原生 scrollbar |
-| `.on_key_down(handler)` | [可接输入的元素](#哪些元素接了输入) | 该元素持有键盘时的 `handler(event, cx)` |
-| `.on_key_up(handler)` | [可接输入的元素](#哪些元素接了输入) | 松开时同上 |
-| `.on_mouse_down(button, handler)` | [可接输入的元素](#哪些元素接了输入) | 按下 `"left"`、`"right"` 或 `"middle"` |
-| `.on_mouse_up(button, handler)` | [可接输入的元素](#哪些元素接了输入) | 松开 |
-| `.on_mouse_down_out(handler)` | [可接输入的元素](#哪些元素接了输入) | 在该元素**之外**任意位置按下 |
-| `.on_scroll_wheel(handler)` | [可接输入的元素](#哪些元素接了输入) | 滚轮与触控板滚动 |
-| `.on_action(action, handler)` | [可接输入的元素](#哪些元素接了输入) | 命名 action 被派发到它或它内部 |
-| `.key_context(name)` | [可接输入的元素](#哪些元素接了输入) | 该元素与其子树所处的按键绑定上下文 |
+| 方法                              | 用于                                | 作用                                               |
+| --------------------------------- | ----------------------------------- | -------------------------------------------------- |
+| `.on_click(handler)`              | `Button`                            | `handler(event, cx)`，点击**以及**键盘激活都会触发 |
+| `.on_change(handler)`             | `Checkbox`、`Switch`                | `handler(checked, cx)`，由脚本保存新值             |
+| `.disabled(value)`                | `Button`、`Checkbox`、`Switch`      | 阻止激活并报告该状态                               |
+| `.selected(value)`                | `Button`                            | 报告 selected 状态                                 |
+| `.checked(value)`                 | `Checkbox`、`Switch`                | 受控值                                             |
+| `.accessibility_label(text)`      | `Button`、`Checkbox`                | 屏幕阅读器读出的内容                               |
+| `.tooltip(text)`                  | `div`、`h_flex`、`v_flex`、`Button` | 指针停留后显示的说明文字                           |
+| `.id(name)`                       | `div`、`h_flex`、`v_flex`           | 一个稳定的身份，取代“在树中的位置”                 |
+| `.overflow_scrollbar()`           | `div`、`h_flex`、`v_flex`           | 双轴滚动并绘制原生 scrollbar                       |
+| `.overflow_x_scrollbar()`         | `div`、`h_flex`、`v_flex`           | 水平滚动并绘制原生 scrollbar                       |
+| `.overflow_y_scrollbar()`         | `div`、`h_flex`、`v_flex`           | 垂直滚动并绘制原生 scrollbar                       |
+| `.on_key_down(handler)`           | [可接输入的元素](#哪些元素接了输入) | 该元素持有键盘时的 `handler(event, cx)`            |
+| `.on_key_up(handler)`             | [可接输入的元素](#哪些元素接了输入) | 松开时同上                                         |
+| `.on_mouse_down(button, handler)` | [可接输入的元素](#哪些元素接了输入) | 按下 `"left"`、`"right"` 或 `"middle"`             |
+| `.on_mouse_up(button, handler)`   | [可接输入的元素](#哪些元素接了输入) | 松开                                               |
+| `.on_mouse_down_out(handler)`     | [可接输入的元素](#哪些元素接了输入) | 在该元素**之外**任意位置按下                       |
+| `.on_scroll_wheel(handler)`       | [可接输入的元素](#哪些元素接了输入) | 滚轮与触控板滚动                                   |
+| `.on_action(action, handler)`     | [可接输入的元素](#哪些元素接了输入) | 命名 action 被派发到它或它内部                     |
+| `.key_context(name)`              | [可接输入的元素](#哪些元素接了输入) | 该元素与其子树所处的按键绑定上下文                 |
 
 disabled、selected 与 checked 的**外观**由你来画。基础层只报告状态，脚本不说就什么都不会变：
 
@@ -207,8 +201,9 @@ base 的 checkbox 不会自己改状态。它只报告用户的请求，由脚�
 
 ```js
 Checkbox.new(`item-${item.id}`)
-  .checked(item.done)                       // 值来自脚本状态
-  .on_change((done, cx) => {                // 回调只是一个请求
+  .checked(item.done) // 值来自脚本状态
+  .on_change((done, cx) => {
+    // 回调只是一个请求
     this.toggle(item.id, done, cx);
   })
   .child(indicator(item.done))
@@ -332,22 +327,22 @@ render() {
 
 `cx.focus_handle()` 需要一次活的 Host 调用；而在 `render` 里创建的 handle 每一帧都是新的，它所跟踪的焦点会被下一次重绘丢掉。所以它属于 `init` 或事件处理器，在 `render` 里调用会抛错。
 
-| handle 上的方法 | 回答什么 |
-| --- | --- |
-| `handle.focus()` | 把键盘移到跟踪它的那个元素上 |
-| `handle.is_focused()` | 那个元素此刻是否持有键盘 |
-| `handle.release()` | 释放这个 handle |
+| handle 上的方法       | 回答什么                     |
+| --------------------- | ---------------------------- |
+| `handle.focus()`      | 把键盘移到跟踪它的那个元素上 |
+| `handle.is_focused()` | 那个元素此刻是否持有键盘     |
+| `handle.release()`    | 释放这个 handle              |
 
 `Tab` 与 `Shift-Tab` 由窗口根 View 处理：它按下表的顺序双向行走，并遵守已打开的 dialog 或 sheet 的 focus trap。
 
-| 方法 | 作用于 | 效果 |
-| --- | --- | --- |
-| `.track_focus(handle)` | `div`、`h_flex`、`v_flex`、`Button`、`Checkbox`、`Radio`、`Toggle` | 把元素绑定到脚本持有的 handle |
-| `.tab_index(n)` | 上述这些，外加 `Link`、`Switch` | 元素在窗口 Tab 顺序中的位置；同时也把它变成一个 tab stop |
-| `.tab_stop(value)` | 与 `tab_index` 相同 | Tab 是否能落到它上面。`false` 保留它在顺序中的位置但不可达 |
-| `.role(name)` | `div`、`h_flex`、`v_flex`、`Button`、`Checkbox` | 屏幕阅读器把这个元素读作什么 |
-| `.aria_selected(value)` | `div`、`h_flex`、`v_flex` | 脚本自己搭的列表里某一项的选中状态 |
-| `.aria_active_descendant()` | `div`、`h_flex`、`v_flex` | 在祖先持有键盘时，把本元素报读为当前焦点项——比如输入框保持焦点的 combobox 中被高亮的那一项 |
+| 方法                        | 作用于                                                             | 效果                                                                                       |
+| --------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
+| `.track_focus(handle)`      | `div`、`h_flex`、`v_flex`、`Button`、`Checkbox`、`Radio`、`Toggle` | 把元素绑定到脚本持有的 handle                                                              |
+| `.tab_index(n)`             | 上述这些，外加 `Link`、`Switch`                                    | 元素在窗口 Tab 顺序中的位置；同时也把它变成一个 tab stop                                   |
+| `.tab_stop(value)`          | 与 `tab_index` 相同                                                | Tab 是否能落到它上面。`false` 保留它在顺序中的位置但不可达                                 |
+| `.role(name)`               | `div`、`h_flex`、`v_flex`、`Button`、`Checkbox`                    | 屏幕阅读器把这个元素读作什么                                                               |
+| `.aria_selected(value)`     | `div`、`h_flex`、`v_flex`                                          | 脚本自己搭的列表里某一项的选中状态                                                         |
+| `.aria_active_descendant()` | `div`、`h_flex`、`v_flex`                                          | 在祖先持有键盘时，把本元素报读为当前焦点项——比如输入框保持焦点的 combobox 中被高亮的那一项 |
 
 三张表的范围不同，是因为组件本身不同。`Button`、`Checkbox`、`Radio`、`Toggle` 的焦点 handle 由一个你可以替换的值构建；`Link` 与 `Switch` 自己构建 handle，且没有可替换它的 builder。除 `Button` 与 `Checkbox` 之外的每个组件都自带 role——`Tab` 就是 tab，`Radio` 就是 radio——只有这两个把 role 当作可覆盖项，这正是「让一个按钮被读作菜单项」得以成立的原因。组件无法承接的调用会**写进日志**，而不是被悄悄丢掉：
 
@@ -364,14 +359,14 @@ div()
   .role("list_box_option")
   .aria_selected(index === this.chosen)
   .when(index === this.chosen, (el) => el.aria_active_descendant())
-  .child(name)
+  .child(name);
 ```
 
-role 的取值逐字镜像 `gpui::Role` 的 snake_case 拼写——`list_box`、`list_box_option`、`combo_box`、`menu_item`——整套取值以 `Role` 联合类型写在 `gpui.d.ts` 里，编辑器能补全；不在其中的名字会在调用处失败：
+role 的取值逐字镜像 `gpui_kit::Role` 的 snake_case 拼写——`list_box`、`list_box_option`、`combo_box`、`menu_item`——整套取值以 `Role` 联合类型写在 `gpui-kit.d.ts` 里，编辑器能补全；不在其中的名字会在调用处失败：
 
 ```text
-unknown accessibility role `listbox`; the names mirror gpui::Role in snake_case
-— see the Role type in gpui.d.ts
+unknown accessibility role `listbox`; the names mirror gpui_kit::Role in snake_case
+— see the Role type in gpui-kit.d.ts
 ```
 
 ## 元素是一次性的
@@ -381,9 +376,7 @@ unknown accessibility role `listbox`; the names mirror gpui::Role in snake_case
 ```js
 const row = h_flex().child("hello");
 
-v_flex()
-  .child(row)
-  .child(row);   // 抛异常
+v_flex().child(row).child(row); // 抛异常
 ```
 
 ```text
@@ -429,7 +422,7 @@ render(cx) {
 }
 ```
 
-[示例应用](https://github.com/longbridge/gpui-component/tree/main/examples/js_todolist)就是这样写的：`ui.js` 把 `button`、`label`、`icon`、`checkbox` 等导出为函数，`main.js` 调用它们。读起来像一个组件库，而且不花什么代价——一次函数调用就是一段新描述的来源。
+[示例应用](https://github.com/longbridge/gpui-kit/tree/main/examples/js_todolist)就是这样写的：`ui.js` 把 `button`、`label`、`icon`、`checkbox` 等导出为函数，`main.js` 调用它们。读起来像一个组件库，而且不花什么代价——一次函数调用就是一段新描述的来源。
 
 ## 回调属于它所在的那次渲染
 

@@ -2,6 +2,7 @@ use gpui::{
     Anchor, App, Entity, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
+use std::time::Duration;
 
 use crate::monitor::FpsMonitor;
 
@@ -33,6 +34,7 @@ const MARGIN: Pixels = px(12.);
 pub struct FpsOverlay {
     monitor: Entity<FpsMonitor>,
     anchor: Anchor,
+    frame_budget: Option<Duration>,
 }
 
 impl FpsOverlay {
@@ -40,6 +42,7 @@ impl FpsOverlay {
         Self {
             monitor: monitor.clone(),
             anchor: Anchor::TopRight,
+            frame_budget: None,
         }
     }
 
@@ -48,10 +51,20 @@ impl FpsOverlay {
         self.anchor = anchor;
         self
     }
+
+    /// The per-frame budget used for chart grading and its vertical scale.
+    pub fn frame_budget(mut self, budget: Duration) -> Self {
+        self.frame_budget = Some(budget);
+        self
+    }
 }
 
 impl RenderOnce for FpsOverlay {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        if let Some(budget) = self.frame_budget {
+            self.monitor
+                .update(cx, |monitor, _| monitor.set_frame_budget(budget));
+        }
         let margin = MARGIN;
 
         // Corners are placed by their own two offsets so the overlay stays the

@@ -13,7 +13,7 @@ exampleKind: base
 Run the interactive companion for this guide:
 
 ```bash
-cargo run -p gpui-base --example motion
+cargo run -p gpui-base-examples --bin motion
 ```
 
 The example contains five separate demos. Use the tabs at the top to inspect one capability at a time.

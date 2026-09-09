@@ -1,9 +1,9 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement as _, IntoElement,
     ParentElement, Render, Styled, Window, div, px,
 };
 
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Icon, IconName, StyledExt, WindowExt as _,
     button::{Button, ButtonVariant, ButtonVariants},
     dialog::{
@@ -46,7 +46,7 @@ impl AlertDialogStory {
 }
 
 impl Focusable for AlertDialogStory {
-    fn focus_handle(&self, _cx: &gpui::App) -> FocusHandle {
+    fn focus_handle(&self, _cx: &gpui_kit::App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
@@ -100,7 +100,7 @@ impl Render for AlertDialogStory {
                 .child(section("Imperative API").description("Open an alert directly from the window.").child(
                     Button::new("confirm-alert").outline().label("Delete File").on_click(cx.listener(
                         |_, _, window, cx| {
-                            use gpui_component::dialog::DialogButtonProps;
+                            use gpui_kit::component::dialog::DialogButtonProps;
 
                             window.open_alert_dialog(cx, |alert, _, cx| {
                                 alert

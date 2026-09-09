@@ -12,21 +12,21 @@ Use the repository revision of GPUI that matches `gpui-base`:
 
 ```toml
 [dependencies]
-gpui-base = { git = "https://github.com/longbridge/gpui-component" }
+gpui-base = { git = "https://github.com/longbridge/gpui-kit" }
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
 ```
 
 ## Initialize
 
-Call `gpui_base::init` once before opening windows. If the application already calls `gpui_component::init`, base initialization is included.
+Call `gpui_kit::base::init` once before opening windows. If the application already calls `gpui_kit::component::init`, base initialization is included.
 
 ```rust
-use gpui::AppContext as _;
+use gpui_kit::AppContext as _;
 
 fn main() {
     gpui_platform::application().run(|cx| {
-        gpui_base::init(cx);
+        gpui_kit::base::init(cx);
         // Open your application window here.
     });
 }
@@ -37,9 +37,9 @@ fn main() {
 Base controls intentionally have no product-specific padding, colors, or radius. Style them with ordinary GPUI methods:
 
 ```rust
-use gpui::prelude::*;
-use gpui::{px, rgb};
-use gpui_base::Button;
+use gpui_kit::prelude::*;
+use gpui_kit::{px, rgb};
+use gpui_kit::base::Button;
 
 Button::new("save")
     .px_3()
@@ -61,7 +61,7 @@ the light palette. Both palettes use `Hsla` values and match the semantic roles
 of the default `gpui-component` themes.
 
 ```rust
-use gpui_base::{ColorTokens, SemanticThemeTokens, Theme};
+use gpui_kit::base::{ColorTokens, SemanticThemeTokens, Theme};
 
 // Pick the palette that matches the application's current appearance.
 let colors = if is_dark {
@@ -85,7 +85,7 @@ rather than adding a component-specific token for it. `selection` is its own
 role because no other one can stand in for it: it is painted under the glyphs
 and has to stay legible there, which neither `accent` nor `ring` guarantees.
 
-Calling `gpui_component::init` projects its active light or dark theme into the
+Calling `gpui_kit::component::init` projects its active light or dark theme into the
 same Base tokens automatically. Applications that use only `gpui-base` should
 install the matching palette when their appearance mode changes.
 
@@ -94,7 +94,7 @@ install the matching palette when their appearance mode changes.
 The examples used by this website also run as a native GPUI application:
 
 ```sh
-cargo run -p gpui-base --example components -- button
+cargo run -p gpui-base-examples -- button
 ```
 
 Replace `button` with a primitive slug from the [primitive catalog](./primitives/index.md). The website compiles the same showcase for `wasm32-unknown-unknown` and loads it on each primitive page.

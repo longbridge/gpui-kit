@@ -11,7 +11,7 @@ order: 15
 ## 导入
 
 ```rust
-use gpui_base::input::{InputEvent, Textarea, TextareaState};
+use gpui_kit::base::input::{InputEvent, Textarea, TextareaState};
 ```
 
 ## 固定行数
@@ -51,10 +51,10 @@ let value = notes.read(cx).value();
 
 ## 表现
 
-该控件没有产品样式；边框、高度、颜色、内边距和 `InputEditorStyle` 由设计系统提供。现成样式控件参见 [`gpui-component` Textarea](../../docs/components/textarea.md)。
+该控件没有产品样式；边框、高度、颜色、内边距和 `InputEditorStyle` 由设计系统提供。现成样式控件参见 [`gpui-component` Textarea](../../component/textarea.md)。
 
 ## 可运行示例
 
 ```bash
-cargo run -p gpui-base --example components -- textarea
+cargo run -p gpui-base-examples -- textarea
 ```

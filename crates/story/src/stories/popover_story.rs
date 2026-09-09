@@ -1,9 +1,4 @@
-use gpui::{
-    Action, Anchor, App, AppContext, Context, DismissEvent, Entity, EventEmitter, FocusHandle,
-    Focusable, Half, InteractiveElement, IntoElement, KeyBinding, MouseButton, ParentElement as _,
-    Render, Styled as _, WeakEntity, Window, actions, div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, StyledExt, WindowExt,
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -14,6 +9,7 @@ use gpui_component::{
     separator::Separator,
     v_flex,
 };
+use gpui_kit::*;
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -79,7 +75,7 @@ impl ListDelegate for DropdownListDelegate {
 
     fn render_item(
         &mut self,
-        ix: gpui_component::IndexPath,
+        ix: gpui_kit::component::IndexPath,
         _: &mut Window,
         _: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
@@ -88,9 +84,9 @@ impl ListDelegate for DropdownListDelegate {
 
     fn set_selected_index(
         &mut self,
-        _: Option<gpui_component::IndexPath>,
+        _: Option<gpui_kit::component::IndexPath>,
         _: &mut Window,
-        _: &mut Context<gpui_component::list::ListState<Self>>,
+        _: &mut Context<gpui_kit::component::list::ListState<Self>>,
     ) {
     }
 

@@ -1,0 +1,20 @@
+---
+import BaseLayout from './BaseLayout.astro';
+
+export interface Props {
+  title?: string;
+  description?: string;
+  lang?: 'en' | 'zh-CN';
+}
+
+const { title, description, lang = 'en' } = Astro.props;
+const canonical = new URL(Astro.url.pathname, 'https://gpui-kit.com').href;
+---
+
+<BaseLayout title={title} description={description} lang={lang} canonical={canonical}>
+  <slot />
+</BaseLayout>
+
+<style is:global>
+  @import '../styles/global.css';
+</style>

@@ -1,13 +1,13 @@
 use std::borrow::Cow;
 use std::cell::RefCell;
 
-use gpui::{prelude::*, *};
-use gpui_component::{
+use gpui_component_story::{Gallery, StoryRoot};
+use gpui_kit::assets::Assets;
+use gpui_kit::component::{
     Root,
     theme::{Theme, ThemeMode},
 };
-use gpui_component_assets::Assets;
-use gpui_component_story::{Gallery, StoryRoot};
+use gpui_kit::{prelude::*, *};
 use wasm_bindgen::prelude::*;
 
 thread_local! {
@@ -59,15 +59,13 @@ pub fn run(story: Option<String>, dark: Option<bool>) -> Result<(), JsValue> {
     tracing_wasm::set_as_global_default();
 
     #[cfg(target_family = "wasm")]
-    gpui_platform::web_init();
+    gpui_kit::platform::web_init();
     #[cfg(not(target_family = "wasm"))]
-    let app = gpui_platform::application();
+    let app = gpui_kit::application();
     #[cfg(target_family = "wasm")]
-    let app = gpui_platform::single_threaded_web();
+    let app = gpui_kit::platform::single_threaded_web();
 
-    let app = app.with_assets(Assets::new(
-        "https://longbridge.github.io/gpui-component/gallery/",
-    ));
+    let app = app.with_assets(Assets::new("https://gpui-kit.com/gallery/"));
     let launch = move |cx: &mut App| {
         gpui_component_story::init(cx);
 
@@ -80,8 +78,21 @@ pub fn run(story: Option<String>, dark: Option<bool>) -> Result<(), JsValue> {
         let emoji_font = Cow::Borrowed(include_bytes!("../fonts/NotoEmoji-Regular.ttf").as_slice());
         let jetbrains_mono =
             Cow::Borrowed(include_bytes!("../fonts/JetBrainsMono-Regular.ttf").as_slice());
+        // The web platform resolves GPUI's `.SystemUIFont` alias to IBM Plex
+        // Sans and ships no fonts of its own. Text measured before the first
+        // frame, such as the search input's initial value, still carries the
+        // window's default text style, so that family has to exist or the
+        // text system panics.
+        let system_font =
+            Cow::Borrowed(include_bytes!("../fonts/IBMPlexSans-Regular.ttf").as_slice());
         cx.text_system()
-            .add_fonts(vec![ui_font, cjk_font, emoji_font, jetbrains_mono])
+            .add_fonts(vec![
+                ui_font,
+                cjk_font,
+                emoji_font,
+                jetbrains_mono,
+                system_font,
+            ])
             .expect("Failed to load fonts");
 
         // Apply the embedding page's appearance before the first frame, so an

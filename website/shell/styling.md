@@ -23,7 +23,7 @@ v_flex().size_full().bg(surface).p(px(12.)).gap(px(8.)).rounded(px(6.))
 
 The style surface has two halves, and they exist for different reasons.
 
-**No-argument methods come from GPUI's reflection table.** `flex_col`, `items_center`, `gap_2`, `rounded_md`, `text_sm`, `size_full`, `font_semibold`, `truncate`, `cursor_pointer` — the whole family, obtained from `gpui_base::styled_ext_reflection_methods` and `gpui::styled_reflection::methods` with no maintenance at all. Not one of these names is written down anywhere in the runtime. When upstream GPUI adds a style method, the script surface has it, and so does the generated `gpui.d.ts`.
+**No-argument methods come from GPUI's reflection table.** `flex_col`, `items_center`, `gap_2`, `rounded_md`, `text_sm`, `size_full`, `font_semibold`, `truncate`, `cursor_pointer` — the whole family, obtained from `gpui_kit::base::styled_ext_reflection_methods` and `gpui_kit::styled_reflection::methods` with no maintenance at all. Not one of these names is written down anywhere in the runtime. When upstream GPUI adds a style method, the script surface has it, and so does the generated `gpui-kit.d.ts`.
 
 The build these pages were written against exposes **3,148** of them. It is however many `fn(self) -> Self` style methods GPUI currently has, and it moves when GPUI moves. `gpui-shell types` prints the exact figure for your build.
 
@@ -44,11 +44,11 @@ A bare number is pixels. A string carries its unit.
 
 Which of those a given method accepts follows **its Rust signature**, because that signature is what rejects the bad ones. GPUI has three length types nested inside each other, and the runtime keeps the distinction rather than flattening it:
 
-| Type | Accepts | Rejects |
-| --- | --- | --- |
-| `Length` | a number, `"12px"`, `"1.5rem"`, `"50%"`, `"auto"` | — |
-| `DefiniteLength` | a number, `"12px"`, `"1.5rem"`, `"50%"` | `"auto"` |
-| `AbsoluteLength` | a number, `"12px"`, `"1.5rem"` | percentages, `"auto"` |
+| Type             | Accepts                                           | Rejects               |
+| ---------------- | ------------------------------------------------- | --------------------- |
+| `Length`         | a number, `"12px"`, `"1.5rem"`, `"50%"`, `"auto"` | —                     |
+| `DefiniteLength` | a number, `"12px"`, `"1.5rem"`, `"50%"`           | `"auto"`              |
+| `AbsoluteLength` | a number, `"12px"`, `"1.5rem"`                    | percentages, `"auto"` |
 
 ```text
 `p` cannot be "auto"; it expects a definite length such as 12 or "50%"
@@ -63,22 +63,22 @@ percentages and "auto" are not allowed here
 
 ### The parametric methods
 
-| Family | Methods | Argument |
-| --- | --- | --- |
-| Size | `w` `h` `size` `min_w` `min_h` `min_size` `max_w` `max_h` `max_size` | `Length` |
-| Padding | `p` `px` `py` `pt` `pb` `pl` `pr` | `DefiniteLength` |
-| Margin | `m` `mx` `my` `mt` `mb` `ml` `mr` | `Length` |
-| Position | `inset` `top` `bottom` `left` `right` | `Length` |
-| Flex | `gap` `gap_x` `gap_y` | `DefiniteLength` |
-| Flex | `flex_basis` | `Length` |
-| Flex | `flex_grow` `flex_shrink` | number |
-| Border | `border` `border_t` `border_b` `border_l` `border_r` `border_x` `border_y` | `AbsoluteLength` |
-| Radius | `rounded` and the `_t` `_b` `_l` `_r` `_tl` `_tr` `_bl` `_br` forms | `AbsoluteLength` |
-| Paint | `bg` `text_color` `text_bg` `border_color` | colour |
-| Paint | `text_size` | `AbsoluteLength` |
-| Paint | `line_height` | `DefiniteLength` |
-| Typography | `font_family` | string |
-| Paint | `opacity` | number |
+| Family     | Methods                                                                    | Argument         |
+| ---------- | -------------------------------------------------------------------------- | ---------------- |
+| Size       | `w` `h` `size` `min_w` `min_h` `min_size` `max_w` `max_h` `max_size`       | `Length`         |
+| Padding    | `p` `px` `py` `pt` `pb` `pl` `pr`                                          | `DefiniteLength` |
+| Margin     | `m` `mx` `my` `mt` `mb` `ml` `mr`                                          | `Length`         |
+| Position   | `inset` `top` `bottom` `left` `right`                                      | `Length`         |
+| Flex       | `gap` `gap_x` `gap_y`                                                      | `DefiniteLength` |
+| Flex       | `flex_basis`                                                               | `Length`         |
+| Flex       | `flex_grow` `flex_shrink`                                                  | number           |
+| Border     | `border` `border_t` `border_b` `border_l` `border_r` `border_x` `border_y` | `AbsoluteLength` |
+| Radius     | `rounded` and the `_t` `_b` `_l` `_r` `_tl` `_tr` `_bl` `_br` forms        | `AbsoluteLength` |
+| Paint      | `bg` `text_color` `text_bg` `border_color`                                 | colour           |
+| Paint      | `text_size`                                                                | `AbsoluteLength` |
+| Paint      | `line_height`                                                              | `DefiniteLength` |
+| Typography | `font_family`                                                              | string           |
+| Paint      | `opacity`                                                                  | number           |
 
 `line_height` is the one exception worth memorizing: a **bare number is a multiplier**, not pixels. `line_height(1.45)` means 1.45× the font size, because that is what it means everywhere else in the industry and 1.45px is never what anyone meant. A string still follows the ordinary grammar.
 
@@ -100,15 +100,15 @@ render(cx) {
 
 The palette defines seventeen tokens:
 
-| | |
-| --- | --- |
-| Ground | `background`, `foreground` |
-| Surfaces | `surface`, `surface_foreground` |
-| Emphasis | `primary`, `primary_foreground`, `secondary`, `secondary_foreground` |
-| Recessive | `muted`, `muted_foreground` |
-| Highlight | `accent`, `accent_foreground`, `selection` |
-| Danger | `destructive`, `destructive_foreground` |
-| Chrome | `border`, `input`, `ring` |
+|           |                                                                      |
+| --------- | -------------------------------------------------------------------- |
+| Ground    | `background`, `foreground`                                           |
+| Surfaces  | `surface`, `surface_foreground`                                      |
+| Emphasis  | `primary`, `primary_foreground`, `secondary`, `secondary_foreground` |
+| Recessive | `muted`, `muted_foreground`                                          |
+| Highlight | `accent`, `accent_foreground`, `selection`                           |
+| Danger    | `destructive`, `destructive_foreground`                              |
+| Chrome    | `border`, `input`, `ring`                                            |
 
 Hex literals accept `#rgb`, `#rrggbb` and `#rrggbbaa`.
 
@@ -124,7 +124,7 @@ or a #rrggbb literal
 ### Where the active tokens come from
 
 gpui-shell does not own a palette or theme file format. It reads the active
-`gpui_base::Theme` supplied by the host. A JavaScript application may replace
+`gpui_kit::base::Theme` supplied by the host. A JavaScript application may replace
 that same Base Snapshot with `set_theme({ appearance, tokens })`; theme names
 and any registry remain application state.
 

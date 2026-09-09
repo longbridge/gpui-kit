@@ -1,6 +1,6 @@
 // The gallery imports only public script modules. Registered surfaces render
 // through gpui-component; infrastructure entries remain honest status panels.
-import { div } from "gpui";
+import { div } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import { coveredSurfaces } from "./coverage.js";
 import { registeredExamples } from "./registered.js";
@@ -30,7 +30,7 @@ export function pendingStory(story) {
   };
 }
 
-/** @param {StoryDefinition} story @param {string[]} surfaces @param {import("gpui").Context} cx */
+/** @param {StoryDefinition} story @param {string[]} surfaces @param {import("gpui-kit").Context} cx */
 function registeredPanel(story, surfaces, cx) {
   return v_flex()
     .id(`story-${story.id}`)
@@ -49,7 +49,7 @@ function registeredPanel(story, surfaces, cx) {
  * boundary, a title/description header, and a presentation area that lets the
  * component remain the focal point.
  * @param {{ label: string, description?: string, element: unknown }} example
- * @param {import("gpui").Context} cx
+ * @param {import("gpui-kit").Context} cx
  */
 function storySection(example, cx) {
   const colors = cx.theme().colors;
@@ -92,14 +92,14 @@ function storySection(example, cx) {
         .justify_center()
         .bg(colors.background)
         .child(
-          /** @type {import("gpui").Element} */ (
+          /** @type {import("gpui-kit").Element} */ (
             /** @type {unknown} */ (example.element)
           ),
         ),
     );
 }
 
-/** @param {StoryDefinition} story @param {import("gpui").Context} cx */
+/** @param {StoryDefinition} story @param {import("gpui-kit").Context} cx */
 function availabilityPanel(story, cx) {
   const colors = cx.theme().colors;
 

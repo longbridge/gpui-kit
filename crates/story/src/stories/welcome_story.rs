@@ -1,8 +1,8 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, Render, Styled as _, Window, px,
 };
 
-use gpui_component::{dock::PanelControl, text::markdown};
+use gpui_kit::component::{dock::PanelControl, text::markdown};
 
 use crate::Story;
 
@@ -39,13 +39,13 @@ impl Story for WelcomeStory {
         None
     }
 
-    fn paddings() -> gpui::Pixels {
+    fn paddings() -> gpui_kit::Pixels {
         px(0.)
     }
 }
 
 impl Focusable for WelcomeStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }
@@ -53,9 +53,9 @@ impl Focusable for WelcomeStory {
 impl Render for WelcomeStory {
     fn render(
         &mut self,
-        _: &mut gpui::Window,
-        _: &mut gpui::Context<Self>,
-    ) -> impl gpui::IntoElement {
+        _: &mut gpui_kit::Window,
+        _: &mut gpui_kit::Context<Self>,
+    ) -> impl gpui_kit::IntoElement {
         markdown(include_str!("../../../../README.md"))
             .px_4()
             .scrollable(true)

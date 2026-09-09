@@ -76,7 +76,7 @@ fn described(context: &mut VisualTestContext, view: &gpui::Entity<ScriptView>) -
 /// The report line is what the assertions read: the script prints its own
 /// `panels()` into the description, so a test sees exactly what a script sees.
 const WORKSPACE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, h_flex, DockArea, dock_area } from "gpui-base";
 
 class Inbox extends View {
@@ -220,7 +220,7 @@ fn unchanged_dock_chrome_does_not_reenter_quickjs(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_null_chrome_description_is_cached_rather_than_retried(cx: &mut TestAppContext) {
     const SOURCE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { DockArea, dock_area } from "gpui-base";
 
 class Inbox extends View {
@@ -263,7 +263,7 @@ export default class Workspace extends View {
 #[gpui::test]
 fn a_dock_area_obeys_the_retained_entity_limit(cx: &mut TestAppContext) {
     const SOURCE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { DockArea } from "gpui-base";
 
 export default class Probe extends View {
@@ -310,7 +310,7 @@ export default class Probe extends View {
 #[gpui::test]
 fn a_layout_round_trips_through_the_registry(cx: &mut TestAppContext) {
     const SOURCE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, DockArea, dock_area } from "gpui-base";
 
 // What `deserialize` was handed, in the order it arrived. Module scope, because
@@ -401,7 +401,7 @@ export default class Workspace extends View {
 #[gpui::test]
 fn a_panel_with_no_registered_class_still_docks(cx: &mut TestAppContext) {
     const SOURCE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, DockArea, dock_area } from "gpui-base";
 
 class Scratch extends View {
@@ -440,7 +440,7 @@ export default class Workspace extends View {
 #[gpui::test]
 fn a_dock_chrome_places_the_content_it_was_given(cx: &mut TestAppContext) {
     const SOURCE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, DockArea, dock_area, dock_content } from "gpui-base";
 
 class Scratch extends View {
@@ -510,7 +510,7 @@ export default class Workspace extends View {
 #[gpui::test]
 fn changing_the_layout_from_render_is_refused(cx: &mut TestAppContext) {
     const SOURCE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { DockArea, dock_area } from "gpui-base";
 
 export default class Workspace extends View {
@@ -539,7 +539,7 @@ export default class Workspace extends View {
 #[gpui::test]
 fn dock_arguments_are_validated_before_narrowing(cx: &mut TestAppContext) {
     const SOURCE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { DockArea } from "gpui-base";
 
 class Panel extends View { render() { return div(); } }
@@ -594,7 +594,7 @@ export default class Probe extends View {
 #[gpui::test]
 fn programmatic_dock_size_change_reaches_persistence_subscriber(cx: &mut TestAppContext) {
     const SOURCE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { DockArea } from "gpui-base";
 
 class Panel extends View { render() { return div(); } }

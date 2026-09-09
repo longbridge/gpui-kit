@@ -12,23 +12,23 @@ Like every `gpui-base` primitive, Select supplies behavior and semantic structur
 
 ## Example
 
-The [single native Cargo entrypoint](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
+The [single native Cargo entrypoint](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/native/src/bin/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
 
 ```bash
-cargo run -p gpui-base --example components -- select
+cargo run -p gpui-base-examples -- select
 ```
 
 ## Import
 
 ```rust
-use gpui_base::{Select};
+use gpui_kit::base::{Select};
 ```
 
 ## Anatomy and API
 
 The example composes `Select`. GPUI's standard styling and event traits provide presentation; these base types provide the interaction structure.
 
-The authoritative module is [`components/select.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/select.rs). Native and browser previews compile this same file.
+The authoritative module is [`components/select.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/select.rs). Native and browser previews compile this same file.
 
 ## State and events
 
@@ -46,7 +46,12 @@ The command above supplies application initialization, window creation, and shar
 
 ## Accessibility
 
-Label the trigger, expose expanded/selected state, and support traversal, selection, Escape, and focus return.
+Set `.accessibility_label(...)` on the controlled root and
+`.accessibility_value(...)` to its committed selection, not a temporary search
+cursor. The root exposes its expanded state and accessible activation. Activation
+requests an open-state change and moves focus between the trigger and content.
+Disabled controls do not expose activation. The styled `Select` supplies its
+committed value automatically, falling back to its placeholder when unselected.
 
 ## Notes
 

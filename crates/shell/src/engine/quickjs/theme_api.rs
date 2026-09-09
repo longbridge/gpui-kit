@@ -3,7 +3,35 @@ use crate::{theme_tokens, value::Bridged};
 use gpui_base::{Theme, ThemeAppearance};
 use rquickjs::{Ctx, Exception, Object, Result as JsResult, Value, function::Func};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
+thread_local! {
+    static SNAPSHOT_CACHE: RefCell<ThemeSnapshotCache> = RefCell::new(ThemeSnapshotCache::default());
+}
+
+#[derive(Default)]
+struct ThemeSnapshotCache {
+    entry: Option<(gpui_base::SemanticThemeTokens, ThemeAppearance, Rc<String>)>,
+}
+
+impl ThemeSnapshotCache {
+    fn snapshot(
+        &mut self,
+        tokens: &gpui_base::SemanticThemeTokens,
+        appearance: ThemeAppearance,
+    ) -> Rc<String> {
+        if let Some((cached_tokens, cached_appearance, json)) = &self.entry
+            && cached_tokens == tokens
+            && *cached_appearance == appearance
+        {
+            return json.clone();
+        }
+
+        let json = Rc::new(build_snapshot_json(tokens, appearance));
+        self.entry = Some((tokens.clone(), appearance, json.clone()));
+        json
+    }
+}
 
 #[derive(Deserialize)]
 struct ScriptTheme {
@@ -63,8 +91,12 @@ struct TextStyleOverride {
 
 pub fn install(ctx: &Ctx<'_>, module: &Object<'_>) -> JsResult<()> {
     ctx.globals().set(
+        "__theme_revision",
+        Func::from(|| -> u32 { theme_tokens::revision() }),
+    )?;
+    ctx.globals().set(
         "__theme_snapshot",
-        Func::from(|_: Ctx<'_>| -> JsResult<String> { Ok(snapshot_json()) }),
+        Func::from(|_: Ctx<'_>| -> JsResult<String> { Ok(snapshot_json().as_ref().clone()) }),
     )?;
     module.set("set_theme", Func::from(set_theme))?;
     Ok(())
@@ -110,14 +142,16 @@ fn set_theme<'js>(ctx: Ctx<'js>, value: Value<'js>) -> JsResult<()> {
         base.tokens = tokens;
         theme_tokens::sync(cx);
         cx.refresh_windows();
-        Ok(())
+        Ok::<(), rquickjs::Error>(())
     })
     .ok_or_else(|| {
         Exception::throw_type(
             &ctx,
             "set_theme(theme) needs a live host call; call it from an event handler",
         )
-    })?
+    })??;
+    ctx.globals().set("__theme_dirty", true)?;
+    Ok(())
 }
 
 fn apply_colors(
@@ -262,11 +296,22 @@ fn set_radius(t: &mut gpui_base::RadiusTokens, n: &str, v: f32) {
     }
 }
 
-fn snapshot_json() -> String {
+fn snapshot_json() -> Rc<String> {
+    let theme = theme_tokens::snapshot();
+    SNAPSHOT_CACHE.with(|cache| cache.borrow_mut().snapshot(&theme.tokens, theme.appearance))
+}
+
+fn build_snapshot_json(
+    tokens: &gpui_base::SemanticThemeTokens,
+    appearance: ThemeAppearance,
+) -> String {
     let join = |v: Vec<String>| v.join(",");
     let pairs = theme_tokens::color_token_names()
         .iter()
-        .filter_map(|n| theme_tokens::token_color(n).map(|c| format!("\"{n}\":\"{}\"", hex(c))))
+        .filter_map(|n| {
+            theme_tokens::resolve_color(&tokens.colors, n)
+                .map(|c| format!("\"{n}\":\"{}\"", hex(c)))
+        })
         .collect::<Vec<_>>();
     let colors = join(pairs.clone());
     let direct = join(pairs);
@@ -274,7 +319,8 @@ fn snapshot_json() -> String {
         theme_tokens::spacing_token_names()
             .iter()
             .filter_map(|n| {
-                theme_tokens::token_spacing(n).map(|v| format!("\"{n}\":{}", f32::from(v)))
+                theme_tokens::resolve_spacing(&tokens.spacing, n)
+                    .map(|v| format!("\"{n}\":{}", f32::from(v)))
             })
             .collect(),
     );
@@ -282,37 +328,35 @@ fn snapshot_json() -> String {
         theme_tokens::radius_token_names()
             .iter()
             .filter_map(|n| {
-                theme_tokens::token_radius(n).map(|v| format!("\"{n}\":{}", f32::from(v)))
+                theme_tokens::resolve_radius(&tokens.radius, n)
+                    .map(|v| format!("\"{n}\":{}", f32::from(v)))
             })
             .collect(),
     );
-    let typography = theme_tokens::typography_tokens()
-        .map(|t| {
-            let style = |name: &str, s: &gpui_base::TextStyleToken| {
-                format!(
-                    "\"{name}\":{{\"size\":{},\"line_height\":{},\"weight\":{}}}",
-                    f32::from(s.size),
-                    f32::from(s.line_height),
-                    s.weight.0
-                )
-            };
-            let mut parts = vec![
-                format!("\"sans\":{}", json_string(&t.sans)),
-                format!("\"mono\":{}", json_string(&t.mono)),
-            ];
-            parts.extend([
-                style("xs", &t.xs),
-                style("sm", &t.sm),
-                style("md", &t.md),
-                style("lg", &t.lg),
-                style("xl", &t.xl),
-                style("mono_md", &t.mono_md),
-            ]);
-            join(parts)
-        })
-        .unwrap_or_default();
-    let appearance =
-        crate::scope::with_current_app(|cx| Theme::global(cx).appearance).unwrap_or_default();
+    let typography = {
+        let t = &tokens.typography;
+        let style = |name: &str, s: &gpui_base::TextStyleToken| {
+            format!(
+                "\"{name}\":{{\"size\":{},\"line_height\":{},\"weight\":{}}}",
+                f32::from(s.size),
+                f32::from(s.line_height),
+                s.weight.0
+            )
+        };
+        let mut parts = vec![
+            format!("\"sans\":{}", json_string(&t.sans)),
+            format!("\"mono\":{}", json_string(&t.mono)),
+        ];
+        parts.extend([
+            style("xs", &t.xs),
+            style("sm", &t.sm),
+            style("md", &t.md),
+            style("lg", &t.lg),
+            style("xl", &t.xl),
+            style("mono_md", &t.mono_md),
+        ]);
+        join(parts)
+    };
     let name = match appearance {
         ThemeAppearance::Light => "light",
         ThemeAppearance::Dark => "dark",
@@ -332,4 +376,32 @@ fn hex(color: gpui::Hsla) -> String {
     let c = gpui::Rgba::from(color);
     let b = |v: f32| (v.clamp(0., 1.) * 255.).round() as u8;
     format!("#{:02x}{:02x}{:02x}", b(c.r), b(c.g), b(c.b))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unchanged_theme_snapshot_reuses_its_serialized_storage() {
+        let tokens = gpui_base::SemanticThemeTokens::default();
+        let mut cache = ThemeSnapshotCache::default();
+
+        let first = cache.snapshot(&tokens, ThemeAppearance::Light);
+        let second = cache.snapshot(&tokens, ThemeAppearance::Light);
+
+        assert!(std::rc::Rc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn changed_theme_snapshot_invalidates_serialized_storage() {
+        let tokens = gpui_base::SemanticThemeTokens::default();
+        let mut cache = ThemeSnapshotCache::default();
+
+        let first = cache.snapshot(&tokens, ThemeAppearance::Light);
+        let second = cache.snapshot(&tokens, ThemeAppearance::Dark);
+
+        assert!(!std::rc::Rc::ptr_eq(&first, &second));
+        assert_ne!(first, second);
+    }
 }

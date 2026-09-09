@@ -1,5 +1,5 @@
-use gpui::*;
-use gpui_component::{
+use gpui_kit::*;
+use gpui_kit::component::{
     h_flex,
     theme::{ActiveTheme, Colorize},
     v_flex, Root, Sizable,
@@ -45,28 +45,28 @@ impl Render for ColorMixDemo {
                                     .size_20()
                                     .bg(destructive)
                                     .child("100%")
-                                    .text_color(gpui::white()),
+                                    .text_color(gpui_kit::white()),
                             )
                             .child(
                                 div()
                                     .size_20()
                                     .bg(mixed_80)
                                     .child("80%")
-                                    .text_color(gpui::white()),
+                                    .text_color(gpui_kit::white()),
                             )
                             .child(
                                 div()
                                     .size_20()
                                     .bg(mixed_50)
                                     .child("50%")
-                                    .text_color(gpui::white()),
+                                    .text_color(gpui_kit::white()),
                             )
                             .child(
                                 div()
                                     .size_20()
                                     .bg(mixed_20)
                                     .child("20%")
-                                    .text_color(gpui::white()),
+                                    .text_color(gpui_kit::white()),
                             ),
                     ),
             )
@@ -110,7 +110,7 @@ impl Render for ColorMixDemo {
                                         div()
                                             .size_16()
                                             .bg(destructive.mix(transparent, 0.5))
-                                            .text_color(gpui::white())
+                                            .text_color(gpui_kit::white())
                                             .child("HSL"),
                                     )
                                     .child(format!(
@@ -126,7 +126,7 @@ impl Render for ColorMixDemo {
                                         div()
                                             .size_16()
                                             .bg(destructive.mix_oklab(transparent, 0.5))
-                                            .text_color(gpui::white())
+                                            .text_color(gpui_kit::white())
                                             .child("Oklab"),
                                     )
                                     .child(format!("{}", mixed_50.to_hex())),
@@ -149,7 +149,7 @@ fn main() {
     env_logger::init();
 
     Application::new().run(move |cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
 
         cx.activate(true);
         cx.on_action(|_: &Quit, cx: &mut AppContext| {

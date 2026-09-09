@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use serde_json::Value;
 
 const INVENTORY: &str = include_str!("../component-inventory.json");
-const UI_LIB: &str = include_str!("../../ui/src/lib.rs");
+const UI_LIB: &str = include_str!("../../component/src/lib.rs");
 const STORIES_MOD: &str = include_str!("../../story/src/stories/mod.rs");
 
 #[test]

@@ -1,0 +1,77 @@
+name: "Release GPUI"
+# Publish a fresh snapshot of Zed's gpui crates to crates.io as gpui-pre-*.
+# See script/bump-gpui.ts for the publishing and validation pipeline.
+on:
+  schedule:
+    # Monday 00:00 US Pacific, where Zed's week starts: 08:09 UTC, a few
+    # minutes off the hour because GitHub delays schedules that begin one,
+    # and an hour later in Pacific daylight time. The run stops without
+    # publishing when Zed did not change any of the republished crates.
+    - cron: "9 8 * * 1"
+  workflow_dispatch:
+    inputs:
+      rev:
+        description: "Zed branch, tag or commit to publish"
+        required: false
+        default: "main"
+      version:
+        description: "Publish exactly this version instead of the next <VERSION>.<N>"
+        required: false
+        default: ""
+      force:
+        description: "Publish even when Zed did not change the published crates"
+        type: boolean
+        required: false
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish gpui-pre
+    # macOS verifies the Metal shader build script of gpui_apple, the one
+    # part of the pipeline that only compiles on Apple platforms.
+    runs-on: macos-latest
+    # The run builds and tests gpui-kit against the snapshot, and a first
+    # publish of brand-new crates waits on the crates.io rate limit between
+    # batches; 6 hours is enough for a full run.
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: oven-sh/setup-bun@v2
+      # The script builds and tests this repository against the staged crates
+      # before uploading, so the same system dependencies CI installs are
+      # needed here.
+      - name: Install system dependencies
+        run: script/bootstrap
+      - name: Cache the staged workspace and repository builds
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: release-gpui-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: release-gpui-${{ runner.os }}-
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          bun script/bump-gpui.ts ${{ inputs.version }} --rev "${{ inputs.rev || 'main' }}" ${{ inputs.force && '--force' || '' }}
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f target/gpui-pre/gpui-pre.json ]; then
+            {
+              echo "## gpui-pre $(jq -r .version target/gpui-pre/gpui-pre.json)"
+              echo
+              echo "Zed revision: $(jq -r .zed.rev target/gpui-pre/gpui-pre.json)"
+              echo
+              echo '| Zed crate | Published as |'
+              echo '| --- | --- |'
+              jq -r '.crates[] | "| \(.zed_name) | \(.name) |"' target/gpui-pre/gpui-pre.json
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi

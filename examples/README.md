@@ -2,7 +2,22 @@
 
 This folder contains basic examples of how to use the GPUI Component library. Each example demonstrates a specific feature or functionality of the library.
 
-Unlike the examples in the `story` folder, these examples focus on 1 example for 1 feature, making it easier to understand and implement specific functionalities in your own projects.
+Each Rust package runs with `cargo run -p <package-name>`. The larger examples
+reuse the `story` gallery components as a normal dependency, so running them does
+not enable the gallery's test-support development dependency.
+
+| Example | Command |
+| --- | --- |
+| Editor | `cargo run -p example-editor` |
+| Brush | `cargo run -p example-brush` |
+| Dock | `cargo run -p example-dock` |
+| HTML | `cargo run -p example-html` |
+| Large text | `cargo run -p example-large-text` |
+| Markdown | `cargo run -p example-markdown` |
+| Streaming Markdown | `cargo run -p example-stream-markdown` |
+| Tiles | `cargo run -p example-tiles` |
+
+Shared sample documents live in `fixtures/`.
 
 ## Contributing
 

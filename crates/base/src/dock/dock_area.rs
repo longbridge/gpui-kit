@@ -1,6 +1,7 @@
 //! The dock area: the trees, the entity cache that mirrors them, and the
 //! reconciliation that keeps the two in step.
 
+use crate::TestSupportExt as _;
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
@@ -111,6 +112,11 @@ struct Cached<T> {
 struct CachedSplit {
     entity: Entity<ResizableState>,
     children: Vec<NodeId>,
+    /// The tree sizes the state last adopted. A reconcile that finds them
+    /// unchanged leaves the state alone: re-adopting a `None` un-pins the
+    /// measurement the layout pass resolved it to, and the split re-flexes
+    /// although the edit never touched it.
+    sizes: Vec<Option<Pixels>>,
     _subscription: Subscription,
 }
 
@@ -1009,22 +1015,43 @@ impl DockArea {
                     sizes,
                 } => {
                     let state = self.split_entity(node, cx);
-                    let previous = self
+                    let (previous, adopted) = self
                         .splits
                         .get(&node)
-                        .map(|cached| cached.children.clone())
+                        .map(|cached| (cached.children.clone(), cached.sizes.clone()))
                         .unwrap_or_default();
-                    state.update(cx, |state, cx| {
-                        sync_split_panels(state, &previous, &children, &sizes, cx);
-                        state.sync_panels_count(axis, children.len(), cx);
-                        // The tree is authoritative on how space divides, so
-                        // its sizes land last — `insert_panel` renormalizes
-                        // everything it touches, which would otherwise undo
-                        // the share an edit just decided.
-                        state.adopt_sizes(&sizes, cx);
-                    });
+                    // Only a split the edit changed is handed anything. The
+                    // state of every other split may legitimately disagree
+                    // with its tree — a window resize rescales it silently —
+                    // and pushing the tree's sizes back would move slots the
+                    // edit never named. For a slot the tree leaves `None`, it
+                    // would also un-pin the measurement the first layout pass
+                    // resolved it to, and the whole split re-flexes.
+                    if previous != children || adopted != sizes {
+                        state.update(cx, |state, cx| {
+                            sync_split_panels(state, &previous, &children, &sizes, cx);
+                            state.sync_panels_count(axis, children.len(), cx);
+                            // The tree is authoritative on how space divides,
+                            // so its sizes land last — `insert_panel`
+                            // renormalizes everything it touches, which would
+                            // otherwise undo the share an edit just decided.
+                            //
+                            // What the tree decides is the *share*, not the
+                            // pixel count. The file holds absolute pixels
+                            // measured in whatever window last saved it, so
+                            // restoring into a different one leaves their
+                            // total off the container — and
+                            // `adjust_to_container_size` rescales the state to
+                            // the container on the very next pass. Adopting
+                            // the raw numbers would re-assert the stale total,
+                            // so hand over the share instead and both sides
+                            // already agree.
+                            state.adopt_sizes(&scale_sizes_to(state.container_size(), &sizes), cx);
+                        });
+                    }
                     if let Some(cached) = self.splits.get_mut(&node) {
                         cached.children = children;
+                        cached.sizes = sizes;
                     }
                 }
                 ContainerPlan::Group {
@@ -1188,8 +1215,13 @@ impl DockArea {
                 let Some(tree) = this.tree_mut(region) else {
                     return;
                 };
-                if tree.set_sizes(node, sizes).changed() {
+                if tree.set_sizes(node, sizes.clone()).changed() {
                     cx.emit(DockEvent::LayoutChanged);
+                }
+                // The state is where these came from, so the next reconcile
+                // has nothing to hand it.
+                if let Some(cached) = this.splits.get_mut(&node) {
+                    cached.sizes = sizes;
                 }
             });
         self.splits.insert(
@@ -1197,6 +1229,7 @@ impl DockArea {
             CachedSplit {
                 entity: entity.clone(),
                 children: Vec::new(),
+                sizes: Vec::new(),
                 _subscription: subscription,
             },
         );
@@ -1562,6 +1595,7 @@ impl Render for DockArea {
 
         renderer
             .frame(window, cx)
+            .test_support()
             // Structure, applied after the hook and not inside it. A dock area
             // lays its left dock, centre and right dock out in a row; a frame
             // that is not one stacks them down the window instead, which is
@@ -1635,6 +1669,25 @@ impl ContainerPlan {
             Self::Split { node, .. } | Self::Group { node, .. } | Self::Tiles { node, .. } => *node,
         }
     }
+}
+
+/// Re-express slot sizes as shares of `container`, keeping their proportions.
+///
+/// Returns them unchanged unless every slot is constrained and both the
+/// container and the recorded total are usable: an unconstrained slot is laid
+/// out by flex and takes the leftover, so scaling only the constrained ones
+/// would move a divider nothing asked to move.
+fn scale_sizes_to(container: Pixels, sizes: &[Option<Pixels>]) -> Vec<Option<Pixels>> {
+    let total: f32 = sizes.iter().flatten().map(|size| size.as_f32()).sum();
+    if container <= px(0.) || total <= 0. || sizes.iter().any(Option::is_none) {
+        return sizes.to_vec();
+    }
+
+    let scale = container.as_f32() / total;
+    sizes
+        .iter()
+        .map(|size| size.map(|size| px(size.as_f32() * scale)))
+        .collect()
 }
 
 /// Bring one split's `ResizableState` panel list from `previous` to `next`,
@@ -2070,6 +2123,35 @@ mod tests {
     use super::*;
     use crate::dock::test_support::{Log, PanelSignal, TestPanel, drain, drain_active, log_of};
     use crate::dock::{TabGroupContext, TileContext};
+
+    /// The file holds pixels measured in whatever window last saved it, so its
+    /// total is off the container the layout is restored into.
+    #[test]
+    fn slot_sizes_are_re_expressed_as_shares_of_the_container() {
+        let scaled = scale_sizes_to(px(800.), &[Some(px(300.)), Some(px(100.))]);
+
+        assert_eq!(scaled, vec![Some(px(600.)), Some(px(200.))]);
+    }
+
+    /// An unconstrained slot is laid out by flex and takes the leftover, so
+    /// scaling only its siblings would move a divider nothing asked to move.
+    #[test]
+    fn an_unconstrained_slot_leaves_every_size_alone() {
+        let sizes = [Some(px(300.)), None];
+
+        assert_eq!(scale_sizes_to(px(800.), &sizes), sizes.to_vec());
+    }
+
+    /// Nothing to scale against before the first layout pass, or when the
+    /// recorded sizes carry no length at all.
+    #[test]
+    fn an_unusable_container_or_total_leaves_every_size_alone() {
+        let sizes = [Some(px(300.)), Some(px(100.))];
+        assert_eq!(scale_sizes_to(px(0.), &sizes), sizes.to_vec());
+
+        let zeroed = [Some(px(0.)), Some(px(0.))];
+        assert_eq!(scale_sizes_to(px(800.), &zeroed), zeroed.to_vec());
+    }
 
     fn setup(cx: &mut TestAppContext) -> (Entity<DockArea>, &mut VisualTestContext) {
         cx.update(|cx| {
@@ -2797,6 +2879,174 @@ mod tests {
         );
     }
 
+    /// A panel that draws a measurable box, so a test can read where a slot
+    /// actually landed rather than what `ResizableState` believes about it.
+    struct MeasuredPanel {
+        name: &'static str,
+        focus_handle: FocusHandle,
+    }
+
+    impl MeasuredPanel {
+        fn new(name: &'static str, cx: &mut App) -> Entity<Self> {
+            cx.new(|cx| Self {
+                name,
+                focus_handle: cx.focus_handle(),
+            })
+        }
+    }
+
+    impl Panel for MeasuredPanel {
+        fn panel_name(&self) -> &'static str {
+            self.name
+        }
+    }
+
+    impl EventEmitter<PanelEvent> for MeasuredPanel {}
+
+    impl Focusable for MeasuredPanel {
+        fn focus_handle(&self, _: &App) -> FocusHandle {
+            self.focus_handle.clone()
+        }
+    }
+
+    impl Render for MeasuredPanel {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let name = self.name;
+            div().size_full().debug_selector(move || name.into())
+        }
+    }
+
+    fn draw_frames(cx: &mut VisualTestContext, frames: usize) {
+        for _ in 0..frames {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+    }
+
+    /// Switching a tab edits one group, yet `commit` reconciles every
+    /// container. Reconciling a split the edit did not touch re-adopted the
+    /// tree's `None` for its flexible slot, un-pinning the size the first
+    /// layout pass had measured for it, so the split re-flexed from scratch
+    /// and its sized neighbour shrank. This is the dock example's left column
+    /// getting shorter on every tab click in the bottom dock.
+    #[gpui::test]
+    fn switching_a_tab_leaves_an_untouched_split_where_it_was_drawn(cx: &mut TestAppContext) {
+        let (area, cx) = setup(cx);
+        cx.update(|window, cx| {
+            area.update(cx, |area, cx| {
+                area.set_center(
+                    DockLayout::tabs().panel(TestPanel::new("Center", cx)),
+                    window,
+                    cx,
+                );
+                area.set_dock(
+                    DockPlacement::Left,
+                    DockLayout::v_split()
+                        .child(
+                            DockLayout::tabs().panel(MeasuredPanel::new("upper-left", cx)),
+                            None,
+                        )
+                        .child(
+                            DockLayout::tabs().panel(MeasuredPanel::new("lower-left", cx)),
+                            Some(px(360.)),
+                        ),
+                    window,
+                    cx,
+                );
+                area.set_dock_size(DockPlacement::Left, px(350.), window, cx);
+                area.set_dock(
+                    DockPlacement::Bottom,
+                    DockLayout::tabs()
+                        .panel(TestPanel::new("Tooltip", cx))
+                        .panel(TestPanel::new("Icon", cx)),
+                    window,
+                    cx,
+                );
+                area.set_dock_size(DockPlacement::Bottom, px(200.), window, cx);
+            });
+        });
+        cx.run_until_parked();
+        draw_frames(cx, 3);
+        let before = (
+            cx.debug_bounds("upper-left").unwrap(),
+            cx.debug_bounds("lower-left").unwrap(),
+        );
+
+        let bottom = cx.read(|cx| {
+            area.read(cx)
+                .layout(DockPlacement::Bottom)
+                .unwrap()
+                .root()
+                .id()
+        });
+        let group = cx.read(|cx| area.read(cx).groups[&bottom].entity.clone());
+        cx.update(|window, cx| {
+            group.update(cx, |group, cx| group.select_tab(1, window, cx));
+        });
+        cx.run_until_parked();
+        draw_frames(cx, 3);
+        let after = (
+            cx.debug_bounds("upper-left").unwrap(),
+            cx.debug_bounds("lower-left").unwrap(),
+        );
+
+        assert_eq!(
+            before, after,
+            "a tab change in the bottom dock must not move the left split"
+        );
+    }
+
+    /// The other way a reconcile could move an untouched split: its file holds
+    /// pixels measured in some other window, the first layout pass rescaled
+    /// the state to the container it actually has, and handing the file's
+    /// pixels back on a tab change slides the divider to a third position.
+    #[gpui::test]
+    fn switching_a_tab_keeps_a_restored_split_at_its_rescaled_share(cx: &mut TestAppContext) {
+        let (area, cx) = setup(cx);
+        cx.update(|window, cx| {
+            area.update(cx, |area, cx| {
+                area.set_center(
+                    DockLayout::h_split()
+                        .child(
+                            DockLayout::tabs()
+                                .panel(TestPanel::new("Alpha", cx))
+                                .panel(TestPanel::new("Beta", cx)),
+                            Some(px(620.)),
+                        )
+                        .child(
+                            DockLayout::tabs().panel(MeasuredPanel::new("second", cx)),
+                            Some(px(350.)),
+                        ),
+                    window,
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+        draw_frames(cx, 3);
+        // The second slot's box tells where the divider is: its left edge is
+        // the first slot's width, and the two add up to the container.
+        let before = cx.debug_bounds("second").unwrap();
+        assert_ne!(
+            before.right(),
+            px(970.),
+            "the window must not match the recorded total, or this test cannot \
+             tell a rescaled split from the file's pixels"
+        );
+
+        let group = group_of(&area, 0, cx);
+        cx.update(|window, cx| {
+            group.update(cx, |group, cx| group.select_tab(1, window, cx));
+        });
+        cx.run_until_parked();
+        draw_frames(cx, 3);
+        let after = cx.debug_bounds("second").unwrap();
+
+        assert_eq!(
+            before, after,
+            "a tab change must not hand the file's pixels back to the split"
+        );
+    }
+
     /// The headline claim of the whole extraction, in one place: a layout
     /// written by the shipped dock loads into the tree world, draws, and saves
     /// back to a state the next load reproduces exactly.
@@ -3046,7 +3296,8 @@ mod tests {
             "the added panel's view is registered"
         );
         let state = cx.read(|cx| area.read(cx).dump(cx));
-        let names: Vec<&str> = state.center.children[0]
+        let names: Vec<&str> = state
+            .center
             .children
             .iter()
             .map(|child| child.panel_name.as_str())
@@ -3391,7 +3642,7 @@ mod tests {
         cx.update(|window, cx| area.update(cx, |area, cx| area.load(state, window, cx).unwrap()));
 
         let dumped = cx.read(|cx| area.read(cx).dump(cx));
-        let tiles = &dumped.center.children[0];
+        let tiles = &dumped.center;
         assert_eq!(tiles.panel_name, "Tiles");
         assert_eq!(
             tiles
@@ -3676,7 +3927,7 @@ mod tests {
         );
     }
 
-    // The tests below were ported from `crates/ui/src/dock/tab_panel.rs` when
+    // The tests below were ported from `crates/component/src/dock/tab_panel.rs` when
     // the dock skin was rebuilt on this crate. They are the surviving record
     // of the `is_empty` semantics and the documented `set_active` contract.
 

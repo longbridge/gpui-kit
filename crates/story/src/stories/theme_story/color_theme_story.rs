@@ -1,5 +1,4 @@
-use gpui::{prelude::FluentBuilder, *};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, IndexPath, StyledExt as _, ThemeColor, ThemeStyled as _,
     button::{Button, ButtonVariants as _},
     h_flex,
@@ -10,6 +9,7 @@ use gpui_component::{
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
     v_flex,
 };
+use gpui_kit::{prelude::FluentBuilder, *};
 use serde::Deserialize;
 
 use crate::stories::theme_story::checkerboard::Checkerboard;
@@ -119,7 +119,7 @@ impl ThemeColorsStory {
     }
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        use gpui_component::ThemeRegistry;
+        use gpui_kit::component::ThemeRegistry;
 
         let registry = ThemeRegistry::global(cx);
         let mut themes = registry.sorted_themes();
@@ -177,7 +177,7 @@ impl ThemeColorsStory {
     }
 
     fn get_theme_colors(&self, cx: &Context<Self>) -> ThemeColor {
-        use gpui_component::{Theme as UITheme, ThemeRegistry};
+        use gpui_kit::component::{Theme as UITheme, ThemeRegistry};
 
         if let Some(theme_config) = ThemeRegistry::global(cx)
             .themes()
@@ -200,7 +200,7 @@ impl ThemeColorsStory {
     }
 
     fn get_isolated_theme(&self, cx: &App) -> (ThemeColor, bool) {
-        use gpui_component::{Theme as UITheme, ThemeRegistry};
+        use gpui_kit::component::{Theme as UITheme, ThemeRegistry};
 
         let registry = ThemeRegistry::global(cx);
 
@@ -232,7 +232,7 @@ impl ThemeColorsStory {
     }
 
     fn compute_categories(&mut self, cx: &Context<Self>) {
-        use gpui_component::ThemeRegistry;
+        use gpui_kit::component::ThemeRegistry;
 
         if self.all_categories.is_empty() {
             let theme = self.get_theme_colors(cx);
@@ -299,7 +299,7 @@ impl ThemeColorsStory {
         isolated_theme: &ThemeColor,
         cx: &App,
     ) -> impl IntoElement {
-        use gpui_component::{WindowExt as _, clipboard::Clipboard};
+        use gpui_kit::component::{WindowExt as _, clipboard::Clipboard};
 
         let rgb_str = format!("#{}", hex);
         let swatch_group = format!("swatch-{}", name);
@@ -571,7 +571,7 @@ impl ThemeColorsStory {
 
 fn format_colors(
     theme: &ThemeColor,
-    config: Option<&gpui_component::theme::ThemeConfigColors>,
+    config: Option<&gpui_kit::component::theme::ThemeConfigColors>,
 ) -> Vec<ColorCategory> {
     let json_theme = serde_json::to_value(theme).unwrap_or(serde_json::Value::Null);
     let mut categories: BTreeMap<String, Vec<ColorEntry>> = BTreeMap::new();
@@ -737,7 +737,7 @@ impl Render for ThemeColorsStory {
                                     .primary()
                                     .label("Set Theme")
                                     .on_click(cx.listener(|this, _, window, cx| {
-                                        use gpui_component::{Theme, ThemeRegistry};
+                                        use gpui_kit::component::{Theme, ThemeRegistry};
 
                                         let registry = ThemeRegistry::global(cx);
                                         if let Some(theme_config) = registry

@@ -5,9 +5,9 @@
 // takes the current `cx` and reads tokens through `cx.theme()`, which costs
 // nothing: a fresh description is exactly what a function call produces.
 
-import { div } from "gpui";
+import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-/** @import { Context, Element } from "gpui" */
+/** @import { Context, Element } from "gpui-kit" */
 
 /** The tab bar's height, and the height a dock's title strip matches. */
 export const BAR = 30;

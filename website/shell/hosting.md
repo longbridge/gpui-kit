@@ -13,7 +13,7 @@ order: 11
 One `ShellRuntime` owns one VM. It is an `Rc` with interior mutability — neither `Send` nor `Sync` — so it lives on the thread that owns the `App`.
 
 ```rust
-gpui_shell::init(cx);                     // gpui-base, the token palette, the style table
+gpui_kit::shell::init(cx);                     // gpui-base, the token palette, the style table
 
 let runtime = ShellRuntime::new(cx)?;     // one VM, installed as this App's default
 ```
@@ -45,7 +45,7 @@ cx.open_window(options, move |window, cx| {
 If `gpui-shell.json` exists, `load` validates its identity metadata and applies
 its entry. Its capabilities are requests, not approval: both paths run
 under the host's current default policy, and without a manifest the entry is
-`main.js`. Either path refreshes `gpui.d.ts`; a load failure renders the
+`main.js`. Either path refreshes `gpui-kit.d.ts`; a load failure renders the
 selectable error surface instead of panicking the host. A host that needs to
 handle the structured error itself uses `try_load`. A failure root has no
 application to watch, so `watch` returns `Err`; ignoring that error here keeps
@@ -100,7 +100,7 @@ cx.notify()        ── draw this View again          (no script runs)
 view.refresh(cx)   ── and its description is stale  (the script runs)
 ```
 
-Because a script `render` is [not a frame render](./state.md#when-render-runs), a plain `cx.notify()` repaints the Snapshot that already exists. If the host changed something the script *reads* — an entity behind a HostModule, a setting, a document — the View must be told the description itself is out of date:
+Because a script `render` is [not a frame render](./state.md#when-render-runs), a plain `cx.notify()` repaints the Snapshot that already exists. If the host changed something the script _reads_ — an entity behind a HostModule, a setting, a document — the View must be told the description itself is out of date:
 
 ```rust
 runtime.refresh(&root, cx)?;
@@ -115,14 +115,14 @@ Getting it wrong in the other direction is visible immediately — the interface
 The three host settings have different lifetimes. Capabilities are frozen into each newly loaded View. The store handle and HostModule registry are live host configuration shared with that View, so replacing either affects its next call:
 
 ```rust
-gpui_shell::set_capabilities(
+gpui_kit::shell::set_capabilities(
     Capabilities::new()
         .read_roots([app_root.clone()])
         .write_roots([data_dir.clone()])
         .store(true),
 );
-gpui_shell::set_store_path(data_dir.join("store.json"));
-gpui_shell::export_module(market_module(&market))?;
+gpui_kit::shell::set_store_path(data_dir.join("store.json"));
+gpui_kit::shell::export_module(market_module(&market))?;
 ```
 
 All three default to nothing: no file access, no storage location, no HostModule registrations. See [Capabilities](./capabilities.md) and [HostModule](./host-module.md).
@@ -147,7 +147,7 @@ reading.structure_repeat_rate();  // how often a rebuild described the shape it 
 
 A regression test can assert on `script_renders` directly; that is what keeps [the benchmark's third figure](./engine.md#the-measurement) honest.
 
-`structure_repeats()` and `structure_changes()` answer a different question: of the rebuilds that had a previous description to compare with, how many produced the same *shape* — the same components, the same builder methods, the same tree — and differed only in the values inside it. Nothing in the runtime acts on the answer; it is there to size [where the Snapshot cache stops](./performance.md#where-the-snapshot-cache-stops). A View's first build has no predecessor and is counted in neither.
+`structure_repeats()` and `structure_changes()` answer a different question: of the rebuilds that had a previous description to compare with, how many produced the same _shape_ — the same components, the same builder methods, the same tree — and differed only in the values inside it. Nothing in the runtime acts on the answer; it is there to size [where the Snapshot cache stops](./performance.md#where-the-snapshot-cache-stops). A View's first build has no predecessor and is counted in neither.
 
 ## Building for development
 
@@ -156,11 +156,11 @@ build, and the whole difference is in two dependencies. Measured on a live appli
 a market terminal re-rendering on every quote tick — with the runtime's own
 [`RuntimeMetrics`](#watching-what-it-costs):
 
-| `[profile.dev.package]` | mean script render | mean materialize |
-| --- | --- | --- |
-| nothing, or `rquickjs` alone | 31.5 ms | 3.9 ms |
-| `rquickjs-sys` + `rquickjs-core` | **11.3 ms** | **1.2 ms** |
-| release, for comparison | 11.0 ms | 1.2 ms |
+| `[profile.dev.package]`          | mean script render | mean materialize |
+| -------------------------------- | ------------------ | ---------------- |
+| nothing, or `rquickjs` alone     | 31.5 ms            | 3.9 ms           |
+| `rquickjs-sys` + `rquickjs-core` | **11.3 ms**        | **1.2 ms**       |
+| release, for comparison          | 11.0 ms            | 1.2 ms           |
 
 So:
 
@@ -173,7 +173,7 @@ rquickjs-core = { opt-level = 3 }
 **`rquickjs` on its own does nothing**, which is the trap: it is a thin facade that
 re-exports `rquickjs-core`, so naming it optimises neither the interpreter nor the
 bindings. `rquickjs-sys` compiles QuickJS itself — C source, built through `cc`, which
-reads the profile's optimisation level for *that* package — and `rquickjs-core` is where
+reads the profile's optimisation level for _that_ package — and `rquickjs-core` is where
 every value that crosses the boundary is converted. An unoptimised interpreter is what
 makes an unoptimised build feel like a different product.
 
@@ -190,7 +190,7 @@ this for you — every host has to write it down itself.
 `process.exit(code)` from a script is **a request, never `exit(2)`**. One plugin must not be able to take the host process down, and the host may have unsaved state. The runtime hands the request to the host, and the host decides:
 
 ```rust
-gpui_shell::on_exit_request(|request, window, cx| {
+gpui_kit::shell::on_exit_request(|request, window, cx| {
     match request.view() {
         Some(view) => close_the_panel_showing(view, window, cx),
         None => cx.quit(),
@@ -198,7 +198,7 @@ gpui_shell::on_exit_request(|request, window, cx| {
 });
 ```
 
-`request.code()` is the exit code the script asked for, and `request.view()` names the View it came from, when there is one — a plugin host closes *that* plugin's panel, where one that quit the window would let a plugin end someone else's work.
+`request.code()` is the exit code the script asked for, and `request.view()` names the View it came from, when there is one — a plugin host closes _that_ plugin's panel, where one that quit the window would let a plugin end someone else's work.
 
 **A host that grants exit without installing a handler is told at the call**, not never: `process.exit()` throws, naming `on_exit_request`. A request nobody answers is a lie told in the flattering direction — the script gets a success and nothing happens.
 
@@ -222,7 +222,7 @@ Plugin unload is a stronger lifecycle boundary than removing one View: the manag
 
 A script that throws does not take the interface with it. The last good Snapshot stays mounted and the failure is reported over it, so the reader keeps their scroll, their focus, and whatever they were reading. The runtime does not re-run a failing `render` until something invalidates the View again.
 
-Install a `tracing` subscriber. The runtime reports script errors, unhandled promise rejections and illegal-phase calls through `tracing` with the target `gpui_shell::script`; with no subscriber every one of them is discarded, and the symptom is a View that quietly stopped responding.
+Install a `tracing` subscriber. The runtime reports script errors, unhandled promise rejections and illegal-phase calls through `tracing` with the target `gpui_kit::shell::script`; with no subscriber every one of them is discarded, and the symptom is a View that quietly stopped responding.
 
 ## Not there yet
 

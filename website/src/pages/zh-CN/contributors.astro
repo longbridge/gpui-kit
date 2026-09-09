@@ -1,0 +1,16 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { fetchContributors } from '../../lib/github';
+import ContributorsApp from '../../components/ContributorsApp.vue';
+
+let contributors: Awaited<ReturnType<typeof fetchContributors>> = [];
+try { contributors = await fetchContributors(); } catch {}
+---
+
+<DocsLayout
+  title="贡献者 — GPUI Kit"
+  description="感谢所有为 GPUI Kit 做出贡献的开发者。"
+  lang="zh-CN"
+>
+  <ContributorsApp client:load lang="zh-CN" contributors={contributors} />
+</DocsLayout>

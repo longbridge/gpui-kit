@@ -1,16 +1,16 @@
-use gpui::*;
-use gpui::{
-    Action, App, AppContext, Axis, Context, Entity, FocusHandle, Focusable, IntoElement,
-    ParentElement, Render, Styled, Window,
-};
-use gpui_component::AxisExt;
-use gpui_component::{
+use gpui_kit::component::AxisExt;
+use gpui_kit::component::{
     Sizable as _, Size,
     button::Button,
     description_list::{DescriptionItem, DescriptionList},
     dock::PanelControl,
     text::TextView,
     v_flex,
+};
+use gpui_kit::*;
+use gpui_kit::{
+    Action, App, AppContext, Axis, Context, Entity, FocusHandle, Focusable, IntoElement,
+    ParentElement, Render, Styled, Window,
 };
 use serde::Deserialize;
 
@@ -37,7 +37,7 @@ impl DescriptionListStory {
             ("Name", "GPUI Component", 1),
             (
                 "Description",
-                "UI components for building fantastic desktop application by using [GPUI](https://gpui.rs).\
+                "UI components for building fantastic desktop application by using GPUI.\
                 \n\n \
                 Contains a lot of useful UI components, such as **Button**, **Input**, **Table**, **List**, **Select**, **DatePicker** ... \
                 \n\n \
@@ -51,7 +51,7 @@ impl DescriptionListStory {
             ("--", "--", 1),
             (
                 "Repository",
-                "https://github.com/longbridge/gpui-component",
+                "https://github.com/longbridge/gpui-kit",
                 2,
             ),
             (

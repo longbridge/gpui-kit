@@ -1,7 +1,7 @@
 // These exports are public constructors from the current component-shell
 // inventory. Constructor calls intentionally use `new`, matching the generated
 // gpui-component declarations.
-import { div } from "gpui";
+import { div } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import {
   Accordion,
@@ -140,10 +140,10 @@ import {
  * method names shadow base Element methods, so bridge that structural typing
  * ambiguity only where a typed child is passed to another component.
  * @param {unknown} value
- * @returns {import("gpui").Element}
+ * @returns {import("gpui-kit").Element}
  */
 const asElement = (value) =>
-  /** @type {import("gpui").Element} */ (/** @type {unknown} */ (value));
+  /** @type {import("gpui-kit").Element} */ (/** @type {unknown} */ (value));
 
 /**
  * Per-case demo state.
@@ -163,7 +163,7 @@ const state = (key, fallback) => (demo.has(key) ? demo.get(key) : fallback);
 /** Test and diagnostic projection of the same controlled state the examples read. */
 export const demoValue = state;
 
-/** @param {string} key @param {unknown} value @param {import("gpui").Context} cx */
+/** @param {string} key @param {unknown} value @param {import("gpui-kit").Context} cx */
 const setState = (key, value, cx) => {
   demo.set(key, value);
   cx.notify();
@@ -246,7 +246,7 @@ const accordionOpen = (key, fallback, index) =>
  * selected, loading — that changes how it reads.
  *
  * @param {string} surface
- * @param {import("gpui").Context} cx
+ * @param {import("gpui-kit").Context} cx
  * @returns {Array<{ label: string, description?: string, element: unknown }>}
  */
 export function registeredExamples(surface, cx) {
@@ -401,6 +401,7 @@ export function registeredExamples(surface, cx) {
         },
       ];
     case "MessageScroller": {
+      /** @type {{ alignment: "start" | "end", variant: "filled" | "secondary", body: string }[]} */
       const messages = [
         {
           alignment: "end",

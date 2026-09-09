@@ -11,7 +11,7 @@ A View is the one thing in this runtime that has an identity, survives a frame, 
 ## Defining a View
 
 ```js
-import { View } from "gpui";
+import { View } from "gpui-kit";
 
 export default class Counter extends View {
   init(props) {

@@ -20,7 +20,7 @@ export default defineConfig({
     {
       name: 'serve-assets',
       configureServer(server) {
-        server.middlewares.use('/gpui-component/gallery/assets', (req, res, next) => {
+        server.middlewares.use('/gallery/assets', (req, res, next) => {
           const assetsPath = path.resolve(__dirname, '../../assets/assets');
           const filePath = path.join(assetsPath, req.url.replace('/assets', ''));
 
@@ -77,5 +77,5 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['./src/wasm'],
   },
-  base: '/gpui-component/gallery/',
+  base: '/gallery/',
 });

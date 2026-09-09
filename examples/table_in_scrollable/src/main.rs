@@ -5,12 +5,12 @@
 //! rows; once the table reaches its top/bottom edge (or when the cursor is
 //! outside the table), the outer page scrolls instead.
 
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     scroll::ScrollableElement as _,
     table::{Column, DataTable, TableDelegate, TableState},
     *,
 };
+use gpui_kit::*;
 
 struct MyTable {
     columns: Vec<Column>,
@@ -106,9 +106,9 @@ impl Render for Example {
 }
 
 fn main() {
-    gpui_platform::application().run(move |cx| {
+    gpui_kit::application().run(move |cx| {
         // This must be called before using any GPUI Component features.
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
 
         let window_options = WindowOptions {
             window_bounds: Some(WindowBounds::centered(size(px(700.), px(700.)), cx)),

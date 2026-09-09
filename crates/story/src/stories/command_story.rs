@@ -1,11 +1,6 @@
 use std::{cell::Cell, rc::Rc, time::Duration};
 
-use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, Focusable, IntoElement,
-    KeyBinding, Keystroke, ParentElement as _, Render, SharedString, Styled as _, Task, Window,
-    actions, div, prelude::FluentBuilder as _, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, WindowExt as _,
     button::Button,
     command::{Command, CommandEntry, CommandGroup, CommandItem, CommandState},
@@ -13,6 +8,8 @@ use gpui_component::{
     kbd::Kbd,
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 
 use crate::section;
 
@@ -47,7 +44,7 @@ pub struct CommandStory {
     /// Held so that a query that arrives while the last one is still in flight
     /// cancels it, instead of racing it.
     _search_task: Option<Task<()>>,
-    last_command: Option<gpui::SharedString>,
+    last_command: Option<gpui_kit::SharedString>,
 }
 
 impl super::Story for CommandStory {
@@ -324,14 +321,18 @@ impl CommandStory {
         cx.new(|cx| Self::new(window, cx))
     }
 
-    fn on_command_confirm(&mut self, index: gpui_component::IndexPath, cx: &mut Context<Self>) {
+    fn on_command_confirm(
+        &mut self,
+        index: gpui_kit::component::IndexPath,
+        cx: &mut Context<Self>,
+    ) {
         self.last_command = Some(format!("section {}, row {}", index.section, index.row).into());
         cx.notify();
     }
 
     fn on_dialog_confirm(
         &mut self,
-        index: gpui_component::IndexPath,
+        index: gpui_kit::component::IndexPath,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -476,7 +477,7 @@ impl CommandStory {
 
     fn on_stock_confirm(
         &mut self,
-        index: gpui_component::IndexPath,
+        index: gpui_kit::component::IndexPath,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

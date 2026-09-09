@@ -21,7 +21,30 @@ pub trait PanelSource {
 
 impl PaneTree {
     pub fn to_state(&self, source: &dyn PanelSource) -> PanelState {
-        node_to_state(self.root(), source)
+        node_to_state(self.persisted_root(), source)
+    }
+
+    /// The node the persisted layout starts at.
+    ///
+    /// A `RootKind::Split` tree keeps a `Split` root even around a lone tiles
+    /// canvas, so an edit always has a container to land in. That wrapper is a
+    /// tree invariant, not part of the persisted schema: the dock before the
+    /// tree rewrite wrote a tiles center as a bare `Tiles`, and its
+    /// `StackPanel::insert_panel` asserts every split child is a `TabPanel` or
+    /// `StackPanel`, so writing the wrapper crashes that reader on load.
+    /// `from_state` puts the wrapper back, so the round trip still holds.
+    fn persisted_root(&self) -> &PaneNode {
+        let root = self.root();
+        match root.kind() {
+            PaneRef::Split {
+                children: [only], ..
+            } if self.root_kind() == RootKind::Split
+                && matches!(only.kind(), PaneRef::Tiles { .. }) =>
+            {
+                only
+            }
+            _ => root,
+        }
     }
 }
 
@@ -648,7 +671,7 @@ mod tests {
         );
 
         let dumped = tree.to_state(&panels);
-        let tiles = &dumped.children[0];
+        let tiles = &dumped;
         assert_eq!(tiles.panel_name, "Tiles");
         assert_eq!(
             tiles
@@ -712,10 +735,34 @@ mod tests {
         assert_eq!(panels.len(), 1);
     }
 
+    /// The dock before the tree rewrite wrote a tiles center as a bare
+    /// `Tiles`, and its `StackPanel::insert_panel` asserts every split child
+    /// is a `TabPanel` or `StackPanel`. Writing the in-memory `Split` root
+    /// around the canvas therefore crashes an older build on load: the wrapper
+    /// is a tree invariant, not part of the persisted schema.
+    #[test]
+    fn a_tiles_center_is_written_the_way_the_pre_tree_dock_wrote_it() {
+        let legacy = PanelState {
+            panel_name: TILES_PANEL_NAME.to_string(),
+            children: vec![tabs_state(vec![panel_state("Alpha")], 0)],
+            info: PanelInfo::tiles(vec![TileMeta::default()]),
+        };
+        let mut panels = PreservingPanels::default();
+        let tree = PaneTree::from_state(&legacy, RootKind::Split, &mut panels);
+
+        let dumped = tree.to_state(&panels);
+
+        assert_eq!(
+            dumped.panel_name, "Tiles",
+            "no `StackPanel` wrapper: the old reader hands the canvas to `StackPanel::insert_panel`"
+        );
+        assert_eq!(dumped.children[0].panel_name, "Alpha");
+    }
+
     #[test]
     fn tile_bounds_and_z_order_survive_a_round_trip() {
         let state = canonicalize(include_str!("fixtures/tiles.json"));
-        let tiles = &state.children[0];
+        let tiles = &state;
 
         assert_eq!(tiles.panel_name, "Tiles");
         // `metas` and `children` are parallel arrays, matched up by index. A

@@ -1,9 +1,9 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement, ParentElement,
     Render, Styled, Window, div, px,
 };
 
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Disableable as _, Sizable, Size, StyledExt, checkbox::Checkbox, h_flex,
     text::markdown, v_flex,
 };
@@ -11,7 +11,7 @@ use gpui_component::{
 use crate::{ChangeStorySize, section, story_toolbar};
 
 pub struct CheckboxStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     check1: bool,
     check2: bool,
     check3: bool,
@@ -55,7 +55,7 @@ impl CheckboxStory {
 }
 
 impl Focusable for CheckboxStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

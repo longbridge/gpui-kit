@@ -1,11 +1,11 @@
-import { div } from "gpui";
+import { div } from "gpui-kit";
 import { Scrollbar, v_flex, v_virtual_list } from "gpui-base";
 
 export function createVirtualListStory() {
   return { selectedId: "project-42" };
 }
 
-/** @param {{ selectedId: string }} story @param {import("gpui").Context} cx */
+/** @param {{ selectedId: string }} story @param {import("gpui-kit").Context} cx */
 export function renderVirtualListStory(story, cx) {
   const colors = cx.theme().colors;
   const rowCount = 10000;

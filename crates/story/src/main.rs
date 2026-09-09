@@ -1,8 +1,8 @@
-use gpui_component_assets::Assets;
 use gpui_component_story::{Gallery, create_new_window, init};
+use gpui_kit::assets::Assets;
 
 fn main() {
-    let app = gpui_platform::application().with_assets(Assets);
+    let app = gpui_kit::application().with_assets(Assets);
 
     // Parse `cargo run -- <story_name>`
     let name = std::env::args().nth(1);

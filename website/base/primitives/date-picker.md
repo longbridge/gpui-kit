@@ -12,23 +12,23 @@ Like every `gpui-base` primitive, Date Picker supplies behavior and semantic str
 
 ## Example
 
-The [single native Cargo entrypoint](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
+The [single native Cargo entrypoint](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/native/src/bin/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
 
 ```bash
-cargo run -p gpui-base --example components -- date-picker
+cargo run -p gpui-base-examples -- date-picker
 ```
 
 ## Import
 
 ```rust
-use gpui_base::{DatePicker};
+use gpui_kit::base::{DatePicker};
 ```
 
 ## Anatomy and API
 
 The example composes `DatePicker`. GPUI's standard styling and event traits provide presentation; these base types provide the interaction structure.
 
-The authoritative module is [`components/date_picker.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/date_picker.rs). Native and browser previews compile this same file.
+The authoritative module is [`components/date_picker.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/date_picker.rs). Native and browser previews compile this same file.
 
 ## State and events
 

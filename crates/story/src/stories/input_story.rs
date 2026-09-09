@@ -1,10 +1,10 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext as _, Context, Entity, InteractiveElement, IntoElement, ParentElement as _,
     Render, Role, Styled, Subscription, Window, div,
 };
 
 use crate::{ChangeStorySize, section, story_toolbar};
-use gpui_component::{button::*, input::*, label::Label, *};
+use gpui_kit::component::{button::*, input::*, label::Label, *};
 
 pub fn init(_: &mut App) {}
 
@@ -30,7 +30,7 @@ pub struct InputStory {
     custom_menu_input: Entity<InputState>,
     color_input: Entity<InputState>,
     content_type_inputs: Vec<ContentTypeInput>,
-    size: gpui_component::Size,
+    size: gpui_kit::component::Size,
 
     _subscriptions: Vec<Subscription>,
 }
@@ -286,7 +286,7 @@ impl InputStory {
             input_text_centered,
             input_text_right,
             content_type_inputs,
-            size: gpui_component::Size::Medium,
+            size: gpui_kit::component::Size::Medium,
             _subscriptions,
         }
     }

@@ -1,10 +1,6 @@
 use std::time::Duration;
 
-use gpui::{
-    App, AppContext as _, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement as _,
-    Render, Styled as _, Window, px, rems,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, StyledExt as _,
     attachment::{
         Attachment, AttachmentContent, AttachmentDescription, AttachmentStatus, AttachmentTitle,
@@ -14,6 +10,10 @@ use gpui_component::{
     marker::{Marker, MarkerContent, MarkerLoadingStyle},
     shimmer::{ShimmerStyle, ShimmerText},
     v_flex,
+};
+use gpui_kit::{
+    App, AppContext as _, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement as _,
+    Render, Styled as _, Window, px, rems,
 };
 
 use crate::{Story, section};

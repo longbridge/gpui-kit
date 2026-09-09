@@ -1,0 +1,67 @@
+#!/usr/bin/env python3
+"""Check published recipe fragments and their isolated Rust consumer."""
+import argparse
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def fragments(root, sync=False):
+    inventory = json.loads((root / "examples/ai_recipes/recipes.json").read_text())
+    checked = 0
+    for recipe in inventory:
+        source = (root / recipe["source"]).read_text().rstrip()
+        for document in recipe["documents"]:
+            path = root / document
+            text = path.read_text()
+            start = f'<!-- recipe:{recipe["id"]}:start -->'
+            end = f'<!-- recipe:{recipe["id"]}:end -->'
+            if text.count(start) != 1 or text.count(end) != 1:
+                raise ValueError(f"{document}: missing or duplicate recipe markers for {recipe['id']}")
+            before, tail = text.split(start)
+            current, after = tail.split(end)
+            expected = f"\n```rust\n{source}\n```\n"
+            if current != expected:
+                if not sync:
+                    raise ValueError(f"{document}: stale {recipe['id']} recipe; run script/check-ai-recipes --sync")
+                path.write_text(before + start + expected + end + after)
+            checked += 1
+    if not checked:
+        raise ValueError("recipe inventory has no published fragments")
+    return checked
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--sync", action="store_true", help="Update published fragments from compiled sources")
+    parser.add_argument("--docs-only", action="store_true", help="Check fragment freshness only; does not validate Rust or UI")
+    args = parser.parse_args()
+    try:
+        print(f"Checked {fragments(ROOT, args.sync)} published recipe fragments", flush=True)
+        if args.docs_only or args.sync:
+            print("Coverage: documentation fragments only; compilation and interaction NOT RUN")
+            return 0
+        env = dict(os.environ)
+        env.setdefault("CARGO_TARGET_DIR", str(ROOT / "target"))
+        manifest = "examples/ai_recipes/Cargo.toml"
+        for argv in [
+            ["cargo", "fmt", "--manifest-path", manifest, "--check"],
+            ["cargo", "check", "--locked", "--manifest-path", manifest, "--bin", "gpui-kit-recipes"],
+            ["cargo", "check", "--locked", "--manifest-path", manifest, "--all-targets"],
+            ["cargo", "test", "--locked", "--manifest-path", manifest],
+        ]:
+            print("Running: " + " ".join(argv), flush=True)
+            subprocess.run(argv, cwd=ROOT, env=env, check=True)
+        print("PASS: isolated consumer compile and GPUI recipe tests. Native OS accessibility and visual review are separate gates.")
+        return 0
+    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

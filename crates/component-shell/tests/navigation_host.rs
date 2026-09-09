@@ -94,7 +94,7 @@ fn draw(context: &mut VisualTestContext, view: Entity<gpui_shell::ScriptView>) {
 #[gpui_shell::gpui::test]
 fn icon_accepts_an_application_relative_asset_and_rejects_traversal(cx: &mut TestAppContext) {
     let valid = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { Icon } from "gpui-component";
 export default class App extends View {
   render() { return new Icon("icons/check.svg").size("small"); }
@@ -110,7 +110,7 @@ export default class App extends View {
     });
 
     let invalid = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { Icon } from "gpui-component";
 export default class App extends View {
   render() { return new Icon("../outside.svg"); }
@@ -129,7 +129,7 @@ fn sidebar_materializes_typed_items_menu_header_and_wrapper_style_in_order(
     cx: &mut TestAppContext,
 ) {
     let source = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import {
   Sidebar, SidebarFooter, SidebarHeader, SidebarMenu, SidebarMenuItem, SidebarToggleButton,
 } from "gpui-component";
@@ -180,7 +180,7 @@ export default class App extends View {
 #[gpui_shell::gpui::test]
 fn sidebar_toggle_invokes_the_registered_common_click_callback(cx: &mut TestAppContext) {
     let source = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { Sidebar, SidebarMenu, SidebarMenuItem, SidebarToggleButton } from "gpui-component";
 export default class App extends View {
   init() { this.hits = 0; this.nav_disabled = false; }

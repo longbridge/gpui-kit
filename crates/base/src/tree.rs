@@ -1,3 +1,5 @@
+use crate::TestSupportExt as _;
+use gpui::StatefulInteractiveElement as _;
 use std::{cell::RefCell, ops::Range, rc::Rc};
 
 use gpui::{
@@ -429,6 +431,13 @@ impl Render for TreeState {
                         };
                         div()
                             .id(ix)
+                            .test_support()
+                            .role(gpui::Role::TreeItem)
+                            .aria_label(entry.item().label.clone())
+                            .aria_selected(entry_state.selected)
+                            .when(entry.is_folder(), |this| {
+                                this.aria_expanded(entry.is_expanded())
+                            })
                             .child((render_item)(ix, entry, entry_state, window, cx))
                             .when(!entry.is_disabled(), |this| {
                                 this.on_mouse_down(
@@ -507,6 +516,8 @@ impl RenderOnce for Tree {
 
         div()
             .id(self.id)
+            .test_support()
+            .role(gpui::Role::Tree)
             .key_context(CONTEXT)
             .track_focus(&focus_handle)
             .on_action(window.listener_for(&self.state, TreeState::on_action_confirm))

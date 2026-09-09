@@ -1,8 +1,4 @@
-use gpui::{
-    App, AppContext as _, Axis, Context, Entity, FocusHandle, Focusable, IntoElement,
-    ParentElement as _, Render, Styled as _, Window, rems,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _, WindowExt as _,
     attachment::{
         Attachment, AttachmentActions, AttachmentContent, AttachmentDescription, AttachmentGroup,
@@ -13,6 +9,10 @@ use gpui_component::{
     shimmer::ShimmerStyle,
     spinner::Spinner,
     v_flex,
+};
+use gpui_kit::{
+    App, AppContext as _, Axis, Context, Entity, FocusHandle, Focusable, IntoElement,
+    ParentElement as _, Render, Styled as _, Window, rems,
 };
 
 use crate::{Story, section};

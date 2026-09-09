@@ -42,7 +42,7 @@ const ROUNDS: usize = 7;
 const SIZES: [(usize, usize); 4] = [(40, 5), (100, 10), (200, 10), (400, 10)];
 
 const TEMPLATE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, h_flex, Button } from "gpui-base";
 
 export default class Grid extends View {

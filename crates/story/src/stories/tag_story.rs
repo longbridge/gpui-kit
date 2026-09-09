@@ -1,9 +1,11 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     ParentElement, Render, Styled, Window, px,
 };
 
-use gpui_component::{ColorName, Sizable, Size, h_flex, indigo_50, indigo_500, tag::Tag, v_flex};
+use gpui_kit::component::{
+    ColorName, Sizable, Size, h_flex, indigo_50, indigo_500, tag::Tag, v_flex,
+};
 
 use crate::{ChangeStorySize, section, story_toolbar};
 

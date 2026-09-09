@@ -1,4 +1,4 @@
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { DockArea, dock_area, dock_content, h_flex, v_flex } from "gpui-base";
 
 const TAB_HEIGHT = 32;
@@ -27,7 +27,7 @@ class StoryDockPanel extends View {
     this.detail = props?.detail ?? "";
   }
 
-  /** @param {import("gpui").Context} cx */
+  /** @param {import("gpui-kit").Context} cx */
   render(cx) {
     const colors = cx.theme().colors;
     return v_flex()
@@ -40,7 +40,7 @@ class StoryDockPanel extends View {
   }
 }
 
-/** @param {import("gpui").AsyncContext} cx */
+/** @param {import("gpui-kit").AsyncContext} cx */
 export function createDockStory(cx) {
   DockArea.register_panel("story-files", StoryDockPanel);
   DockArea.register_panel("main.js", StoryDockPanel);
@@ -68,7 +68,7 @@ export function createDockStory(cx) {
   return dock;
 }
 
-/** @param {ReturnType<typeof createDockStory>} dock @param {import("gpui").Context} cx */
+/** @param {ReturnType<typeof createDockStory>} dock @param {import("gpui-kit").Context} cx */
 export function renderDockStory(dock, cx) {
   const colors = cx.theme().colors;
   return v_flex()

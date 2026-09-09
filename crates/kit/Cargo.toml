@@ -1,0 +1,143 @@
+[package]
+name = "gpui-kit"
+version = "0.6.0"
+description = "GPUI Kit: one dependency for building desktop applications with GPUI, GPUI Base, GPUI Component and default assets."
+keywords = ["desktop", "gpui", "shadcn", "ui", "uikit"]
+categories = ["gui"]
+license = "Apache-2.0"
+documentation = "https://docs.rs/gpui-kit"
+homepage = "https://gpui-kit.com"
+repository = "https://github.com/longbridge/gpui-kit"
+readme = "README.md"
+publish = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["component", "assets"]
+# The styled component library, `gpui_kit::component`. Initializes `gpui-base` too.
+component = ["dep:gpui-component"]
+# The default icon set for `gpui-component`, `gpui_kit::assets`.
+assets = ["dep:gpui-kit-assets"]
+# GPUI's test harness, native-platform rendering, and Kit UI test helpers.
+test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui-base/test-support", "gpui-component?/test-support"]
+# Frame-event instrumentation remains opt-in for performance builds.
+profiler = ["gpui/profiler"]
+inspector = ["gpui/inspector", "gpui-base/inspector", "gpui-component?/inspector"]
+decimal = ["component", "gpui-component/decimal"]
+tree-sitter = ["component", "gpui-component/tree-sitter"]
+tree-sitter-languages = ["component", "gpui-component/tree-sitter-languages"]
+tree-sitter-astro = ["component", "gpui-component/tree-sitter-astro"]
+tree-sitter-bash = ["component", "gpui-component/tree-sitter-bash"]
+tree-sitter-c = ["component", "gpui-component/tree-sitter-c"]
+tree-sitter-cmake = ["component", "gpui-component/tree-sitter-cmake"]
+tree-sitter-cpp = ["component", "gpui-component/tree-sitter-cpp"]
+tree-sitter-csharp = ["component", "gpui-component/tree-sitter-csharp"]
+tree-sitter-css = ["component", "gpui-component/tree-sitter-css"]
+tree-sitter-diff = ["component", "gpui-component/tree-sitter-diff"]
+tree-sitter-ejs = ["component", "gpui-component/tree-sitter-ejs"]
+tree-sitter-elixir = ["component", "gpui-component/tree-sitter-elixir"]
+tree-sitter-erb = ["component", "gpui-component/tree-sitter-erb"]
+tree-sitter-go = ["component", "gpui-component/tree-sitter-go"]
+tree-sitter-graphql = ["component", "gpui-component/tree-sitter-graphql"]
+tree-sitter-html = ["component", "gpui-component/tree-sitter-html"]
+tree-sitter-java = ["component", "gpui-component/tree-sitter-java"]
+tree-sitter-javascript = ["component", "gpui-component/tree-sitter-javascript"]
+tree-sitter-jsdoc = ["component", "gpui-component/tree-sitter-jsdoc"]
+tree-sitter-kotlin = ["component", "gpui-component/tree-sitter-kotlin"]
+tree-sitter-lua = ["component", "gpui-component/tree-sitter-lua"]
+tree-sitter-make = ["component", "gpui-component/tree-sitter-make"]
+tree-sitter-markdown = ["component", "gpui-component/tree-sitter-markdown"]
+tree-sitter-markdown-inline = ["component", "gpui-component/tree-sitter-markdown-inline"]
+tree-sitter-php = ["component", "gpui-component/tree-sitter-php"]
+tree-sitter-proto = ["component", "gpui-component/tree-sitter-proto"]
+tree-sitter-python = ["component", "gpui-component/tree-sitter-python"]
+tree-sitter-ruby = ["component", "gpui-component/tree-sitter-ruby"]
+tree-sitter-rust = ["component", "gpui-component/tree-sitter-rust"]
+tree-sitter-scala = ["component", "gpui-component/tree-sitter-scala"]
+tree-sitter-sql = ["component", "gpui-component/tree-sitter-sql"]
+tree-sitter-svelte = ["component", "gpui-component/tree-sitter-svelte"]
+tree-sitter-swift = ["component", "gpui-component/tree-sitter-swift"]
+tree-sitter-toml = ["component", "gpui-component/tree-sitter-toml"]
+tree-sitter-tsx = ["component", "gpui-component/tree-sitter-tsx"]
+tree-sitter-typescript = ["component", "gpui-component/tree-sitter-typescript"]
+tree-sitter-yaml = ["component", "gpui-component/tree-sitter-yaml"]
+tree-sitter-zig = ["component", "gpui-component/tree-sitter-zig"]
+
+[dependencies]
+gpui.workspace = true
+gpui_platform.workspace = true
+gpui-base.workspace = true
+gpui-component = { workspace = true, optional = true }
+gpui-kit-assets = { workspace = true, optional = true }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+gpui_web.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
+[[test]]
+name = "window"
+required-features = ["test-support"]
+
+[[test]]
+name = "lifecycle"
+required-features = ["test-support"]
+
+[[test]]
+name = "components"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "input"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "ui"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "controls"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "interactions"
+required-features = ["test-support"]
+
+[[test]]
+name = "rendering"
+# Requires a real Metal device; select explicitly with --test rendering.
+test = false
+harness = false
+required-features = ["test-support", "component", "assets"]
+
+[[test]]
+name = "disclosure"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "overlays"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "menu"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "collections"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "date_picker"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "dock"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "search"
+required-features = ["assets", "test-support", "component"]

@@ -1,5 +1,5 @@
-use gpui::{Context, IntoElement, ParentElement, Render, Styled, Window, div};
-use gpui_component::{ActiveTheme, Icon, IconName, StyledExt, h_flex, progress::Progress, v_flex};
+use gpui_kit::{Context, IntoElement, ParentElement, Render, Styled, Window, div};
+use gpui_kit::component::{ActiveTheme, Icon, IconName, StyledExt, h_flex, progress::Progress, v_flex};
 
 pub struct ProjectOverview {
     progress: f32,

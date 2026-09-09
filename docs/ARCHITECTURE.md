@@ -10,7 +10,7 @@ individual methods.
 `gpui-base` is the reusable foundation below the styled `gpui-component` crate.
 It is designed for both of these callers:
 
-- `crates/ui`, which adapts base behavior into GPUI Component's complete visual
+- `crates/component`, which adapts base behavior into GPUI Component's complete visual
   system;
 - applications that build and own a different visual system directly on top of
   base behavior.
@@ -102,8 +102,8 @@ semantic seams. Base does not walk arbitrary descendant trees to discover them.
 ### 3. Stateful systems
 
 Examples include InputState, TextareaState, EditorState, CalendarState, TreeState, SliderState,
-ResizableState, OtpState, ColorPickerState, ToastManager, ToastStackState, DockArea, TabGroup, and
-TilesState.
+ResizableState, OtpState, ColorPickerState, ToastManager, ToastStackState, NavStackState, DockArea,
+TabGroup, and TilesState.
 
 These modules retain data because their behavior spans frames or requires
 measurement, subscriptions, history, focus, or incremental updates. State is
@@ -253,7 +253,7 @@ name describing what it holds.
 This applies to state snapshots (`InputPresentation`, `CalendarItemState`),
 capability sets (`InputContextMenuCapabilities`), render contexts
 (`ComboboxTriggerContext`), and option sets (`RenderOptions`). It does not
-apply to value types whose fields *are* the definition and cannot grow, such as
+apply to value types whose fields _are_ the definition and cannot grow, such as
 `Point`, `Selection`, `Edges`, `IndexPath`, or `FoldRange`, nor to types that
 mirror an external schema, such as the LSP `Diagnostic`.
 
@@ -271,11 +271,11 @@ not need to learn the complete editor interface for every text field.
 
 Both `gpui-base` and `gpui-component` expose three purpose-specific forms:
 
-| Form | State | Intended interface |
-| --- | --- | --- |
-| `Input` | `InputState` | Single-line values, placeholders, masks, validation, and submission |
-| `Textarea` | `TextareaState` | Ordinary multi-line text, fixed rows, soft wrapping, and optional auto-grow limits |
-| `Editor` | `EditorState` | Source text, language-aware highlighting, line numbers, folding, search, diagnostics, and LSP integration |
+| Form       | State           | Intended interface                                                                                        |
+| ---------- | --------------- | --------------------------------------------------------------------------------------------------------- |
+| `Input`    | `InputState`    | Single-line values, placeholders, masks, validation, and submission                                       |
+| `Textarea` | `TextareaState` | Ordinary multi-line text, fixed rows, soft wrapping, and optional auto-grow limits                        |
+| `Editor`   | `EditorState`   | Source text, language-aware highlighting, line numbers, folding, search, diagnostics, and LSP integration |
 
 `gpui-base` provides unstyled forms. `gpui-component` adapts the same behavior
 into the product theme and sizing system. `InputBase` is the foundational frame
@@ -417,7 +417,7 @@ interfere.
 
 `crates/base/src/dock` owns the layout tree, persistence, drag hit-testing,
 resize arithmetic, the active-panel state machine, zoom, focus, and the panel
-registry. `crates/ui/src/dock` is a skin: `DockSkin` implements the renderer
+registry. `crates/component/src/dock` is a skin: `DockSkin` implements the renderer
 traits below to supply the tab bar, toolbar, drop-indicator, and dock-toggle
 appearance. A `DockArea` built without a renderer still docks, drags, and
 persists — it draws no chrome at all.

@@ -18,6 +18,8 @@ mod editor;
 mod hover_card;
 mod input;
 mod link;
+mod nav_stack;
+pub(super) use nav_stack::{ShowcasePage, slide};
 mod number_input;
 mod otp_input;
 mod pagination;

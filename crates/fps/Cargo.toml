@@ -4,12 +4,12 @@ description = "Realtime FPS, frame time, CPU, GPU and memory HUD for GPUI applic
 keywords = ["fps", "gpui", "hud", "performance", "profiling"]
 license = "Apache-2.0"
 documentation = "https://docs.rs/gpui-fps"
-homepage = "https://longbridge.github.io/gpui-component"
-repository = "https://github.com/longbridge/gpui-component/tree/main/crates/fps"
+homepage = "https://gpui-kit.com"
+repository = "https://github.com/longbridge/gpui-kit/tree/main/crates/fps"
 readme = "README.md"
 edition.workspace = true
-publish = false
-version = "0.1.0"
+publish = true
+version = "0.6.0"
 
 [lib]
 doctest = false
@@ -18,7 +18,7 @@ doctest = false
 # `gpui/profiler` belongs here, not on the workspace dependency: this is the
 # only crate that uses it, and cargo unifies features across the graph.
 gpui = { workspace = true, features = ["profiler"] }
-instant.workspace = true
+web-time = "1"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 sysinfo = "0.37"
@@ -29,6 +29,7 @@ sysinfo = "0.37"
 # counter the platform's own activity monitor attributes per process with, so no
 # vendor SDK or elevated privilege is involved.
 [target.'cfg(target_os = "macos")'.dependencies]
+core-graphics = "0.24"
 libc = "0.2"
 objc2-core-foundation = { version = "0.3", default-features = false, features = [
     "std",
@@ -42,8 +43,13 @@ objc2-io-kit = { version = "0.3", default-features = false, features = [
     "libc",
 ] }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+uuid = { version = "1", features = ["v5"] }
+wayland-client = "0.31"
+
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { workspace = true, features = [
+    "Win32_Graphics_Gdi",
     "Win32_System_Performance",
     "Win32_System_ProcessStatus",
     "Win32_System_Threading",

@@ -4,7 +4,7 @@
 [![Documentation](https://docs.rs/gpui-base/badge.svg)](https://docs.rs/gpui-base)
 [![License](https://img.shields.io/crates/l/gpui-base.svg)](../../LICENSE-APACHE)
 
-`gpui-base` is the reusable foundation of the [GPUI Component](https://github.com/longbridge/gpui-component) Rust desktop application framework, built on [GPUI](https://gpui.rs). It is intended for applications that want to build and own their own design systems. It provides interaction behavior, focus management, accessibility semantics, animation, virtual lists, theme tokens, and other foundational capabilities without imposing a visual style.
+`gpui-base` is the reusable foundation of the [GPUI Component](https://github.com/longbridge/gpui-kit) Rust desktop application framework, built on GPUI. It is intended for applications that want to build and own their own design systems. It provides interaction behavior, focus management, accessibility semantics, animation, virtual lists, theme tokens, and other foundational capabilities without imposing a visual style.
 
 > Use [`gpui-component`](https://crates.io/crates/gpui-component) if you want ready-to-use components with a complete visual design. Use `gpui-base` if your application should own its component source and visual styles while reusing stable, shared behavior.
 
@@ -26,12 +26,12 @@ Dependencies always point from higher layers toward the foundation: `gpui-base` 
 
 The GPUI Component ecosystem follows the same layering idea as [shadcn](https://ui.shadcn.com):
 
-| GPUI ecosystem | shadcn ecosystem |
-| --- | --- |
-| [GPUI](https://gpui.rs) | HTML + Tailwind CSS |
-| `gpui-base` | [Base UI](https://base-ui.com) |
-| `gpui-component` | shadcn |
-| `crates/ui` in GPUI Component | shadcn's default UI |
+| GPUI ecosystem                       | shadcn ecosystem               |
+| ------------------------------------ | ------------------------------ |
+| GPUI                                 | HTML + Tailwind CSS            |
+| `gpui-base`                          | [Base UI](https://base-ui.com) |
+| `gpui-component`                     | shadcn                         |
+| `crates/component` in GPUI Component | shadcn's default UI            |
 
 ## Design Principles
 
@@ -45,16 +45,18 @@ For example, `Button::new("save")` has no padding, background, radius, or size b
 
 ## Installation
 
-To follow the repository's development branch, use a Git dependency instead:
+Depend on `gpui-kit`, which pins the GPUI crates `gpui-base` was built
+against and re-exports them as `gpui_kit::gpui` and `gpui_kit::platform`, with
+`gpui-base` itself always available at `gpui_kit::base`. Turn off the default
+features to skip the styled layers:
 
 ```toml
 [dependencies]
-gpui-base = { git = "https://github.com/longbridge/gpui-component" }
-gpui = { git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
+gpui-kit = { version = "0.6", default-features = false }
 ```
 
-`gpui-base` uses the same GPUI version as the repository. If Cargo reports incompatible GPUI types, check whether your application is pulling GPUI from a different revision.
+If Cargo reports incompatible GPUI types, check whether your application pulls
+GPUI in from somewhere other than `gpui-kit`.
 
 ### Optional Features
 
@@ -64,30 +66,30 @@ gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["fo
 
 ## Initialization
 
-Call `gpui_base::init(cx)` once before creating windows or using foundation controls. It installs the global theme and focus-trap infrastructure required by the base layer.
+Call `gpui_kit::base::init(cx)` once before creating windows or using foundation controls. It installs the global theme and focus-trap infrastructure required by the base layer.
 
 ```rust
-use gpui::*;
+use gpui_kit::*;
 
 fn main() {
-    gpui_platform::application().run(|cx| {
-        gpui_base::init(cx);
+    gpui_kit::application().run(|cx| {
+        gpui_kit::base::init(cx);
 
         // Create windows and views after initialization.
     });
 }
 ```
 
-If the application already calls `gpui_component::init(cx)`, do not call `gpui_base::init(cx)` again. The higher-level initializer includes base initialization.
+If the application already calls `gpui_kit::init(cx)`, do not call `gpui_kit::base::init(cx)` again. The higher-level initializer includes base initialization.
 
 ## Quick Start
 
 Foundation controls can be styled and given children like ordinary GPUI elements:
 
 ```rust
-use gpui::prelude::*;
-use gpui::{Context, IntoElement, Render, Window, px, rgb};
-use gpui_base::Button;
+use gpui_kit::prelude::*;
+use gpui_kit::{Context, IntoElement, Render, Window, px, rgb};
+use gpui_kit::base::Button;
 
 struct SaveButton;
 
@@ -113,9 +115,9 @@ An `ElementId` must remain stable within a view so GPUI can preserve focus and e
 `Checkbox`, `Radio`, `Switch`, and `Toggle` are controlled components. Their callbacks report the next value; the application updates its own state and passes that value back on the next render:
 
 ```rust
-use gpui::prelude::*;
-use gpui::{Context, IntoElement, Render, Window};
-use gpui_base::{Checkbox, CheckboxIndicator};
+use gpui_kit::prelude::*;
+use gpui_kit::{Context, IntoElement, Render, Window};
+use gpui_kit::base::{Checkbox, CheckboxIndicator};
 
 struct Settings {
     telemetry: bool,
@@ -131,7 +133,7 @@ impl Render for Settings {
             .accessibility_label("Send anonymous usage data")
             .on_change(move |state, _, cx| {
                 _ = settings.update(cx, |this, cx| {
-                    this.telemetry = state == gpui_base::CheckboxState::Checked;
+                    this.telemetry = state == gpui_kit::base::CheckboxState::Checked;
                     cx.notify();
                 });
             })
@@ -187,19 +189,19 @@ Base controls cannot suppress `hover` or `active` styles while disabled, because
 | `Switch` / `SwitchTrack` / `SwitchThumb` | A controlled switch with independently styled track and thumb parts                                   |
 | `Toggle` / `ToggleGroup`                 | A controlled pressed state and grouping container                                                     |
 | `Link`                                   | Link semantics and activation with an application-provided `open_with` navigation strategy            |
-| `Table` and semantic table parts         | Table, row-group, row, column-header, cell roles, and accessibility indices without layout or styling  |
-| `Toast` / `ToastStack` / `ToastManager`  | Alert semantics, lifecycle, timers, limits, measured stack geometry, and interaction-aware motion       |
+| `Table` and semantic table parts         | Table, row-group, row, column-header, cell roles, and accessibility indices without layout or styling |
+| `Toast` / `ToastStack` / `ToastManager`  | Alert semantics, lifecycle, timers, limits, measured stack geometry, and interaction-aware motion     |
 
 ### Text Editing
 
 Text editing is split into purpose-specific controls instead of exposing the
 complete editor interface on every text field:
 
-| Control | State | Use |
-| --- | --- | --- |
-| [`Input`](../../website/base/primitives/input.md) | `InputState` | Single-line values, masking, validation, and number stepping |
-| [`Textarea`](../../website/base/primitives/textarea.md) | `TextareaState` | Ordinary multi-line text, fixed rows, wrapping, and auto-grow |
-| [`Editor`](../../website/base/primitives/editor.md) | `EditorState` | Source code, highlighting, gutter, folding, decorations, diagnostics, and LSP integration |
+| Control                                                 | State           | Use                                                                                       |
+| ------------------------------------------------------- | --------------- | ----------------------------------------------------------------------------------------- |
+| [`Input`](../../website/base/primitives/input.md)       | `InputState`    | Single-line values, masking, validation, and number stepping                              |
+| [`Textarea`](../../website/base/primitives/textarea.md) | `TextareaState` | Ordinary multi-line text, fixed rows, wrapping, and auto-grow                             |
+| [`Editor`](../../website/base/primitives/editor.md)     | `EditorState`   | Source code, highlighting, gutter, folding, decorations, diagnostics, and LSP integration |
 
 All three share the internal `InputBaseState` editing engine. Applications
 should construct the purpose-specific state rather than configuring modes on
@@ -237,7 +239,7 @@ Foundation controls do not install animation automatically. Applications choose 
 See the [Motion guide](../../website/base/motion.md) and run its five focused interactive demonstrations with:
 
 ```bash
-cargo run -p gpui-base --example motion
+cargo run -p gpui-base-examples --bin motion
 ```
 
 ### Themes and Styles
@@ -251,8 +253,8 @@ cargo run -p gpui-base --example motion
 The global base theme can be customized after initialization:
 
 ```rust
-use gpui::{px, rgb};
-use gpui_base::Theme;
+use gpui_kit::{px, rgb};
+use gpui_kit::base::Theme;
 
 let theme = Theme::global_mut(cx);
 theme.tokens.colors.primary = rgb(0x2563eb).into();
@@ -265,7 +267,8 @@ Tokens describe design semantics; they do not automatically style unstyled contr
 
 | API                               | Purpose                                                                 |
 | --------------------------------- | ----------------------------------------------------------------------- |
-| `History` / `HistoryItem`         | Undo and redo history with grouping, deduplication, and capacity limits |
+| `History`                         | Browser-style navigation trail with back and forward entries            |
+| `UndoHistory`                     | Grouped undo and redo transactions                                      |
 | `SliderState`                     | Single or range values, linear or logarithmic scales, and slider events |
 | `IndexPath`                       | A section, row, and column index path                                   |
 | `Placement` / `Side`              | Placement and layout direction descriptions                             |
@@ -275,15 +278,15 @@ Tokens describe design semantics; they do not automatically style unstyled contr
 
 The crates target different abstraction levels and can be used in the same application:
 
-|                      | `gpui-base`                                                      | `gpui-component`                                               |
-| -------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------- |
-| Role                 | Behavior and infrastructure                                      | Complete UI component library                                  |
-| Default presentation | None                                                             | Included                                                       |
-| Visual style owner   | Application                                                      | Component library, customizable through its Theme and APIs     |
-| Best suited for      | Custom design systems, registry components, and foundation reuse | Building complete desktop applications quickly                 |
-| Initialization       | `gpui_base::init(cx)`                                            | `gpui_component::init(cx)`, which includes base initialization |
+|                      | `gpui-base`                                                      | `gpui-component`                                           |
+| -------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------- |
+| Role                 | Behavior and infrastructure                                      | Complete UI component library                              |
+| Default presentation | None                                                             | Included                                                   |
+| Visual style owner   | Application                                                      | Component library, customizable through its Theme and APIs |
+| Best suited for      | Custom design systems, registry components, and foundation reuse | Building complete desktop applications quickly             |
+| Initialization       | `gpui_kit::base::init(cx)`                                       | `gpui_kit::init(cx)`, which includes base initialization   |
 
-Do not migrate from `gpui-component` by mechanically replacing imports. For example, `gpui_component::button::Button` is a fully styled higher-level component, while `gpui_base::Button` requires the caller to provide its children and all presentation styles.
+Do not migrate from `gpui-component` by mechanically replacing imports. For example, `gpui_kit::component::button::Button` is a fully styled higher-level component, while `gpui_kit::base::Button` requires the caller to provide its children and all presentation styles.
 
 ## Platform Support
 
@@ -320,11 +323,11 @@ style and motion contracts.
 
 ## Related Resources
 
-- [GPUI Component repository](https://github.com/longbridge/gpui-component)
-- [GPUI Component documentation](https://longbridge.github.io/gpui-component)
+- [GPUI Kit repository](https://github.com/longbridge/gpui-kit)
+- [GPUI Kit documentation](https://gpui-kit.com)
 - [`gpui-component` crate](https://crates.io/crates/gpui-component)
 - [`gpui-base` API documentation](https://docs.rs/gpui-base)
-- [GPUI](https://gpui.rs)
+- GPUI
 - [Contributing guide](../../CONTRIBUTING.md)
 
 ## License

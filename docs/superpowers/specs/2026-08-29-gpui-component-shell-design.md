@@ -129,7 +129,7 @@ Add `examples/js_story/` as a normal `gpui-shell` application. It contains:
 - interactive examples for normal, focused, selected, disabled, loading,
   validation, overlay, and destructive states where relevant;
 - retained demo data for tables, lists, trees, charts, editors, and docks;
-- a generated `gpui.d.ts` and `jsconfig.json` for editor validation;
+- a generated `gpui-kit.d.ts` and `jsconfig.json` for editor validation;
 - an index/manifest that makes the complete gallery auditable.
 
 The gallery uses only the public JavaScript API. It must not add Rust host

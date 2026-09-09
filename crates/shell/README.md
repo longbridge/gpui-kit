@@ -1,6 +1,6 @@
 # gpui-shell
 
-`gpui-shell` exists to make a Rust [GPUI](https://gpui.rs) application
+`gpui-shell` exists to make a Rust GPUI application
 **extensible in JavaScript**.
 
 **The primary goal is plugin extension.** A host application compiles and ships
@@ -64,7 +64,9 @@ This is the same trade the Rust side makes when an application builds directly
 on `gpui-base` instead of `gpui-component`. Colors are named as semantic theme
 tokens, so a shared visual language stays available without the runtime making
 visual decisions on the application's behalf. Applications that want ready-made
-product visuals wait for a `gpui-component` module, a later milestone.
+product visuals use the `gpui-component-shell` host and its `gpui-component`
+script module. Run `cargo run -p gpui-component-shell -- examples/js_story`
+for the styled gallery. Use this crate's bare host for Base-first applications.
 
 ## Quick Start
 
@@ -79,7 +81,7 @@ default-exports, and mounts one instance of it as the window's root view:
 
 ```js
 // main.js
-import { View } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex, Button, InputState } from "gpui-base";
 
 export default class Notes extends View {
@@ -125,15 +127,17 @@ missing:
 ```bash
 cargo run -p gpui-shell -- check examples/js_todolist    # exit 0 or 1
 cargo run -p gpui-shell -- check examples/js_todolist --print-spec
-cargo run -p gpui-shell -- types examples/js_todolist    # writes gpui.d.ts
+cargo run -p gpui-shell -- types examples/js_todolist    # writes gpui-kit.d.ts
 ```
 
-`check` loads and renders the application once without showing a window. It
-reports syntax errors, unresolved imports, a missing or malformed default
-export, unknown style methods with a suggestion, wrongly typed style arguments,
-and an element used twice — each with the script's own stack. `types` writes
-TypeScript declarations generated from the same tables the runtime dispatches
-through, so an editor catches a mistyped style method before it runs.
+`check` loads the application, builds its description, and materializes eager
+native elements in a hidden window. It exits nonzero for load, render, or
+registered-component materialization errors, including invalid structured
+children and unsupported styles. It does not validate layout, paint, deferred
+slots, nested view renders, or later interactions and asynchronous states.
+`--print-spec` prints the same description that was materialized. `types` writes
+TypeScript declarations from the runtime's registration tables so an editor
+can catch invalid calls before execution.
 
 ### Working on an application
 
@@ -162,7 +166,7 @@ camelCase one is script code.
 Each module carries what its own crate provides:
 
 ```js
-import { View, div, svg, image } from "gpui";
+import { View, div, svg, image } from "gpui-kit";
 import { h_flex, v_flex, Button, Link, Checkbox, Switch } from "gpui-base";
 import { fps_monitor } from "gpui-fps";
 ```
@@ -173,7 +177,7 @@ import { fps_monitor } from "gpui-fps";
 | `h_flex()` / `v_flex()` | function | A row / column flex element |
 | `value` | function | A text element |
 | `svg(path)` / `image(path)` | functions | A theme-tinted vector icon / full-colour application asset |
-| `fps_monitor()` | function | The native `gpui-fps` performance HUD; place it in a `relative()` parent |
+| `fps_monitor()` | function | The native `gpui-fps` performance HUD; passive by default, with `.continuous(true)` for a sustained-frame test |
 | `Button.new(id)` | type | A base `Button`: activation, focus, disabled and selected state, no styling |
 | `Link.new(id)` | type | A base external link; pair it with `.href("https://…")` |
 | `Checkbox.new(id)` / `Switch.new(id)` | type | A base controlled toggle, no styling |
@@ -301,7 +305,7 @@ grant the CLI installs in `gpui-shell.json`:
   "id": "com.example.viewer",
   "name": "Viewer",
   "version": "1.0.0",
-  "shell-version": "0.1.0",
+  "shell-version": "0.6.0",
   "entry": "main.js",
   "dependencies": {
     "omarchy-ui": "huacnlee/omarchy-ui"
@@ -430,7 +434,7 @@ an internal trait with opaque handles, and a fake engine to compile it against �
 is worth doing when there is a second engine to write, and is make-work before
 that.
 
-## Not Here Yet
+## Host capabilities
 
 Present today: the element and style surface, state styles (`hover` / `active` /
 `focus`), `Button`, `Checkbox`, `Switch`, retained `InputState` with input
@@ -443,10 +447,12 @@ declarations.
 Deliberately absent:
 
 - `gpui.open_window` and multi-window applications; the host opens the window.
-- Select, combobox, tabs, list, table and tree bindings.
-- Charts, the code editor and its LSP surface, and WebView — these stay in Rust
-  on purpose; binding a trait-and-generics interface across a language boundary
-  costs more than it returns.
+- Full Rust API parity: script support is explicitly tracked per surface, not
+  inferred from the existence of a Rust component. The styled adapter already
+  supplies collection, select, table, tree, chart, and editor bindings. Consult
+  [the component inventory](../component-shell/component-inventory.json) and
+  [the gallery](../../examples/js_story/README.md) for available and deferred
+  surfaces; do not assume every delegate, LSP, or WebView facility is exposed.
 - Packaging and installing an application as a distributable archive.
 
 The design, what is implemented, and what is not are in
@@ -454,9 +460,9 @@ The design, what is implemented, and what is not are in
 
 ## Types for the Script
 
-`import ... from "gpui"` is opaque without declarations, and the style surface
+`import ... from "gpui-kit"` is opaque without declarations, and the style surface
 is far too large to memorize. **There is nothing to run.** Every `gpui-shell`
-invocation — running an application, `check`, `types` — writes `gpui.d.ts` into
+invocation — running an application, `check`, `types` — writes `gpui-kit.d.ts` into
 each directory that imports a built-in module, from the runtime it is about to
 use:
 
@@ -466,12 +472,12 @@ cargo run -p gpui-shell -- check path/to/app     # checks it, and writes them
 cargo run -p gpui-shell -- types path/to/app     # writes them and nothing else
 ```
 
-One file, three modules: `"gpui"` for GPUI's own elements and what the runtime
+One file, built-in modules for each runtime layer: `"gpui-kit"` for GPUI's own elements and what the runtime
 adds, `"gpui-base"` for gpui-base's layout helpers, components and theme, and
-`"gpui-fps"` for its performance overlay. A name belongs to exactly one of them,
-so an import says which layer a script depends on.
+`"gpui-fps"` for its performance overlay. `"gpui"` is a compatibility alias for
+`"gpui-kit"`, so `import { div } from "gpui"` uses the same binding.
 
-Add `gpui.d.ts` to `.gitignore`; the file's own first line says so.
+Add `gpui-kit.d.ts` to `.gitignore`; the file's own first line says so.
 
 ### Dependencies an editor can see
 
@@ -500,7 +506,7 @@ The directory is called `node_modules` because that is the one place every
 editor looks — no package manager is involved and nothing comes from a
 registry. It also buys quiet: TypeScript treats what it resolves there as an
 external library, so a dependency's own implicit-`any` diagnostics stay out of
-your build. Ignore it, the way `gpui.d.ts` is ignored.
+your build. Ignore it, the way `gpui-kit.d.ts` is ignored.
 
 The style methods, their argument types and the colour-token union are generated
 from the tables the runtime dispatches through, so a name that type-checks is a
@@ -529,7 +535,7 @@ the shape to copy.
 
 ### Keeping it current
 
-`gpui.d.ts` is an **output**, not a source, and a stale one is worse than none:
+`gpui-kit.d.ts` is an **output**, not a source, and a stale one is worse than none:
 it completes methods that no longer exist and refuses ones that do, and nothing
 about editing against it feels wrong until the script runs. So it is not
 something to write down and remember — it is rewritten by whatever is about to
@@ -544,7 +550,7 @@ Nothing is written when the file already matches, so an editor watching the
 directory is not woken on every launch and a read-only checkout is not an error.
 A directory that refuses the write is logged, never fatal.
 
-Do not commit it. This repository ignores `gpui.d.ts` everywhere, including
+Do not commit it. This repository ignores `gpui-kit.d.ts` everywhere, including
 beside its own example and story scripts — a committed copy could only ever be
 the stale one. What *is* committed is the part that has no machine in it: a
 `jsconfig.json` that turns checking on. An application that has none is given
@@ -600,7 +606,7 @@ long that render's output lives.
 - [GPUI Shell design document](../../docs/gpui-shell.md)
 - [`gpui-base`](../base/README.md), the foundation this runtime binds
 - [Architecture](../../docs/ARCHITECTURE.md) and [Styling and Motion](../../docs/STYLING-AND-MOTION.md)
-- [GPUI](https://gpui.rs)
+- GPUI
 
 ## License
 

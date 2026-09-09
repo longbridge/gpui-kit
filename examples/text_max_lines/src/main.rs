@@ -9,8 +9,8 @@
 //!
 //! Run: `cargo run -p text_max_lines`
 
-use gpui::{prelude::FluentBuilder as _, *};
-use gpui_component::{
+use gpui_kit::assets::Assets;
+use gpui_kit::component::{
     ActiveTheme as _, IconName, Sizable as _,
     button::{Button, ButtonVariants as _},
     scroll::ScrollableElement as _,
@@ -18,7 +18,7 @@ use gpui_component::{
     text::{TextView, TextViewState},
     *,
 };
-use gpui_component_assets::Assets;
+use gpui_kit::{prelude::FluentBuilder as _, *};
 
 const DEFAULT_MAX_LINES: usize = 5;
 
@@ -233,11 +233,11 @@ impl Render for MaxLinesExample {
 }
 
 fn main() {
-    let app = gpui_platform::application().with_assets(Assets);
+    let app = gpui_kit::application().with_assets(Assets);
 
     app.run(move |cx| {
         // This must be called before using any GPUI Component features.
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
 
         // The document embeds remote images; without an HTTP client they
         // silently never load.

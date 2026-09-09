@@ -1,9 +1,9 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     ParentElement, Render, Styled, Window, div, px,
 };
 
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Disableable as _, Sizable, Size, StyledExt, h_flex, separator::Separator,
     switch::Switch, v_flex,
 };
@@ -53,7 +53,7 @@ impl SwitchStory {
 }
 
 impl Focusable for SwitchStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

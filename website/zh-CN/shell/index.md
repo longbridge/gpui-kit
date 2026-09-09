@@ -6,7 +6,7 @@ order: 1
 
 # GPUI Shell
 
-`gpui-shell` 的存在，是为了让一个用 Rust 写的 [GPUI](https://gpui.rs) 应用**能被 JavaScript 扩展**。
+`gpui-shell` 的存在，是为了让一个用 Rust 写的 GPUI 应用**能被 JavaScript 扩展**。
 
 **首要目标是插件扩展。** Host 应用编译一次、发布一次，此后新增一块面板、一个侧边工具或一段业务逻辑，都以脚本的形式加载进同一个进程——不必重新编译，不必重新分发二进制，想加一块面板的人也不必 fork 整个 Host。
 
@@ -14,10 +14,10 @@ order: 1
 
 **它不是 Electron，也不是 Tauri。** 没有 WebView，没有 DOM，没有 HTML 与 CSS，没有浏览器引擎，也没有 Node.js。脚本从不负责渲染，它只把界面**描述**一次，此后每一帧都由 Rust 把这份描述重放成真正的 GPUI 元素——和一个基于 `gpui-base` 的 Rust 应用所构建的，是同一套元素模型、同一个 GPU 渲染器。在这里 JavaScript 是应用层，不是渲染层：所以一次重绘完全不执行 JavaScript，而带上整个运行时也只多 [13.5 MiB 二进制](./engine.md#链接它要付多少)。
 
-这两个目标建立在同一条分工上。`gpui-shell` 直接构建在 [`gpui-base`](/base/) 之上，[QuickJS](https://github.com/quickjs-ng/quickjs) 跑在 Host 自己的线程上。由 Host 构建运行时、决定脚本能碰到什么，而脚本在同一个进程里画出真正的界面。Rust 负责渲染、布局、文本编辑、虚拟化、焦点、浮层以及全部系统能力；脚本负责界面组合、视觉呈现与业务逻辑。
+这两个目标建立在同一条分工上。`gpui-shell` 直接构建在 [`gpui-base`](/base) 之上，[QuickJS](https://github.com/quickjs-ng/quickjs) 跑在 Host 自己的线程上。由 Host 构建运行时、决定脚本能碰到什么，而脚本在同一个进程里画出真正的界面。Rust 负责渲染、布局、文本编辑、虚拟化、焦点、浮层以及全部系统能力；脚本负责界面组合、视觉呈现与业务逻辑。
 
 ```js
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { v_flex, Button } from "gpui-base";
 
 export default class Counter extends View {
@@ -32,7 +32,12 @@ export default class Counter extends View {
       .justify_center()
       .gap(20)
       .bg(cx.theme().colors.background)
-      .child(div().text_3xl().text_color(cx.theme().colors.foreground).child(`${this.count}`))
+      .child(
+        div()
+          .text_3xl()
+          .text_color(cx.theme().colors.foreground)
+          .child(`${this.count}`),
+      )
       .child(
         Button.new("increment")
           .h(32)
@@ -58,17 +63,17 @@ export default class Counter extends View {
 
 「插件优先」不是一句定位口号。下面这些设计决策，如果只面向独立脚本，每一条都可以是另一种选择；放在插件的语境下才成为必然：
 
-| 设计决策 | 为什么它由插件推导而来 |
-| --- | --- |
-| `Capabilities::default()` 是空集，由 Host 授予 | 插件是别人写的代码，授权必须来自 Host，而不能由插件在自己的 manifest 里声明即得 |
-| 每个插件一份独立 `Policy`，卸载即取消它名下的全部任务 | 多个插件共用同一个运行时，授权之间不能相互渗透 |
-| 脚本出错是可恢复的异常，Host 进程存活 | 一个插件写崩了，不该把整个应用一起带走 |
-| 重绘只重放快照，从不进入 VM | 帧预算由 Host 负责，插件的 JavaScript 不能压在上面 |
-| `HostModule` 把 Host 自己的 Rust 借给脚本 | 只有脚本跑在 Host 内部时才有意义——独立应用没有 Host 可借 |
-| Dock 面板在应用被卸载后仍保留位置与状态 | 插件会被装了又卸；重新装回来时，面板还在原来的位置，状态也还在 |
-| 基座不提供任何视觉，呈现权整个交给脚本 | 插件要长得像 Host 的一部分，就必须能掌控每一个像素 |
+| 设计决策                                              | 为什么它由插件推导而来                                                          |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `Capabilities::default()` 是空集，由 Host 授予        | 插件是别人写的代码，授权必须来自 Host，而不能由插件在自己的 manifest 里声明即得 |
+| 每个插件一份独立 `Policy`，卸载即取消它名下的全部任务 | 多个插件共用同一个运行时，授权之间不能相互渗透                                  |
+| 脚本出错是可恢复的异常，Host 进程存活                 | 一个插件写崩了，不该把整个应用一起带走                                          |
+| 重绘只重放快照，从不进入 VM                           | 帧预算由 Host 负责，插件的 JavaScript 不能压在上面                              |
+| `HostModule` 把 Host 自己的 Rust 借给脚本             | 只有脚本跑在 Host 内部时才有意义——独立应用没有 Host 可借                        |
+| Dock 面板在应用被卸载后仍保留位置与状态               | 插件会被装了又卸；重新装回来时，面板还在原来的位置，状态也还在                  |
+| 基座不提供任何视觉，呈现权整个交给脚本                | 插件要长得像 Host 的一部分，就必须能掌控每一个像素                              |
 
-独立脚本应用用得上其中的很少几条。它真正获得的是迭代速度——hot-reload、`check`，以及自动生成的 `gpui.d.ts`。这也是它排在第二位的原因：它是插件被开发和验证的地方，而不是这套运行时的目的本身。
+独立脚本应用用得上其中的很少几条。它真正获得的是迭代速度——hot-reload、`check`，以及自动生成的 `gpui-kit.d.ts`。这也是它排在第二位的原因：它是插件被开发和验证的地方，而不是这套运行时的目的本身。
 
 文本编辑、语法高亮、LSP、虚拟化与动画采样都留在 Rust。这条线是职责划分，而不是对脚本的限制：所有必须贴着 GPU 与系统运行的部分都归 Host，插件因此不会成为应用性能与稳定性上的变量。
 
@@ -88,10 +93,10 @@ export default class Counter extends View {
 
 脚本拿到的，正是一个基于 `gpui-base` 的 Rust 应用能拿到的东西：元素与布局、链接与控件、建立在语义主题 token 之上的流式样式接口、通过 `init` / `render` / `cx.notify()` 管理的 View 状态、由 Host 留存的状态（例如文本输入的 rope 与选区）、dialog / sheet / toast、异步任务、原生 transition 与 spring，以及需要授权才能用的文件、存储、剪贴板、进程、HTTP、TCP 与 WebSocket 接口。
 
-围绕它的还有：`--watch` 保存文件即 hot-reload，`gpui-shell.json` 在代码运行前声明身份与最小权限，自动生成的 `gpui.d.ts` 把整套 API 描述给编辑器或模型，`check` 则在应用跑起来之前就报出问题。
+围绕它的还有：`--watch` 保存文件即 hot-reload，`gpui-shell.json` 在代码运行前声明身份与最小权限，自动生成的 `gpui-kit.d.ts` 把整套 API 描述给编辑器或模型，`check` 则在应用跑起来之前就报出问题。
 
 ::: tip
-`gpui.d.ts` 可以加进 `.gitignore`，它是自动生成的。
+`gpui-kit.d.ts` 可以加进 `.gitignore`，它是自动生成的。
 :::
 
 ### 性能：脚本不在每一帧里
@@ -103,20 +108,19 @@ export default class Counter extends View {
 <img class="architecture-light" src="/shell-render-frequency-light.svg" alt="一秒内的一块实时面板。JavaScript 的数据没有变化时，60 帧全部触发，而 JavaScript 那一行始终是空的；价格每 50 ms 变动一次时，仍是 60 帧，JavaScript 触发约 20 次。">
 <img class="architecture-dark" src="/shell-render-frequency-dark.svg" alt="一秒内的一块实时面板。JavaScript 的数据没有变化时，60 帧全部触发，而 JavaScript 那一行始终是空的；价格每 50 ms 变动一次时，仍是 60 帧，JavaScript 触发约 20 次。">
 
-
-| 界面在做什么 | 每秒画的帧 | 每秒跑的 JavaScript |
-| --- | --- | --- |
-| 只是重绘，JavaScript 的数据没有变化 | 60 | 0 |
-| 价格每 50 ms 变动一次 | 60 | 19 |
+| 界面在做什么                        | 每秒画的帧 | 每秒跑的 JavaScript |
+| ----------------------------------- | ---------- | ------------------- |
+| 只是重绘，JavaScript 的数据没有变化 | 60         | 0                   |
+| 价格每 50 ms 变动一次               | 60         | 19                  |
 
 帧数取决于屏幕，JavaScript 的次数取决于数据。第二行里另外 41 帧重放的是已有的描述。
 
 成本因此按用户操作计，而不是按帧计。443 节点的面板，跑一遍 `render`、把整个界面记进 Snapshot 要 1.1 ms，只在状态变化时付；之后每一帧 1.3 ms，那是渲染本身——把 Snapshot 变成元素、布局、绘制，其中没有 JavaScript。
 
-| | 每帧成本 |
-| --- | --- |
+|               | 每帧成本                                                            |
+| ------------- | ------------------------------------------------------------------- |
 | 没有 Snapshot | 1.1 ms (JS render) + 1.3 ms (Rust render) = **2.4 ms/frame render** |
-| 有 Snapshot | **1.3 ms** |
+| 有 Snapshot   | **1.3 ms**                                                          |
 
 面板变大也不改变这条性质：[基准测试](./engine.md#那次实测)覆盖到 8,403 个节点，各档的每一帧都不执行 JavaScript，最小一档由每次 CI 运行的断言保证。
 
@@ -172,7 +176,7 @@ GPUI 的元素是**被消费**的值：`RenderOnce::render` 按值取走 `self`�
 
 ```text
   JavaScript 应用            main.js · views · 样式 · 业务逻辑
-            │  import { … } from "gpui"
+            │  import { … } from "gpui-kit"
             ▼
   gpui-shell                 引擎分界线 · 元素描述 · CallScope
                              样式表 · 主题 token · 能力模型
@@ -189,24 +193,24 @@ GPUI 的元素是**被消费**的值：`RenderOnce::render` 按值取走 `self`�
 
 ## 接着读
 
-| 页面 | 内容 |
-| --- | --- |
-| [Getting Started](./getting-started.md) | 运行示例、最小应用、`check` 与 `types` |
-| [Examples](./examples.md) | 仓库里的独立应用、 Host 状态与原生动画示例 |
-| [Elements](./elements.md) | 构造器、`child` / `children` / `when`，以及元素为什么是一次性的 |
-| [Styling](./styling.md) | 流式样式接口、长度与颜色、语义 token、状态样式 |
-| [State and Views](./state.md) | `init` / `render`、`cx.notify()`、留存状态、异步 |
-| [Overlays](./overlays.md) | dialog、sheet、toast，以及 phase 规则 |
-| [Capabilities](./capabilities.md) | `gpui-shell.json`、默认拒绝、文件、存储、进程与网络 API |
-| [依赖](./dependencies.md) | shell package：什么样的仓库算一个，manifest 如何命名与钉住它，以及编辑器拿到的类型 |
-| [Hosting](./hosting.md) | Rust 这一侧的全貌：挂载、刷新、指标、退出、hot-reload |
-| [HostModule](./host-module.md) | 把 Host 自己的 Rust 借给脚本，以及那条纯数据边界 |
-| [Dock 与面板](./dock.md) | 把脚本 View 变成可停靠面板、为它绘制 chrome，以及重启后什么会留下 |
-| [Performance](./performance.md) | 脚本的成本：失效频率乘以描述规模、 View 这条边界，以及那几个计数器 |
-| [The Engine Seam](./engine.md) | QuickJS、这条分界线存在的理由，以及把脚本成本与帧成本分开的三项实测 |
+| 页面                                    | 内容                                                                               |
+| --------------------------------------- | ---------------------------------------------------------------------------------- |
+| [Getting Started](./getting-started.md) | 运行示例、最小应用、`check` 与 `types`                                             |
+| [Examples](./examples.md)               | 仓库里的独立应用、 Host 状态与原生动画示例                                         |
+| [Elements](./elements.md)               | 构造器、`child` / `children` / `when`，以及元素为什么是一次性的                    |
+| [Styling](./styling.md)                 | 流式样式接口、长度与颜色、语义 token、状态样式                                     |
+| [State and Views](./state.md)           | `init` / `render`、`cx.notify()`、留存状态、异步                                   |
+| [Overlays](./overlays.md)               | dialog、sheet、toast，以及 phase 规则                                              |
+| [Capabilities](./capabilities.md)       | `gpui-shell.json`、默认拒绝、文件、存储、进程与网络 API                            |
+| [依赖](./dependencies.md)               | shell package：什么样的仓库算一个，manifest 如何命名与钉住它，以及编辑器拿到的类型 |
+| [Hosting](./hosting.md)                 | Rust 这一侧的全貌：挂载、刷新、指标、退出、hot-reload                              |
+| [HostModule](./host-module.md)          | 把 Host 自己的 Rust 借给脚本，以及那条纯数据边界                                   |
+| [Dock 与面板](./dock.md)                | 把脚本 View 变成可停靠面板、为它绘制 chrome，以及重启后什么会留下                  |
+| [Performance](./performance.md)         | 脚本的成本：失效频率乘以描述规模、 View 这条边界，以及那几个计数器                 |
+| [The Engine Seam](./engine.md)          | QuickJS、这条分界线存在的理由，以及把脚本成本与帧成本分开的三项实测                |
 
 ## 当前状态
 
 该 crate 处于 **M0** 里程碑：一条可行性基线，而不是稳定接口。它没有发布到 crates.io，脚本 API 预计还会变化。本节文档写到的都是已经实现并可用的部分；缺失的部分，会写在你最可能去找它的那一页上。
 
-设计详见 [GPUI Shell 设计文档](https://github.com/longbridge/gpui-component/blob/main/docs/gpui-shell.md)，代码位于 [`crates/shell`](https://github.com/longbridge/gpui-component/tree/main/crates/shell)。
+设计详见 [GPUI Shell 设计文档](https://github.com/longbridge/gpui-kit/blob/main/docs/gpui-shell.md)，代码位于 [`crates/shell`](https://github.com/longbridge/gpui-kit/tree/main/crates/shell)。

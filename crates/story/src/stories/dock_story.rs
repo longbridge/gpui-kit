@@ -1,14 +1,14 @@
 use std::rc::Rc;
 
-use gpui::{
-    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
-    ParentElement as _, Render, SharedString, Styled as _, Window, div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _,
     dock::{
         BasePanel, DockArea, DockLayout, DockPlacement, DockSkin, Panel, PanelEvent, panel_handle,
     },
+};
+use gpui_kit::{
+    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    ParentElement as _, Render, SharedString, Styled as _, Window, div, px,
 };
 
 struct DemoPanel {
@@ -78,7 +78,7 @@ impl super::Story for DockStory {
         "Drag tabs between groups or towards an edge to split the workspace."
     }
 
-    fn paddings() -> gpui::Pixels {
+    fn paddings() -> gpui_kit::Pixels {
         px(0.)
     }
 

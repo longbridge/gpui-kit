@@ -1,9 +1,9 @@
-use gpui::*;
-use gpui_component::{
+use gpui_kit::component::{
     Root, TitleBar,
     button::{Button, ButtonVariants},
     h_flex, v_flex,
 };
+use gpui_kit::*;
 
 pub struct Example;
 impl Render for Example {
@@ -40,10 +40,10 @@ impl Render for Example {
 }
 
 fn main() {
-    let app = gpui_platform::application().with_assets(gpui_component_assets::Assets);
+    let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
 
     app.run(move |cx| {
-        gpui_component::init(cx);
+        gpui_kit::init(cx);
 
         cx.spawn(async move |cx| {
             // Setup GPUI to use custom title bar

@@ -1,11 +1,6 @@
 use std::collections::HashSet;
 
-use gpui::{
-    App, AppContext, Context, Div, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, Stateful, StatefulInteractiveElement, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Icon, IconName, Sizable, StyledExt,
     avatar::Avatar,
     button::{Button, ButtonVariants},
@@ -16,6 +11,11 @@ use gpui_component::{
     progress::Progress,
     tag::Tag,
     v_flex,
+};
+use gpui_kit::{
+    App, AppContext, Context, Div, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
+    ParentElement, Render, Stateful, StatefulInteractiveElement, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::section;

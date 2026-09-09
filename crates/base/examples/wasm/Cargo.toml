@@ -1,6 +1,6 @@
 [package]
 name = "gpui-base-examples-wasm"
-version = "0.5.2"
+version = "0.6.0"
 publish = false
 edition.workspace = true
 

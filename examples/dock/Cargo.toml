@@ -1,0 +1,16 @@
+[package]
+name = "example-dock"
+version = "0.6.0"
+publish = false
+edition.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+gpui-component-story = { path = "../../crates/story" }
+anyhow.workspace = true
+rand = "0.8"
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+[lints]
+workspace = true

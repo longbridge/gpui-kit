@@ -1,9 +1,9 @@
-use gpui::{Action, App, SharedString, actions};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, IconName, Theme, ThemeConfig, ThemeMode, ThemeRegistry,
     command::{CommandEntry, CommandGroup, CommandItem},
     scroll::ScrollbarMode,
 };
+use gpui_kit::*;
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
@@ -74,11 +74,11 @@ fn apply_persisted_radius(state: &State, cx: &mut App) {
     };
 
     let theme = Theme::global_mut(cx);
-    theme.radius = gpui::px(radius);
+    theme.radius = gpui_kit::px(radius);
     theme.radius_lg = if radius > 0. {
-        gpui::px(radius + 2.)
+        gpui_kit::px(radius + 2.)
     } else {
-        gpui::px(0.)
+        gpui_kit::px(0.)
     };
     Theme::sync_base(cx);
 }
@@ -205,7 +205,10 @@ pub(crate) fn theme_entries(cx: &App) -> Vec<CommandEntry> {
         .collect()
 }
 
-pub(crate) fn theme_name_at(index: gpui_component::IndexPath, cx: &App) -> Option<SharedString> {
+pub(crate) fn theme_name_at(
+    index: gpui_kit::component::IndexPath,
+    cx: &App,
+) -> Option<SharedString> {
     let mode = [ThemeMode::Light, ThemeMode::Dark].get(index.section)?;
     ThemeRegistry::global(cx)
         .sorted_themes()
@@ -229,13 +232,14 @@ fn theme_item(theme: &ThemeConfig, active_name: &SharedString) -> CommandItem {
 #[cfg(all(test, feature = "test-support"))]
 mod tests {
     use super::*;
-    use gpui::{TestAppContext, px};
-    use gpui_component::ThemeConfig;
+    // `super::*` also carries GPUI's `test` attribute; keep the built-in one for `#[test]`.
+    use core::prelude::v1::test;
+    use gpui_kit::component::ThemeConfig;
     use std::rc::Rc;
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn applying_custom_theme_updates_base_component_colors(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let config = Rc::new(
             serde_json::from_value::<ThemeConfig>(serde_json::json!({
                 "name": "Custom Dark",
@@ -255,7 +259,7 @@ mod tests {
 
         cx.read(|cx| {
             let theme = cx.theme();
-            let base = gpui_base::Theme::global(cx);
+            let base = gpui_kit::base::Theme::global(cx);
             assert_eq!(base.tokens.colors.surface, theme.popover);
             assert_eq!(
                 base.tokens.colors.surface_foreground,
@@ -281,9 +285,9 @@ mod tests {
         assert_eq!(json["radius"], 4.0);
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn persisted_radius_overrides_the_theme_radius(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let config = Rc::new(
             serde_json::from_value::<ThemeConfig>(serde_json::json!({
                 "name": "Rounded Theme",

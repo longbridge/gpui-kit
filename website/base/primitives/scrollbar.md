@@ -19,19 +19,19 @@ design-system layer owns colors, geometry, timing, and entrance choreography.
 The native showcase and WASM preview use the same implementation:
 
 ```bash
-cargo run -p gpui-base --example components -- scrollbar
+cargo run -p gpui-base-examples -- scrollbar
 ```
 
 The source is available in
-[`components/scrollbar.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/scrollbar.rs).
+[`components/scrollbar.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/scrollbar.rs).
 
 ## Imports
 
 ```rust
 use std::time::Duration;
 
-use gpui::{div, px, rgb, ScrollHandle, Styled as _};
-use gpui_base::{
+use gpui_kit::{div, px, rgb, ScrollHandle, Styled as _};
+use gpui_kit::base::{
     Scrollbar, ScrollbarAxis, ScrollbarEntrance, ScrollbarMode,
     ScrollbarMotion, ScrollbarStyles, ScrollbarTheme, Theme,
 };
@@ -55,7 +55,7 @@ impl ActivityList {
         }
     }
 
-    fn render_list(&self) -> impl gpui::IntoElement {
+    fn render_list(&self) -> impl gpui_kit::IntoElement {
         div()
             .relative()
             .size_full()
@@ -94,11 +94,11 @@ Scrollbar::vertical(&scroll_handle).mode(ScrollbarMode::Hover);
 Scrollbar::vertical(&scroll_handle).mode(ScrollbarMode::Always);
 ```
 
-| Mode | Behavior |
-| --- | --- |
+| Mode        | Behavior                                                                                                                                                              |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `Scrolling` | Appears after scrolling or dragging. A visible scrollbar stays visible while hovered; leaving starts a fresh idle hold. Hover cannot reveal a fully hidden scrollbar. |
-| `Hover` | Appears when the pointer enters the scrollbar track. |
-| `Always` | Remains visible and skips visibility transitions. |
+| `Hover`     | Appears when the pointer enters the scrollbar track.                                                                                                                  |
+| `Always`    | Remains visible and skips visibility transitions.                                                                                                                     |
 
 All modes use a 6 px resting thumb by default. Track hover keeps that width.
 Thumb hover and active dragging target the 8 px active width. Width changes use
@@ -114,7 +114,7 @@ scroll.
 it during application initialization or when your design-system theme changes.
 
 ```rust
-fn install_scrollbar_theme(cx: &mut gpui::App) {
+fn install_scrollbar_theme(cx: &mut gpui_kit::App) {
     let styles = ScrollbarStyles::default()
         .track(|style| {
             style
@@ -175,12 +175,12 @@ and width changes.
 
 The example theme above produces this choreography:
 
-| Trigger | Entrance |
-| --- | --- |
-| Scroll in `Scrolling` or `Hover` mode | `entrance`: fade in place |
-| Track hover in `Hover` mode | `entrance`: fade in place |
-| Thumb hover in `Hover` mode | `thumb_hover_entrance`: slide from the nearest edge while fading |
-| `Always` mode | Immediate; visibility motion is skipped |
+| Trigger                               | Entrance                                                         |
+| ------------------------------------- | ---------------------------------------------------------------- |
+| Scroll in `Scrolling` or `Hover` mode | `entrance`: fade in place                                        |
+| Track hover in `Hover` mode           | `entrance`: fade in place                                        |
+| Thumb hover in `Hover` mode           | `thumb_hover_entrance`: slide from the nearest edge while fading |
+| `Always` mode                         | Immediate; visibility motion is skipped                          |
 
 For `SlideAndFade`, a vertical scrollbar enters from the right and a horizontal
 scrollbar enters from the bottom. Opacity uses linear entrance progress;
@@ -243,7 +243,7 @@ scrollable extent:
 
 ```rust
 Scrollbar::vertical(&scroll_handle)
-    .scroll_size(gpui::size(px(800.), px(4_000.)));
+    .scroll_size(gpui_kit::size(px(800.), px(4_000.)));
 ```
 
 ## Custom scroll handles
@@ -252,8 +252,8 @@ Scrollbar::vertical(&scroll_handle)
 `ScrollbarHandle`. Custom scroll containers can implement the same trait:
 
 ```rust
-use gpui::{Bounds, Pixels, Point, Size};
-use gpui_base::ScrollbarHandle;
+use gpui_kit::{Bounds, Pixels, Point, Size};
+use gpui_kit::base::ScrollbarHandle;
 
 impl ScrollbarHandle for MyScrollState {
     fn viewport_bounds(&self) -> Bounds<Pixels> {

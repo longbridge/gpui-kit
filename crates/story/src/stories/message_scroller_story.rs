@@ -1,11 +1,6 @@
 use std::{rc::Rc, time::Duration};
 
-use gpui::{
-    AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
-    StyleRefinement, Styled as _, Task, Window, div, prelude::FluentBuilder as _, rems,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IconName, Sizable as _, StyledExt as _,
     bubble::{Bubble, BubbleVariant},
     button::{Button, ButtonVariants as _},
@@ -15,6 +10,11 @@ use gpui_component::{
     message::{Message, MessageAlignment, MessageContent},
     message_scroller::{MessageScroller, MessageScrollerState},
     v_flex,
+};
+use gpui_kit::{
+    AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, Focusable,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
+    StyleRefinement, Styled as _, Task, Window, div, prelude::FluentBuilder as _, rems,
 };
 
 use crate::{Story, section};

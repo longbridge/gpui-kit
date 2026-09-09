@@ -1,14 +1,12 @@
 [package]
 name = "table_in_scrollable"
 description = "A DataTable with its own scrollbar nested inside a scrollable page."
-version = "0.5.1"
+version = "0.6.0"
 publish = false
 edition.workspace = true
 
 [dependencies]
-gpui.workspace = true
-gpui_platform.workspace = true
-gpui-component = { workspace = true }
+gpui-kit.workspace = true
 
 [lints]
 workspace = true

@@ -11,7 +11,7 @@ View 是这个运行时里唯一有身份、能跨帧存活、并且由 GPUI 拥
 ## 定义 View
 
 ```js
-import { View } from "gpui";
+import { View } from "gpui-kit";
 
 export default class Counter extends View {
   init(props) {

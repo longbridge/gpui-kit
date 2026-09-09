@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
-  base: '/gpui-component/examples/base/',
+  base: '/examples/base/',
   build: {
     target: 'esnext',
     minify: true,

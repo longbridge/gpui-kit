@@ -1,5 +1,5 @@
-use gpui::*;
-use gpui_component::{button::*, input::*, select::*, separator::*, *};
+use gpui_kit::component::{button::*, input::*, select::*, separator::*, *};
+use gpui_kit::*;
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +30,7 @@ impl SelectItem for Country {
         self.name.clone()
     }
 
-    fn display_title(&self) -> Option<gpui::AnyElement> {
+    fn display_title(&self) -> Option<gpui_kit::AnyElement> {
         Some(format!("{} ({})", self.name, self.code).into_any_element())
     }
 
@@ -41,7 +41,7 @@ impl SelectItem for Country {
 
 pub struct SelectStory {
     disabled: bool,
-    size: gpui_component::Size,
+    size: gpui_kit::component::Size,
     country_select: Entity<SelectState<SearchableVec<SelectGroup<Country>>>>,
     fruit_select: Entity<SelectState<SearchableVec<&'static str>>>,
     simple_select1: Entity<SelectState<Vec<&'static str>>>,
@@ -68,7 +68,7 @@ impl super::Story for SelectStory {
 }
 
 impl Focusable for SelectStory {
-    fn focus_handle(&self, cx: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, cx: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.fruit_select.focus_handle(cx)
     }
 }
@@ -126,7 +126,7 @@ impl SelectStory {
 
             Self {
                 disabled: false,
-                size: gpui_component::Size::Medium,
+                size: gpui_kit::component::Size::Medium,
                 country_select,
                 fruit_select,
                 simple_select1: cx.new(|cx| {
@@ -289,6 +289,7 @@ impl Render for SelectStory {
                     .items_center()
                     .child(
                         Select::new(&self.simple_select2)
+                            .accessibility_label("Programming language")
                             .w(px(280.))
                             .with_size(self.size)
                             .disabled(self.disabled)

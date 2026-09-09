@@ -18,11 +18,11 @@ This page is long because Dock is the largest system in `gpui-base`. If you only
 
 Three container shapes, and nothing else:
 
-| Container | Holds | Notes |
-| --- | --- | --- |
-| `Split` | Other containers, along one axis | Each child slot has an optional fixed size |
-| `Tabs` | Panels, one displayed at a time | Carries the displayed index |
-| `Tiles` | Panels at free positions | Each tile has bounds and a z-index |
+| Container | Holds                            | Notes                                      |
+| --------- | -------------------------------- | ------------------------------------------ |
+| `Split`   | Other containers, along one axis | Each child slot has an optional fixed size |
+| `Tabs`    | Panels, one displayed at a time  | Carries the displayed index                |
+| `Tiles`   | Panels at free positions         | Each tile has bounds and a z-index         |
 
 There is no leaf variant, so **a panel can only ever live inside a `Tabs` or a `Tiles`**. A region whose center is a single panel is still a `Tabs` holding one panel.
 
@@ -37,25 +37,25 @@ Neither the tree nor any node stores a GPUI entity handle.
 
 ### Key types
 
-| Type | Role |
-| --- | --- |
-| `PaneTree` | One region's layout, as pure data |
-| `PaneNode` / `PaneRef` | A node, and the borrowed projection you `match` on |
-| `NodeId` / `PanelId` | Stable container and panel identity |
-| `DockArea` | Owns the trees, reconciles them into entities, routes drags and persistence |
-| `DockLayout` | Describes a layout without constructing anything |
-| `Panel` | What a dockable view implements — behavior only |
-| `PanelView` | Object-safe panel handle, `Arc<dyn PanelView>` |
-| `TabGroup` / `TilesState` | The entity behind a `Tabs` node and a `Tiles` node |
-| `DockAreaRenderer` / `TabGroupRenderer` / `TilesRenderer` | Where every visual decision goes |
-| `DockContext` / `TabGroupContext` / `TileContext` | Resolved state and callbacks handed to a renderer |
-| `DockAreaState` | The serializable form of a whole area |
+| Type                                                      | Role                                                                        |
+| --------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `PaneTree`                                                | One region's layout, as pure data                                           |
+| `PaneNode` / `PaneRef`                                    | A node, and the borrowed projection you `match` on                          |
+| `NodeId` / `PanelId`                                      | Stable container and panel identity                                         |
+| `DockArea`                                                | Owns the trees, reconciles them into entities, routes drags and persistence |
+| `DockLayout`                                              | Describes a layout without constructing anything                            |
+| `Panel`                                                   | What a dockable view implements — behavior only                             |
+| `PanelView`                                               | Object-safe panel handle, `Arc<dyn PanelView>`                              |
+| `TabGroup` / `TilesState`                                 | The entity behind a `Tabs` node and a `Tiles` node                          |
+| `DockAreaRenderer` / `TabGroupRenderer` / `TilesRenderer` | Where every visual decision goes                                            |
+| `DockContext` / `TabGroupContext` / `TileContext`         | Resolved state and callbacks handed to a renderer                           |
+| `DockAreaState`                                           | The serializable form of a whole area                                       |
 
 ## Get started
 
 ```rust
 use std::rc::Rc;
-use gpui_base::dock::{DockArea, DockLayout, DockPlacement};
+use gpui_kit::base::dock::{DockArea, DockLayout, DockPlacement};
 
 let area = cx.new(|cx| {
     DockArea::new("workspace", Some(1), window, cx).with_renderer(Rc::new(MySkin))
@@ -101,15 +101,15 @@ DockLayout::h_split()
     )
 ```
 
-| Builder | Produces |
-| --- | --- |
-| `h_split()` / `v_split()` | A split along that axis |
-| `child(layout, size)` | Adds a child container to a split |
-| `tabs()` | A tab group |
-| `panel(entity)` | Adds a panel to a tab group |
-| `active_index(ix)` | Which tab starts displayed |
-| `tiles()` | A tiles canvas |
-| `tile(entity, bounds)` | Places a panel on a canvas |
+| Builder                   | Produces                          |
+| ------------------------- | --------------------------------- |
+| `h_split()` / `v_split()` | A split along that axis           |
+| `child(layout, size)`     | Adds a child container to a split |
+| `tabs()`                  | A tab group                       |
+| `panel(entity)`           | Adds a panel to a tab group       |
+| `active_index(ix)`        | Which tab starts displayed        |
+| `tiles()`                 | A tiles canvas                    |
+| `tile(entity, bounds)`    | Places a panel on a canvas        |
 
 Misuse — a panel added to a split, a child added to a tab group — trips a `debug_assert!` and is otherwise ignored.
 
@@ -158,17 +158,17 @@ impl Render for FilesPanel { /* ... */ }
 
 ### Every hook
 
-| Method | Default | When it runs |
-| --- | --- | --- |
-| `panel_name()` | *required* | Any time the panel is identified or written out |
-| `visible(cx)` | `true` | Every render pass |
-| `closable(cx)` | `true` | Before a close is offered or applied |
-| `zoomable(cx)` | `true` | Before a zoom is applied |
-| `on_added_to(group, ..)` | no-op | When the panel joins a tab group, with a weak handle on it |
-| `set_active(active, ..)` | no-op | On each real edge of "is the displayed tab" |
-| `set_zoomed(zoomed, ..)` | no-op | When the group displaying it zooms in or out |
-| `on_removed(..)` | no-op | When the panel leaves the dock for good |
-| `dump(cx)` | name only | On `DockArea::dump` |
+| Method                   | Default    | When it runs                                               |
+| ------------------------ | ---------- | ---------------------------------------------------------- |
+| `panel_name()`           | _required_ | Any time the panel is identified or written out            |
+| `visible(cx)`            | `true`     | Every render pass                                          |
+| `closable(cx)`           | `true`     | Before a close is offered or applied                       |
+| `zoomable(cx)`           | `true`     | Before a zoom is applied                                   |
+| `on_added_to(group, ..)` | no-op      | When the panel joins a tab group, with a weak handle on it |
+| `set_active(active, ..)` | no-op      | On each real edge of "is the displayed tab"                |
+| `set_zoomed(zoomed, ..)` | no-op      | When the group displaying it zooms in or out               |
+| `on_removed(..)`         | no-op      | When the panel leaves the dock for good                    |
+| `dump(cx)`               | name only  | On `DockArea::dump`                                        |
 
 ### Lifecycle contracts
 
@@ -186,7 +186,7 @@ These are precise, and worth reading once:
 
 **`closable` is permission, not a guarantee.** A container can still refuse — the last group of a dock does, so a dock cannot be emptied by closing.
 
-**A hidden panel keeps its place.** `visible` returning `false` leaves the panel in the tree and in its group; it reappears where it was. A container whose panels are *all* hidden gives up its slot, recursively — a nested split whose every leaf is hidden takes no space.
+**A hidden panel keeps its place.** `visible` returning `false` leaves the panel in the tree and in its group; it reappears where it was. A container whose panels are _all_ hidden gives up its slot, recursively — a nested split whose every leaf is hidden takes no space.
 
 ## The dock area
 
@@ -270,11 +270,11 @@ tree.bring_to_front(panel);
 
 `InsertTarget` says where a panel lands:
 
-| Variant | Meaning |
-| --- | --- |
-| `Tabs { node, ix, activate }` | Into an existing tab group, optionally at an index |
-| `Split { node, placement, size }` | Beside a node, in a new tab group |
-| `Tile { node, bounds }` | Onto a tiles canvas at those bounds |
+| Variant                           | Meaning                                            |
+| --------------------------------- | -------------------------------------------------- |
+| `Tabs { node, ix, activate }`     | Into an existing tab group, optionally at an index |
+| `Split { node, placement, size }` | Beside a node, in a new tab group                  |
+| `Tile { node, bounds }`           | Onto a tiles canvas at those bounds                |
 
 Every edit returns an `EditResult`: `changed()`, plus `created_nodes()`, `removed_nodes()`, `removed_panels()`, `activated()`, `deactivated()`. **`removed_panels` excludes moves** — a moved panel's entity survives, so it must not receive `on_removed`.
 
@@ -296,43 +296,43 @@ match node.kind() {
 
 ## Supply the appearance
 
-Nothing in `gpui_base::dock` paints a color, a border, or a size. Three traits carry appearance in.
+Nothing in `gpui_kit::base::dock` paints a color, a border, or a size. Three traits carry appearance in.
 
 ### `DockAreaRenderer`
 
-| Method | Supplies | Default |
-| --- | --- | --- |
-| `frame` | The area's outermost element | Bare `div` |
-| `center_frame` | The column holding the center and bottom dock | Bare `div` |
-| `split_frame` | One split's frame | Bare `div` |
-| `render_split_handle` | The divider between two slots | `None` → base's one-pixel line |
-| `render_dock` | One dock's chrome: title strip, collapse affordance, resize handle | The content, unwrapped |
-| `build_placeholder` | The stand-in for a panel this build cannot construct | `None` → draws nothing |
-| `tab_group_renderer` | *required* | — |
-| `tiles_renderer` | *required* | — |
+| Method                | Supplies                                                           | Default                        |
+| --------------------- | ------------------------------------------------------------------ | ------------------------------ |
+| `frame`               | The area's outermost element                                       | Bare `div`                     |
+| `center_frame`        | The column holding the center and bottom dock                      | Bare `div`                     |
+| `split_frame`         | One split's frame                                                  | Bare `div`                     |
+| `render_split_handle` | The divider between two slots                                      | `None` → base's one-pixel line |
+| `render_dock`         | One dock's chrome: title strip, collapse affordance, resize handle | The content, unwrapped         |
+| `build_placeholder`   | The stand-in for a panel this build cannot construct               | `None` → draws nothing         |
+| `tab_group_renderer`  | _required_                                                         | —                              |
+| `tiles_renderer`      | _required_                                                         | —                              |
 
 ### `TabGroupRenderer`
 
-| Method | Supplies | Default |
-| --- | --- | --- |
-| `frame` | The group's outer element | Bare `div` |
-| `content_frame` | The element the displayed panel sits in | Bare `div` |
-| `render_tab_bar` | The tab strip | Nothing |
-| `render_active_panel` | How the displayed panel is placed | The panel, filling the frame |
-| `render_drop_indicator` | The highlight showing where a drop lands | Nothing |
-| `render_empty` | What an empty group shows | Nothing |
+| Method                  | Supplies                                 | Default                      |
+| ----------------------- | ---------------------------------------- | ---------------------------- |
+| `frame`                 | The group's outer element                | Bare `div`                   |
+| `content_frame`         | The element the displayed panel sits in  | Bare `div`                   |
+| `render_tab_bar`        | The tab strip                            | Nothing                      |
+| `render_active_panel`   | How the displayed panel is placed        | The panel, filling the frame |
+| `render_drop_indicator` | The highlight showing where a drop lands | Nothing                      |
+| `render_empty`          | What an empty group shows                | Nothing                      |
 
 ### `TilesRenderer`
 
-| Method | Supplies | Default |
-| --- | --- | --- |
-| `frame` | The canvas | Bare `div` |
-| `tile_frame` | One tile's outer element | Bare `div` |
-| `render_drag_bar` | *required* — the strip that moves a tile | — |
-| `render_resize_handles` | The tile's resize affordances | Nothing |
-| `panel_frame` | The element the panel sits in | Bare `div` |
-| `render_overlay` | Anything drawn above every tile | Nothing |
-| `grid_size` | Snap granularity | No snapping |
+| Method                  | Supplies                                 | Default     |
+| ----------------------- | ---------------------------------------- | ----------- |
+| `frame`                 | The canvas                               | Bare `div`  |
+| `tile_frame`            | One tile's outer element                 | Bare `div`  |
+| `render_drag_bar`       | _required_ — the strip that moves a tile | —           |
+| `render_resize_handles` | The tile's resize affordances            | Nothing     |
+| `panel_frame`           | The element the panel sits in            | Bare `div`  |
+| `render_overlay`        | Anything drawn above every tile          | Nothing     |
+| `grid_size`             | Snap granularity                         | No snapping |
 
 ### Contexts
 
@@ -404,13 +404,13 @@ Snapping geometry is exported for skins that want to preview a drop: `magnetic_s
 
 ## Events
 
-| Emitter | Event | Meaning |
-| --- | --- | --- |
-| `DockArea` | `LayoutChanged` | Something changed. Fires on **every** edit, including each step of a tile drag — debounce before writing to disk |
-| `DockArea` | `DragDrop { item, target }` | A host-owned drag landed |
-| `TabGroup` | `Drop` / `DragDrop` / `ClosePanel` / `ActiveChanged` / `ZoomIn` / `ZoomOut` | A group's intent, applied by the area |
-| `TilesState` | `BoundsChanged` / `BringToFront` / `ClosePanel` / `DragDrop` / `ZoomIn` / `ZoomOut` | A canvas's intent |
-| `Panel` | `ZoomIn` / `ZoomOut` / `LayoutChanged` | A panel's own signal |
+| Emitter      | Event                                                                               | Meaning                                                                                                          |
+| ------------ | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `DockArea`   | `LayoutChanged`                                                                     | Something changed. Fires on **every** edit, including each step of a tile drag — debounce before writing to disk |
+| `DockArea`   | `DragDrop { item, target }`                                                         | A host-owned drag landed                                                                                         |
+| `TabGroup`   | `Drop` / `DragDrop` / `ClosePanel` / `ActiveChanged` / `ZoomIn` / `ZoomOut`         | A group's intent, applied by the area                                                                            |
+| `TilesState` | `BoundsChanged` / `BringToFront` / `ClosePanel` / `DragDrop` / `ZoomIn` / `ZoomOut` | A canvas's intent                                                                                                |
+| `Panel`      | `ZoomIn` / `ZoomOut` / `LayoutChanged`                                              | A panel's own signal                                                                                             |
 
 Container events are the container asking the area for something; the area is what actually edits the tree. A host normally subscribes only to `DockEvent`.
 
@@ -447,23 +447,23 @@ Docking layouts are well-trodden. Where implementations differ is how far the la
 
 ### Architecture
 
-| Project | Stack | Engine and rendering | What a consumer can change |
-| --- | --- | --- | --- |
-| [Qt](https://doc.qt.io/qt-6/qdockwidget.html) | C++, retained | `QMainWindow` owns four fixed dock areas; a `QDockWidget` *is* a widget | Subclass the widget; styling via QSS |
-| [AvalonDock](https://github.com/Dirkster99/AvalonDock) | C#/WPF, retained | `LayoutRoot` tree of layout elements | XAML templates and themes |
-| [Dear ImGui](https://github.com/ocornut/imgui/wiki/Docking) | C++, immediate | `DockSpace()` is a region any window may dock into; nodes are engine-internal | Style vars and colors |
-| [egui_dock](https://docs.rs/egui_dock/) | Rust, immediate | `DockState` holds surfaces, each with a `Tree` of `Node`s | `TabViewer` renders tab bodies; a `Style` struct tunes the chrome |
-| [dockview](https://dockview.dev/) | TypeScript, web | Framework-agnostic engine behind thin adapters | CSS variables, theme object, replace the tab component |
-| [FlexLayout](https://github.com/caplin/FlexLayout) | TypeScript, web | JSON model beside a React renderer | `onRenderTab` callbacks and CSS |
-| [golden-layout](https://golden-layout.com/) | TypeScript, web | Engine owns its DOM outright | CSS overrides |
-| [rc-dock](https://github.com/ticlo/rc-dock) | TypeScript, web | `BoxData` / `PanelData` / `TabData` model | Custom tab rendering and CSS |
-| [VS Code](https://code.visualstudio.com/api/ux-guidelines/panel) | TypeScript, app | Workbench owns the layout | Contributed views, themed via CSS |
-| [Zed](https://zed.dev/) | Rust, app | `PaneGroup` built into the application | Not reusable outside its host |
-| **`gpui-base`** | Rust, retained | Pure-data `PaneTree`; the engine paints nothing | Renderer traits return elements — there is no default look to override |
+| Project                                                          | Stack            | Engine and rendering                                                          | What a consumer can change                                             |
+| ---------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [Qt](https://doc.qt.io/qt-6/qdockwidget.html)                    | C++, retained    | `QMainWindow` owns four fixed dock areas; a `QDockWidget` _is_ a widget       | Subclass the widget; styling via QSS                                   |
+| [AvalonDock](https://github.com/Dirkster99/AvalonDock)           | C#/WPF, retained | `LayoutRoot` tree of layout elements                                          | XAML templates and themes                                              |
+| [Dear ImGui](https://github.com/ocornut/imgui/wiki/Docking)      | C++, immediate   | `DockSpace()` is a region any window may dock into; nodes are engine-internal | Style vars and colors                                                  |
+| [egui_dock](https://docs.rs/egui_dock/)                          | Rust, immediate  | `DockState` holds surfaces, each with a `Tree` of `Node`s                     | `TabViewer` renders tab bodies; a `Style` struct tunes the chrome      |
+| [dockview](https://dockview.dev/)                                | TypeScript, web  | Framework-agnostic engine behind thin adapters                                | CSS variables, theme object, replace the tab component                 |
+| [FlexLayout](https://github.com/caplin/FlexLayout)               | TypeScript, web  | JSON model beside a React renderer                                            | `onRenderTab` callbacks and CSS                                        |
+| [golden-layout](https://golden-layout.com/)                      | TypeScript, web  | Engine owns its DOM outright                                                  | CSS overrides                                                          |
+| [rc-dock](https://github.com/ticlo/rc-dock)                      | TypeScript, web  | `BoxData` / `PanelData` / `TabData` model                                     | Custom tab rendering and CSS                                           |
+| [VS Code](https://code.visualstudio.com/api/ux-guidelines/panel) | TypeScript, app  | Workbench owns the layout                                                     | Contributed views, themed via CSS                                      |
+| [Zed](https://zed.dev/)                                          | Rust, app        | `PaneGroup` built into the application                                        | Not reusable outside its host                                          |
+| **`gpui-base`**                                                  | Rust, retained   | Pure-data `PaneTree`; the engine paints nothing                               | Renderer traits return elements — there is no default look to override |
 
-Three families are visible in that table. **Application-owned** engines (VS Code, Zed) are the most capable and the least reusable — you cannot lift them out of their host. **Widget-tree** engines (Qt, AvalonDock, golden-layout) make the dockable thing a widget, so the layout *is* the view hierarchy. **Model-and-renderer** engines (FlexLayout, rc-dock, dockview, egui_dock, and this one) keep a separate description of the layout and hand rendering to something else.
+Three families are visible in that table. **Application-owned** engines (VS Code, Zed) are the most capable and the least reusable — you cannot lift them out of their host. **Widget-tree** engines (Qt, AvalonDock, golden-layout) make the dockable thing a widget, so the layout _is_ the view hierarchy. **Model-and-renderer** engines (FlexLayout, rc-dock, dockview, egui_dock, and this one) keep a separate description of the layout and hand rendering to something else.
 
-`gpui-base` sits at the far end of the third family: the engine paints nothing at all. In a library that draws its own chrome, customization is a set of overrides layered onto a default appearance, and you are limited to the seams it chose to expose. Here a renderer returns elements and base attaches behavior to *those* elements, so two unrelated appearances can sit over one behavior — `crates/ui/src/dock` and the example below are exactly that.
+`gpui-base` sits at the far end of the third family: the engine paints nothing at all. In a library that draws its own chrome, customization is a set of overrides layered onto a default appearance, and you are limited to the seams it chose to expose. Here a renderer returns elements and base attaches behavior to _those_ elements, so two unrelated appearances can sit over one behavior — `crates/component/src/dock` and the example below are exactly that.
 
 ### The closest relative
 
@@ -477,7 +477,7 @@ egui_dock also has something this does not: **undocking a tab into a floating OS
 
 The layout being a value rather than a widget tree is not an aesthetic preference. Three properties follow:
 
-**A drag does not reset what it did not touch.** When containers *are* views — the Qt and AvalonDock model — rearranging the layout means creating and dropping views, so a drag can reset state (scroll offsets, focus, in-progress input) in panels that merely shared a parent with the one being moved. Here identity is a `NodeId` that survives every edit and every normalization rule, so reconciliation is a diff against the entity cache: a steady-state pass creates and drops nothing.
+**A drag does not reset what it did not touch.** When containers _are_ views — the Qt and AvalonDock model — rearranging the layout means creating and dropping views, so a drag can reset state (scroll offsets, focus, in-progress input) in panels that merely shared a parent with the one being moved. Here identity is a `NodeId` that survives every edit and every normalization rule, so reconciliation is a diff against the entity cache: a steady-state pass creates and drops nothing.
 
 **Collapse is a pure function, not a deferred cascade.** When the last panel leaves a group, the group must remove itself from its parent, which may empty the parent in turn. With containers as views this is mutual recursion between two types reaching upward through parent handles — and those handles must be installed after construction, which in GPUI means a deferred pass, which means a window in which the tree disagrees with itself. `normalize` is one post-order pass to a fixpoint: no parent pointers, no deferred work, and the tree is self-consistent the instant an edit returns.
 
@@ -489,16 +489,16 @@ The cost, stated plainly: an edit clones the tree once to diff it, and normaliza
 
 The vocabulary follows the neighborhood where it can, which matters if you already know one of these systems:
 
-| Concept | Qt | egui_dock | dockview | VS Code | Zed | `gpui-base` |
-| --- | --- | --- | --- | --- | --- | --- |
-| Window-level container | `QMainWindow` | `DockState` | `DockviewApi` | Workbench | `Workspace` | `DockArea` |
-| Tree arranging containers | — | `Tree` | Gridview | — | `PaneGroup` | `PaneTree` |
-| Tree node | — | `Node` | — | — | `Member` | `PaneNode` |
-| Tab group | (stacked docks) | `LeafNode` | Group | View Container | `Pane` | `TabGroup` |
-| Content in a tab | `QDockWidget` | `Tab` | `Panel` | `View` | `Item` | `Panel` |
-| Edge region | `Qt::DockWidgetArea` | — | — | Panel / Sidebar | `Dock` | `Dock` |
+| Concept                   | Qt                   | egui_dock   | dockview      | VS Code         | Zed         | `gpui-base` |
+| ------------------------- | -------------------- | ----------- | ------------- | --------------- | ----------- | ----------- |
+| Window-level container    | `QMainWindow`        | `DockState` | `DockviewApi` | Workbench       | `Workspace` | `DockArea`  |
+| Tree arranging containers | —                    | `Tree`      | Gridview      | —               | `PaneGroup` | `PaneTree`  |
+| Tree node                 | —                    | `Node`      | —             | —               | `Member`    | `PaneNode`  |
+| Tab group                 | (stacked docks)      | `LeafNode`  | Group         | View Container  | `Pane`      | `TabGroup`  |
+| Content in a tab          | `QDockWidget`        | `Tab`       | `Panel`       | `View`          | `Item`      | `Panel`     |
+| Edge region               | `Qt::DockWidgetArea` | —           | —             | Panel / Sidebar | `Dock`      | `Dock`      |
 
-One caution, because the field uses the word inconsistently: here a **`Panel` is the dockable content**, matching dockview. VS Code calls the *bottom region* a panel; rc-dock calls the *tab container* one. Translate the word before porting concepts from either.
+One caution, because the field uses the word inconsistently: here a **`Panel` is the dockable content**, matching dockview. VS Code calls the _bottom region_ a panel; rc-dock calls the _tab container_ one. Translate the word before porting concepts from either.
 
 Qt is the outlier worth noting: it has no separate node type at all, because `QDockWidget` is both the content and the thing the layout arranges. That is the design this one is furthest from.
 
@@ -512,7 +512,7 @@ its own, and a host that wants a different look writes a different skin.
 cargo run -p gpui-base dock
 ```
 
-Source: [`showcase/components/dock.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/dock.rs). It is the same file the preview at the top of this page compiles to WebAssembly.
+Source: [`showcase/components/dock.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/dock.rs). It is the same file the preview at the top of this page compiles to WebAssembly.
 
 ## Integration checklist
 

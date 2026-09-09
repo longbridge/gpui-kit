@@ -1,13 +1,10 @@
-use gpui::{
-    Action, App, AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, Styled, Subscription, Window, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     IconName, Sizable, Size, StyledExt,
     button::Button,
     stepper::{Stepper, StepperItem},
     v_flex,
 };
+use gpui_kit::*;
 use serde::Deserialize;
 
 use crate::{ChangeStorySize, section, story_toolbar};
@@ -17,7 +14,7 @@ use crate::{ChangeStorySize, section, story_toolbar};
 struct ToggleDisabled;
 
 pub struct StepperStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     size: Size,
     stepper0_step: usize,
     stepper1_step: usize,
@@ -61,7 +58,7 @@ impl StepperStory {
 }
 
 impl Focusable for StepperStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

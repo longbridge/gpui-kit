@@ -11,7 +11,7 @@ order: 14
 ## 导入
 
 ```rust
-use gpui_base::input::{Input, InputEvent, InputState};
+use gpui_kit::base::input::{Input, InputEvent, InputState};
 ```
 
 ## 基本用法
@@ -54,12 +54,12 @@ let password = cx.new(|cx| {
 
 ## 表现
 
-`gpui-base` 不安装产品样式。向状态提供 `InputEditorStyle`，并把控件组合进自己的边框容器。若需要现成主题、尺寸、边框、前后缀槽位和清除按钮，请使用 [`gpui-component` Input](../../docs/components/input.md)。
+`gpui-base` 不安装产品样式。向状态提供 `InputEditorStyle`，并把控件组合进自己的边框容器。若需要现成主题、尺寸、边框、前后缀槽位和清除按钮，请使用 [`gpui-component` Input](../../component/input.md)。
 
 ## 可运行示例
 
 ```bash
-cargo run -p gpui-base --example components -- input
+cargo run -p gpui-base-examples -- input
 ```
 
-实现位于 [`input.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/input.rs)。
+实现位于 [`input.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/input.rs)。

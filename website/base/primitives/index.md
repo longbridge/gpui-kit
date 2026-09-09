@@ -26,6 +26,7 @@ GPUI Base primitives provide behavior without prescribing presentation. Each pag
 - [Textarea](./textarea.md) — A multi-line text field with fixed rows, wrapping, and auto-grow behavior.
 - [Editor](./editor.md) — A source-code editor foundation with highlighting, gutter, folding, decorations, and LSP hooks.
 - [Link](./link.md) — An accessible link-like control with application-defined styling.
+- [Nav Stack](./nav-stack.md) — A navigation stack of views with push, pop, forward, and replace, and an animatable transition lifecycle.
 - [Number Input](./number-input.md) — A numeric input with reusable increment, decrement, and step behavior.
 - [OTP Input](./otp-input.md) — A multi-cell one-time-code input driven by a shared text state.
 - [Pagination](./pagination.md) — A controlled page navigator with explicit current and total page state.

@@ -1,7 +1,7 @@
 //! Script-level contracts for small host APIs.
 //!
 //! These deliberately render a real `ScriptView`: success means the API was
-//! installed in the `gpui` module, ran inside a live host scope, and produced
+//! installed in the `gpui-kit` module, ran inside a live host scope, and produced
 //! state JavaScript could publish to a snapshot.
 
 use std::ops::Deref;
@@ -11,7 +11,7 @@ use gpui::{Entity, IntoElement as _, TestAppContext, VisualTestContext};
 use crate::{Capabilities, HostError, HostModule, HostValue, ScriptView, ShellRuntime};
 
 const CLIPBOARD_PROBE: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 
 export default class Probe extends View {
@@ -24,7 +24,7 @@ export default class Probe extends View {
 "#;
 
 const CANCELLED_TIMER_PROBE: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 
 export default class Probe extends View {
@@ -40,7 +40,7 @@ export default class Probe extends View {
 "#;
 
 const WITHDRAWN_MODULE_PROBE: &str = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import { increment } from "calculator";
 
@@ -56,7 +56,7 @@ export default class Probe extends View {
 "#;
 
 const ASYNC_MODULE_PROBE: &str = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import { double, refuse } from "slow";
 
@@ -83,7 +83,7 @@ export default class Probe extends View {
 "#;
 
 const HOST_MODULE_PROBE: &str = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import { increment } from "calculator";
 

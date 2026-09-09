@@ -8,7 +8,7 @@
 //! the show delay, the grace period between two triggers, the deferred paint
 //! above every other layer and the window-edge clamping already inside it.
 //! What base has no part of is the *trigger*: `gpui-component` writes that
-//! itself, in `crates/ui/src/tooltip.rs`, against its own `Root`.
+//! itself, in `crates/component/src/tooltip.rs`, against its own `Root`.
 //! [`crate::root::ShellRoot`] is a different root, so the shell writes it once
 //! more, here.
 //!

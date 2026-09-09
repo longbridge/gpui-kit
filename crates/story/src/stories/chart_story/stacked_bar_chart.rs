@@ -1,9 +1,6 @@
 // You can draw any chart you want by using the `Plot`.
 
-use gpui::{
-    AnyElement, App, Bounds, ElementId, IntoElement, Pixels, Point, TextAlign, Window, point, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme,
     plot::{
         AXIS_GAP, AxisText, Grid, IntoPlot, Plot, PlotAxis,
@@ -12,6 +9,7 @@ use gpui_component::{
         tooltip::{CrossLine, Tooltip, TooltipState},
     },
 };
+use gpui_kit::*;
 
 use super::DailyDevice;
 

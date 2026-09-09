@@ -9,7 +9,7 @@ use gpui::{
     App, BorderStyle, Bounds, ClickEvent, CursorStyle, Edges, Element, ElementId, GlobalElementId,
     Half, HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
     MouseButton, MouseClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    SharedString, StyledText, TextLayout, Window, point, px, quad,
+    SharedString, StyledText, TextLayout, TextRun, TextStyle, Window, point, px, quad,
 };
 
 use crate::{
@@ -22,6 +22,141 @@ use crate::{
     text::text_view::{LinkClickHandlerFn, handle_link_click},
 };
 
+/// The style applied to one range of inline text.
+///
+/// A [`HighlightStyle`] carries no font family, so the family an inline code
+/// span is set in rides beside it; `None` keeps the family of the enclosing
+/// text style.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(super) struct InlineHighlight {
+    pub(super) style: HighlightStyle,
+    pub(super) font_family: Option<SharedString>,
+    pub(super) font_size_scale: Option<f32>,
+}
+
+impl InlineHighlight {
+    /// Layers `other` over `self`, the way [`HighlightStyle::highlight`] does.
+    fn highlight(mut self, other: &InlineHighlight) -> Self {
+        self.style = self.style.highlight(other.style);
+        if other.font_family.is_some() {
+            self.font_family = other.font_family.clone();
+        }
+        if other.font_size_scale.is_some() {
+            self.font_size_scale = other.font_size_scale;
+        }
+        self
+    }
+}
+
+impl From<HighlightStyle> for InlineHighlight {
+    fn from(style: HighlightStyle) -> Self {
+        Self {
+            style,
+            font_family: None,
+            font_size_scale: None,
+        }
+    }
+}
+
+/// Merges two highlight lists over one text into non-overlapping ranges,
+/// cutting at every endpoint of every input range. Same sweep as
+/// [`gpui::combine_highlights`], for [`InlineHighlight`] payloads.
+pub(super) fn combine_highlights(
+    a: impl IntoIterator<Item = (Range<usize>, InlineHighlight)>,
+    b: impl IntoIterator<Item = (Range<usize>, InlineHighlight)>,
+) -> Vec<(Range<usize>, InlineHighlight)> {
+    let mut endpoints = Vec::new();
+    let mut highlights = Vec::new();
+    for (range, highlight) in a.into_iter().chain(b) {
+        if !range.is_empty() {
+            let id = highlights.len();
+            endpoints.push((range.start, id, true));
+            endpoints.push((range.end, id, false));
+            highlights.push(highlight);
+        }
+    }
+    endpoints.sort_unstable_by_key(|(position, _, _)| *position);
+
+    let mut combined = Vec::new();
+    let mut active: Vec<usize> = Vec::new();
+    let mut ix = 0;
+    for (position, id, is_start) in endpoints {
+        if position > ix && !active.is_empty() {
+            let style = active.iter().fold(InlineHighlight::default(), |acc, id| {
+                acc.highlight(&highlights[*id])
+            });
+            combined.push((ix..position, style));
+        }
+        ix = position;
+        if is_start {
+            active.push(id);
+        } else {
+            active.retain(|active_id| *active_id != id);
+        }
+    }
+    combined
+}
+
+/// Builds the [`TextRun`]s for `text_len` bytes of inline text: each
+/// highlight refines `default_style` over its range, and a highlight that
+/// names a font family shapes its run in that family.
+pub(super) fn text_runs(
+    text_len: usize,
+    default_style: &TextStyle,
+    highlights: &[(Range<usize>, InlineHighlight)],
+) -> Vec<TextRun> {
+    let mut runs = Vec::with_capacity(highlights.len() * 2 + 1);
+    let mut ix = 0;
+    for (range, highlight) in highlights {
+        if ix < range.start {
+            runs.push(default_style.clone().to_run(range.start - ix));
+        }
+        let mut run = default_style
+            .clone()
+            .highlight(highlight.style)
+            .to_run(range.len());
+        if let Some(family) = &highlight.font_family {
+            run.font.family = family.clone();
+        }
+        runs.push(run);
+        ix = range.end;
+    }
+    if ix < text_len {
+        runs.push(default_style.to_run(text_len - ix));
+    }
+    runs
+}
+
+/// Splits text into contiguous ranges sharing one font size. GPUI runs can
+/// vary the font but not its size, so each range needs its own shaped line.
+pub(super) fn text_size_ranges(
+    text_len: usize,
+    highlights: &[(Range<usize>, InlineHighlight)],
+) -> Vec<(Range<usize>, f32)> {
+    let mut ranges: Vec<(Range<usize>, f32)> = Vec::new();
+    let mut push = |range: Range<usize>, scale: f32| {
+        if range.is_empty() {
+            return;
+        }
+        if let Some((last, last_scale)) = ranges.last_mut()
+            && *last_scale == scale
+            && last.end == range.start
+        {
+            last.end = range.end;
+        } else {
+            ranges.push((range, scale));
+        }
+    };
+    let mut cursor = 0;
+    for (range, highlight) in highlights {
+        push(cursor..range.start, 1.);
+        push(range.clone(), highlight.font_size_scale.unwrap_or(1.));
+        cursor = range.end;
+    }
+    push(cursor..text_len, 1.);
+    ranges
+}
+
 /// A inline element used to render a inline text and support selectable.
 ///
 /// All text in TextView (including the CodeBlock) used this for text rendering.
@@ -29,8 +164,10 @@ pub(super) struct Inline {
     id: ElementId,
     text: SharedString,
     links: Rc<Vec<(Range<usize>, LinkMark)>>,
-    highlights: Vec<(Range<usize>, HighlightStyle)>,
+    highlights: Vec<(Range<usize>, InlineHighlight)>,
     styled_text: StyledText,
+    paint_origin: Option<Point<Pixels>>,
+    selection_source: Option<(Arc<Mutex<InlineState>>, Range<usize>)>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
 
     state: Arc<Mutex<InlineState>>,
@@ -57,7 +194,7 @@ impl Inline {
         id: impl Into<ElementId>,
         state: Arc<Mutex<InlineState>>,
         links: Vec<(Range<usize>, LinkMark)>,
-        highlights: Vec<(Range<usize>, HighlightStyle)>,
+        highlights: Vec<(Range<usize>, InlineHighlight)>,
         link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     ) -> Self {
         let text = state
@@ -71,9 +208,26 @@ impl Inline {
             highlights,
             text: text.clone(),
             styled_text: StyledText::new(text),
+            paint_origin: None,
+            selection_source: None,
             link_click_handler,
             state,
         }
+    }
+
+    /// Preserve the shared inline-flow baseline through GPUI's element-bound snapping.
+    pub(super) fn paint_origin(mut self, origin: Point<Pixels>) -> Self {
+        self.paint_origin = Some(origin);
+        self
+    }
+
+    pub(super) fn selection_source(
+        mut self,
+        state: Arc<Mutex<InlineState>>,
+        range: Range<usize>,
+    ) -> Self {
+        self.selection_source = Some((state, range));
+        self
     }
 
     /// Get link at given mouse position.
@@ -356,19 +510,7 @@ impl Element for Inline {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let text_style = window.text_style();
-
-        let mut runs = Vec::new();
-        let mut ix = 0;
-        for (range, highlight) in self.highlights.iter() {
-            if ix < range.start {
-                runs.push(text_style.clone().to_run(range.start - ix));
-            }
-            runs.push(text_style.clone().highlight(*highlight).to_run(range.len()));
-            ix = range.end;
-        }
-        if ix < self.text.len() {
-            runs.push(text_style.to_run(self.text.len() - ix));
-        }
+        let runs = text_runs(self.text.len(), &text_style, &self.highlights);
 
         self.styled_text = StyledText::new(self.text.clone()).with_runs(runs);
         let (layout_id, _) =
@@ -387,6 +529,7 @@ impl Element for Inline {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        let bounds = Bounds::new(self.paint_origin.unwrap_or(bounds.origin), bounds.size);
         self.styled_text
             .prepaint(id, inspector_id, bounds, &mut (), window, cx);
 
@@ -421,6 +564,7 @@ impl Element for Inline {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let bounds = Bounds::new(self.paint_origin.unwrap_or(bounds.origin), bounds.size);
         let current_view = window.current_view();
         let hitbox = prepaint;
         let Ok(mut state) = self.state.lock() else {
@@ -436,6 +580,17 @@ impl Element for Inline {
             self.layout_selections(&text_layout, &bounds, window, cx);
 
         state.selection = selection;
+        if let Some((source, range)) = &self.selection_source
+            && let Some(selection) = selection
+            && let Ok(mut source) = source.lock()
+        {
+            let start = range.start + selection.start;
+            let end = range.start + selection.end;
+            source.selection = Some(match source.selection {
+                Some(previous) => Selection::new(previous.start.min(start), previous.end.max(end)),
+                None => Selection::new(start, end),
+            });
+        }
 
         if is_selection || is_selectable {
             window.set_cursor_style(CursorStyle::IBeam, &hitbox);
@@ -649,10 +804,203 @@ fn point_in_text_selection(
     }
 }
 
+/// A platform text system for tests where the `Mono` family shapes twice as
+/// wide as every other family, so a measurement that ignores the family of a
+/// run comes out visibly short.
+#[cfg(test)]
+pub(super) mod test_fonts {
+    use gpui::{
+        Bounds, DevicePixels, Font, FontId, FontMetrics, FontRun, GlyphId, LineLayout, Pixels,
+        PlatformTextSystem, RenderGlyphParams, ShapedGlyph, ShapedRun, Size, TextRenderingMode,
+        point, px, size,
+    };
+    use std::borrow::Cow;
+
+    pub(crate) const BODY: &str = "Body";
+    pub(crate) const MONO: &str = "Mono";
+    const BODY_ID: FontId = FontId(1);
+    const MONO_ID: FontId = FontId(2);
+    const UNITS_PER_EM: f32 = 1000.;
+
+    pub(crate) struct WideMonoTextSystem;
+
+    impl WideMonoTextSystem {
+        /// Advance of one glyph in `font_id`, in em units.
+        fn advance_units(font_id: FontId) -> f32 {
+            if font_id == MONO_ID { 1000. } else { 500. }
+        }
+
+        /// Width of `text` shaped entirely in `family` at `font_size`.
+        pub(crate) fn width_of(text: &str, family: &str, font_size: Pixels) -> Pixels {
+            let font_id = if family == MONO { MONO_ID } else { BODY_ID };
+            font_size * (Self::advance_units(font_id) / UNITS_PER_EM) * text.chars().count() as f32
+        }
+    }
+
+    impl PlatformTextSystem for WideMonoTextSystem {
+        fn add_fonts(&self, _fonts: Vec<Cow<'static, [u8]>>) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn all_font_names(&self) -> Vec<String> {
+            vec![BODY.into(), MONO.into()]
+        }
+
+        fn font_id(&self, descriptor: &Font) -> anyhow::Result<FontId> {
+            Ok(if descriptor.family.as_ref() == MONO {
+                MONO_ID
+            } else {
+                BODY_ID
+            })
+        }
+
+        fn font_metrics(&self, _font_id: FontId) -> FontMetrics {
+            FontMetrics {
+                units_per_em: UNITS_PER_EM as u32,
+                ascent: 800.,
+                descent: -200.,
+                line_gap: 0.,
+                underline_position: -100.,
+                underline_thickness: 50.,
+                cap_height: 700.,
+                x_height: 500.,
+                bounding_box: Bounds {
+                    origin: point(0., -200.),
+                    size: size(1000., 1000.),
+                },
+            }
+        }
+
+        fn typographic_bounds(
+            &self,
+            font_id: FontId,
+            _glyph_id: GlyphId,
+        ) -> anyhow::Result<Bounds<f32>> {
+            Ok(Bounds {
+                origin: point(0., 0.),
+                size: size(Self::advance_units(font_id), 700.),
+            })
+        }
+
+        fn advance(&self, font_id: FontId, _glyph_id: GlyphId) -> anyhow::Result<Size<f32>> {
+            Ok(size(Self::advance_units(font_id), 0.))
+        }
+
+        fn glyph_for_char(&self, _font_id: FontId, ch: char) -> Option<GlyphId> {
+            Some(GlyphId(ch as u32))
+        }
+
+        fn glyph_raster_bounds(
+            &self,
+            _params: &RenderGlyphParams,
+        ) -> anyhow::Result<Bounds<DevicePixels>> {
+            Ok(Bounds::default())
+        }
+
+        fn rasterize_glyph(
+            &self,
+            _params: &RenderGlyphParams,
+            raster_bounds: Bounds<DevicePixels>,
+        ) -> anyhow::Result<(Size<DevicePixels>, Vec<u8>)> {
+            Ok((raster_bounds.size, Vec::new()))
+        }
+
+        fn layout_line(&self, text: &str, font_size: Pixels, runs: &[FontRun]) -> LineLayout {
+            let mut position = px(0.);
+            let mut shaped_runs = Vec::new();
+            let mut run_start = 0;
+            for run in runs {
+                let run_text = &text[run_start..run_start + run.len];
+                let advance = font_size * (Self::advance_units(run.font_id) / UNITS_PER_EM);
+                let mut glyphs = Vec::new();
+                for (ix, ch) in run_text.char_indices() {
+                    glyphs.push(ShapedGlyph {
+                        id: GlyphId(ch as u32),
+                        position: point(position, px(0.)),
+                        index: run_start + ix,
+                        is_emoji: false,
+                    });
+                    position += advance;
+                }
+                shaped_runs.push(ShapedRun {
+                    font_id: run.font_id,
+                    glyphs,
+                });
+                run_start += run.len;
+            }
+            let metrics = self.font_metrics(BODY_ID);
+            LineLayout {
+                font_size,
+                width: position,
+                ascent: font_size * (metrics.ascent / UNITS_PER_EM),
+                descent: font_size * (metrics.descent / UNITS_PER_EM),
+                runs: shaped_runs,
+                len: text.len(),
+            }
+        }
+
+        fn recommended_rendering_mode(
+            &self,
+            _font_id: FontId,
+            _font_size: Pixels,
+        ) -> TextRenderingMode {
+            TextRenderingMode::Grayscale
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::point_in_text_selection;
-    use gpui::{point, px};
+    use super::{InlineHighlight, combine_highlights, point_in_text_selection, text_runs};
+    use gpui::{FontWeight, HighlightStyle, SharedString, TextStyle, point, px};
+
+    fn mono(style: HighlightStyle) -> InlineHighlight {
+        InlineHighlight {
+            style,
+            font_family: Some(SharedString::from("Mono")),
+            font_size_scale: None,
+        }
+    }
+
+    #[test]
+    fn text_runs_shape_a_code_highlight_in_its_font_family() {
+        let style = TextStyle {
+            font_family: SharedString::from("Body"),
+            ..Default::default()
+        };
+        let highlights = vec![(4..8, mono(HighlightStyle::default()))];
+
+        let runs = text_runs(12, &style, &highlights);
+
+        let families = runs
+            .iter()
+            .map(|run| (run.len, run.font.family.as_ref()))
+            .collect::<Vec<_>>();
+        assert_eq!(families, vec![(4, "Body"), (4, "Mono"), (4, "Body")]);
+    }
+
+    #[test]
+    fn combine_highlights_cuts_a_bold_span_at_the_code_boundary() {
+        // `**bold `code`**`: the bold mark spans the code mark, so the
+        // combined list carries the weight on both sides and the family on
+        // the code side only.
+        let bold = InlineHighlight::from(HighlightStyle {
+            font_weight: Some(FontWeight::BOLD),
+            ..Default::default()
+        });
+        let combined = combine_highlights(
+            vec![(0..10, bold)],
+            vec![(6..10, mono(HighlightStyle::default()))],
+        );
+
+        assert_eq!(combined.len(), 2);
+        assert_eq!(combined[0].0, 0..6);
+        assert_eq!(combined[0].1.style.font_weight, Some(FontWeight::BOLD));
+        assert_eq!(combined[0].1.font_family, None);
+        assert_eq!(combined[1].0, 6..10);
+        assert_eq!(combined[1].1.style.font_weight, Some(FontWeight::BOLD));
+        assert_eq!(combined[1].1.font_family.as_deref(), Some("Mono"));
+    }
 
     #[test]
     fn test_point_in_text_selection() {

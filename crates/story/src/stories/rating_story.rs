@@ -1,13 +1,13 @@
-use gpui::{
+use gpui_kit::component::{ActiveTheme, Size, rating::Rating, v_flex};
+use gpui_kit::{
     App, AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement, ParentElement,
     Render, Styled, Window, px,
 };
-use gpui_component::{ActiveTheme, Size, rating::Rating, v_flex};
 
 use crate::{ChangeStorySize, section, story_toolbar};
 
 pub struct RatingStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     size: Size,
     value: usize,
 }
@@ -41,7 +41,7 @@ impl RatingStory {
 }
 
 impl Focusable for RatingStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

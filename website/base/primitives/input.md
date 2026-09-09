@@ -16,7 +16,7 @@ Use [Textarea](./textarea.md) for ordinary multi-line text and
 ## Import
 
 ```rust
-use gpui_base::input::{Input, InputEvent, InputState};
+use gpui_kit::base::input::{Input, InputEvent, InputState};
 ```
 
 ## Basic usage
@@ -76,13 +76,13 @@ cx.subscribe(&input, |this, state, event: &InputEvent, cx| {
 `gpui-base` does not install product styling. Supply `InputEditorStyle` to the
 state and compose the control inside your own frame. If you want the ready-made
 theme, sizing, borders, prefix/suffix slots, and clear button, use the styled
-[`gpui-component` Input](../../docs/components/input.md).
+[`gpui-component` Input](../../component/input.md).
 
 ## Runnable example
 
 ```bash
-cargo run -p gpui-base --example components -- input
+cargo run -p gpui-base-examples -- input
 ```
 
 The implementation is in
-[`crates/base/examples/showcase/components/input.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/input.rs).
+[`crates/base/examples/showcase/components/input.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/input.rs).

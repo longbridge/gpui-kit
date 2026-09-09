@@ -1,5 +1,5 @@
-use gpui::{App, Entity, Menu, MenuItem, SharedString};
-use gpui_component::{ActiveTheme as _, GlobalState, Theme, ThemeMode, menu::AppMenuBar};
+use gpui_kit::component::{ActiveTheme as _, GlobalState, Theme, ThemeMode, menu::AppMenuBar};
+use gpui_kit::{App, Entity, Menu, MenuItem, SharedString};
 
 use crate::{
     About, Open, OpenCommandPalette, Quit, SelectLocale,
@@ -76,26 +76,26 @@ fn build_menus(title: impl Into<SharedString>, cx: &App) -> Vec<Menu> {
         Menu {
             name: "Edit".into(),
             items: vec![
-                MenuItem::action("Undo", gpui_component::input::Undo),
-                MenuItem::action("Redo", gpui_component::input::Redo),
+                MenuItem::action("Undo", gpui_kit::component::input::Undo),
+                MenuItem::action("Redo", gpui_kit::component::input::Redo),
                 MenuItem::separator(),
-                MenuItem::action("Cut", gpui_component::input::Cut),
-                MenuItem::action("Copy", gpui_component::input::Copy),
-                MenuItem::action("Paste", gpui_component::input::Paste),
+                MenuItem::action("Cut", gpui_kit::component::input::Cut),
+                MenuItem::action("Copy", gpui_kit::component::input::Copy),
+                MenuItem::action("Paste", gpui_kit::component::input::Paste),
                 MenuItem::separator(),
-                MenuItem::action("Delete", gpui_component::input::Delete),
+                MenuItem::action("Delete", gpui_kit::component::input::Delete),
                 MenuItem::action(
                     "Delete Previous Word",
-                    gpui_component::input::DeleteToPreviousWordStart,
+                    gpui_kit::component::input::DeleteToPreviousWordStart,
                 ),
                 MenuItem::action(
                     "Delete Next Word",
-                    gpui_component::input::DeleteToNextWordEnd,
+                    gpui_kit::component::input::DeleteToNextWordEnd,
                 ),
                 MenuItem::separator(),
-                MenuItem::action("Find", gpui_component::input::Search),
+                MenuItem::action("Find", gpui_kit::component::input::Search),
                 MenuItem::separator(),
-                MenuItem::action("Select All", gpui_component::input::SelectAll),
+                MenuItem::action("Select All", gpui_kit::component::input::SelectAll),
             ],
             disabled: false,
         },
@@ -134,13 +134,15 @@ fn language_menu(_: &App) -> MenuItem {
 
 #[cfg(all(test, feature = "test-support"))]
 mod tests {
-    use gpui::TestAppContext;
+    // The glob also carries GPUI's `test` attribute; keep the built-in one for `#[test]`.
+    use core::prelude::v1::test;
+    use gpui_kit::*;
 
     use super::*;
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn build_menus_puts_navigation_actions_in_go_menu(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
 
         cx.read(|cx| {
             let menus = build_menus("Story", cx);
@@ -168,9 +170,9 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[gpui_kit::test]
     fn build_menus_reflects_active_theme_and_locale_checked_states(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         cx.update(|cx| Theme::change(ThemeMode::Dark, None, cx));
         rust_i18n::set_locale("fr");
 
@@ -204,7 +206,7 @@ mod tests {
     fn assert_action(
         item: &MenuItem,
         expected_name: &str,
-        matches_action: impl FnOnce(&dyn gpui::Action) -> bool,
+        matches_action: impl FnOnce(&dyn gpui_kit::Action) -> bool,
     ) {
         match item {
             MenuItem::Action { name, action, .. } => {

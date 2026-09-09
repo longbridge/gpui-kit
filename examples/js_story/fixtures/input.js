@@ -1,4 +1,4 @@
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import {
   initializeRegisteredExamples,

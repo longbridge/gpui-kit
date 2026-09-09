@@ -74,7 +74,7 @@ fn position(tree: &str, needle: &str) -> usize {
 #[gpui_shell::gpui::test]
 fn structured_components_materialize_nested_children_in_script_order(cx: &mut TestAppContext) {
     let source = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import {
   DescriptionItem, DescriptionList, Field, HForm,
   Table, TableBody, TableCaption, TableHeader,

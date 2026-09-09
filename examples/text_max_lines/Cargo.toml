@@ -1,17 +1,14 @@
 [package]
 name = "text_max_lines"
 description = "Clamp rendered Markdown to N whole lines with TextView::max_lines."
-version = "0.5.1"
+version = "0.6.0"
 publish = false
 edition.workspace = true
 
 [dependencies]
-anyhow.workspace = true
-gpui.workspace = true
-gpui_platform.workspace = true
-gpui-component = { workspace = true }
-gpui-component-assets.workspace = true
+gpui-kit.workspace = true
 reqwest_client.workspace = true
+anyhow.workspace = true
 
 [lints]
 workspace = true

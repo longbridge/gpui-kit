@@ -35,8 +35,8 @@
 //!
 //! # Editing the script
 //!
-//! `js/quotes/` carries a generated `gpui.d.ts` and a hand-written
-//! `market.d.ts`, so an editor knows what `import ... from "gpui"` holds and
+//! `js/quotes/` carries a generated `gpui-kit.d.ts` and a hand-written
+//! `market.d.ts`, so an editor knows what `import ... from "gpui-kit"` holds and
 //! what the `market` module answers. A misspelled style method, a colour token
 //! that does not exist, or a host module nobody registered is an error in the
 //! editor rather than an exception on the next tick. Regenerate the first after
@@ -55,19 +55,19 @@
 
 use std::{path::PathBuf, rc::Rc, time::Duration};
 
-use gpui::{
-    App, AppContext as _, Context, Entity, FocusHandle, Focusable, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement, Render, SharedString, Styled, Window, div,
-    prelude::FluentBuilder as _, px, relative, rems,
-};
-use gpui_base::Button as BaseButton;
-use gpui_component::{
+use gpui_kit::base::Button as BaseButton;
+use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Sizable as _, StyledExt as _,
     button::Button,
     h_flex,
     label::Label,
     tab::{Tab, TabBar},
     v_flex,
+};
+use gpui_kit::{
+    App, AppContext as _, Context, Entity, FocusHandle, Focusable, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement, Render, SharedString, Styled, Window, div,
+    prelude::FluentBuilder as _, px, relative, rems,
 };
 use gpui_shell::Watcher;
 use gpui_shell::{
@@ -614,8 +614,8 @@ pub struct ShellStory {
     /// Held rather than detached, so the assignment below drops the previous
     /// one: Reload script mounts a new view, and a detached watcher would go on
     /// polling for the view it was started for.
-    script_watch: Option<Watcher>,
-    motion_watch: Option<Watcher>,
+    _script_watch: Option<Watcher>,
+    _motion_watch: Option<Watcher>,
     /// The last load failure, kept visible instead of thrown away — a story
     /// that silently shows the previous script after a syntax error is worse
     /// than one that says what broke.
@@ -690,8 +690,8 @@ impl ShellStory {
             script: None,
             motion_root: None,
             motion: None,
-            script_watch: None,
-            motion_watch: None,
+            _script_watch: None,
+            _motion_watch: None,
             script_error: None,
             motion_error: None,
             feed: Feed::Idle,
@@ -852,7 +852,7 @@ impl ShellStory {
 
                 #[cfg(debug_assertions)]
                 {
-                    self.script_watch = runtime.watch(&root, window, cx).ok();
+                    self._script_watch = runtime.watch(&root, window, cx).ok();
                 }
                 Ok((root, view))
             });
@@ -890,7 +890,7 @@ impl ShellStory {
 
                 #[cfg(debug_assertions)]
                 {
-                    self.motion_watch = runtime.watch(&root, window, cx).ok();
+                    self._motion_watch = runtime.watch(&root, window, cx).ok();
                 }
                 Ok((root, view))
             });
@@ -1097,7 +1097,7 @@ impl ShellStory {
         let watched = quote.watched;
         let moved = direction_color(quote.direction(), cx);
 
-        // `gpui_base::Button`, which is what the script half gets — and for the
+        // `gpui_kit::base::Button`, which is what the script half gets — and for the
         // same two reasons. A row you can Tab to compared against a row you
         // cannot is not a comparison of two renderers, it is a comparison of one
         // of them against something that is not a control. And Base ships
@@ -1308,7 +1308,7 @@ impl ShellStory {
 fn pause_button(
     id: &'static str,
     paused: bool,
-    on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
+    on_click: impl Fn(&gpui_kit::ClickEvent, &mut Window, &mut App) + 'static,
 ) -> Button {
     Button::new(id)
         .xsmall()
@@ -1584,7 +1584,9 @@ fn boundary_line(
 mod tests {
     use std::ops::Deref as _;
 
-    use gpui::{Modifiers, TestAppContext, VisualTestContext, point};
+    // The glob also carries GPUI's `test` attribute; keep the built-in one for `#[test]`.
+    use core::prelude::v1::test;
+    use gpui_kit::*;
 
     use super::*;
 
@@ -1644,7 +1646,7 @@ mod tests {
     /// `validate` is part of the assertion: it is what checks `MARKET_TYPES`
     /// against the functions actually registered, so a rename on either side
     /// fails here rather than in an editor.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn story_host_registry_only_grants_market(cx: &mut TestAppContext) {
         let market = cx.new(|_| Market::open());
         let module = market_module(&market);
@@ -1675,11 +1677,11 @@ mod tests {
     /// It is worth an end-to-end test rather than a unit one because it spans
     /// every part that has to agree: the entity, the host module, the script's
     /// `ticks()` call, and the difference between `refresh` and `notify`.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_quote_tick_re_runs_the_script_and_a_repaint_does_not(cx: &mut TestAppContext) {
         // The story reads shell theme tokens through `cx.theme()`, so
         // the theme has to exist before the script's first render.
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let window = cx.add_window(|window, cx| ShellStory::new(window, cx));
         let story = cx.update(|cx| window.entity(cx)).expect("the story");
         let mut context = VisualTestContext::from_window(*window.deref(), cx);
@@ -1743,9 +1745,9 @@ mod tests {
     /// pinning it would turn an unrelated change to the script into a failure.
     /// What the test defends is the claim: a moving price is a value, not a
     /// structure.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn a_quote_feed_mostly_repeats_the_panel_s_shape(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let window = cx.add_window(|window, cx| ShellStory::new(window, cx));
         let story = cx.update(|cx| window.entity(cx)).expect("the story");
         let mut context = VisualTestContext::from_window(*window.deref(), cx);
@@ -1784,9 +1786,9 @@ mod tests {
     /// Pausing one half must not pause the other, and the two mechanisms are
     /// genuinely different: the script half stops because nothing invalidates
     /// it, the Rust half because the story keeps a copy.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn each_half_pauses_on_its_own(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let window = cx.add_window(|window, cx| ShellStory::new(window, cx));
         let story = cx.update(|cx| window.entity(cx)).expect("the story");
         let mut context = VisualTestContext::from_window(*window.deref(), cx);
@@ -1850,7 +1852,7 @@ mod tests {
 
     /// The board moves the same way twice, so the panel a reader sees on one run
     /// is the panel they saw on the last one.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn the_feed_is_deterministic(_: &mut TestAppContext) {
         let mut first = Market::open();
         let mut second = Market::open();
@@ -1979,9 +1981,9 @@ mod tests {
     /// The motion lab has its own loaded object, rather than being extra work
     /// inside the quote board. A pointer event retargets it, then GPUI samples
     /// native animation frames without returning to QuickJS.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn standalone_motion_view_retargets_native_frames(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let window = cx.add_window(|window, cx| ShellStory::new(window, cx));
         let story = cx.update(|cx| window.entity(cx)).expect("the story");
 
@@ -2038,9 +2040,9 @@ mod tests {
     /// Choosing the interpolation policy is not itself an animation command.
     /// The selected segment remains an ordinary interactive control, while the
     /// independent Run action is the only thing that changes the card target.
-    #[gpui::test]
+    #[gpui_kit::test]
     fn selecting_a_motion_policy_does_not_run_the_motion(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(gpui_kit::init);
         let window = cx.add_window(|window, cx| ShellStory::new(window, cx));
         let story = cx.update(|cx| window.entity(cx)).expect("the story");
         let (runtime, motion) = cx.update(|cx| {
@@ -2081,8 +2083,8 @@ mod tests {
     fn draw(context: &mut VisualTestContext, script: &Entity<ScriptView>) {
         let script = script.clone();
         context.draw(
-            gpui::Point::default(),
-            gpui::size(gpui::px(520.), gpui::px(420.)),
+            gpui_kit::Point::default(),
+            gpui_kit::size(gpui_kit::px(520.), gpui_kit::px(420.)),
             move |_, _| script.into_any_element(),
         );
     }

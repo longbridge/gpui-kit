@@ -5,7 +5,7 @@ use gpui::{IntoElement as _, TestAppContext, VisualTestContext};
 use crate::ShellRuntime;
 
 const PURE_MODULES: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import { Buffer } from "buffer";
 import path from "path";
@@ -96,7 +96,7 @@ fn callback_style_fs_module_is_not_part_of_the_shell_contract() {
 #[gpui::test]
 fn safe_host_standard_modules_replace_the_old_gpui_exports(cx: &mut TestAppContext) {
     let source = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import console from "console";
 import os from "os";
@@ -147,7 +147,7 @@ export default class Probe extends View {
     let error = runtime
         .load_source(
             "old-host-exports.js",
-            r#"import { div, fs, process } from "gpui"; export default fs || process;"#,
+            r#"import { div, fs, process } from "gpui-kit"; export default fs || process;"#,
         )
         .expect_err("the old gpui.fs/process exports must be removed");
     assert!(
@@ -159,7 +159,7 @@ export default class Probe extends View {
 #[gpui::test]
 fn synchronous_unawaited_host_calls_hit_the_runtime_task_limit(cx: &mut TestAppContext) {
     let source = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 
 export default class Probe extends View {

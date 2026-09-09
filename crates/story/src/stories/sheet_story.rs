@@ -1,13 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
 use fake::Fake;
-use gpui::{
-    Action, App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement as _,
-    IntoElement, ParentElement, Render, SharedString, Styled, Task, WeakEntity, Window, div,
-    prelude::FluentBuilder as _, px,
-};
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, IndexPath, Placement, WindowExt,
     button::{Button, ButtonVariant, ButtonVariants as _},
     date_picker::{DatePicker, DatePickerState},
@@ -370,7 +367,7 @@ impl SheetStory {
 }
 
 impl Focusable for SheetStory {
-    fn focus_handle(&self, _cx: &gpui::App) -> FocusHandle {
+    fn focus_handle(&self, _cx: &gpui_kit::App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
@@ -490,7 +487,7 @@ impl Render for SheetStory {
                             h_flex().gap_1().child("You have selected:").child(
                                 div()
                                     .child(selected_value.to_string())
-                                    .text_color(gpui::red()),
+                                    .text_color(gpui_kit::red()),
                             ),
                         )
                     }),

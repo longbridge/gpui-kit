@@ -10,8 +10,8 @@ import { SPACE, button, label, muted } from "./ui.js";
 
 /**
  * @param {number} count
- * @param {import("gpui").Context} cx
- * @param {(cx: import("gpui").Context) => void} onConfirm
+ * @param {import("gpui-kit").Context} cx
+ * @param {(cx: import("gpui-kit").Context) => void} onConfirm
  */
 export default (count, cx, onConfirm) => () =>
   v_flex()

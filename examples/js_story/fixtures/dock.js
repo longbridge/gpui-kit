@@ -1,4 +1,4 @@
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { createDockStory, renderDockStory } from "../stories/dock.js";
 
 export default class DockStoryFixture extends View {

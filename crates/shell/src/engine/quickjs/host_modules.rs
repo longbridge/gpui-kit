@@ -16,7 +16,7 @@
 //! # How a registered module becomes an importable one
 //!
 //! [`HostModuleLoader`] sits in the resolver chain after the built-ins and
-//! before the application's own files, so a host can neither shadow `gpui` nor
+//! before the application's own files, so a host can neither shadow `gpui-kit` nor
 //! be shadowed by a file the script happens to have. Resolving produces a
 //! generated source module — one `export const` per registered function:
 //!

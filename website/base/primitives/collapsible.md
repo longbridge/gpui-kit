@@ -12,23 +12,23 @@ Like every `gpui-base` primitive, Collapsible supplies behavior and semantic str
 
 ## Example
 
-The [single native Cargo entrypoint](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
+The [single native Cargo entrypoint](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/native/src/bin/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
 
 ```bash
-cargo run -p gpui-base --example components -- collapsible
+cargo run -p gpui-base-examples -- collapsible
 ```
 
 ## Import
 
 ```rust
-use gpui_base::{Collapsible};
+use gpui_kit::base::{Collapsible};
 ```
 
 ## Anatomy and API
 
 The example composes `Collapsible`. GPUI's standard styling and event traits provide presentation; these base types provide the interaction structure.
 
-The authoritative module is [`components/collapsible.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/collapsible.rs). Native and browser previews compile this same file.
+The authoritative module is [`components/collapsible.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/collapsible.rs). Native and browser previews compile this same file.
 
 ## State and events
 

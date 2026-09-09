@@ -1,0 +1,14 @@
+[package]
+name = "example-markdown"
+version = "0.6.0"
+publish = false
+edition.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+gpui-component-story = { path = "../../crates/story" }
+lsp-types.workspace = true
+regex = "1"
+
+[lints]
+workspace = true

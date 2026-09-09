@@ -1,12 +1,12 @@
-use gpui::{
-    AnyElement, App, AppContext, Context, Entity, FocusHandle, Focusable, IntoElement,
-    ParentElement as _, Pixels, Render, SharedString, Styled, Window, div, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Sizable as _,
     button::Button,
     resizable::{ResizableState, h_resizable, resizable_panel, v_resizable},
     v_flex,
+};
+use gpui_kit::{
+    AnyElement, App, AppContext, Context, Entity, FocusHandle, Focusable, IntoElement,
+    ParentElement as _, Pixels, Render, SharedString, Styled, Window, div, px,
 };
 
 use crate::{section, story_toolbar_group};
@@ -33,7 +33,7 @@ impl super::Story for ResizableStory {
 }
 
 impl Focusable for ResizableStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

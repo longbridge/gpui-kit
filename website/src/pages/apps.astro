@@ -1,0 +1,14 @@
+---
+import DocsLayout from '../layouts/DocsLayout.astro';
+import { getShowcaseApps } from '../lib/showcases.ts';
+import AppsApp from '../components/AppsApp.vue';
+const apps = await getShowcaseApps();
+---
+
+<DocsLayout
+  title="App Stories — GPUI Kit"
+  description="Desktop apps built with GPUI Kit — from a production trading terminal to database clients, terminals, and system utilities."
+  lang="en"
+>
+  <AppsApp apps={apps} client:load lang="en" />
+</DocsLayout>

@@ -12,23 +12,23 @@ Like every `gpui-base` primitive, Hover Card supplies behavior and semantic stru
 
 ## Example
 
-The [single native Cargo entrypoint](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
+The [single native Cargo entrypoint](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/native/src/bin/components.rs) selects this primitive from the [shared showcase implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/mod.rs). The same showcase is compiled once for the WASM preview above.
 
 ```bash
-cargo run -p gpui-base --example components -- hover-card
+cargo run -p gpui-base-examples -- hover-card
 ```
 
 ## Import
 
 ```rust
-use gpui_base::{HoverCard};
+use gpui_kit::base::{HoverCard};
 ```
 
 ## Anatomy and API
 
 The example composes `HoverCard`. GPUI's standard styling and event traits provide presentation; these base types provide the interaction structure.
 
-The authoritative module is [`components/hover_card.rs`](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/hover_card.rs). Native and browser previews compile this same file.
+The authoritative module is [`components/hover_card.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/hover_card.rs). Native and browser previews compile this same file.
 
 ## State and events
 

@@ -11,9 +11,9 @@ order: 12
 A script cannot load a native extension. `dlopen`-ed Rust has no stable ABI, and once it is inside the process it holds every permission the process holds — a sandbox that permits that does not mean anything. So the direction is reversed. **The host registers, at compile time, the Rust it is willing to expose**, and a script reaches exactly that and nothing else.
 
 ```rust
-use gpui_shell::{HostModule, HostValue};
+use gpui_kit::shell::{HostModule, HostValue};
 
-gpui_shell::export_module(
+gpui_kit::shell::export_module(
     HostModule::new("workspace")
         .function("project_name", |_| Ok(HostValue::from("gpui-component")))
         .function("version", |_| Ok(HostValue::from("0.1.0"))),
@@ -23,10 +23,10 @@ gpui_shell::export_module(
 ```js
 import { project_name } from "workspace";
 
-project_name();      // "gpui-component"
+project_name(); // "gpui-component"
 ```
 
-A registered module is an ordinary ES module, resolved by the same loader that answers `gpui` and `path`. One call registers one module, and a repeated name replaces the earlier module rather than merging into it — a host with three of them calls `export_module` three times. The rest of this page is what that costs and what it refuses.
+A registered module is an ordinary ES module, resolved by the same loader that answers `gpui-kit` and `path`. One call registers one module, and a repeated name replaces the earlier module rather than merging into it — a host with three of them calls `export_module` three times. The rest of this page is what that costs and what it refuses.
 
 ## Why an import rather than a lookup
 
@@ -35,20 +35,20 @@ The obvious alternative is a runtime registry lookup answering with a bag of fun
 ```js
 // The shape this does not have.
 const workspace = native("workspace");
-workspace.projectName();          // typo: throws, eventually
+workspace.projectName(); // typo: throws, eventually
 ```
 
 ```js
 // The shape it has.
-import { projectName } from "workspace";   // typo: fails to link
+import { projectName } from "workspace"; // typo: fails to link
 ```
 
-It loses twice, and both times on *when* you find out:
+It loses twice, and both times on _when_ you find out:
 
 - **A misspelled export would be a run-time failure.** `workspace.projectName()` type-checks, loads, renders, and then throws on the frame that first reaches it — which, for a name only one branch touches, can be a long way from the edit that caused it. An import is resolved when the module graph is linked, so the same typo stops the application before its first line runs, naming the module and the export.
-- **The type declarations would have nothing to say.** Only the Host knows what it registered, so a lookup could offer no better than `Record<string, (...args: any[]) => any>` — leaving an application that wants real types to hand-write a `.d.ts` that nothing checks against the registry. A module specifier is a name declarations *can* be written against, so they are [generated from the registry itself](#typing-them) and the typo is red in the editor.
+- **The type declarations would have nothing to say.** Only the Host knows what it registered, so a lookup could offer no better than `Record<string, (...args: any[]) => any>` — leaving an application that wants real types to hand-write a `.d.ts` that nothing checks against the registry. A module specifier is a name declarations _can_ be written against, so they are [generated from the registry itself](#typing-them) and the typo is red in the editor.
 
-What the import does **not** freeze is the function behind the name. Every export is a forwarding stub that resolves through the registry on each call, so withdrawing a module still takes effect immediately: a script holding an imported function gets a refusal, not the withdrawn closure. Only the *set of names* is fixed, at the moment the importing module is linked — which is why a host calls `export_module` **before** it loads an application.
+What the import does **not** freeze is the function behind the name. Every export is a forwarding stub that resolves through the registry on each call, so withdrawing a module still takes effect immediately: a script holding an imported function gets a refusal, not the withdrawn closure. Only the _set of names_ is fixed, at the moment the importing module is linked — which is why a host calls `export_module` **before** it loads an application.
 
 ## The registry is the grant
 
@@ -57,7 +57,7 @@ The default registry is **empty**, the same shape as `Capabilities::default()`. 
 ```text
 HostModule `market` is not available: this Host registered none.
 HostModule access is granted by the embedding application, with
-gpui_shell::export_module(...).
+gpui_kit::shell::export_module(...).
 ```
 
 Register something and the message changes to name what does exist:
@@ -87,7 +87,7 @@ are: gpui, gpui-base, gpui-fps, buffer, console, crypto, fs/promises, net, os,
 path, process, url, websocket, zlib
 ```
 
-The full list is `gpui_shell::RESERVED_SPECIFIERS`. Everything else is yours — and cannot be shadowed by a file in the application directory either, because HostModule registrations resolve before the application's own files.
+The full list is `gpui_kit::shell::RESERVED_SPECIFIERS`. Everything else is yours — and cannot be shadowed by a file in the application directory either, because HostModule registrations resolve before the application's own files.
 
 ## The boundary is plain data
 
@@ -97,19 +97,19 @@ It never receives a script handle. A handle would let the host keep a reference 
 
 Arguments come out by position, with the type check and the error message included:
 
-| Call | Yields |
-| --- | --- |
-| `arguments.string(0)` | `&str`, or an error naming what arrived instead |
-| `arguments.number(0)` | `f64` |
-| `arguments.integer(0)` | `i64`, refusing a fractional number |
-| `arguments.boolean(0)` | `bool` |
-| `arguments.value(0)` | The raw `HostValue`, for a function that accepts more than one shape |
-| `arguments.get(0)` | `Option<&HostValue>`, for an optional argument |
+| Call                   | Yields                                                               |
+| ---------------------- | -------------------------------------------------------------------- |
+| `arguments.string(0)`  | `&str`, or an error naming what arrived instead                      |
+| `arguments.number(0)`  | `f64`                                                                |
+| `arguments.integer(0)` | `i64`, refusing a fractional number                                  |
+| `arguments.boolean(0)` | `bool`                                                               |
+| `arguments.value(0)`   | The raw `HostValue`, for a function that accepts more than one shape |
+| `arguments.get(0)`     | `Option<&HostValue>`, for an optional argument                       |
 
-Returning a record is a builder rather than a map, because an object frequently *is* the row a script renders and insertion order should be the host's to decide:
+Returning a record is a builder rather than a map, because an object frequently _is_ the row a script renders and insertion order should be the host's to decide:
 
 ```rust
-use gpui_shell::HostObject;
+use gpui_kit::shell::HostObject;
 
 HostObject::new()
     .field("symbol", "AAPL.US")
@@ -123,11 +123,11 @@ An error is a message, not a type: `HostError::new("no such symbol")` reaches th
 
 **It must not call back into the script engine.** A host call happens inside a script call, which is inside a host call; re-entering the VM from there would run script code with an engine frame already on the stack, in the middle of a render pass. Holding no script handle makes that hard to express by accident, and the dispatcher refuses a nested call outright so a host that finds another route gets a diagnosable error rather than undefined behavior.
 
-**Reading and writing host state is the point.** A function reaches the ambient `App` through `gpui_shell::with_current_app`, which is `None` outside a live call:
+**Reading and writing host state is the point.** A function reaches the ambient `App` through `gpui_kit::shell::with_current_app`, which is `None` outside a live call:
 
 ```rust
 fn with_app<R>(read: impl FnOnce(&mut App) -> R) -> Result<R, HostError> {
-    gpui_shell::with_current_app(read)
+    gpui_kit::shell::with_current_app(read)
         .ok_or_else(|| HostError::new("only reachable while a script call is in progress"))
 }
 ```
@@ -193,7 +193,7 @@ HostModule::new("market")
     .function("watch", /* … */)
 ```
 
-The generated `gpui.d.ts` emits that verbatim inside `declare module "market"`, so `import { quotes } from "market"` is checked exactly the way `import { div } from "gpui"` is.
+The generated `gpui-kit.d.ts` emits that verbatim inside `declare module "market"`, so `import { quotes } from "market"` is checked exactly the way `import { div } from "gpui-kit"` is.
 
 Writing it here rather than in a `.d.ts` beside the script is what keeps the two halves one thing. A `.d.ts` would be a second file, in a second language, with nothing holding it to the registry. `export_module` compares the declared exports with the registered ones and refuses a mismatch:
 
@@ -208,7 +208,7 @@ Declaring nothing is allowed and costs only precision. An undeclared module is e
 
 ```ts
 declare module "audit" {
-  import { HostValue } from "gpui";
+  import { HostValue } from "gpui-kit";
 
   export function observe(...args: HostValue[]): HostValue;
 }
@@ -242,7 +242,7 @@ fn market_module(market: &Entity<Market>) -> HostModule {
         })
 }
 
-gpui_shell::export_module(market_module(&market))?;
+gpui_kit::shell::export_module(market_module(&market))?;
 ```
 
 And this is the script that uses it — the same `Market` entity a Rust panel beside it is rendering from:

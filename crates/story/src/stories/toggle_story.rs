@@ -1,9 +1,9 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
     ParentElement as _, Render, Styled as _, Window, div,
 };
 
-use gpui_component::{
+use gpui_kit::component::{
     IconName, Sizable, Size, StyledExt,
     button::{Toggle, ToggleGroup, ToggleVariants},
     h_flex, v_flex,
@@ -48,7 +48,7 @@ impl super::Story for ToggleStory {
 }
 
 impl Focusable for ToggleStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

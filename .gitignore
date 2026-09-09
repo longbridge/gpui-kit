@@ -25,7 +25,7 @@ crates/base/examples/wasm/www/src/wasm/*.ts
 # it from the runtime that is about to run the script, so a committed copy could
 # only ever be the stale one. The hand-written jsconfig.json and the per-app
 # native-module declarations beside it are sources and stay tracked.
-gpui.d.ts
+gpui-kit.d.ts
 
 # Frontend build artifacts
 crates/story-web/www/dist/

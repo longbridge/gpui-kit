@@ -1,14 +1,12 @@
-use gpui::{
-    Action, App, AppContext, Context, Entity, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, Styled, Task, Window, div, prelude::FluentBuilder as _, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, IconName, Sizable, Size, StyledExt,
     button::Button,
     h_flex,
     progress::{Progress, ProgressCircle},
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -22,7 +20,7 @@ enum ProgressAction {
 }
 
 pub struct ProgressStory {
-    focus_handle: gpui::FocusHandle,
+    focus_handle: gpui_kit::FocusHandle,
     value: f32,
     loading: bool,
     size: Size,
@@ -94,7 +92,7 @@ impl ProgressStory {
 }
 
 impl Focusable for ProgressStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

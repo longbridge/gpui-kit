@@ -123,7 +123,7 @@ fn collection_catalog_stays_bounded() {
 #[gpui::test]
 fn tree_native_interaction_and_data_sync_survive_public_js_refresh(cx: &mut TestAppContext) {
     let source = r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 import { Tree, TreeItem } from "gpui-component";
 export default class App extends View {
   init() { this.renders = 0; }
@@ -201,7 +201,7 @@ export default class App extends View {
 
 fn draw_invalid(cx: &mut TestAppContext, expression: &str) -> Vec<String> {
     let source = format!(
-        r#"import {{ View, div }} from "gpui";
+        r#"import {{ View, div }} from "gpui-kit";
 import {{ Tree, TreeItem }} from "gpui-component";
 export default class App extends View {{ render() {{ return {expression}; }} }}"#
     );

@@ -162,6 +162,9 @@ impl TextViewState {
                                 state.parsed_content = content;
                                 state.parsed_error = None;
                                 state.compatible_layout_update = parsed_update.selection_compatible;
+                                if parsed_update.full_parse {
+                                    state.invalidate_measured_heights();
+                                }
                             }
                             Err(err) => {
                                 state.parsed_error = Some(err);
@@ -367,6 +370,28 @@ impl TextViewState {
         self.parsed_content.document.selected_text(format, blocks)
     }
 
+    /// Force a full re-measure of the block list after the document has been
+    /// replaced.
+    ///
+    /// `Document::render_root` only calls `ListState::reset` when the block
+    /// *count* changes, and the full-measure pass enabled by `measure_all` is
+    /// a one-shot latch that only `reset`, `remeasure_items`, or a width
+    /// change re-arms. Replacing a document with one that happens to have the
+    /// same number of blocks therefore leaves every cached height belonging to
+    /// the *previous* document. The list summary height stays wrong, and since
+    /// the wheel clamps against that summary, the blocks past the false bottom
+    /// can never scroll into view to be re-measured -- the clamp seals itself.
+    ///
+    /// `remeasure_items` re-arms the latch and marks the items unmeasured
+    /// while keeping their old sizes as hints, so the scrollbar does not
+    /// collapse in the frame before the next layout measures the real heights.
+    fn invalidate_measured_heights(&self) {
+        let count = self.list_state.item_count();
+        if count > 0 {
+            self.list_state.remeasure_items(0..count);
+        }
+    }
+
     fn increment_update(&mut self, text: &str, append: bool, cx: &mut Context<Self>) {
         self.revision += 1;
         if !append {
@@ -395,6 +420,7 @@ impl TextViewState {
                 Ok(content) => {
                     self.parsed_content = content;
                     self.parsed_error = None;
+                    self.invalidate_measured_heights();
                     if !self.is_selecting {
                         self.reset_selection_and_adapter(cx);
                     }

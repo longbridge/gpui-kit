@@ -1,16 +1,13 @@
 [package]
 name = "dialog_overlay"
 description = "An example of using gpui-component to create a Dialog with overlay."
-version = "0.5.1"
+version = "0.6.0"
 publish = false
 edition.workspace = true
 
 [dependencies]
+gpui-kit.workspace = true
 anyhow.workspace = true
-gpui.workspace = true
-gpui_platform.workspace = true
-gpui-component.workspace = true
-gpui-component-assets.workspace = true
 
 [lints]
 workspace = true

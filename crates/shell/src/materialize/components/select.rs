@@ -17,7 +17,7 @@
 //!
 //! Nothing here supplies one, so out of the box the control is complete with a
 //! pointer, opens and closes from the keyboard, and cannot be *navigated* from
-//! the keyboard once open. That is written into `gpui.d.ts` rather than left
+//! the keyboard once open. That is written into `gpui-kit.d.ts` rather than left
 //! for a script author to discover.
 //!
 //! What changed since this was written is that the script can now supply the
@@ -29,7 +29,7 @@
 //!
 //! `DatePicker` loses more than the other two. It handles Confirm and Cancel
 //! but sets no key context of its own, and every binding base installs is
-//! scoped to one — `crates/ui` supplies both halves for its own picker, and the
+//! scoped to one — `crates/component` supplies both halves for its own picker, and the
 //! shell can supply neither. So its `on_open_change` never fires from the
 //! keyboard at all, and a script opens the picker from a press on the trigger
 //! it drew. What is left still earns the binding: the combobox role, the

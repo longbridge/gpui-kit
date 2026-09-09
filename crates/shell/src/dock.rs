@@ -1216,7 +1216,7 @@ mod tests {
     /// at what it renders — only at what survives a save and a load.
     #[cfg(feature = "quickjs")]
     const PANEL_SOURCE: &str = r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 
 export default class Inbox extends View {
   render() {
@@ -1226,7 +1226,7 @@ export default class Inbox extends View {
 "#;
     #[cfg(not(feature = "quickjs"))]
     const PANEL_SOURCE: &str = r#"
-local gpui = require("gpui")
+local gpui = require("gpui-kit")
 local Inbox = gpui.view("Inbox")
 
 function Inbox:render(cx)

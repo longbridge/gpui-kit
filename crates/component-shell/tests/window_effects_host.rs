@@ -175,7 +175,7 @@ fn real_click_events_open_native_surfaces_and_build_lazy_content(cx: &mut TestAp
     clear_builds();
     let app = TempApp::new(
         r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 import { Dialog, AlertDialog, Sheet, Notification, EffectMarker } from "gpui-component";
 export default class App extends View {
  init() { this.errors = 0; this.closed = 0; }
@@ -270,7 +270,7 @@ fn closed_alert_and_notification_reject_common_named_slots(cx: &mut TestAppConte
         r#"new Notification("note", "Notify", (_message, _cx) => {}).footer(div())"#,
     ] {
         let source = format!(
-            r#"import {{ View, div }} from "gpui";
+            r#"import {{ View, div }} from "gpui-kit";
 import {{ AlertDialog, Notification }} from "gpui-component";
 export default class App extends View {{ render() {{ return {}; }} }}"#,
             expression
@@ -303,7 +303,7 @@ fn dialog_and_sheet_duplicate_content_is_last_call_wins(cx: &mut TestAppContext)
         ),
     ] {
         let source = format!(
-            r#"import {{ View }} from "gpui";
+            r#"import {{ View }} from "gpui-kit";
 import {{ Dialog, Sheet, EffectMarker }} from "gpui-component";
 export default class App extends View {{ render() {{ return {}; }} }}"#,
             expression
@@ -344,7 +344,7 @@ export default class App extends View {{ render() {{ return {}; }} }}"#,
 
 #[gpui::test]
 fn failed_factory_and_failed_reporter_are_both_diagnosed(cx: &mut TestAppContext) {
-    let source = r#"import { View } from "gpui";
+    let source = r#"import { View } from "gpui-kit";
 import { Dialog, EffectMarker } from "gpui-component";
 export default class App extends View { render() { return new Dialog("fail", "Fail", () => { throw new Error("reporter exploded"); }).content(new EffectMarker("fail")); } }"#;
     cx.update(|cx| {

@@ -15,7 +15,7 @@ use crate::{Capabilities, ScriptView, ShellRuntime};
 
 #[cfg(unix)]
 const OUTPUT_PROBE: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import process from "process";
 
@@ -44,7 +44,7 @@ export default class Probe extends View {
 
 #[cfg(unix)]
 const FAILURE_PROBE: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import process from "process";
 
@@ -70,7 +70,7 @@ export default class Probe extends View {
 
 #[cfg(unix)]
 const OUTPUT_LIMIT_PROBE: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import process from "process";
 
@@ -95,7 +95,7 @@ export default class Probe extends View {
 "#;
 
 const DENIAL_PROBE: &str = r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { v_flex } from "gpui-base";
 import process from "process";
 

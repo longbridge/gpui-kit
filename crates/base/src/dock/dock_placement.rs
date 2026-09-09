@@ -3,7 +3,7 @@
 //!
 //! This module decides *how big a dock is allowed to be*. It draws nothing:
 //! the resize-handle chrome and collapsed/expanded presentation live in
-//! `crates/ui`.
+//! `crates/component`.
 
 use gpui::{Bounds, Pixels, Point, px};
 

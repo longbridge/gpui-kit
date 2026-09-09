@@ -1008,11 +1008,9 @@ mod window_api;
 ///
 /// One module per crate that provides the capability, so an import says which
 /// layer a script depends on: `gpui-base`'s components come from `"gpui-base"`,
-/// `gpui-fps`'s overlay from `"gpui-fps"`, and `"gpui"` carries only what GPUI
-/// itself and this runtime provide. A name belongs to exactly one of them —
-/// nothing is re-exported for convenience, because a name reachable from two
-/// specifiers stops saying anything about where it came from, and the next
-/// layer to arrive would have to be told apart from the ones already here.
+/// `gpui-fps`'s overlay from `"gpui-fps"`, and `"gpui-kit"` carries only what GPUI
+/// itself and this runtime provide. `"gpui"` is an explicit compatibility alias
+/// for that module; other names belong to exactly one layer.
 ///
 /// Anything installed onto `globalThis.__gpui` must be listed in one of these
 /// or no `import { … }` will see it.
@@ -1025,6 +1023,10 @@ pub(crate) mod exports {
         "div",
         "svg",
         "image",
+        // GPUI's own lazy lists. Base's virtual lists live in `gpui-base`;
+        // these are GPUI's, and are exported where `div` is.
+        "list",
+        "uniform_list",
         "PathBuilder",
         "Background",
     ];
@@ -1104,8 +1106,14 @@ pub(crate) mod exports {
         "set_theme",
     ];
 
-    /// The performance overlay, owned by `gpui-fps`.
-    pub(crate) const GPUI_FPS: &[&str] = &["fps_monitor"];
+    /// The performance overlay, owned by `gpui-fps`: the element form, and
+    /// the root-owned HUD a script switches on and off.
+    pub(crate) const GPUI_FPS: &[&str] = &[
+        "fps_monitor",
+        "show_fps_monitor",
+        "hide_fps_monitor",
+        "fps_monitor_visible",
+    ];
 
     /// Shell-owned shared types. Module components are exported from their
     /// host modules rather than through a public generic dispatcher.
@@ -1188,7 +1196,8 @@ macro_rules! builtin_modules {
 }
 
 builtin_modules![
-    (GpuiModule, "gpui", exports::GPUI),
+    (GpuiModule, "gpui-kit", exports::GPUI),
+    (GpuiAliasModule, "gpui", exports::GPUI),
     (GpuiBaseModule, "gpui-base", exports::GPUI_BASE),
     (GpuiShellModule, "gpui-shell", exports::GPUI_SHELL),
     (GpuiFpsModule, "gpui-fps", exports::GPUI_FPS),
@@ -1484,7 +1493,7 @@ impl ShellRuntime {
             source: components.javascript_module_source(&component_state_proof),
         };
         // Order is the namespace policy. The runtime's own modules resolve
-        // first, so a host cannot take `gpui` or `path` from under a script;
+        // first, so a host cannot take `gpui-kit` or `path` from under a script;
         // the application's files resolve last, so a HostModule cannot be
         // shadowed by a file that happens to share its name. `host_modules`
         // refuses reserved names at registration, which is what turns the first
@@ -2887,6 +2896,10 @@ impl ShellRuntime {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<RenderSnapshot> {
+        // One theme sync per description makes cx.theme() a JS-only cache read.
+        // The native snapshot crosses the boundary only when this revision
+        // changes, rather than once per component asking for the theme.
+        crate::theme_tokens::sync(cx);
         self.arena.borrow_mut().reset();
         let callbacks = self.callbacks.borrow_mut().begin();
 
@@ -2947,6 +2960,7 @@ impl ShellRuntime {
     /// tests that never paint a frame. This runs the script; to read a
     /// description that has already been built, use
     /// [`RenderSnapshot::debug_tree`] instead — that path never enters the VM.
+    #[cfg(test)]
     pub(crate) fn render_to_spec(
         self: &Rc<Self>,
         object: &ViewObject,
@@ -3400,8 +3414,47 @@ impl ShellRuntime {
         window: &mut Window,
         cx: &mut App,
     ) {
+        self.dispatch_item(id, "item click", window, cx, |_, handler, context| {
+            handler.call::<_, ()>((key, context))
+        });
+    }
+
+    /// Delivers a secondary press on a virtual list row: the row's key, then
+    /// the press exactly as `on_mouse_down` would report it, with
+    /// `local_position` measured from the row's own box.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn dispatch_item_mouse_button(
+        self: &Rc<Self>,
+        id: CallbackId,
+        key: &str,
+        button: gpui::MouseButton,
+        position: gpui::Point<gpui::Pixels>,
+        click_count: usize,
+        modifiers: gpui::Modifiers,
+        bounds: Option<gpui::Bounds<gpui::Pixels>>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.dispatch_item(id, "item press", window, cx, |ctx, handler, context| {
+            let event =
+                mouse_button_payload(ctx, button, position, click_count, modifiers, bounds)?;
+            handler.call::<_, ()>((key, event, context))
+        });
+    }
+
+    /// The lifetime checks, scope entry and job drain every row-level dispatch
+    /// shares. The call itself is the caller's, because the two row events
+    /// hand the handler different argument lists.
+    fn dispatch_item(
+        self: &Rc<Self>,
+        id: CallbackId,
+        what: &str,
+        window: &mut Window,
+        cx: &mut App,
+        call: impl for<'js> FnOnce(&Ctx<'js>, Function<'js>, Object<'js>) -> JsResult<()>,
+    ) {
         let Some(entry) = self.callbacks.borrow().get(id) else {
-            tracing::debug!("item callback {id} belongs to a superseded render pass");
+            tracing::debug!("{what} callback {id} belongs to a superseded render pass");
             return;
         };
 
@@ -3410,12 +3463,12 @@ impl ShellRuntime {
             .as_ref()
             .is_some_and(|application| !application.is_active())
         {
-            tracing::debug!("item callback {id} belongs to a retired application");
+            tracing::debug!("{what} callback {id} belongs to a retired application");
             return;
         }
 
         let Some(view) = entry.live_view() else {
-            tracing::debug!("item callback {id} owner has been released");
+            tracing::debug!("{what} callback {id} owner has been released");
             return;
         };
         let policy = view
@@ -3434,11 +3487,12 @@ impl ShellRuntime {
 
         let result = self.with_js(|ctx| {
             let handler = entry.value.clone().restore(ctx)?;
-            handler.call::<_, ()>((key, context_object(ctx, ContextBinding::Call(generation))?))
+            let context = context_object(ctx, ContextBinding::Call(generation))?;
+            call(ctx, handler, context)
         });
 
         if let Err(error) = result {
-            tracing::error!("error in item click handler: {error}");
+            tracing::error!("error in {what} handler: {error}");
         }
         scheduler::drain_runtime_jobs(self, window, cx);
     }
@@ -3891,19 +3945,7 @@ impl ShellRuntime {
         cx: &mut App,
     ) {
         self.dispatch_simple_event(id, "mouse button", window, cx, move |ctx| {
-            let payload = Object::new(ctx.clone())?;
-            payload.set(
-                "button",
-                match button {
-                    gpui::MouseButton::Right => "right",
-                    gpui::MouseButton::Middle => "middle",
-                    _ => "left",
-                },
-            )?;
-            payload.set("click_count", click_count as u32)?;
-            set_pointer_geometry(ctx, &payload, position, bounds)?;
-            payload.set("modifiers", modifiers_object(ctx, modifiers)?)?;
-            Ok(payload)
+            mouse_button_payload(ctx, button, position, click_count, modifiers, bounds)
         });
     }
 
@@ -4634,6 +4676,8 @@ impl ShellRuntime {
 
     fn call_render_once(&self, object: &ViewObject, generation: u64) -> Result<SpecId> {
         self.with_js(|ctx| {
+            let prepare_theme: Function = ctx.globals().get("__prepare_theme")?;
+            prepare_theme.call::<_, ()>(())?;
             let instance = object.value.clone().restore(ctx)?;
             let render: Function = instance.get("render").map_err(|_| {
                 Exception::throw_message(ctx, "view class has no render(cx) method")
@@ -5291,21 +5335,27 @@ globalThis.__gpui = (() => {
   // The argument checks are here rather than only on the Rust side because a
   // list built with the pieces in the wrong order — a render function where the
   // sizes go — would otherwise fail as a type error naming neither.
-  const virtualList = (build, name) => (id, item_count, item_sizes, get_key, render) => {
-    const shape = name + "(id, item_count, item_sizes, get_key, render)";
+  // The three checks every lazy list makes. Only the render hint differs:
+  // `list` is called per item, the other two per visible range.
+  const checkListArgs = (shape, item_count, get_key, render, renderHint) => {
     if (!Number.isInteger(item_count) || item_count < 0) {
       throw new TypeError(shape + " needs a whole, non-negative item_count");
-    }
-    if (typeof render !== "function") {
-      throw new TypeError(
-        shape + " needs a render function; it is called once per visible range, not once per item",
-      );
     }
     if (typeof get_key !== "function") {
       throw new TypeError(
         shape + " needs get_key(index) to return each item's stable string key",
       );
     }
+    if (typeof render !== "function") {
+      throw new TypeError(shape + " needs a render function; it is called " + renderHint);
+    }
+  };
+
+  const RANGE_HINT = "once per visible range, not once per item";
+
+  const virtualList = (build, name) => (id, item_count, item_sizes, get_key, render) => {
+    const shape = name + "(id, item_count, item_sizes, get_key, render)";
+    checkListArgs(shape, item_count, get_key, render, RANGE_HINT);
     if (Array.isArray(item_sizes) && item_sizes.length !== item_count) {
       throw new TypeError(
         shape + " was given " + item_sizes.length + " item sizes for " + item_count +
@@ -5313,6 +5363,31 @@ globalThis.__gpui = (() => {
       );
     }
     return element(build(String(id), item_count, item_sizes, get_key, render));
+  };
+
+  // `list` and `uniform_list`: GPUI's own lazy lists. Both cross the boundary
+  // the way a virtual list does -- one renderer per visible range -- so a
+  // `list` renderer written per item is folded into a range here, once, rather
+  // than teaching the host a second calling convention.
+  const lazyList = (build, name, perItem) => (id, item_count, get_key, render) => {
+    const shape = name + "(id, item_count, get_key, render)";
+    checkListArgs(
+      shape,
+      item_count,
+      get_key,
+      render,
+      perItem ? "once per item on screen, with the item's index" : RANGE_HINT,
+    );
+    const describe = perItem
+      ? (range, cx) => {
+          const items = [];
+          for (let index = range.start; index < range.end; index++) {
+            items.push(render(index, cx));
+          }
+          return items;
+        }
+      : render;
+    return element(build(String(id), item_count, get_key, describe));
   };
 
   const finiteNonNegative = (value, name) => {
@@ -5429,7 +5504,7 @@ globalThis.__gpui = (() => {
 
   // Which corner of an anchored surface is pinned to its trigger. The names
   // come from the host so that the check here, the parser behind it and the
-  // union in gpui.d.ts cannot disagree. Checked at the call site because an
+  // union in gpui-kit.d.ts cannot disagree. Checked at the call site because an
   // unrecognized anchor would otherwise open the surface in the component's
   // default corner, which looks like a positioning bug rather than a typo.
   methods.anchor = function (value) {
@@ -5443,6 +5518,13 @@ globalThis.__gpui = (() => {
       );
     }
     __apply(this.__id, "anchor", [value]);
+    return this;
+  };
+
+  methods.frame_budget = function (milliseconds) {
+    __apply(this.__id, "frame_budget", [
+      finitePositive(milliseconds, "frame_budget"),
+    ]);
     return this;
   };
 
@@ -6202,7 +6284,11 @@ globalThis.__gpui = (() => {
 
   let cachedThemeSource;
   let cachedTheme;
-  const currentTheme = () => {
+  let cachedThemeRevision = -1;
+  globalThis.__theme_dirty = true;
+  const refreshTheme = () => {
+    const revision = __theme_revision();
+    if (!globalThis.__theme_dirty && revision === cachedThemeRevision) return;
     const source = __theme_snapshot();
     if (source !== cachedThemeSource) {
       cachedThemeSource = source;
@@ -6212,6 +6298,12 @@ globalThis.__gpui = (() => {
       Object.freeze(cachedTheme.radius);
       Object.freeze(cachedTheme);
     }
+    cachedThemeRevision = revision;
+    globalThis.__theme_dirty = false;
+  };
+  globalThis.__prepare_theme = refreshTheme;
+  const currentTheme = () => {
+    if (globalThis.__theme_dirty || cachedTheme === undefined) refreshTheme();
     return cachedTheme;
   };
 
@@ -6430,6 +6522,9 @@ globalThis.__gpui = (() => {
     ProgressTrack: { new: () => element(__progress_track()) },
     ProgressIndicator: { new: () => element(__progress_indicator()) },
     fps_monitor: () => element(__fps_monitor()),
+    show_fps_monitor: (options) => __show_fps_monitor(options),
+    hide_fps_monitor: () => __hide_fps_monitor(),
+    fps_monitor_visible: () => __fps_monitor_visible(),
     Radio: { new: (id) => element(__radio(String(id))) },
     Toggle: { new: (id) => element(__toggle(String(id))) },
     RadioGroup: { new: (id) => element(__radio_group(String(id))) },
@@ -6492,6 +6587,8 @@ globalThis.__gpui = (() => {
     // would put one number per row across the boundary on every render.
     v_virtual_list: virtualList(__v_virtual_list, "v_virtual_list"),
     h_virtual_list: virtualList(__h_virtual_list, "h_virtual_list"),
+    list: lazyList(__list, "list", true),
+    uniform_list: lazyList(__uniform_list, "uniform_list", false),
     VirtualListScrollHandle: { new: () => virtualScrollHandle(__virtual_scroll_new()) },
     Scrollbar: {
       new: (id) => element(__scrollbar(String(id))),
@@ -6659,6 +6756,7 @@ impl ShellRuntime {
                 "aria_level",
                 "keep_mounted",
                 "on_item_click",
+                "on_item_secondary_click",
                 "on_change",
                 "on_open_change",
                 "on_confirm",
@@ -6997,6 +7095,18 @@ impl ShellRuntime {
                 "__h_virtual_list",
                 runtime.clone(),
                 gpui::Axis::Horizontal,
+            )?;
+            list_constructor(
+                &globals,
+                "__list",
+                runtime.clone(),
+                crate::spec::ListKind::Measured,
+            )?;
+            list_constructor(
+                &globals,
+                "__uniform_list",
+                runtime.clone(),
+                crate::spec::ListKind::Uniform,
             )?;
             text_constructor(&globals, "__popup", runtime.clone(), Component::Popup)?;
             text_constructor(&globals, "__select", runtime.clone(), Component::Select)?;
@@ -7602,6 +7712,7 @@ impl ShellRuntime {
             | "on_dismiss"
             | "on_step"
             | "on_item_click"
+            | "on_item_secondary_click"
             | "on_mouse_move"
             | "on_hover"
             | "on_key_down"
@@ -7632,8 +7743,10 @@ impl ShellRuntime {
                             "`{method}` cannot be registered from a virtual list's item \
                              renderer: the rows are rebuilt every frame, so a handler \
                              registered there would pile up for as long as the view stood. \
-                             Use `on_item_click((key, cx) => ...)` on the list itself, and \
-                             read the row out of your own data with the stable key it gives you"
+                             Use `on_item_click((key, cx) => ...)` or \
+                             `on_item_secondary_click((key, event, cx) => ...)` on the list \
+                             itself, and read the row out of your own data with the stable key \
+                             it gives you"
                         ),
                     ));
                 }
@@ -7695,6 +7808,7 @@ impl ShellRuntime {
             | "default_open"
             | "overlay_closable"
             | "anchor"
+            | "frame_budget"
             | "mouse_button"
             | "open_delay"
             | "close_delay"
@@ -7746,6 +7860,7 @@ impl ShellRuntime {
                     "default_open" => "default_open",
                     "overlay_closable" => "overlay_closable",
                     "anchor" => "anchor",
+                    "frame_budget" => "frame_budget",
                     "mouse_button" => "mouse_button",
                     "open_delay" => "open_delay",
                     "close_delay" => "close_delay",
@@ -7843,7 +7958,7 @@ impl ShellRuntime {
                     let Some(named) = bridged.first().and_then(|value| value.as_str().ok()) else {
                         return Err(Exception::throw_type(
                             ctx,
-                            "role(name) expects a string; see the Role type in gpui.d.ts",
+                            "role(name) expects a string; see the Role type in gpui-kit.d.ts",
                         ));
                     };
                     if named == crate::a11y::FILTERED_ROLE {
@@ -7859,7 +7974,7 @@ impl ShellRuntime {
                             ctx,
                             &format!(
                                 "unknown accessibility role `{named}`; the names mirror \
-                                 gpui::Role in snake_case — see the Role type in gpui.d.ts"
+                                 gpui::Role in snake_case — see the Role type in gpui-kit.d.ts"
                             ),
                         ));
                     }
@@ -8398,6 +8513,61 @@ impl<'js> FromJs<'js> for ItemKeyResolver {
 /// lists cannot bypass it.
 const MAX_VIRTUAL_ITEMS_PER_RENDER: usize = 1_000_000;
 
+/// The guard both lazy-list constructors run before they allocate anything.
+///
+/// The phase check is why an item renderer cannot build a list: callbacks
+/// belong to the snapshot that registered them, and by the time a renderer
+/// runs that generation is closed, so a callback pushed there is one no lookup
+/// could ever match. The budget claim has to come before the size table,
+/// because a count the script fat-fingered is an allocation measured in
+/// gigabytes.
+fn guard_lazy_list(
+    ctx: &Ctx<'_>,
+    runtime: &Weak<ShellRuntime>,
+    count: usize,
+) -> JsResult<Rc<ShellRuntime>> {
+    if scope::current_phase() == Some(ScopePhase::Layout) {
+        return Err(Exception::throw_type(
+            ctx,
+            "a list cannot be built from inside another list's item renderer: its own \
+             renderer would belong to no render pass and would never be called. Describe \
+             the nested list from the view's render() instead",
+        ));
+    }
+    let store = upgrade(runtime, ctx)?;
+    if !store
+        .arena
+        .borrow_mut()
+        .claim_virtual_items(count, MAX_VIRTUAL_ITEMS_PER_RENDER)
+    {
+        return Err(Exception::throw_type(
+            ctx,
+            &format!(
+                "the lists in one render may describe at most \
+                 {MAX_VIRTUAL_ITEMS_PER_RENDER} items in total"
+            ),
+        ));
+    }
+    Ok(store)
+}
+
+/// Files a lazy list's two script functions against the open generation.
+fn register_item_callbacks(
+    store: &Rc<ShellRuntime>,
+    get_key: ItemKeyResolver,
+    render: ItemRenderer,
+) -> (CallbackId, CallbackId) {
+    let entry = |value| {
+        store.callbacks.borrow_mut().push(CallbackEntry {
+            value,
+            view: scope::current_view().map(|view| view.downgrade()),
+            application: scope::current_application_generation(),
+            registered_in: scope::current_generation(),
+        })
+    };
+    (entry(get_key.0), entry(render.0))
+}
+
 /// `v_virtual_list` and `h_virtual_list`.
 ///
 /// The item renderer is registered as an ordinary callback, so it belongs to
@@ -8421,24 +8591,7 @@ fn virtual_list_constructor(
                   get_key: ItemKeyResolver,
                   render: ItemRenderer|
                   -> JsResult<SpecId> {
-                if scope::current_phase() == Some(ScopePhase::Layout) {
-                    return Err(Exception::throw_type(
-                        &ctx,
-                        "a virtual list cannot be built from inside another list's item                          renderer: its own renderer would belong to no render pass and would                          never be called. Describe the nested list from the view's render()                          instead",
-                    ));
-                }
-                if !upgrade(&runtime, &ctx)?
-                    .arena
-                    .borrow_mut()
-                    .claim_virtual_items(count, MAX_VIRTUAL_ITEMS_PER_RENDER)
-                {
-                    return Err(Exception::throw_type(
-                        &ctx,
-                        &format!(
-                            "the virtual lists in one render may describe at most                              {MAX_VIRTUAL_ITEMS_PER_RENDER} items in total"
-                        ),
-                    ));
-                }
+                let store = guard_lazy_list(&ctx, &runtime, count)?;
 
                 let extent = |value: f64| -> JsResult<gpui::Size<gpui::Pixels>> {
                     if !value.is_finite() || value < 0.0 {
@@ -8492,19 +8645,7 @@ fn virtual_list_constructor(
                     }
                 };
 
-                let store = upgrade(&runtime, &ctx)?;
-                let get_key = store.callbacks.borrow_mut().push(CallbackEntry {
-                    value: get_key.0,
-                    view: scope::current_view().map(|view| view.downgrade()),
-                    application: scope::current_application_generation(),
-                    registered_in: scope::current_generation(),
-                });
-                let callback = store.callbacks.borrow_mut().push(CallbackEntry {
-                    value: render.0,
-                    view: scope::current_view().map(|view| view.downgrade()),
-                    application: scope::current_application_generation(),
-                    registered_in: scope::current_generation(),
-                });
+                let (get_key, callback) = register_item_callbacks(&store, get_key, render);
                 Ok(store.push_node(Component::VirtualList(Rc::new(
                     crate::spec::VirtualListSpec::new(
                         id,
@@ -8514,6 +8655,41 @@ fn virtual_list_constructor(
                         callback,
                     ),
                 ))))
+            },
+        ),
+    )
+}
+
+/// `list` and `uniform_list`.
+///
+/// The same registration as a virtual list's, and confined for the same
+/// reasons: the renderer belongs to the snapshot being built, and cannot be
+/// registered from inside another list's item renderer. The item budget is
+/// claimed too, because `gpui::list` keeps one entry per item whether or not
+/// the item is ever drawn.
+fn list_constructor(
+    globals: &Object<'_>,
+    name: &str,
+    runtime: Weak<ShellRuntime>,
+    kind: crate::spec::ListKind,
+) -> JsResult<()> {
+    globals.set(
+        name,
+        Func::from(
+            move |ctx: Ctx<'_>,
+                  id: String,
+                  count: usize,
+                  get_key: ItemKeyResolver,
+                  render: ItemRenderer|
+                  -> JsResult<SpecId> {
+                let store = guard_lazy_list(&ctx, &runtime, count)?;
+
+                let (get_key, callback) = register_item_callbacks(&store, get_key, render);
+                Ok(
+                    store.push_node(Component::List(Rc::new(crate::spec::ListSpec::new(
+                        id, kind, count, get_key, callback,
+                    )))),
+                )
             },
         ),
     )
@@ -8928,6 +9104,32 @@ fn modifiers_object<'js>(ctx: &Ctx<'js>, modifiers: gpui::Modifiers) -> JsResult
 /// that has not been prepainted yet, so a script reading `undefined` knows the
 /// geometry was unavailable instead of being told the press landed at its
 /// top-left corner.
+/// The object an `on_mouse_down` or `on_mouse_up` handler is handed, built in
+/// one place so a press reported through a row carries the same fields as one
+/// reported through the element it landed on.
+fn mouse_button_payload<'js>(
+    ctx: &Ctx<'js>,
+    button: gpui::MouseButton,
+    position: gpui::Point<gpui::Pixels>,
+    click_count: usize,
+    modifiers: gpui::Modifiers,
+    bounds: Option<gpui::Bounds<gpui::Pixels>>,
+) -> JsResult<Object<'js>> {
+    let payload = Object::new(ctx.clone())?;
+    payload.set(
+        "button",
+        match button {
+            gpui::MouseButton::Right => "right",
+            gpui::MouseButton::Middle => "middle",
+            _ => "left",
+        },
+    )?;
+    payload.set("click_count", click_count as u32)?;
+    set_pointer_geometry(ctx, &payload, position, bounds)?;
+    payload.set("modifiers", modifiers_object(ctx, modifiers)?)?;
+    Ok(payload)
+}
+
 fn set_pointer_geometry<'js>(
     ctx: &Ctx<'js>,
     payload: &Object<'js>,
@@ -9412,6 +9614,7 @@ fn callback_op_name(method: &str) -> Option<&'static str> {
         "on_mouse_down_out" => "on_mouse_down_out",
         "on_scroll_wheel" => "on_scroll_wheel",
         "on_item_click" => "on_item_click",
+        "on_item_secondary_click" => "on_item_secondary_click",
         "on_resize" => "on_resize",
         "tab_bar" => "tab_bar",
         "empty_group" => "empty_group",
@@ -9622,6 +9825,20 @@ mod module_lifecycle_tests {
     use crate::dependencies::{GitDependencyStore, MaterializedDependency};
     use std::collections::BTreeMap;
     use std::process::Command;
+
+    #[test]
+    fn gpui_module_exports_div() {
+        let runtime = ShellRuntime::new_isolated().expect("runtime");
+        runtime
+            .load_source(
+                "gpui-import.js",
+                r#"
+import { div, View } from "gpui";
+export default class Panel extends View { render() { return div(); } }
+"#,
+            )
+            .expect("gpui is an importable built-in module");
+    }
 
     #[test]
     fn registrations_for_the_same_root_are_generation_scoped_and_leased() {
@@ -9953,7 +10170,7 @@ mod nested_view_lifecycle_tests {
         let mut view_type = child_type(
             &runtime,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 export default class Child extends View { render(cx) { return "child"; } }
 "#,
         );
@@ -10027,7 +10244,7 @@ export default class Child extends View { render(cx) { return "child"; } }
         let mut view_type = child_type(
             &runtime,
             r#"
-import { View } from "gpui";
+import { View } from "gpui-kit";
 export default class Child extends View { render(cx) { return "child"; } }
 "#,
         );
@@ -10092,7 +10309,7 @@ export default class Child extends View { render(cx) { return "child"; } }
         let view_type = child_type(
             &runtime,
             r#"
-import { View, div } from "gpui";
+import { View, div } from "gpui-kit";
 globalThis.child_hits = 0;
 
 export default class Child extends View {
@@ -10168,7 +10385,7 @@ export default class Child extends View {
         let view_type = child_type(
             &runtime,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { InputState } from "gpui-base";
 
 export default class Child extends View {
@@ -10256,7 +10473,7 @@ export default class Child extends View {
         let parent_type = child_type(
             &runtime,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { InputState } from "gpui-base";
 globalThis.parent_continuations = 0;
 // Takes a context, because module scope has none: the caller is a live host
@@ -10275,7 +10492,7 @@ export default class Parent extends View {
         let child_type = child_type(
             &runtime,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { InputState } from "gpui-base";
 globalThis.child_continuations = 0;
 export default class Child extends View {
@@ -10377,7 +10594,7 @@ export default class Child extends View {
         let parent_type = child_type(
             &runtime,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { InputState } from "gpui-base";
 globalThis.parent_continuations = 0;
 // Takes a context, because module scope has none: the caller is a live host
@@ -10396,7 +10613,7 @@ export default class Parent extends View {
         let child_type = child_type(
             &runtime,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { InputState } from "gpui-base";
 globalThis.child_continuations = 0;
 export default class BrokenChild extends View {
@@ -10496,7 +10713,7 @@ export default class BrokenChild extends View {
         let parent_type = child_type(
             &runtime,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 export default class Parent extends View {
   render() { return "parent"; }
 }
@@ -10505,7 +10722,7 @@ export default class Parent extends View {
         let child_type = child_type(
             &runtime,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { InputState } from "gpui-base";
 globalThis.successor_runs = 0;
 export default class BrokenChild extends View {
@@ -10599,7 +10816,7 @@ export default class BrokenChild extends View {
         std::fs::write(
             root.join("main.js"),
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 export default class Child extends View {
   render(cx) { return "loaded child"; }
 }
@@ -10659,7 +10876,7 @@ export default class Child extends View {
         let view_type = child_type(
             &runtime,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { InputState } from "gpui-base";
 
 export default class Child extends View {
@@ -10736,7 +10953,7 @@ export default class Child extends View {
         let view_type = child_type(
             &runtime,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 
 export default class Child extends View {
   init(_props, cx) { this.tick = cx.timer.every(60_000, () => {}); }
@@ -10807,7 +11024,7 @@ export default class Child extends View {
         let view_type_a = child_type(
             &runtime_a,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 export default class Child extends View {
   init(_props, cx) { this.tick = cx.timer.every(60_000, () => {}); }
   render() { return "a"; }
@@ -10817,7 +11034,7 @@ export default class Child extends View {
         let view_type_b = child_type(
             &runtime_b,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 export default class Child extends View {
   init(_props, cx) { this.tick = cx.timer.every(60_000, () => {}); }
   render(cx) { return "b"; }
@@ -10886,7 +11103,7 @@ export default class Child extends View {
         let view_type = child_type(
             &runtime,
             r#"
-import { div, View } from "gpui";
+import { div, View } from "gpui-kit";
 import { InputState } from "gpui-base";
 globalThis.failed_child_continuations = 0;
 

@@ -1,9 +1,9 @@
-use gpui::{
+use gpui_kit::{
     App, AppContext, Axis, Context, Element, Entity, FocusHandle, Focusable, Global, IntoElement,
     ParentElement as _, Render, SharedString, Styled, Window, prelude::FluentBuilder, px,
 };
 
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Disableable, Icon, IconName, Sizable, Size, Theme, ThemeMode,
     button::{Button, ButtonVariants},
     group_box::GroupBoxVariant,
@@ -108,7 +108,7 @@ impl super::Story for SettingsStory {
         Self::view(window, cx)
     }
 
-    fn paddings() -> gpui::Pixels {
+    fn paddings() -> gpui_kit::Pixels {
         px(0.)
     }
 }
@@ -144,9 +144,7 @@ impl SettingsStory {
                         .icon(IconName::Info)
                         .ghost()
                         .xsmall()
-                        .on_click(|_, _, cx| {
-                            cx.open_url("https://longbridge.github.io/gpui-component/")
-                        })
+                        .on_click(|_, _, cx| cx.open_url("https://gpui-kit.com/"))
                 })
                 .groups(vec![
                     SettingGroup::new().title("Appearance").items(vec![
@@ -355,9 +353,7 @@ impl SettingsStory {
                                         .with_size(options.size())
                                         .disabled(options.is_disabled())
                                         .on_click(|_, _, cx| {
-                                            cx.open_url(
-                                                "https://github.com/longbridge/gpui-component",
-                                            );
+                                            cx.open_url("https://github.com/longbridge/gpui-kit");
                                         }),
                                 )
                                 .into_any_element()
@@ -482,7 +478,7 @@ impl SettingsStory {
                             "GitHub Repository",
                             SettingField::element(OpenURLSettingField::new(
                                 "Repository...",
-                                "https://github.com/longbridge/gpui-component",
+                                "https://github.com/longbridge/gpui-kit",
                             )),
                         )
                         .description("Open the GitHub repository in your default browser."),
@@ -504,7 +500,7 @@ impl SettingsStory {
                                     .label("Website...")
                                     .with_size(options.size())
                                     .on_click(|_, _window, cx| {
-                                        cx.open_url("https://longbridge.github.io/gpui-component/");
+                                        cx.open_url("https://gpui-kit.com/");
                                     })
                             }),
                         )
@@ -515,7 +511,7 @@ impl SettingsStory {
 }
 
 impl Focusable for SettingsStory {
-    fn focus_handle(&self, _: &gpui::App) -> gpui::FocusHandle {
+    fn focus_handle(&self, _: &gpui_kit::App) -> gpui_kit::FocusHandle {
         self.focus_handle.clone()
     }
 }

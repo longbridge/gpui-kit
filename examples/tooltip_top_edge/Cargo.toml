@@ -1,15 +1,13 @@
 [package]
 name = "tooltip_top_edge"
 description = "Example demonstrating tooltip placement near the top window edge."
-version = "0.5.1"
+version = "0.6.0"
 publish = false
 edition.workspace = true
 
 [dependencies]
+gpui-kit.workspace = true
 anyhow.workspace = true
-gpui.workspace = true
-gpui_platform.workspace = true
-gpui-component = { workspace = true }
 
 [lints]
 workspace = true

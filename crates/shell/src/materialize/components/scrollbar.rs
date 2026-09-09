@@ -26,10 +26,11 @@
 //! sitting there hit-testable and refusing to move.
 
 use gpui::{
-    AnyElement, App, ElementId, IntoElement, ParentElement, Refineable as _, ScrollHandle,
-    SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, px,
+    AnyElement, App, Bounds, ElementId, IntoElement, ListState, ParentElement, Pixels, Point,
+    Refineable as _, ScrollHandle, SharedString, Size, StatefulInteractiveElement, StyleRefinement,
+    Styled, UniformListScrollHandle, Window, div, px,
 };
-use gpui_base::{Scrollbar, ScrollbarAxis};
+use gpui_base::{Scrollbar, ScrollbarAxis, ScrollbarHandle};
 
 use crate::materialize::{Behavior, Children, StateStyles, warn_ignored_key, warn_unhonoured_a11y};
 
@@ -58,7 +59,9 @@ pub(in crate::materialize) fn scrollbar(
     }
 
     let target = SharedString::from(id);
-    let handle = scroll_position(&ElementId::Name(target.clone()), window, cx);
+    let handle = shared_scroll_position(&ElementId::Name(target.clone()), window, cx)
+        .read(cx)
+        .clone();
     warn_if_unclaimed(&target, &handle, window, cx);
 
     // `new(...)` is both axes, and `Scrollbar.horizontal`/`.vertical` narrow it
@@ -116,9 +119,108 @@ pub(in crate::materialize) fn track_scroll_position<E: StatefulInteractiveElemen
 /// runtime's entity store, and window element state is the one place both sides
 /// of the pairing can reach with nothing but a name.
 fn scroll_position(identity: &ElementId, window: &mut Window, cx: &mut App) -> ScrollHandle {
-    shared_scroll_position(identity, window, cx)
+    // The area keeps its position under a key of its own rather than in the
+    // shared slot. A lazy list of the same name overwrites that slot on every
+    // frame, and an area that read its handle back out of it would be handed a
+    // fresh, unscrolled one every frame -- it would stop scrolling entirely
+    // rather than merely lose the bar.
+    let handle = window
+        .use_keyed_state((identity.clone(), "scroll-area"), cx, |_, _| {
+            ScrollHandle::default()
+        })
         .read(cx)
-        .clone()
+        .clone();
+    let shared = shared_scroll_position(identity, window, cx);
+    if !matches!(shared.read(cx), SharedScroll::Handle(_)) {
+        warn_about_two_scrollers(identity, window, cx);
+    }
+    // Last one described wins the bar, which is what two scroll areas sharing
+    // a name have always done.
+    shared.update(cx, |shared, _| {
+        *shared = SharedScroll::Handle(handle.clone())
+    });
+    handle
+}
+
+/// Reports one name claimed by two things that cannot share a position.
+///
+/// Once per name, not once per frame: both claimants rewrite the shared slot
+/// every time they are materialized, so the condition is true for as long as
+/// the description stands.
+fn warn_about_two_scrollers(identity: &ElementId, window: &mut Window, cx: &mut App) {
+    let reported =
+        window.use_keyed_state((identity.clone(), "scroll-name-collision"), cx, |_, _| {
+            false
+        });
+    if *reported.read(cx) {
+        return;
+    }
+    reported.update(cx, |reported, _| *reported = true);
+    tracing::warn!(
+        "{identity:?} names both a scroll area and a lazy list; each keeps scrolling, but a \
+         Scrollbar of that name drives whichever was described last. Give one of them a name \
+         of its own"
+    );
+}
+
+/// The scroll position one name can carry.
+///
+/// A scroll area and a virtual list scroll through a [`ScrollHandle`]; GPUI's
+/// own lazy lists keep their position in a handle of their own. A `Scrollbar`
+/// pairs by name and does not know which it was given, so the shared slot
+/// holds any of them and answers as the bar's handle itself.
+#[derive(Clone)]
+pub(in crate::materialize) enum SharedScroll {
+    Handle(ScrollHandle),
+    Uniform(UniformListScrollHandle),
+    List(ListState),
+}
+
+impl Default for SharedScroll {
+    fn default() -> Self {
+        Self::Handle(ScrollHandle::default())
+    }
+}
+
+impl SharedScroll {
+    /// The handle this name carries, as the bar's own trait.
+    ///
+    /// Base's `Scrollbar` erases its handle to `Rc<dyn ScrollbarHandle>`
+    /// anyway; the enum exists so a scroll area can still get its concrete
+    /// `ScrollHandle` back, and one match is the whole of what the bar needs.
+    fn inner(&self) -> &dyn ScrollbarHandle {
+        match self {
+            Self::Handle(handle) => handle,
+            Self::Uniform(handle) => handle,
+            Self::List(state) => state,
+        }
+    }
+}
+
+impl ScrollbarHandle for SharedScroll {
+    fn viewport_bounds(&self) -> Bounds<Pixels> {
+        self.inner().viewport_bounds()
+    }
+
+    fn offset(&self) -> Point<Pixels> {
+        self.inner().offset()
+    }
+
+    fn set_offset(&self, offset: Point<Pixels>) {
+        self.inner().set_offset(offset)
+    }
+
+    fn content_size(&self) -> Size<Pixels> {
+        self.inner().content_size()
+    }
+
+    fn start_drag(&self) {
+        self.inner().start_drag()
+    }
+
+    fn end_drag(&self) {
+        self.inner().end_drag()
+    }
 }
 
 /// The slot itself, for the one caller that has to *write* it.
@@ -131,8 +233,8 @@ pub(in crate::materialize) fn shared_scroll_position(
     identity: &ElementId,
     window: &mut Window,
     cx: &mut App,
-) -> gpui::Entity<ScrollHandle> {
-    window.use_keyed_state(identity.clone(), cx, |_, _| ScrollHandle::default())
+) -> gpui::Entity<SharedScroll> {
+    window.use_keyed_state(identity.clone(), cx, |_, _| SharedScroll::default())
 }
 
 /// Distinguishes the bars over one scroll area. They share a scroll position,
@@ -168,11 +270,11 @@ struct ScrollTarget {
 /// Reported once. A warning repeated every frame is a warning nobody reads.
 fn warn_if_unclaimed(
     target: &SharedString,
-    handle: &ScrollHandle,
+    handle: &SharedScroll,
     window: &mut Window,
     cx: &mut App,
 ) {
-    let viewport = handle.bounds().size;
+    let viewport = handle.viewport_bounds().size;
     let unclaimed = viewport.width <= px(0.) || viewport.height <= px(0.);
     let state = window.use_keyed_state(
         (ElementId::Name(target.clone()), "scroll-target"),

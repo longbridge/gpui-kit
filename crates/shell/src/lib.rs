@@ -31,7 +31,7 @@
 // script may reach, `root` and `theme` for the window it lives in, `view` and
 // `snapshot` for the view itself, `metrics` to measure. Hot reload is exposed
 // through `ShellRuntime::watch`; its watcher implementation remains internal.
-// `write_type_declarations_with_components` is the explicit tooling hook for `gpui.d.ts`;
+// `write_type_declarations_with_components` is the explicit tooling hook for `gpui-kit.d.ts`;
 // ordinary application loading updates it automatically.
 //
 // **Crate-private, and why.** `engine` is the seam and its shape follows
@@ -141,7 +141,7 @@ pub fn write_type_declarations_with_components(
 
 /// Links an application's declared Git dependencies where an editor finds them.
 ///
-/// `gpui.d.ts` describes the runtime; this describes the packages the manifest
+/// `gpui-kit.d.ts` describes the runtime; this describes the packages the manifest
 /// adds to it. Without it `import { style } from "omarchy-ui"` is a module an
 /// editor cannot resolve, so the names behind it have no types, no parameter
 /// hints and no documentation even though the runtime resolves them fine.
@@ -353,7 +353,7 @@ mod init_tests {
 /// # Ok::<(), gpui_shell::HostError>(())
 /// ```
 ///
-/// A script imports that by name, the way it imports `gpui` or `path`:
+/// A script imports that by name, the way it imports `gpui-kit` or `path`:
 ///
 /// ```js
 /// import { project_name } from "workspace";
@@ -387,7 +387,7 @@ mod init_tests {
 /// # Give it a TypeScript face
 ///
 /// [`HostModule::declarations`] is optional but worth writing. With it, the
-/// generated `gpui.d.ts` describes the module exactly, and this function checks
+/// generated `gpui-kit.d.ts` describes the module exactly, and this function checks
 /// that description against the functions actually registered — so renaming one
 /// half is a sentence at start-up rather than an editor that keeps completing a
 /// function you deleted. Without it, the module is still declared, with

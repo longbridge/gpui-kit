@@ -1,5 +1,4 @@
-use gpui::{prelude::FluentBuilder as _, *};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme, Icon, IconName, IndexPath, Sizable as _, ThemeStyled as _,
     button::Button,
     button::ButtonVariants as _,
@@ -11,6 +10,7 @@ use gpui_component::{
     },
     v_flex, white,
 };
+use gpui_kit::{prelude::FluentBuilder as _, *};
 
 use crate::section;
 
@@ -80,8 +80,12 @@ impl SearchableListItem for Industry {
         &self.label
     }
 
-    fn render(&self, _window: &mut gpui::Window, cx: &mut gpui::App) -> impl gpui::IntoElement {
-        use gpui_component::ActiveTheme as _;
+    fn render(
+        &self,
+        _window: &mut gpui_kit::Window,
+        cx: &mut gpui_kit::App,
+    ) -> impl gpui_kit::IntoElement {
+        use gpui_kit::component::ActiveTheme as _;
 
         h_flex()
             .w_full()
@@ -92,7 +96,7 @@ impl SearchableListItem for Industry {
                     .small()
                     .text_color(cx.theme().muted_foreground),
             )
-            .child(gpui::div().child(self.label.clone()))
+            .child(gpui_kit::div().child(self.label.clone()))
     }
 }
 

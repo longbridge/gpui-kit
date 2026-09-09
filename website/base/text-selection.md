@@ -26,17 +26,17 @@ A selectable window has three roles:
 
 ### Key parts
 
-| API | Lifetime | Purpose |
-| --- | --- | --- |
-| `TextSelectionLayer` | Once per window | Installs window-level pointer handling and selection state. |
-| `TextSelection` | Static API | Queries and controls the window selection. |
-| `TextSelectionHandle` | Once per selectable participant | Identifies the participant and stores its callbacks and projected selection. |
-| `TextSelectionRegistration` | Recreated each rendered frame | Reports the current hitbox, bounds, scroll offset, scope, and document order. |
-| `TextSelectionRun` | Recreated during paint | Describes laid-out text for projection to a UTF-8 byte range. |
-| `TextSelectionProjection` | Returned by `update_runs` | Pairs each submitted run with its selected byte range. |
-| `TextSelectionSnapshot` | Produced when selection changes | Describes the participant's endpoints and coverage. |
-| `TextSelectionEvent` | Emitted to subscribers | Reports selection changes, clearing, and auto-scroll requests. |
-| `TextSelectionContentKey` | Stable content identity | Identifies virtualized content at a selection endpoint. |
+| API                         | Lifetime                        | Purpose                                                                       |
+| --------------------------- | ------------------------------- | ----------------------------------------------------------------------------- |
+| `TextSelectionLayer`        | Once per window                 | Installs window-level pointer handling and selection state.                   |
+| `TextSelection`             | Static API                      | Queries and controls the window selection.                                    |
+| `TextSelectionHandle`       | Once per selectable participant | Identifies the participant and stores its callbacks and projected selection.  |
+| `TextSelectionRegistration` | Recreated each rendered frame   | Reports the current hitbox, bounds, scroll offset, scope, and document order. |
+| `TextSelectionRun`          | Recreated during paint          | Describes laid-out text for projection to a UTF-8 byte range.                 |
+| `TextSelectionProjection`   | Returned by `update_runs`       | Pairs each submitted run with its selected byte range.                        |
+| `TextSelectionSnapshot`     | Produced when selection changes | Describes the participant's endpoints and coverage.                           |
+| `TextSelectionEvent`        | Emitted to subscribers          | Reports selection changes, clearing, and auto-scroll requests.                |
+| `TextSelectionContentKey`   | Stable content identity         | Identifies virtualized content at a selection endpoint.                       |
 
 The complete flow is:
 
@@ -62,9 +62,9 @@ The window state belongs to the retained `TextSelectionLayer` element. Handles a
 Add one `TextSelectionLayer` as the first child of the window root:
 
 ```rust
-use gpui::prelude::*;
-use gpui::{Context, Render, Window};
-use gpui_base::TextSelectionLayer;
+use gpui_kit::prelude::*;
+use gpui_kit::{Context, Render, Window};
+use gpui_kit::base::TextSelectionLayer;
 
 impl Render for AppView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -83,8 +83,8 @@ impl Render for AppView {
 Create one handle for the semantic lifetime of the participant. Do not create a new handle every frame.
 
 ```rust
-use gpui::{Context, Subscription, Window};
-use gpui_base::TextSelectionHandle;
+use gpui_kit::{Context, Subscription, Window};
+use gpui_kit::base::TextSelectionHandle;
 
 struct DocumentView {
     selection: TextSelectionHandle,
@@ -113,15 +113,15 @@ The `fallback_copy_text` passed to `TextSelectionHandle::new` is used until the 
 Call `TextSelectionHandle::register(registration, window, cx)` once per rendered frame, after the handle's bounds and hitbox are known:
 
 ```rust
-use gpui::{Bounds, Hitbox, Pixels, Window};
-use gpui_base::TextSelectionRegistration;
+use gpui_kit::{Bounds, Hitbox, Pixels, Window};
+use gpui_kit::base::TextSelectionRegistration;
 
 fn register_selection(
     handle: &TextSelectionHandle,
     hitbox: Hitbox,
     bounds: Bounds<Pixels>,
     window: &mut Window,
-    cx: &mut gpui::App,
+    cx: &mut gpui_kit::App,
 ) {
     handle.register(
         TextSelectionRegistration::new(hitbox, bounds)
@@ -146,15 +146,15 @@ Handles not registered in the current frame stop participating automatically.
 In paint, call `TextSelectionHandle::update_runs` with laid-out runs containing the exact text used to create each `TextLayout`. It returns a `TextSelectionProjection` containing UTF-8-safe byte ranges:
 
 ```rust
-use gpui::{Bounds, Pixels, SharedString, TextLayout};
-use gpui_base::TextSelectionRun;
+use gpui_kit::{Bounds, Pixels, SharedString, TextLayout};
+use gpui_kit::base::TextSelectionRun;
 
 fn selected_range(
     handle: &TextSelectionHandle,
     text: SharedString,
     layout: TextLayout,
     bounds: Bounds<Pixels>,
-    cx: &mut gpui::App,
+    cx: &mut gpui_kit::App,
 ) -> Option<std::ops::Range<usize>> {
     handle
         .update_runs(
@@ -173,10 +173,10 @@ Paint the returned range behind the glyphs, then paint the text normally. Wrappe
 
 For multiple runs, give each run a stable `document_order`. Input order is preserved in `projection.ranges()` so each range can be paired with its original layout; document order is used when composing copied text.
 
-The [shared Text Selection showcase](https://github.com/longbridge/gpui-component/blob/main/crates/base/examples/showcase/components/text_selection.rs) is the complete runnable example used by both the native command and the live Rust/WASM preview above:
+The [shared Text Selection showcase](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/text_selection.rs) is the complete runnable example used by both the native command and the live Rust/WASM preview above:
 
 ```bash
-cargo run -p gpui-base --example components -- text-selection
+cargo run -p gpui-base-examples -- text-selection
 ```
 
 ## Complete Rust example
@@ -188,7 +188,7 @@ cargo run -p gpui-base --example components -- text-selection
 Use `TextSelection` associated functions to read or mutate the window selection. No extension trait import is required:
 
 ```rust
-use gpui_base::TextSelection;
+use gpui_kit::base::TextSelection;
 
 let has_selection = TextSelection::has_selection(window, cx);
 let text = TextSelection::selected_text(window, cx);
@@ -203,16 +203,16 @@ TextSelection::clear(window, cx); // Clear window and participant-local ranges.
 
 Plain text usually needs only `refresh_window_on_change` and `update_runs`. Rich or virtualized participants can configure additional behavior directly on the handle:
 
-| Method | Use |
-| --- | --- |
-| `refresh_window_on_change` | Redraw only the owning window when this handle's selection changes. |
-| `subscribe` | Receive `TextSelectionEvent` values for selection changes, clearing, and auto-scroll. |
-| `copy_with` | Export source text or include virtualized content that is not currently painted. |
-| `set_fallback_copy_text` | Replace the participant's fallback copy text. |
-| `resolve_content_key_with` | Attach a stable `TextSelectionContentKey` to an endpoint. |
-| `focus_with` | Focus the participant when a drag begins inside it. |
-| `clear_with` | Synchronously clear participant-local state when the window selection clears. |
-| `set_local_selection` | Report participant-local selection such as select-all. |
+| Method                     | Use                                                                                   |
+| -------------------------- | ------------------------------------------------------------------------------------- |
+| `refresh_window_on_change` | Redraw only the owning window when this handle's selection changes.                   |
+| `subscribe`                | Receive `TextSelectionEvent` values for selection changes, clearing, and auto-scroll. |
+| `copy_with`                | Export source text or include virtualized content that is not currently painted.      |
+| `set_fallback_copy_text`   | Replace the participant's fallback copy text.                                         |
+| `resolve_content_key_with` | Attach a stable `TextSelectionContentKey` to an endpoint.                             |
+| `focus_with`               | Focus the participant when a drag begins inside it.                                   |
+| `clear_with`               | Synchronously clear participant-local state when the window selection clears.         |
+| `set_local_selection`      | Report participant-local selection such as select-all.                                |
 
 Callbacks are invoked outside selection-state leases. They may update the participant or query `TextSelection` without causing a reentrant entity borrow.
 
@@ -225,7 +225,7 @@ For a virtualized document, inspect `TextSelectionEvent::SelectionChanged` and u
 Only handles in the active `TextSelectionScopeId` participate. Set the active window scope, then mark the corresponding rendered subtree:
 
 ```rust
-use gpui_base::{ElementExt as _, TextSelection, TextSelectionScopeId};
+use gpui_kit::base::{ElementExt as _, TextSelection, TextSelectionScopeId};
 
 let dialog_scope = TextSelectionScopeId::new();
 TextSelection::activate_scope(dialog_scope, window, cx);

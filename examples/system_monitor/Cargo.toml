@@ -1,16 +1,13 @@
 [package]
 name = "system_monitor"
 description = "A real-time system resource monitor using GPUI Component charts."
-version = "0.5.0"
+version = "0.6.0"
 publish = false
 edition = "2024"
 
 [dependencies]
+gpui-kit.workspace = true
 anyhow.workspace = true
-gpui.workspace = true
-gpui_platform.workspace = true
-gpui-component-assets.workspace = true
-gpui-component.workspace = true
 sysinfo = "0.37"
 smol = "2"
 battery = "0.7"
