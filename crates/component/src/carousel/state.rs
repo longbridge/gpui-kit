@@ -25,6 +25,7 @@ pub enum CarouselEvent {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(super) struct CarouselGeometry {
     viewport: Option<Bounds<Pixels>>,
+    frame: Option<Bounds<Pixels>>,
     items: Vec<Bounds<Pixels>>,
 }
 
@@ -338,25 +339,31 @@ impl CarouselState {
         self.motion_revision
     }
 
-    pub(super) fn viewport_size(&self) -> Option<gpui::Size<Pixels>> {
-        self.geometry.viewport.map(|viewport| viewport.size)
+    /// Returns the size of the clipped content frame that controls and the
+    /// focus ring are positioned around.
+    pub(super) fn frame_size(&self) -> Option<gpui::Size<Pixels>> {
+        self.geometry.frame.map(|frame| frame.size)
     }
 
     /// Records the viewport and item bounds used for gesture snapping.
     #[cfg(test)]
     fn set_geometry(&mut self, viewport: Bounds<Pixels>, items: Vec<Bounds<Pixels>>) {
         let has_runway = self.loop_layout.is_some();
-        self.set_geometry_with_runway(viewport, items, has_runway);
+        self.set_geometry_with_runway(viewport, viewport, items, has_runway);
     }
 
+    /// Records the scroll track (`viewport`), the clipped content `frame`, and
+    /// the item bounds after layout.
     pub(super) fn set_geometry_with_runway(
         &mut self,
         viewport: Bounds<Pixels>,
+        frame: Bounds<Pixels>,
         items: Vec<Bounds<Pixels>>,
         has_runway: bool,
     ) {
         self.geometry = CarouselGeometry {
             viewport: Some(viewport),
+            frame: Some(frame),
             items,
         };
         self.geometry_has_runway = has_runway;

@@ -52,7 +52,7 @@ Carousel
 └── CarouselNext
 ```
 
-可以在 `Carousel` 根节点上使用 `.w_full().max_w_96()` 约束整个 Carousel；需要单独设置 viewport 的宽度或高度时，可以直接设置 `CarouselContent` 的样式。`track_style` 仅用于间距等内部 track 调整。
+可以在 `Carousel` 根节点上使用 `.w_full().max_w_96()` 约束整个 Carousel；需要单独设置 viewport 的宽度或高度时，可以直接设置 `CarouselContent` 的样式。`track_style` 仅用于间距等内部 track 调整。根节点会把常规子元素按列排布并留出 16px 间距，因此放在内容后面的 `CarouselPagination` 会自然与内容拉开；需要其他排布时直接在根节点上覆盖样式。
 
 ## 尺寸
 

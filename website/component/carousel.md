@@ -52,7 +52,7 @@ Carousel
 └── CarouselNext
 ```
 
-Constrain the Carousel with `.w_full().max_w_96()` on its root, or style `CarouselContent` when the viewport itself needs a custom width or height. Use `track_style` only for inner-track adjustments such as spacing.
+Constrain the Carousel with `.w_full().max_w_96()` on its root, or style `CarouselContent` when the viewport itself needs a custom width or height. Use `track_style` only for inner-track adjustments such as spacing. The root lays out its flow children as a column with a 16px gap, so a `CarouselPagination` placed after the content keeps its distance; restyle the root for another arrangement.
 
 ## Sizes
 

@@ -94,34 +94,28 @@ impl CarouselStory {
     ) -> impl IntoElement {
         div()
             .w_full()
+            .when(square, |this| this.aspect_square())
             .when(!square, |this| this.h_full())
-            .p_1()
-            .child(
-                div()
-                    .w_full()
-                    .when(square, |this| this.aspect_square())
-                    .when(!square, |this| this.h_full())
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .p_6()
-                    .rounded(cx.theme().radius_tokens().xl)
-                    .border_1()
-                    .border_color(cx.theme().border)
-                    .bg(cx.theme().background)
-                    .text_color(cx.theme().foreground)
-                    .font_semibold()
-                    .when(matches!(typography, SlideTypography::Large), |this| {
-                        this.text_size(rems(2.25))
-                    })
-                    .when(matches!(typography, SlideTypography::Medium), |this| {
-                        this.text_3xl()
-                    })
-                    .when(matches!(typography, SlideTypography::Small), |this| {
-                        this.text_2xl()
-                    })
-                    .child(label.into()),
-            )
+            .flex()
+            .items_center()
+            .justify_center()
+            .p_6()
+            .rounded(cx.theme().radius_tokens().xl)
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .font_semibold()
+            .when(matches!(typography, SlideTypography::Large), |this| {
+                this.text_size(rems(2.25))
+            })
+            .when(matches!(typography, SlideTypography::Medium), |this| {
+                this.text_3xl()
+            })
+            .when(matches!(typography, SlideTypography::Small), |this| {
+                this.text_2xl()
+            })
+            .child(label.into())
     }
 
     fn items(

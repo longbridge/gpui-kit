@@ -92,7 +92,7 @@ impl RenderOnce for Carousel {
         );
         let snapshot = self.state.read(cx);
         let axis = snapshot.axis();
-        let viewport_size = snapshot.viewport_size();
+        let frame_size = snapshot.frame_size();
         let focus_handle = window
             .use_keyed_state(("carousel-focus", self.state.entity_id()), cx, |_, cx| {
                 cx.focus_handle()
@@ -108,6 +108,9 @@ impl RenderOnce for Carousel {
         div()
             .id(self.id)
             .relative()
+            .flex()
+            .flex_col()
+            .gap_4()
             .role(Role::Region)
             .aria_label(self.accessibility_label)
             .track_focus(&focus_handle.tab_stop(true))
@@ -160,7 +163,7 @@ impl RenderOnce for Carousel {
             )
             .children(self.children)
             .when(focus_visible, |this| {
-                this.when_some(viewport_size, |this, size| {
+                this.when_some(frame_size, |this, size| {
                     this.child(
                         div()
                             .absolute()
@@ -182,17 +185,24 @@ impl RenderOnce for Carousel {
 #[derive(Default, PartialEq)]
 struct CarouselGeometry {
     viewport: Bounds<Pixels>,
+    frame: Bounds<Pixels>,
     items: Vec<Bounds<Pixels>>,
     has_runway: bool,
     revision: usize,
 }
 
 impl CarouselGeometry {
-    fn read(state: &CarouselState, has_runway: bool, rendered_item_count: usize) -> Self {
+    fn read(
+        state: &CarouselState,
+        frame: Bounds<Pixels>,
+        has_runway: bool,
+        rendered_item_count: usize,
+    ) -> Self {
         let handle = state.scroll_handle();
         let item_offset = usize::from(has_runway);
         Self {
             viewport: handle.bounds(),
+            frame,
             items: (0..state.item_count().min(rendered_item_count))
                 .filter_map(|ix| handle.bounds_for_item(ix + item_offset))
                 .collect(),
@@ -203,6 +213,7 @@ impl CarouselGeometry {
 
     fn same_layout(&self, other: &Self) -> bool {
         self.viewport == other.viewport
+            && self.frame == other.frame
             && self.items == other.items
             && self.has_runway == other.has_runway
     }
@@ -416,16 +427,24 @@ impl RenderOnce for CarouselContent {
         div()
             .relative()
             .w_full()
+            .flex()
+            .when(axis.is_horizontal(), |this| this.flex_row())
+            .when(axis.is_vertical(), |this| this.flex_col())
             .refine_style(&self.style)
             .overflow_hidden()
             .child(
+                // As a flex child the track grows by its negative leading
+                // margin, so the padded items fill the frame on both edges.
                 div()
                     .id(viewport_id.clone())
-                    .w_full()
-                    .when(axis.is_vertical(), |this| this.h_full())
+                    .flex_1()
                     .flex()
-                    .when(axis.is_horizontal(), |this| this.flex_row().ml_neg_4())
-                    .when(axis.is_vertical(), |this| this.flex_col().mt_neg_4())
+                    .when(axis.is_horizontal(), |this| {
+                        this.flex_row().min_w_0().ml_neg_4()
+                    })
+                    .when(axis.is_vertical(), |this| {
+                        this.flex_col().min_h_0().mt_neg_4()
+                    })
                     .track_scroll(&handle)
                     .when_some(loop_runway, |this, runway| {
                         this.child(runway_spacer(runway))
@@ -437,9 +456,10 @@ impl RenderOnce for CarouselContent {
                     .refine_style(&self.track_style),
             )
             .child(CarouselScrollMask::new(axis, &self.state).id(viewport_id))
-            .on_prepaint(move |_, _, cx| {
+            .on_prepaint(move |frame, _, cx| {
                 let next = CarouselGeometry::read(
                     geometry_state.read(cx),
+                    frame,
                     has_runway,
                     rendered_item_count,
                 );
@@ -447,12 +467,14 @@ impl RenderOnce for CarouselContent {
                     geometry_state.update(cx, |state, _| {
                         state.set_geometry_with_runway(
                             next.viewport,
+                            next.frame,
                             next.items.clone(),
                             next.has_runway,
                         );
                     });
                     geometry.update(cx, |current, cx| {
                         current.viewport = next.viewport;
+                        current.frame = next.frame;
                         current.items = next.items;
                         current.has_runway = next.has_runway;
                         current.revision = current.revision.wrapping_add(1);
@@ -672,7 +694,7 @@ fn carousel_control(
 ) -> impl IntoElement {
     let snapshot = state.read(cx);
     let axis = snapshot.axis();
-    let viewport_size = snapshot.viewport_size();
+    let frame_size = snapshot.frame_size();
     let disabled = if next {
         !snapshot.has_next()
     } else {
@@ -695,10 +717,8 @@ fn carousel_control(
         .absolute()
         .top_0()
         .left_0()
-        .when_some(viewport_size, |this, size| {
-            this.w(size.width).h(size.height)
-        })
-        .when(viewport_size.is_none(), |this| this.right_0().bottom_0())
+        .when_some(frame_size, |this, size| this.w(size.width).h(size.height))
+        .when(frame_size.is_none(), |this| this.right_0().bottom_0())
         .child(
             Button::new(id)
                 .outline()
@@ -1081,6 +1101,36 @@ mod tests {
             Some(1)
         );
         assert_eq!(outer_actions.get(), 2);
+    }
+
+    #[gpui::test]
+    fn track_grows_by_its_leading_margin_so_items_fill_the_frame(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        for axis in [Axis::Horizontal, Axis::Vertical] {
+            let state = cx.update(|cx| cx.new(|_| CarouselState::new(3).with_axis(axis)));
+            let (_, cx) = cx.add_window_view({
+                let state = state.clone();
+                move |_, _| KeyboardHarness { state }
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+
+            let (track, first_item, frame_size) = state.read_with(cx, |state, _| {
+                let handle = state.scroll_handle();
+                (
+                    handle.bounds(),
+                    handle.bounds_for_item(0).unwrap(),
+                    state.frame_size().unwrap(),
+                )
+            });
+            assert_eq!(frame_size, gpui::size(px(100.), px(100.)), "{axis:?}");
+            let expected = if axis.is_horizontal() {
+                Bounds::new(point(px(-16.), px(0.)), gpui::size(px(116.), px(100.)))
+            } else {
+                Bounds::new(point(px(0.), px(-16.)), gpui::size(px(100.), px(116.)))
+            };
+            assert_eq!(track, expected, "{axis:?}");
+            assert_eq!(first_item, expected, "{axis:?}");
+        }
     }
 
     #[gpui::test]
