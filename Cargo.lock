@@ -2672,7 +2672,7 @@ dependencies = [
  "anyhow",
  "gpui-component-story",
  "gpui-kit",
- "rand 0.8.6",
+ "rand 0.8.8",
  "serde",
  "serde_json",
 ]
@@ -2724,7 +2724,7 @@ version = "0.6.0"
 dependencies = [
  "gpui-component-story",
  "gpui-kit",
- "rand 0.8.6",
+ "rand 0.8.8",
  "smol",
 ]
 
@@ -3796,7 +3796,6 @@ dependencies = [
  "gpui-shell",
  "gtk",
  "itertools 0.14.0",
- "lsp-types 0.97.0",
  "rand 0.8.8",
  "regex",
  "rust-i18n",
@@ -4430,13 +4429,9 @@ dependencies = [
  "gpui-pre-reqwest",
  "instant",
  "libc",
- "llrt_buffer",
- "llrt_crypto",
- "llrt_path",
- "llrt_url",
- "llrt_zlib",
  "quickjs-jit",
  "quickjs-jit-runtime",
+ "quickjs-jit-stdlib",
  "schemars",
  "semver",
  "serde",
@@ -7963,6 +7958,19 @@ dependencies = [
  "serde_yaml",
  "target-lexicon 0.13.5",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "quickjs-jit-stdlib"
+version = "0.12.7"
+source = "git+https://github.com/longbridge/quickjs-jit?rev=605da483611a3548edb8c33fdff602e3f5f42076#605da483611a3548edb8c33fdff602e3f5f42076"
+dependencies = [
+ "llrt_buffer",
+ "llrt_crypto",
+ "llrt_path",
+ "llrt_url",
+ "llrt_zlib",
+ "rquickjs",
 ]
 
 [[package]]
