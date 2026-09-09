@@ -22,7 +22,7 @@ use gpui_kit::component::input::{Editor, EditorState, TabSize};
 
 ```rust
 use gpui_kit::component::input::{
-    AutoClosingPair, BracketPair, LanguageConfig, SyntaxContext, set_language_config,
+    AutoClosingPair, BracketPair, language_config::LanguageConfig, SyntaxContext, set_language_config,
 };
 
 let rules = LanguageConfig::default()
@@ -47,6 +47,7 @@ let editor = cx.new(|cx| {
 `set_language_config` 替换当前应用中指定语言的配置，已有编辑器在下一次编辑时立即使用它，
 即使配置修改和编辑发生在同一个事件处理函数内。语言别名共享配置，例如 `python`、`py`、
 `pyi`，不受对应 grammar feature 是否启用影响。自定义配置在 Component 初始化后仍然保留。
+精确注册的自定义 grammar 名称优先于内置别名，并保留原始大小写。
 未知语言使用 `LanguageConfig::default()`。
 
 Component 安装 `LanguageProvider`，统一提供语言名称、默认规则及每个编辑器的语法提供者。

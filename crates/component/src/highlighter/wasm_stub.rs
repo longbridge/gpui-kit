@@ -89,7 +89,7 @@ pub struct LanguageConfig {
     pub name: SharedString,
 }
 
-/// Explicit name for grammar resources; editing rules use `input::LanguageConfig`.
+/// Explicit name for grammar resources; editing rules use `input::language_config::LanguageConfig`.
 pub type GrammarConfig = LanguageConfig;
 
 impl LanguageConfig {
@@ -468,7 +468,16 @@ impl LanguageRegistry {
         self.languages
             .lock()
             .unwrap()
-            .insert(super::language_name(lang), config.clone());
+            .insert(lang.to_string().into(), config.clone());
+    }
+
+    pub(crate) fn editing_language_name(&self, name: &str) -> SharedString {
+        self.languages
+            .lock()
+            .unwrap()
+            .get_key_value(name)
+            .map(|(name, _)| name.clone())
+            .unwrap_or_else(|| super::language_name(name))
     }
 
     pub fn languages(&self) -> Vec<SharedString> {
@@ -476,10 +485,47 @@ impl LanguageRegistry {
     }
 
     pub fn language(&self, name: &str) -> Option<GrammarConfig> {
-        self.languages
-            .lock()
-            .unwrap()
-            .get(super::language_name(name).as_ref())
-            .cloned()
+        self.languages.lock().unwrap().get(name).cloned()
+    }
+}
+
+#[cfg(test)]
+mod registry_compat_tests {
+    use super::*;
+
+    #[test]
+    fn registrations_preserve_exact_names_without_alias_fallback() {
+        let registry = LanguageRegistry {
+            languages: Mutex::new(HashMap::new()),
+        };
+        registry.register(
+            "json",
+            &LanguageConfig {
+                name: "canonical".into(),
+            },
+        );
+        assert!(registry.language("jsonc").is_none());
+        registry.register(
+            "jsonc",
+            &LanguageConfig {
+                name: "custom alias".into(),
+            },
+        );
+        registry.register(
+            "JSON",
+            &LanguageConfig {
+                name: "custom uppercase".into(),
+            },
+        );
+        assert_eq!(registry.language("json").unwrap().name, "canonical");
+        assert_eq!(registry.language("jsonc").unwrap().name, "custom alias");
+        assert_eq!(registry.language("JSON").unwrap().name, "custom uppercase");
+        assert!(registry.language("Json").is_none());
+        let mut names = registry.languages();
+        names.sort();
+        assert_eq!(names, vec!["JSON", "json", "jsonc"]);
+        assert_eq!(registry.editing_language_name("jsonc"), "jsonc");
+        assert_eq!(registry.editing_language_name("JSON"), "JSON");
+        assert_eq!(registry.editing_language_name("pyi"), "python");
     }
 }

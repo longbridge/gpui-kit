@@ -64,7 +64,7 @@ pub struct LanguageConfig {
     pub locals: SharedString,
 }
 
-/// Explicit name for grammar resources; editing rules use `input::LanguageConfig`.
+/// Explicit name for grammar resources; editing rules use `input::language_config::LanguageConfig`.
 pub type GrammarConfig = LanguageConfig;
 
 impl LanguageConfig {
@@ -514,7 +514,16 @@ impl LanguageRegistry {
         self.languages
             .lock()
             .unwrap()
-            .insert(super::language_name(lang), config.clone());
+            .insert(lang.to_string().into(), config.clone());
+    }
+
+    pub(crate) fn editing_language_name(&self, name: &str) -> SharedString {
+        self.languages
+            .lock()
+            .unwrap()
+            .get_key_value(name)
+            .map(|(name, _)| name.clone())
+            .unwrap_or_else(|| super::language_name(name))
     }
 
     /// Returns a list of all registered language names.
@@ -524,14 +533,63 @@ impl LanguageRegistry {
 
     /// Returns the language configuration for the given language name.
     pub fn language(&self, name: &str) -> Option<GrammarConfig> {
-        let name = super::language_name(name);
-        self.languages.lock().unwrap().get(name.as_ref()).cloned()
+        let languages = self.languages.lock().unwrap();
+        languages.get(name).cloned().or_else(|| {
+            languages::Language::from_name(name)
+                .and_then(|language| languages.get(language.name()).cloned())
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::highlighter::GrammarConfig;
+
+    #[test]
+    fn registrations_preserve_exact_names_before_alias_fallback() {
+        let registry = super::LanguageRegistry {
+            languages: std::sync::Mutex::new(std::collections::HashMap::new()),
+        };
+        registry.register("json", &GrammarConfig::plain("canonical"));
+        assert_eq!(registry.language("jsonc").unwrap().name, "canonical");
+        registry.register("jsonc", &GrammarConfig::plain("custom alias"));
+        registry.register("JSON", &GrammarConfig::plain("custom uppercase"));
+        assert_eq!(registry.language("json").unwrap().name, "canonical");
+        assert_eq!(registry.language("jsonc").unwrap().name, "custom alias");
+        assert_eq!(registry.language("JSON").unwrap().name, "custom uppercase");
+        assert!(registry.language("Json").is_none());
+        let mut names = registry.languages();
+        names.sort();
+        assert_eq!(names, vec!["JSON", "json", "jsonc"]);
+        assert_eq!(registry.editing_language_name("jsonc"), "jsonc");
+        assert_eq!(registry.editing_language_name("JSON"), "JSON");
+        assert_eq!(registry.editing_language_name("pyi"), "python");
+    }
+
+    #[cfg(not(feature = "tree-sitter-typescript"))]
+    #[test]
+    fn custom_canonical_registration_does_not_enable_disabled_aliases() {
+        let registry = super::LanguageRegistry {
+            languages: std::sync::Mutex::new(std::collections::HashMap::new()),
+        };
+        registry.register("typescript", &GrammarConfig::plain("typescript"));
+        assert!(registry.language("ts").is_none());
+        registry.register("ts", &GrammarConfig::plain("custom"));
+        assert_eq!(registry.language("ts").unwrap().name, "custom");
+    }
+
+    #[test]
+    fn public_language_lookup_retains_case_sensitive_aliases() {
+        use super::languages::Language;
+        assert_eq!(Language::from_str("jsonc"), Language::Json);
+        assert_eq!(Language::from_str("JSON"), Language::Plain);
+        assert_eq!(Language::from_str("pyi"), Language::Plain);
+        #[cfg(feature = "tree-sitter-typescript")]
+        {
+            assert_eq!(Language::from_str("typescript"), Language::TypeScript);
+            assert_eq!(Language::from_str("ts"), Language::TypeScript);
+        }
+    }
 
     #[test]
     fn test_registry() {

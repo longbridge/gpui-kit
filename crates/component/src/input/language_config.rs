@@ -1,6 +1,8 @@
-use gpui_base::input::{
-    AutoClosingPair, BracketPair, IndentationRules, LanguageConfig, SyntaxContext,
-};
+//! Language editing configuration. Grammar resources live in `highlighter`.
+
+pub use gpui_base::input::language_config::LanguageConfig;
+
+use gpui_base::input::{AutoClosingPair, BracketPair, IndentationRules, SyntaxContext};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -11,7 +13,7 @@ struct ComponentLanguages {
 
 impl gpui_base::input::LanguageProvider for ComponentLanguages {
     fn language_name(&self, name: &str) -> gpui::SharedString {
-        crate::highlighter::language_name(name)
+        crate::highlighter::LanguageRegistry::singleton().editing_language_name(name)
     }
 
     fn config(&self, name: &str) -> std::rc::Rc<LanguageConfig> {

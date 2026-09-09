@@ -1,6 +1,6 @@
 use gpui::SharedString;
 
-/// Canonical language identities shared by grammar lookup and editor behavior.
+/// Built-in aliases for editing defaults when no exact grammar name is registered.
 /// Availability of a parser does not change what a language name means.
 pub(crate) fn language_name(name: &str) -> SharedString {
     let name = name.to_lowercase();

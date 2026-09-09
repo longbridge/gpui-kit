@@ -1,7 +1,7 @@
 mod clear_button;
 mod content_type;
 mod input;
-mod language_config;
+pub mod language_config;
 mod number_input;
 mod otp_input;
 mod overlay;
@@ -38,8 +38,8 @@ mod state;
 mod textarea;
 pub use editor::Editor;
 pub use gpui_base::input::{
-    AutoClosingPair, BracketPair, IndentationRules, LanguageConfig, LanguageProvider,
-    SyntaxContext, SyntaxContextProvider, set_language_config, set_language_provider,
+    AutoClosingPair, BracketPair, IndentationRules, LanguageProvider, SyntaxContext,
+    SyntaxContextProvider, set_language_config, set_language_provider,
 };
 pub use input::*;
 pub use lsp_types::Position;

@@ -197,7 +197,7 @@ mod tests {
     }
     #[gpui::test]
     fn language_config_works_without_render_sync(cx: &mut TestAppContext) {
-        use crate::input::{AutoClosingPair, LanguageConfig, set_language_config};
+        use crate::input::{AutoClosingPair, language_config::LanguageConfig, set_language_config};
         use gpui::EntityInputHandler as _;
         cx.update(crate::init);
         let mut state = None;
@@ -246,7 +246,7 @@ mod tests {
 
     #[gpui::test]
     fn aliases_share_config_even_when_registered_before_init(cx: &mut TestAppContext) {
-        use crate::input::{AutoClosingPair, LanguageConfig, set_language_config};
+        use crate::input::{AutoClosingPair, language_config::LanguageConfig, set_language_config};
         use gpui::EntityInputHandler as _;
         cx.update(|cx| {
             set_language_config(
@@ -343,7 +343,7 @@ mod tests {
     #[cfg(feature = "tree-sitter-rust")]
     #[gpui::test]
     fn generated_comment_closer_survives_syntax_changes(cx: &mut TestAppContext) {
-        use crate::input::{AutoClosingPair, LanguageConfig, SyntaxContext};
+        use crate::input::{AutoClosingPair, SyntaxContext, language_config::LanguageConfig};
         use gpui::EntityInputHandler as _;
         cx.update(crate::init);
         cx.update(|cx| {

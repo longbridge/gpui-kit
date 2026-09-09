@@ -1709,7 +1709,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Cursor target when a typed closer should skip over an existing one.
     ///
     /// Returns `Some(offset)` when `new_text` is a single closer from the
-    /// active [`LanguageConfig`](crate::input::LanguageConfig) that already follows the collapsed cursor and is
+    /// active [`LanguageConfig`](crate::input::language_config::LanguageConfig) that already follows the collapsed cursor and is
     /// not escaped. The caller then moves the cursor without editing text or
     /// history. `None` means insert normally.
     fn skip_over_target(&self, new_text: &str) -> Option<usize> {
@@ -7829,7 +7829,7 @@ mod tests {
             view.input.update(cx, |state, cx| {
                 crate::input::set_language_config(
                     state.language_name(),
-                    crate::input::LanguageConfig::default()
+                    crate::input::language_config::LanguageConfig::default()
                         .brackets([crate::input::BracketPair::new("«", "»")])
                         .auto_closing_pairs([crate::input::AutoClosingPair::new("«", "»")]),
                     cx,
@@ -9157,7 +9157,7 @@ impl InputBaseState<crate::input::EditorMode> {
 
     /// Set enable/disable automatic closing brackets and quotes.
     ///
-    /// When enabled, typing an opener from [`LanguageConfig::auto_closing_pairs`](crate::input::LanguageConfig::auto_closing_pairs) inserts the
+    /// When enabled, typing an opener from [`LanguageConfig::auto_closing_pairs`](crate::input::language_config::LanguageConfig::auto_closing_pairs) inserts the
     /// matching closer and places the cursor inside. Typing a closer that is
     /// already present just moves past it. Default: true
     #[doc(hidden)]
@@ -9175,7 +9175,7 @@ impl InputBaseState<crate::input::EditorMode> {
     /// Set enable/disable smart indent on Enter.
     ///
     /// When enabled, Enter uses structural brackets and
-    /// [`LanguageConfig::indentation_rules`](crate::input::LanguageConfig::indentation_rules) to choose indentation.
+    /// [`LanguageConfig::indentation_rules`](crate::input::language_config::LanguageConfig::indentation_rules) to choose indentation.
     /// Default: true
     #[doc(hidden)]
     pub fn smart_indent(mut self, smart_indent: bool) -> Self {

@@ -78,7 +78,7 @@ pub fn set_language_provider(provider: Rc<dyn LanguageProvider>, cx: &mut App) {
 /// This does not change `auto_close` or `smart_indent` preferences.
 pub fn set_language_config(language: impl AsRef<str>, config: LanguageConfig, cx: &mut App) {
     let languages = Languages::global(cx);
-    let name: SharedString = language.as_ref().to_lowercase().into();
+    let name: SharedString = language.as_ref().to_string().into();
     let mut settings = languages.0.borrow_mut();
     settings
         .configs

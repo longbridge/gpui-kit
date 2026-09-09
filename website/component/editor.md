@@ -24,7 +24,7 @@ can still split an existing pair when automatic closing is disabled.
 
 ```rust
 use gpui_kit::component::input::{
-    AutoClosingPair, BracketPair, LanguageConfig, SyntaxContext, set_language_config,
+    AutoClosingPair, BracketPair, language_config::LanguageConfig, SyntaxContext, set_language_config,
 };
 
 let rules = LanguageConfig::default()
@@ -51,7 +51,8 @@ let editor = cx.new(|cx| {
 application. Existing editors use the replacement on their next edit, including
 within the same event handler. Aliases share configurations: `python`, `py`, and
 `pyi` refer to the same language even without its grammar feature. Custom
-configurations survive component initialization. Unknown languages use
+configurations survive component initialization. Exact custom grammar registrations
+take precedence over built-in aliases and retain their original case. Unknown languages use
 `LanguageConfig::default()`.
 
 Component installs a `LanguageProvider` for language names, editing defaults,

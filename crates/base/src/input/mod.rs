@@ -38,7 +38,7 @@ mod kind;
 #[path = "editor/language.rs"]
 mod language;
 #[path = "editor/language_config.rs"]
-mod language_config;
+pub mod language_config;
 #[path = "base/layout.rs"]
 mod layout;
 #[path = "editor/lsp/mod.rs"]
@@ -88,7 +88,8 @@ pub use kind::{
 };
 pub(crate) use language::EditorLanguage;
 pub use language::{LanguageProvider, set_language_config, set_language_provider};
-pub use language_config::{AutoClosingPair, BracketPair, IndentationRules, LanguageConfig};
+pub(crate) use language_config::LanguageConfig;
+pub use language_config::{AutoClosingPair, BracketPair, IndentationRules};
 pub use lsp::{
     CodeActionItem, CodeActionMenuState, CodeActionProvider, CompletionMenuOptions,
     CompletionMenuState, CompletionProvider, DefinitionProvider, DocumentColorProvider,
