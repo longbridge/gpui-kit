@@ -1,7 +1,7 @@
 [package]
 name = "window_title"
 description = "An example of using gpui-component to create a window with a custom title bar."
-version = "0.6.0"
+version = "0.6.1"
 publish = false
 edition.workspace = true
 

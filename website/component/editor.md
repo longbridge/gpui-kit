@@ -14,6 +14,75 @@ single-line values and [`Textarea`](./textarea.md) for ordinary multi-line text.
 use gpui_kit::component::input::{Editor, EditorState, TabSize};
 ```
 
+## Language editing rules
+
+`LanguageConfig` describes a language; `.auto_close(bool)` and `.smart_indent(bool)`
+are independent editor preferences. Changing languages or replacing rules does
+not reset either preference. Automatic closing, skip-over, and paired Backspace
+use `auto_closing_pairs`. Enter uses `brackets` and `indentation_rules`, so it
+can still split an existing pair when automatic closing is disabled.
+
+```rust
+use gpui_kit::component::input::{
+    AutoClosingPair, BracketPair, language_config::LanguageConfig, SyntaxContext, set_language_config,
+};
+
+let rules = LanguageConfig::default()
+    .brackets([BracketPair::new("{", "}"), BracketPair::new("(", ")")])
+    .auto_closing_pairs([
+        AutoClosingPair::new("{", "}")
+            .not_in([SyntaxContext::String, SyntaxContext::Comment]),
+        AutoClosingPair::new("(", ")")
+            .not_in([SyntaxContext::String, SyntaxContext::Comment]),
+    ])
+    .auto_close_before(";:.,=}])>");
+
+set_language_config("rust", rules, cx);
+
+let editor = cx.new(|cx| {
+    EditorState::new(window, cx)
+        .language("rust")
+        .auto_close(true)
+        .smart_indent(true)
+});
+```
+
+`set_language_config` replaces the configuration for a language in the current
+application. Existing editors use the replacement on their next edit, including
+within the same event handler. Aliases share configurations: `python`, `py`, and
+`pyi` refer to the same language even without its grammar feature. Custom
+configurations survive component initialization. Exact custom grammar registrations
+take precedence over built-in aliases and retain their original case. Unknown languages use
+`LanguageConfig::default()`.
+
+Component installs a `LanguageProvider` for language names, editing defaults,
+and editor-owned syntax providers. Syntax selection follows the language on the
+first edit and after language changes, independently of rendering. Base clients
+can install their own service with `set_language_provider`; ordinary Component
+clients only need `set_language_config`. Grammar resources are available as
+`highlighter::GrammarConfig`; its existing `highlighter::LanguageConfig` name
+remains compatible.
+
+Pairs use strings, including multi-character delimiters. `auto_closing_pairs`
+is optional: `None` uses the structural `brackets`, while `Some(vec![])` disables
+all automatic pairs. Its builder sets `Some`. Whitespace and end-of-document
+always allow automatic insertion; `auto_close_before` lists other allowed
+following characters. `not_in` requires a syntax-context provider; without one,
+the Base editor reports `Code`. The styled editor supplies a provider when the
+language's Tree-sitter grammar is enabled.
+
+`IndentationRules::new(increase, decrease)` accepts two compiled `regex::Regex`
+patterns. On Enter, the increase pattern tests text before the cursor and the
+decrease pattern tests text after it. Without an increase pattern, structural
+opening brackets provide the default indentation. These rules do not reformat
+existing lines or pasted text. Python's language defaults additionally recognize
+a trailing colon; unknown languages use structural brackets only.
+
+This is the supported subset of Monaco-style language configuration, not a
+loader for Monaco JSON or Tree-sitter `.scm` files. Selection-surrounding and
+custom `onEnterRules` are not part of this interface yet.
+
+
 ## Basic usage
 
 ```rust

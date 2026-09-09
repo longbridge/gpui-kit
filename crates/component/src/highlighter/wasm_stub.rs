@@ -72,8 +72,8 @@ impl Language {
         "unknown"
     }
 
-    pub fn config(&self) -> LanguageConfig {
-        LanguageConfig {
+    pub fn config(&self) -> GrammarConfig {
+        GrammarConfig {
             name: "unknown".into(),
         }
     }
@@ -88,6 +88,9 @@ impl Language {
 pub struct LanguageConfig {
     pub name: SharedString,
 }
+
+/// Explicit name for grammar resources; editing rules use `input::language_config::LanguageConfig`.
+pub type GrammarConfig = LanguageConfig;
 
 impl LanguageConfig {
     pub fn has_grammar(&self) -> bool {
@@ -450,7 +453,7 @@ impl gpui_base::input::HighlightStyleResolver for HighlightTheme {
 
 // Language registry stub
 pub struct LanguageRegistry {
-    languages: Mutex<HashMap<SharedString, LanguageConfig>>,
+    languages: Mutex<HashMap<SharedString, GrammarConfig>>,
 }
 
 impl LanguageRegistry {
@@ -461,18 +464,68 @@ impl LanguageRegistry {
         &INSTANCE
     }
 
-    pub fn register(&self, lang: &str, config: &LanguageConfig) {
+    pub fn register(&self, lang: &str, config: &GrammarConfig) {
         self.languages
             .lock()
             .unwrap()
             .insert(lang.to_string().into(), config.clone());
     }
 
+    pub(crate) fn editing_language_name(&self, name: &str) -> SharedString {
+        self.languages
+            .lock()
+            .unwrap()
+            .get_key_value(name)
+            .map(|(name, _)| name.clone())
+            .unwrap_or_else(|| super::language_name(name))
+    }
+
     pub fn languages(&self) -> Vec<SharedString> {
         self.languages.lock().unwrap().keys().cloned().collect()
     }
 
-    pub fn language(&self, name: &str) -> Option<LanguageConfig> {
+    pub fn language(&self, name: &str) -> Option<GrammarConfig> {
         self.languages.lock().unwrap().get(name).cloned()
+    }
+}
+
+#[cfg(test)]
+mod registry_compat_tests {
+    use super::*;
+
+    #[test]
+    fn registrations_preserve_exact_names_without_alias_fallback() {
+        let registry = LanguageRegistry {
+            languages: Mutex::new(HashMap::new()),
+        };
+        registry.register(
+            "json",
+            &LanguageConfig {
+                name: "canonical".into(),
+            },
+        );
+        assert!(registry.language("jsonc").is_none());
+        registry.register(
+            "jsonc",
+            &LanguageConfig {
+                name: "custom alias".into(),
+            },
+        );
+        registry.register(
+            "JSON",
+            &LanguageConfig {
+                name: "custom uppercase".into(),
+            },
+        );
+        assert_eq!(registry.language("json").unwrap().name, "canonical");
+        assert_eq!(registry.language("jsonc").unwrap().name, "custom alias");
+        assert_eq!(registry.language("JSON").unwrap().name, "custom uppercase");
+        assert!(registry.language("Json").is_none());
+        let mut names = registry.languages();
+        names.sort();
+        assert_eq!(names, vec!["JSON", "json", "jsonc"]);
+        assert_eq!(registry.editing_language_name("jsonc"), "jsonc");
+        assert_eq!(registry.editing_language_name("JSON"), "JSON");
+        assert_eq!(registry.editing_language_name("pyi"), "python");
     }
 }
