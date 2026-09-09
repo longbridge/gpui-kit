@@ -54,27 +54,9 @@ Carousel
 
 可以在 `Carousel` 根节点上使用 `.w_full().max_w_96()` 约束整个 Carousel；需要单独设置 viewport 的宽度或高度时，可以直接设置 `CarouselContent` 的样式。`track_style` 仅用于间距等内部 track 调整。根节点会把常规子元素按列排布并留出 16px 间距，因此放在内容后面的 `CarouselPagination` 会自然与内容拉开；需要其他排布时直接在根节点上覆盖样式。
 
-## 尺寸
+## 每屏多个 item
 
-`CarouselItem` 实现了 `Styled`。设置 flex basis 可以在 viewport 中同时显示多个 item：
-
-```rust
-use gpui_kit::{ParentElement as _, Styled as _, relative};
-
-let state = cx.new(|_| CarouselState::new(6));
-
-CarouselContent::new(&state).children((0..6).map(|index| {
-    CarouselItem::new(("project", index), index, &state)
-        .flex_basis(relative(1. / 3.))
-        .child(format!("项目 {}", index + 1))
-}))
-```
-
-flex basis 控制的是 item 几何尺寸，与按钮等控件使用的语义 `Size` 相互独立。
-
-## 间距
-
-Carousel 采用与 shadcn/ui 相同的成对间距模型：通过 `CarouselContent::track_style` 设置负的起始 margin，并为每个 `CarouselItem` 设置数值相同的起始 padding。
+`CarouselItem` 实现了 `Styled`。设置 flex basis 可以在 viewport 中同时显示多个 item；再通过 `CarouselContent::track_style` 设置负的起始 margin，并为每个 item 设置数值相同的起始 padding，即可调整它们之间的间距。这与 shadcn/ui 采用的成对间距模型一致。
 
 ```rust
 use gpui_kit::{ParentElement as _, StyleRefinement, Styled as _, relative};
@@ -90,6 +72,8 @@ CarouselContent::new(&state)
             .child(format!("项目 {}", index + 1))
     }))
 ```
+
+flex basis 控制的是 item 几何尺寸，与按钮等控件使用的语义 `Size` 相互独立。
 
 横向 Carousel 默认在 content track 上使用 `.ml_neg_4()`，在 item 上使用 `.pl_4()`；纵向 Carousel 使用对应的 `.mt_neg_4()` 与 `.pt_4()`。覆盖间距时应同步修改两侧，并使用相同的 spacing scale，这样首个 item 会继续与 viewport 对齐，同时改变可见间距。
 

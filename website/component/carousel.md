@@ -54,27 +54,9 @@ Carousel
 
 Constrain the Carousel with `.w_full().max_w_96()` on its root, or style `CarouselContent` when the viewport itself needs a custom width or height. Use `track_style` only for inner-track adjustments such as spacing. The root lays out its flow children as a column with a 16px gap, so a `CarouselPagination` placed after the content keeps its distance; restyle the root for another arrangement.
 
-## Sizes
+## Multiple items
 
-`CarouselItem` implements `Styled`. Set its flex basis to show more than one item in the viewport:
-
-```rust
-use gpui_kit::{ParentElement as _, Styled as _, relative};
-
-let state = cx.new(|_| CarouselState::new(6));
-
-CarouselContent::new(&state).children((0..6).map(|index| {
-    CarouselItem::new(("project", index), index, &state)
-        .flex_basis(relative(1. / 3.))
-        .child(format!("Project {}", index + 1))
-}))
-```
-
-The flex basis controls item geometry; it is separate from the semantic `Size` used by buttons and other controls.
-
-## Spacing
-
-Carousel follows the same paired spacing model as shadcn/ui: apply a negative leading margin through `CarouselContent::track_style` and matching leading padding to every `CarouselItem`.
+`CarouselItem` implements `Styled`. Set its flex basis to show more than one item in the viewport, and pair a negative leading margin on the content track with matching leading padding on every item to tune the gap between them. This is the same paired spacing model shadcn/ui uses.
 
 ```rust
 use gpui_kit::{ParentElement as _, StyleRefinement, Styled as _, relative};
@@ -90,6 +72,8 @@ CarouselContent::new(&state)
             .child(format!("Project {}", index + 1))
     }))
 ```
+
+The flex basis controls item geometry; it is separate from the semantic `Size` used by buttons and other controls.
 
 Horizontal carousels default to `.ml_neg_4()` on the content track and `.pl_4()` on items. Vertical carousels use the corresponding `.mt_neg_4()` and `.pt_4()` pair. Override both sides with the same spacing scale so the first item stays aligned with the viewport while the visual gap changes.
 

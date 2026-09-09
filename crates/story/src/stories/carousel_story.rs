@@ -24,11 +24,9 @@ pub struct CarouselStory {
     horizontal: Entity<CarouselState>,
     custom_controls: Entity<CarouselState>,
     multiple: Entity<CarouselState>,
-    spacing: Entity<CarouselState>,
     vertical: Entity<CarouselState>,
     looped: Entity<CarouselState>,
     controlled: Entity<CarouselState>,
-    keyboard: Entity<CarouselState>,
     controlled_index: usize,
     size: Size,
     _subscriptions: Vec<Subscription>,
@@ -54,11 +52,9 @@ impl CarouselStory {
             let horizontal = cx.new(|_| CarouselState::new(3));
             let custom_controls = cx.new(|_| CarouselState::new(3));
             let multiple = cx.new(|_| CarouselState::new(5));
-            let spacing = cx.new(|_| CarouselState::new(5));
             let vertical = cx.new(|_| CarouselState::new(3).with_axis(Axis::Vertical));
             let looped = cx.new(|_| CarouselState::new(4).with_looping(true));
             let controlled = cx.new(|_| CarouselState::new(3).with_selected_index(1));
-            let keyboard = cx.new(|_| CarouselState::new(3));
 
             let subscription = cx.subscribe(
                 &controlled,
@@ -74,11 +70,9 @@ impl CarouselStory {
                 horizontal,
                 custom_controls,
                 multiple,
-                spacing,
                 vertical,
                 looped,
                 controlled,
-                keyboard,
                 controlled_index: 1,
                 size: Size::default(),
                 _subscriptions: vec![subscription],
@@ -230,9 +224,9 @@ impl Render for CarouselStory {
                     ),
             )
             .child(
-                section("Sizes")
+                section("Multiple items")
                     .description(
-                        "Set a fractional flex basis on each item to show several at once.",
+                        "A fractional flex basis shows several items at once. Pair the content's negative margin with matching item padding to tune the gap between them.",
                     )
                     .v_flex()
                     .gap_3()
@@ -241,47 +235,20 @@ impl Render for CarouselStory {
                             .w_full()
                             .max_w_96()
                             .mx_auto()
-                            .child(Self::items_with(
-                                &self.multiple,
-                                "Multiple",
-                                5,
-                                SlideTypography::Medium,
-                                true,
-                                |item| item.flex_basis(relative(1. / 3.)),
-                                cx,
-                            ))
-                            .child(CarouselPrevious::new(&self.multiple).with_size(self.size))
-                            .child(CarouselNext::new(&self.multiple).with_size(self.size)),
-                    ),
-            )
-            .child(
-                section("Spacing")
-                    .description(
-                        "Pair the content's negative margin with matching item padding.",
-                    )
-                    .v_flex()
-                    .gap_3()
-                    .child(
-                        Carousel::new("carousel-spacing", &self.spacing)
-                            .w_full()
-                            .max_w_96()
-                            .mx_auto()
                             .child(
                                 Self::items_with(
-                                    &self.spacing,
-                                    "Spacing",
+                                    &self.multiple,
+                                    "Multiple",
                                     5,
                                     SlideTypography::Small,
                                     true,
-                                    |item| {
-                                        item.flex_basis(relative(1. / 3.)).pl_1()
-                                    },
+                                    |item| item.flex_basis(relative(1. / 3.)).pl_1(),
                                     cx,
                                 )
                                 .track_style(StyleRefinement::default().ml_neg_1()),
                             )
-                            .child(CarouselPrevious::new(&self.spacing).with_size(self.size))
-                            .child(CarouselNext::new(&self.spacing).with_size(self.size)),
+                            .child(CarouselPrevious::new(&self.multiple).with_size(self.size))
+                            .child(CarouselNext::new(&self.multiple).with_size(self.size)),
                     ),
             )
             .child(
@@ -333,7 +300,7 @@ impl Render for CarouselStory {
                     ),
             )
             .child(
-                section("Controlled / Programmatic")
+                section("Controlled")
                     .description("The selected index is owned by application state and can be changed programmatically.")
                     .v_flex()
                     .gap_3()
@@ -381,30 +348,6 @@ impl Render for CarouselStory {
                                         cx.notify();
                                     })),
                             ),
-                    ),
-            )
-            .child(
-                section("Keyboard navigation")
-                    .description(
-                        "Tab to the Carousel or either navigation button, then use Left, Right, Home, and End.",
-                    )
-                    .v_flex()
-                    .gap_3()
-                    .child(
-                        Carousel::new("carousel-keyboard", &self.keyboard)
-                            .w_full()
-                            .max_w_96()
-                            .mx_auto()
-                            .child(Self::items(
-                                &self.keyboard,
-                                "Keyboard",
-                                3,
-                                SlideTypography::Large,
-                                true,
-                                cx,
-                            ))
-                            .child(CarouselPrevious::new(&self.keyboard).with_size(self.size))
-                            .child(CarouselNext::new(&self.keyboard).with_size(self.size)),
                     ),
             )
     }
