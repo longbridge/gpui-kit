@@ -126,6 +126,15 @@ impl FrameSampler {
         self.ingest_presents(presents, Instant::now());
     }
 
+    /// Starts over, as for a HUD shown again after a spell hidden: a new
+    /// collector, because the frame trace was cleared meanwhile and the counter
+    /// its cursor is measured against with it, and nothing retained — the
+    /// frames drawn in between were not watched, and the first ones back are
+    /// cold.
+    pub(crate) fn reset(&mut self) {
+        *self = Self::new(self.window_id, self.capacity);
+    }
+
     pub(crate) fn set_capacity(&mut self, capacity: usize) {
         self.capacity = capacity.max(1);
         while self.samples.len() > self.capacity {
@@ -661,6 +670,24 @@ mod tests {
             "the clock's own frame was sampled"
         );
         assert_eq!(sampler.mean_draw(), Duration::from_millis(7));
+    }
+
+    #[test]
+    fn a_reset_sampler_keeps_nothing_and_warms_up_again() {
+        let window_id = WindowId::from(1);
+        let mut sampler = warmed_sampler(window_id, 8);
+        sampler.ingest_draws(vec![timing(window_id, Duration::from_millis(5))]);
+        sampler.ingest_presents([Instant::now()], Instant::now());
+        assert_eq!(sampler.samples().len(), 1);
+
+        sampler.reset();
+        assert_eq!(sampler.samples().len(), 0);
+        assert_eq!(sampler.fps(), 0.);
+        assert_eq!(sampler.capacity(), 8);
+
+        // The first frames after coming back are warm-up again.
+        sampler.ingest_draws(vec![timing(window_id, Duration::from_millis(5))]);
+        assert_eq!(sampler.samples().len(), 0);
     }
 
     #[test]

@@ -53,6 +53,8 @@ impl FpsOverlay {
     }
 
     /// The per-frame budget used for chart grading and its vertical scale.
+    /// Set, it holds regardless of the display; left alone, the HUD grades
+    /// against one refresh of the panel the window is on.
     pub fn frame_budget(mut self, budget: Duration) -> Self {
         self.frame_budget = Some(budget);
         self

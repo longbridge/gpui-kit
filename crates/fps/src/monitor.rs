@@ -66,6 +66,12 @@ const FIGURE_WIDTH: Pixels = px(70.);
 /// of the figure so the figure lands on the HUD's true center.
 const UNIT_WIDTH: Pixels = px(28.);
 
+/// Ticks of the clock the HUD may go unrendered before it is taken to be
+/// hidden and the clock stops. One tick is ambiguous — the frame the previous
+/// tick asked for may not have landed yet — so two: a second in which nothing
+/// drew the HUD.
+const HIDDEN_TICKS: u32 = 2;
+
 /// How often the numbers are recomputed.
 ///
 /// The trace keeps up with every frame, but the readings do not: recomputed
@@ -187,6 +193,9 @@ pub struct FpsMonitor {
     readout_at: Option<Instant>,
     style: FpsStyle,
     frame_budget: Duration,
+    /// Whether the caller chose the budget, in which case the display's
+    /// refresh period does not replace it.
+    budget_explicit: bool,
     headline: Headline,
     /// The panel's refresh period, and which display it was asked about, so
     /// that moving the window to another monitor re-asks and staying on one
@@ -198,8 +207,43 @@ pub struct FpsMonitor {
     compact: bool,
     /// Upper bound of the chart's y axis, in seconds.
     axis_max: f32,
+    /// Renders so far, which is how the clock tells a shown HUD from a hidden
+    /// one: a shown HUD is rendered at least once per tick, by the frame the
+    /// tick itself asks for.
+    frames_rendered: u64,
+    /// Running while the HUD is shown; `None` before the first render and
+    /// again once the HUD has gone unrendered for [`HIDDEN_TICKS`].
     clock: Option<Task<()>>,
-    _frame_trace: FrameTraceGuard,
+    /// Held while the HUD is shown, so a hidden HUD does not keep GPUI
+    /// recording every frame into the trace buffer.
+    frame_trace: Option<FrameTraceGuard>,
+}
+
+/// Tells a hidden HUD from a shown one by whether anything has rendered it
+/// since the clock last looked.
+struct RenderWatch {
+    seen: u64,
+    still_ticks: u32,
+}
+
+impl RenderWatch {
+    fn watching(frames_rendered: u64) -> Self {
+        Self {
+            seen: frames_rendered,
+            still_ticks: 0,
+        }
+    }
+
+    /// `true` once `frames_rendered` has stood still for [`HIDDEN_TICKS`].
+    fn tick(&mut self, frames_rendered: u64) -> bool {
+        if self.seen == frames_rendered {
+            self.still_ticks += 1;
+        } else {
+            self.seen = frames_rendered;
+            self.still_ticks = 0;
+        }
+        self.still_ticks >= HIDDEN_TICKS
+    }
 }
 
 impl FpsMonitor {
@@ -211,6 +255,7 @@ impl FpsMonitor {
             readout_at: None,
             style: FpsStyle::default(),
             frame_budget,
+            budget_explicit: false,
             headline: Headline::Max,
             display: None,
             show_resources: true,
@@ -218,9 +263,32 @@ impl FpsMonitor {
             resources: None,
             compact: false,
             axis_max: frame_budget.as_secs_f32() * 2.,
+            frames_rendered: 0,
             clock: None,
-            _frame_trace: FrameTraceGuard::acquire(),
+            frame_trace: Some(FrameTraceGuard::acquire()),
         }
+    }
+
+    /// Counts a render, which is what keeps the clock running, and brings a HUD
+    /// back from [`Self::sleep`]: tracing on again, and the sampler started
+    /// over — turning the trace off cleared its buffer and the counter the
+    /// collector's cursor is measured against, so the old cursor would skip
+    /// every frame until that counter caught up.
+    fn wake(&mut self) {
+        self.frames_rendered = self.frames_rendered.wrapping_add(1);
+        if self.frame_trace.is_none() {
+            self.frame_trace = Some(FrameTraceGuard::acquire());
+            self.sampler.reset();
+        }
+    }
+
+    /// What a hidden HUD does: nothing. The clock ends, the frame trace is let
+    /// go of unless something else holds it, and the resource readings are
+    /// dropped rather than shown stale when the HUD next appears.
+    fn sleep(&mut self) {
+        self.clock = None;
+        self.frame_trace = None;
+        self.resources = None;
     }
 
     /// How many frames the chart keeps. Defaults to 120.
@@ -229,18 +297,43 @@ impl FpsMonitor {
         self
     }
 
-    /// The per-frame budget used for the chart's baseline and bar colors.
-    /// Defaults to one 60Hz frame; set it to `1/144s` on a high refresh rate
-    /// display.
+    /// The per-frame budget `FRAME`, `P95` and `DROP` are graded against, and
+    /// the chart's baseline.
+    ///
+    /// Left alone, the budget is one refresh of the display the window is on,
+    /// or one 60Hz frame where the platform will not say what the panel runs
+    /// at. Set it to hold a budget regardless of the panel.
     pub fn frame_budget(mut self, budget: Duration) -> Self {
-        self.frame_budget = budget;
-        self.axis_max = budget.as_secs_f32() * 2.;
+        self.set_frame_budget(budget);
         self
     }
 
+    /// Pins the budget: the display's refresh period no longer replaces it.
     pub(crate) fn set_frame_budget(&mut self, budget: Duration) {
+        self.budget_explicit = true;
+        self.apply_budget(budget);
+    }
+
+    /// Only a changed budget moves the axis. The overlay repeats its budget on
+    /// every render, and resetting the axis each time would undo the decay
+    /// [`Self::update_axis`] relies on.
+    fn apply_budget(&mut self, budget: Duration) {
+        if self.frame_budget == budget {
+            return;
+        }
         self.frame_budget = budget;
         self.axis_max = budget.as_secs_f32() * 2.;
+    }
+
+    /// Takes the panel's refresh period as the budget, unless the caller chose
+    /// one. A frame that misses a refresh is what the graded rows are about,
+    /// and the period is what a refresh is: a 60Hz default on a 120Hz panel
+    /// grades a frame that missed its slot as healthy.
+    fn adopt_display_budget(&mut self, refresh_rate: Option<Duration>) {
+        if self.budget_explicit {
+            return;
+        }
+        self.apply_budget(refresh_rate.unwrap_or(DEFAULT_FRAME_BUDGET));
     }
 
     /// Whether to sample and show CPU, memory and GPU usage. Defaults to
@@ -260,7 +353,8 @@ impl FpsMonitor {
         self
     }
 
-    /// The clock that republishes the readings, started on the first render so
+    /// The clock that republishes the readings, and stops itself once the HUD
+    /// has gone unrendered for [`HIDDEN_TICKS`]. Started on the first render so
     /// that the builder methods have already been applied by the time its
     /// interval is read.
     ///
@@ -283,6 +377,7 @@ impl FpsMonitor {
         } else {
             READOUT_INTERVAL
         };
+        let frames_rendered = self.frames_rendered;
         self.clock = Some(cx.spawn(async move |this, cx| {
             let executor = cx.background_executor().clone();
             // Probing walks the process table, so it never runs on the render
@@ -297,6 +392,7 @@ impl FpsMonitor {
                 None
             };
 
+            let mut watch = RenderWatch::watching(frames_rendered);
             loop {
                 executor.timer(interval).await;
 
@@ -314,7 +410,11 @@ impl FpsMonitor {
                     None => None,
                 };
 
-                let alive = this.update(cx, |this, cx| {
+                let shown = this.update(cx, |this, cx| {
+                    if watch.tick(this.frames_rendered) {
+                        this.sleep();
+                        return false;
+                    }
                     if sample.is_some() {
                         this.resources = sample;
                     }
@@ -322,8 +422,9 @@ impl FpsMonitor {
                     // application's; say so before it is drawn.
                     this.sampler.expect_own_frame(Instant::now());
                     cx.notify();
+                    true
                 });
-                if alive.is_err() {
+                if !matches!(shown, Ok(true)) {
                     break;
                 }
             }
@@ -337,15 +438,22 @@ impl FpsMonitor {
         if self.clock.is_some() {
             return;
         }
+        let frames_rendered = self.frames_rendered;
         self.clock = Some(cx.spawn(async move |this, cx| {
             let executor = cx.background_executor().clone();
+            let mut watch = RenderWatch::watching(frames_rendered);
             loop {
                 executor.timer(READOUT_INTERVAL).await;
-                let alive = this.update(cx, |this, cx| {
+                let shown = this.update(cx, |this, cx| {
+                    if watch.tick(this.frames_rendered) {
+                        this.sleep();
+                        return false;
+                    }
                     this.sampler.expect_own_frame(Instant::now());
                     cx.notify();
+                    true
                 });
-                if alive.is_err() {
+                if !matches!(shown, Ok(true)) {
                     break;
                 }
             }
@@ -361,7 +469,9 @@ impl FpsMonitor {
         };
         let id = display.id();
         if self.display.map(|(asked, _)| asked) != Some(id) {
-            self.display = Some((id, display_refresh_rate(display.as_ref())));
+            let refresh_rate = display_refresh_rate(display.as_ref());
+            self.display = Some((id, refresh_rate));
+            self.adopt_display_budget(refresh_rate);
         }
     }
 
@@ -530,6 +640,7 @@ impl FpsMonitor {
 
 impl Render for FpsMonitor {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.wake();
         self.sampler.tick();
         self.update_display(window, cx);
         self.update_readout();
@@ -805,6 +916,95 @@ mod tests {
             // The axis floor tracks the budget so a 144Hz budget doesn't leave
             // the chart scaled for 60Hz frames.
             assert_eq!(monitor.axis_max, budget.as_secs_f32() * 2.);
+        });
+    }
+
+    #[gpui::test]
+    fn the_budget_follows_the_display_unless_the_caller_chose_one(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.update(|window, cx| {
+            let pro_motion = Duration::from_micros(8_333);
+
+            let monitor = cx.new(|cx| FpsMonitor::new(window, cx));
+            monitor.update(cx, |monitor, _| {
+                monitor.adopt_display_budget(Some(pro_motion));
+                assert_eq!(monitor.frame_budget, pro_motion);
+                assert_eq!(monitor.axis_max, pro_motion.as_secs_f32() * 2.);
+
+                // A panel nobody will describe falls back to the 60Hz default.
+                monitor.adopt_display_budget(None);
+                assert_eq!(monitor.frame_budget, DEFAULT_FRAME_BUDGET);
+            });
+
+            let pinned = Duration::from_micros(6_944);
+            let monitor = cx.new(|cx| FpsMonitor::new(window, cx).frame_budget(pinned));
+            monitor.update(cx, |monitor, _| {
+                monitor.adopt_display_budget(Some(pro_motion));
+                assert_eq!(monitor.frame_budget, pinned, "a chosen budget is kept");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn repeating_the_budget_leaves_the_axis_where_it_grew(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.update(|window, cx| {
+            let budget = Duration::from_micros(8_333);
+            let monitor = cx.new(|cx| FpsMonitor::new(window, cx).frame_budget(budget));
+            monitor.update(cx, |monitor, _| {
+                // The axis grew to fit a slow frame, and the overlay repeating
+                // its budget on the next render must not snap it back down.
+                monitor.axis_max = 0.05;
+                monitor.set_frame_budget(budget);
+                assert_eq!(monitor.axis_max, 0.05);
+
+                // A different budget is a new floor.
+                let other = Duration::from_micros(6_944);
+                monitor.set_frame_budget(other);
+                assert_eq!(monitor.axis_max, other.as_secs_f32() * 2.);
+            });
+        });
+    }
+
+    #[test]
+    fn the_watch_calls_the_hud_hidden_after_two_still_ticks() {
+        let mut watch = RenderWatch::watching(7);
+        assert!(!watch.tick(8), "rendered since the clock started: shown");
+        assert!(
+            !watch.tick(8),
+            "one still tick could be a frame not yet landed"
+        );
+        assert!(
+            watch.tick(8),
+            "two is a second with nothing drawing the HUD"
+        );
+
+        // A render between ticks starts the count over.
+        let mut watch = RenderWatch::watching(7);
+        assert!(!watch.tick(7));
+        assert!(!watch.tick(9));
+        assert!(!watch.tick(9));
+        assert!(watch.tick(9));
+    }
+
+    #[gpui::test]
+    fn a_hidden_hud_lets_go_of_the_trace_and_takes_it_back_when_shown(cx: &mut TestAppContext) {
+        let cx = cx.add_empty_window();
+        cx.update(|window, cx| {
+            let monitor = cx.new(|cx| FpsMonitor::new(window, cx));
+            monitor.update(cx, |monitor, _| {
+                assert!(monitor.frame_trace.is_some());
+
+                monitor.sleep();
+                assert!(monitor.frame_trace.is_none());
+                assert!(monitor.clock.is_none());
+                assert!(monitor.resources.is_none());
+
+                let rendered = monitor.frames_rendered;
+                monitor.wake();
+                assert!(monitor.frame_trace.is_some());
+                assert_eq!(monitor.frames_rendered, rendered + 1);
+            });
         });
     }
 

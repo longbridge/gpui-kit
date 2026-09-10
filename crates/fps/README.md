@@ -106,6 +106,9 @@ settings menu, and persisted to `target/state.json` through an
 Click the HUD to collapse it to a small tag showing just the frame rate, and
 click again to expand.
 
+While the flag is off the HUD costs nothing: a second unrendered and its clock
+stops and it releases GPUI's frame trace, until it is shown again.
+
 ## Customization
 
 The call takes no options. For a different corner or frame budget, compose the
@@ -118,7 +121,7 @@ use gpui_fps::{FpsMonitor, FpsOverlay};
 let monitor = cx.new(|cx| {
     FpsMonitor::new(window, cx)
         .capacity(240)                                  // frames kept in the trace (default 120)
-        .frame_budget(Duration::from_micros(6_944))     // 144Hz (default is 60Hz)
+        .frame_budget(Duration::from_micros(6_944))     // pins 144Hz; unset, it follows the display
         .show_resources(true)                           // GPU, CPU and memory (default true)
         .resource_interval(Duration::from_millis(500))  // default 500ms
 });
