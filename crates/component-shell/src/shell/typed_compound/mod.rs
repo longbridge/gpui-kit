@@ -116,7 +116,7 @@ mod tests {
     }
 }
 
-fn take_element<T: gpui::IntoElement + 'static>(
+pub(super) fn take_element<T: gpui::IntoElement + 'static>(
     element: &mut gpui::AnyElement,
     name: &str,
 ) -> anyhow::Result<T> {
@@ -127,12 +127,12 @@ fn take_element<T: gpui::IntoElement + 'static>(
         .ok_or_else(|| anyhow::anyhow!("registered {name} child was already consumed"))
 }
 
-struct TypedChildElement<T: gpui::IntoElement + 'static> {
+pub(super) struct TypedChildElement<T: gpui::IntoElement + 'static> {
     value: Option<T>,
 }
 
 impl<T: gpui::IntoElement + 'static> TypedChildElement<T> {
-    fn new(value: T) -> Self {
+    pub(super) fn new(value: T) -> Self {
         Self { value: Some(value) }
     }
 

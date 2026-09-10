@@ -27,6 +27,7 @@ export const coveredBy = [
   { route: "dock", registrations: [] },
   { route: "dropdown-button", registrations: ["DropdownButton"] },
   { route: "editor", registrations: ["Editor", "Text"] },
+  { route: "empty", registrations: ["Empty"] },
   { route: "form", registrations: ["Form"] },
   { route: "group-box", registrations: ["GroupBox"] },
   { route: "hover-card", registrations: ["HoverCard"] },

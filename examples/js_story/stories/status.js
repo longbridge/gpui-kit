@@ -25,6 +25,7 @@ export const REGISTERED_SURFACES = [
   "Dialog",
   "DropdownButton",
   "Editor",
+  "Empty",
   "Form",
   "GroupBox",
   "HoverCard",

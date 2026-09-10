@@ -1,6 +1,7 @@
 import { div, View, type Element, type NativeElement, type Context } from 'gpui-kit';
 import { Spinner, Separator, Skeleton, HForm, Field, type SpinnerElement } from 'gpui-component';
 import { TextView } from 'gpui-base';
+import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from 'gpui-component';
 
 function padded(element: Element): Element {
   return element.p(2).when(true, current => current.p(4));
@@ -29,6 +30,13 @@ export default class FluentContracts extends View {
       new Skeleton().flex().secondary(),
       new HForm().child(new Field().label('Name').child('Ada')).children([]).columns(2),
       TextView.markdown('text', '# Hello').p(2).selectable().flex().scrollable(),
+      new Empty().p(16)
+        .header(new EmptyHeader().items_start()
+          .media(new EmptyMedia().variant('icon').p(2).child('!'))
+          .title(new EmptyTitle().font_semibold().child('No results'))
+          .description(new EmptyDescription().child('Try another query.')))
+        .content(new EmptyContent().gap(8).child(div().child('Custom content')))
+        .child('Additional content'),
     ]);
   }
 }

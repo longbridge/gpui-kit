@@ -9,9 +9,8 @@ description: Composable empty states with media, text, actions, and custom conte
 slots provide the layout and visual hierarchy; the application decides when to
 show it and owns the state and actions of its children.
 
-The component is stateless and lives entirely in GPUI Component. Its composition
-and default spacing follow the [shadcn/ui Empty](https://ui.shadcn.com/docs/components/base/empty)
-examples with the Nova style, using GPUI Component's theme and native controls.
+The component is stateless and lives entirely in GPUI Component, using its
+theme and native controls.
 
 ## Import
 

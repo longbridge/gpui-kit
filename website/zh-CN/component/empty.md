@@ -8,9 +8,7 @@ description: 用媒体、文字、操作和自定义内容组合空状态。
 `Empty` 用于缺少内容、搜索无结果和首次使用等空状态。命名插槽负责布局与视觉层级，
 应用决定何时显示空状态，并管理子组件的状态和操作。
 
-该组件无状态，完整位于 GPUI Component 层。组合结构和默认间距参考
-[shadcn/ui Empty](https://ui.shadcn.com/docs/components/base/empty) 的 Nova 示例，
-使用 GPUI Component 的主题和原生控件。
+该组件无状态，完整位于 GPUI Component 层，使用该层的主题和原生控件。
 
 ## 导入
 

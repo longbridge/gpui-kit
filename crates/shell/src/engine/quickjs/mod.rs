@@ -5392,9 +5392,10 @@ globalThis.__gpui = (() => {
   // A named slot. The element is consumed exactly as `child` consumes one, so
   // it cannot also be added to the tree — which is the point: the component
   // renders it somewhere of its own, or not at all.
+  // Preserve the element object for registered methods with an Element schema.
   const slot = (name) =>
     function (element) {
-      __apply(this.__id, name, [element.__id]);
+      __apply(this.__id, name, [element]);
       return this;
     };
 
@@ -7743,13 +7744,13 @@ impl ShellRuntime {
             }
             "content" | "trigger" | "input" | "decrement_button" | "increment_button" | "image"
             | "fallback" | "header" | "footer" | "panel" => {
-                let element = args
-                    .first_value()
-                    .and_then(|value| value.as_f32().ok())
-                    .ok_or_else(|| {
-                        Exception::throw_type(ctx, &format!("{method}(element) expects an element"))
-                    })? as SpecId;
-                self.fill_slot(ctx, id, method, element)
+                let Some(Argument::Element(element)) = args.0.first() else {
+                    return Err(Exception::throw_type(
+                        ctx,
+                        &format!("{method}(element) expects an element"),
+                    ));
+                };
+                self.fill_slot(ctx, id, method, *element)
             }
             // The script's own name for an action, plus the handler. It is not
             // a `Callback` op because the name is discovered at run time and a

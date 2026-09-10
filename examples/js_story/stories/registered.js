@@ -48,6 +48,12 @@ import {
   DropdownMenu,
   Editor,
   EditorState,
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
   Field,
   Form,
   GroupBox,
@@ -191,6 +197,7 @@ const retained = (key, create) => {
  */
 export function initializeRegisteredExamples() {
   retained("input-project-name", () => InputState("Enter a project name"));
+  retained("empty-search", () => InputState("Search pages"));
   retained("input-locked", () => InputState("Managed by your organization"));
   retained("number-input", () => InputState("Quantity", "12"));
   retained("otp-six", () => OtpState(6));
@@ -251,6 +258,60 @@ const accordionOpen = (key, fallback, index) =>
  */
 export function registeredExamples(surface, cx) {
   switch (surface) {
+    case "Empty": {
+      const created = Boolean(state("empty-project-created", false));
+      return [
+        {
+          label: "Minimal",
+          element: new Empty().header(
+            new EmptyHeader().title(new EmptyTitle().child("No results")),
+          ),
+        },
+        {
+          label: "Icon and action",
+          description: "The application owns the project state and the action callback.",
+          element: new Empty()
+            .header(
+              new EmptyHeader()
+                .media(new EmptyMedia().variant("icon").child(new Icon("folder")))
+                .title(new EmptyTitle().child(created ? "Untitled project" : "No projects yet"))
+                .description(new EmptyDescription().child(
+                  created ? "Your sample project is ready." : "Create a project to get started.",
+                )),
+            )
+            .content(new EmptyContent().child(
+              new Button("empty-create-project")
+                .primary()
+                .label(created ? "Reset example" : "Create project")
+                .on_click((_event, cx) => setState("empty-project-created", !created, cx)),
+            )),
+        },
+        {
+          label: "Avatar and custom content",
+          description: "Each part is independently styled; the input retains its own state.",
+          element: new Empty()
+            .max_w(320)
+            .items_start()
+            .text_left()
+            .p(16)
+            .border(1)
+            .border_color(cx.theme().colors.border)
+            .header(
+              new EmptyHeader()
+                .items_start()
+                .media(new EmptyMedia().child(new Avatar().name("Ada Lovelace").size("large")))
+                .title(new EmptyTitle().child("Find a shared page"))
+                .description(new EmptyDescription().child(
+                  "Search your workspace for a page to share with Ada. Longer descriptions wrap within this narrow panel.",
+                )),
+            )
+            .content(new EmptyContent().items_start().child(
+              new Input(retained("empty-search", () => InputState("Search pages"))).w_full(),
+            ))
+            .child(div().text_size(12).child("Search input is provided by the application.")),
+        },
+      ];
+    }
     case "Attachment":
       return [
         {

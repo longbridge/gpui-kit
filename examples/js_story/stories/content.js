@@ -52,6 +52,16 @@ export const stories = [
     api: "DescriptionList",
   }),
   pendingStory({
+    id: "empty",
+    title: "Empty",
+    group: "Content",
+    rustStory: "EmptyStory",
+    description: "Composable empty states with application-owned actions.",
+    states: ["minimal", "icon", "action", "avatar", "custom content"],
+    availability: "registered",
+    api: "Empty",
+  }),
+  pendingStory({
     id: "group-box",
     title: "GroupBox",
     group: "Content",

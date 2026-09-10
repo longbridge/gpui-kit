@@ -1,5 +1,14 @@
 import { div } from 'gpui-kit';
-import { Spinner } from 'gpui-component';
+import { Spinner, Empty, EmptyHeader, EmptyMedia } from 'gpui-component';
+
+// @ts-expect-error Empty actions belong to its child controls.
+new Empty().p(4).on_click(() => {});
+// @ts-expect-error The header is an element, not plain text.
+new Empty().header('No results');
+// @ts-expect-error Named title slots take elements, not plain text.
+new EmptyHeader().title('No results');
+// @ts-expect-error EmptyMedia supports only default and icon variants.
+new EmptyMedia().p(4).variant('avatar');
 
 // @ts-expect-error Registered components reject undeclared click handlers.
 new Spinner().on_click(() => {});

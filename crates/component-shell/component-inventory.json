@@ -348,6 +348,55 @@
     },
     {
       "source": "ui",
+      "name": "empty",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Empty",
+        "exports": [
+          "Empty"
+        ],
+        "related": [
+          {
+            "descriptor": "EmptyHeader",
+            "exports": [
+              "EmptyHeader"
+            ],
+            "role": "named-slot-part"
+          },
+          {
+            "descriptor": "EmptyMedia",
+            "exports": [
+              "EmptyMedia"
+            ],
+            "role": "named-slot-part"
+          },
+          {
+            "descriptor": "EmptyTitle",
+            "exports": [
+              "EmptyTitle"
+            ],
+            "role": "named-slot-part"
+          },
+          {
+            "descriptor": "EmptyDescription",
+            "exports": [
+              "EmptyDescription"
+            ],
+            "role": "named-slot-part"
+          },
+          {
+            "descriptor": "EmptyContent",
+            "exports": [
+              "EmptyContent"
+            ],
+            "role": "named-slot-part"
+          }
+        ]
+      }
+    },
+    {
+      "source": "ui",
       "name": "form",
       "classification": "component",
       "registration": {
@@ -1473,6 +1522,55 @@
             "export": "EditorState",
             "kind": "EditorState",
             "role": "retained-editor-state"
+          }
+        ]
+      }
+    },
+    {
+      "source": "story",
+      "name": "empty",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Empty",
+        "exports": [
+          "Empty"
+        ],
+        "related": [
+          {
+            "descriptor": "EmptyHeader",
+            "exports": [
+              "EmptyHeader"
+            ],
+            "role": "named-slot-part"
+          },
+          {
+            "descriptor": "EmptyMedia",
+            "exports": [
+              "EmptyMedia"
+            ],
+            "role": "named-slot-part"
+          },
+          {
+            "descriptor": "EmptyTitle",
+            "exports": [
+              "EmptyTitle"
+            ],
+            "role": "named-slot-part"
+          },
+          {
+            "descriptor": "EmptyDescription",
+            "exports": [
+              "EmptyDescription"
+            ],
+            "role": "named-slot-part"
+          },
+          {
+            "descriptor": "EmptyContent",
+            "exports": [
+              "EmptyContent"
+            ],
+            "role": "named-slot-part"
           }
         ]
       }
