@@ -4,7 +4,8 @@ use gpui::{
     AnyElement, App, AvailableSpace, Bounds, CursorStyle, Element, ElementId, GlobalElementId,
     Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement as _, IntoElement, LayoutId,
     MouseButton, MouseDownEvent, ObjectFit, ParentElement, Pixels, Role, SharedString, Size,
-    StatefulInteractiveElement as _, Styled, StyledImage, TextStyle, Window, div, img, px, size,
+    StatefulInteractiveElement as _, Styled, StyledImage, StyledText, TextRun, TextStyle, Window,
+    div, img, px, size,
 };
 
 use super::{
@@ -22,6 +23,7 @@ pub(super) struct MeasuredInlineObject {
     text: SharedString,
     font_size: Pixels,
     text_style: TextStyle,
+    text_runs: Vec<TextRun>,
     appearance: super::markdown_inline::InlineAppearance,
 }
 
@@ -51,6 +53,12 @@ impl MeasuredInlineObject {
         if let Some(weight) = appearance.font_weight {
             style.font_weight = weight;
         }
+        if appearance.underline {
+            style.underline = Some(gpui::UnderlineStyle {
+                thickness: px(1.),
+                ..Default::default()
+            });
+        }
         if let Some(color) = appearance.color {
             style.color = color;
         }
@@ -59,12 +67,10 @@ impl MeasuredInlineObject {
         }
         // A fallback is one atomic line; source newlines remain in copied text.
         let text: SharedString = node.as_text().replace(['\r', '\n'], " ").into();
-        let line = window.text_system().shape_line(
-            text.clone(),
-            font_size,
-            &[style.to_run(text.len())],
-            None,
-        );
+        let runs = colored_text_runs(&text, &style, &appearance.color_ranges);
+        let line = window
+            .text_system()
+            .shape_line(text.clone(), font_size, &runs, None);
         let height = context.line_height.max(line.ascent + line.descent);
         let fallback = MarkdownInlineMetrics::new(
             size(line.width.max(px(1.)) + appearance.padding_x * 2., height),
@@ -92,6 +98,7 @@ impl MeasuredInlineObject {
             text,
             font_size: font_size * fallback_scale,
             text_style: style,
+            text_runs: runs,
             appearance,
         }
     }
@@ -106,6 +113,7 @@ impl MeasuredInlineObject {
         let padding = self.appearance.padding_x;
         let color = self.text_style.color;
         let weight = self.text_style.font_weight;
+        let runs = self.text_runs.clone();
         let fallback = move || {
             div()
                 .w(bounds.width)
@@ -117,7 +125,7 @@ impl MeasuredInlineObject {
                 .line_height(bounds.height)
                 .whitespace_nowrap()
                 .overflow_hidden()
-                .child(fallback_text.clone())
+                .child(StyledText::new(fallback_text.clone()).with_runs(runs.clone()))
                 .into_any_element()
         };
         if let Some((image, _)) = self.presentation.as_ref().and_then(|p| p.image.as_ref()) {
@@ -132,6 +140,37 @@ impl MeasuredInlineObject {
             fallback()
         }
     }
+}
+
+fn colored_text_runs(
+    text: &str,
+    style: &TextStyle,
+    colors: &[(std::ops::Range<usize>, gpui::Hsla)],
+) -> Vec<TextRun> {
+    let mut colors = colors.to_vec();
+    colors.sort_by_key(|(range, _)| range.start);
+    let mut runs = Vec::new();
+    let mut offset = 0;
+    for (range, color) in colors {
+        if range.start < offset
+            || range.start >= range.end
+            || !text.is_char_boundary(range.start)
+            || !text.is_char_boundary(range.end)
+        {
+            continue;
+        }
+        if range.start > offset {
+            runs.push(style.to_run(range.start - offset));
+        }
+        let mut run = style.to_run(range.len());
+        run.color = color;
+        runs.push(run);
+        offset = range.end;
+    }
+    if offset < text.len() {
+        runs.push(style.to_run(text.len() - offset));
+    }
+    runs
 }
 
 /// Passive leaf whose whole bounds participate in TextView selection.
@@ -374,6 +413,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn prefix_color_keeps_utf8_text_complete_and_ignores_invalid_ranges() {
+        let style = TextStyle {
+            color: gpui::Hsla::black(),
+            ..Default::default()
+        };
+        let muted = gpui::Hsla::white();
+        let runs = colored_text_runs(
+            "@中文",
+            &style,
+            &[
+                (2..3, muted), // Inside a UTF-8 character.
+                (0..1, muted),
+                (0..4, muted), // Overlaps the prefix.
+                (7..8, muted), // Past the end.
+            ],
+        );
+        assert_eq!(runs.len(), 2);
+        assert_eq!((runs[0].len, runs[0].color), (1, muted));
+        assert_eq!((runs[1].len, runs[1].color), (6, style.color));
+    }
+
+    #[test]
     fn styled_text_padding_scales_with_atomic_geometry() {
         use gpui::{Empty, FontWeight, TestApp};
         let mut app = TestApp::new();
@@ -504,6 +565,7 @@ mod tests {
             text: "x²".into(),
             font_size: px(16.),
             text_style: TextStyle::default(),
+            text_runs: vec![TextStyle::default().to_run("x²".len())],
             appearance: Default::default(),
         };
         let object = InlineObject::new(

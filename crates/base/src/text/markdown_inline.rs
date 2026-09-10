@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{ops::Range, sync::Arc};
 
 use gpui::{AnyView, App, FontWeight, Hsla, Image, Pixels, Size, TextStyle, Window};
 
@@ -7,9 +7,11 @@ type HoverCardBuilder = dyn Fn(&mut Window, &mut App) -> AnyView + Send + Sync;
 #[derive(Clone, Default)]
 pub(crate) struct InlineAppearance {
     pub color: Option<Hsla>,
+    pub color_ranges: Vec<(Range<usize>, Hsla)>,
     pub background: Option<Hsla>,
     pub hover_background: Option<Hsla>,
     pub font_weight: Option<FontWeight>,
+    pub underline: bool,
     pub padding_x: Pixels,
     pub radius: Pixels,
 }
@@ -78,9 +80,22 @@ impl MarkdownInlinePresentation {
         self
     }
 
+    /// Color a UTF-8 byte range in the node's plain text without changing selection.
+    /// Invalid or overlapping ranges are ignored.
+    pub fn text_color_range(mut self, range: Range<usize>, color: Hsla) -> Self {
+        self.appearance.color_ranges.push((range, color));
+        self
+    }
+
     /// Set the atomic text's weight, used for both measurement and painting.
     pub fn font_weight(mut self, weight: FontWeight) -> Self {
         self.appearance.font_weight = Some(weight);
+        self
+    }
+
+    /// Underline the atomic text.
+    pub fn underline(mut self) -> Self {
+        self.appearance.underline = true;
         self
     }
 

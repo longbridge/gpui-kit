@@ -49,7 +49,7 @@ impl MarkdownPlugin for MentionPlugin {
     fn render_inline(
         &self,
         node: &MarkdownNode,
-        context: &MarkdownInlineRenderContext,
+        _: &MarkdownInlineRenderContext,
         _: &mut Window,
         cx: &mut App,
     ) -> Option<MarkdownInlinePresentation> {
@@ -57,11 +57,9 @@ impl MarkdownPlugin for MentionPlugin {
         Some(
             MarkdownInlinePresentation::text()
                 .text_color(cx.theme().link)
+                .text_color_range(0..1, cx.theme().muted_foreground)
                 .font_weight(FontWeight::MEDIUM)
-                .background(cx.theme().link.opacity(0.10))
-                .hover_background(cx.theme().link.opacity(0.18))
-                .padding_x(context.font_size * 0.3)
-                .rounded(context.font_size * 0.25)
+                .underline()
                 .hover_card(move |window, cx| {
                     Tooltip::element(move |_, cx| {
                         h_flex()
