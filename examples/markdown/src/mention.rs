@@ -65,22 +65,18 @@ impl MarkdownPlugin for MentionPlugin {
                 .hover_card(move |window, cx| {
                     Tooltip::element(move |_, cx| {
                         h_flex()
-                            .w_64()
-                            .gap_3()
-                            .p_2()
-                            .child(Avatar::new().name(member.name).large())
+                            .gap_2()
+                            .py_1()
+                            .child(Avatar::new().name(member.name).small())
                             .child(
                                 v_flex()
-                                    .gap_1()
-                                    .child(
-                                        div().font_weight(FontWeight::SEMIBOLD).child(member.name),
-                                    )
+                                    .child(div().font_weight(FontWeight::MEDIUM).child(member.name))
                                     .child(
                                         div()
+                                            .text_xs()
                                             .text_color(cx.theme().muted_foreground)
                                             .child(format!("@{}", member.handle)),
-                                    )
-                                    .child(div().text_xs().child("GPUI Kit")),
+                                    ),
                             )
                     })
                     .build(window, cx)
