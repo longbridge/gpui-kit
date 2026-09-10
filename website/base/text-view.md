@@ -167,7 +167,6 @@ impl MarkdownPlugin for FormulaPlugin {
 }
 
 TextView::markdown("inline-formulas", "Formulas $x^2$ and $y^2$")
-    .markdown_math()
     .plugin(FormulaPlugin)
 ```
 
@@ -183,7 +182,7 @@ Objects align to the text baseline and wrap only before or after the whole objec
 
 For asynchronous resources, retain a `TextViewState`, update the application-owned cache, then call `state.invalidate_inline_layout(cx)` through the view's weak entity. This remeasures inline content and virtual-list heights without reparsing or dropping the current logical selection. Associate results with source/font/theme keys and discard obsolete completions. `examples/markdown` contains the formula implementation and a preview zoom control.
 
-Use `.plugin(...)` for reusable extensions. `.markdown_math()` opts into math parsing; inline code continues to protect dollar signs from math parsing.
+Inline math syntax is parsed by default. Register a plugin to customize its rendering; no separate syntax switch is needed. Inline code continues to protect dollar signs from math parsing.
 
 ## Retained state and streaming updates
 

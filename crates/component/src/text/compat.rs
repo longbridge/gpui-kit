@@ -118,12 +118,6 @@ impl TextView {
         self
     }
 
-    /// Enables inline and block math parsing.
-    pub fn markdown_math(mut self) -> Self {
-        self.inner = self.inner.markdown_math();
-        self
-    }
-
     /// Parses custom block nodes out of the Markdown AST.
     pub fn markdown_block_parser<F>(mut self, parser: F) -> Self
     where

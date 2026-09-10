@@ -30,7 +30,7 @@ impl Render for VirtualInlineRoot {
             .child(crate::TextSelectionLayer)
             .child(TextView::new(&self.view).scrollable(true)
                 .selection_format(if self.source_format { SelectionFormat::Source } else { SelectionFormat::Plain })
-                .markdown_math()
+
                 .plugin(crate::text::markdown_ext::TestInlinePlugin::new("math").parse_with(|node, _| {
                     let markdown::mdast::Node::InlineMath(math) = node else { return None };
                     Some(MarkdownNode::new("math", ()).text(format!("{}²", math.value)))

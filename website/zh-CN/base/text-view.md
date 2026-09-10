@@ -166,7 +166,6 @@ impl MarkdownPlugin for FormulaPlugin {
 }
 
 TextView::markdown("inline-formulas", "Formulas $x^2$ and $y^2$")
-    .markdown_math()
     .plugin(FormulaPlugin)
 ```
 
@@ -182,7 +181,7 @@ TextView::markdown("inline-formulas", "Formulas $x^2$ and $y^2$")
 
 异步资源应由应用缓存：保留 `TextViewState`，准备完成后通过弱 entity 更新缓存并调用 `state.invalidate_inline_layout(cx)`。这会重新测量行内内容和虚拟列表高度，不重解析文档，也不丢弃已有逻辑选区。缓存键应区分源码、字号和主题，过期结果应丢弃。`examples/markdown` 提供公式实现和预览缩放控件。
 
-可复用扩展通过 `.plugin(...)` 注册。通过 `.markdown_math()` 显式开启公式解析；行内代码里的美元符号仍保留为代码。
+默认解析 inline math 语法，通过 Plugin 自定义渲染，无需额外开关。行内代码里的美元符号仍保留为代码。
 
 ## 保留状态与动态更新
 

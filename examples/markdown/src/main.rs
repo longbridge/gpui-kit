@@ -1306,7 +1306,6 @@ impl Render for Example {
                                 .child(
                                     resizable_panel().child(
                                         TextView::new(&self.text_view)
-                                            .markdown_math()
                                             .plugin(self.inline_math.clone())
                                             .plugin(mention::MentionPlugin)
                                             .code_block_actions(|code_block, _window, _cx| {

@@ -339,13 +339,6 @@ impl TextView {
         self
     }
 
-    /// Opt into `$...$` inline math and `$$` block math parsing.
-    pub fn markdown_math(mut self) -> Self {
-        let extensions = Arc::make_mut(&mut self.markdown_extensions);
-        *extensions = std::mem::take(extensions).math();
-        self
-    }
-
     /// Enable MDX JSX/expression parsing.
     ///
     /// This disables raw HTML parsing because `markdown-rs` gives HTML
@@ -890,7 +883,7 @@ mod tests {
                 TextView::new(&self.text_view)
                     .selection_format(if self.source_format { crate::text::SelectionFormat::Source }
                         else { crate::text::SelectionFormat::Plain })
-                    .markdown_math()
+
                     .plugin(crate::text::markdown_ext::TestInlinePlugin::new("math").parse_with(|node, _| {
                         let markdown::mdast::Node::InlineMath(math) = node else { return None };
                         Some(crate::text::MarkdownNode::new("math", ()).text(format!("{}²", math.value)))
@@ -1929,7 +1922,7 @@ mod tests {
         impl Render for Root {
             fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
                 let clicks = self.clicks.clone();
-                let extensions = crate::text::MarkdownExtensions::default().math().plugin(
+                let extensions = crate::text::MarkdownExtensions::default().plugin(
                     crate::text::markdown_ext::TestInlinePlugin::new("math")
                         .parse_with(|node, _| {
                             matches!(node, markdown::mdast::Node::InlineMath(_)).then(|| {

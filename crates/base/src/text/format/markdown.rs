@@ -830,9 +830,39 @@ mod tests {
     }
 
     #[test]
+    fn inline_math_is_enabled_by_default_and_respects_code_and_escapes() {
+        let extensions = MarkdownExtensions::default().plugin(
+            crate::text::markdown_ext::TestInlinePlugin::new("formula").parse_with(|node, _| {
+                let Node::InlineMath(math) = node else {
+                    return None;
+                };
+                assert_eq!(math.value, "x");
+                Some(MarkdownNode::new("formula", ()).text("formula"))
+            }),
+        );
+        let mut cx = NodeContext {
+            markdown_extensions: extensions.into(),
+            ..Default::default()
+        };
+        let document = parse(r"$x$ `$code$` \$escaped\$", &mut cx).unwrap();
+        assert_eq!(document.text(), "formula $code$ $escaped$\n");
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!()
+        };
+        assert_eq!(
+            paragraph
+                .children
+                .iter()
+                .filter(|node| node.custom.is_some())
+                .count(),
+            1
+        );
+    }
+
+    #[test]
     fn inline_extensions_preserve_nodes_inside_marks_and_global_source_ranges() {
         let source = "中文 **before $x^2$ after** and `$ignored$`";
-        let extensions = MarkdownExtensions::default().math().plugin(
+        let extensions = MarkdownExtensions::default().plugin(
             crate::text::markdown_ext::TestInlinePlugin::new("test").parse_with(|node, cx| {
                 let Node::InlineMath(math) = node else {
                     return None;
@@ -875,7 +905,6 @@ mod tests {
         ] {
             let mut cx = NodeContext {
                 markdown_extensions: MarkdownExtensions::default()
-                    .math()
                     .plugin(
                         crate::text::markdown_ext::TestInlinePlugin::new("test").parse_with(
                             |node, _| match node {

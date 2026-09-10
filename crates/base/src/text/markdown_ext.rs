@@ -234,7 +234,6 @@ impl PartialEq for MarkdownNode {
 pub struct MarkdownExtensions {
     enable_mdx: bool,
     enable_frontmatter: bool,
-    enable_math: bool,
     block_parsers: Vec<Arc<MarkdownBlockParserFn>>,
     block_renderers: HashMap<SharedString, Arc<MarkdownBlockRenderFn>>,
     inline_parsers: Vec<Arc<MarkdownInlineParserFn>>,
@@ -249,13 +248,6 @@ impl MarkdownExtensions {
     /// retain the parsed document. Renderer-only changes do not need a new value.
     pub fn parser_revision(mut self, revision: u64) -> Self {
         self.parser_revision = revision;
-        self.bump_revision();
-        self
-    }
-
-    /// Opt into Markdown math (`$...$` inline and `$$` blocks).
-    pub fn math(mut self) -> Self {
-        self.enable_math = true;
         self.bump_revision();
         self
     }
@@ -347,7 +339,6 @@ impl MarkdownExtensions {
     pub(crate) fn has_same_parser_configuration(&self, other: &Self) -> bool {
         self.parser_revision == other.parser_revision
             && self.enable_mdx == other.enable_mdx
-            && self.enable_math == other.enable_math
             && self.enable_frontmatter == other.enable_frontmatter
             && self.block_parsers.len() == other.block_parsers.len()
             && self.block_renderers.len() == other.block_renderers.len()
@@ -389,8 +380,7 @@ impl MarkdownExtensions {
     pub(crate) fn parse_options(&self) -> ParseOptions {
         let mut options = ParseOptions::gfm();
         options.constructs.frontmatter = self.enable_frontmatter;
-        options.constructs.math_text = self.enable_math;
-        options.constructs.math_flow = self.enable_math;
+        options.constructs.math_text = true;
         if self.enable_mdx {
             options.constructs.html_flow = false;
             options.constructs.html_text = false;

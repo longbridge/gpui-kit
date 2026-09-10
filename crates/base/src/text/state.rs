@@ -998,7 +998,7 @@ mod tests {
         cx.update(crate::init);
         let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("中文 $a$\n\n尾 $x", cx)));
         state.update(cx, |state, cx| {
-            let extensions = MarkdownExtensions::default().math().plugin(
+            let extensions = MarkdownExtensions::default().plugin(
                 crate::text::markdown_ext::TestInlinePlugin::new("test").parse_with(|node, _| {
                     let markdown::mdast::Node::InlineMath(math) = node else {
                         return None;
