@@ -76,7 +76,7 @@ enum PositionedFragment {
     Object {
         item_ix: usize,
         origin: gpui::Point<Pixels>,
-        object: MeasuredInlineObject,
+        object: Box<MeasuredInlineObject>,
         selection_bounds: Bounds<Pixels>,
     },
     Text {
@@ -125,7 +125,7 @@ struct LineFragmentLayout {
 }
 
 enum LineFragmentKind {
-    Object(MeasuredInlineObject),
+    Object(Box<MeasuredInlineObject>),
     Text {
         font_size: Pixels,
         text: SharedString,
@@ -316,7 +316,7 @@ impl Element for InlineFlow {
                         ("inline-object", *id),
                         text.clone(),
                         accessibility_label.clone(),
-                        object,
+                        *object,
                         selected.clone(),
                         Bounds::new(
                             bounds.origin + selection_bounds.origin,
@@ -751,7 +751,7 @@ fn layout_measured_flow(
                     line_width += metrics.size.width;
                     line_fragments.push(LineFragmentLayout {
                         item_ix,
-                        kind: LineFragmentKind::Object(object),
+                        kind: LineFragmentKind::Object(Box::new(object)),
                         size: metrics.size,
                         source_range: 0..IMAGE_LEN,
                         baseline: metrics.baseline,
