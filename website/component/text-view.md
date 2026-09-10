@@ -210,7 +210,7 @@ fn is_block(&self) -> bool {
 }
 ```
 
-Inline plugins use the default `is_block() == false` and the static `render_inline` contract. They support baseline layout, atomic selection, plain/Markdown copying, text fallback, and explicit asynchronous layout invalidation. See [Inline extensions](../base/text-view.md#inline-extensions) for the contract and registration example. The component facade forwards the same builders and exports the same inline types.
+Inline plugins use the default `is_block() == false` and the static `render_inline` contract. They support baseline layout, atomic selection, plain/Markdown copying, text fallback, and explicit asynchronous layout invalidation. See [Inline plugin](../base/text-view.md#inline-plugin) for the contract and registration example. The component facade forwards the same builders and exports the same inline types.
 
 ## YAML Frontmatter
 

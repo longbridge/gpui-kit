@@ -33,11 +33,11 @@ pub type MarkdownBlockRenderFn =
     dyn Fn(&MarkdownNode, &mut Window, &mut App) -> AnyElement + Send + Sync;
 
 /// Parser for a single inline AST node; follows the block parser contract.
-pub type MarkdownInlineParserFn = MarkdownBlockParserFn;
+type MarkdownInlineParserFn = MarkdownBlockParserFn;
 
 /// Produces static inline text or an image, or `None` for atomic text fallback.
 /// Read prepared resources here; start asynchronous work outside rendering.
-pub type MarkdownInlineRenderFn = dyn Fn(
+type MarkdownInlineRenderFn = dyn Fn(
         &MarkdownNode,
         &MarkdownInlineRenderContext,
         &mut Window,
@@ -260,37 +260,6 @@ impl MarkdownExtensions {
         self
     }
 
-    /// Register a parser for inline AST nodes, in first-match order.
-    pub fn inline_parser<F>(mut self, parser: F) -> Self
-    where
-        F: for<'a> Fn(&mdast::Node, &MarkdownParseContext<'a>) -> Option<MarkdownNode>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.inline_parsers.push(Arc::new(parser));
-        self.bump_revision();
-        self
-    }
-
-    /// Register a static renderer by node name, just like a block renderer.
-    pub fn inline_renderer<F>(mut self, name: impl Into<SharedString>, renderer: F) -> Self
-    where
-        F: Fn(
-                &MarkdownNode,
-                &MarkdownInlineRenderContext,
-                &mut Window,
-                &mut App,
-            ) -> Option<MarkdownInlinePresentation>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.inline_renderers
-            .insert(name.into(), Arc::new(renderer));
-        self.bump_revision();
-        self
-    }
     /// Enable YAML frontmatter parsing.
     ///
     /// Frontmatter is disabled by default because it is not part of CommonMark
@@ -351,10 +320,18 @@ impl MarkdownExtensions {
             });
             extensions
         } else {
-            self.inline_parser(move |node, cx| parser.parse(node, cx))
-                .inline_renderer(name, move |node, context, window, cx| {
+            let mut extensions = self;
+            extensions
+                .inline_parsers
+                .push(Arc::new(move |node, cx| parser.parse(node, cx)));
+            extensions.inline_renderers.insert(
+                name,
+                Arc::new(move |node, context, window, cx| {
                     renderer.render_inline(node, context, window, cx)
-                })
+                }),
+            );
+            extensions.bump_revision();
+            extensions
         }
     }
 
@@ -479,5 +456,74 @@ impl MarkdownExtensions {
 
     fn bump_revision(&mut self) {
         self.revision = MARKDOWN_EXTENSIONS_REVISION.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Test fixture that exercises the same plugin registration path as applications.
+#[cfg(test)]
+pub(super) struct TestInlinePlugin {
+    name: &'static str,
+    parser: Option<Arc<MarkdownInlineParserFn>>,
+    renderer: Option<Arc<MarkdownInlineRenderFn>>,
+}
+
+#[cfg(test)]
+impl TestInlinePlugin {
+    pub(super) fn new(name: &'static str) -> Self {
+        Self {
+            name,
+            parser: None,
+            renderer: None,
+        }
+    }
+
+    pub(super) fn parse_with<F>(mut self, parser: F) -> Self
+    where
+        F: for<'a> Fn(&mdast::Node, &MarkdownParseContext<'a>) -> Option<MarkdownNode>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.parser = Some(Arc::new(parser));
+        self
+    }
+
+    pub(super) fn render_with<F>(mut self, renderer: F) -> Self
+    where
+        F: Fn(
+                &MarkdownNode,
+                &MarkdownInlineRenderContext,
+                &mut Window,
+                &mut App,
+            ) -> Option<MarkdownInlinePresentation>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.renderer = Some(Arc::new(renderer));
+        self
+    }
+}
+
+#[cfg(test)]
+impl MarkdownPlugin for TestInlinePlugin {
+    fn name(&self) -> &str {
+        self.name
+    }
+
+    fn parse(&self, node: &mdast::Node, cx: &MarkdownParseContext<'_>) -> Option<MarkdownNode> {
+        self.parser.as_ref().and_then(|parse| parse(node, cx))
+    }
+
+    fn render_inline(
+        &self,
+        node: &MarkdownNode,
+        context: &MarkdownInlineRenderContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<MarkdownInlinePresentation> {
+        self.renderer
+            .as_ref()
+            .and_then(|render| render(node, context, window, cx))
     }
 }

@@ -125,25 +125,52 @@ code-block fallback。可以通过 `.plugin(...)` 挂载自定义插件；
 
 ## Inline plugin
 
-Inline plugin 沿用 Block plugin 的机制：parser 按注册顺序匹配，renderer 通过 `MarkdownNode::name()` 查找。`MarkdownPlugin` 默认 `is_block() == false`，使用 `render_inline`；Block plugin 继续使用 `render`。
+与 Block plugin 一样，Inline plugin 实现 `MarkdownPlugin`，通过 `.plugin(...)` 注册。`MarkdownPlugin` 默认 `is_block() == false`，使用 `render_inline`；Block plugin 继续使用 `render`。
 
 ```rust
-use gpui_base::{MarkdownExtensions, MarkdownNode, TextView, markdown_ast};
+use gpui::{App, Window};
+use gpui_base::{
+    MarkdownInlinePresentation, MarkdownInlineRenderContext, MarkdownNode,
+    MarkdownParseContext, MarkdownPlugin, TextView, markdown_ast,
+};
 
-let extensions = MarkdownExtensions::default()
-    .math()
-    .inline_parser(|node, _| {
-        let markdown_ast::Node::InlineMath(math) = node else { return None };
-        Some(MarkdownNode::new("formula", math.value.clone())
+struct FormulaPlugin;
+
+impl MarkdownPlugin for FormulaPlugin {
+    fn name(&self) -> &str {
+        "formula"
+    }
+
+    fn parse(
+        &self,
+        node: &markdown_ast::Node,
+        _: &MarkdownParseContext<'_>,
+    ) -> Option<MarkdownNode> {
+        let markdown_ast::Node::InlineMath(math) = node else {
+            return None;
+        };
+        Some(MarkdownNode::new(self.name(), math.value.clone())
             .text(math.value.clone())
-            .accessibility_label(format!("公式：{}", math.value)))
-    });
+            .accessibility_label(format!("Formula: {}", math.value)))
+    }
 
-TextView::markdown("inline-formulas", "中文 $x^2$ and $y^2$")
-    .markdown_extensions(extensions)
+    fn render_inline(
+        &self,
+        _: &MarkdownNode,
+        _: &MarkdownInlineRenderContext,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Option<MarkdownInlinePresentation> {
+        Some(MarkdownInlinePresentation::text())
+    }
+}
+
+TextView::markdown("inline-formulas", "Formulas $x^2$ and $y^2$")
+    .markdown_math()
+    .plugin(FormulaPlugin)
 ```
 
-此例显示原子化的纯文本替代内容。注册 `inline_renderer("formula", ...)`，返回 `Some(MarkdownInlinePresentation::image(image, metrics))`，即可显示已准备的 `Arc<gpui::Image>`。`MarkdownInlineMetrics::new(size(width, height), baseline)` 使用当前字号下的逻辑像素，基线距离从顶部计算。renderer 收到的 `MarkdownInlineRenderContext` 包含实际文本样式、字号、行高、rem 大小和可用宽度。返回 `None` 或无效尺寸时使用文本降级。渲染回调应读取已准备的资源，不应在布局期间同步调用公式排版引擎。
+此 Inline plugin 显示原子化的纯文本。通过 `MarkdownPlugin::render_inline` 返回 `Some(MarkdownInlinePresentation::image(image, metrics))`，即可显示已准备的 `Arc<gpui::Image>`。`MarkdownInlineMetrics::new(size(width, height), baseline)` 使用当前字号下的逻辑像素，基线距离从顶部计算。renderer 收到的 `MarkdownInlineRenderContext` 包含实际文本样式、字号、行高、rem 大小和可用宽度。返回 `None` 或无效尺寸时使用文本降级。渲染回调应读取已准备的资源，不应在布局期间同步调用公式排版引擎。
 
 当 parser 捕获值或插件配置改变，但注册名称不变时，使用 `MarkdownExtensions::parser_revision(config_version)` 触发重新解析。每次 render 重建相同配置时应保持该 revision 不变。
 
@@ -155,7 +182,7 @@ TextView::markdown("inline-formulas", "中文 $x^2$ and $y^2$")
 
 异步资源应由应用缓存：保留 `TextViewState`，准备完成后通过弱 entity 更新缓存并调用 `state.invalidate_inline_layout(cx)`。这会重新测量行内内容和虚拟列表高度，不重解析文档，也不丢弃已有逻辑选区。缓存键应区分源码、字号和主题，过期结果应丢弃。`examples/markdown` 提供公式实现和预览缩放控件。
 
-`TextView` 还提供 `markdown_math`、`markdown_inline_parser`、`markdown_inline_renderer` builder。公式解析需要显式开启；行内代码里的美元符号仍保留为代码。
+可复用扩展通过 `.plugin(...)` 注册。通过 `.markdown_math()` 显式开启公式解析；行内代码里的美元符号仍保留为代码。
 
 ## 保留状态与动态更新
 

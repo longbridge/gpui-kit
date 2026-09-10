@@ -124,34 +124,6 @@ impl TextView {
         self
     }
 
-    /// Parses custom inline nodes using the same registry as block extensions.
-    pub fn markdown_inline_parser<F>(mut self, parser: F) -> Self
-    where
-        F: for<'a> Fn(&markdown::mdast::Node, &MarkdownParseContext<'a>) -> Option<MarkdownNode>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.inner = self.inner.markdown_inline_parser(parser);
-        self
-    }
-
-    /// Presents a custom inline node as a static, atomically selectable object.
-    pub fn markdown_inline_renderer<F>(mut self, name: impl Into<SharedString>, renderer: F) -> Self
-    where
-        F: Fn(
-                &MarkdownNode,
-                &super::MarkdownInlineRenderContext,
-                &mut Window,
-                &mut App,
-            ) -> Option<super::MarkdownInlinePresentation>
-            + Send
-            + Sync
-            + 'static,
-    {
-        self.inner = self.inner.markdown_inline_renderer(name, renderer);
-        self
-    }
     /// Parses custom block nodes out of the Markdown AST.
     pub fn markdown_block_parser<F>(mut self, parser: F) -> Self
     where

@@ -485,18 +485,25 @@ mod tests {
         let mut app = TestApp::new();
         let mut window = app.open_window(|_, _| Empty);
         let node = MarkdownNode::new("mention", ()).text("@member");
-        let plain = MarkdownExtensions::default().inline_renderer("mention", |_, _, _, _| {
-            Some(MarkdownInlinePresentation::text().font_weight(FontWeight::MEDIUM))
-        });
-        let decorated =
-            MarkdownExtensions::default().inline_renderer("mention", |_, context, _, _| {
-                Some(
-                    MarkdownInlinePresentation::text()
-                        .font_weight(FontWeight::MEDIUM)
-                        .padding_x(context.font_size * 0.3)
-                        .rounded(context.font_size * 0.25),
-                )
-            });
+        let plain = MarkdownExtensions::default().plugin(
+            crate::text::markdown_ext::TestInlinePlugin::new("mention").render_with(
+                |_, _, _, _| {
+                    Some(MarkdownInlinePresentation::text().font_weight(FontWeight::MEDIUM))
+                },
+            ),
+        );
+        let decorated = MarkdownExtensions::default().plugin(
+            crate::text::markdown_ext::TestInlinePlugin::new("mention").render_with(
+                |_, context, _, _| {
+                    Some(
+                        MarkdownInlinePresentation::text()
+                            .font_weight(FontWeight::MEDIUM)
+                            .padding_x(context.font_size * 0.3)
+                            .rounded(context.font_size * 0.25),
+                    )
+                },
+            ),
+        );
         for font_size in [16., 24., 32.] {
             window.update(|_, window, cx| {
                 let style = TextStyle {
@@ -540,13 +547,16 @@ mod tests {
             MarkdownInlineMetrics::new(size(px(10.), px(0.)), px(0.)),
             MarkdownInlineMetrics::new(size(px(10.), px(10.)), px(11.)),
         ] {
-            let extensions =
-                MarkdownExtensions::default().inline_renderer("math", move |_, _, _, _| {
-                    Some(MarkdownInlinePresentation::image(
-                        Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, Vec::new())),
-                        metrics,
-                    ))
-                });
+            let extensions = MarkdownExtensions::default().plugin(
+                crate::text::markdown_ext::TestInlinePlugin::new("math").render_with(
+                    move |_, _, _, _| {
+                        Some(MarkdownInlinePresentation::image(
+                            Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, Vec::new())),
+                            metrics,
+                        ))
+                    },
+                ),
+            );
             window.update(|_, window, cx| {
                 let measured =
                     MeasuredInlineObject::measure(&node, &extensions, &style, None, window, cx);
@@ -572,15 +582,17 @@ mod tests {
         use gpui::{Empty, TestApp};
         let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
         let mut window = app.open_window(|_, _| Empty);
-        let extensions = MarkdownExtensions::default().inline_renderer("math", |_, _, _, _| {
-            Some(MarkdownInlinePresentation::image(
-                Arc::new(gpui::Image::from_bytes(
-                    gpui::ImageFormat::Svg,
-                    b"invalid SVG".to_vec(),
-                )),
-                MarkdownInlineMetrics::new(size(px(8.), px(10.)), px(8.)),
-            ))
-        });
+        let extensions = MarkdownExtensions::default().plugin(
+            crate::text::markdown_ext::TestInlinePlugin::new("math").render_with(|_, _, _, _| {
+                Some(MarkdownInlinePresentation::image(
+                    Arc::new(gpui::Image::from_bytes(
+                        gpui::ImageFormat::Svg,
+                        b"invalid SVG".to_vec(),
+                    )),
+                    MarkdownInlineMetrics::new(size(px(8.), px(10.)), px(8.)),
+                ))
+            }),
+        );
         let text = "long formula alternative";
         let node = MarkdownNode::new("math", ()).text(text);
         let style = TextStyle {

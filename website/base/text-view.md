@@ -124,27 +124,54 @@ code-block fallback. A custom plugin can be attached with `.plugin(...)`;
 `gpui-component` provides a themed
 `FrontmatterPlugin`; Base remains independent of that presentation.
 
-## Inline extensions
+## Inline plugin
 
-Inline extensions follow the block extension mechanism: register parsers in order and renderers by `MarkdownNode::name()`. A `MarkdownPlugin` with the default `is_block() == false` uses `render_inline`; block plugins keep `render`.
+Implement `MarkdownPlugin` and register it with `.plugin(...)`, just like a Block plugin. A `MarkdownPlugin` with the default `is_block() == false` uses `render_inline`; block plugins keep `render`.
 
 ```rust
-use gpui_base::{MarkdownExtensions, MarkdownNode, TextView, markdown_ast};
+use gpui::{App, Window};
+use gpui_base::{
+    MarkdownInlinePresentation, MarkdownInlineRenderContext, MarkdownNode,
+    MarkdownParseContext, MarkdownPlugin, TextView, markdown_ast,
+};
 
-let extensions = MarkdownExtensions::default()
-    .math()
-    .inline_parser(|node, _| {
-        let markdown_ast::Node::InlineMath(math) = node else { return None };
-        Some(MarkdownNode::new("formula", math.value.clone())
+struct FormulaPlugin;
+
+impl MarkdownPlugin for FormulaPlugin {
+    fn name(&self) -> &str {
+        "formula"
+    }
+
+    fn parse(
+        &self,
+        node: &markdown_ast::Node,
+        _: &MarkdownParseContext<'_>,
+    ) -> Option<MarkdownNode> {
+        let markdown_ast::Node::InlineMath(math) = node else {
+            return None;
+        };
+        Some(MarkdownNode::new(self.name(), math.value.clone())
             .text(math.value.clone())
             .accessibility_label(format!("Formula: {}", math.value)))
-    });
+    }
+
+    fn render_inline(
+        &self,
+        _: &MarkdownNode,
+        _: &MarkdownInlineRenderContext,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Option<MarkdownInlinePresentation> {
+        Some(MarkdownInlinePresentation::text())
+    }
+}
 
 TextView::markdown("inline-formulas", "Formulas $x^2$ and $y^2$")
-    .markdown_extensions(extensions)
+    .markdown_math()
+    .plugin(FormulaPlugin)
 ```
 
-This renders an atomic text fallback. Register `inline_renderer("formula", ...)` to return `Some(MarkdownInlinePresentation::image(image, metrics))` for a prepared `Arc<gpui::Image>`. `MarkdownInlineMetrics::new(size(width, height), baseline)` uses logical pixels at the current font size; the baseline is measured from the top. The renderer receives `MarkdownInlineRenderContext` with the current text style, font size, line height, rem size, and available width. Returning `None` or invalid metrics uses the text fallback. Render callbacks should read prepared resources; do not run an equation engine synchronously during layout.
+This plugin renders atomic text. Implement `MarkdownPlugin::render_inline` to return `Some(MarkdownInlinePresentation::image(image, metrics))` for a prepared `Arc<gpui::Image>`. `MarkdownInlineMetrics::new(size(width, height), baseline)` uses logical pixels at the current font size; the baseline is measured from the top. The renderer receives `MarkdownInlineRenderContext` with the current text style, font size, line height, rem size, and available width. Returning `None` or invalid metrics uses the text fallback. Render callbacks should read prepared resources; do not run an equation engine synchronously during layout.
 
 Use `MarkdownExtensions::parser_revision(config_version)` when parser captures or plugin configuration change without changing the registered names. Keep the revision stable for equivalent registrations rebuilt during rendering; changing it reparses the existing source.
 
@@ -156,7 +183,7 @@ Objects align to the text baseline and wrap only before or after the whole objec
 
 For asynchronous resources, retain a `TextViewState`, update the application-owned cache, then call `state.invalidate_inline_layout(cx)` through the view's weak entity. This remeasures inline content and virtual-list heights without reparsing or dropping the current logical selection. Associate results with source/font/theme keys and discard obsolete completions. `examples/markdown` contains the formula implementation and a preview zoom control.
 
-`TextView` also offers `markdown_math`, `markdown_inline_parser`, and `markdown_inline_renderer` convenience builders. Math parsing is opt-in; inline code continues to protect dollar signs from math parsing.
+Use `.plugin(...)` for reusable extensions. `.markdown_math()` opts into math parsing; inline code continues to protect dollar signs from math parsing.
 
 ## Retained state and streaming updates
 

@@ -2866,20 +2866,21 @@ mod tests {
         let width = Arc::new(std::sync::atomic::AtomicUsize::new(400));
         let render_width = width.clone();
         let mut node_cx = NodeContext::default();
-        node_cx.markdown_extensions = Arc::new(MarkdownExtensions::default().inline_renderer(
-            "test",
-            move |_, _, _, _| {
-                Some(MarkdownInlinePresentation::image(
-                    Arc::new(Image::from_bytes(ImageFormat::Svg, b"<svg/>".to_vec())),
-                    MarkdownInlineMetrics::new(
-                        gpui::size(
-                            px(render_width.load(std::sync::atomic::Ordering::Relaxed) as f32),
-                            px(20.),
+        node_cx.markdown_extensions = Arc::new(MarkdownExtensions::default().plugin(
+            crate::text::markdown_ext::TestInlinePlugin::new("test").render_with(
+                move |_, _, _, _| {
+                    Some(MarkdownInlinePresentation::image(
+                        Arc::new(Image::from_bytes(ImageFormat::Svg, b"<svg/>".to_vec())),
+                        MarkdownInlineMetrics::new(
+                            gpui::size(
+                                px(render_width.load(std::sync::atomic::Ordering::Relaxed) as f32),
+                                px(20.),
+                            ),
+                            px(15.),
                         ),
-                        px(15.),
-                    ),
-                ))
-            },
+                    ))
+                },
+            ),
         ));
         let table = table_of(
             vec![vec![TableCell {

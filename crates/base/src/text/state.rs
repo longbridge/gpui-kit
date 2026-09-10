@@ -998,14 +998,14 @@ mod tests {
         cx.update(crate::init);
         let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("中文 $a$\n\n尾 $x", cx)));
         state.update(cx, |state, cx| {
-            let extensions = MarkdownExtensions::default()
-                .math()
-                .inline_parser(|node, _| {
+            let extensions = MarkdownExtensions::default().math().plugin(
+                crate::text::markdown_ext::TestInlinePlugin::new("test").parse_with(|node, _| {
                     let markdown::mdast::Node::InlineMath(math) = node else {
                         return None;
                     };
                     Some(super::super::MarkdownNode::new("formula", ()).text(math.value.clone()))
-                });
+                }),
+            );
             state.set_markdown_extensions(Arc::new(extensions), cx);
         });
         cx.run_until_parked();
@@ -1286,10 +1286,14 @@ mod tests {
         for (revision, label) in [(1, "Alice"), (2, "Bob")] {
             let extensions = MarkdownExtensions::default()
                 .parser_revision(revision)
-                .inline_parser(move |node, _| {
-                    matches!(node, markdown::mdast::Node::Text(_))
-                        .then(|| MarkdownNode::new("mention", label).text(label))
-                });
+                .plugin(
+                    crate::text::markdown_ext::TestInlinePlugin::new("test").parse_with(
+                        move |node, _| {
+                            matches!(node, markdown::mdast::Node::Text(_))
+                                .then(|| MarkdownNode::new("mention", label).text(label))
+                        },
+                    ),
+                );
             state.update(cx, |state, cx| {
                 state.set_markdown_extensions(Arc::new(extensions), cx)
             });

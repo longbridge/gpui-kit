@@ -832,15 +832,15 @@ mod tests {
     #[test]
     fn inline_extensions_preserve_nodes_inside_marks_and_global_source_ranges() {
         let source = "中文 **before $x^2$ after** and `$ignored$`";
-        let extensions = MarkdownExtensions::default()
-            .math()
-            .inline_parser(|node, cx| {
+        let extensions = MarkdownExtensions::default().math().plugin(
+            crate::text::markdown_ext::TestInlinePlugin::new("test").parse_with(|node, cx| {
                 let Node::InlineMath(math) = node else {
                     return None;
                 };
                 assert_eq!(cx.node_source(node), Some("$x^2$"));
                 Some(MarkdownNode::new("formula", math.value.clone()).text("x²"))
-            });
+            }),
+        );
         let mut cx = NodeContext {
             offset: 50,
             markdown_extensions: extensions.into(),
@@ -876,12 +876,16 @@ mod tests {
             let mut cx = NodeContext {
                 markdown_extensions: MarkdownExtensions::default()
                     .math()
-                    .inline_parser(|node, _| match node {
-                        Node::InlineMath(math) => {
-                            Some(MarkdownNode::new("math", ()).text(math.value.clone()))
-                        }
-                        _ => None,
-                    })
+                    .plugin(
+                        crate::text::markdown_ext::TestInlinePlugin::new("test").parse_with(
+                            |node, _| match node {
+                                Node::InlineMath(math) => {
+                                    Some(MarkdownNode::new("math", ()).text(math.value.clone()))
+                                }
+                                _ => None,
+                            },
+                        ),
+                    )
                     .into(),
                 ..Default::default()
             };
@@ -916,9 +920,14 @@ mod tests {
     fn inline_parser_without_metadata_falls_back_to_original_source() {
         let mut cx = NodeContext {
             markdown_extensions: MarkdownExtensions::default()
-                .inline_parser(|node, _| {
-                    matches!(node, Node::InlineCode(_)).then(|| MarkdownNode::new("opaque", ()))
-                })
+                .plugin(
+                    crate::text::markdown_ext::TestInlinePlugin::new("test").parse_with(
+                        |node, _| {
+                            matches!(node, Node::InlineCode(_))
+                                .then(|| MarkdownNode::new("opaque", ()))
+                        },
+                    ),
+                )
                 .into(),
             ..Default::default()
         };

@@ -346,40 +346,6 @@ impl TextView {
         self
     }
 
-    /// Register an inline AST parser, following the block extension mechanism.
-    pub fn markdown_inline_parser<F>(mut self, parser: F) -> Self
-    where
-        F: for<'a> Fn(
-                &markdown::mdast::Node,
-                &crate::text::MarkdownParseContext<'a>,
-            ) -> Option<MarkdownNode>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let extensions = Arc::make_mut(&mut self.markdown_extensions);
-        *extensions = std::mem::take(extensions).inline_parser(parser);
-        self
-    }
-
-    /// Register a static inline renderer by custom node name.
-    pub fn markdown_inline_renderer<F>(mut self, name: impl Into<SharedString>, renderer: F) -> Self
-    where
-        F: Fn(
-                &MarkdownNode,
-                &crate::text::MarkdownInlineRenderContext,
-                &mut Window,
-                &mut App,
-            ) -> Option<crate::text::MarkdownInlinePresentation>
-            + Send
-            + Sync
-            + 'static,
-    {
-        let extensions = Arc::make_mut(&mut self.markdown_extensions);
-        *extensions = std::mem::take(extensions).inline_renderer(name, renderer);
-        self
-    }
-
     /// Enable MDX JSX/expression parsing.
     ///
     /// This disables raw HTML parsing because `markdown-rs` gives HTML
@@ -822,25 +788,30 @@ mod tests {
                 .child(
                     TextView::new(&self.view)
                         .selection_format(self.format)
-                        .markdown_inline_parser(|node, _| {
-                            let markdown::mdast::Node::Link(link) = node else {
-                                return None;
-                            };
-                            let handle = link.url.strip_prefix("mention:")?;
-                            Some(
-                                crate::text::MarkdownNode::new("mention", ())
-                                    .text(format!("@{handle}")),
-                            )
-                        })
-                        .markdown_inline_renderer("mention", move |_, _, _, _| {
-                            let builds = builds.clone();
-                            Some(crate::text::MarkdownInlinePresentation::text().hover_card(
-                                move |_, cx| {
-                                    builds.fetch_add(1, Ordering::Relaxed);
-                                    cx.new(|_| InlineHoverCard).into()
-                                },
-                            ))
-                        }),
+                        .plugin(
+                            crate::text::markdown_ext::TestInlinePlugin::new("mention")
+                                .parse_with(|node, _| {
+                                    let markdown::mdast::Node::Link(link) = node else {
+                                        return None;
+                                    };
+                                    let handle = link.url.strip_prefix("mention:")?;
+                                    Some(
+                                        crate::text::MarkdownNode::new("mention", ())
+                                            .text(format!("@{handle}")),
+                                    )
+                                })
+                                .render_with(move |_, _, _, _| {
+                                    let builds = builds.clone();
+                                    Some(
+                                        crate::text::MarkdownInlinePresentation::text().hover_card(
+                                            move |_, cx| {
+                                                builds.fetch_add(1, Ordering::Relaxed);
+                                                cx.new(|_| InlineHoverCard).into()
+                                            },
+                                        ),
+                                    )
+                                }),
+                        ),
                 )
         }
     }
@@ -920,11 +891,10 @@ mod tests {
                     .selection_format(if self.source_format { crate::text::SelectionFormat::Source }
                         else { crate::text::SelectionFormat::Plain })
                     .markdown_math()
-                    .markdown_inline_parser(|node, _| {
+                    .plugin(crate::text::markdown_ext::TestInlinePlugin::new("math").parse_with(|node, _| {
                         let markdown::mdast::Node::InlineMath(math) = node else { return None };
                         Some(crate::text::MarkdownNode::new("math", ()).text(format!("{}²", math.value)))
-                    })
-                    .markdown_inline_renderer("math", move |_, context, _, _| {
+                    }).render_with(move |_, context, _, _| {
                         let value = prepared_size.as_ref()?.load(Ordering::Relaxed) as f32;
                         let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg,
                             b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"40\"><path d=\"M0 0L40 40\" stroke=\"black\"/></svg>".to_vec()));
@@ -932,7 +902,7 @@ mod tests {
                         Some(crate::text::MarkdownInlinePresentation::image(image,
                             crate::text::MarkdownInlineMetrics::new(
                                 gpui::size(unit * value, unit * value), unit * value * 0.75)))
-                    }))
+                    })))
         }
     }
 
@@ -1959,16 +1929,18 @@ mod tests {
         impl Render for Root {
             fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
                 let clicks = self.clicks.clone();
-                let extensions = crate::text::MarkdownExtensions::default()
-                    .math()
-                    .inline_parser(|node, _| {
-                        matches!(node, markdown::mdast::Node::InlineMath(_))
-                            .then(|| super::super::MarkdownNode::new("math", ()).text("formula"))
-                    })
-                    .inline_renderer("math", |_, context, _, _| {
-                        assert_eq!(context.text_style.font_weight, gpui::FontWeight::BOLD);
-                        Some(super::super::MarkdownInlinePresentation::text())
-                    });
+                let extensions = crate::text::MarkdownExtensions::default().math().plugin(
+                    crate::text::markdown_ext::TestInlinePlugin::new("math")
+                        .parse_with(|node, _| {
+                            matches!(node, markdown::mdast::Node::InlineMath(_)).then(|| {
+                                super::super::MarkdownNode::new("math", ()).text("formula")
+                            })
+                        })
+                        .render_with(|_, context, _, _| {
+                            assert_eq!(context.text_style.font_weight, gpui::FontWeight::BOLD);
+                            Some(super::super::MarkdownInlinePresentation::text())
+                        }),
+                );
                 div().w(px(300.)).child(crate::TextSelectionLayer).child(
                     TextView::new(&self.state)
                         .markdown_extensions(extensions)

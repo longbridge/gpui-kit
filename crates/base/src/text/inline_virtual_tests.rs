@@ -31,17 +31,16 @@ impl Render for VirtualInlineRoot {
             .child(TextView::new(&self.view).scrollable(true)
                 .selection_format(if self.source_format { SelectionFormat::Source } else { SelectionFormat::Plain })
                 .markdown_math()
-                .markdown_inline_parser(|node, _| {
+                .plugin(crate::text::markdown_ext::TestInlinePlugin::new("math").parse_with(|node, _| {
                     let markdown::mdast::Node::InlineMath(math) = node else { return None };
                     Some(MarkdownNode::new("math", ()).text(format!("{}²", math.value)))
-                })
-                .markdown_inline_renderer("math", move |_, context, _, _| {
+                }).render_with(move |_, context, _, _| {
                     let extent = context.font_size * (prepared.load(Ordering::Relaxed) as f32 / 16.);
                     let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg,
                         b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"40\"><path d=\"M0 0L40 40\" stroke=\"black\"/></svg>".to_vec()));
                     Some(MarkdownInlinePresentation::image(image,
                         MarkdownInlineMetrics::new(size(extent, extent), extent * 0.75)))
-                }))
+                })))
     }
 }
 
