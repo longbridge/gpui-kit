@@ -24,8 +24,6 @@ enum Part {
 
 #[derive(Clone, Copy, PartialEq)]
 enum Slot {
-    Header,
-    Content,
     Media,
     Title,
     Description,
@@ -57,6 +55,24 @@ fn slot<T: gpui::IntoElement + 'static>(
         .transpose()
 }
 
+// `header` and `content` are slots the prelude installs on every element, so
+// they arrive through the common slot lane rather than as recorded methods.
+// Resolve only the final value: overwritten slots must not be rendered.
+fn common_slot<T: gpui::IntoElement + 'static>(
+    request: &mut MaterializeRequest<'_>,
+    slot: &str,
+    name: &str,
+) -> anyhow::Result<Option<T>> {
+    // `take_slot` drains one value per call and reaches the deferred lane that
+    // `take_slots` leaves behind, so draining to the end is what finds the last.
+    let mut last = None;
+    while let Some(element) = request.take_slot(slot)? {
+        last = Some(element);
+    }
+    last.map(|mut element| take_element(&mut element, name))
+        .transpose()
+}
+
 impl ComponentMaterializer for Materializer {
     fn materialize(&self, mut request: MaterializeRequest<'_>) -> anyhow::Result<gpui::AnyElement> {
         let part = *request
@@ -71,8 +87,8 @@ impl ComponentMaterializer for Materializer {
 
         match part {
             Part::Root => {
-                let header = slot(&mut request, &operations, Slot::Header, "EmptyHeader")?;
-                let content = slot(&mut request, &operations, Slot::Content, "EmptyContent")?;
+                let header = common_slot(&mut request, "header", "EmptyHeader")?;
+                let content = common_slot(&mut request, "content", "EmptyContent")?;
                 request.finish(
                     Empty::new()
                         .when_some(header, Empty::header)
@@ -139,18 +155,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             "Empty",
             Part::Root,
             "A stateless empty state. Ordinary children follow the header and content slots.",
-            vec![
-                slot_method(
-                    "header",
-                    Slot::Header,
-                    "Sets an EmptyHeader, replacing the previous header.",
-                ),
-                slot_method(
-                    "content",
-                    Slot::Content,
-                    "Sets an EmptyContent, replacing the previous content.",
-                ),
-            ],
+            vec![],
         ),
         (
             "EmptyHeader",
@@ -261,7 +266,7 @@ mod tests {
             ]
         );
         for (descriptor, methods) in descriptors.iter().zip([
-            vec!["header", "content"],
+            vec![],
             vec!["media", "title", "description"],
             vec!["variant"],
             vec![],
