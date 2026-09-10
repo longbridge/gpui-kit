@@ -154,7 +154,7 @@ fn is_block(&self) -> bool {
 }
 ```
 
-Inline plugin 保留默认的 `is_block() == false`，使用静态 `render_inline` 契约，支持基线布局、原子选择、纯文本与 Markdown 复制、文本降级和异步布局失效。详见[Inline plugin](../base/text-view.md#inline-plugin)。Component 层转发相同的 builder，并导出相同的行内类型。
+Inline plugin 保留默认的 `is_block() == false`，`render_inline` 返回 `Option<InlineElement>`。通过 `InlineElement::new(...)` 包裹任意 GPUI 元素，使用原生样式与事件，并按需指定基线。TextView 将整个元素作为原子对象测量和选择，支持纯文本与 Markdown 复制、文本降级和异步布局失效。契约与 `.plugin(...)` 注册示例详见[Inline plugin](../base/text-view.md#inline-plugin)。Component 层导出相同的 `InlineElement` 和 `InlineRenderContext` 类型。
 
 ## YAML Frontmatter
 

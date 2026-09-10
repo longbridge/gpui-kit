@@ -3,11 +3,11 @@ use gpui_kit::{
         ActiveTheme as _, Sizable as _,
         avatar::Avatar,
         h_flex,
+        hover_card::HoverCard,
         text::{
-            MarkdownInlinePresentation, MarkdownInlineRenderContext, MarkdownNode,
-            MarkdownParseContext, MarkdownPlugin, markdown_ast,
+            InlineElement, InlineRenderContext, MarkdownNode, MarkdownParseContext, MarkdownPlugin,
+            markdown_ast,
         },
-        tooltip::Tooltip,
         v_flex,
     },
     *,
@@ -49,37 +49,51 @@ impl MarkdownPlugin for MentionPlugin {
     fn render_inline(
         &self,
         node: &MarkdownNode,
-        _: &MarkdownInlineRenderContext,
+        context: &InlineRenderContext,
         _: &mut Window,
         cx: &mut App,
-    ) -> Option<MarkdownInlinePresentation> {
+    ) -> Option<InlineElement> {
         let member = *node.data::<Member>()?;
-        Some(
-            MarkdownInlinePresentation::text()
-                .text_color(cx.theme().link)
-                .text_color_range(0..1, cx.theme().muted_foreground)
-                .font_weight(FontWeight::MEDIUM)
-                .underline()
-                .hover_card(move |window, cx| {
-                    Tooltip::element(move |_, cx| {
-                        h_flex()
-                            .gap_2()
-                            .py_1()
-                            .child(Avatar::new().name(member.name).small())
-                            .child(
-                                v_flex()
-                                    .child(div().font_weight(FontWeight::MEDIUM).child(member.name))
-                                    .child(
-                                        div()
-                                            .text_xs()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(format!("@{}", member.handle)),
-                                    ),
-                            )
-                    })
-                    .build(window, cx)
+        let mut style = context.text_style().clone();
+        style.color = cx.theme().link;
+        style.font_weight = FontWeight::MEDIUM;
+        style.underline = Some(UnderlineStyle {
+            thickness: px(1.),
+            ..Default::default()
+        });
+        let mut prefix = style.to_run(1);
+        prefix.color = cx.theme().muted_foreground;
+        let label = StyledText::new(format!("@{}", member.handle))
+            .with_runs(vec![prefix, style.to_run(member.handle.len())]);
+        Some(InlineElement::new(
+            HoverCard::new("mention-profile")
+                .anchor(Anchor::TopCenter)
+                .trigger(
+                    div()
+                        .id("mention")
+                        .cursor_default()
+                        .text_size(context.font_size())
+                        .line_height(context.line_height())
+                        .whitespace_nowrap()
+                        .child(label),
+                )
+                .content(move |_, _, cx| {
+                    h_flex()
+                        .gap_2()
+                        .py_1()
+                        .child(Avatar::new().name(member.name).small())
+                        .child(
+                            v_flex()
+                                .child(div().font_weight(FontWeight::MEDIUM).child(member.name))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(format!("@{}", member.handle)),
+                                ),
+                        )
                 }),
-        )
+        ))
     }
 }
 

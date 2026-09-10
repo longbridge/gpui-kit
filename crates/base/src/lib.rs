@@ -163,8 +163,9 @@ pub use switch::{
 pub use table::{Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow};
 pub use tabs::{Tab, TabStyles, Tabs};
 pub use text::{
-    MarkdownExtensions, MarkdownNode, MarkdownPlugin, SelectionFormat, TableData, Text, TextView,
-    TextViewDefaults, TextViewPlugin, TextViewState, TextViewStyle, html, markdown,
+    InlineElement, InlineRenderContext, MarkdownExtensions, MarkdownNode, MarkdownParseContext,
+    MarkdownPlugin, SelectionFormat, TableData, Text, TextView, TextViewDefaults, TextViewPlugin,
+    TextViewState, TextViewStyle, html, markdown, markdown_ast,
 };
 pub use text_selection::{
     TextSelection, TextSelectionContentKey, TextSelectionCoverage, TextSelectionEndpoint,

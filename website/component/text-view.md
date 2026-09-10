@@ -210,7 +210,7 @@ fn is_block(&self) -> bool {
 }
 ```
 
-Inline plugins use the default `is_block() == false` and the static `render_inline` contract. They support baseline layout, atomic selection, plain/Markdown copying, text fallback, and explicit asynchronous layout invalidation. See [Inline plugin](../base/text-view.md#inline-plugin) for the contract and registration example. The component facade forwards the same builders and exports the same inline types.
+Inline plugins use the default `is_block() == false` and return `Option<InlineElement>` from `render_inline`. Wrap any GPUI element with `InlineElement::new(...)`, use native styles and events, and set an optional baseline. TextView measures and selects the whole element as one atom, with plain/Markdown copying, text fallback, and explicit asynchronous layout invalidation. See [Inline plugin](../base/text-view.md#inline-plugin) for the contract and `.plugin(...)` registration example. The component facade exports the same `InlineElement` and `InlineRenderContext` types.
 
 ## YAML Frontmatter
 

@@ -1,187 +1,164 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    cell::RefCell,
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, CursorStyle, Element, ElementId, GlobalElementId,
-    Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement as _, IntoElement, LayoutId,
-    MouseButton, MouseDownEvent, ObjectFit, ParentElement, Pixels, Role, SharedString, Size,
-    StatefulInteractiveElement as _, Styled, StyledImage, StyledText, TextRun, TextStyle, Window,
-    div, img, px, size,
+    Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseDownEvent,
+    ParentElement, Pixels, Refineable as _, Role, SharedString, Size, Styled, StyledText,
+    TextStyle, Window, div, px, size,
 };
 
 use super::{
-    MarkdownExtensions, MarkdownInlineMetrics, MarkdownInlinePresentation,
-    MarkdownInlineRenderContext, MarkdownNode, TextViewMultiClickKind,
-    inline::point_in_text_selection, state::LineSpan,
+    InlineElement, TextViewMultiClickKind, inline::point_in_text_selection, state::LineSpan,
 };
 use crate::GlobalState;
 
-/// A measured static object, reused unchanged from wrapping through painting.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct InlineMetrics {
+    pub size: Size<Pixels>,
+    pub baseline: Pixels,
+}
+
+impl InlineMetrics {
+    fn is_valid(self) -> bool {
+        let width = f32::from(self.size.width);
+        let height = f32::from(self.size.height);
+        let baseline = f32::from(self.baseline);
+        width.is_finite()
+            && height.is_finite()
+            && baseline.is_finite()
+            && width > 0.
+            && height > 0.
+            && baseline >= 0.
+            && baseline <= height
+    }
+}
+
+/// Geometry can be cloned during wrapping; the frame's element is consumed once.
 #[derive(Clone)]
 pub(super) struct MeasuredInlineObject {
-    pub metrics: MarkdownInlineMetrics,
-    presentation: Option<MarkdownInlinePresentation>,
+    pub metrics: InlineMetrics,
+    content: Option<Rc<RefCell<Option<AnyElement>>>>,
     text: SharedString,
     font_size: Pixels,
     text_style: TextStyle,
-    text_runs: Vec<TextRun>,
-    appearance: super::markdown_inline::InlineAppearance,
 }
 
 impl MeasuredInlineObject {
+    /// Must run before entering a GPUI measured-layout callback: native element
+    /// layout itself uses the window's layout engine.
     pub fn measure(
-        node: &MarkdownNode,
-        extensions: &MarkdownExtensions,
+        text: &str,
+        presentation: Option<InlineElement>,
         style: &TextStyle,
-        width: Option<Pixels>,
         window: &mut Window,
         cx: &mut App,
     ) -> Self {
         let font_size = style.font_size.to_pixels(window.rem_size());
-        let context = MarkdownInlineRenderContext {
-            text_style: style.clone(),
+        let text: SharedString = text.replace(['\r', '\n'], " ").into();
+        let line = window.text_system().shape_line(
+            text.clone(),
             font_size,
-            line_height: window.line_height(),
-            rem_size: window.rem_size(),
-            available_width: width,
-        };
-        let presentation = extensions.render_inline(node, &context, window, cx);
-        let mut appearance = presentation
-            .as_ref()
-            .map(|p| p.appearance.clone())
-            .unwrap_or_default();
-        let mut style = style.clone();
-        if let Some(weight) = appearance.font_weight {
-            style.font_weight = weight;
-        }
-        if appearance.underline {
-            style.underline = Some(gpui::UnderlineStyle {
-                thickness: px(1.),
-                ..Default::default()
-            });
-        }
-        if let Some(color) = appearance.color {
-            style.color = color;
-        }
-        if presentation.as_ref().is_some_and(|p| p.image.is_some()) {
-            appearance.padding_x = Pixels::ZERO;
-        }
-        // A fallback is one atomic line; source newlines remain in copied text.
-        let text: SharedString = node.as_text().replace(['\r', '\n'], " ").into();
-        let runs = colored_text_runs(&text, &style, &appearance.color_ranges);
-        let line = window
-            .text_system()
-            .shape_line(text.clone(), font_size, &runs, None);
-        let height = context.line_height.max(line.ascent + line.descent);
-        let fallback = MarkdownInlineMetrics::new(
-            size(line.width.max(px(1.)) + appearance.padding_x * 2., height),
-            (height - line.ascent - line.descent) / 2. + line.ascent,
+            &[style.to_run(text.len())],
+            None,
         );
-        let mut metrics = presentation
-            .as_ref()
-            .and_then(|p| p.image.as_ref())
-            .map_or(fallback, |(_, metrics)| *metrics);
-        let scale = width.map_or(1., |width| {
-            (f32::from(width.max(Pixels::ZERO)) / f32::from(metrics.size.width)).min(1.)
-        });
-        metrics.size = size(metrics.size.width * scale, metrics.size.height * scale);
-        metrics.baseline *= scale;
-        // Image decode failure uses this same box. Fit all of the alternative
-        // text to that box, even when the image is much narrower than its name.
-        let fallback_scale = (metrics.size.width / fallback.size.width)
-            .min(metrics.size.height / fallback.size.height)
-            .min(1.);
-        appearance.padding_x *= fallback_scale;
-        appearance.radius *= scale;
-        Self {
-            metrics,
-            presentation,
+        let height = style
+            .line_height_in_pixels(window.rem_size())
+            .max(line.ascent + line.descent);
+        let fallback = InlineMetrics {
+            size: size(line.width.max(px(1.)), height),
+            baseline: (height - line.ascent - line.descent) / 2. + line.ascent,
+        };
+        let mut result = Self {
+            metrics: fallback,
+            content: None,
             text,
-            font_size: font_size * fallback_scale,
-            text_style: style,
-            text_runs: runs,
-            appearance,
+            font_size,
+            text_style: style.clone(),
+        };
+        if let Some(presentation) = presentation {
+            // The wrapper carries inherited marks into both layout and painting.
+            let mut wrapper = div().child(presentation.element);
+            wrapper.style().text = style.subtract(&Default::default());
+            let mut element = wrapper.into_any_element();
+            let measured = element.layout_as_root(
+                size(AvailableSpace::MaxContent, AvailableSpace::MaxContent),
+                window,
+                cx,
+            );
+            let metrics = InlineMetrics {
+                size: measured,
+                baseline: presentation.baseline.unwrap_or(
+                    (measured.height - (fallback.size.height - fallback.baseline))
+                        .max(Pixels::ZERO),
+                ),
+            };
+            if metrics.is_valid() {
+                result.metrics = metrics;
+                result.content = Some(Rc::new(RefCell::new(Some(element))));
+            }
         }
+        result
     }
 
-    fn element(&self) -> AnyElement {
-        if self.metrics.size.width <= Pixels::ZERO || self.metrics.size.height <= Pixels::ZERO {
-            return gpui::Empty.into_any_element();
+    pub fn fit_text(mut self, width: Option<Pixels>) -> Self {
+        // GPUI has no general subtree scale. Only our own plain-text fallback
+        // can be proportionally fitted; custom elements retain their real size.
+        if self.content.is_none() {
+            let scale = width.map_or(1., |width| {
+                (width.max(Pixels::ZERO) / self.metrics.size.width).min(1.)
+            });
+            self.metrics.size = size(
+                self.metrics.size.width * scale,
+                self.metrics.size.height * scale,
+            );
+            self.metrics.baseline *= scale;
+            self.font_size *= scale;
         }
-        let fallback_text = self.text.clone();
-        let font_size = self.font_size;
-        let bounds = self.metrics.size;
-        let padding = self.appearance.padding_x;
-        let color = self.text_style.color;
-        let weight = self.text_style.font_weight;
-        let runs = self.text_runs.clone();
-        let fallback = move || {
+        self
+    }
+
+    fn element(&self) -> (AnyElement, bool) {
+        if let Some(content) = &self.content {
+            return (
+                content
+                    .borrow_mut()
+                    .take()
+                    .expect("inline element painted once per frame"),
+                true,
+            );
+        }
+        let text = StyledText::new(self.text.clone())
+            .with_runs(vec![self.text_style.to_run(self.text.len())]);
+        (
             div()
-                .w(bounds.width)
-                .h(bounds.height)
-                .px(padding)
-                .text_size(font_size)
-                .text_color(color)
-                .font_weight(weight)
-                .line_height(bounds.height)
+                .w(self.metrics.size.width)
+                .h(self.metrics.size.height)
+                .text_size(self.font_size)
+                .line_height(self.metrics.size.height)
                 .whitespace_nowrap()
                 .overflow_hidden()
-                .child(StyledText::new(fallback_text.clone()).with_runs(runs.clone()))
-                .into_any_element()
-        };
-        if let Some((image, _)) = self.presentation.as_ref().and_then(|p| p.image.as_ref()) {
-            img(image.clone())
-                .w(bounds.width)
-                .h(bounds.height)
-                .object_fit(ObjectFit::Contain)
-                .with_loading(fallback.clone())
-                .with_fallback(fallback)
-                .into_any_element()
-        } else {
-            fallback()
-        }
+                .child(text)
+                .into_any_element(),
+            false,
+        )
     }
 }
 
-fn colored_text_runs(
-    text: &str,
-    style: &TextStyle,
-    colors: &[(std::ops::Range<usize>, gpui::Hsla)],
-) -> Vec<TextRun> {
-    let mut colors = colors.to_vec();
-    colors.sort_by_key(|(range, _)| range.start);
-    let mut runs = Vec::new();
-    let mut offset = 0;
-    for (range, color) in colors {
-        if range.start < offset
-            || range.start >= range.end
-            || !text.is_char_boundary(range.start)
-            || !text.is_char_boundary(range.end)
-        {
-            continue;
-        }
-        if range.start > offset {
-            runs.push(style.to_run(range.start - offset));
-        }
-        let mut run = style.to_run(range.len());
-        run.color = color;
-        runs.push(run);
-        offset = range.end;
-    }
-    if offset < text.len() {
-        runs.push(style.to_run(text.len() - offset));
-    }
-    runs
-}
-
-/// Passive leaf whose whole bounds participate in TextView selection.
+/// Atomic selection wrapper that leaves child styling and interaction to GPUI.
 pub(super) struct InlineObject {
     id: ElementId,
-    node: MarkdownNode,
+    text: SharedString,
+    accessibility_label: SharedString,
     object: MeasuredInlineObject,
     selected: Arc<Mutex<bool>>,
     selection_bounds: Bounds<Pixels>,
     line_bounds: Bounds<Pixels>,
     content: AnyElement,
+    content_measured: bool,
     link: Option<super::node::LinkMark>,
     link_click_handler: Option<Arc<super::text_view::LinkClickHandlerFn>>,
 }
@@ -199,43 +176,24 @@ impl InlineObject {
 
     pub fn new(
         id: impl Into<ElementId>,
-        node: MarkdownNode,
+        text: SharedString,
+        accessibility_label: SharedString,
         object: MeasuredInlineObject,
         selected: Arc<Mutex<bool>>,
         selection_bounds: Bounds<Pixels>,
         line_bounds: Bounds<Pixels>,
     ) -> Self {
-        let mut content = div()
-            .id("inline-object-content")
-            .w(object.metrics.size.width)
-            .h(object.metrics.size.height)
-            .child(object.element());
-        if object.appearance.hover_background.is_some() {
-            content = content.on_hover(|_, window, _| window.refresh());
-        }
-        let content = if let Some(build) = object
-            .presentation
-            .as_ref()
-            .and_then(|p| p.hover_card.clone())
-        {
-            crate::HoverCard::new("inline-hover-card")
-                .anchor(gpui::Anchor::TopCenter)
-                .trigger(content)
-                .content(move |_, window, cx| {
-                    div().id("inline-hover-content").child(build(window, cx))
-                })
-                .into_any_element()
-        } else {
-            content.into_any_element()
-        };
+        let (content, content_measured) = object.element();
         Self {
             id: id.into(),
-            node,
+            text,
+            accessibility_label,
             object,
             selected,
             selection_bounds,
             line_bounds,
             content,
+            content_measured,
             link: None,
             link_click_handler: None,
         }
@@ -260,12 +218,12 @@ impl Element for InlineObject {
     }
 
     fn a11y_role(&self) -> Option<Role> {
-        Some(Role::Image)
+        Some(Role::GenericContainer)
     }
 
     fn write_a11y_info(&self, node: &mut gpui::accesskit::Node) {
-        node.set_role(Role::Image);
-        node.set_label(self.node.accessibility_name());
+        node.set_role(Role::GenericContainer);
+        node.set_label(self.accessibility_label.as_ref());
         node.set_read_only();
     }
 
@@ -299,15 +257,20 @@ impl Element for InlineObject {
         window: &mut Window,
         cx: &mut App,
     ) -> Hitbox {
-        self.content.prepaint_as_root(
-            bounds.origin,
-            Size {
-                width: AvailableSpace::Definite(bounds.size.width),
-                height: AvailableSpace::Definite(bounds.size.height),
-            },
-            window,
-            cx,
-        );
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        if self.content_measured {
+            self.content.prepaint_at(bounds.origin, window, cx);
+        } else {
+            self.content.prepaint_as_root(
+                bounds.origin,
+                size(
+                    AvailableSpace::Definite(bounds.size.width),
+                    AvailableSpace::Definite(bounds.size.height),
+                ),
+                window,
+                cx,
+            );
+        }
         if let Some(view) = GlobalState::global(cx).text_view_state() {
             let state = view.read(cx);
             if state.max_lines.is_some()
@@ -320,7 +283,7 @@ impl Element for InlineObject {
                 });
             }
         }
-        window.insert_hitbox(bounds, HitboxBehavior::Normal)
+        hitbox
     }
 
     fn paint(
@@ -363,20 +326,10 @@ impl Element for InlineObject {
         if let Ok(mut value) = self.selected.lock() {
             *value = selected;
         }
-        let appearance = &self.object.appearance;
-        let background = if hitbox.is_hovered(window) {
-            appearance.hover_background.or(appearance.background)
-        } else {
-            appearance.background
-        };
-        if let Some(color) = background {
-            window.paint_quad(gpui::fill(bounds, color).corner_radii(appearance.radius));
-        }
         if selected {
             let color = view.as_ref().unwrap().read(cx).text_view_style.selection();
-            window.paint_quad(gpui::fill(bounds, color).corner_radii(appearance.radius));
+            window.paint_quad(gpui::fill(bounds, color));
         }
-        self.content.paint(window, cx);
         if let Some(link) = self.link.clone() {
             window.set_cursor_style(CursorStyle::PointingHand, hitbox);
             let link_hitbox = hitbox.clone();
@@ -418,7 +371,7 @@ impl Element for InlineObject {
             }
             let hitbox = hitbox.clone();
             let selected_state = self.selected.clone();
-            let text = self.node.as_text().to_string();
+            let text = self.text.to_string();
             let current_view = window.current_view();
             let line_bounds = self.line_bounds;
             window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
@@ -450,196 +403,83 @@ impl Element for InlineObject {
                 cx.notify(current_view);
             });
         }
+        self.content.paint(window, cx);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::inline::test_draw::in_prepaint;
     use super::*;
 
     #[test]
-    fn prefix_color_keeps_utf8_text_complete_and_ignores_invalid_ranges() {
-        let style = TextStyle {
-            color: gpui::Hsla::black(),
-            ..Default::default()
-        };
-        let muted = gpui::Hsla::white();
-        let runs = colored_text_runs(
-            "@中文",
-            &style,
-            &[
-                (2..3, muted), // Inside a UTF-8 character.
-                (0..1, muted),
-                (0..4, muted), // Overlaps the prefix.
-                (7..8, muted), // Past the end.
-            ],
-        );
-        assert_eq!(runs.len(), 2);
-        assert_eq!((runs[0].len, runs[0].color), (1, muted));
-        assert_eq!((runs[1].len, runs[1].color), (6, style.color));
-    }
-
-    #[test]
-    fn styled_text_padding_scales_with_atomic_geometry() {
-        use gpui::{Empty, FontWeight, TestApp};
-        let mut app = TestApp::new();
-        let mut window = app.open_window(|_, _| Empty);
-        let node = MarkdownNode::new("mention", ()).text("@member");
-        let plain = MarkdownExtensions::default().plugin(
-            crate::text::markdown_ext::TestInlinePlugin::new("mention").render_with(
-                |_, _, _, _| {
-                    Some(MarkdownInlinePresentation::text().font_weight(FontWeight::MEDIUM))
-                },
-            ),
-        );
-        let decorated = MarkdownExtensions::default().plugin(
-            crate::text::markdown_ext::TestInlinePlugin::new("mention").render_with(
-                |_, context, _, _| {
-                    Some(
-                        MarkdownInlinePresentation::text()
-                            .font_weight(FontWeight::MEDIUM)
-                            .padding_x(context.font_size * 0.3)
-                            .rounded(context.font_size * 0.25),
-                    )
-                },
-            ),
-        );
-        for font_size in [16., 24., 32.] {
-            window.update(|_, window, cx| {
-                let style = TextStyle {
-                    font_size: px(font_size).into(),
-                    ..Default::default()
-                };
-                let plain = MeasuredInlineObject::measure(&node, &plain, &style, None, window, cx);
-                let full =
-                    MeasuredInlineObject::measure(&node, &decorated, &style, None, window, cx);
-                assert!(
-                    (full.metrics.size.width - plain.metrics.size.width - px(font_size * 0.6))
-                        .abs()
-                        < px(0.001)
-                );
-                assert_eq!(full.metrics.baseline, plain.metrics.baseline);
-                assert_eq!(full.text_style.font_weight, FontWeight::MEDIUM);
-                let narrow = MeasuredInlineObject::measure(
-                    &node,
-                    &decorated,
-                    &style,
-                    Some(full.metrics.size.width / 2.),
-                    window,
-                    cx,
-                );
-                assert_eq!(narrow.metrics.size, full.metrics.size / 2.);
-                assert_eq!(narrow.appearance.padding_x, full.appearance.padding_x / 2.);
-                assert_eq!(narrow.font_size, full.font_size / 2.);
-            });
-        }
-    }
-
-    #[test]
-    fn invalid_plugin_metrics_use_measured_text_and_zero_width_is_finite() {
-        use gpui::{Empty, TestApp};
-        let mut app = TestApp::new();
-        let mut window = app.open_window(|_, _| Empty);
-        let node = MarkdownNode::new("math", ()).text("x squared");
-        let style = TextStyle::default();
-        for metrics in [
-            MarkdownInlineMetrics::new(size(px(f32::NAN), px(10.)), px(8.)),
-            MarkdownInlineMetrics::new(size(px(10.), px(0.)), px(0.)),
-            MarkdownInlineMetrics::new(size(px(10.), px(10.)), px(11.)),
-        ] {
-            let extensions = MarkdownExtensions::default().plugin(
-                crate::text::markdown_ext::TestInlinePlugin::new("math").render_with(
-                    move |_, _, _, _| {
-                        Some(MarkdownInlinePresentation::image(
-                            Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg, Vec::new())),
-                            metrics,
-                        ))
-                    },
-                ),
+    fn native_padding_and_fixed_size_are_measured_without_fake_scaling() {
+        let mut app = gpui::TestApp::new();
+        in_prepaint(&mut app, |window, cx| {
+            let native = InlineElement::new(
+                div()
+                    .px(px(4.))
+                    .py(px(2.))
+                    .child(div().w(px(40.)).h(px(10.))),
+            )
+            .with_baseline(px(10.));
+            let measured = MeasuredInlineObject::measure(
+                "badge",
+                Some(native),
+                &TextStyle::default(),
+                window,
+                cx,
             );
-            window.update(|_, window, cx| {
-                let measured =
-                    MeasuredInlineObject::measure(&node, &extensions, &style, None, window, cx);
-                assert!(measured.presentation.is_none());
-                assert!(measured.metrics.is_valid());
-                let zero = MeasuredInlineObject::measure(
-                    &node,
-                    &extensions,
-                    &style,
-                    Some(px(0.)),
-                    window,
-                    cx,
-                );
-                assert_eq!(zero.metrics.size, size(px(0.), px(0.)));
-                assert_eq!(zero.metrics.baseline, px(0.));
-            });
-        }
-    }
-
-    #[test]
-    fn failed_image_fallback_fits_the_whole_alternative_text() {
-        use crate::text::inline::test_fonts::{BODY, WideMonoTextSystem};
-        use gpui::{Empty, TestApp};
-        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
-        let mut window = app.open_window(|_, _| Empty);
-        let extensions = MarkdownExtensions::default().plugin(
-            crate::text::markdown_ext::TestInlinePlugin::new("math").render_with(|_, _, _, _| {
-                Some(MarkdownInlinePresentation::image(
-                    Arc::new(gpui::Image::from_bytes(
-                        gpui::ImageFormat::Svg,
-                        b"invalid SVG".to_vec(),
-                    )),
-                    MarkdownInlineMetrics::new(size(px(8.), px(10.)), px(8.)),
-                ))
-            }),
-        );
-        let text = "long formula alternative";
-        let node = MarkdownNode::new("math", ()).text(text);
-        let style = TextStyle {
-            font_family: BODY.into(),
-            font_size: px(16.).into(),
-            ..Default::default()
-        };
-        window.update(|_, window, cx| {
-            let measured =
-                MeasuredInlineObject::measure(&node, &extensions, &style, None, window, cx);
-            assert!(
-                WideMonoTextSystem::width_of(text, BODY, measured.font_size)
-                    <= measured.metrics.size.width + px(0.001)
-            );
+            assert_eq!(measured.metrics.size, size(px(48.), px(14.)));
+            assert_eq!(measured.metrics.baseline, px(10.));
+            let narrow = measured.fit_text(Some(px(20.)));
+            assert_eq!(narrow.metrics.size, size(px(48.), px(14.)));
         });
     }
 
     #[test]
-    fn inline_object_exposes_one_read_only_name_without_actions() {
-        let node = MarkdownNode::new("math", ())
-            .text("x²")
-            .accessibility_label("x squared");
-        let metrics = MarkdownInlineMetrics::new(size(px(30.), px(20.)), px(15.));
-        let measured = MeasuredInlineObject {
-            metrics,
-            presentation: None,
-            text: "x²".into(),
-            font_size: px(16.),
-            text_style: TextStyle::default(),
-            text_runs: vec![TextStyle::default().to_run("x²".len())],
-            appearance: Default::default(),
-        };
-        let object = InlineObject::new(
-            "formula",
-            node,
-            measured,
-            Arc::default(),
-            Bounds::default(),
-            Bounds::default(),
-        );
-        let mut accessible = gpui::accesskit::Node::new(Role::Unknown);
-        assert_eq!(object.a11y_role(), Some(Role::Image));
-        object.write_a11y_info(&mut accessible);
-        assert_eq!(accessible.role(), Role::Image);
-        assert_eq!(accessible.label(), Some("x squared"));
-        assert!(accessible.is_read_only());
-        assert!(!accessible.supports_action(gpui::accesskit::Action::Focus));
-        assert!(!accessible.supports_action(gpui::accesskit::Action::Click));
+    fn invalid_baseline_uses_text_fallback_and_zero_width_remains_finite() {
+        let mut app = gpui::TestApp::new();
+        in_prepaint(&mut app, |window, cx| {
+            for baseline in [px(f32::NAN), px(-1.), px(30.)] {
+                let native =
+                    InlineElement::new(div().w(px(20.)).h(px(20.))).with_baseline(baseline);
+                let measured = MeasuredInlineObject::measure(
+                    "fallback",
+                    Some(native),
+                    &TextStyle::default(),
+                    window,
+                    cx,
+                );
+                assert!(measured.content.is_none());
+                assert!(measured.metrics.is_valid());
+                let zero = measured.fit_text(Some(px(0.)));
+                assert_eq!(zero.metrics.size, size(px(0.), px(0.)));
+                assert_eq!(zero.metrics.baseline, px(0.));
+            }
+        });
+    }
+
+    #[test]
+    fn atomic_wrapper_does_not_mislabel_native_controls_as_images() {
+        let mut app = gpui::TestApp::new();
+        let mut window = app.open_window(|_, _| gpui::Empty);
+        window.update(|_, window, cx| {
+            let measured =
+                MeasuredInlineObject::measure("member", None, &TextStyle::default(), window, cx);
+            let object = InlineObject::new(
+                "member",
+                "member".into(),
+                "Member profile".into(),
+                measured,
+                Arc::default(),
+                Bounds::default(),
+                Bounds::default(),
+            );
+            let mut accessible = gpui::accesskit::Node::new(Role::Unknown);
+            object.write_a11y_info(&mut accessible);
+            assert_eq!(accessible.role(), Role::GenericContainer);
+            assert_eq!(accessible.label(), Some("Member profile"));
+        });
     }
 }

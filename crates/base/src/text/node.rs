@@ -1756,9 +1756,15 @@ impl Paragraph {
                         });
                     }
                 }
+                let rendered_node = node.clone();
+                let extensions = node_cx.markdown_extensions.clone();
                 items.push(InlineFlowItem::Object {
-                    node: node.clone(),
-                    extensions: node_cx.markdown_extensions.clone(),
+                    text: node.shared_text(),
+                    accessibility_label: node.shared_accessibility_name(),
+                    id: node.source_range().map_or(items.len(), |range| range.start),
+                    renderer: Arc::new(move |context, window, cx| {
+                        extensions.render_inline(&rendered_node, context, window, cx)
+                    }),
                     selected: inline_node.custom_selection.clone(),
                     style: object_style,
                     link: object_link,
@@ -2859,26 +2865,29 @@ mod tests {
 
     #[test]
     fn table_column_uses_prepared_inline_metrics_after_resource_update() {
-        use crate::text::{MarkdownInlineMetrics, MarkdownInlinePresentation};
-        use gpui::{Empty, Image, ImageFormat, TestApp};
+        use crate::text::InlineElement;
+        use crate::text::inline::test_draw::in_prepaint;
+        use gpui::{Image, ImageFormat, TestApp};
         let mut app = TestApp::new();
-        let mut window = app.open_window(|_, _| Empty);
         let width = Arc::new(std::sync::atomic::AtomicUsize::new(400));
         let render_width = width.clone();
         let mut node_cx = NodeContext::default();
         node_cx.markdown_extensions = Arc::new(MarkdownExtensions::default().plugin(
             crate::text::markdown_ext::TestInlinePlugin::new("test").render_with(
                 move |_, _, _, _| {
-                    Some(MarkdownInlinePresentation::image(
-                        Arc::new(Image::from_bytes(ImageFormat::Svg, b"<svg/>".to_vec())),
-                        MarkdownInlineMetrics::new(
-                            gpui::size(
-                                px(render_width.load(std::sync::atomic::Ordering::Relaxed) as f32),
-                                px(20.),
-                            ),
-                            px(15.),
-                        ),
-                    ))
+                    Some(
+                        InlineElement::new(
+                            gpui::img(Arc::new(Image::from_bytes(
+                                ImageFormat::Svg,
+                                b"<svg/>".to_vec(),
+                            )))
+                            .w(px(
+                                render_width.load(std::sync::atomic::Ordering::Relaxed) as f32
+                            ))
+                            .h(px(20.)),
+                        )
+                        .with_baseline(px(15.)),
+                    )
                 },
             ),
         ));
@@ -2892,15 +2901,15 @@ mod tests {
             }]],
             vec![],
         );
-        for expected in [400, 600] {
-            width.store(expected, std::sync::atomic::Ordering::Relaxed);
-            window.update(|_, window, cx| {
+        in_prepaint(&mut app, move |window, cx| {
+            for expected in [400, 600] {
+                width.store(expected, std::sync::atomic::Ordering::Relaxed);
                 assert_eq!(
                     measure_table_columns(&table, 1, &node_cx, window, cx)[0],
                     expected as f32 + CELL_PAD_PX
                 );
-            });
-        }
+            }
+        });
     }
 
     /// Table columns are sized from shaped text, so a column of inline code

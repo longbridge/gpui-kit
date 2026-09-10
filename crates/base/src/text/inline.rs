@@ -870,6 +870,54 @@ pub(super) fn point_in_text_selection(
 /// wide as every other family, so a measurement that ignores the family of a
 /// run comes out visibly short.
 #[cfg(test)]
+pub(super) mod test_draw {
+    use gpui::{App, Context, IntoElement, Render, Styled as _, TestApp, Window, canvas, px};
+    use std::{cell::RefCell, rc::Rc};
+
+    struct Probe {
+        body: Option<Box<dyn FnOnce(&mut Window, &mut App)>>,
+    }
+
+    impl Render for Probe {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let body = self.body.take();
+            canvas(
+                move |_, window, cx| {
+                    if let Some(body) = body {
+                        body(window, cx);
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .w(px(1000.))
+            .h(px(1000.))
+        }
+    }
+
+    /// Runs `f` inside a real prepaint pass and returns its value.
+    ///
+    /// Measuring an inline object lays its GPUI element out through the
+    /// window, which GPUI only permits while a frame is being drawn, so a test
+    /// that builds a real element cannot call the measurement helpers straight
+    /// from `TestAppWindow::update`.
+    pub(crate) fn in_prepaint<R: 'static>(
+        app: &mut TestApp,
+        f: impl FnOnce(&mut Window, &mut App) -> R + 'static,
+    ) -> R {
+        let slot: Rc<RefCell<Option<R>>> = Rc::new(RefCell::new(None));
+        let out = slot.clone();
+        let mut window = app.open_window(|_, _| Probe {
+            body: Some(Box::new(move |window, cx| {
+                *out.borrow_mut() = Some(f(window, cx));
+            })),
+        });
+        window.draw();
+        let value = slot.borrow_mut().take();
+        value.expect("prepaint probe did not run")
+    }
+}
+
+#[cfg(test)]
 pub(super) mod test_fonts {
     use gpui::{
         Bounds, DevicePixels, Font, FontId, FontMetrics, FontRun, GlyphId, LineLayout, Pixels,

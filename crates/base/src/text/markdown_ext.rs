@@ -12,7 +12,7 @@ use std::{
 use gpui::{AnyElement, App, IntoElement, SharedString, Window};
 use markdown::{ParseOptions, mdast};
 
-use super::{MarkdownInlinePresentation, MarkdownInlineRenderContext};
+use super::{InlineElement, InlineRenderContext};
 use crate::text::node::Span;
 
 static MARKDOWN_EXTENSIONS_REVISION: AtomicU64 = AtomicU64::new(1);
@@ -35,14 +35,9 @@ pub type MarkdownBlockRenderFn =
 /// Parser for a single inline AST node; follows the block parser contract.
 type MarkdownInlineParserFn = MarkdownBlockParserFn;
 
-/// Produces static inline text or an image, or `None` for atomic text fallback.
+/// Produces a native GPUI inline element, or `None` for atomic text fallback.
 /// Read prepared resources here; start asynchronous work outside rendering.
-type MarkdownInlineRenderFn = dyn Fn(
-        &MarkdownNode,
-        &MarkdownInlineRenderContext,
-        &mut Window,
-        &mut App,
-    ) -> Option<MarkdownInlinePresentation>
+type MarkdownInlineRenderFn = dyn Fn(&MarkdownNode, &InlineRenderContext, &mut Window, &mut App) -> Option<InlineElement>
     + Send
     + Sync;
 
@@ -66,15 +61,16 @@ pub trait MarkdownPlugin: Send + Sync + 'static {
         node.as_text().to_string()
     }
 
-    /// Present an inline node. The default displays its atomic text fallback.
+    /// Render an inline node using the existing `render` implementation.
+    /// Override this only when inherited layout context or an explicit baseline is needed.
     fn render_inline(
         &self,
-        _node: &MarkdownNode,
-        _context: &MarkdownInlineRenderContext,
-        _window: &mut Window,
-        _cx: &mut App,
-    ) -> Option<MarkdownInlinePresentation> {
-        None
+        node: &MarkdownNode,
+        _context: &InlineRenderContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<InlineElement> {
+        Some(InlineElement::new(self.render(node, window, cx)))
     }
 }
 
@@ -163,6 +159,22 @@ impl MarkdownNode {
         let label = label.into();
         self.accessibility_label = (!label.is_empty()).then_some(label);
         self
+    }
+
+    /// Plain text, sharing this node's buffer.
+    ///
+    /// The inline flow rebuilds its items every frame and holds text by value,
+    /// so going through [`Self::as_text`] would allocate a `String` per object
+    /// per frame.
+    pub(crate) fn shared_text(&self) -> SharedString {
+        self.text.clone()
+    }
+
+    /// Accessible name, sharing this node's buffer. Defaults to the plain text.
+    pub(crate) fn shared_accessibility_name(&self) -> SharedString {
+        self.accessibility_label
+            .clone()
+            .unwrap_or_else(|| self.text.clone())
     }
 
     pub(crate) fn with_inline_source(mut self, source: &str) -> Self {
@@ -418,19 +430,13 @@ impl MarkdownExtensions {
     pub(crate) fn render_inline(
         &self,
         node: &MarkdownNode,
-        context: &MarkdownInlineRenderContext,
+        context: &InlineRenderContext,
         window: &mut Window,
         cx: &mut App,
-    ) -> Option<MarkdownInlinePresentation> {
+    ) -> Option<InlineElement> {
         self.inline_renderers
             .get(node.name())
             .and_then(|render| render(node, context, window, cx))
-            .filter(|presentation| {
-                presentation
-                    .image
-                    .as_ref()
-                    .is_none_or(|(_, metrics)| metrics.is_valid())
-            })
     }
 
     pub(crate) fn render_block(
@@ -480,12 +486,7 @@ impl TestInlinePlugin {
 
     pub(super) fn render_with<F>(mut self, renderer: F) -> Self
     where
-        F: Fn(
-                &MarkdownNode,
-                &MarkdownInlineRenderContext,
-                &mut Window,
-                &mut App,
-            ) -> Option<MarkdownInlinePresentation>
+        F: Fn(&MarkdownNode, &InlineRenderContext, &mut Window, &mut App) -> Option<InlineElement>
             + Send
             + Sync
             + 'static,
@@ -508,10 +509,10 @@ impl MarkdownPlugin for TestInlinePlugin {
     fn render_inline(
         &self,
         node: &MarkdownNode,
-        context: &MarkdownInlineRenderContext,
+        context: &InlineRenderContext,
         window: &mut Window,
         cx: &mut App,
-    ) -> Option<MarkdownInlinePresentation> {
+    ) -> Option<InlineElement> {
         self.renderer
             .as_ref()
             .and_then(|render| render(node, context, window, cx))

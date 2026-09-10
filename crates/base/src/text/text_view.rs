@@ -795,18 +795,93 @@ mod tests {
                                 })
                                 .render_with(move |_, _, _, _| {
                                     let builds = builds.clone();
-                                    Some(
-                                        crate::text::MarkdownInlinePresentation::text().hover_card(
-                                            move |_, cx| {
+                                    Some(crate::text::InlineElement::new(
+                                        crate::HoverCard::new("mention-hover")
+                                            .anchor(gpui::Anchor::TopCenter)
+                                            .trigger(div().child("@member"))
+                                            .content(move |_, _, cx| {
                                                 builds.fetch_add(1, Ordering::Relaxed);
-                                                cx.new(|_| InlineHoverCard).into()
-                                            },
-                                        ),
-                                    )
+                                                div()
+                                                    .id("hover-content")
+                                                    .child(cx.new(|_| InlineHoverCard))
+                                            }),
+                                    ))
                                 }),
                         ),
                 )
         }
+    }
+
+    #[gpui::test]
+    fn inline_plugin_reuses_render_and_preserves_native_child_events(cx: &mut TestAppContext) {
+        use std::sync::Mutex;
+        struct ControlPlugin(Arc<Mutex<Vec<String>>>);
+        impl crate::text::MarkdownPlugin for ControlPlugin {
+            fn name(&self) -> &str {
+                "control"
+            }
+            fn parse(
+                &self,
+                node: &markdown::mdast::Node,
+                _: &crate::text::MarkdownParseContext<'_>,
+            ) -> Option<crate::text::MarkdownNode> {
+                let markdown::mdast::Node::Link(link) = node else {
+                    return None;
+                };
+                let label = link.url.strip_prefix("control:")?;
+                Some(crate::text::MarkdownNode::new("control", ()).text(label.to_string()))
+            }
+            fn render(
+                &self,
+                node: &crate::text::MarkdownNode,
+                _: &mut Window,
+                _: &mut gpui::App,
+            ) -> impl IntoElement {
+                let clicks = self.0.clone();
+                let label = node.as_text().to_string();
+                div()
+                    .id("same-control-id")
+                    .w(px(60.))
+                    .h(px(24.))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(move |_, _, _| clicks.lock().unwrap().push(label.clone()))
+                    .child(node.as_text().to_string())
+            }
+        }
+        struct Root {
+            view: Entity<TextViewState>,
+            clicks: Arc<Mutex<Vec<String>>>,
+        }
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(300.))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.view).plugin(ControlPlugin(self.clicks.clone())))
+            }
+        }
+        cx.update(crate::init);
+        let clicks = Arc::new(Mutex::new(Vec::new()));
+        let captured = clicks.clone();
+        let (root, cx) = cx.add_window_view(move |_, cx| Root {
+            view: cx.new(|cx| TextViewState::markdown("[one](control:one)[two](control:two)", cx)),
+            clicks,
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+        let bounds = root.read_with(cx, |root, cx| {
+            root.view.read(cx).selection_adapter.text_bounds()
+        });
+        assert_eq!(bounds.len(), 2);
+        for bounds in bounds {
+            cx.simulate_click(bounds.center(), Modifiers::default());
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+            });
+        }
+        assert_eq!(*captured.lock().unwrap(), vec!["one", "two"]);
     }
 
     #[gpui::test]
@@ -891,10 +966,8 @@ mod tests {
                         let value = prepared_size.as_ref()?.load(Ordering::Relaxed) as f32;
                         let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg,
                             b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"40\"><path d=\"M0 0L40 40\" stroke=\"black\"/></svg>".to_vec()));
-                        let unit = context.font_size / 16.;
-                        Some(crate::text::MarkdownInlinePresentation::image(image,
-                            crate::text::MarkdownInlineMetrics::new(
-                                gpui::size(unit * value, unit * value), unit * value * 0.75)))
+                        let unit = context.font_size() / 16.;
+                        Some(crate::text::InlineElement::new(gpui::img(image).w(unit * value).h(unit * value)).with_baseline(unit * value * 0.75))
                     })))
         }
     }
@@ -1055,6 +1128,45 @@ mod tests {
             root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
                 .trim(),
             "before $x$ after"
+        );
+    }
+
+    #[gpui::test]
+    fn double_click_on_formula_selects_only_that_object(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (root, cx) = cx.add_window_view(|_, cx| InlinePluginTestRoot {
+            text_view: cx.new(|cx| TextViewState::markdown("before $x$ after", cx)),
+            width: px(420.),
+            font_size: px(16.),
+            source_format: false,
+            prepared_size: None,
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let regions = root.read_with(cx, |root, cx| {
+            root.text_view.read(cx).selection_adapter.text_bounds()
+        });
+        let position = regions[1].center();
+        cx.simulate_event(MouseDownEvent {
+            position,
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 2,
+            first_mouse: false,
+        });
+        cx.simulate_event(MouseUpEvent {
+            position,
+            modifiers: Modifiers::default(),
+            button: MouseButton::Left,
+            click_count: 2,
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        // Two clicks stop at the object; only three take the whole line.
+        assert_eq!(
+            root.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim(),
+            "x²"
         );
     }
 
@@ -1930,8 +2042,8 @@ mod tests {
                             })
                         })
                         .render_with(|_, context, _, _| {
-                            assert_eq!(context.text_style.font_weight, gpui::FontWeight::BOLD);
-                            Some(super::super::MarkdownInlinePresentation::text())
+                            assert_eq!(context.text_style().font_weight, gpui::FontWeight::BOLD);
+                            Some(super::super::InlineElement::new(div().child("formula")))
                         }),
                 );
                 div().w(px(300.)).child(crate::TextSelectionLayer).child(

@@ -24,9 +24,8 @@ use gpui_kit::component::{
     resizable::{h_resizable, resizable_panel},
     status_bar::StatusBar,
     text::{
-        MarkdownInlineMetrics, MarkdownInlinePresentation, MarkdownInlineRenderContext,
-        MarkdownNode, MarkdownParseContext, MarkdownPlugin, SelectionFormat, TextView,
-        TextViewState, TextViewStyle, markdown_ast,
+        InlineElement, InlineRenderContext, MarkdownNode, MarkdownParseContext, MarkdownPlugin,
+        SelectionFormat, TextView, TextViewState, TextViewStyle, markdown_ast,
     },
     v_flex,
 };
@@ -304,25 +303,30 @@ impl MarkdownPlugin for InlineMathPlugin {
     fn render_inline(
         &self,
         node: &MarkdownNode,
-        context: &MarkdownInlineRenderContext,
+        context: &InlineRenderContext,
         _window: &mut Window,
         cx: &mut App,
-    ) -> Option<MarkdownInlinePresentation> {
+    ) -> Option<InlineElement> {
         let source = node.data::<MathNode>()?.source.clone();
-        let font_size = f32::from(context.font_size);
-        let foreground = context.text_style.color;
+        let font_size = f32::from(context.font_size());
+        let foreground = context.text_style().color;
         let background = cx.theme().background;
         let key = format!("{source}\0{font_size:?}\0{foreground:?}\0{background:?}");
         let mut cache = self.cache.lock().unwrap();
         if let Some(image) = cache.images.get(&key) {
             return image.as_ref().map(|image| {
-                MarkdownInlinePresentation::image(
-                    image.image.clone(),
-                    MarkdownInlineMetrics::new(
-                        size(px(image.width), px(image.height)),
-                        px(image.baseline),
-                    ),
+                let fallback_source = source.clone();
+                let fallback =
+                    move || render_math_text(&fallback_source, true, font_size, foreground);
+                InlineElement::new(
+                    img(image.image.clone())
+                        .object_fit(ObjectFit::Contain)
+                        .w(px(image.width))
+                        .h(px(image.height))
+                        .with_loading(fallback.clone())
+                        .with_fallback(fallback),
                 )
+                .with_baseline(px(image.baseline))
             });
         }
         // None represents pending or unavailable; both use TextView's atomic text fallback.

@@ -129,9 +129,9 @@ code-block fallback. A custom plugin can be attached with `.plugin(...)`;
 Implement `MarkdownPlugin` and register it with `.plugin(...)`, just like a Block plugin. A `MarkdownPlugin` with the default `is_block() == false` uses `render_inline`; block plugins keep `render`.
 
 ```rust
-use gpui::{App, Window};
+use gpui::{App, Styled, Window, div};
 use gpui_base::{
-    MarkdownInlinePresentation, MarkdownInlineRenderContext, MarkdownNode,
+    InlineElement, InlineRenderContext, MarkdownNode,
     MarkdownParseContext, MarkdownPlugin, TextView, markdown_ast,
 };
 
@@ -150,19 +150,21 @@ impl MarkdownPlugin for FormulaPlugin {
         let markdown_ast::Node::InlineMath(math) = node else {
             return None;
         };
-        Some(MarkdownNode::new(self.name(), math.value.clone())
-            .text(math.value.clone())
-            .accessibility_label(format!("Formula: {}", math.value)))
+        Some(
+            MarkdownNode::new("formula", math.value.clone())
+                .text(math.value.clone())
+                .accessibility_label(format!("Formula: {}", math.value)),
+        )
     }
 
     fn render_inline(
         &self,
-        _: &MarkdownNode,
-        _: &MarkdownInlineRenderContext,
+        node: &MarkdownNode,
+        _: &InlineRenderContext,
         _: &mut Window,
         _: &mut App,
-    ) -> Option<MarkdownInlinePresentation> {
-        Some(MarkdownInlinePresentation::text())
+    ) -> Option<InlineElement> {
+        Some(InlineElement::new(div().italic().child(node.as_text().to_string())))
     }
 }
 
@@ -170,19 +172,21 @@ TextView::markdown("inline-formulas", "Formulas $x^2$ and $y^2$")
     .plugin(FormulaPlugin)
 ```
 
-This plugin renders atomic text. Implement `MarkdownPlugin::render_inline` to return `Some(MarkdownInlinePresentation::image(image, metrics))` for a prepared `Arc<gpui::Image>`. `MarkdownInlineMetrics::new(size(width, height), baseline)` uses logical pixels at the current font size; the baseline is measured from the top. The renderer receives `MarkdownInlineRenderContext` with the current text style, font size, line height, rem size, and available width. Returning `None` or invalid metrics uses the text fallback. Render callbacks should read prepared resources; do not run an equation engine synchronously during layout.
+`render_inline` returns `Some(InlineElement::new(element))` for any GPUI `IntoElement`, including styled text, images, and composed elements. Use native GPUI styling, hover handlers, and child events. The renderer receives `InlineRenderContext` with the effective text style, font size, line height, and rem size. These rendering types are independent of Markdown; parsing and registration in this example remain Markdown-specific.
+
+TextView measures the element's intrinsic size and lays it out as one atom. Set `.with_baseline(px(...))` on `InlineElement` when the content needs an explicit baseline, measured from its top edge in logical pixels. Objects wrap only before or after the whole element. Fixed-size elements retain their dimensions even when wider than a line; constrain their size with GPUI styles where needed. TextView does not scale the entire element subtree.
 
 Use `MarkdownExtensions::parser_revision(config_version)` when parser captures or plugin configuration change without changing the registered names. Keep the revision stable for equivalent registrations rebuilt during rendering; changing it reparses the existing source.
 
-`MarkdownInlinePresentation::text()` keeps the node's plain text in the inline flow. Add `.hover_card(|window, cx| ...)` to build a read-only `AnyView` in a HoverCard centered horizontally below the inline object. The card is created on hover, outside inline layout, and must not contain focusable controls. Use `text_color`, `text_color_range`, `font_weight`, `underline`, `background`, `hover_background`, `padding_x`, and `rounded` to style the object. Horizontal padding participates in measurement, wrapping, selection, and proportional shrinking; background colors remain beneath selection highlighting. `text_color_range` styles UTF-8 byte ranges without splitting atomic selection. The Markdown example uses this for `[@huacnlee](mention:huacnlee)` profile cards; plain copy emits the handle and Markdown copy retains the original link syntax.
+Compose a native `HoverCard` around the trigger to show a profile card. The Markdown example uses a `StyledText` label with a muted `@`, an underlined username, and a `HoverCard` anchored at `Anchor::TopCenter`. Plain copy of `[@huacnlee](mention:huacnlee)` emits the handle; Markdown copy retains the original link syntax.
 
-Objects align to the text baseline and wrap only before or after the whole object. An object wider than the available line shrinks proportionally, including its baseline. Objects are read-only, have no focus stop or internal controls, and are selected as a whole. Double-click selects an object; triple-click selects its mixed text line. Drag selection can cross text and consecutive objects in either direction.
+Selection treats the rendered element as a whole. Double-click selects an object; triple-click selects its mixed text line. Drag selection can cross text and consecutive objects in either direction. Child events remain native GPUI events, so plugin authors should coordinate interactive controls with TextView's selection gestures.
 
-`source_range()` exposes full-document UTF-8 byte offsets including delimiters. `.text(...)` supplies plain copy and fallback text; `.markdown(...)` supplies Markdown copy, defaulting to the original node source. Missing plain text falls back to source. `.accessibility_label(...)` supplies the accessible name, defaulting to the plain text. Image loading/failure retains a visible text fallback and the same atomic copying contract.
+`source_range()` exposes full-document UTF-8 byte offsets including delimiters. `.text(...)` supplies plain copy and fallback text; `.markdown(...)` supplies Markdown copy, defaulting to the original node source. Missing plain text falls back to source. `.accessibility_label(...)` supplies the accessible name, defaulting to the plain text. Returning `None` from `render_inline` uses atomic text fallback. For images, the plugin supplies loading and failure content through `img(...).with_loading(...).with_fallback(...)`.
 
-For asynchronous resources, retain a `TextViewState`, update the application-owned cache, then call `state.invalidate_inline_layout(cx)` through the view's weak entity. This remeasures inline content and virtual-list heights without reparsing or dropping the current logical selection. Associate results with source/font/theme keys and discard obsolete completions. `examples/markdown` contains the formula implementation and a preview zoom control.
+For asynchronous resources, retain a `TextViewState`, update the application-owned cache, then call `state.invalidate_inline_layout(cx)` through the view's weak entity. This remeasures inline content and virtual-list heights without reparsing or dropping the current logical selection. Associate results with source/font/theme keys and discard obsolete completions. Render callbacks should read prepared resources; do not run an equation engine synchronously during layout. `examples/markdown` contains the formula implementation and a preview zoom control.
 
-Inline math syntax is parsed by default. Register a plugin to customize its rendering; no separate syntax switch is needed. Inline code continues to protect dollar signs from math parsing.
+Inline math syntax is parsed by default. Register a plugin to customize its rendering; no separate syntax switch is needed. Inline code continues to protect dollar signs from math parsing. When no plugin claims a math node, TextView renders its original `$...$` source as literal text, so prose that merely contains dollar signs — `spent $5 and $10` — reads and copies back unchanged.
 
 ## Retained state and streaming updates
 

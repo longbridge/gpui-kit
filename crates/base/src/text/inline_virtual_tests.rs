@@ -6,13 +6,9 @@ use std::sync::{
 use gpui::{
     AppContext as _, Context, Entity, IntoElement, Modifiers, MouseButton, ParentElement as _,
     Pixels, Render, Styled as _, TestAppContext, VisualTestContext, Window, div, point, px, rems,
-    size,
 };
 
-use super::{
-    MarkdownInlineMetrics, MarkdownInlinePresentation, MarkdownNode, SelectionFormat, TextView,
-    TextViewState,
-};
+use super::{InlineElement, MarkdownNode, SelectionFormat, TextView, TextViewState};
 
 const BLOCKS: usize = 24;
 
@@ -35,11 +31,10 @@ impl Render for VirtualInlineRoot {
                     let markdown::mdast::Node::InlineMath(math) = node else { return None };
                     Some(MarkdownNode::new("math", ()).text(format!("{}²", math.value)))
                 }).render_with(move |_, context, _, _| {
-                    let extent = context.font_size * (prepared.load(Ordering::Relaxed) as f32 / 16.);
+                    let extent = context.font_size() * (prepared.load(Ordering::Relaxed) as f32 / 16.);
                     let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Svg,
                         b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"40\" height=\"40\"><path d=\"M0 0L40 40\" stroke=\"black\"/></svg>".to_vec()));
-                    Some(MarkdownInlinePresentation::image(image,
-                        MarkdownInlineMetrics::new(size(extent, extent), extent * 0.75)))
+                    Some(InlineElement::new(gpui::img(image).w(extent).h(extent)).with_baseline(extent * 0.75))
                 })))
     }
 }

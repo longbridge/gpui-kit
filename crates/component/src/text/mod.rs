@@ -9,9 +9,9 @@ pub use compat::{
 };
 pub use frontmatter::FrontmatterPlugin;
 pub use gpui_base::text::{
-    MarkdownBlockParserFn, MarkdownBlockRenderFn, MarkdownExtensions, MarkdownInlineMetrics,
-    MarkdownInlinePresentation, MarkdownInlineRenderContext, MarkdownNode, MarkdownParseContext,
-    MarkdownPlugin, SelectionFormat, TableData, TextViewState, markdown_ast,
+    InlineElement, InlineRenderContext, MarkdownBlockParserFn, MarkdownBlockRenderFn,
+    MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, SelectionFormat,
+    TableData, TextViewState, markdown_ast,
 };
 pub use style::TextViewStyle;
 

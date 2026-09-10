@@ -7,16 +7,15 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use gpui::{
     AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, DefiniteLength, Element, ElementId,
     GlobalElementId, InspectorElementId, InteractiveElement as _, IntoElement, LayoutId,
-    LineFragment as WrapLineFragment, ObjectFit, ParentElement as _, Pixels, ShapedLine,
-    SharedString, SharedUri, Size, StatefulInteractiveElement as _, Styled, StyledImage as _,
-    TextRun, TextStyle, WhiteSpace, Window, div, img, point, prelude::FluentBuilder as _, px,
-    relative, size,
+    LineFragment as WrapLineFragment, ObjectFit, ParentElement as _, Pixels, Refineable as _,
+    ShapedLine, SharedString, SharedUri, Size, StatefulInteractiveElement as _, Styled,
+    StyledImage as _, TextRun, TextStyle, WhiteSpace, Window, div, img, point,
+    prelude::FluentBuilder as _, px, relative, size,
 };
 
 use crate::text::text_view::{LinkClickHandlerFn, handle_link_click};
 
 use super::{
-    MarkdownExtensions, MarkdownNode,
     inline::{Inline, InlineHighlight, InlineState, text_runs, text_size_ranges},
     inline_object::{InlineObject, MeasuredInlineObject},
     node::LinkMark,
@@ -32,10 +31,16 @@ pub(super) struct InlineFlow {
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
 }
 
+pub(super) type InlineRenderer = dyn Fn(&super::InlineRenderContext, &mut Window, &mut App) -> Option<super::InlineElement>
+    + Send
+    + Sync;
+
 pub(super) enum InlineFlowItem {
     Object {
-        node: MarkdownNode,
-        extensions: Arc<MarkdownExtensions>,
+        text: SharedString,
+        id: usize,
+        renderer: Arc<InlineRenderer>,
+        accessibility_label: SharedString,
         selected: Arc<Mutex<bool>>,
         style: gpui::HighlightStyle,
         link: Option<LinkMark>,
@@ -94,8 +99,9 @@ enum PositionedFragment {
 
 enum MeasureItem {
     Object {
-        node: MarkdownNode,
-        extensions: Arc<MarkdownExtensions>,
+        text: SharedString,
+        id: usize,
+        renderer: Arc<InlineRenderer>,
         style: gpui::HighlightStyle,
     },
     Text {
@@ -234,6 +240,7 @@ impl Element for InlineFlow {
                 MeasureItem::Text { .. } | MeasureItem::Object { .. } => None,
             })
             .collect::<Vec<_>>();
+        let objects = prepare_objects(&measure_items, &window.text_style(), window, cx);
         let layout_state = InlineFlowLayoutState::default();
         let layout_ref = layout_state.layout.clone();
 
@@ -248,9 +255,10 @@ impl Element for InlineFlow {
                 } else {
                     None
                 };
-                let layout = layout_flow(
+                let layout = layout_measured_flow(
                     &measure_items,
                     &image_sizes,
+                    &objects,
                     &text_style,
                     wrap_width,
                     window,
@@ -293,7 +301,9 @@ impl Element for InlineFlow {
                     selection_bounds,
                 } => {
                     let InlineFlowItem::Object {
-                        node,
+                        text,
+                        id,
+                        accessibility_label,
                         selected,
                         link,
                         ..
@@ -303,11 +313,9 @@ impl Element for InlineFlow {
                     };
                     let object_size = object.metrics.size;
                     let mut element = InlineObject::new(
-                        (
-                            "inline-object",
-                            node.source_range().map_or(item_ix, |range| range.start),
-                        ),
-                        node.clone(),
+                        ("inline-object", *id),
+                        text.clone(),
+                        accessibility_label.clone(),
                         object,
                         selected.clone(),
                         Bounds::new(
@@ -501,13 +509,15 @@ impl From<&InlineFlowItem> for MeasureItem {
     fn from(item: &InlineFlowItem) -> Self {
         match item {
             InlineFlowItem::Object {
-                node,
-                extensions,
+                text,
+                id,
+                renderer,
                 style,
                 ..
             } => Self::Object {
-                node: node.clone(),
-                extensions: extensions.clone(),
+                text: text.clone(),
+                id: *id,
+                renderer: renderer.clone(),
                 style: *style,
             },
             InlineFlowItem::Text {
@@ -572,6 +582,45 @@ pub(super) fn intrinsic_width(
         .width
 }
 
+fn prepare_objects(
+    items: &[MeasureItem],
+    text_style: &TextStyle,
+    window: &mut Window,
+    cx: &mut App,
+) -> Vec<Option<MeasuredInlineObject>> {
+    items
+        .iter()
+        .map(|item| match item {
+            MeasureItem::Object {
+                text,
+                id,
+                renderer,
+                style,
+            } => {
+                let style = text_style.clone().highlight(*style);
+                let context = super::InlineRenderContext::new(
+                    style.clone(),
+                    style.font_size.to_pixels(window.rem_size()),
+                    style.line_height_in_pixels(window.rem_size()),
+                    window.rem_size(),
+                );
+                // Must be the id `InlineObject` paints under: GPUI asserts a
+                // stateful child (a plugin's HoverCard) sees the same id path
+                // in request_layout as in prepaint, and the element is laid
+                // out here but painted inside `InlineObject`.
+                Some(window.with_id(("inline-object", *id), |window| {
+                    let element = window
+                        .with_text_style(Some(style.subtract(&Default::default())), |window| {
+                            renderer(&context, window, cx)
+                        });
+                    MeasuredInlineObject::measure(text, element, &style, window, cx)
+                }))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 fn layout_flow(
     items: &[MeasureItem],
     image_sizes: &[Option<Size<Pixels>>],
@@ -580,6 +629,27 @@ fn layout_flow(
     window: &mut Window,
     cx: &mut App,
 ) -> InlineFlowLayout {
+    let objects = prepare_objects(items, text_style, window, cx);
+    layout_measured_flow(
+        items,
+        image_sizes,
+        &objects,
+        text_style,
+        wrap_width,
+        window,
+        cx,
+    )
+}
+
+fn layout_measured_flow(
+    items: &[MeasureItem],
+    image_sizes: &[Option<Size<Pixels>>],
+    prepared_objects: &[Option<MeasuredInlineObject>],
+    text_style: &TextStyle,
+    wrap_width: Option<Pixels>,
+    window: &mut Window,
+    _cx: &mut App,
+) -> InlineFlowLayout {
     let line_height = window.pixel_snap(window.line_height());
     let rem_size = window.rem_size();
     let total_len = items.iter().map(MeasureItem::len).sum::<usize>();
@@ -587,23 +657,9 @@ fn layout_flow(
         return InlineFlowLayout::default();
     }
 
-    let objects = items
+    let objects = prepared_objects
         .iter()
-        .map(|item| match item {
-            MeasureItem::Object {
-                node,
-                extensions,
-                style,
-            } => Some(MeasuredInlineObject::measure(
-                node,
-                extensions,
-                &text_style.clone().highlight(*style),
-                wrap_width,
-                window,
-                cx,
-            )),
-            _ => None,
-        })
+        .map(|object| object.clone().map(|object| object.fit_text(wrap_width)))
         .collect::<Vec<_>>();
     let line_ranges = line_ranges(items, image_sizes, &objects, text_style, wrap_width, window);
     let font_size = text_style.font_size.to_pixels(rem_size);
@@ -1078,40 +1134,42 @@ mod tests {
 
     #[test]
     fn atomic_objects_wrap_and_share_a_baseline_at_multiple_font_sizes() {
+        use super::super::inline::test_draw::in_prepaint;
         use super::super::inline::test_fonts::{BODY, WideMonoTextSystem};
-        use gpui::{Empty, TestApp};
+        use gpui::TestApp;
         let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
-        let mut window = app.open_window(|_, _| Empty);
-        for scale in [1., 1.5, 2.] {
-            let style = TextStyle {
-                font_family: BODY.into(),
-                font_size: px(16. * scale).into(),
-                ..Default::default()
-            };
-            let items = vec![
-                MeasureItem::Text {
-                    text: "中文 ".into(),
-                    links: vec![],
-                    highlights: vec![],
-                },
-                MeasureItem::Object {
-                    node: crate::text::MarkdownNode::new("math", ()).text("x²"),
-                    extensions: Arc::default(),
-                    style: Default::default(),
-                },
-                MeasureItem::Object {
-                    node: crate::text::MarkdownNode::new("math", ()).text("y²"),
-                    extensions: Arc::default(),
-                    style: Default::default(),
-                },
-                MeasureItem::Text {
-                    text: " English".into(),
-                    links: vec![],
-                    highlights: vec![],
-                },
-            ];
-            for width in [1., 30., 80., 500.] {
-                window.update(|_, window, cx| {
+        in_prepaint(&mut app, |window, cx| {
+            for scale in [1., 1.5, 2.] {
+                let style = TextStyle {
+                    font_family: BODY.into(),
+                    font_size: px(16. * scale).into(),
+                    ..Default::default()
+                };
+                let items = vec![
+                    MeasureItem::Text {
+                        text: "中文 ".into(),
+                        links: vec![],
+                        highlights: vec![],
+                    },
+                    MeasureItem::Object {
+                        text: "x²".into(),
+                        id: 0,
+                        renderer: Arc::new(|_, _, _| None),
+                        style: Default::default(),
+                    },
+                    MeasureItem::Object {
+                        text: "y²".into(),
+                        id: 1,
+                        renderer: Arc::new(|_, _, _| None),
+                        style: Default::default(),
+                    },
+                    MeasureItem::Text {
+                        text: " English".into(),
+                        links: vec![],
+                        highlights: vec![],
+                    },
+                ];
+                for width in [1., 30., 80., 500.] {
                     let layout = layout_flow(
                         &items,
                         &[None, None, None, None],
@@ -1142,9 +1200,9 @@ mod tests {
                             objects[1].0.y + objects[1].1.metrics.baseline
                         );
                     }
-                });
+                }
             }
-        }
+        });
     }
 
     #[test]

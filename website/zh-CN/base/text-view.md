@@ -128,9 +128,9 @@ code-block fallback。可以通过 `.plugin(...)` 挂载自定义插件；
 与 Block plugin 一样，Inline plugin 实现 `MarkdownPlugin`，通过 `.plugin(...)` 注册。`MarkdownPlugin` 默认 `is_block() == false`，使用 `render_inline`；Block plugin 继续使用 `render`。
 
 ```rust
-use gpui::{App, Window};
+use gpui::{App, Styled, Window, div};
 use gpui_base::{
-    MarkdownInlinePresentation, MarkdownInlineRenderContext, MarkdownNode,
+    InlineElement, InlineRenderContext, MarkdownNode,
     MarkdownParseContext, MarkdownPlugin, TextView, markdown_ast,
 };
 
@@ -149,19 +149,21 @@ impl MarkdownPlugin for FormulaPlugin {
         let markdown_ast::Node::InlineMath(math) = node else {
             return None;
         };
-        Some(MarkdownNode::new(self.name(), math.value.clone())
-            .text(math.value.clone())
-            .accessibility_label(format!("Formula: {}", math.value)))
+        Some(
+            MarkdownNode::new("formula", math.value.clone())
+                .text(math.value.clone())
+                .accessibility_label(format!("Formula: {}", math.value)),
+        )
     }
 
     fn render_inline(
         &self,
-        _: &MarkdownNode,
-        _: &MarkdownInlineRenderContext,
+        node: &MarkdownNode,
+        _: &InlineRenderContext,
         _: &mut Window,
         _: &mut App,
-    ) -> Option<MarkdownInlinePresentation> {
-        Some(MarkdownInlinePresentation::text())
+    ) -> Option<InlineElement> {
+        Some(InlineElement::new(div().italic().child(node.as_text().to_string())))
     }
 }
 
@@ -169,19 +171,21 @@ TextView::markdown("inline-formulas", "Formulas $x^2$ and $y^2$")
     .plugin(FormulaPlugin)
 ```
 
-此 Inline plugin 显示原子化的纯文本。通过 `MarkdownPlugin::render_inline` 返回 `Some(MarkdownInlinePresentation::image(image, metrics))`，即可显示已准备的 `Arc<gpui::Image>`。`MarkdownInlineMetrics::new(size(width, height), baseline)` 使用当前字号下的逻辑像素，基线距离从顶部计算。renderer 收到的 `MarkdownInlineRenderContext` 包含实际文本样式、字号、行高、rem 大小和可用宽度。返回 `None` 或无效尺寸时使用文本降级。渲染回调应读取已准备的资源，不应在布局期间同步调用公式排版引擎。
+`render_inline` 返回 `Some(InlineElement::new(element))`，支持任意 GPUI `IntoElement`，包括带样式的文本、图片和组合元素。样式、hover 和子元素事件直接使用原生 GPUI API。renderer 收到的 `InlineRenderContext` 包含实际文本样式、字号、行高和 rem 大小。这些渲染类型不依赖 Markdown；本例的解析和注册仍属于 Markdown API。
+
+TextView 测量元素的固有尺寸，将整个元素作为一个原子对象排版。需要指定基线时，在 `InlineElement` 上调用 `.with_baseline(px(...))`，数值为从顶部到基线的逻辑像素距离。只能在对象前后换行。固定尺寸的元素即使超过行宽，也保留真实尺寸；需要限宽时使用 GPUI 样式约束。TextView 不会整体缩放元素子树。
 
 当 parser 捕获值或插件配置改变，但注册名称不变时，使用 `MarkdownExtensions::parser_revision(config_version)` 触发重新解析。每次 render 重建相同配置时应保持该 revision 不变。
 
-`MarkdownInlinePresentation::text()` 在正文中显示节点的原子文本。通过 `.hover_card(|window, cx| ...)` 可以在行内对象下方水平居中的 HoverCard 中创建只读 `AnyView`。卡片仅在悬停时创建，不参与行内布局，也不应包含可聚焦控件。可以通过 `text_color`、`text_color_range`、`font_weight`、`underline`、`background`、`hover_background`、`padding_x` 和 `rounded` 设置样式。水平内边距参与测量、换行、选择和等比缩小；背景色绘制在选区高亮下方。`text_color_range` 按 UTF-8 字节范围设置颜色，不拆分原子选区。Markdown 示例用它实现 `[@huacnlee](mention:huacnlee)` 资料卡；纯文本复制输出账号，Markdown 复制保留原始链接语法。
+可以直接用原生 `HoverCard` 包裹 trigger 来显示资料卡。Markdown 示例使用 `StyledText` 设置淡色 `@` 和用户名下划线，通过 `Anchor::TopCenter` 居中定位 `HoverCard`。`[@huacnlee](mention:huacnlee)` 的纯文本复制输出账号，Markdown 复制保留原始链接语法。
 
-对象与正文基线对齐，只能在对象前后换行。超过可用行宽时，宽、高和基线一同等比缩小。对象不可编辑，不新增焦点停靠点或内部控件；选择只能覆盖整个对象。双击选中对象，三击选中所在混排行；拖选可以双向跨越文字与连续对象。
+选择以整个渲染元素为单位。双击选中对象，三击选中所在混排行；拖选可以双向跨越文字与连续对象。子元素事件保留原生 GPUI 行为，插件中的交互控件应与 TextView 的选择手势协调。
 
-`source_range()` 返回包括分隔符在内的全局 UTF-8 字节范围。`.text(...)` 提供纯文本复制和降级内容；`.markdown(...)` 提供 Markdown 复制内容，默认使用节点原始源码。未提供纯文本时使用源码。`.accessibility_label(...)` 提供无障碍名称，默认使用纯文本。图片加载中或失败时显示文本降级，仍按原子对象选择和复制。
+`source_range()` 返回包括分隔符在内的全局 UTF-8 字节范围。`.text(...)` 提供纯文本复制和降级内容；`.markdown(...)` 提供 Markdown 复制内容，默认使用节点原始源码。未提供纯文本时使用源码。`.accessibility_label(...)` 提供无障碍名称，默认使用纯文本。`render_inline` 返回 `None` 时使用原子文本降级。图片的加载中和失败内容由插件通过 `img(...).with_loading(...).with_fallback(...)` 提供。
 
-异步资源应由应用缓存：保留 `TextViewState`，准备完成后通过弱 entity 更新缓存并调用 `state.invalidate_inline_layout(cx)`。这会重新测量行内内容和虚拟列表高度，不重解析文档，也不丢弃已有逻辑选区。缓存键应区分源码、字号和主题，过期结果应丢弃。`examples/markdown` 提供公式实现和预览缩放控件。
+异步资源应由应用缓存：保留 `TextViewState`，准备完成后通过弱 entity 更新缓存并调用 `state.invalidate_inline_layout(cx)`。这会重新测量行内内容和虚拟列表高度，不重解析文档，也不丢弃已有逻辑选区。缓存键应区分源码、字号和主题，过期结果应丢弃。渲染回调应读取已准备的资源，不应在布局期间同步调用公式排版引擎。`examples/markdown` 提供公式实现和预览缩放控件。
 
-默认解析 inline math 语法，通过 Plugin 自定义渲染，无需额外开关。行内代码里的美元符号仍保留为代码。
+默认解析 inline math 语法，通过 Plugin 自定义渲染，无需额外开关。行内代码里的美元符号仍保留为代码。没有 Plugin 认领某个 math 节点时，TextView 按原始 `$...$` 源码渲染为普通文本，因此正文中单纯出现美元符号的句子（`spent $5 and $10`）显示和复制都保持原样。
 
 ## 保留状态与动态更新
 

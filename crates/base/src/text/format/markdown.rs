@@ -288,10 +288,17 @@ fn parse_paragraph(
             paragraph.push(InlineNode::new("\n"));
         }
         Node::InlineMath(raw) => {
-            text = raw.value.clone();
-            paragraph.push(
-                InlineNode::new(&text).marks(vec![(0..text.len(), TextMark::default().code())]),
-            );
+            // Math parsing is on by default, so ordinary prose that merely
+            // contains dollar signs ("spent $5 and $10") arrives here as a
+            // math node whenever no inline plugin claimed it. Emitting
+            // `raw.value` would drop the delimiters and restyle the run as
+            // code, silently rewriting what the author typed. Fall back to the
+            // original source so unclaimed math stays literal.
+            text = parse_cx
+                .node_source(node)
+                .map(str::to_string)
+                .unwrap_or_else(|| raw.value.clone());
+            paragraph.push_str(&text);
         }
         Node::MdxTextExpression(raw) => {
             text = raw.value.clone();
@@ -894,6 +901,22 @@ mod tests {
         assert_eq!(object.accessibility_name(), "x²");
         assert_eq!(document.text(), "中文 before x² after and $ignored$\n");
         assert!(document.to_markdown().contains("**before $x^2$ after**"));
+    }
+
+    #[test]
+    fn unclaimed_inline_math_keeps_its_literal_source() {
+        // Math parsing is on by default, so prose that merely contains dollar
+        // signs parses as a math node. With no plugin to render it, the text
+        // must survive display and a Markdown round trip untouched.
+        let source = "spent $5 and $10 today";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        assert_eq!(document.text(), "spent $5 and $10 today\n");
+        assert!(document.to_markdown().contains("spent $5 and $10 today"));
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!()
+        };
+        assert!(paragraph.children.iter().all(|node| node.custom.is_none()));
     }
 
     #[test]
