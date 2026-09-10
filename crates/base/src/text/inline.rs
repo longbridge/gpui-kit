@@ -166,6 +166,8 @@ pub(super) struct Inline {
     links: Rc<Vec<(Range<usize>, LinkMark)>>,
     highlights: Vec<(Range<usize>, InlineHighlight)>,
     styled_text: StyledText,
+    /// The resolved style from a parent deferred layout, when there is one.
+    text_style: Option<TextStyle>,
     paint_origin: Option<Point<Pixels>>,
     selection_bounds: Option<Bounds<Pixels>>,
     selection_source: Option<(Arc<Mutex<InlineState>>, Range<usize>)>,
@@ -209,12 +211,19 @@ impl Inline {
             highlights,
             text: text.clone(),
             styled_text: StyledText::new(text),
+            text_style: None,
             paint_origin: None,
             selection_bounds: None,
             selection_source: None,
             link_click_handler,
             state,
         }
+    }
+
+    /// Use the resolved style captured by a deferred parent layout.
+    pub(super) fn text_style(mut self, text_style: TextStyle) -> Self {
+        self.text_style = Some(text_style);
+        self
     }
 
     /// Preserve the shared inline-flow baseline through GPUI's element-bound snapping.
@@ -555,7 +564,10 @@ impl Element for Inline {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let text_style = window.text_style();
+        let text_style = self
+            .text_style
+            .clone()
+            .unwrap_or_else(|| window.text_style());
         let runs = text_runs(self.text.len(), &text_style, &self.highlights);
 
         self.styled_text = StyledText::new(self.text.clone()).with_runs(runs);
@@ -920,9 +932,9 @@ pub(super) mod test_draw {
 #[cfg(test)]
 pub(super) mod test_fonts {
     use gpui::{
-        Bounds, DevicePixels, Font, FontId, FontMetrics, FontRun, GlyphId, LineLayout, Pixels,
-        PlatformTextSystem, RenderGlyphParams, ShapedGlyph, ShapedRun, Size, TextRenderingMode,
-        point, px, size,
+        Bounds, DevicePixels, Font, FontId, FontMetrics, FontRun, FontWeight, GlyphId, LineLayout,
+        Pixels, PlatformTextSystem, RenderGlyphParams, ShapedGlyph, ShapedRun, Size,
+        TextRenderingMode, point, px, size,
     };
     use std::borrow::Cow;
 
@@ -930,6 +942,8 @@ pub(super) mod test_fonts {
     pub(crate) const MONO: &str = "Mono";
     const BODY_ID: FontId = FontId(1);
     const MONO_ID: FontId = FontId(2);
+    const BOLD_BODY_ID: FontId = FontId(3);
+    const BOLD_MONO_ID: FontId = FontId(4);
     const UNITS_PER_EM: f32 = 1000.;
 
     pub(crate) struct WideMonoTextSystem;
@@ -937,7 +951,13 @@ pub(super) mod test_fonts {
     impl WideMonoTextSystem {
         /// Advance of one glyph in `font_id`, in em units.
         fn advance_units(font_id: FontId) -> f32 {
-            if font_id == MONO_ID { 1000. } else { 500. }
+            match font_id {
+                MONO_ID => 1000.,
+                BOLD_MONO_ID => 1250.,
+                BODY_ID => 500.,
+                BOLD_BODY_ID => 750.,
+                _ => 500.,
+            }
         }
 
         /// Width of `text` shaped entirely in `family` at `font_size`.
@@ -957,11 +977,17 @@ pub(super) mod test_fonts {
         }
 
         fn font_id(&self, descriptor: &Font) -> anyhow::Result<FontId> {
-            Ok(if descriptor.family.as_ref() == MONO {
-                MONO_ID
-            } else {
-                BODY_ID
-            })
+            Ok(
+                match (
+                    descriptor.family.as_ref() == MONO,
+                    descriptor.weight == FontWeight::BOLD,
+                ) {
+                    (true, true) => BOLD_MONO_ID,
+                    (true, false) => MONO_ID,
+                    (false, true) => BOLD_BODY_ID,
+                    (false, false) => BODY_ID,
+                },
+            )
         }
 
         fn font_metrics(&self, _font_id: FontId) -> FontMetrics {
@@ -1043,7 +1069,8 @@ pub(super) mod test_fonts {
                 font_size,
                 width: position,
                 ascent: font_size * (metrics.ascent / UNITS_PER_EM),
-                descent: font_size * (metrics.descent / UNITS_PER_EM),
+                // Native backends normalize the signed font metric for shaped lines.
+                descent: font_size * (-metrics.descent / UNITS_PER_EM),
                 runs: shaped_runs,
                 len: text.len(),
             }

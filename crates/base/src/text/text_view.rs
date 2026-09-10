@@ -1920,6 +1920,182 @@ mod tests {
         assert_eq!(selected.trim(), "[`code`](https://example.com) after");
     }
 
+    /// Inline-code Markdown takes the deferred `InlineFlow` path. Its layout
+    /// must use the heading's resolved typography rather than the ambient body
+    /// style that remains after the heading's style stack has been popped.
+    ///
+    /// This is a real request-layout → measured-layout → prepaint → paint test:
+    /// the deterministic text system makes bold glyphs wider than body glyphs.
+    /// Before the fix, the code heading was allocated using normal body metrics
+    /// but its fragments painted bold, so the wrapped heading text crossed into
+    /// the following paragraph.
+    #[test]
+    fn inline_code_heading_reserves_painted_wrapped_lines_and_list_baseline() {
+        use crate::text::inline::test_fonts::{MONO, WideMonoTextSystem};
+        use gpui::{TestApp, rems};
+
+        const MARKDOWN: &str = "The same words with inline code.\n\nThe same words with `inline code`.\n\n- The same words with inline code.\n- The same words with `inline code`.\n\n# Heading with inline code\n# Heading with `inline code`\n\nthis is a test";
+
+        struct MarkdownRoot {
+            text_view: Entity<TextViewState>,
+            width: Pixels,
+            preview_zoom: f32,
+        }
+
+        impl Render for MarkdownRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(self.width)
+                    // Match example-markdown: preview zoom changes TextView's
+                    // inherited text size, not the window rem size.
+                    .text_size(rems(self.preview_zoom))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).selectable(true))
+            }
+        }
+
+        fn draw(
+            app: &mut TestApp,
+            width: Pixels,
+            preview_zoom: f32,
+        ) -> (Bounds<Pixels>, Vec<Bounds<Pixels>>, String) {
+            let mut window = app.open_window(|_, cx| MarkdownRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(MARKDOWN, cx)),
+                width,
+                preview_zoom,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+            window.update(|root, _, cx| {
+                root.text_view.update(cx, |state, cx| state.select_all(cx));
+            });
+            window.draw();
+            window.read(|root, cx| {
+                let state = root.text_view.read(cx);
+                (
+                    state.bounds(),
+                    state.selection_adapter.text_bounds(),
+                    state.selected_text(),
+                )
+            })
+        }
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        app.update(|cx| {
+            crate::init(cx);
+            crate::Theme::global_mut(cx).tokens.typography.mono = MONO.into();
+        });
+
+        for (case, width, preview_zoom) in [
+            // At the root 16px size the plain heading fits, while bold inline
+            // fragments need their own measured widths.
+            ("default-16px", px(600.), 1.),
+            // A narrow view exercises intentional heading wrapping.
+            ("narrow-16px", px(320.), 1.),
+            // Preview zoom applies through `.text_size(rems(zoom))`.
+            ("zoom-1.25", px(600.), 1.25),
+        ] {
+            let (view_bounds, text_bounds, selected_text) = draw(&mut app, width, preview_zoom);
+            assert!(
+                text_bounds.len() > 8,
+                "{case}: expected all markdown fragments"
+            );
+            assert_eq!(
+                selected_text.trim(),
+                "The same words with inline code.\nThe same words with inline code.\nThe same words with inline code.\nThe same words with inline code.\nHeading with inline code\nHeading with inline code\nthis is a test",
+                "{case}: wrapped inline-code text was lost or duplicated"
+            );
+            let following = text_bounds.last().expect("following paragraph must paint");
+            let painted_bottom = text_bounds
+                .iter()
+                .map(|bounds| bounds.bottom())
+                .max()
+                .expect("markdown must paint text");
+            // This is intentionally not a fragment-count or selection-only
+            // assertion: `text_bounds` are the shaped Inline layouts produced
+            // during paint. No painted wrapped line may reach the following
+            // paragraph's origin, and the TextView allocation must contain the
+            // complete painted document.
+            assert!(
+                text_bounds[..text_bounds.len() - 1]
+                    .iter()
+                    .all(|bounds| bounds.bottom() <= following.top()),
+                "{case}: heading/list text painted through the following paragraph;                  following={following:?}, text_bounds={text_bounds:?}, view={view_bounds:?}"
+            );
+            assert!(
+                painted_bottom <= view_bounds.bottom(),
+                "{case}: TextView height did not reserve its painted text;                  painted_bottom={painted_bottom:?}, view={view_bounds:?}"
+            );
+        }
+    }
+
+    /// The code-bearing list item takes `InlineFlow`; the plain item takes the
+    /// ordinary text path. Their first body glyphs must begin at the same row
+    /// position relative to their own TextView origins.
+    #[test]
+    fn inline_code_list_body_paint_origin_matches_plain_list_item() {
+        use crate::text::inline::test_fonts::{MONO, WideMonoTextSystem};
+        use gpui::{TestApp, rems};
+
+        struct ListRoot {
+            plain: Entity<TextViewState>,
+            code: Entity<TextViewState>,
+            preview_zoom: f32,
+        }
+
+        impl Render for ListRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(600.))
+                    .text_size(rems(self.preview_zoom))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.plain).selectable(true))
+                    .child(TextView::new(&self.code).selectable(true))
+            }
+        }
+
+        fn draw(app: &mut TestApp, preview_zoom: f32) -> (Pixels, Pixels) {
+            let mut window = app.open_window(|_, cx| ListRoot {
+                plain: cx.new(|cx| TextViewState::markdown("- plain body words", cx)),
+                code: cx.new(|cx| TextViewState::markdown("- plain `code` words", cx)),
+                preview_zoom,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+            window.read(|root, cx| {
+                let first_body_line_top = |view: &Entity<TextViewState>| {
+                    let view = view.read(cx);
+                    let painted_line = view
+                        .selection_adapter
+                        .text_bounds()
+                        .into_iter()
+                        .next()
+                        .expect("list item should paint its first body line");
+                    painted_line.top() - view.bounds().top()
+                };
+                (
+                    first_body_line_top(&root.plain),
+                    first_body_line_top(&root.code),
+                )
+            })
+        }
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        app.update(|cx| {
+            crate::init(cx);
+            crate::Theme::global_mut(cx).tokens.typography.mono = MONO.into();
+        });
+        for (case, preview_zoom) in [("16px", 1.), ("zoom-1.25", 1.25), ("zoom-1.5", 1.5)] {
+            let (plain_origin, code_origin) = draw(&mut app, preview_zoom);
+            assert_eq!(
+                code_origin, plain_origin,
+                "{case}: code list body paint origin {code_origin:?} must match plain {plain_origin:?}"
+            );
+        }
+    }
+
     #[gpui::test]
     fn markdown_link_opens_url_without_handler(cx: &mut TestAppContext) {
         cx.update(crate::init);
