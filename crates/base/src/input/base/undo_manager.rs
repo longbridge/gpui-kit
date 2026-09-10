@@ -1,3 +1,4 @@
+use super::auto_close::AutoClosedPairs;
 use crate::input::change::Change;
 
 use super::cursor::CursorSelection;
@@ -25,6 +26,8 @@ struct UndoTransaction {
     selections_before: Option<Vec<CursorSelection>>,
     /// The cursors as they stood after it, restored on redo.
     selections_after: Option<Vec<CursorSelection>>,
+    auto_closed_pairs_before: Option<AutoClosedPairs>,
+    auto_closed_pairs_after: Option<AutoClosedPairs>,
 }
 
 /// A batch of changes being collected between `begin_transaction` and the
@@ -35,6 +38,8 @@ struct PendingTransaction {
     changes: Vec<Change>,
     selections_before: Option<Vec<CursorSelection>>,
     selections_after: Option<Vec<CursorSelection>>,
+    auto_closed_pairs_before: Option<AutoClosedPairs>,
+    auto_closed_pairs_after: Option<AutoClosedPairs>,
 }
 
 /// One transaction handed back to be replayed, with the cursors to restore
@@ -42,6 +47,7 @@ struct PendingTransaction {
 pub(crate) struct Replay {
     pub(super) changes: Vec<Change>,
     pub(super) selections: Option<Vec<CursorSelection>>,
+    pub(super) auto_closed_pairs: Option<AutoClosedPairs>,
 }
 
 /// Coordinates undo and redo as explicit editing transactions.
@@ -122,6 +128,8 @@ impl UndoManager {
                 changes: Vec::new(),
                 selections_before: None,
                 selections_after: None,
+                auto_closed_pairs_before: None,
+                auto_closed_pairs_after: None,
             });
         }
     }
@@ -150,6 +158,16 @@ impl UndoManager {
         }
         if let Some(after) = pending.selections_after {
             self.record_selections_after(after);
+        }
+        // These snapshots were recorded with the edits. Commit them even when
+        // replay has just enabled ignoring to flush an open IME transaction.
+        if let Some(transaction) = self.undo_transactions.last_mut() {
+            if let Some(before) = pending.auto_closed_pairs_before {
+                transaction.auto_closed_pairs_before.get_or_insert(before);
+            }
+            if let Some(after) = pending.auto_closed_pairs_after {
+                transaction.auto_closed_pairs_after = Some(after);
+            }
         }
     }
 
@@ -189,6 +207,8 @@ impl UndoManager {
             changes,
             selections_before: None,
             selections_after: None,
+            auto_closed_pairs_before: None,
+            auto_closed_pairs_after: None,
         });
         self.coalescing_boundary = intent == EditIntent::Atomic;
     }
@@ -208,6 +228,33 @@ impl UndoManager {
         }
         self.record_selections_before(before);
         self.record_selections_after(after);
+    }
+
+    pub(super) fn record_auto_closed_pairs(
+        &mut self,
+        before: AutoClosedPairs,
+        after: AutoClosedPairs,
+    ) {
+        if self.ignoring {
+            return;
+        }
+        if let Some(pending) = self.pending.as_mut() {
+            pending.auto_closed_pairs_before.get_or_insert(before);
+        } else if let Some(transaction) = self.undo_transactions.last_mut() {
+            transaction.auto_closed_pairs_before.get_or_insert(before);
+        }
+        self.record_auto_closed_pairs_after(after);
+    }
+
+    pub(super) fn record_auto_closed_pairs_after(&mut self, after: AutoClosedPairs) {
+        if self.ignoring {
+            return;
+        }
+        if let Some(pending) = self.pending.as_mut() {
+            pending.auto_closed_pairs_after = Some(after);
+        } else if let Some(transaction) = self.undo_transactions.last_mut() {
+            transaction.auto_closed_pairs_after = Some(after);
+        }
     }
 
     fn record_selections_before(&mut self, before: Vec<CursorSelection>) {
@@ -275,6 +322,7 @@ impl UndoManager {
         let replay = Replay {
             changes: transaction.changes.iter().rev().cloned().collect(),
             selections: transaction.selections_before.clone(),
+            auto_closed_pairs: transaction.auto_closed_pairs_before.clone(),
         };
         self.redo_transactions.push(transaction);
         self.coalescing_boundary = true;
@@ -287,6 +335,7 @@ impl UndoManager {
         let replay = Replay {
             changes: transaction.changes.clone(),
             selections: transaction.selections_after.clone(),
+            auto_closed_pairs: transaction.auto_closed_pairs_after.clone(),
         };
         self.undo_transactions.push(transaction);
         self.coalescing_boundary = true;

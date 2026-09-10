@@ -7,7 +7,7 @@ documentation = "https://docs.rs/gpui-component"
 homepage = "https://gpui-kit.com"
 repository = "https://github.com/longbridge/gpui-kit"
 readme = "../../README.md"
-version = "0.6.0"
+version = "0.6.1"
 publish = true
 edition.workspace = true
 
@@ -96,6 +96,7 @@ tree-sitter-yaml = ["tree-sitter", "dep:tree-sitter-yaml"]
 tree-sitter-zig = ["tree-sitter", "dep:tree-sitter-zig"]
 
 [dependencies]
+regex = "1"
 anyhow.workspace = true
 gpui = { workspace = true }
 gpui_macros.workspace = true

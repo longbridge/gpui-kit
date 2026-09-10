@@ -1,6 +1,6 @@
 [package]
 name = "gpui-kit"
-version = "0.6.0"
+version = "0.6.1"
 description = "GPUI Kit: one dependency for building desktop applications with GPUI, GPUI Base, GPUI Component and default assets."
 keywords = ["desktop", "gpui", "shadcn", "ui", "uikit"]
 categories = ["gui"]

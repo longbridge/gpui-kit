@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+publish_log=$(mktemp)
+trap 'rm -f "$publish_log"' EXIT
+
+# Publish dependencies first so a partially completed release can be resumed.
+for package in \
+  gpui-kit-assets \
+  gpui-component-macros \
+  gpui-base \
+  gpui-fps \
+  gpui-component \
+  gpui-wry \
+  gpui-kit
+do
+  # CI forces colored Cargo output; keep diagnostics plain for matching below.
+  if cargo publish -p "$package" --color never 2>&1 | tee "$publish_log"; then
+    continue
+  else
+    publish_status=$?
+  fi
+
+  if grep -Eq "^error: crate ${package}@[0-9][^ ]* already exists on crates.io index$" "$publish_log"; then
+    echo "::notice::Skipping already published crate: $package"
+  else
+    exit "$publish_status"
+  fi
+done

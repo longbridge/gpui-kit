@@ -208,6 +208,7 @@ pub struct TextSelectionRegistration {
     scope: TextSelectionScopeId,
     document_order: u64,
     text_bounds: Vec<Bounds<Pixels>>,
+    self_scroll: bool,
 }
 
 impl TextSelectionRegistration {
@@ -220,7 +221,17 @@ impl TextSelectionRegistration {
             scope: TextSelectionScopeId::default(),
             document_order: 0,
             text_bounds: Vec::new(),
+            self_scroll: false,
         }
+    }
+
+    /// Marks a participant that scrolls its own content in response to
+    /// [`TextSelectionEvent::AutoScroll`]. Drag auto-scroll then drives it
+    /// directly, measured against its own bounds, instead of synthesizing a
+    /// wheel event for the nearest scrollable ancestor.
+    pub(crate) fn with_self_scroll(mut self, self_scroll: bool) -> Self {
+        self.self_scroll = self_scroll;
+        self
     }
 
     /// Sets the participant's content scroll offset.
@@ -832,6 +843,7 @@ struct WindowSelectionState {
     did_hit_text: bool,
     frame_generation: u64,
     finish_frame_scheduled: bool,
+    refresh_held_cursor: bool,
     mouse_down_prepared: bool,
     auto_scroll: AutoScroll,
 }
@@ -996,6 +1008,20 @@ impl WindowSelectionState {
         cx: &mut App,
     ) {
         self.prune_dead_participants();
+        if self.is_selecting
+            && registration.self_scroll
+            && self.anchor.as_ref().and_then(SelectionEndpoint::entity_id)
+                == Some(selection.entity_id())
+            && self
+                .participants
+                .get(&selection.entity_id())
+                .is_some_and(|previous| {
+                    previous.registration.scroll_offset != registration.scroll_offset
+                        || previous.registration.bounds != registration.bounds
+                })
+        {
+            self.refresh_held_cursor = true;
+        }
         self.participants.insert(
             selection.entity_id(),
             ParticipantRegistration {
@@ -1142,7 +1168,7 @@ impl WindowSelectionState {
     ) {
         if !cx.has_active_drag() {
             self.update_impl(position, Some(window), cx);
-            self.update_auto_scroll(position, Some(window), cx);
+            self.update_auto_scroll(position, window, cx);
         }
     }
 
@@ -1455,7 +1481,7 @@ impl WindowSelectionState {
     fn update_auto_scroll(
         &mut self,
         position: Point<Pixels>,
-        window: Option<&Window>,
+        window: &Window,
         cx: &mut Context<Self>,
     ) {
         // A finished gesture keeps its anchor for shift-click extension; only
@@ -1463,20 +1489,21 @@ impl WindowSelectionState {
         if !self.is_selecting {
             return;
         }
-        let Some(anchor) = self.anchor.as_ref().filter(|anchor| anchor.inside) else {
+        let Some((_, registration)) = self.anchor_registration() else {
             return;
         };
-        let Some(participant) = anchor.participant.as_ref().and_then(WeakEntity::upgrade) else {
+        // Exactly one writer per drag: a participant that scrolls its own
+        // content is notified directly; anything else gets a synthetic wheel.
+        if registration.self_scroll {
+            self.auto_scroll.stop();
+            self.update_participant_auto_scroll(position, cx);
             return;
-        };
-        let Some(registration) = self.participants.get(&participant.entity_id()) else {
-            return;
-        };
+        }
         // The content mask is the nearest clipping viewport established by a
         // scrollable ancestor. It remains stable as the participant itself
         // moves, so selection keeps scrolling the same related region even
         // after the anchor text has moved out of view.
-        let visible_bounds = registration.registration.hitbox.content_mask.bounds;
+        let visible_bounds = registration.hitbox.content_mask.bounds;
         // Keeps the synthesized wheel event hit-testing inside the mask.
         const HIT_TEST_INSET: Pixels = px(1.);
         // A collapsed mask leaves an empty clamp range below — stop.
@@ -1487,11 +1514,6 @@ impl WindowSelectionState {
             return;
         }
         let delta = AutoScroll::compute_delta(position.y, visible_bounds);
-        let Some(window) = window else {
-            participant.update(cx, |state, cx| state.set_auto_scroll(delta, cx));
-            return;
-        };
-
         let event_position = point(
             position.x.clamp(
                 visible_bounds.left() + HIT_TEST_INSET,
@@ -1525,32 +1547,48 @@ impl WindowSelectionState {
         });
     }
 
+    /// Drives the anchor participant's own scrolling, measured against the
+    /// visible portion of the participant's element bounds.
     fn update_participant_auto_scroll(&self, position: Point<Pixels>, cx: &mut App) {
-        let Some(anchor) = self.anchor.as_ref().filter(|anchor| anchor.inside) else {
+        let Some((participant, registration)) = self.anchor_registration() else {
             return;
         };
-        let Some(participant) = anchor.participant.as_ref().and_then(WeakEntity::upgrade) else {
-            return;
+        let visible_bounds = registration
+            .bounds
+            .intersect(&registration.hitbox.content_mask.bounds);
+        let delta = if visible_bounds.size.width > px(0.) && visible_bounds.size.height > px(0.) {
+            AutoScroll::compute_delta(position.y, visible_bounds)
+        } else {
+            None
         };
-        let Some(registration) = self.participants.get(&participant.entity_id()) else {
-            return;
-        };
-        let delta = AutoScroll::compute_delta(position.y, registration.registration.bounds);
         participant.update(cx, |state, cx| state.set_auto_scroll(delta, cx));
     }
 
     fn stop_anchor_auto_scroll(&mut self, cx: &mut App) {
         self.auto_scroll.stop();
-        let Some(participant) = self
-            .anchor
-            .as_ref()
-            .filter(|anchor| anchor.inside)
-            .and_then(|anchor| anchor.participant.as_ref())
-            .and_then(WeakEntity::upgrade)
-        else {
+        let Some(participant) = self.anchor_participant() else {
             return;
         };
         participant.update(cx, |state, cx| state.set_auto_scroll(None, cx));
+    }
+
+    /// The live participant owning the anchor of the current gesture.
+    fn anchor_participant(&self) -> Option<Entity<SelectableTextState>> {
+        self.anchor
+            .as_ref()
+            .filter(|anchor| anchor.inside)?
+            .participant
+            .as_ref()?
+            .upgrade()
+    }
+
+    /// The anchor participant together with its current frame registration.
+    fn anchor_registration(
+        &self,
+    ) -> Option<(Entity<SelectableTextState>, Rc<TextSelectionRegistration>)> {
+        let participant = self.anchor_participant()?;
+        let registration = self.participants.get(&participant.entity_id())?;
+        Some((participant, registration.registration.clone()))
     }
 
     fn prune_dead_participants(&mut self) {
@@ -1871,12 +1909,25 @@ fn retain_text_selection_state(
 fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Window, cx: &mut App) {
     if state.update(cx, |state, _| state.schedule_finish_frame()) {
         let state = state.downgrade();
-        window.defer(cx, move |_, cx| {
+        window.defer(cx, move |window, cx| {
             let Some(state) = state.upgrade() else {
                 return;
             };
             let handlers = state.update(cx, |state, cx| state.finish_frame(cx));
             dispatch_clear_handlers(handlers, cx);
+            // Direct participant scrolling produces no wheel event. Refresh
+            // the held cursor after paint registers the new scroll geometry.
+            let refresh_cursor = state.update(cx, |state, cx| {
+                if std::mem::take(&mut state.refresh_held_cursor) && state.is_selecting {
+                    state.update_in_window(window.mouse_position(), window, cx);
+                    true
+                } else {
+                    false
+                }
+            });
+            if refresh_cursor {
+                WindowSelectionState::resolve_content_keys(&state, cx);
+            }
         });
     }
 

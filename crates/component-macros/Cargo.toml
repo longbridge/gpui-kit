@@ -1,7 +1,7 @@
 [package]
 name = "gpui-component-macros"
 description = "Procedural macros for GPUI Component, the styled layer of GPUI Kit."
-version = "0.6.0"
+version = "0.6.1"
 license = "Apache-2.0"
 publish = true
 edition.workspace = true

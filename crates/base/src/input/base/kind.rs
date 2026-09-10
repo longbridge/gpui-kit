@@ -28,7 +28,9 @@ use ropey::Rope;
 
 use super::decorations::DecorationCollections;
 use super::lsp::{ContextMenuContent, HoverDefinition, InlineCompletion};
-use crate::input::{HighlightStyleResolver, InputEdit, InputHighlighter, TextDecoration};
+use crate::input::{
+    HighlightStyleResolver, InputEdit, InputHighlighter, SyntaxContext, TextDecoration,
+};
 use crate::input::{HoverPopoverState, Lsp};
 use gpui::Task;
 
@@ -184,6 +186,14 @@ pub trait InputModeKind: sealed::Sealed + Sized + 'static {
 
     /// Drops decorations and hover state when the text is replaced wholesale.
     fn reset_annotations(_state: &mut InputBaseState<Self>) {}
+
+    /// Syntax context at `offset` for editing decisions.
+    ///
+    /// Only a code editor can have a provider installed; the default answer
+    /// is `Code`, which preserves character-heuristic behavior.
+    fn editing_syntax_context(_state: &InputBaseState<Self>, _offset: usize) -> SyntaxContext {
+        SyntaxContext::Code
+    }
 
     /// Slides decoration ranges along with an edit.
     fn adjust_annotations(

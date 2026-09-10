@@ -13,6 +13,64 @@ description: 支持语法高亮、行号、折叠和文本装饰的源代码编�
 use gpui_kit::component::input::{Editor, EditorState, TabSize};
 ```
 
+## 语言编辑规则
+
+`LanguageConfig` 描述语言规则；`.auto_close(bool)` 和 `.smart_indent(bool)` 是独立的编辑器选项。
+切换语言或替换规则不会重置这两个选项。自动补全、跳过结束符和成对 Backspace 使用
+`auto_closing_pairs`；Enter 使用 `brackets` 和 `indentation_rules`，因此关闭自动补全后，
+仍可在已有括号内换行并缩进。
+
+```rust
+use gpui_kit::component::input::{
+    AutoClosingPair, BracketPair, language_config::LanguageConfig, SyntaxContext, set_language_config,
+};
+
+let rules = LanguageConfig::default()
+    .brackets([BracketPair::new("{", "}"), BracketPair::new("(", ")")])
+    .auto_closing_pairs([
+        AutoClosingPair::new("{", "}")
+            .not_in([SyntaxContext::String, SyntaxContext::Comment]),
+        AutoClosingPair::new("(", ")")
+            .not_in([SyntaxContext::String, SyntaxContext::Comment]),
+    ]);
+
+set_language_config("rust", rules, cx);
+
+let editor = cx.new(|cx| {
+    EditorState::new(window, cx)
+        .language("rust")
+        .auto_close(true)
+        .smart_indent(true)
+});
+```
+
+`set_language_config` 替换当前应用中指定语言的配置，已有编辑器在下一次编辑时立即使用它，
+即使配置修改和编辑发生在同一个事件处理函数内。语言别名共享配置，例如 `python`、`py`、
+`pyi`，不受对应 grammar feature 是否启用影响。自定义配置在 Component 初始化后仍然保留。
+精确注册的自定义 grammar 名称优先于内置别名，并保留原始大小写。
+未知语言使用 `LanguageConfig::default()`。
+
+Component 安装 `LanguageProvider`，统一提供语言名称、默认规则及每个编辑器的语法提供者。
+首次编辑和切换语言后的语法选择都不依赖 render。直接使用 Base 时，可通过
+`set_language_provider` 安装自己的语言服务；普通 Component 使用者只需调用
+`set_language_config`。高亮的 grammar 资源可使用 `highlighter::GrammarConfig`，
+原有 `highlighter::LanguageConfig` 名称保持兼容。
+
+配对使用字符串，支持多字符定界符。`auto_closing_pairs = None` 表示使用 `brackets`；
+`Some(vec![])` 表示禁用全部自动配对，其 builder 设置的是 `Some`。
+`auto_close_before` 指定允许自动补全的后方字符；空白和文档末尾始终允许。
+`not_in` 依赖语法上下文提供者；没有提供者时 Base 按 `Code` 处理。
+启用对应 Tree-sitter grammar 后，Component 会安装语法上下文提供者。
+
+`IndentationRules::new(increase, decrease)` 接受两个已编译的 `regex::Regex`。
+Enter 时分别匹配光标前、后的文本；未配置增加缩进模式时，使用结构括号判断。
+这些规则不会重新格式化已有行或粘贴内容。Python 的默认规则额外识别末尾冒号，
+未知语言仅使用结构括号。
+
+这是 Monaco 风格语言配置的已支持子集，不直接加载 Monaco JSON 或 `.scm`。
+包围选区、自定义 `onEnterRules` 留待后续实现。
+
+
 ## 基础用法
 
 ```rust
