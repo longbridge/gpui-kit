@@ -124,31 +124,28 @@ impl ColorPicker {
         self
     }
 
-    fn render_item(&self, color: Hsla, cx: &mut App) -> ColorSwatch {
+    fn render_item(&self, id: impl Into<ElementId>, color: Hsla, cx: &mut App) -> ColorSwatch {
         let selected = self.state.read(cx).value() == Some(color);
         let hover_state = self.state.clone();
         let click_state = self.state.clone();
 
-        ColorSwatch::new(
-            SharedString::from(format!("color-{}", color.to_hex())),
-            color,
-        )
-        .selected(selected)
-        .h_5()
-        .w_5()
-        .bg(color)
-        .border_1()
-        .border_color(color.darken(0.1))
-        .hover(|this| this.border_color(color.darken(0.3)).bg(color.lighten(0.1)))
-        .active(|this| this.border_color(color.darken(0.5)).bg(color.darken(0.2)))
-        .on_hover(move |color, entered, window, cx| {
-            if entered {
-                hover_state.update(cx, |state, cx| state.preview_color(color, window, cx));
-            }
-        })
-        .on_click(move |color, _, window, cx| {
-            click_state.update(cx, |state, cx| state.select_color(color, window, cx));
-        })
+        ColorSwatch::new(id, color)
+            .selected(selected)
+            .h_5()
+            .w_5()
+            .bg(color)
+            .border_1()
+            .border_color(color.darken(0.1))
+            .hover(|this| this.border_color(color.darken(0.3)).bg(color.lighten(0.1)))
+            .active(|this| this.border_color(color.darken(0.5)).bg(color.darken(0.2)))
+            .on_hover(move |color, entered, window, cx| {
+                if entered {
+                    hover_state.update(cx, |state, cx| state.preview_color(color, window, cx));
+                }
+            })
+            .on_click(move |color, _, window, cx| {
+                click_state.update(cx, |state, cx| state.select_color(color, window, cx));
+            })
     }
 
     fn render_colors(&self, window: &mut Window, cx: &mut App) -> impl IntoElement {
@@ -225,19 +222,24 @@ impl ColorPicker {
                 h_flex().gap_1().children(
                     featured_colors
                         .iter()
-                        .map(|color| self.render_item(*color, cx)),
+                        // Featured slots may contain the same color more than once.
+                        .enumerate()
+                        .map(|(ix, color)| self.render_item(("featured-color", ix), *color, cx)),
                 ),
             )
             .child(Separator::horizontal())
             .child(
                 v_flex()
                     .gap_1()
-                    .children(color_palettes().iter().map(|sub_colors| {
-                        h_flex().gap_1().children(
-                            sub_colors
-                                .iter()
-                                .rev()
-                                .map(|color| self.render_item(*color, cx)),
+                    .children(color_palettes().iter().enumerate().map(|(ix, sub_colors)| {
+                        h_flex().id(("palette-row", ix)).gap_1().children(
+                            sub_colors.iter().rev().map(|color| {
+                                self.render_item(
+                                    SharedString::from(format!("color-{}", color.to_hex())),
+                                    *color,
+                                    cx,
+                                )
+                            }),
                         )
                     })),
             )
@@ -512,9 +514,47 @@ impl RenderOnce for ColorPicker {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{AppContext as _, TestAppContext};
+    use gpui::{AppContext as _, Context, Render, TestAppContext};
 
     use super::*;
+
+    struct PaletteHarness {
+        state: Entity<ColorPickerState>,
+    }
+
+    impl Render for PaletteHarness {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let color = color_palettes()[0][0];
+            ColorPicker::new(&self.state)
+                .featured_colors(vec![color, color])
+                .render_palette_panel(cx)
+                .into_any_element()
+        }
+    }
+
+    #[gpui::test]
+    fn repeated_palette_colors_have_independent_focus_stops(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|window, cx| PaletteHarness {
+            state: cx.new(|cx| ColorPickerState::new(window, cx)),
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let swatch_count = 2 + color_palettes().iter().map(Vec::len).sum::<usize>();
+            let mut focused = Vec::new();
+            for _ in 0..swatch_count {
+                window.focus_next(cx);
+                let handle = window.focused(cx).expect("each swatch is focusable");
+                assert!(
+                    !focused.contains(&handle),
+                    "equal colors must not share element identity or a focus stop"
+                );
+                focused.push(handle);
+            }
+            window.focus_next(cx);
+            assert_eq!(window.focused(cx), focused.first().cloned());
+        });
+    }
 
     #[gpui::test]
     fn an_explicit_accessibility_label_replaces_the_visible_one(cx: &mut TestAppContext) {
