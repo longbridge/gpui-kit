@@ -458,9 +458,7 @@ Reading the theme is `cx.theme()`. `set_theme` remains in `gpui-base` because th
 | `DockPanel`             | One panel as `panels()` reports it: `id`, `name`, `placement`, `node`, `index`, `active`, and its three flags |
 | `DockGroup` / `DockTab` | A tab group and one of its tabs, as `tab_bar` and `empty_group` are given them                                |
 | `DockRegion`            | One dock, as the `dock` handler is given it                                                                   |
-| `DockTile`              | One tile, with already-resolved bounds                                                                        |
 | `DockDrop`              | Where a dragged panel would land                                                                              |
-| `TileResizeSide`        | `"left"`, `"right"`, `"top"`, `"bottom"` or `"bottom_right"`                                                  |
 
 ### Composition patterns
 
@@ -725,15 +723,10 @@ handler was given as its first argument, and they belong on a `div`, an
 | `drop_tab(group, index?)`      | drop  | Accepts a dragged panel here; no index appends    |
 | `toggle_dock(dock)`            | click | Opens or closes the dock                          |
 | `resize_dock(dock)`            | drag  | Drags the dock's edge; base clamps every position |
-| `move_tile(tile)`              | drag  | Moves the tile around its canvas                  |
-| `resize_tile(tile, side)`      | drag  | Drags one edge or corner                          |
-| `raise_tile(tile)`             | press | Brings the tile above the others                  |
-| `toggle_tile_zoom(tile)`       | click | Zooms the tile to fill its dock                   |
-| `close_tile(tile)`             | click | Closes the tile                                   |
 
 ### Dock chrome
 
-Six handlers, all optional, and legal only on a `dock_area(...)`. Each is first
+Four handlers, all optional, and legal only on a `dock_area(...)`. Each is first
 called from inside GPUI's layout pass and given base's resolved state. Its
 description is cached until that state or handler changes.
 
@@ -743,8 +736,6 @@ description is cached until that state or handler changes.
 | `empty_group(handler)`         | What a group with no displayed panel shows                            |
 | `drop_indicator(handler)`      | Where a dragged panel would land                                      |
 | `dock(handler)`                | One dock's frame around its content; place `dock_content()` inside it |
-| `tile_drag_bar(handler)`       | The strip a tile is dragged by                                        |
-| `tile_resize_handles(handler)` | A tile's resize affordances                                           |
 
 ### Motion
 

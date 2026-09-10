@@ -74,7 +74,7 @@ init(_props, cx) {
 }
 ```
 
-`layout_changed` 会在每次编辑时触发，包括 tile 拖动的每一步，所以要用定时器落盘，而不是在事件里直接写。
+`layout_changed` 会在每次编辑时触发，包括拖动 dock 边缘的每一步，所以要用定时器落盘，而不是在事件里直接写。
 
 ## 面板
 
@@ -147,7 +147,7 @@ init(_props, cx) {
 
 ## 绘制 chrome
 
-六个 handler，全都可选，挂在 `dock_area(...)` 元素上：
+四个 handler，全都可选，挂在 `dock_area(...)` 元素上：
 
 | Handler                          | 画什么                              |
 | -------------------------------- | ----------------------------------- |
@@ -155,8 +155,6 @@ init(_props, cx) {
 | `empty_group(group => …)`        | 没有可显示面板的 group 显示什么     |
 | `drop_indicator(drop => …)`      | 被拖动的面板会落在哪里              |
 | `dock(dock => …)`                | 一侧 dock 包住内容的外框            |
-| `tile_drag_bar(tile => …)`       | 拖动 tile 用的那条拖拽条            |
-| `tile_resize_handles(tile => …)` | tile 的缩放把手                     |
 
 每一个都会先在 GPUI 的 layout pass 内部被调用，拿到的是 base **已经解析好的**状态——从不包含拖拽事件、鼠标位置或命中测试，因为 base 会把这些自己挂到拿回去的元素上。生成的描述按 handler 与解析后的状态缓存；未变化的帧只在 Rust 中重放，不会进入 JavaScript。
 
@@ -211,11 +209,6 @@ chrome 描述会被缓存，并且可以比生成它的 handler 调用活得更�
 | `drop_tab(group, index?)`      | 放下 | 在此接收被拖来的面板；不给 index 就追加到末尾 |
 | `toggle_dock(dock)`            | 点击 | 展开或收起这侧 dock                           |
 | `resize_dock(dock)`            | 拖动 | 拖动 dock 的边                                |
-| `move_tile(tile)`              | 拖动 | 在画布上移动这个 tile                         |
-| `resize_tile(tile, side)`      | 拖动 | 拖动某条边或某个角                            |
-| `raise_tile(tile)`             | 按下 | 把这个 tile 提到最上层                        |
-| `toggle_tile_zoom(tile)`       | 点击 | 让 tile 放大占满所在 dock                     |
-| `close_tile(tile)`             | 点击 | 关闭这个 tile                                 |
 
 每一个的第一个参数都是它所在 handler 拿到的那个对象。它们只能挂在 `div`、`h_flex` 或 `v_flex` 上：`Button` 自己构造内部结构，没有地方安放这些命令。
 
@@ -244,20 +237,6 @@ chrome 描述会被缓存，并且可以比生成它的 handler 调用活得更�
 
 忘了写 `dock_content()` 的 handler 仍然会显示它的面板——面板会画在它返回的内容之后，并带一条警告——而不是悄悄丢掉。
 
-## Tiles
-
-一个区域也可以是自由浮动的画布，而不是标签组。传入 `bounds`，面板就成为一个 tile：
-
-```js
-this.dock.add_panel(cx.new(Chart), {
-  name: "chart",
-  placement: "center",
-  bounds: { x: 40, y: 40, width: 320, height: 240 },
-});
-```
-
-tile 需要自己的那两个 handler，因为 base 在那里同样什么都不画：`tile_drag_bar`（高度固定为 base 的拖拽条高度，吸附算法以此为前提）与 `tile_resize_handles`。两者拿到的 `tile` 里，bounds 都是**已经解析好的**。
-
 ## 完整接口
 
 ```js
@@ -281,7 +260,7 @@ area.on("layout_changed", handler);
 area.release();
 ```
 
-被锁定的 area 不能重新排列，也不能接受放入操作；dock 和 tile 仍可调整大小。因此「锁定布局」固定的是面板所在位置，而不是面板的可用尺寸。
+被锁定的 area 不能重新排列，也不能接受放入操作；dock 仍可调整大小。因此「锁定布局」固定的是面板所在位置，而不是面板的可用尺寸。
 
 ## 一个完整的例子
 
@@ -293,4 +272,4 @@ cargo run -p gpui-shell -- examples/js_dock
 
 ## 从 Rust 使用
 
-`gpui_kit::shell::dock` 是公开的，因此 Host 不写脚本也能接到同一处接缝。`ScriptPanel` 把 `ScriptView` 包成 `gpui_kit::base::dock::Panel`；`register_panel(application, panel, script, cx)` 教会注册表用一个 `PanelScript` 重建它；`ScriptDockSkin` 把 base 的三个 renderer trait 统一转发给一个 `DockChrome`。`tab_group_data`、`dock_data`、`tile_data` 与 `drop_indicator_data` 是引擎交给脚本代码的那几个 JSON 转换，Host 自己写绑定时同样用得上。
+`gpui_kit::shell::dock` 是公开的，因此 Host 不写脚本也能接到同一处接缝。`ScriptPanel` 把 `ScriptView` 包成 `gpui_kit::base::dock::Panel`；`register_panel(application, panel, script, cx)` 教会注册表用一个 `PanelScript` 重建它；`ScriptDockSkin` 把 base 的两个 renderer trait 统一转发给一个 `DockChrome`。`tab_group_data`、`dock_data` 与 `drop_indicator_data` 是引擎交给脚本代码的那几个 JSON 转换，Host 自己写绑定时同样用得上。

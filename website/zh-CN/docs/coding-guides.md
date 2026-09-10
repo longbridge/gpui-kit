@@ -290,7 +290,7 @@ Application UI 中每个直接 `px(...)` 和 raw color constructor 都应视为 
 
 从 resolved layout 得到的 cache 必须把 `window.rem_size()` 纳入 invalidation key，或者依赖随它变化的 revision。包括 wrapped row height、text shaping/layout、virtual-list measurement、popup/dialog geometry、由 text 推导的 icon size 和 custom canvas metric。Command variable-height row 是生态中的现有案例：较大 base font 会让同一 fixed width 产生不同 wrapping，因此 rem 变化时会重新 measure。
 
-不要把 application zoom 与 Dock panel zoom 混淆。Dock zoom 是 stateful layout operation：让一个 tab group 或 tile 保留 container chrome 并填满 DockArea，同时保留退出路径；它不能修改 window rem size。
+不要把 application zoom 与 Dock panel zoom 混淆。Dock zoom 是 stateful layout operation：让一个 tab group 保留 container chrome 并填满 DockArea，同时保留退出路径；它不能修改 window rem size。
 
 ## 事件、Action 与焦点
 

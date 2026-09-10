@@ -19,7 +19,7 @@ single screen, what this project is — and then prove it is real.
    examples. Homepage capability previews are deliberately diagrams, not fake
    product screenshots.
 3. **Verifiable facts over adjectives.** Star count, licence, platforms, real
-   type names (`DockArea`, `Rope`, `Tiles`), real numbers from the README (120
+   type names (`DockArea`, `Rope`, `TabGroup`), real numbers from the README (120
    FPS, 200K lines). A developer judges credibility from specifics.
 4. **Same palette and typeface as the library.** Colours come from
    `crates/component/src/theme/default-theme.json`; code colours come from the same

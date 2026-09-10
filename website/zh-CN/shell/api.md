@@ -457,9 +457,7 @@ base 的 `Calendar` 元素**没有**绑定，这是个决定而不是遗漏：�
 | `DockPanel`             | `panels()` 报告的一块面板：`id`、`name`、`placement`、`node`、`index`、`active` 与三个标志位 |
 | `DockGroup` / `DockTab` | 一个标签组与它的一个标签页，也就是 `tab_bar` 与 `empty_group` 拿到的东西                     |
 | `DockRegion`            | 一侧 dock，也就是 `dock` handler 拿到的东西                                                  |
-| `DockTile`              | 一个 tile，bounds 已经解析好                                                                 |
 | `DockDrop`              | 被拖动的面板会落在哪里                                                                       |
-| `TileResizeSide`        | `"left"`、`"right"`、`"top"`、`"bottom"` 或 `"bottom_right"`                                 |
 
 ### 组合模式
 
@@ -720,15 +718,10 @@ dock 的 chrome 画出来的元素*做什么*。缓存的 chrome 描述没有脚
 | `drop_tab(group, index?)`      | 放下 | 在此接收被拖来的面板；不给 index 就追加到末尾 |
 | `toggle_dock(dock)`            | 点击 | 展开或收起这侧 dock                           |
 | `resize_dock(dock)`            | 拖动 | 拖动 dock 的边；每个位置都由 base 钳制        |
-| `move_tile(tile)`              | 拖动 | 在画布上移动这个 tile                         |
-| `resize_tile(tile, side)`      | 拖动 | 拖动某条边或某个角                            |
-| `raise_tile(tile)`             | 按下 | 把这个 tile 提到最上层                        |
-| `toggle_tile_zoom(tile)`       | 点击 | 让 tile 放大占满所在 dock                     |
-| `close_tile(tile)`             | 点击 | 关闭这个 tile                                 |
 
 ### Dock chrome
 
-六个 handler，全都可选，且只能挂在 `dock_area(...)` 上。每一个都会先在 GPUI 的 layout pass 内部被调用，拿到的是 base 已经解析好的状态；描述会缓存到该状态或 handler 改变为止。
+四个 handler，全都可选，且只能挂在 `dock_area(...)` 上。每一个都会先在 GPUI 的 layout pass 内部被调用，拿到的是 base 已经解析好的状态；描述会缓存到该状态或 handler 改变为止。
 
 | 方法                           | 画什么                                               |
 | ------------------------------ | ---------------------------------------------------- |
@@ -736,8 +729,6 @@ dock 的 chrome 画出来的元素*做什么*。缓存的 chrome 描述没有脚
 | `empty_group(handler)`         | 没有可显示面板的 group 显示什么                      |
 | `drop_indicator(handler)`      | 被拖动的面板会落在哪里                               |
 | `dock(handler)`                | 一侧 dock 包住内容的外框；把 `dock_content()` 放进去 |
-| `tile_drag_bar(handler)`       | 拖动 tile 用的那条拖拽条                             |
-| `tile_resize_handles(handler)` | tile 的缩放把手                                      |
 
 ### 动效
 

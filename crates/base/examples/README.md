@@ -31,9 +31,9 @@ component using the `?component=<slug>` query parameter.
 
 `dock` is a showcase component like the rest, but a larger one: a dockable workspace — nested
 splits, tab groups, and a bottom dock — built on `gpui-base` alone. Because the base dock draws
-nothing, `showcase/components/dock.rs` implements the `DockAreaRenderer`, `TabGroupRenderer`, and
-`TilesRenderer` traits itself, which is what makes it worth reading: it is the smallest complete
-skin over the dock's renderer seam.
+nothing, `showcase/components/dock.rs` implements the `DockAreaRenderer` and `TabGroupRenderer`
+traits itself, which is what makes it worth reading: it is the smallest complete skin over the
+dock's renderer seam.
 
 ```bash
 cargo run -p gpui-base dock

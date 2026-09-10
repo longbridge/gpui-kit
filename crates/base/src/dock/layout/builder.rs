@@ -2,9 +2,9 @@
 
 use std::sync::Arc;
 
-use gpui::{App, Axis, Bounds, Entity, Pixels};
+use gpui::{App, Axis, Entity, Pixels};
 
-use super::node::{NodeKind, PaneNode, PanelId, TilePanel};
+use super::node::{NodeKind, PaneNode, PanelId};
 use super::tree::{PaneTree, RootKind};
 use crate::dock::panel::{Panel, PanelView};
 
@@ -34,9 +34,6 @@ enum BuilderKind {
         panels: Vec<(PanelId, Arc<dyn PanelView>)>,
         active_ix: usize,
     },
-    Tiles {
-        panels: Vec<(PanelId, Arc<dyn PanelView>, Bounds<Pixels>)>,
-    },
 }
 
 impl DockLayout {
@@ -57,14 +54,6 @@ impl DockLayout {
                 panels: Vec::new(),
                 active_ix: 0,
             },
-        }
-    }
-
-    /// A tiles canvas: panels placed at free coordinates, each dragged and
-    /// resized on its own.
-    pub fn tiles() -> Self {
-        Self {
-            kind: BuilderKind::Tiles { panels: Vec::new() },
         }
     }
 
@@ -116,37 +105,6 @@ impl DockLayout {
         );
         if let BuilderKind::Tabs { panels, .. } = &mut self.kind {
             panels.push((panel.panel_id(cx), panel));
-        }
-        self
-    }
-
-    /// Place a panel on a tiles canvas.
-    pub fn tile<P: Panel>(mut self, panel: Entity<P>, bounds: Bounds<Pixels>) -> Self {
-        debug_assert!(
-            matches!(self.kind, BuilderKind::Tiles { .. }),
-            "tile() is only valid on tiles()"
-        );
-        if let BuilderKind::Tiles { panels } = &mut self.kind {
-            panels.push((PanelId::from(panel.entity_id()), Arc::new(panel), bounds));
-        }
-        self
-    }
-
-    /// Place an already-wrapped panel handle on a tiles canvas. The companion
-    /// to [`Self::tile`], for the same reason [`Self::panel_view`] is the
-    /// companion to [`Self::panel`].
-    pub fn tile_view(
-        mut self,
-        panel: Arc<dyn PanelView>,
-        bounds: Bounds<Pixels>,
-        cx: &App,
-    ) -> Self {
-        debug_assert!(
-            matches!(self.kind, BuilderKind::Tiles { .. }),
-            "tile_view() is only valid on tiles()"
-        );
-        if let BuilderKind::Tiles { panels } = &mut self.kind {
-            panels.push((panel.panel_id(cx), panel, bounds));
         }
         self
     }
@@ -213,17 +171,6 @@ impl DockLayout {
                     },
                 )
             }
-            BuilderKind::Tiles { panels } => {
-                let tiles = panels
-                    .iter()
-                    .enumerate()
-                    .map(|(ix, (panel, _, bounds))| {
-                        TilePanel::new(*panel, *bounds).with_z_index(ix)
-                    })
-                    .collect();
-                collected.extend(panels.into_iter().map(|(id, view, _)| (id, view)));
-                PaneNode::new(id, NodeKind::Tiles { panels: tiles })
-            }
         }
     }
 }
@@ -233,8 +180,8 @@ impl PaneTree {
     ///
     /// The `RootKind::Split` wrap mirrors the one in
     /// [`PaneTree::from_state`](crate::dock::PaneTree::from_state): a
-    /// center whose described root is a tab group or a tiles canvas still has
-    /// to serialize as a `StackPanel`.
+    /// center whose described root is a tab group still has to serialize as a
+    /// `StackPanel`.
     pub(crate) fn from_layout(
         layout: DockLayout,
         root_kind: RootKind,
@@ -354,27 +301,5 @@ mod tests {
             panic!("expected a tab group root");
         };
         assert_eq!(active_ix, 1);
-    }
-
-    #[gpui::test]
-    fn tiles_are_stacked_in_the_order_they_are_placed(cx: &mut TestAppContext) {
-        let bounds = Bounds {
-            origin: gpui::point(px(0.), px(0.)),
-            size: gpui::size(px(100.), px(100.)),
-        };
-        let (tree, _) = cx.update(|cx| {
-            let alpha = TestPanel::new("Alpha", cx);
-            let beta = TestPanel::new("Beta", cx);
-            PaneTree::from_layout(
-                DockLayout::tiles().tile(alpha, bounds).tile(beta, bounds),
-                RootKind::Any,
-            )
-        });
-
-        let PaneRef::Tiles { panels } = tree.root().kind() else {
-            panic!("expected a tiles root");
-        };
-        assert_eq!(panels[0].z_index(), 0);
-        assert_eq!(panels[1].z_index(), 1);
     }
 }

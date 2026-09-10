@@ -103,7 +103,7 @@ self.dock_area.update(cx, |area, cx| {
 });
 ```
 
-用 `h_split()` 和 `v_split()` 创建横向与纵向分割，用 `tabs()` 创建标签组，用 `tiles()` 创建可自由定位的画布。分割尺寸为 `None` 时会填满剩余空间。
+用 `h_split()` 和 `v_split()` 创建横向与纵向分割，用 `tabs()` 创建标签组。分割尺寸为 `None` 时会填满剩余空间。
 
 DockArea 还通过 `DockPlacement` 支持左、右和底部区域。运行时可以添加、移除、激活、最大化或移动 Panel；用户操作会触发 `DockEvent`，其中 `LayoutChanged` 可用于持久化。
 
@@ -143,8 +143,6 @@ Dock 状态兼容旧版本保存的布局。对于已经从应用移除的 Panel
 ```rust
 self.dock_skin.set_panel_style(PanelStyle::default(), cx);
 self.dock_skin.set_toggle_button_visible(true, cx);
-self.dock_skin
-    .set_tiles_scrollbar_mode(Some(ScrollbarMode::Auto), cx);
 ```
 
 如果需要完全不同的视觉，可以实现 `gpui-base` 的渲染器 traits；同一份布局数据和操作逻辑仍然可以复用。

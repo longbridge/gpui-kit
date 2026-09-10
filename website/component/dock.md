@@ -103,7 +103,7 @@ self.dock_area.update(cx, |area, cx| {
 });
 ```
 
-Use `h_split()` and `v_split()` for rows and columns, `tabs()` for a tab group, and `tiles()` for a free-positioning canvas. A `None` split size fills the remaining space.
+Use `h_split()` and `v_split()` for rows and columns and `tabs()` for a tab group. A `None` split size fills the remaining space.
 
 The Dock area also supports left, right, and bottom regions through `DockPlacement`. Panels can be added, removed, activated, zoomed, and moved at runtime; user operations emit `DockEvent`, including `LayoutChanged` for persistence.
 
@@ -143,8 +143,6 @@ Dock state retains compatibility with layouts saved by earlier releases. Keep a 
 ```rust
 self.dock_skin.set_panel_style(PanelStyle::default(), cx);
 self.dock_skin.set_toggle_button_visible(true, cx);
-self.dock_skin
-    .set_tiles_scrollbar_mode(Some(ScrollbarMode::Auto), cx);
 ```
 
 For complete control, implement the renderer traits in `gpui-base`. The same layout data and operations can then drive an entirely different Dock style.

@@ -2729,17 +2729,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "example-tiles"
-version = "0.6.1"
-dependencies = [
- "anyhow",
- "gpui-component-story",
- "gpui-kit",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "exr"
 version = "1.74.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

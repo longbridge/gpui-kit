@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use smallvec::SmallVec;
 
-use super::node::{NodeId, NodeKind, PaneNode, PaneRef, PanelId, TilePanel};
+use super::node::{NodeId, NodeKind, PaneNode, PaneRef, PanelId};
 
 /// Whether the root of this tree is pinned to a split.
 ///
@@ -90,7 +90,6 @@ impl PaneTree {
         let mut found = Vec::new();
         self.root.walk(&mut |node| match node.kind() {
             PaneRef::Tabs { panels, .. } => found.extend_from_slice(panels),
-            PaneRef::Tiles { panels } => found.extend(panels.iter().map(TilePanel::panel)),
             PaneRef::Split { .. } => {}
         });
         found.into_iter()
@@ -100,13 +99,12 @@ impl PaneTree {
         self.path_of_node(id).map(|path| self.node_at(&path))
     }
 
-    /// The tab or tiles node holding `panel`.
+    /// The tab node holding `panel`.
     pub fn find_panel_node(&self, panel: PanelId) -> Option<NodeId> {
         let mut found = None;
         self.root.walk(&mut |node| {
             let holds = match node.kind() {
                 PaneRef::Tabs { panels, .. } => panels.contains(&panel),
-                PaneRef::Tiles { panels } => panels.iter().any(|p| p.panel() == panel),
                 PaneRef::Split { .. } => false,
             };
             if holds {
@@ -220,12 +218,6 @@ impl PaneTree {
         id
     }
 
-    pub(crate) fn set_root_tiles_for_test(&mut self, panels: Vec<TilePanel>) -> NodeId {
-        let id = self.allocate_node_id();
-        self.root = PaneNode::new(id, NodeKind::Tiles { panels });
-        id
-    }
-
     pub(crate) fn set_root_split_for_test(&mut self, axis: Axis) -> NodeId {
         let id = self.allocate_node_id();
         self.root = PaneNode::new(
@@ -284,8 +276,6 @@ impl PaneTree {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{Bounds, point, px, size};
-
     use super::*;
 
     fn panel_id(n: u64) -> PanelId {
@@ -309,26 +299,5 @@ mod tests {
         assert_ne!(tabs, tree.root().id());
         assert!(tree.find_node(tabs).is_some());
         assert_eq!(tree.find_panel_node(panel_id(1)), Some(tabs));
-    }
-
-    #[test]
-    fn tile_panels_carry_bounds_and_z_index() {
-        let mut tree = PaneTree::new(RootKind::Any);
-        let tiles = tree.set_root_tiles_for_test(vec![
-            TilePanel::new(
-                panel_id(7),
-                Bounds {
-                    origin: point(px(10.), px(20.)),
-                    size: size(px(100.), px(50.)),
-                },
-            )
-            .with_z_index(3),
-        ]);
-        let PaneRef::Tiles { panels } = tree.find_node(tiles).unwrap().kind() else {
-            panic!("expected tiles root");
-        };
-        assert_eq!(panels[0].panel(), panel_id(7));
-        assert_eq!(panels[0].z_index(), 3);
-        assert_eq!(panels[0].bounds().size.width, px(100.));
     }
 }

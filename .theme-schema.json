@@ -485,10 +485,6 @@
           "description": "TitleBar border color.",
           "type": ["string", "null"]
         },
-        "tiles.background": {
-          "description": "Background color for Tiles.",
-          "type": ["string", "null"]
-        },
         "warning.background": {
           "description": "Warning background color.",
           "type": ["string", "null"]

@@ -1,4 +1,4 @@
-use gpui::{Axis, Bounds, EntityId, Pixels};
+use gpui::{Axis, EntityId, Pixels};
 
 /// Stable container identity. Survives structural edits and normalization so
 /// the `DockArea` view cache does not tear down and rebuild entities.
@@ -36,46 +36,6 @@ impl From<EntityId> for PanelId {
     }
 }
 
-/// One panel placed on a tiles canvas.
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub struct TilePanel {
-    panel: PanelId,
-    bounds: Bounds<Pixels>,
-    z_index: usize,
-}
-
-impl TilePanel {
-    pub fn new(panel: PanelId, bounds: Bounds<Pixels>) -> Self {
-        Self {
-            panel,
-            bounds,
-            z_index: 0,
-        }
-    }
-
-    pub fn with_z_index(mut self, z_index: usize) -> Self {
-        self.z_index = z_index;
-        self
-    }
-
-    pub fn with_bounds(mut self, bounds: Bounds<Pixels>) -> Self {
-        self.bounds = bounds;
-        self
-    }
-
-    pub fn panel(&self) -> PanelId {
-        self.panel
-    }
-
-    pub fn bounds(&self) -> Bounds<Pixels> {
-        self.bounds
-    }
-
-    pub fn z_index(&self) -> usize {
-        self.z_index
-    }
-}
-
 /// The shape of one container. Private: every mutation goes through
 /// [`PaneTree`] so normalization always runs.
 ///
@@ -91,9 +51,6 @@ pub(crate) enum NodeKind {
         panels: Vec<PanelId>,
         active_ix: usize,
     },
-    Tiles {
-        panels: Vec<TilePanel>,
-    },
 }
 
 /// Borrowed read-only projection of a node.
@@ -106,9 +63,6 @@ pub enum PaneRef<'a> {
     Tabs {
         panels: &'a [PanelId],
         active_ix: usize,
-    },
-    Tiles {
-        panels: &'a [TilePanel],
     },
 }
 
@@ -142,7 +96,6 @@ impl PaneNode {
                 panels,
                 active_ix: *active_ix,
             },
-            NodeKind::Tiles { panels } => PaneRef::Tiles { panels },
         }
     }
 

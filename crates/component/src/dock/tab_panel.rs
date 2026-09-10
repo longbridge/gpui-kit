@@ -160,7 +160,6 @@ fn left_top_group(node: &PaneNode) -> Option<NodeId> {
     match node.kind() {
         PaneRef::Tabs { .. } => Some(node.id()),
         PaneRef::Split { children, .. } => children.first().and_then(left_top_group),
-        PaneRef::Tiles { .. } => None,
     }
 }
 
@@ -175,7 +174,6 @@ fn right_top_group(node: &PaneNode) -> Option<NodeId> {
             gpui::Axis::Horizontal => children.last(),
         }
         .and_then(right_top_group),
-        PaneRef::Tiles { .. } => None,
     }
 }
 
@@ -705,6 +703,11 @@ impl TabGroupRenderer for TabGroupSkin {
         match visible.as_slice() {
             [] => Empty.into_any_element(),
             [ix] if self.shared.panel_style() == PanelStyle::Auto => {
+                // A panel that draws its own chrome declines the title bar.
+                let panel = &group.panels()[*ix];
+                if PanelHandle::of(panel).is_some_and(|handle| !handle.title_bar(cx)) {
+                    return Empty.into_any_element();
+                }
                 self.render_title(group, *ix, window, cx)
             }
             _ => self.render_tabs(group, window, cx),
@@ -777,20 +780,23 @@ impl TabGroupRenderer for TabGroupSkin {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
+    use std::{
+        cell::{Cell, RefCell},
+        sync::Arc,
+    };
 
     use gpui::{
         Entity, EventEmitter, FocusHandle, Focusable, Pixels, TestAppContext, VisualTestContext,
     };
-    use gpui_base::dock::{
-        DockArea, DockAreaRenderer, DockLayout, DockPlacement, PanelEvent, TileContext,
-        TilesRenderer,
-    };
+    use gpui_base::dock::{DockArea, DockAreaRenderer, DockLayout, DockPlacement, PanelEvent};
 
     use super::*;
-    use crate::dock::{
-        DockSkin, Panel, panel_handle,
-        test_support::{HideableProbe, MeasuredProbe},
+    use crate::{
+        ElementExt as _,
+        dock::{
+            DockSkin, Panel, panel_handle,
+            test_support::{HideableProbe, MeasuredProbe},
+        },
     };
 
     struct Probe {
@@ -853,24 +859,12 @@ mod tests {
         }
     }
 
-    impl TilesRenderer for Recorder {
-        fn render_drag_bar(&self, _: &TileContext, _: &mut Window, _: &mut App) -> AnyElement {
-            Empty.into_any_element()
-        }
-    }
-
     impl DockAreaRenderer for Recorder {
         fn frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
             div().id("recorder").size_full()
         }
 
         fn tab_group_renderer(&self) -> Rc<dyn TabGroupRenderer> {
-            Rc::new(Recorder {
-                log: self.log.clone(),
-            })
-        }
-
-        fn tiles_renderer(&self) -> Rc<dyn TilesRenderer> {
             Rc::new(Recorder {
                 log: self.log.clone(),
             })
@@ -1458,6 +1452,80 @@ mod tests {
             cx.read(|cx| area.read(cx).is_zoomed()),
             false,
             "a collapsed group installs no action handler"
+        );
+    }
+
+    /// A panel that carries its own chrome declines the one-panel title bar
+    /// and gets the whole group.
+    #[gpui::test]
+    fn a_panel_without_a_title_bar_gets_the_whole_group(cx: &mut TestAppContext) {
+        struct Chromeless {
+            focus_handle: FocusHandle,
+            height: Rc<Cell<Pixels>>,
+        }
+
+        impl gpui_base::dock::Panel for Chromeless {
+            fn panel_name(&self) -> &'static str {
+                "Chromeless"
+            }
+        }
+
+        impl Panel for Chromeless {
+            fn title_bar(&self, _: &App) -> bool {
+                false
+            }
+        }
+
+        impl EventEmitter<PanelEvent> for Chromeless {}
+
+        impl Focusable for Chromeless {
+            fn focus_handle(&self, _: &App) -> FocusHandle {
+                self.focus_handle.clone()
+            }
+        }
+
+        impl Render for Chromeless {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let height = self.height.clone();
+                div()
+                    .size_full()
+                    .on_prepaint(move |bounds, _, _| height.set(bounds.size.height))
+            }
+        }
+
+        cx.update(|cx| crate::init(cx));
+
+        let measure = |cx: &mut TestAppContext, chromeless: bool| -> Pixels {
+            let height = Rc::new(Cell::new(px(0.)));
+            let (area, cx) = cx.add_window_view(|window, cx| {
+                let skin = DockSkin::new(cx);
+                DockArea::new("skin", None, window, cx).with_renderer(skin)
+            });
+            let measured = height.clone();
+            cx.update(|window, cx| {
+                let panel: Arc<dyn gpui_base::dock::PanelView> = if chromeless {
+                    panel_handle(cx.new(|cx| Chromeless {
+                        focus_handle: cx.focus_handle(),
+                        height: measured,
+                    }))
+                } else {
+                    panel_handle(MeasuredProbe::new(measured, cx))
+                };
+                let layout = DockLayout::tabs().panel_view(panel, cx);
+                area.update(cx, |area, cx| area.set_center(layout, window, cx));
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            height.get()
+        };
+
+        let with_title = measure(cx, false);
+        let without = measure(cx, true);
+        assert!(with_title > px(0.), "the probe must have been drawn");
+        assert_eq!(
+            without,
+            with_title + px(30.),
+            "the 30px the title bar took go to the panel instead"
         );
     }
 }

@@ -1,4 +1,4 @@
-use gpui::{Axis, Bounds, Pixels, point, px, size};
+use gpui::{Axis, Pixels};
 use serde::{Deserialize, Serialize};
 
 /// Used to serialize and deserialize the DockArea.
@@ -70,30 +70,6 @@ pub struct PanelState {
     pub info: PanelInfo,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Serialize, Deserialize)]
-pub struct TileMeta {
-    pub bounds: Bounds<Pixels>,
-    pub z_index: usize,
-}
-
-impl Default for TileMeta {
-    fn default() -> Self {
-        Self {
-            bounds: Bounds {
-                origin: point(px(10.), px(10.)),
-                size: size(px(200.), px(200.)),
-            },
-            z_index: 0,
-        }
-    }
-}
-
-impl From<Bounds<Pixels>> for TileMeta {
-    fn from(bounds: Bounds<Pixels>) -> Self {
-        Self { bounds, z_index: 0 }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PanelInfo {
     #[serde(rename = "stack")]
@@ -105,8 +81,6 @@ pub enum PanelInfo {
     Tabs { active_index: usize },
     #[serde(rename = "panel")]
     Panel(serde_json::Value),
-    #[serde(rename = "tiles")]
-    Tiles { metas: Vec<TileMeta> },
 }
 
 impl PanelInfo {
@@ -123,10 +97,6 @@ impl PanelInfo {
 
     pub fn panel(info: serde_json::Value) -> Self {
         Self::Panel(info)
-    }
-
-    pub fn tiles(metas: Vec<TileMeta>) -> Self {
-        Self::Tiles { metas }
     }
 
     pub fn axis(&self) -> Option<Axis> {

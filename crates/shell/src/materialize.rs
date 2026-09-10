@@ -446,8 +446,7 @@ struct Behavior {
     /// The dock commands a chrome element carries — what base is asked to do
     /// when it is clicked or dragged.
     ///
-    /// A list, because one element often carries two: a tile's drag bar both
-    /// raises the tile and moves it, and a tab both selects and drags.
+    /// A list, because one element can carry two: a tab both selects and drags.
     dock_commands: SmallVec<[crate::dock::DockAction; 2]>,
     /// Which script handler draws each piece of a `dock_area`'s chrome.
     ///
@@ -2490,8 +2489,6 @@ pub(in crate::materialize) fn resolve_ops(
                 "empty_group" => behavior.dock_chrome.empty_group = Some(*id),
                 "drop_indicator" => behavior.dock_chrome.drop_indicator = Some(*id),
                 "dock" => behavior.dock_chrome.dock = Some(*id),
-                "tile_drag_bar" => behavior.dock_chrome.tile_drag_bar = Some(*id),
-                "tile_resize_handles" => behavior.dock_chrome.tile_resize_handles = Some(*id),
                 other => tracing::error!("unhandled callback `{other}` reached materialize"),
             },
             SpecOp::ActionCallback(id, callback) => {
@@ -2818,8 +2815,7 @@ fn warn_unsupported(component: &str, methods: &[(&str, bool)]) {
 /// Every one of them takes the dock handle first, because a command is resolved
 /// against the contexts of *that* area — the script passes the container object
 /// it was handed, and the prelude unpacks the handle out of it. What follows
-/// names the container inside the area: a group's node, a dock's placement, or
-/// a tile's panel.
+/// names the container inside the area: a group's node or a dock's placement.
 fn is_dock_command(name: &str) -> bool {
     matches!(
         name,
@@ -2830,11 +2826,6 @@ fn is_dock_command(name: &str) -> bool {
             | "drop_tab"
             | "toggle_dock"
             | "resize_dock"
-            | "move_tile"
-            | "resize_tile"
-            | "raise_tile"
-            | "toggle_tile_zoom"
-            | "close_tile"
     )
 }
 
@@ -2857,7 +2848,6 @@ fn dock_action(name: &str, args: &[Bridged]) -> Option<crate::dock::DockAction> 
 
     let dock = handle(0)?;
     let node = || handle(1);
-    let panel = || handle(1);
 
     let command = match name {
         "select_tab" => DockCommand::SelectTab {
@@ -2885,14 +2875,6 @@ fn dock_action(name: &str, args: &[Bridged]) -> Option<crate::dock::DockAction> 
         "resize_dock" => DockCommand::ResizeDock {
             placement: dock_placement(text(1)?)?,
         },
-        "move_tile" => DockCommand::MoveTile { panel: panel()? },
-        "resize_tile" => DockCommand::ResizeTile {
-            panel: panel()?,
-            side: resize_side(text(2)?)?,
-        },
-        "raise_tile" => DockCommand::RaiseTile { panel: panel()? },
-        "toggle_tile_zoom" => DockCommand::ToggleTileZoom { panel: panel()? },
-        "close_tile" => DockCommand::CloseTile { panel: panel()? },
         _ => return None,
     };
 
@@ -2910,25 +2892,6 @@ pub(crate) fn dock_placement(name: &str) -> Option<gpui_base::dock::DockPlacemen
         _ => {
             tracing::error!(
                 "`{name}` is not a dock placement; expected \"center\", \"left\", \"right\" or \"bottom\""
-            );
-            None
-        }
-    }
-}
-
-/// Which edge or corner of a tile a resize handle pulls.
-fn resize_side(name: &str) -> Option<gpui_base::dock::ResizeSide> {
-    use gpui_base::dock::ResizeSide;
-    match name {
-        "left" => Some(ResizeSide::Left),
-        "right" => Some(ResizeSide::Right),
-        "top" => Some(ResizeSide::Top),
-        "bottom" => Some(ResizeSide::Bottom),
-        "bottom_right" => Some(ResizeSide::BottomRight),
-        _ => {
-            tracing::error!(
-                "`{name}` is not a tile resize side; expected \"left\", \"right\", \"top\", \
-                 \"bottom\" or \"bottom_right\""
             );
             None
         }

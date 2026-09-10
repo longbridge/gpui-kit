@@ -125,7 +125,6 @@
         "table.foot.foreground": "#64748B",
         "table.hover.background": "#F1F5F9",
         "table.row.border": "#E2E8F0B3",
-        "tiles.background": "#F8FAFC",
         "title_bar.background": "linear-gradient(180deg, #FFFFFF, #F8FAFC)",
         "title_bar.border": "#E2E8F0",
         "status_bar.background": "linear-gradient(180deg, #F8FAFC, #F1F5F9)",

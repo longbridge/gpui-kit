@@ -137,12 +137,6 @@ pub struct Theme {
     /// The notification setting.
     #[serde(skip)]
     pub notification: NotificationSettings,
-    /// Tile grid size, default is 4px.
-    pub tile_grid_size: Pixels,
-    /// The shadow of the tile panel.
-    pub tile_shadow: bool,
-    /// The border radius of the tile panel, default is 0px.
-    pub tile_radius: Pixels,
     /// The list settings.
     pub list: ListSettings,
     /// The sheet settings.
@@ -632,9 +626,6 @@ impl From<&ThemeColor> for Theme {
             focus_ring: true,
             scrollbar_mode: ScrollbarMode::default(),
             notification: NotificationSettings::default(),
-            tile_grid_size: px(8.),
-            tile_shadow: true,
-            tile_radius: px(0.),
             list: ListSettings::default(),
             colors: *colors,
             tokens: ThemeTokens::from(colors),

@@ -297,8 +297,6 @@ pub struct ThemeColor {
     pub status_bar: Hsla,
     /// StatusBar border color.
     pub status_bar_border: Hsla,
-    /// Background color for Tiles.
-    pub tiles: Hsla,
     /// Warning background color.
     pub warning: Hsla,
     /// Warning active background color.
@@ -494,7 +492,6 @@ define_theme_tokens! {
     title_bar_border,
     status_bar,
     status_bar_border,
-    tiles,
     warning,
     warning_active,
     warning_hover,

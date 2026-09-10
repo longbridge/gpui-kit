@@ -263,10 +263,6 @@ impl DockAreaRenderer for ShowcaseDockSkin {
     fn tab_group_renderer(&self) -> Rc<dyn TabGroupRenderer> {
         Rc::new(self.clone())
     }
-
-    fn tiles_renderer(&self) -> Rc<dyn TilesRenderer> {
-        Rc::new(self.clone())
-    }
 }
 
 impl TabGroupRenderer for ShowcaseDockSkin {
@@ -363,15 +359,6 @@ impl TabGroupRenderer for ShowcaseDockSkin {
                 .bg(rgba(DROP_TARGET))
                 .into_any_element(),
         )
-    }
-}
-
-/// This example builds no tiles canvas, so none of this is reached. A
-/// `DockAreaRenderer` must still name a tiles renderer, because base builds one
-/// for any `Tiles` node a layout — or a persisted file — happens to hold.
-impl TilesRenderer for ShowcaseDockSkin {
-    fn render_drag_bar(&self, _: &TileContext, _: &mut Window, _: &mut App) -> AnyElement {
-        div().into_any_element()
     }
 }
 

@@ -77,7 +77,6 @@ icons/plus.svg
 icons/redo-2.svg
 icons/redo.svg
 icons/replace.svg
-icons/resize-corner.svg
 icons/rotate-cw.svg
 icons/search.svg
 icons/settings-2.svg

@@ -10,14 +10,13 @@ use gpui::{
 };
 use gpui_base::dock::{
     DockAreaRenderer, DockContext, DockEvent, DockPlacement, NodeId, PanelState, PanelView,
-    TabGroupRenderer, TilesRenderer,
+    TabGroupRenderer,
 };
 
 use crate::{
     ActiveTheme as _, Side,
     dock::{
         DockSkin, SkinShared, invalid_panel::InvalidPanel, panel_handle, tab_panel::TabGroupSkin,
-        tiles::TilesSkin,
     },
     resize_handle,
 };
@@ -95,10 +94,6 @@ impl DockAreaRenderer for DockSkin {
 
     fn tab_group_renderer(&self) -> Rc<dyn TabGroupRenderer> {
         Rc::new(TabGroupSkin::new(self.shared().clone()))
-    }
-
-    fn tiles_renderer(&self) -> Rc<dyn TilesRenderer> {
-        Rc::new(TilesSkin::new(self.shared().clone()))
     }
 }
 
@@ -267,10 +262,6 @@ mod tests {
         fn tab_group_renderer(&self) -> Rc<dyn gpui_base::dock::TabGroupRenderer> {
             Rc::new(ChromelessTabs)
         }
-
-        fn tiles_renderer(&self) -> Rc<dyn gpui_base::dock::TilesRenderer> {
-            Rc::new(ChromelessTiles)
-        }
     }
 
     struct ChromelessTabs;
@@ -281,18 +272,6 @@ mod tests {
         fn render_tab_bar(
             &self,
             _: &gpui_base::dock::TabGroupContext,
-            _: &mut Window,
-            _: &mut App,
-        ) -> gpui::AnyElement {
-            gpui::Empty.into_any_element()
-        }
-    }
-
-    struct ChromelessTiles;
-    impl gpui_base::dock::TilesRenderer for ChromelessTiles {
-        fn render_drag_bar(
-            &self,
-            _: &gpui_base::dock::TileContext,
             _: &mut Window,
             _: &mut App,
         ) -> gpui::AnyElement {

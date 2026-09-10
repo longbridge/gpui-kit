@@ -16,7 +16,7 @@ use gpui::{KeyBinding, WindowBounds};
 use gpui_base::ResizeHandleContext;
 use gpui_base::dock::{
     DockArea, DockAreaRenderer, DockContext, DockLayout, DockPlacement, DropIndicator, NodeId,
-    Panel, PanelEvent, PanelView, TabGroupContext, TabGroupRenderer, TileContext, TilesRenderer,
+    Panel, PanelEvent, PanelView, TabGroupContext, TabGroupRenderer,
 };
 use gpui_base::input::InputEditorStyle;
 use gpui_base::input::{EditorState, InputState, TextareaState};

@@ -12,5 +12,5 @@ pub use edit::{EditResult, InsertTarget};
 // going through `PaneTree`, which is what guarantees normalization always
 // runs.
 pub(crate) use node::NodeKind;
-pub use node::{NodeId, PaneNode, PaneRef, PanelId, TilePanel};
+pub use node::{NodeId, PaneNode, PaneRef, PanelId};
 pub use tree::{PaneTree, RootKind};

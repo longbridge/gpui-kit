@@ -38,7 +38,7 @@ See the [executable application recipe and AI-assisted development acceptance ch
 - **Data Tables**: Virtual scrolling, fixed and resizable columns, sorting, and cell selection across hundreds of thousands of rows.
 - **Virtual Lists**: Render only the visible range, including lists whose items have different sizes.
 - **Code Editor**: Stable performance at 200K lines with Tree-sitter highlighting and LSP diagnostics, completion, and hover.
-- **Dock Layout**: Resizable panels, draggable tabs, nested splits, edge docks, and serializable freeform Tiles.
+- **Dock Layout**: Resizable panels, draggable tabs, nested splits, and edge docks — all serializable.
 - **Rich Content**: Native Markdown and HTML rendering, syntax highlighting, and built-in charts.
 - **Design Freedom**: Use the complete visual system or build your own on the behavior and infrastructure in `gpui-base`.
 - **JavaScript Extensions**: `gpui-shell` lets a shipped Rust host load panels and business logic as scripts, with every capability granted explicitly.

@@ -1,9 +1,9 @@
 //! Panel doubles shared by the skin's tests.
 //!
 //! This lives beside the production modules rather than inside one module's
-//! `mod tests` because the same double is needed by two of them: a tab group
-//! and a tiles canvas each hand a panel to a different frame, and the question
-//! — did the panel get a height? — is the same. Mirrors
+//! `mod tests` because the same double is needed by more than one of them: a
+//! tab group and a dock each hand a panel to a different frame, and the
+//! question — did the panel get a height? — is the same. Mirrors
 //! `gpui_base::dock::test_support`.
 
 use std::{cell::Cell, rc::Rc};

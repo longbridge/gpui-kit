@@ -439,7 +439,7 @@ they remeasure when rem changes because the same fixed width wraps differently
 at a larger base font.
 
 Do not confuse this application zoom with Dock panel zoom. Dock zoom is a
-stateful layout operation that makes one tab group or tile fill the DockArea
+stateful layout operation that makes one tab group fill the DockArea
 while keeping the container chrome and the way back out. It must not modify the
 window rem size.
 

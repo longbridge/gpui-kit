@@ -1913,8 +1913,8 @@ const ELEMENT_METHODS: &str = r#"    /**
      * stood. A command carries no script value: it names a container in the
      * area and what to ask it, and base does the work.
      *
-     * Every command takes the object its handler was given — the group, the
-     * dock, the tile — as its first argument. They belong on a `div`, an
+     * Every command takes the object its handler was given — the group or the
+     * dock — as its first argument. They belong on a `div`, an
      * `h_flex` or a `v_flex`; a `Button` builds its own interior and has
      * nowhere to put one.
      */
@@ -1941,19 +1941,6 @@ const ELEMENT_METHODS: &str = r#"    /**
      * area and the opposite dock, so nothing here has to.
      */
     resize_dock<Self extends Element>(this: Self, dock: import("gpui-base").DockRegion): Self;
-    /** Drags the tile around its canvas, raising it first. */
-    move_tile<Self extends Element>(this: Self, tile: import("gpui-base").DockTile): Self;
-    /** Drags one edge or corner of the tile. */
-    resize_tile<Self extends Element>(this: Self,
-      tile: import("gpui-base").DockTile,
-      side: import("gpui-base").TileResizeSide,
-    ): Self;
-    /** Brings the tile above the others when this element is pressed. */
-    raise_tile<Self extends Element>(this: Self, tile: import("gpui-base").DockTile): Self;
-    /** Zooms the tile to fill its dock, or back out. */
-    toggle_tile_zoom<Self extends Element>(this: Self, tile: import("gpui-base").DockTile): Self;
-    /** Closes the tile. */
-    close_tile<Self extends Element>(this: Self, tile: import("gpui-base").DockTile): Self;
 "#;
 
 fn shell_types() -> String {
@@ -3291,23 +3278,6 @@ const BASE: &str = r#"  /** A row. */
     readonly collapsible: boolean;
   }
 
-  /** One tile of a tiles canvas, as the two tile handlers are given it. */
-  export interface DockTile {
-    readonly node: number;
-    readonly panel: { readonly name: string; readonly id: number; readonly visible: boolean };
-    /**
-     * Already resolved — base snaps, clamps and rounds before a skin sees
-     * them, so nothing here has to be positioned by hand.
-     */
-    readonly bounds: import("gpui-shell").ElementBounds;
-    readonly z_index: number;
-    readonly moving: boolean;
-    readonly resizing: boolean;
-    readonly closable: boolean;
-    readonly zoomed: boolean;
-    readonly zoomable: boolean;
-  }
-
   /** Where a dragged panel would land, as the `drop_indicator` handler is given it. */
   export interface DockDrop {
     /** `null` means the drop merges into the group's tabs rather than splitting beside it. */
@@ -3331,11 +3301,6 @@ const BASE: &str = r#"  /** A row. */
     placement?: DockPlacement;
     /** Seeds the dock's extent when the panel is the first thing in it. */
     size?: number;
-    /**
-     * Places the panel on the region's tiles canvas instead of in a tab group.
-     * A region with no canvas has nowhere to put a tile, so nothing happens.
-     */
-    bounds?: { x: number; y: number; width: number; height: number };
     /** Default `true`. */
     closable?: boolean;
     /** Default `true`. */
@@ -3345,7 +3310,7 @@ const BASE: &str = r#"  /** A row. */
   }
 
   /**
-   * A dockable layout: splits, tab groups, docks and tiles that the user can
+   * A dockable layout: splits, tab groups and docks that the user can
    * rearrange, and that survives a restart.
    *
    * Retained for a reason none of the other handles share. **The layout is what
@@ -3403,15 +3368,15 @@ const BASE: &str = r#"  /** A row. */
     dock_size(placement: DockPlacement): number | null;
     set_dock_size(placement: DockPlacement, size: number): void;
     set_dock_collapsible(placement: DockPlacement, collapsible: boolean): void;
-    /** A locked area cannot be rearranged or dropped into; dock and tile resizing stays available. */
+    /** A locked area cannot be rearranged or dropped into; dock resizing stays available. */
     is_locked(): boolean;
     set_locked(locked: boolean): void;
     is_zoomed(): boolean;
     /** Clears the zoom, whichever container holds it. */
     zoom_out(): void;
     /**
-     * Fires on every edit — including each step of a tile drag — so save on a
-     * timer rather than on every one.
+     * Fires on every edit — including each step of a dock resize — so save on
+     * a timer rather than on every one.
      */
     on(event: "layout_changed", handler: (cx: Context) => void): boolean;
     release(): boolean;
@@ -3452,9 +3417,8 @@ const BASE: &str = r#"  /** A row. */
    * so unchanged frames do not enter JavaScript. It may not register event
    * handlers — cached chrome has no script callback lifecycle of its own — so
    * the elements it returns say what they do with a **command** instead:
-   * `select_tab(group, i)`, `close_panel(group, id)`, `toggle_dock(dock)`,
-   * `move_tile(tile)` and the rest. A command carries no script value, and base
-   * does the work.
+   * `select_tab(group, i)`, `close_panel(group, id)`, `toggle_dock(dock)` and
+   * the rest. A command carries no script value, and base does the work.
    */
   export function dock_area(area: DockArea): DockAreaElement;
 
@@ -3471,13 +3435,6 @@ const BASE: &str = r#"  /** A row. */
      * `dock_content()` where the panels belong.
      */
     dock(handler: (dock: DockRegion, cx: Context) => Element | null): DockAreaElement;
-    /**
-     * The strip a tile is dragged by. Its height is fixed at base's drag-bar
-     * height, which the snapping arithmetic assumes.
-     */
-    tile_drag_bar(handler: (tile: DockTile, cx: Context) => Element): DockAreaElement;
-    /** A tile's resize affordances. */
-    tile_resize_handles(handler: (tile: DockTile, cx: Context) => Element | null): DockAreaElement;
   }
 
   /**
@@ -3485,9 +3442,6 @@ const BASE: &str = r#"  /** A row. */
    * around them. Legal only inside that handler, and only once.
    */
   export function dock_content(): NativeElement;
-
-  /** Which edge or corner of a tile a resize handle pulls. */
-  export type TileResizeSide = "left" | "right" | "top" | "bottom" | "bottom_right";
 
   /** Semantic color roles, aligned with `gpui_base::ColorTokens`. */
   export type ColorTokens = { readonly [Role in ColorToken]: Color };
@@ -3968,11 +3922,6 @@ mod tests {
         "drop_tab",
         "toggle_dock",
         "resize_dock",
-        "move_tile",
-        "resize_tile",
-        "raise_tile",
-        "toggle_tile_zoom",
-        "close_tile",
         "value",
         "indeterminate",
         "axis",

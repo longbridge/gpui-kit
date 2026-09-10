@@ -2238,14 +2238,14 @@ carry the rest of a panel's life across the seam: `set_active`, `set_zoomed`,
 and `release`, which is where the engine frees the retained handle its own
 `build` produced.
 
-**`ScriptDockSkin`** is the appearance. It implements all three renderer traits
+**`ScriptDockSkin`** is the appearance. It implements both renderer traits
 and forwards each callback to a `DockChrome`, whose every method has a default
 reproducing base's own no-chrome behavior — so an application that draws no
 chrome implements none of them and still gets a dock that docks, drags, resizes,
 and persists. Base keeps the drag source, drop-target hit testing, keyboard
 actions, and focus; a chrome implementation never sees a drag event, a mouse
-position, or a hit test, only resolved state through `TabGroupContext`,
-`DockContext`, and `TileContext`.
+position, or a hit test, only resolved state through `TabGroupContext` and
+`DockContext`.
 
 **The script binding** is `DockArea` (a retained entity), `dock_area(area)` (one
 description of it), and `dock_content()` (where a dock's own content goes inside
@@ -2268,7 +2268,7 @@ duplicated by later state changes, so it is refused by the same
 `ScopePhase::Layout` check used for virtual-list row descriptions.
 
 So a chrome element carries a `DockCommand` instead: `SelectTab { node, index }`,
-`ClosePanel { node, panel }`, `MoveTile { panel }` and nine more. A command names
+`ClosePanel { node, panel }`, `ToggleDock { placement }` and four more. A command names
 a container and what to ask it, carries no script value, and is resolved against
 `DockContexts` — the table the skin files each context in as base hands it past,
 cleared once per frame by `materialize` before anything is recorded again. The

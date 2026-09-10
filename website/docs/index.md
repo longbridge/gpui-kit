@@ -33,7 +33,7 @@ application development. For library APIs, see [GPUI Component](/component),
 - **Data Tables**: Virtual scrolling, fixed and resizable columns, sorting, and cell selection across hundreds of thousands of rows.
 - **Virtual Lists**: Render only the visible range, including differently sized items.
 - **Code Editor**: 200K lines, Tree-sitter highlighting, diagnostics, completion, and hover.
-- **Dock Layout**: Resizable panels, draggable tabs, nested splits, edge docks, and freeform Tiles.
+- **Dock Layout**: Resizable panels, draggable tabs, nested splits, and edge docks.
 - **Rich Content**: Native Markdown and HTML, syntax highlighting, and charts.
 - **Design Freedom**: Use the complete visual system or build your own on `gpui-base`.
 - **Typed Motion**: CSS-aligned easing, timing, keyframes, springs, presence, and measured reveal with allocation-free steady sampling.

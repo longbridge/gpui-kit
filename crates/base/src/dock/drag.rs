@@ -122,21 +122,29 @@ impl AnyDrag {
     }
 }
 
-/// Where a host-owned drag landed.
-#[derive(Clone, Debug)]
-pub enum DropTarget {
-    /// A tiles canvas, where the cursor position is the landing position and
-    /// the host can read it directly.
-    Canvas,
-    /// A tab group in a split layout. A split layout has no free coordinates,
-    /// so the container reports the group and the edge it resolved instead.
-    ///
-    /// `placement` is `None` for the centre zone, meaning merge into the group
-    /// rather than split.
-    Group {
-        node: NodeId,
-        placement: Option<Placement>,
-    },
+/// Where a host-owned drag landed: a tab group, and the edge it resolved.
+///
+/// A split layout has no free coordinates, so the container reports the group
+/// and the placement instead of a position. `placement` is `None` for the
+/// centre zone, meaning merge into the group rather than split.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DropTarget {
+    node: NodeId,
+    placement: Option<Placement>,
+}
+
+impl DropTarget {
+    pub(crate) fn new(node: NodeId, placement: Option<Placement>) -> Self {
+        Self { node, placement }
+    }
+
+    pub fn node(&self) -> NodeId {
+        self.node
+    }
+
+    pub fn placement(&self) -> Option<Placement> {
+        self.placement
+    }
 }
 
 /// What the skin should draw while a drag hovers a group.

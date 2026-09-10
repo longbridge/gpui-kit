@@ -1,13 +1,12 @@
 use gpui::{Axis, Pixels};
 
-use super::layout::{NodeKind, PaneNode, PaneRef, PaneTree, PanelId, RootKind, TilePanel};
-use super::state::{PanelInfo, PanelState, TileMeta};
+use super::layout::{NodeKind, PaneNode, PaneRef, PaneTree, PanelId, RootKind};
+use super::state::{PanelInfo, PanelState};
 
 /// The names written to persisted layouts. These are contract, not type names:
 /// they must keep their values even if the Rust types are renamed.
 pub(crate) const STACK_PANEL_NAME: &str = "StackPanel";
 pub(crate) const TAB_PANEL_NAME: &str = "TabPanel";
-pub(crate) const TILES_PANEL_NAME: &str = "Tiles";
 
 /// How the layout tree reads properties of panels it only knows by id.
 ///
@@ -21,30 +20,7 @@ pub trait PanelSource {
 
 impl PaneTree {
     pub fn to_state(&self, source: &dyn PanelSource) -> PanelState {
-        node_to_state(self.persisted_root(), source)
-    }
-
-    /// The node the persisted layout starts at.
-    ///
-    /// A `RootKind::Split` tree keeps a `Split` root even around a lone tiles
-    /// canvas, so an edit always has a container to land in. That wrapper is a
-    /// tree invariant, not part of the persisted schema: the dock before the
-    /// tree rewrite wrote a tiles center as a bare `Tiles`, and its
-    /// `StackPanel::insert_panel` asserts every split child is a `TabPanel` or
-    /// `StackPanel`, so writing the wrapper crashes that reader on load.
-    /// `from_state` puts the wrapper back, so the round trip still holds.
-    fn persisted_root(&self) -> &PaneNode {
-        let root = self.root();
-        match root.kind() {
-            PaneRef::Split {
-                children: [only], ..
-            } if self.root_kind() == RootKind::Split
-                && matches!(only.kind(), PaneRef::Tiles { .. }) =>
-            {
-                only
-            }
-            _ => root,
-        }
+        node_to_state(self.root(), source)
     }
 }
 
@@ -83,22 +59,6 @@ fn node_to_state(node: &PaneNode, source: &dyn PanelSource) -> PanelState {
             // its loop and left an empty group looking like a bare panel.
             info: PanelInfo::tabs(active_ix),
         },
-        PaneRef::Tiles { panels } => PanelState {
-            panel_name: TILES_PANEL_NAME.to_string(),
-            children: panels
-                .iter()
-                .map(|tile| source.dump(tile.panel()))
-                .collect(),
-            info: PanelInfo::tiles(
-                panels
-                    .iter()
-                    .map(|tile| TileMeta {
-                        bounds: tile.bounds(),
-                        z_index: tile.z_index(),
-                    })
-                    .collect(),
-            ),
-        },
     }
 }
 
@@ -128,12 +88,7 @@ impl PaneTree {
     ///   old reader had no such rule: it looked "TabPanel" up in the panel
     ///   registry, found nothing, and rendered an `InvalidPanel` placeholder
     ///   where an empty tab group belonged. This rule is a genuine fix, not a
-    ///   preserved behavior;
-    /// - a `Tiles` child without a matching meta keeps the default placement.
-    ///   The old writer's counterpart (`DockItem::tiles`) hard-asserted
-    ///   `items.len() == metas.len()` and panicked the whole load on a short
-    ///   `metas` list, so this rule is a new safety net, not a preserved
-    ///   graceful-degradation path.
+    ///   preserved behavior.
     pub fn from_state(
         state: &PanelState,
         root_kind: RootKind,
@@ -200,19 +155,6 @@ fn build_node(tree: &mut PaneTree, state: &PanelState, builder: &mut dyn PanelBu
                 },
             )
         }
-        PanelInfo::Tiles { metas } => {
-            let mut panels = Vec::new();
-            for (ix, child) in state.children.iter().enumerate() {
-                // Keyed by the *child* index, not by the output index: a
-                // child that expands to several tiles must not shift the
-                // metas of the children after it.
-                let meta = metas.get(ix).copied().unwrap_or_default();
-                for panel in tile_panels(child, builder) {
-                    panels.push(TilePanel::new(panel, meta.bounds).with_z_index(meta.z_index));
-                }
-            }
-            PaneNode::new(id, NodeKind::Tiles { panels })
-        }
         PanelInfo::Panel(_) => {
             // A container name carrying a leaf info means the writer that
             // produced this file had the empty-group defect.
@@ -232,42 +174,6 @@ fn build_node(tree: &mut PaneTree, state: &PanelState, builder: &mut dyn PanelBu
     }
 }
 
-/// The panels one persisted `Tiles` child stands for.
-///
-/// Every tile the old dock ever wrote is `TabPanel`-shaped: `DockItem::tiles`
-/// wraps each child in a `TabPanel`, `DockItem::add_panel`'s tiles arm wraps
-/// every UI-added panel in a fresh one, and `PanelState::to_item` converts a
-/// plain-panel child into a `TabPanel` on the next save. In the tree model a
-/// tile *is* a panel, so the group has to be unwrapped — building the
-/// `"TabPanel"` leaf directly would miss the registry, fall to a placeholder,
-/// and never build the user's real panels at all, restoring a saved tiles
-/// canvas as blank tiles.
-///
-/// A group holding several panels expands to one tile per panel, sharing the
-/// group's meta. That is not merely defensive: the UI cannot produce it
-/// (tiles groups are locked, so they can never gain a tab), but
-/// `DockItem::tiles(vec![DockItem::tabs(vec![a, b])], ..)` can, and a tiles
-/// canvas has no way to show a second tab.
-fn tile_panels(child: &PanelState, builder: &mut dyn PanelBuilder) -> Vec<PanelId> {
-    match &child.info {
-        PanelInfo::Tabs { .. } => {
-            let panels = collect_tab_panels(&child.children, builder);
-            if panels.len() > 1 {
-                tracing::warn!(
-                    panels = panels.len(),
-                    "a tiles child held a tab group with more than one panel; \
-                     expanding it to one tile per panel, all sharing the group's placement"
-                );
-            }
-            panels
-        }
-        // The legacy empty-group form: a `TabPanel` name carrying leaf info.
-        // It stands for no panel, so it contributes no tile.
-        PanelInfo::Panel(_) if child.panel_name == TAB_PANEL_NAME => Vec::new(),
-        _ => vec![builder.build(child, &child.info)],
-    }
-}
-
 /// Flatten one level of tab nesting, which the old writer could produce.
 fn collect_tab_panels(children: &[PanelState], builder: &mut dyn PanelBuilder) -> Vec<PanelId> {
     children
@@ -282,9 +188,9 @@ fn collect_tab_panels(children: &[PanelState], builder: &mut dyn PanelBuilder) -
 
 #[cfg(test)]
 mod tests {
-    use gpui::{Bounds, point, px, size};
+    use gpui::px;
 
-    use super::super::layout::{RootKind, TilePanel};
+    use super::super::layout::RootKind;
     use super::super::state::DockAreaState;
     use super::*;
 
@@ -380,27 +286,6 @@ mod tests {
         assert!(matches!(state.info, PanelInfo::Stack { .. }));
     }
 
-    #[test]
-    fn tiles_serialize_with_their_metas_in_order() {
-        let mut tree = PaneTree::new(RootKind::Any);
-        let bounds = Bounds {
-            origin: point(px(5.), px(6.)),
-            size: size(px(7.), px(8.)),
-        };
-        tree.set_root_tiles_for_test(vec![
-            TilePanel::new(PanelId::from_u64(1), bounds).with_z_index(2),
-        ]);
-
-        let state = tree.to_state(&FakePanels(vec![(PanelId::from_u64(1), "Alpha")]));
-
-        assert_eq!(state.panel_name, "Tiles");
-        let PanelInfo::Tiles { metas } = state.info else {
-            panic!()
-        };
-        assert_eq!(metas[0].bounds, bounds);
-        assert_eq!(metas[0].z_index, 2);
-    }
-
     /// Assigns each leaf `PanelState` an id in encounter order, so the reader
     /// can be tested without a registry or an `App`.
     #[derive(Default)]
@@ -488,45 +373,6 @@ mod tests {
         assert!(matches!(tree.root().kind(), PaneRef::Split { .. }));
     }
 
-    #[test]
-    fn tile_metas_are_paired_with_children_by_index() {
-        let bounds = Bounds {
-            origin: point(px(1.), px(2.)),
-            size: size(px(3.), px(4.)),
-        };
-        let state = PanelState {
-            panel_name: TILES_PANEL_NAME.to_string(),
-            children: vec![panel_state("Alpha")],
-            info: PanelInfo::tiles(vec![TileMeta { bounds, z_index: 5 }]),
-        };
-
-        let mut builder = RecordingBuilder::default();
-        let tree = PaneTree::from_state(&state, RootKind::Any, &mut builder);
-
-        let PaneRef::Tiles { panels } = tree.root().kind() else {
-            panic!()
-        };
-        assert_eq!(panels[0].bounds(), bounds);
-        assert_eq!(panels[0].z_index(), 5);
-    }
-
-    #[test]
-    fn a_tile_child_missing_its_meta_falls_back_to_the_default_placement() {
-        let state = PanelState {
-            panel_name: TILES_PANEL_NAME.to_string(),
-            children: vec![panel_state("Alpha"), panel_state("Beta")],
-            info: PanelInfo::tiles(vec![TileMeta::default()]),
-        };
-
-        let mut builder = RecordingBuilder::default();
-        let tree = PaneTree::from_state(&state, RootKind::Any, &mut builder);
-
-        let PaneRef::Tiles { panels } = tree.root().kind() else {
-            panic!()
-        };
-        assert_eq!(panels.len(), 2, "a short metas list must not drop panels");
-    }
-
     /// Round-trips leaves by remembering the exact `PanelState` each id came
     /// from, which is what the production invalid-panel path must also do.
     ///
@@ -574,12 +420,10 @@ mod tests {
     fn canonicalization_reaches_a_fixpoint_in_one_pass() {
         for json in [
             include_str!("fixtures/layout.json"),
-            include_str!("fixtures/tiles.json"),
             include_str!("fixtures/nested_splits.json"),
             include_str!("fixtures/legacy_empty_tab_group.json"),
             include_str!("fixtures/unregistered_panel.json"),
             include_str!("fixtures/zero_size_sentinel.json"),
-            include_str!("fixtures/tiles_tab_panel_children.json"),
         ] {
             let once = canonicalize(json);
             let twice = {
@@ -652,136 +496,6 @@ mod tests {
             "the spliced-in sizes are scaled by outer/inner (400/200 = 2x), and the \
              collapsed split hands its own outer slot (300.0) to its surviving child"
         );
-    }
-
-    /// The shape every persisted tiles canvas actually has: each tile child
-    /// is a `TabPanel` wrapping the real panel. Reading the `"TabPanel"` leaf
-    /// literally would build a placeholder and drop the user's panel.
-    #[test]
-    fn a_tiles_child_that_is_a_tab_group_is_unwrapped_to_its_panels() {
-        let json = include_str!("fixtures/tiles_tab_panel_children.json");
-        let state: DockAreaState = serde_json::from_str(json).unwrap();
-        let mut panels = PreservingPanels::default();
-        let tree = PaneTree::from_state(&state.center, RootKind::Split, &mut panels);
-
-        assert_eq!(
-            panels.names,
-            vec!["Alpha", "Beta", "Gamma"],
-            "the real panels are built; no `TabPanel` leaf is handed to the builder"
-        );
-
-        let dumped = tree.to_state(&panels);
-        let tiles = &dumped;
-        assert_eq!(tiles.panel_name, "Tiles");
-        assert_eq!(
-            tiles
-                .children
-                .iter()
-                .map(|child| child.panel_name.as_str())
-                .collect::<Vec<_>>(),
-            vec!["Alpha", "Beta", "Gamma"],
-        );
-
-        let PanelInfo::Tiles { metas } = &tiles.info else {
-            panic!("expected Tiles info");
-        };
-        // The two-panel child expands to two tiles sharing its own meta, and
-        // the *next* child still gets the meta at its own child index — an
-        // implementation keyed on the output index would hand Gamma the first
-        // meta and lose the second entirely.
-        assert_eq!(metas.len(), 3);
-        assert_eq!(
-            metas[0].bounds.origin.x,
-            px(10.),
-            "Alpha keeps child 0's meta"
-        );
-        assert_eq!(
-            metas[1].bounds.origin.x,
-            px(10.),
-            "Beta shares child 0's meta"
-        );
-        assert_eq!(metas[1].z_index, 0);
-        assert_eq!(
-            metas[2].bounds.origin.x,
-            px(400.),
-            "Gamma gets child 1's meta"
-        );
-        assert_eq!(metas[2].z_index, 3);
-    }
-
-    #[test]
-    fn an_empty_tab_group_on_a_tiles_canvas_contributes_no_tile() {
-        let state = PanelState {
-            panel_name: TILES_PANEL_NAME.to_string(),
-            children: vec![
-                // The legacy empty-group form.
-                PanelState {
-                    panel_name: TAB_PANEL_NAME.to_string(),
-                    children: Vec::new(),
-                    info: PanelInfo::panel(serde_json::Value::Null),
-                },
-                tabs_state(vec![panel_state("Alpha")], 0),
-            ],
-            info: PanelInfo::tiles(vec![TileMeta::default(), TileMeta::default()]),
-        };
-
-        let mut builder = RecordingBuilder::default();
-        let tree = PaneTree::from_state(&state, RootKind::Any, &mut builder);
-
-        assert_eq!(builder.built, vec!["Alpha"]);
-        let PaneRef::Tiles { panels } = tree.root().kind() else {
-            panic!()
-        };
-        assert_eq!(panels.len(), 1);
-    }
-
-    /// The dock before the tree rewrite wrote a tiles center as a bare
-    /// `Tiles`, and its `StackPanel::insert_panel` asserts every split child
-    /// is a `TabPanel` or `StackPanel`. Writing the in-memory `Split` root
-    /// around the canvas therefore crashes an older build on load: the wrapper
-    /// is a tree invariant, not part of the persisted schema.
-    #[test]
-    fn a_tiles_center_is_written_the_way_the_pre_tree_dock_wrote_it() {
-        let legacy = PanelState {
-            panel_name: TILES_PANEL_NAME.to_string(),
-            children: vec![tabs_state(vec![panel_state("Alpha")], 0)],
-            info: PanelInfo::tiles(vec![TileMeta::default()]),
-        };
-        let mut panels = PreservingPanels::default();
-        let tree = PaneTree::from_state(&legacy, RootKind::Split, &mut panels);
-
-        let dumped = tree.to_state(&panels);
-
-        assert_eq!(
-            dumped.panel_name, "Tiles",
-            "no `StackPanel` wrapper: the old reader hands the canvas to `StackPanel::insert_panel`"
-        );
-        assert_eq!(dumped.children[0].panel_name, "Alpha");
-    }
-
-    #[test]
-    fn tile_bounds_and_z_order_survive_a_round_trip() {
-        let state = canonicalize(include_str!("fixtures/tiles.json"));
-        let tiles = &state;
-
-        assert_eq!(tiles.panel_name, "Tiles");
-        // `metas` and `children` are parallel arrays, matched up by index. A
-        // bug that swapped `children`'s order while leaving `metas` in place
-        // would misattribute bounds to the wrong panel without either array
-        // changing length, so check both arrays' contents *and* that they
-        // still line up by identity, not just that each array is correct in
-        // isolation.
-        assert_eq!(tiles.children[0].panel_name, "Alpha");
-        assert_eq!(tiles.children[1].panel_name, "Beta");
-
-        let PanelInfo::Tiles { metas } = &tiles.info else {
-            panic!()
-        };
-        assert_eq!(metas.len(), 2);
-        assert_eq!(metas[0].z_index, 0, "Alpha's meta");
-        assert_eq!(metas[0].bounds.origin.x, px(10.), "Alpha's meta");
-        assert_eq!(metas[1].z_index, 1, "Beta's meta");
-        assert_eq!(metas[1].bounds.origin.x, px(220.), "Beta's meta");
     }
 
     #[test]

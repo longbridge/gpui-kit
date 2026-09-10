@@ -21,7 +21,7 @@ impl PaneTree {
     ///
     /// Rules, applied bottom up:
     ///
-    /// 1. An empty `Tabs`, `Tiles`, or `Split` is removed from its parent.
+    /// 1. An empty `Tabs` or `Split` is removed from its parent.
     /// 2. A `Split` with one child is replaced by that child. The child keeps
     ///    its own `NodeId` and inherits the split's slot size.
     /// 3. A `Split` whose child is a `Split` of the same axis splices that
@@ -116,11 +116,6 @@ impl PaneTree {
                     ok &= !panels.is_empty();
                 }
             }
-            NodeKind::Tiles { panels } => {
-                if node.id() != root_id {
-                    ok &= !panels.is_empty();
-                }
-            }
         });
         ok
     }
@@ -135,7 +130,6 @@ fn normalize_node(node: &mut PaneNode, changed: &mut bool) {
                 *changed = true;
             }
         }
-        NodeKind::Tiles { .. } => {}
         NodeKind::Split {
             axis,
             children,
@@ -245,7 +239,6 @@ fn is_empty_container(node: &PaneNode) -> bool {
     match node.kind_ref() {
         NodeKind::Split { children, .. } => children.is_empty(),
         NodeKind::Tabs { panels, .. } => panels.is_empty(),
-        NodeKind::Tiles { panels } => panels.is_empty(),
     }
 }
 

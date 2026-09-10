@@ -27,7 +27,7 @@
 //! registered inside one would outlive the temporary description unpredictably.
 //! Instead a chrome element carries a
 //! [`DockCommand`](crate::dock::DockCommand) — `select_tab(group, i)`,
-//! `close_panel(group, id)`, `move_tile(tile)` — which names a container and
+//! `close_panel(group, id)`, `toggle_dock(dock)` — which names a container and
 //! what to ask it, and is resolved against the contexts the last drawn frame
 //! recorded. Nothing about it is a script value, so there is nothing to retire.
 //!
@@ -43,11 +43,11 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Empty, Entity, EntityId, IntoElement as _,
-    ParentElement as _, Styled as _, Window, div, point, px, size,
+    AnyElement, App, AppContext as _, Empty, Entity, EntityId, IntoElement as _,
+    ParentElement as _, Styled as _, Window, div, px,
 };
 use gpui_base::dock::{
-    DockContext, DockEvent, DockPlacement, DropIndicator, PanelId, TabGroupContext, TileContext,
+    DockContext, DockEvent, DockPlacement, DropIndicator, PanelId, TabGroupContext,
 };
 use rquickjs::{Ctx, Exception, Object, Persistent, Result as JsResult, Value, function::Func};
 use serde_json::{Value as Json, json};
@@ -55,7 +55,7 @@ use serde_json::{Value as Json, json};
 use crate::{
     dock::{
         DockChrome, PanelScript, ScriptDockSkin, ScriptPanel, dock_data, drop_indicator_data,
-        tab_group_data, tile_data,
+        tab_group_data,
     },
     entities::EntityHandle,
     materialize::dock_placement,
@@ -206,9 +206,6 @@ pub fn install(
                             let (panels, active_ix) = match node.kind() {
                                 gpui_base::dock::PaneRef::Tabs { panels, active_ix } => {
                                     (panels.to_vec(), Some(active_ix))
-                                }
-                                gpui_base::dock::PaneRef::Tiles { panels } => {
-                                    (panels.iter().map(|tile| tile.panel()).collect(), None)
                                 }
                                 gpui_base::dock::PaneRef::Split { .. } => return,
                             };
@@ -513,8 +510,6 @@ pub(in crate::engine) struct PanelOptions {
     name: String,
     placement: String,
     size: Option<f32>,
-    /// Present only for a tile: bounds name a place only a tiles canvas has.
-    bounds: Option<Bounds<gpui::Pixels>>,
     closable: bool,
     zoomable: bool,
     visible: bool,
@@ -525,23 +520,6 @@ impl<'js> rquickjs::FromJs<'js> for PanelOptions {
         let object = value.as_object().ok_or_else(|| {
             Exception::throw_type(ctx, "add_panel(view, options) expects an options object")
         })?;
-        let bounds = match object.get::<_, Option<Object>>("bounds")? {
-            Some(bounds) => {
-                let x = bounds.get::<_, f32>("x")?;
-                let y = bounds.get::<_, f32>("y")?;
-                let width = bounds.get::<_, f32>("width")?;
-                let height = bounds.get::<_, f32>("height")?;
-                finite_number(ctx, x, "add_panel bounds.x")?;
-                finite_number(ctx, y, "add_panel bounds.y")?;
-                finite_non_negative(ctx, width, "add_panel bounds.width")?;
-                finite_non_negative(ctx, height, "add_panel bounds.height")?;
-                Some(Bounds {
-                    origin: point(px(x), px(y)),
-                    size: size(px(width), px(height)),
-                })
-            }
-            None => None,
-        };
         let name = object.get::<_, String>("name")?;
         if name.is_empty() {
             return Err(Exception::throw_type(
@@ -559,7 +537,6 @@ impl<'js> rquickjs::FromJs<'js> for PanelOptions {
                 .get::<_, Option<String>>("placement")?
                 .unwrap_or_else(|| "center".to_owned()),
             size,
-            bounds,
             closable: object.get::<_, Option<bool>>("closable")?.unwrap_or(true),
             zoomable: object.get::<_, Option<bool>>("zoomable")?.unwrap_or(true),
             visible: object.get::<_, Option<bool>>("visible")?.unwrap_or(true),
@@ -625,8 +602,6 @@ enum ChromeSlotKey {
     /// [`DropIndicator`] carries no node id to key on either.
     DropIndicator,
     Dock(DockPlacement),
-    TileDragBar(u64),
-    TileResizeHandles(u64),
 }
 
 struct ChromeSpec {
@@ -801,36 +776,6 @@ impl DockChrome for ScriptChrome {
             (None, None) => Empty.into_any_element(),
         }
     }
-
-    fn tile_drag_bar(&self, tile: &TileContext, window: &mut Window, cx: &mut App) -> AnyElement {
-        let hooks = self.slots.get();
-        let payload = tile_data(tile, cx);
-        self.draw(
-            ChromeSlotKey::TileDragBar(tile.panel_id().as_u64()),
-            hooks.tile_drag_bar,
-            payload,
-            window,
-            cx,
-        )
-        .unwrap_or_else(|| Empty.into_any_element())
-    }
-
-    fn tile_resize_handles(
-        &self,
-        tile: &TileContext,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Option<AnyElement> {
-        let hooks = self.slots.get();
-        let payload = tile_data(tile, cx);
-        self.draw(
-            ChromeSlotKey::TileResizeHandles(tile.panel_id().as_u64()),
-            hooks.tile_resize_handles,
-            payload,
-            window,
-            cx,
-        )
-    }
 }
 
 /// The script side of one registered panel: a view class, and the two methods
@@ -971,8 +916,8 @@ fn subscribe_dock(
             ctx,
             &format!(
                 "unknown dock event `{name}`; the only one is \"layout_changed\", which fires on \
-                 every edit — including each step of a tile drag, so save on a timer rather than \
-                 on every one"
+                 every edit — including each step of a dock resize, so save on a timer rather \
+                 than on every one"
             ),
         ));
     }
@@ -1194,9 +1139,8 @@ pub(super) fn apply_edit(
                 }
                 panel
             });
-            area.update(cx, |area, cx| match options.bounds {
-                Some(bounds) => area.add_tile(panel, placement, bounds, window, cx),
-                None => area.add_panel(panel, placement, options.size.map(px), window, cx),
+            area.update(cx, |area, cx| {
+                area.add_panel(panel, placement, options.size.map(px), window, cx)
             });
             Ok(())
         }

@@ -23,7 +23,6 @@ members = [
     "examples/large-text",
     "examples/markdown",
     "examples/stream-markdown",
-    "examples/tiles",
     "examples/window_title",
     "examples/dialog_overlay",
     "examples/webview",
