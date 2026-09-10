@@ -803,7 +803,11 @@ mod tests {
     struct InlineHoverCard;
     impl Render for InlineHoverCard {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div().w(px(120.)).h(px(40.)).child("Member profile")
+            div()
+                .debug_selector(|| "inline-test-card".into())
+                .w(px(120.))
+                .h(px(40.))
+                .child("Member profile")
         }
     }
 
@@ -811,6 +815,7 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             let builds = self.builds.clone();
             div()
+                .pl(px(150.))
                 .w(px(300.))
                 .text_size(px(16.))
                 .child(crate::TextSelectionLayer)
@@ -855,7 +860,9 @@ mod tests {
         assert_eq!(builds.load(Ordering::Relaxed), 0);
         let view = root.read_with(cx, |root, _| root.view.clone());
         let bounds = view.read_with(cx, |view, _| view.selection_adapter.text_bounds()[0]);
-        cx.update(|window, cx| window.simulate_mouse_move(bounds.center(), cx));
+        cx.update(|window, cx| {
+            window.simulate_mouse_move(point(bounds.right() - px(1.), bounds.center().y), cx)
+        });
         cx.run_until_parked();
         cx.executor()
             .advance_clock(std::time::Duration::from_secs(1));
@@ -864,6 +871,18 @@ mod tests {
         assert!(
             builds.load(Ordering::Relaxed) > 0,
             "hover did not build the card"
+        );
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let card = cx
+            .debug_bounds("inline-test-card")
+            .expect("hover card should be painted");
+        assert!(
+            (card.center().x - bounds.center().x).abs() < px(1.),
+            "card {card:?} must be centered on mention {bounds:?}"
+        );
+        assert!(
+            card.top() >= bounds.bottom(),
+            "card should be below the mention"
         );
         for (format, expected) in [
             (crate::text::SelectionFormat::Plain, "@member"),

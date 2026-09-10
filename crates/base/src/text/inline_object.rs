@@ -21,6 +21,8 @@ pub(super) struct MeasuredInlineObject {
     presentation: Option<MarkdownInlinePresentation>,
     text: SharedString,
     font_size: Pixels,
+    text_style: TextStyle,
+    appearance: super::markdown_inline::InlineAppearance,
 }
 
 impl MeasuredInlineObject {
@@ -41,6 +43,20 @@ impl MeasuredInlineObject {
             available_width: width,
         };
         let presentation = extensions.render_inline(node, &context, window, cx);
+        let mut appearance = presentation
+            .as_ref()
+            .map(|p| p.appearance.clone())
+            .unwrap_or_default();
+        let mut style = style.clone();
+        if let Some(weight) = appearance.font_weight {
+            style.font_weight = weight;
+        }
+        if let Some(color) = appearance.color {
+            style.color = color;
+        }
+        if presentation.as_ref().is_some_and(|p| p.image.is_some()) {
+            appearance.padding_x = Pixels::ZERO;
+        }
         // A fallback is one atomic line; source newlines remain in copied text.
         let text: SharedString = node.as_text().replace(['\r', '\n'], " ").into();
         let line = window.text_system().shape_line(
@@ -51,7 +67,7 @@ impl MeasuredInlineObject {
         );
         let height = context.line_height.max(line.ascent + line.descent);
         let fallback = MarkdownInlineMetrics::new(
-            size(line.width.max(px(1.)), height),
+            size(line.width.max(px(1.)) + appearance.padding_x * 2., height),
             (height - line.ascent - line.descent) / 2. + line.ascent,
         );
         let mut metrics = presentation
@@ -68,11 +84,15 @@ impl MeasuredInlineObject {
         let fallback_scale = (metrics.size.width / fallback.size.width)
             .min(metrics.size.height / fallback.size.height)
             .min(1.);
+        appearance.padding_x *= fallback_scale;
+        appearance.radius *= scale;
         Self {
             metrics,
             presentation,
             text,
             font_size: font_size * fallback_scale,
+            text_style: style,
+            appearance,
         }
     }
 
@@ -83,11 +103,17 @@ impl MeasuredInlineObject {
         let fallback_text = self.text.clone();
         let font_size = self.font_size;
         let bounds = self.metrics.size;
+        let padding = self.appearance.padding_x;
+        let color = self.text_style.color;
+        let weight = self.text_style.font_weight;
         let fallback = move || {
             div()
                 .w(bounds.width)
                 .h(bounds.height)
+                .px(padding)
                 .text_size(font_size)
+                .text_color(color)
+                .font_weight(weight)
                 .line_height(bounds.height)
                 .whitespace_nowrap()
                 .overflow_hidden()
@@ -133,14 +159,24 @@ impl InlineObject {
             .w(object.metrics.size.width)
             .h(object.metrics.size.height)
             .child(object.element());
-        if let Some(build) = object
+        if object.appearance.hover_background.is_some() {
+            content = content.on_hover(|_, window, _| window.refresh());
+        }
+        let content = if let Some(build) = object
             .presentation
             .as_ref()
             .and_then(|p| p.hover_card.clone())
         {
-            content = content.hoverable_tooltip(move |window, cx| build(window, cx));
-        }
-        let content = content.into_any_element();
+            crate::HoverCard::new("inline-hover-card")
+                .anchor(gpui::Anchor::TopCenter)
+                .trigger(content)
+                .content(move |_, window, cx| {
+                    div().id("inline-hover-content").child(build(window, cx))
+                })
+                .into_any_element()
+        } else {
+            content.into_any_element()
+        };
         Self {
             id: id.into(),
             node,
@@ -274,9 +310,18 @@ impl Element for InlineObject {
         if let Ok(mut value) = self.selected.lock() {
             *value = selected;
         }
+        let appearance = &self.object.appearance;
+        let background = if hitbox.is_hovered(window) {
+            appearance.hover_background.or(appearance.background)
+        } else {
+            appearance.background
+        };
+        if let Some(color) = background {
+            window.paint_quad(gpui::fill(bounds, color).corner_radii(appearance.radius));
+        }
         if selected {
             let color = view.as_ref().unwrap().read(cx).text_view_style.selection();
-            window.paint_quad(gpui::fill(bounds, color));
+            window.paint_quad(gpui::fill(bounds, color).corner_radii(appearance.radius));
         }
         self.content.paint(window, cx);
         if selectable {
@@ -327,6 +372,55 @@ impl Element for InlineObject {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn styled_text_padding_scales_with_atomic_geometry() {
+        use gpui::{Empty, FontWeight, TestApp};
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| Empty);
+        let node = MarkdownNode::new("mention", ()).text("@member");
+        let plain = MarkdownExtensions::default().inline_renderer("mention", |_, _, _, _| {
+            Some(MarkdownInlinePresentation::text().font_weight(FontWeight::MEDIUM))
+        });
+        let decorated =
+            MarkdownExtensions::default().inline_renderer("mention", |_, context, _, _| {
+                Some(
+                    MarkdownInlinePresentation::text()
+                        .font_weight(FontWeight::MEDIUM)
+                        .padding_x(context.font_size * 0.3)
+                        .rounded(context.font_size * 0.25),
+                )
+            });
+        for font_size in [16., 24., 32.] {
+            window.update(|_, window, cx| {
+                let style = TextStyle {
+                    font_size: px(font_size).into(),
+                    ..Default::default()
+                };
+                let plain = MeasuredInlineObject::measure(&node, &plain, &style, None, window, cx);
+                let full =
+                    MeasuredInlineObject::measure(&node, &decorated, &style, None, window, cx);
+                assert!(
+                    (full.metrics.size.width - plain.metrics.size.width - px(font_size * 0.6))
+                        .abs()
+                        < px(0.001)
+                );
+                assert_eq!(full.metrics.baseline, plain.metrics.baseline);
+                assert_eq!(full.text_style.font_weight, FontWeight::MEDIUM);
+                let narrow = MeasuredInlineObject::measure(
+                    &node,
+                    &decorated,
+                    &style,
+                    Some(full.metrics.size.width / 2.),
+                    window,
+                    cx,
+                );
+                assert_eq!(narrow.metrics.size, full.metrics.size / 2.);
+                assert_eq!(narrow.appearance.padding_x, full.appearance.padding_x / 2.);
+                assert_eq!(narrow.font_size, full.font_size / 2.);
+            });
+        }
+    }
 
     #[test]
     fn invalid_plugin_metrics_use_measured_text_and_zero_width_is_finite() {
@@ -409,6 +503,8 @@ mod tests {
             presentation: None,
             text: "x²".into(),
             font_size: px(16.),
+            text_style: TextStyle::default(),
+            appearance: Default::default(),
         };
         let object = InlineObject::new(
             "formula",

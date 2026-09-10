@@ -1,8 +1,18 @@
 use std::sync::Arc;
 
-use gpui::{AnyView, App, Image, Pixels, Size, TextStyle, Window};
+use gpui::{AnyView, App, FontWeight, Hsla, Image, Pixels, Size, TextStyle, Window};
 
 type HoverCardBuilder = dyn Fn(&mut Window, &mut App) -> AnyView + Send + Sync;
+
+#[derive(Clone, Default)]
+pub(crate) struct InlineAppearance {
+    pub color: Option<Hsla>,
+    pub background: Option<Hsla>,
+    pub hover_background: Option<Hsla>,
+    pub font_weight: Option<FontWeight>,
+    pub padding_x: Pixels,
+    pub radius: Pixels,
+}
 
 /// Geometry of a read-only inline object, in logical pixels at the current font size.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -39,6 +49,7 @@ impl MarkdownInlineMetrics {
 pub struct MarkdownInlinePresentation {
     pub(crate) image: Option<(Arc<Image>, MarkdownInlineMetrics)>,
     pub(crate) hover_card: Option<Arc<HoverCardBuilder>>,
+    pub(crate) appearance: InlineAppearance,
 }
 
 impl MarkdownInlinePresentation {
@@ -48,6 +59,7 @@ impl MarkdownInlinePresentation {
         Self {
             image: Some((image, metrics)),
             hover_card: None,
+            appearance: InlineAppearance::default(),
         }
     }
 
@@ -56,10 +68,55 @@ impl MarkdownInlinePresentation {
         Self {
             image: None,
             hover_card: None,
+            appearance: InlineAppearance::default(),
         }
     }
 
-    /// Show supplementary, read-only content in GPUI's hoverable tooltip layer.
+    /// Set the atomic text's foreground color.
+    pub fn text_color(mut self, color: Hsla) -> Self {
+        self.appearance.color = Some(color);
+        self
+    }
+
+    /// Set the atomic text's weight, used for both measurement and painting.
+    pub fn font_weight(mut self, weight: FontWeight) -> Self {
+        self.appearance.font_weight = Some(weight);
+        self
+    }
+
+    /// Set a background behind the entire object.
+    pub fn background(mut self, color: Hsla) -> Self {
+        self.appearance.background = Some(color);
+        self
+    }
+
+    /// Set the background while the pointer is over the object.
+    pub fn hover_background(mut self, color: Hsla) -> Self {
+        self.appearance.hover_background = Some(color);
+        self
+    }
+
+    /// Add horizontal padding to atomic text, included in wrapping and selection.
+    pub fn padding_x(mut self, padding: Pixels) -> Self {
+        self.appearance.padding_x = if f32::from(padding).is_finite() {
+            padding.max(Pixels::ZERO)
+        } else {
+            Pixels::ZERO
+        };
+        self
+    }
+
+    /// Round the object's background corners.
+    pub fn rounded(mut self, radius: Pixels) -> Self {
+        self.appearance.radius = if f32::from(radius).is_finite() {
+            radius.max(Pixels::ZERO)
+        } else {
+            Pixels::ZERO
+        };
+        self
+    }
+
+    /// Show read-only content centered horizontally on the whole inline object.
     ///
     /// The builder runs on hover, outside inline layout. The card must not
     /// contain focusable controls; selection and copying stay with TextView.

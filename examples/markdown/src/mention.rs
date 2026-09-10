@@ -49,33 +49,42 @@ impl MarkdownPlugin for MentionPlugin {
     fn render_inline(
         &self,
         node: &MarkdownNode,
-        _: &MarkdownInlineRenderContext,
+        context: &MarkdownInlineRenderContext,
         _: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) -> Option<MarkdownInlinePresentation> {
         let member = *node.data::<Member>()?;
         Some(
-            MarkdownInlinePresentation::text().hover_card(move |window, cx| {
-                Tooltip::element(move |_, cx| {
-                    h_flex()
-                        .w_64()
-                        .gap_3()
-                        .p_2()
-                        .child(Avatar::new().name(member.name).large())
-                        .child(
-                            v_flex()
-                                .gap_1()
-                                .child(div().font_weight(FontWeight::SEMIBOLD).child(member.name))
-                                .child(
-                                    div()
-                                        .text_color(cx.theme().muted_foreground)
-                                        .child(format!("@{}", member.handle)),
-                                )
-                                .child(div().text_xs().child("GPUI Kit")),
-                        )
-                })
-                .build(window, cx)
-            }),
+            MarkdownInlinePresentation::text()
+                .text_color(cx.theme().link)
+                .font_weight(FontWeight::MEDIUM)
+                .background(cx.theme().link.opacity(0.10))
+                .hover_background(cx.theme().link.opacity(0.18))
+                .padding_x(context.font_size * 0.3)
+                .rounded(context.font_size * 0.25)
+                .hover_card(move |window, cx| {
+                    Tooltip::element(move |_, cx| {
+                        h_flex()
+                            .w_64()
+                            .gap_3()
+                            .p_2()
+                            .child(Avatar::new().name(member.name).large())
+                            .child(
+                                v_flex()
+                                    .gap_1()
+                                    .child(
+                                        div().font_weight(FontWeight::SEMIBOLD).child(member.name),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(format!("@{}", member.handle)),
+                                    )
+                                    .child(div().text_xs().child("GPUI Kit")),
+                            )
+                    })
+                    .build(window, cx)
+                }),
         )
     }
 }
