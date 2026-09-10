@@ -136,6 +136,22 @@ mod oklab {
     }
 }
 
+/// Builds a color from OkLCH, the cylindrical form of the perceptually uniform
+/// Oklab color space.
+///
+/// Unlike HSL, rotating `hue` while holding `lightness` and `chroma` keeps the
+/// perceived brightness and vividness of every hue equal, so a generated color
+/// ring reads as one family instead of a raw rainbow.
+///
+/// `lightness` is `0.0 .. 1.0`, `chroma` is an absolute Oklab distance
+/// (roughly `0.0 .. 0.37`), and `hue` is in degrees. A request outside the sRGB
+/// gamut is clipped per channel, which costs a little chroma but not the hue.
+pub fn oklch(lightness: f32, chroma: f32, hue: f32) -> Hsla {
+    let hue = hue.to_radians();
+    let rgb = oklab::oklab_to_rgb(lightness, chroma * hue.cos(), chroma * hue.sin());
+    rgb.into()
+}
+
 impl Colorize for Hsla {
     fn opacity(&self, factor: f32) -> Self {
         Self {
