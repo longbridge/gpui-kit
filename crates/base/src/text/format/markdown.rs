@@ -904,6 +904,21 @@ mod tests {
     }
 
     #[test]
+    fn block_math_parses_as_a_block_and_falls_back_to_a_code_block() {
+        // `$$` is a block fence. With only the inline construct enabled it was
+        // swallowed as one long inline formula, so a block plugin matching
+        // `Node::Math` never fired.
+        let source = "$$\n\\sum_{i=1}^{n} i\n$$";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::CodeBlock(code) = &document.blocks[0] else {
+            panic!("expected a code block fallback")
+        };
+        assert_eq!(code.code(), "\\sum_{i=1}^{n} i");
+        assert!(document.to_markdown().contains("\\sum_{i=1}^{n} i"));
+    }
+
+    #[test]
     fn unclaimed_inline_math_keeps_its_literal_source() {
         // Math parsing is on by default, so prose that merely contains dollar
         // signs parses as a math node. With no plugin to render it, the text

@@ -393,6 +393,10 @@ impl MarkdownExtensions {
         let mut options = ParseOptions::gfm();
         options.constructs.frontmatter = self.enable_frontmatter;
         options.constructs.math_text = true;
+        // Both fences or neither: with only `math_text` on, the inline
+        // construct swallows a `$$` block, so a block plugin matching
+        // `Node::Math` never fires and the formula renders inline.
+        options.constructs.math_flow = true;
         if self.enable_mdx {
             options.constructs.html_flow = false;
             options.constructs.html_text = false;
