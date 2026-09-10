@@ -24,14 +24,17 @@ use gpui_kit::component::{
     resizable::{h_resizable, resizable_panel},
     status_bar::StatusBar,
     text::{
-        MarkdownNode, MarkdownParseContext, MarkdownPlugin, SelectionFormat, TextViewStyle,
-        markdown, markdown_ast,
+        MarkdownInlineMetrics, MarkdownInlinePresentation, MarkdownInlineRenderContext,
+        MarkdownNode, MarkdownParseContext, MarkdownPlugin, SelectionFormat, TextView,
+        TextViewState, TextViewStyle, markdown_ast,
     },
     v_flex,
 };
 use gpui_kit::{prelude::FluentBuilder as _, *};
 use lsp_types::{SemanticToken, SemanticTokenType, SemanticTokens, SemanticTokensLegend};
 use regex::{Captures, Regex};
+
+mod mention;
 
 /// Markers, each mapped to a different `HighlightTheme` token-type name so
 /// `TODO`, `FIXME`, … render in distinct colors.
@@ -54,15 +57,9 @@ struct UserCardNode {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum MathNode {
-    Formula { source: String, inline: bool },
-    Paragraph { segments: Vec<MathSegment> },
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct MathSegment {
+struct MathNode {
     source: String,
-    math: bool,
+    inline: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -110,6 +107,7 @@ struct RenderedMathImage {
     image: Arc<Image>,
     width: f32,
     height: f32,
+    baseline: f32,
 }
 
 impl MathPlugin {
@@ -174,119 +172,21 @@ fn math_markdown(source: &str, inline: bool) -> String {
 
 fn math_node(source: String, inline: bool, markdown: impl Into<String>) -> MarkdownNode {
     MarkdownNode::new(
-        "math",
-        MathNode::Formula {
+        if inline { "inline-math" } else { "math" },
+        MathNode {
             source: source.clone(),
             inline,
         },
     )
-    .text(math_markdown(&source, inline))
+    .text(prettify_math_source(&source))
+    .accessibility_label(format!("Formula: {}", prettify_math_source(&source)))
     .markdown(markdown.into())
-}
-
-fn math_paragraph_node(markdown: &str, segments: Vec<MathSegment>) -> MarkdownNode {
-    MarkdownNode::new("math", MathNode::Paragraph { segments })
-        .text(markdown.to_string())
-        .markdown(markdown.to_string())
 }
 
 fn block_math_source(source: &str) -> Option<&str> {
     let source = source.trim();
     let body = source.strip_prefix("$$")?.strip_suffix("$$")?.trim();
     (!body.is_empty()).then_some(body)
-}
-
-fn inline_math_segments(source: &str) -> Option<Vec<MathSegment>> {
-    let mut segments = Vec::new();
-    let mut text_start = 0;
-    let mut ix = 0;
-    let mut code_ticks = None;
-
-    while ix < source.len() {
-        if let Some(ticks) = count_run(source, ix, b'`') {
-            if code_ticks == Some(ticks) {
-                code_ticks = None;
-            } else if code_ticks.is_none() {
-                code_ticks = Some(ticks);
-            }
-            ix += ticks;
-            continue;
-        }
-
-        if code_ticks.is_none()
-            && source.as_bytes()[ix] == b'$'
-            && !is_escaped(source, ix)
-            && source.as_bytes().get(ix + 1) != Some(&b'$')
-            && let Some(end_ix) = find_inline_math_end(source, ix + 1)
-        {
-            let math = source[ix + 1..end_ix].trim();
-            if !math.is_empty() {
-                if text_start < ix {
-                    segments.push(MathSegment {
-                        source: source[text_start..ix].to_string(),
-                        math: false,
-                    });
-                }
-                segments.push(MathSegment {
-                    source: math.to_string(),
-                    math: true,
-                });
-                ix = end_ix + 1;
-                text_start = ix;
-                continue;
-            }
-        }
-
-        ix += source[ix..].chars().next().map_or(1, char::len_utf8);
-    }
-
-    if segments.iter().all(|segment| !segment.math) {
-        return None;
-    }
-
-    if text_start < source.len() {
-        segments.push(MathSegment {
-            source: source[text_start..].to_string(),
-            math: false,
-        });
-    }
-
-    Some(segments)
-}
-
-fn find_inline_math_end(source: &str, mut ix: usize) -> Option<usize> {
-    while ix < source.len() {
-        if source.as_bytes()[ix] == b'$'
-            && !is_escaped(source, ix)
-            && source.as_bytes().get(ix + 1) != Some(&b'$')
-        {
-            return Some(ix);
-        }
-        ix += source[ix..].chars().next().map_or(1, char::len_utf8);
-    }
-    None
-}
-
-fn count_run(source: &str, ix: usize, needle: u8) -> Option<usize> {
-    if source.as_bytes().get(ix) != Some(&needle) {
-        return None;
-    }
-
-    let mut end = ix + 1;
-    while source.as_bytes().get(end) == Some(&needle) {
-        end += 1;
-    }
-    Some(end - ix)
-}
-
-fn is_escaped(source: &str, ix: usize) -> bool {
-    let mut backslashes = 0;
-    let mut cursor = ix;
-    while cursor > 0 && source.as_bytes()[cursor - 1] == b'\\' {
-        backslashes += 1;
-        cursor -= 1;
-    }
-    backslashes % 2 == 1
 }
 
 impl MarkdownPlugin for MathPlugin {
@@ -322,44 +222,139 @@ impl MarkdownPlugin for MathPlugin {
             return Some(math_node(math.to_string(), false, source));
         }
 
-        inline_math_segments(source).map(|segments| math_paragraph_node(source, segments))
+        None
     }
 
     fn render(&self, node: &MarkdownNode, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let math = node.data::<MathNode>().expect("math markdown node data");
         let font_size = f32::from(window.text_style().font_size.to_pixels(window.rem_size()));
 
-        match math {
-            MathNode::Formula { source, inline } => {
-                let content = render_math_formula(source, *inline, font_size, cx);
-                if *inline {
-                    content
-                } else {
-                    div()
-                        .w_full()
-                        .flex()
-                        .justify_center()
-                        .py_1()
-                        .child(content)
-                        .into_any_element()
-                }
-            }
-            MathNode::Paragraph { segments } => h_flex()
-                .w_full()
-                .flex_wrap()
-                .items_center()
-                .children(segments.iter().map(|segment| {
-                    if segment.math {
-                        render_math_formula(&segment.source, true, font_size, cx)
-                    } else {
-                        div()
-                            .line_height(relative(1.5))
-                            .child(segment.source.clone())
-                            .into_any_element()
-                    }
-                }))
-                .into_any_element(),
+        div()
+            .w_full()
+            .flex()
+            .justify_center()
+            .py_1()
+            .child(render_math_formula(&math.source, false, font_size, cx))
+    }
+}
+
+/// Prepared resources belong to this example, not a process-global inline cache.
+#[derive(Default)]
+struct InlineMathCache {
+    document: String,
+    generation: u64,
+    images: HashMap<String, Option<RenderedMathImage>>,
+}
+
+#[derive(Clone)]
+struct InlineMathPlugin {
+    cache: Arc<Mutex<InlineMathCache>>,
+    view: WeakEntity<TextViewState>,
+}
+
+impl InlineMathPlugin {
+    fn new(view: &Entity<TextViewState>) -> Self {
+        Self {
+            cache: Arc::default(),
+            view: view.downgrade(),
         }
+    }
+
+    fn set_document(&self, source: &str) {
+        let mut cache = self.cache.lock().unwrap();
+        if cache.document != source {
+            cache.document = source.to_string();
+            cache.generation = cache.generation.wrapping_add(1);
+            cache.images.clear();
+        }
+    }
+}
+
+fn parse_inline_math(node: &markdown_ast::Node, source: Option<&str>) -> Option<MarkdownNode> {
+    let markdown_ast::Node::InlineMath(math) = node else {
+        return None;
+    };
+    Some(math_node(
+        math.value.clone(),
+        true,
+        source
+            .map(str::to_string)
+            .unwrap_or_else(|| math_markdown(&math.value, true)),
+    ))
+}
+
+impl MarkdownPlugin for InlineMathPlugin {
+    fn name(&self) -> &str {
+        "inline-math"
+    }
+
+    fn parse(
+        &self,
+        node: &markdown_ast::Node,
+        context: &MarkdownParseContext<'_>,
+    ) -> Option<MarkdownNode> {
+        parse_inline_math(node, context.node_source(node))
+    }
+
+    fn render_inline(
+        &self,
+        node: &MarkdownNode,
+        context: &MarkdownInlineRenderContext,
+        _window: &mut Window,
+        cx: &mut App,
+    ) -> Option<MarkdownInlinePresentation> {
+        let source = node.data::<MathNode>()?.source.clone();
+        let font_size = f32::from(context.font_size);
+        let foreground = context.text_style.color;
+        let background = cx.theme().background;
+        let key = format!("{source}\0{font_size:?}\0{foreground:?}\0{background:?}");
+        let mut cache = self.cache.lock().unwrap();
+        if let Some(image) = cache.images.get(&key) {
+            return image.as_ref().map(|image| {
+                MarkdownInlinePresentation::image(
+                    image.image.clone(),
+                    MarkdownInlineMetrics::new(
+                        size(px(image.width), px(image.height)),
+                        px(image.baseline),
+                    ),
+                )
+            });
+        }
+        // None represents pending or unavailable; both use TextView's atomic text fallback.
+        cache.images.insert(key.clone(), None);
+        let generation = cache.generation;
+        drop(cache);
+        let cache = Arc::downgrade(&self.cache);
+        let view = self.view.clone();
+        // The callback only reads prepared images and enqueues at most one request per
+        // exact source/font/theme key. Deferring is necessary to capture the real
+        // font size (including headings), without running MathJax during layout.
+        // The pending entry above deduplicates repeated measurement callbacks.
+        cx.defer(move |cx| {
+            if view.upgrade().is_none()
+                || cache
+                    .upgrade()
+                    .is_none_or(|cache| cache.lock().unwrap().generation != generation)
+            {
+                return;
+            }
+            let task = cx.background_executor().spawn(async move {
+                render_math_image(&source, true, font_size, foreground, background)
+            });
+            cx.spawn(async move |cx| {
+                let image = task.await;
+                let Some(cache) = cache.upgrade() else { return };
+                let mut cache = cache.lock().unwrap();
+                if cache.generation != generation {
+                    return;
+                }
+                cache.images.insert(key, image);
+                drop(cache);
+                let _ = view.update(cx, |view, cx| view.invalidate_inline_layout(cx));
+            })
+            .detach();
+        });
+        None
     }
 }
 
@@ -646,7 +641,8 @@ fn render_math_image(
         "{inline}\0{font_size:.2}\0{foreground_fill}\0{foreground_opacity:.3}\0{background_fill}\0{background_opacity:.3}\0{source}"
     );
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Ok(cache) = cache.lock()
+    if !inline
+        && let Ok(cache) = cache.lock()
         && let Some(image) = cache.get(&cache_key)
     {
         return image.clone();
@@ -663,11 +659,12 @@ fn render_math_image(
         RenderedMathImage {
             width,
             height,
+            baseline: svg_baseline(&svg, height).unwrap_or(height),
             image: Arc::new(Image::from_bytes(ImageFormat::Svg, svg.into_bytes())),
         }
     });
 
-    if let Ok(mut cache) = cache.lock() {
+    if !inline && let Ok(mut cache) = cache.lock() {
         cache.insert(cache_key, image.clone());
     }
 
@@ -714,7 +711,9 @@ fn render_math_svg(
     svg = remove_svg_attr(&svg, "style");
     svg = rewrite_rects_as_paths(&svg);
     svg = svg.replace("currentColor", &foreground_fill);
-    svg = inject_svg_background(&svg, &background_fill, background_opacity);
+    if !inline {
+        svg = inject_svg_background(&svg, &background_fill, background_opacity);
+    }
     if foreground_opacity < 0.999 {
         svg = svg.replacen(
             "<g ",
@@ -744,6 +743,10 @@ fn render_math_text(source: &str, inline: bool, font_size: f32, color: Hsla) -> 
 }
 
 fn mathjax_root() -> Option<PathBuf> {
+    if let Some(root) = std::env::var_os("GPUI_MATHJAX_ROOT") {
+        let root = PathBuf::from(root);
+        return root.join("js/mathjax.js").is_file().then_some(root);
+    }
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     [
         manifest_dir.join("../../docs/node_modules/mathjax-full"),
@@ -788,6 +791,15 @@ fn inject_svg_background(svg: &str, fill: &str, opacity: f32) -> String {
     out.push_str(&background);
     out.push_str(&svg[open_end + 1..]);
     out
+}
+
+// MathJax places the alphabetic baseline at y=0 in its SVG viewBox.
+fn svg_baseline(svg: &str, pixel_height: f32) -> Option<f32> {
+    let (_, y, _, height) = svg_view_box(svg)?;
+    if !y.is_finite() || !height.is_finite() || height <= 0.0 {
+        return None;
+    }
+    Some((-y / height * pixel_height).clamp(0.0, pixel_height))
 }
 
 fn svg_view_box(svg: &str) -> Option<(f32, f32, f32, f32)> {
@@ -1153,6 +1165,9 @@ impl DocumentRangeSemanticTokensProvider for MarkerHighlighter {
 
 pub struct Example {
     input_state: Entity<EditorState>,
+    text_view: Entity<TextViewState>,
+    inline_math: InlineMathPlugin,
+    preview_zoom: f32,
     /// When `true`, tables wrap cell content to fit the width; when `false`
     /// (the default), tables keep cells on one line and scroll horizontally.
     table_wrap: bool,
@@ -1193,9 +1208,15 @@ impl Example {
             focus_handle.focus(window, cx);
         });
 
-        let _subscriptions = vec![cx.subscribe(&input_state, |_, _, _: &InputEvent, _| {})];
+        let _subscriptions =
+            vec![cx.subscribe(&input_state, |_, _, _: &InputEvent, cx| cx.notify())];
 
+        let text_view = cx.new(|cx| TextViewState::markdown(EXAMPLE, cx));
+        let inline_math = InlineMathPlugin::new(&text_view);
         Self {
+            text_view,
+            inline_math,
+            preview_zoom: 1.0,
             input_state,
             // Default to horizontal scrolling for tables.
             table_wrap: false,
@@ -1249,6 +1270,10 @@ impl Example {
 
 impl Render for Example {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let source = self.input_state.read(cx).value();
+        self.inline_math.set_document(&source);
+        self.text_view
+            .update(cx, |state, cx| state.set_text(&source, cx));
         div()
             .id("editor")
             .size_full()
@@ -1276,7 +1301,10 @@ impl Render for Example {
                                 )
                                 .child(
                                     resizable_panel().child(
-                                        markdown(self.input_state.read(cx).value())
+                                        TextView::new(&self.text_view)
+                                            .markdown_math()
+                                            .plugin(self.inline_math.clone())
+                                            .plugin(mention::MentionPlugin)
                                             .code_block_actions(|code_block, _window, _cx| {
                                                 let code = code_block.code();
                                                 let lang = code_block.lang();
@@ -1410,6 +1438,7 @@ impl Render for Example {
                                             // Tables scroll horizontally by default; the
                                             // status bar toggle switches to wrapping.
                                             .style(self.text_view_style())
+                                            .text_size(rems(self.preview_zoom))
                                             .flex_none()
                                             .px_5()
                                             .scrollable(true)
@@ -1421,6 +1450,17 @@ impl Render for Example {
                     )
                     .child(
                         StatusBar::new()
+                            .right(
+                                Button::new("preview-zoom")
+                                    .ghost()
+                                    .xsmall()
+                                    .label(format!("Zoom: {:.0}%", self.preview_zoom * 100.0))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.preview_zoom = if this.preview_zoom >= 2.0 { 0.75 } else { this.preview_zoom + 0.25 };
+                                        this.text_view.update(cx, |view, cx| view.invalidate_inline_layout(cx));
+                                        cx.notify();
+                                    })),
+                            )
                             .right(
                                 Button::new("selection-format")
                                     .ghost()
@@ -1480,17 +1520,16 @@ mod tests {
     }
 
     #[::core::prelude::v1::test]
+    #[ignore = "requires Node.js and docs/node_modules/mathjax-full"]
     fn math_svg_uses_path_based_renderer() {
-        let Some(svg) = render_math_svg(
+        let svg = render_math_svg(
             r"e^{i\pi} + 1 = 0",
             true,
             20.0,
             Hsla::black(),
             Hsla::white(),
-        ) else {
-            eprintln!("skipping MathJax SVG test because mathjax-full is not available");
-            return;
-        };
+        )
+        .expect("install mathjax-full in docs/node_modules before running ignored MathJax tests");
 
         assert!(
             !svg.contains("<text"),
@@ -1511,19 +1550,21 @@ mod tests {
     }
 
     #[::core::prelude::v1::test]
+    #[ignore = "requires Node.js and docs/node_modules/mathjax-full"]
     fn inline_math_svg_uses_pixel_dimensions_without_glyph_scaling() {
-        let Some(svg) = render_math_svg(
+        let svg = render_math_svg(
             r"e^{i\pi} + 1 = 0",
             true,
             20.0,
             Hsla::black(),
             Hsla::white(),
-        ) else {
-            eprintln!("skipping MathJax SVG test because mathjax-full is not available");
-            return;
-        };
+        )
+        .expect("install mathjax-full in docs/node_modules before running ignored MathJax tests");
 
         assert!(svg_width(&svg) > 0.0);
+        assert!(!svg.contains("data-gpui-math-background"));
+        let height = svg_attr(&svg, "height").unwrap().parse().unwrap();
+        assert!(svg_baseline(&svg, height).unwrap() > 0.0);
         assert!(!svg_attr(&svg, "width").unwrap().ends_with("ex"));
         assert!(!svg_attr(&svg, "height").unwrap().ends_with("ex"));
         assert!(!svg.contains("vertical-align"));
@@ -1533,17 +1574,16 @@ mod tests {
     }
 
     #[::core::prelude::v1::test]
+    #[ignore = "requires Node.js and docs/node_modules/mathjax-full"]
     fn block_math_svg_rewrites_mathjax_rects_to_paths() {
-        let Some(svg) = render_math_svg(
+        let svg = render_math_svg(
             r"\frac{\alpha + \beta}{\sqrt{\gamma}} = \sum_{i=1}^{n} i^2",
             false,
             20.0,
             Hsla::black(),
             Hsla::white(),
-        ) else {
-            eprintln!("skipping MathJax SVG test because mathjax-full is not available");
-            return;
-        };
+        )
+        .expect("install mathjax-full in docs/node_modules before running ignored MathJax tests");
 
         assert!(!svg.contains(r#"<rect width="543""#));
         assert!(!svg.contains(r#"<rect width="2628.4""#));
@@ -1551,34 +1591,32 @@ mod tests {
     }
 
     #[::core::prelude::v1::test]
+    #[ignore = "requires Node.js and docs/node_modules/mathjax-full"]
     fn block_math_svg_includes_theme_background() {
-        let Some(svg) = render_math_svg(
+        let svg = render_math_svg(
             r"\frac{\alpha + \beta}{\sqrt{\gamma}} = \sum_{i=1}^{n} i^2",
             false,
             20.0,
             Hsla::black(),
             Hsla::white(),
-        ) else {
-            eprintln!("skipping MathJax SVG test because mathjax-full is not available");
-            return;
-        };
+        )
+        .expect("install mathjax-full in docs/node_modules before running ignored MathJax tests");
 
         assert!(svg.contains(r#"data-gpui-math-background="true""#));
         assert!(svg.contains("fill=\"#ffffff\""));
     }
 
     #[::core::prelude::v1::test]
+    #[ignore = "requires Node.js and docs/node_modules/mathjax-full"]
     fn block_math_image_exposes_intrinsic_svg_size() {
-        let Some(image) = render_math_image(
+        let image = render_math_image(
             r"\frac{\alpha + \beta}{\sqrt{\gamma}} = \sum_{i=1}^{n} i^2",
             false,
             20.0,
             Hsla::black(),
             Hsla::white(),
-        ) else {
-            eprintln!("skipping MathJax image test because mathjax-full is not available");
-            return;
-        };
+        )
+        .expect("install mathjax-full in docs/node_modules before running ignored MathJax tests");
 
         assert_eq!(image.image.format, ImageFormat::Svg);
         assert!(image.image.bytes.starts_with(b"<svg"));
@@ -1603,24 +1641,41 @@ mod tests {
     }
 
     #[::core::prelude::v1::test]
-    fn inline_math_segments_skip_inline_code() {
-        assert_eq!(
-            inline_math_segments("This is $x^2$ and `$ignored$`.").unwrap(),
-            vec![
-                MathSegment {
-                    source: "This is ".to_string(),
-                    math: false,
-                },
-                MathSegment {
-                    source: "x^2".to_string(),
-                    math: true,
-                },
-                MathSegment {
-                    source: " and `$ignored$`.".to_string(),
-                    math: false,
-                },
-            ]
-        );
+    fn inline_math_baseline_uses_view_box_origin() {
+        let svg = r#"<svg viewBox="0 -800 1200 1000"></svg>"#;
+        assert_eq!(svg_baseline(svg, 20.0), Some(16.0));
+        assert_eq!(svg_baseline(svg, 40.0), Some(32.0));
+        assert_eq!(svg_baseline(r#"<svg viewBox="0 0 0 0">"#, 20.0), None);
+    }
+
+    #[::core::prelude::v1::test]
+    fn math_node_distinguishes_plain_markdown_and_accessibility() {
+        let node = math_node("x^2".to_string(), true, "$x^2$");
+        assert_eq!(node.name(), "inline-math");
+        assert_eq!(node.as_text(), "x²");
+        assert_eq!(node.as_markdown(), "$x^2$");
+        assert_eq!(node.accessibility_name(), "Formula: x²");
+    }
+
+    #[::core::prelude::v1::test]
+    fn inline_plugin_accepts_math_and_leaves_code_and_paragraphs_to_markdown() {
+        let node = markdown_ast::Node::InlineMath(markdown_ast::InlineMath {
+            value: "x^2".into(),
+            position: None,
+        });
+        let parsed = parse_inline_math(&node, Some("$ x^2 $")).unwrap();
+        assert_eq!(parsed.as_markdown(), "$ x^2 $");
+        assert_eq!(parsed.as_text(), "x²");
+        let code = markdown_ast::Node::InlineCode(markdown_ast::InlineCode {
+            value: "$x^2$".into(),
+            position: None,
+        });
+        assert!(parse_inline_math(&code, None).is_none());
+        let paragraph = markdown_ast::Node::Paragraph(markdown_ast::Paragraph {
+            children: vec![node],
+            position: None,
+        });
+        assert!(parse_inline_math(&paragraph, None).is_none());
     }
 
     fn svg_width(svg: &str) -> f32 {

@@ -202,7 +202,7 @@ MarkdownNode::new("ticker", TickerNode { symbol })
 
 ## Block Plugins
 
-Custom Markdown rendering currently supports block plugins. Return `true` from `is_block()` for plugins that should be registered today:
+Return `true` from `is_block()` to use the block parser and renderer:
 
 ```rust
 fn is_block(&self) -> bool {
@@ -210,7 +210,7 @@ fn is_block(&self) -> bool {
 }
 ```
 
-Inline plugins are reserved for future `TextView` support.
+Inline plugins use the default `is_block() == false` and the static `render_inline` contract. They support baseline layout, atomic selection, plain/Markdown copying, text fallback, and explicit asynchronous layout invalidation. See [Inline extensions](../base/text-view.md#inline-extensions) for the contract and registration example. The component facade forwards the same builders and exports the same inline types.
 
 ## YAML Frontmatter
 

@@ -107,6 +107,8 @@ pub struct TextViewState {
     pub(super) markdown_extensions: Arc<MarkdownExtensions>,
 
     pub(super) is_selecting: bool,
+    /// Logical ranges retained across an explicitly requested resource reflow.
+    pub(super) preserve_inline_selection: bool,
     multi_click_selection: Option<TextViewMultiClickSelection>,
     selected_text_override: Option<String>,
     select_all: bool,
@@ -121,6 +123,7 @@ pub struct TextViewState {
     revision: usize,
     pub(super) selection_revision: usize,
     compatible_layout_update: bool,
+    layout_text_style: Option<(gpui::TextStyle, Pixels)>,
     parsed_error: Option<SharedString>,
     tx: Sender<UpdateOptions>,
     _parse_task: Task<()>,
@@ -208,6 +211,7 @@ impl TextViewState {
             link_click_handler: None,
             markdown_extensions: Arc::default(),
             is_selecting: false,
+            preserve_inline_selection: false,
             auto_scroll: AutoScroll::default(),
             selection_adapter,
             parsed_content: Default::default(),
@@ -217,6 +221,7 @@ impl TextViewState {
             revision: 0,
             selection_revision: 0,
             compatible_layout_update: false,
+            layout_text_style: None,
             tx,
             _parse_task,
             _receive_task,
@@ -392,6 +397,18 @@ impl TextViewState {
         }
     }
 
+    /// Remeasure inline resources after their prepared content or metrics change.
+    ///
+    /// Call from the resource owner's completion handler, through a weak entity
+    /// when the task can outlive this view. This does not reparse the document.
+    /// Existing logical selection is retained until the next selection gesture.
+    pub fn invalidate_inline_layout(&mut self, cx: &mut Context<Self>) {
+        self.preserve_inline_selection = true;
+        self.compatible_layout_update = true;
+        self.invalidate_measured_heights();
+        cx.notify();
+    }
+
     fn increment_update(&mut self, text: &str, append: bool, cx: &mut Context<Self>) {
         self.revision += 1;
         if !append {
@@ -504,6 +521,7 @@ impl TextViewState {
     }
 
     pub(super) fn reset_selection(&mut self) {
+        self.preserve_inline_selection = false;
         self.multi_click_selection = None;
         self.selected_text_override = None;
         self.select_all = false;
@@ -552,14 +570,33 @@ impl TextViewState {
         selected_text: String,
         cx: &mut App,
     ) {
+        self.preserve_inline_selection = false;
         let scroll_offset = self.scroll_offset();
         let pos = pos - self.bounds.origin - scroll_offset;
-        self.multi_click_selection = Some(TextViewMultiClickSelection { pos, kind });
+        self.multi_click_selection = Some(TextViewMultiClickSelection {
+            pos,
+            kind,
+            line_bounds: None,
+        });
         self.selected_text_override = Some(selected_text);
         self.select_all = false;
         self.is_selecting = false;
         self.auto_scroll.stop();
         self.selection_adapter.set_local_selection(true, cx);
+    }
+
+    pub(crate) fn set_multi_click_line(&mut self, bounds: Bounds<Pixels>, cx: &mut App) {
+        self.set_multi_click_selection(
+            bounds.center(),
+            TextViewMultiClickKind::Line,
+            String::new(),
+            cx,
+        );
+        self.selected_text_override = None;
+        let offset = self.bounds.origin + self.scroll_offset();
+        if let Some(selection) = self.multi_click_selection.as_mut() {
+            selection.line_bounds = Some(Bounds::new(bounds.origin - offset, bounds.size));
+        }
     }
 
     pub(super) fn set_auto_scroll(&mut self, delta: Option<Pixels>, cx: &mut Context<Self>) {
@@ -612,7 +649,17 @@ impl TextViewState {
         let scroll_offset = self.scroll_offset();
         self.multi_click_selection.map(|selection| {
             let pos = selection.pos + scroll_offset + self.bounds.origin;
-            TextViewMultiClickSelection { pos, ..selection }
+            let line_bounds = selection.line_bounds.map(|bounds| {
+                Bounds::new(
+                    bounds.origin + scroll_offset + self.bounds.origin,
+                    bounds.size,
+                )
+            });
+            TextViewMultiClickSelection {
+                pos,
+                line_bounds,
+                ..selection
+            }
         })
     }
 }
@@ -621,16 +668,32 @@ impl TextViewState {
 pub(crate) struct TextViewMultiClickSelection {
     pub(crate) pos: Point<Pixels>,
     pub(crate) kind: TextViewMultiClickKind,
+    pub(crate) line_bounds: Option<Bounds<Pixels>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TextViewMultiClickKind {
     Word,
     Paragraph,
+    Line,
 }
 
 impl Render for TextViewState {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let typography = (window.text_style(), window.rem_size());
+        if self
+            .layout_text_style
+            .as_ref()
+            .is_some_and(|previous| previous != &typography)
+        {
+            // ListState invalidates its cached rows for width changes, but does
+            // not know that an inherited font or rem change affects offscreen
+            // inline metrics. Retain logical selections just as for resources.
+            self.preserve_inline_selection = true;
+            self.compatible_layout_update = true;
+            self.invalidate_measured_heights();
+        }
+        self.layout_text_style = Some(typography);
         let state = cx.entity();
         let document = self.parsed_content.document.clone();
         let mut node_cx = self.parsed_content.node_cx.clone();
@@ -927,6 +990,51 @@ mod tests {
         html_state.read_with(cx, |state, _| {
             assert_eq!(state.source().as_str(), html.as_str());
             assert!(!state.parsed_content.document.blocks.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn inline_source_ranges_follow_streamed_tail_reparsing(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("中文 $a$\n\n尾 $x", cx)));
+        state.update(cx, |state, cx| {
+            let extensions = MarkdownExtensions::default()
+                .math()
+                .inline_parser(|node, _| {
+                    let markdown::mdast::Node::InlineMath(math) = node else {
+                        return None;
+                    };
+                    Some(super::super::MarkdownNode::new("formula", ()).text(math.value.clone()))
+                });
+            state.set_markdown_extensions(Arc::new(extensions), cx);
+        });
+        cx.run_until_parked();
+        state.update(cx, |state, cx| state.push_str("^2$ 后", cx));
+        cx.run_until_parked();
+        state.read_with(cx, |state, _| {
+            let source = "中文 $a$\n\n尾 $x^2$ 后";
+            assert_eq!(state.source().as_str(), source);
+            let objects: Vec<_> = state
+                .parsed_content
+                .document
+                .blocks
+                .iter()
+                .flat_map(|block| {
+                    let super::super::node::BlockNode::Paragraph(paragraph) = block else {
+                        panic!()
+                    };
+                    paragraph
+                        .children
+                        .iter()
+                        .filter_map(|node| node.custom.as_ref())
+                })
+                .collect();
+            assert_eq!(objects.len(), 2);
+            for (object, markdown) in objects.iter().zip(["$a$", "$x^2$"]) {
+                let start = source.find(markdown).unwrap();
+                assert_eq!(object.source_range(), Some(start..start + markdown.len()));
+                assert_eq!(object.as_markdown(), markdown);
+            }
         });
     }
 

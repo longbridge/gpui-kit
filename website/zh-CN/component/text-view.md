@@ -146,7 +146,7 @@ MarkdownNode::new("ticker", TickerNode { symbol })
 
 ## Block 插件
 
-当前自定义 Markdown 渲染支持 block 插件。现在可注册的插件需要在 `is_block()` 中返回 `true`：
+块插件在 `is_block()` 中返回 `true`，使用块 parser 和 renderer：
 
 ```rust
 fn is_block(&self) -> bool {
@@ -154,7 +154,7 @@ fn is_block(&self) -> bool {
 }
 ```
 
-Inline 插件保留给未来的 `TextView` 支持。
+行内插件保留默认的 `is_block() == false`，使用静态 `render_inline` 契约，支持基线布局、原子选择、纯文本与 Markdown 复制、文本降级和异步布局失效。详见[行内扩展](../base/text-view.md#行内扩展)。Component 层转发相同的 builder，并导出相同的行内类型。
 
 ## YAML Frontmatter
 

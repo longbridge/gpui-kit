@@ -124,6 +124,38 @@ code-block fallback. A custom plugin can be attached with `.plugin(...)`;
 `gpui-component` provides a themed
 `FrontmatterPlugin`; Base remains independent of that presentation.
 
+## Inline extensions
+
+Inline extensions follow the block extension mechanism: register parsers in order and renderers by `MarkdownNode::name()`. A `MarkdownPlugin` with the default `is_block() == false` uses `render_inline`; block plugins keep `render`.
+
+```rust
+use gpui_base::{MarkdownExtensions, MarkdownNode, TextView, markdown_ast};
+
+let extensions = MarkdownExtensions::default()
+    .math()
+    .inline_parser(|node, _| {
+        let markdown_ast::Node::InlineMath(math) = node else { return None };
+        Some(MarkdownNode::new("formula", math.value.clone())
+            .text(math.value.clone())
+            .accessibility_label(format!("Formula: {}", math.value)))
+    });
+
+TextView::markdown("inline-formulas", "Formulas $x^2$ and $y^2$")
+    .markdown_extensions(extensions)
+```
+
+This renders an atomic text fallback. Register `inline_renderer("formula", ...)` to return `Some(MarkdownInlinePresentation::image(image, metrics))` for a prepared `Arc<gpui::Image>`. `MarkdownInlineMetrics::new(size(width, height), baseline)` uses logical pixels at the current font size; the baseline is measured from the top. The renderer receives `MarkdownInlineRenderContext` with the current text style, font size, line height, rem size, and available width. Returning `None` or invalid metrics uses the text fallback. Render callbacks should read prepared resources; do not run an equation engine synchronously during layout.
+
+`MarkdownInlinePresentation::text()` keeps the node's plain text in the inline flow. Add `.hover_card(|window, cx| ...)` to build a read-only `AnyView` in GPUI's hoverable tooltip layer. The card is created on hover, outside inline layout, and must not contain focusable controls. The Markdown example uses this for `[@huacnlee](mention:huacnlee)` profile cards; plain copy emits the handle and Markdown copy retains the original link syntax.
+
+Objects align to the text baseline and wrap only before or after the whole object. An object wider than the available line shrinks proportionally, including its baseline. Objects are read-only, have no focus stop or internal controls, and are selected as a whole. Double-click selects an object; triple-click selects its mixed text line. Drag selection can cross text and consecutive objects in either direction.
+
+`source_range()` exposes full-document UTF-8 byte offsets including delimiters. `.text(...)` supplies plain copy and fallback text; `.markdown(...)` supplies Markdown copy, defaulting to the original node source. Missing plain text falls back to source. `.accessibility_label(...)` supplies the accessible name, defaulting to the plain text. Image loading/failure retains a visible text fallback and the same atomic copying contract.
+
+For asynchronous resources, retain a `TextViewState`, update the application-owned cache, then call `state.invalidate_inline_layout(cx)` through the view's weak entity. This remeasures inline content and virtual-list heights without reparsing or dropping the current logical selection. Associate results with source/font/theme keys and discard obsolete completions. `examples/markdown` contains the formula implementation and a preview zoom control.
+
+`TextView` also offers `markdown_math`, `markdown_inline_parser`, and `markdown_inline_renderer` convenience builders. Math parsing is opt-in; inline code continues to protect dollar signs from math parsing.
+
 ## Retained state and streaming updates
 
 Use `TextViewState` when content changes without replacing the view:

@@ -123,6 +123,38 @@ code-block fallback。可以通过 `.plugin(...)` 挂载自定义插件；
 `gpui-component` 提供带主题样式的
 `FrontmatterPlugin`；Base 不依赖该 presentation。
 
+## 行内扩展
+
+行内扩展沿用块扩展机制：parser 按注册顺序匹配，renderer 通过 `MarkdownNode::name()` 查找。`MarkdownPlugin` 默认 `is_block() == false`，使用 `render_inline`；块插件继续使用 `render`。
+
+```rust
+use gpui_base::{MarkdownExtensions, MarkdownNode, TextView, markdown_ast};
+
+let extensions = MarkdownExtensions::default()
+    .math()
+    .inline_parser(|node, _| {
+        let markdown_ast::Node::InlineMath(math) = node else { return None };
+        Some(MarkdownNode::new("formula", math.value.clone())
+            .text(math.value.clone())
+            .accessibility_label(format!("公式：{}", math.value)))
+    });
+
+TextView::markdown("inline-formulas", "中文 $x^2$ and $y^2$")
+    .markdown_extensions(extensions)
+```
+
+此例显示原子化的纯文本替代内容。注册 `inline_renderer("formula", ...)`，返回 `Some(MarkdownInlinePresentation::image(image, metrics))`，即可显示已准备的 `Arc<gpui::Image>`。`MarkdownInlineMetrics::new(size(width, height), baseline)` 使用当前字号下的逻辑像素，基线距离从顶部计算。renderer 收到的 `MarkdownInlineRenderContext` 包含实际文本样式、字号、行高、rem 大小和可用宽度。返回 `None` 或无效尺寸时使用文本降级。渲染回调应读取已准备的资源，不应在布局期间同步调用公式排版引擎。
+
+`MarkdownInlinePresentation::text()` 在正文中显示节点的原子文本。通过 `.hover_card(|window, cx| ...)` 可以在 GPUI 的悬浮提示层中创建只读 `AnyView`。卡片仅在悬停时创建，不参与行内布局，也不应包含可聚焦控件。Markdown 示例用它实现 `[@huacnlee](mention:huacnlee)` 资料卡；纯文本复制输出账号，Markdown 复制保留原始链接语法。
+
+对象与正文基线对齐，只能在对象前后换行。超过可用行宽时，宽、高和基线一同等比缩小。对象不可编辑，不新增焦点停靠点或内部控件；选择只能覆盖整个对象。双击选中对象，三击选中所在混排行；拖选可以双向跨越文字与连续对象。
+
+`source_range()` 返回包括分隔符在内的全局 UTF-8 字节范围。`.text(...)` 提供纯文本复制和降级内容；`.markdown(...)` 提供 Markdown 复制内容，默认使用节点原始源码。未提供纯文本时使用源码。`.accessibility_label(...)` 提供无障碍名称，默认使用纯文本。图片加载中或失败时显示文本降级，仍按原子对象选择和复制。
+
+异步资源应由应用缓存：保留 `TextViewState`，准备完成后通过弱 entity 更新缓存并调用 `state.invalidate_inline_layout(cx)`。这会重新测量行内内容和虚拟列表高度，不重解析文档，也不丢弃已有逻辑选区。缓存键应区分源码、字号和主题，过期结果应丢弃。`examples/markdown` 提供公式实现和预览缩放控件。
+
+`TextView` 还提供 `markdown_math`、`markdown_inline_parser`、`markdown_inline_renderer` builder。公式解析需要显式开启；行内代码里的美元符号仍保留为代码。
+
 ## 保留状态与动态更新
 
 内容需要持续更新时使用 `TextViewState`：

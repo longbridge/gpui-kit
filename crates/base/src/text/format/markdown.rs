@@ -20,12 +20,12 @@ pub(crate) fn parse(source: &str, cx: &mut NodeContext) -> Result<ParsedDocument
         .map_err(|e| e.to_string().into())
 }
 
-fn parse_table_row(table: &mut Table, node: &mdast::TableRow, cx: &mut NodeContext) {
+fn parse_table_row(source: &str, table: &mut Table, node: &mdast::TableRow, cx: &mut NodeContext) {
     let mut row = TableRow::default();
     node.children.iter().for_each(|c| {
         match c {
             Node::TableCell(cell) => {
-                parse_table_cell(&mut row, cell, cx);
+                parse_table_cell(source, &mut row, cell, cx);
             }
             _ => {}
         };
@@ -33,10 +33,15 @@ fn parse_table_row(table: &mut Table, node: &mdast::TableRow, cx: &mut NodeConte
     table.children.push(row);
 }
 
-fn parse_table_cell(row: &mut node::TableRow, node: &mdast::TableCell, cx: &mut NodeContext) {
+fn parse_table_cell(
+    source: &str,
+    row: &mut node::TableRow,
+    node: &mdast::TableCell,
+    cx: &mut NodeContext,
+) {
     let mut paragraph = Paragraph::default();
     node.children.iter().for_each(|c| {
-        parse_paragraph(&mut paragraph, c, cx);
+        parse_paragraph(source, &mut paragraph, c, cx);
     });
     let table_cell = node::TableCell {
         children: paragraph,
@@ -81,6 +86,7 @@ fn push_merged(
 /// nodes. The return value is the plain text from all children, for callers that
 /// need to pass text back to their parent node.
 fn merge_children_with_mark(
+    source: &str,
     paragraph: &mut Paragraph,
     children: &[mdast::Node],
     mark: TextMark,
@@ -92,10 +98,25 @@ fn merge_children_with_mark(
 
     for child in children {
         let mut child_paragraph = Paragraph::default();
-        let child_text = parse_paragraph(&mut child_paragraph, child, cx);
+        let child_text = parse_paragraph(source, &mut child_paragraph, child, cx);
         text.push_str(&child_text);
 
-        for node in child_paragraph.children {
+        for mut node in child_paragraph.children {
+            if node.custom.is_some() {
+                push_merged(
+                    paragraph,
+                    std::mem::take(&mut merged_text),
+                    std::mem::take(&mut merged_marks),
+                    mark.clone(),
+                );
+                if let Some((_, existing)) = node.marks.first_mut() {
+                    existing.merge(mark.clone());
+                } else {
+                    node.marks.push((0..node.text.len(), mark.clone()));
+                }
+                paragraph.push(node);
+                continue;
+            }
             let merged_offset = merged_text.len();
             merged_text.push_str(&node.text);
 
@@ -154,7 +175,12 @@ fn append_inline_html_blocks(paragraph: &mut Paragraph, blocks: Vec<BlockNode>) 
     Some(text)
 }
 
-fn parse_paragraph(paragraph: &mut Paragraph, node: &mdast::Node, cx: &mut NodeContext) -> String {
+fn parse_paragraph(
+    source: &str,
+    paragraph: &mut Paragraph,
+    node: &mdast::Node,
+    cx: &mut NodeContext,
+) -> String {
     let span = node.position().map(|pos| Span {
         start: cx.offset + pos.start.offset,
         end: cx.offset + pos.end.offset,
@@ -163,12 +189,21 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &mdast::Node, cx: &mut NodeC
         paragraph.set_span(span);
     }
 
+    let parse_cx = MarkdownParseContext::new(source, cx.offset);
+    if let Some(mut custom) = cx.markdown_extensions.parse_inline(node, &parse_cx) {
+        custom.set_span(span);
+        let custom = custom.with_inline_source(parse_cx.node_source(node).unwrap_or_default());
+        let text = custom.as_text().to_string();
+        paragraph.push(InlineNode::custom(custom));
+        return text;
+    }
+
     let mut text = String::new();
 
     match node {
         Node::Paragraph(val) => {
             val.children.iter().for_each(|c| {
-                text.push_str(&parse_paragraph(paragraph, c, cx));
+                text.push_str(&parse_paragraph(source, paragraph, c, cx));
             });
         }
         Node::Text(val) => {
@@ -188,6 +223,7 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &mdast::Node, cx: &mut NodeC
         }
         Node::Emphasis(val) => {
             text = merge_children_with_mark(
+                source,
                 paragraph,
                 &val.children,
                 TextMark::default().italic(),
@@ -195,11 +231,17 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &mdast::Node, cx: &mut NodeC
             );
         }
         Node::Strong(val) => {
-            text =
-                merge_children_with_mark(paragraph, &val.children, TextMark::default().bold(), cx);
+            text = merge_children_with_mark(
+                source,
+                paragraph,
+                &val.children,
+                TextMark::default().bold(),
+                cx,
+            );
         }
         Node::Delete(val) => {
             text = merge_children_with_mark(
+                source,
                 paragraph,
                 &val.children,
                 TextMark::default().strikethrough(),
@@ -220,6 +262,7 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &mdast::Node, cx: &mut NodeC
             });
 
             text = merge_children_with_mark(
+                source,
                 paragraph,
                 &val.children,
                 TextMark {
@@ -293,6 +336,7 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &mdast::Node, cx: &mut NodeC
             };
 
             text = merge_children_with_mark(
+                source,
                 paragraph,
                 &link.children,
                 TextMark {
@@ -351,7 +395,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
         Node::Paragraph(val) => {
             let mut paragraph = Paragraph::default();
             val.children.iter().for_each(|c| {
-                parse_paragraph(&mut paragraph, c, cx);
+                parse_paragraph(source, &mut paragraph, c, cx);
             });
             paragraph.span = new_span(val.position, cx);
             BlockNode::Paragraph(paragraph)
@@ -404,7 +448,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
         Node::Heading(val) => {
             let mut paragraph = Paragraph::default();
             val.children.iter().for_each(|c| {
-                parse_paragraph(&mut paragraph, c, cx);
+                parse_paragraph(source, &mut paragraph, c, cx);
             });
 
             BlockNode::Heading {
@@ -449,7 +493,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
         Node::MdxJsxTextElement(val) => {
             let mut paragraph = Paragraph::default();
             val.children.iter().for_each(|c| {
-                parse_paragraph(&mut paragraph, c, cx);
+                parse_paragraph(source, &mut paragraph, c, cx);
             });
             paragraph.span = new_span(val.position, cx);
             BlockNode::Paragraph(paragraph)
@@ -457,7 +501,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
         Node::MdxJsxFlowElement(val) => {
             let mut paragraph = Paragraph::default();
             val.children.iter().for_each(|c| {
-                parse_paragraph(&mut paragraph, c, cx);
+                parse_paragraph(source, &mut paragraph, c, cx);
             });
             paragraph.span = new_span(val.position, cx);
             BlockNode::Paragraph(paragraph)
@@ -475,7 +519,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
                 .collect();
             val.children.iter().for_each(|c| {
                 if let Node::TableRow(row) = c {
-                    parse_table_row(&mut table, row, cx);
+                    parse_table_row(source, &mut table, row, cx);
                 }
             });
             table.span = new_span(val.position, cx);
@@ -494,7 +538,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
             )]));
 
             def.children.iter().for_each(|c| {
-                parse_paragraph(&mut paragraph, c, cx);
+                parse_paragraph(source, &mut paragraph, c, cx);
             });
             paragraph.span = new_span(def.position, cx);
             BlockNode::Paragraph(paragraph)
@@ -783,6 +827,109 @@ mod tests {
 
     struct TickerPlugin {
         name: &'static str,
+    }
+
+    #[test]
+    fn inline_extensions_preserve_nodes_inside_marks_and_global_source_ranges() {
+        let source = "中文 **before $x^2$ after** and `$ignored$`";
+        let extensions = MarkdownExtensions::default()
+            .math()
+            .inline_parser(|node, cx| {
+                let Node::InlineMath(math) = node else {
+                    return None;
+                };
+                assert_eq!(cx.node_source(node), Some("$x^2$"));
+                Some(MarkdownNode::new("formula", math.value.clone()).text("x²"))
+            });
+        let mut cx = NodeContext {
+            offset: 50,
+            markdown_extensions: extensions.into(),
+            ..Default::default()
+        };
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!()
+        };
+        let objects: Vec<_> = paragraph
+            .children
+            .iter()
+            .filter_map(|node| node.custom.as_ref())
+            .collect();
+        assert_eq!(objects.len(), 1);
+        let object = objects[0];
+        let start = source.find("$x^2$").unwrap() + 50;
+        assert_eq!(object.source_range(), Some(start..start + 5));
+        assert_eq!(object.as_text(), "x²");
+        assert_eq!(object.as_markdown(), "$x^2$");
+        assert_eq!(object.accessibility_name(), "x²");
+        assert_eq!(document.text(), "中文 before x² after and $ignored$\n");
+        assert!(document.to_markdown().contains("**before $x^2$ after**"));
+    }
+
+    #[test]
+    fn inline_object_markdown_roundtrip_preserves_nested_emphasis() {
+        for source in [
+            "*before $x$ after*",
+            "*before **$x$** after*",
+            "**before *$x$* after**",
+        ] {
+            let mut cx = NodeContext {
+                markdown_extensions: MarkdownExtensions::default()
+                    .math()
+                    .inline_parser(|node, _| match node {
+                        Node::InlineMath(math) => {
+                            Some(MarkdownNode::new("math", ()).text(math.value.clone()))
+                        }
+                        _ => None,
+                    })
+                    .into(),
+                ..Default::default()
+            };
+            let original = parse(source, &mut cx).unwrap();
+            let markdown = original.to_markdown();
+            let reparsed = parse(&markdown, &mut cx).unwrap();
+            let BlockNode::Paragraph(before) = &original.blocks[0] else {
+                panic!()
+            };
+            let BlockNode::Paragraph(after) = &reparsed.blocks[0] else {
+                panic!()
+            };
+            let before_object = before
+                .children
+                .iter()
+                .find(|node| node.custom.is_some())
+                .unwrap();
+            let after_object = after
+                .children
+                .iter()
+                .find(|node| node.custom.is_some())
+                .unwrap();
+            assert_eq!(before.text(), after.text(), "{source} -> {markdown}");
+            assert_eq!(
+                before_object.marks, after_object.marks,
+                "{source} -> {markdown}"
+            );
+        }
+    }
+
+    #[test]
+    fn inline_parser_without_metadata_falls_back_to_original_source() {
+        let mut cx = NodeContext {
+            markdown_extensions: MarkdownExtensions::default()
+                .inline_parser(|node, _| {
+                    matches!(node, Node::InlineCode(_)).then(|| MarkdownNode::new("opaque", ()))
+                })
+                .into(),
+            ..Default::default()
+        };
+        let document = parse("`原子`", &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!()
+        };
+        let node = paragraph.children[0].custom.as_ref().unwrap();
+        assert_eq!(node.as_text(), "`原子`");
+        assert_eq!(node.as_markdown(), "`原子`");
+        assert_eq!(node.accessibility_name(), "`原子`");
     }
 
     impl TickerPlugin {

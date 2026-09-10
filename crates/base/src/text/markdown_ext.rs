@@ -2,6 +2,7 @@ use std::{
     any::Any,
     collections::HashMap,
     fmt,
+    ops::Range,
     sync::{
         Arc,
         atomic::{AtomicU64, Ordering},
@@ -11,6 +12,7 @@ use std::{
 use gpui::{AnyElement, App, IntoElement, SharedString, Window};
 use markdown::{ParseOptions, mdast};
 
+use super::{MarkdownInlinePresentation, MarkdownInlineRenderContext};
 use crate::text::node::Span;
 
 static MARKDOWN_EXTENSIONS_REVISION: AtomicU64 = AtomicU64::new(1);
@@ -30,12 +32,25 @@ pub type MarkdownBlockParserFn =
 pub type MarkdownBlockRenderFn =
     dyn Fn(&MarkdownNode, &mut Window, &mut App) -> AnyElement + Send + Sync;
 
+/// Parser for a single inline AST node; follows the block parser contract.
+pub type MarkdownInlineParserFn = MarkdownBlockParserFn;
+
+/// Produces static inline text or an image, or `None` for atomic text fallback.
+/// Read prepared resources here; start asynchronous work outside rendering.
+pub type MarkdownInlineRenderFn = dyn Fn(
+        &MarkdownNode,
+        &MarkdownInlineRenderContext,
+        &mut Window,
+        &mut App,
+    ) -> Option<MarkdownInlinePresentation>
+    + Send
+    + Sync;
+
 /// A reusable Markdown extension that parses and renders one custom node.
 pub trait MarkdownPlugin: Send + Sync + 'static {
     /// Whether this plugin produces block-level nodes.
     ///
-    /// Plugins are inline by default. TextView does not support inline custom
-    /// Markdown rendering yet, so block plugins should return `true`.
+    /// Plugins are inline by default. Block plugins should return `true`.
     fn is_block(&self) -> bool {
         false
     }
@@ -47,7 +62,20 @@ pub trait MarkdownPlugin: Send + Sync + 'static {
     fn parse(&self, node: &mdast::Node, cx: &MarkdownParseContext<'_>) -> Option<MarkdownNode>;
 
     /// Render a custom Markdown node produced by this plugin.
-    fn render(&self, node: &MarkdownNode, window: &mut Window, cx: &mut App) -> impl IntoElement;
+    fn render(&self, node: &MarkdownNode, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        node.as_text().to_string()
+    }
+
+    /// Present an inline node. The default displays its atomic text fallback.
+    fn render_inline(
+        &self,
+        _node: &MarkdownNode,
+        _context: &MarkdownInlineRenderContext,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> Option<MarkdownInlinePresentation> {
+        None
+    }
 }
 
 /// Context passed to custom Markdown parsers.
@@ -85,6 +113,7 @@ pub struct MarkdownNode {
     name: SharedString,
     text: SharedString,
     markdown: SharedString,
+    accessibility_label: Option<SharedString>,
     data: Arc<dyn Any + Send + Sync>,
     pub(crate) span: Option<Span>,
 }
@@ -99,6 +128,7 @@ impl MarkdownNode {
             name: name.into(),
             text: SharedString::default(),
             markdown: SharedString::default(),
+            accessibility_label: None,
             data: Arc::new(data),
             span: None,
         }
@@ -117,6 +147,32 @@ impl MarkdownNode {
     /// Markdown representation of this custom node.
     pub fn as_markdown(&self) -> &str {
         &self.markdown
+    }
+
+    /// Full-document UTF-8 source byte range, including syntax delimiters.
+    pub fn source_range(&self) -> Option<Range<usize>> {
+        self.span.map(|span| span.start..span.end)
+    }
+
+    /// Name exposed to accessibility clients, defaulting to the plain text.
+    pub fn accessibility_name(&self) -> &str {
+        self.accessibility_label.as_deref().unwrap_or(&self.text)
+    }
+
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        let label = label.into();
+        self.accessibility_label = (!label.is_empty()).then_some(label);
+        self
+    }
+
+    pub(crate) fn with_inline_source(mut self, source: &str) -> Self {
+        if self.text.is_empty() {
+            self.text = source.to_string().into();
+        }
+        if self.markdown.is_empty() {
+            self.markdown = source.to_string().into();
+        }
+        self
     }
 
     /// Set the text representation of this custom node.
@@ -168,6 +224,7 @@ impl PartialEq for MarkdownNode {
         self.name == other.name
             && self.text == other.text
             && self.markdown == other.markdown
+            && self.accessibility_label == other.accessibility_label
             && self.span == other.span
     }
 }
@@ -177,12 +234,53 @@ impl PartialEq for MarkdownNode {
 pub struct MarkdownExtensions {
     enable_mdx: bool,
     enable_frontmatter: bool,
+    enable_math: bool,
     block_parsers: Vec<Arc<MarkdownBlockParserFn>>,
     block_renderers: HashMap<SharedString, Arc<MarkdownBlockRenderFn>>,
+    inline_parsers: Vec<Arc<MarkdownInlineParserFn>>,
+    inline_renderers: HashMap<SharedString, Arc<MarkdownInlineRenderFn>>,
     revision: u64,
 }
 
 impl MarkdownExtensions {
+    /// Opt into Markdown math (`$...$` inline and `$$` blocks).
+    pub fn math(mut self) -> Self {
+        self.enable_math = true;
+        self.bump_revision();
+        self
+    }
+
+    /// Register a parser for inline AST nodes, in first-match order.
+    pub fn inline_parser<F>(mut self, parser: F) -> Self
+    where
+        F: for<'a> Fn(&mdast::Node, &MarkdownParseContext<'a>) -> Option<MarkdownNode>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.inline_parsers.push(Arc::new(parser));
+        self.bump_revision();
+        self
+    }
+
+    /// Register a static renderer by node name, just like a block renderer.
+    pub fn inline_renderer<F>(mut self, name: impl Into<SharedString>, renderer: F) -> Self
+    where
+        F: Fn(
+                &MarkdownNode,
+                &MarkdownInlineRenderContext,
+                &mut Window,
+                &mut App,
+            ) -> Option<MarkdownInlinePresentation>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.inline_renderers
+            .insert(name.into(), Arc::new(renderer));
+        self.bump_revision();
+        self
+    }
     /// Enable YAML frontmatter parsing.
     ///
     /// Frontmatter is disabled by default because it is not part of CommonMark
@@ -243,7 +341,10 @@ impl MarkdownExtensions {
             });
             extensions
         } else {
-            panic!("inline Markdown plugins are not supported by TextView yet")
+            self.inline_parser(move |node, cx| parser.parse(node, cx))
+                .inline_renderer(name, move |node, context, window, cx| {
+                    renderer.render_inline(node, context, window, cx)
+                })
         }
     }
 
@@ -258,9 +359,16 @@ impl MarkdownExtensions {
     /// stable; render handles may be refreshed without reparsing the document.
     pub(crate) fn has_same_parser_configuration(&self, other: &Self) -> bool {
         self.enable_mdx == other.enable_mdx
+            && self.enable_math == other.enable_math
             && self.enable_frontmatter == other.enable_frontmatter
             && self.block_parsers.len() == other.block_parsers.len()
             && self.block_renderers.len() == other.block_renderers.len()
+            && self.inline_parsers.len() == other.inline_parsers.len()
+            && self.inline_renderers.len() == other.inline_renderers.len()
+            && self
+                .inline_renderers
+                .keys()
+                .all(|name| other.inline_renderers.contains_key(name))
             && self
                 .block_renderers
                 .keys()
@@ -293,6 +401,8 @@ impl MarkdownExtensions {
     pub(crate) fn parse_options(&self) -> ParseOptions {
         let mut options = ParseOptions::gfm();
         options.constructs.frontmatter = self.enable_frontmatter;
+        options.constructs.math_text = self.enable_math;
+        options.constructs.math_flow = self.enable_math;
         if self.enable_mdx {
             options.constructs.html_flow = false;
             options.constructs.html_text = false;
@@ -315,6 +425,34 @@ impl MarkdownExtensions {
             }
         }
         None
+    }
+
+    pub(crate) fn parse_inline(
+        &self,
+        node: &mdast::Node,
+        cx: &MarkdownParseContext<'_>,
+    ) -> Option<MarkdownNode> {
+        self.inline_parsers
+            .iter()
+            .find_map(|parser| parser(node, cx))
+    }
+
+    pub(crate) fn render_inline(
+        &self,
+        node: &MarkdownNode,
+        context: &MarkdownInlineRenderContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<MarkdownInlinePresentation> {
+        self.inline_renderers
+            .get(node.name())
+            .and_then(|render| render(node, context, window, cx))
+            .filter(|presentation| {
+                presentation
+                    .image
+                    .as_ref()
+                    .is_none_or(|(_, metrics)| metrics.is_valid())
+            })
     }
 
     pub(crate) fn render_block(

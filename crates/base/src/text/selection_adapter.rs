@@ -90,6 +90,7 @@ impl TextViewSelectionAdapter {
                     TextSelectionEvent::SelectionChanged(snapshot) => {
                         let snapshot = *snapshot;
                         let _ = view_for_events.update(cx, |state, cx| {
+                            state.preserve_inline_selection = false;
                             blocks_for_events
                                 .borrow_mut()
                                 .update(snapshot, selection_id);

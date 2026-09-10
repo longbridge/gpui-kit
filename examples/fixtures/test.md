@@ -303,6 +303,10 @@ button:
 
 <UserCard id="madcodelife" />
 
+### Mentions
+
+Ask [@huacnlee](mention:huacnlee) or [@madcodelife](mention:madcodelife) for a review. Hover over a mention to see the profile card.
+
 ## Task markers
 
 The custom `MarkerHighlighter` (an LSP-style semantic tokens provider)

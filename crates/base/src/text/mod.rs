@@ -2,7 +2,11 @@ mod document;
 mod format;
 mod inline;
 mod inline_flow;
+mod inline_object;
+#[cfg(test)]
+mod inline_virtual_tests;
 mod markdown_ext;
+mod markdown_inline;
 mod node;
 pub(crate) mod selection;
 mod selection_adapter;
@@ -13,6 +17,7 @@ mod utils;
 
 use gpui::{App, ElementId, IntoElement, RenderOnce, SharedString, Window};
 pub use markdown_ext::*;
+pub use markdown_inline::*;
 pub use node::{CodeBlock, TableData};
 pub use state::*;
 pub use style::*;

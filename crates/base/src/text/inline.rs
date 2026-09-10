@@ -167,6 +167,7 @@ pub(super) struct Inline {
     highlights: Vec<(Range<usize>, InlineHighlight)>,
     styled_text: StyledText,
     paint_origin: Option<Point<Pixels>>,
+    selection_bounds: Option<Bounds<Pixels>>,
     selection_source: Option<(Arc<Mutex<InlineState>>, Range<usize>)>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
 
@@ -209,6 +210,7 @@ impl Inline {
             text: text.clone(),
             styled_text: StyledText::new(text),
             paint_origin: None,
+            selection_bounds: None,
             selection_source: None,
             link_click_handler,
             state,
@@ -218,6 +220,11 @@ impl Inline {
     /// Preserve the shared inline-flow baseline through GPUI's element-bound snapping.
     pub(super) fn paint_origin(mut self, origin: Point<Pixels>) -> Self {
         self.paint_origin = Some(origin);
+        self
+    }
+
+    pub(super) fn selection_bounds(mut self, bounds: Bounds<Pixels>) -> Self {
+        self.selection_bounds = Some(bounds);
         self
     }
 
@@ -280,7 +287,35 @@ impl Inline {
             return (is_selectable, true, Some((0..self.text.len()).into()));
         }
 
+        if text_view_state.preserve_inline_selection {
+            let selection = if let Some((source, range)) = &self.selection_source {
+                source
+                    .lock()
+                    .ok()
+                    .and_then(|state| state.selection)
+                    .and_then(|selection| {
+                        let start = selection.start.max(range.start);
+                        let end = selection.end.min(range.end);
+                        (start < end)
+                            .then(|| Selection::new(start - range.start, end - range.start))
+                    })
+            } else {
+                self.state.lock().ok().and_then(|state| state.selection)
+            };
+            return (true, selection.is_some(), selection);
+        }
+
         if let Some(selection) = text_view_state.multi_click_selection() {
+            if selection.kind == TextViewMultiClickKind::Line {
+                return (
+                    true,
+                    true,
+                    selection
+                        .line_bounds
+                        .filter(|row| row.contains(&bounds.center()))
+                        .map(|_| Selection::new(0, self.text.len())),
+                );
+            }
             return (
                 is_selectable,
                 true,
@@ -339,8 +374,19 @@ impl Inline {
                 }
             }
 
-            if point_in_text_selection(pos, char_width, selection_start, selection_end, line_height)
-            {
+            let selection_pos = self
+                .selection_bounds
+                .map_or(pos, |bounds| point(pos.x, bounds.top()));
+            let selection_height = self
+                .selection_bounds
+                .map_or(line_height, |bounds| bounds.size.height);
+            if point_in_text_selection(
+                selection_pos,
+                char_width,
+                selection_start,
+                selection_end,
+                selection_height,
+            ) {
                 if selection.is_none() {
                     selection = Some((offset..offset).into());
                 }
@@ -567,10 +613,6 @@ impl Element for Inline {
         let bounds = Bounds::new(self.paint_origin.unwrap_or(bounds.origin), bounds.size);
         let current_view = window.current_view();
         let hitbox = prepaint;
-        let Ok(mut state) = self.state.lock() else {
-            return;
-        };
-
         let text_layout = self.styled_text.layout().clone();
         self.styled_text
             .paint(global_id, None, bounds, &mut (), &mut (), window, cx);
@@ -578,6 +620,10 @@ impl Element for Inline {
         // layout selections
         let (is_selectable, is_selection, selection) =
             self.layout_selections(&text_layout, &bounds, window, cx);
+
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
 
         state.selection = selection;
         if let Some((source, range)) = &self.selection_source
@@ -628,11 +674,25 @@ impl Element for Inline {
                 let inline_state = self.state.clone();
                 let text = self.text.clone();
                 let text_view_state = GlobalState::global(cx).text_view_state().cloned();
+                let line_bounds = self.selection_bounds;
                 move |event: &MouseDownEvent, phase, window, cx| {
                     if !phase.bubble()
                         || !hitbox.is_hovered(window)
                         || event.button != MouseButton::Left
                     {
+                        return;
+                    }
+
+                    if event.click_count == 3
+                        && let Some(line_bounds) = line_bounds
+                    {
+                        GlobalState::suppress_text_selection(cx);
+                        if let Some(view) = &text_view_state {
+                            view.update(cx, |state, cx| {
+                                state.set_multi_click_line(line_bounds, cx)
+                            });
+                        }
+                        cx.notify(current_view);
                         return;
                     }
 
@@ -757,12 +817,14 @@ fn selection_for_multi_click(
         // Known limitation: a paragraph maps to a single Inline run here. When a
         // paragraph embeds an inline image it is split into multiple Inline runs,
         // so triple-click only selects the run on the clicked side of the image.
-        TextViewMultiClickKind::Paragraph => (!text.is_empty()).then_some(0..text.len()),
+        TextViewMultiClickKind::Paragraph | TextViewMultiClickKind::Line => {
+            (!text.is_empty()).then_some(0..text.len())
+        }
     }
 }
 
 /// Check if a `pos` is within a `bounds`, considering multi-line selections.
-fn point_in_text_selection(
+pub(super) fn point_in_text_selection(
     pos: Point<Pixels>,
     char_width: Pixels,
     selection_start: Point<Pixels>,

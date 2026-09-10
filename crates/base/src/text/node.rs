@@ -481,6 +481,8 @@ pub(crate) struct InlineNode {
     /// The text content.
     pub(crate) text: SharedString,
     pub(crate) image: Option<ImageNode>,
+    pub(crate) custom: Option<MarkdownNode>,
+    custom_selection: Arc<Mutex<bool>>,
     /// The text styles, each tuple contains the range of the text and the style.
     pub(crate) marks: Vec<(Range<usize>, TextMark)>,
 
@@ -489,7 +491,10 @@ pub(crate) struct InlineNode {
 
 impl PartialEq for InlineNode {
     fn eq(&self, other: &Self) -> bool {
-        self.text == other.text && self.image == other.image && self.marks == other.marks
+        self.text == other.text
+            && self.image == other.image
+            && self.custom == other.custom
+            && self.marks == other.marks
     }
 }
 
@@ -534,6 +539,138 @@ pub(crate) fn wrap_with_mark(text: &str, mark: &TextMark) -> String {
     out
 }
 
+/// Keep syntax and marks separate until all selected runs and atomic objects
+/// have been collected. Wrapping every run independently creates adjacent `*`
+/// delimiters that can turn italic formulas into bold ones when pasted.
+#[derive(Default)]
+struct MarkdownSource {
+    pieces: Vec<(String, Vec<TextMark>)>,
+}
+
+impl MarkdownSource {
+    fn push_str(&mut self, source: &str) {
+        self.push_marked(source, &TextMark::default());
+    }
+
+    fn push_marked(&mut self, source: &str, mark: &TextMark) {
+        if source.is_empty() {
+            return;
+        }
+        // Outer-to-inner order for equally extensive marks. When a mark spans
+        // more neighboring pieces, serialize it outside the shorter marks.
+        let mut layers = Vec::new();
+        if let Some(link) = &mark.link {
+            layers.push(TextMark {
+                link: Some(link.clone()),
+                ..Default::default()
+            });
+        }
+        if let Some(highlight) = mark.highlight {
+            layers.push(TextMark {
+                highlight: Some(highlight),
+                ..Default::default()
+            });
+        }
+        if mark.underline {
+            layers.push(TextMark::default().underline());
+        }
+        if mark.strikethrough {
+            layers.push(TextMark::default().strikethrough());
+        }
+        if mark.bold {
+            layers.push(TextMark::default().bold());
+        }
+        if mark.italic {
+            layers.push(TextMark::default().italic());
+        }
+        if mark.code {
+            layers.push(TextMark::default().code());
+        }
+        self.pieces.push((source.to_string(), layers));
+    }
+
+    fn push_text(
+        &mut self,
+        text: &str,
+        marks: &[(Range<usize>, TextMark)],
+        selection: Range<usize>,
+    ) {
+        let start = selection.start.min(text.len());
+        let end = selection.end.min(text.len());
+        if start >= end {
+            return;
+        }
+        let mut cursor = start;
+        for (range, mark) in marks {
+            let lo = range.start.max(start);
+            let hi = range.end.min(end);
+            if lo >= hi {
+                continue;
+            }
+            if cursor < lo {
+                self.push_str(&text[cursor..lo]);
+            }
+            self.push_marked(&text[lo..hi], mark);
+            cursor = hi;
+        }
+        if cursor < end {
+            self.push_str(&text[cursor..end]);
+        }
+    }
+
+    fn push_object(&mut self, node: &InlineNode) {
+        let mut mark = TextMark::default();
+        for (_, layer) in &node.marks {
+            mark.merge(layer.clone());
+        }
+        self.push_marked(&node.custom.as_ref().unwrap().to_markdown(), &mark);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.pieces.is_empty()
+    }
+
+    fn finish(mut self) -> String {
+        fn write(pieces: &mut [(String, Vec<TextMark>)]) -> String {
+            let mut out = String::new();
+            let mut offset = 0;
+            while offset < pieces.len() {
+                let Some((mark, count)) = pieces[offset]
+                    .1
+                    .iter()
+                    .map(|mark| {
+                        let count = pieces[offset..]
+                            .iter()
+                            .take_while(|(_, layers)| layers.contains(mark))
+                            .count();
+                        (mark.clone(), count)
+                    })
+                    .reduce(|best, candidate| {
+                        if candidate.1 > best.1 {
+                            candidate
+                        } else {
+                            best
+                        }
+                    })
+                else {
+                    out.push_str(&pieces[offset].0);
+                    offset += 1;
+                    continue;
+                };
+                let group = &mut pieces[offset..offset + count];
+                for (_, layers) in group.iter_mut() {
+                    layers.retain(|layer| layer != &mark);
+                }
+                let content = write(group);
+                out.push_str(&wrap_with_mark(&content, &mark));
+                offset += count;
+            }
+            out
+        }
+        write(&mut self.pieces)
+    }
+}
+
 /// How a selection covers one rendered run, so the caller can tell whether it
 /// continues into an adjacent inline image.
 #[derive(Default)]
@@ -550,7 +687,7 @@ fn emit_run(
     state: &Arc<Mutex<InlineState>>,
     run: &[(usize, &InlineNode)],
     pending_images: &mut Vec<String>,
-    out: &mut String,
+    out: &mut MarkdownSource,
 ) -> RunSelection {
     let mut selected = RunSelection::default();
     let Ok(state) = state.lock() else {
@@ -582,11 +719,7 @@ fn emit_run(
         }
         selected.emitted = true;
 
-        out.push_str(&reconstruct_markdown(
-            &child.text,
-            &child.marks,
-            (lo - start)..(hi - start),
-        ));
+        out.push_text(&child.text, &child.marks, (lo - start)..(hi - start));
     }
 
     selected
@@ -610,38 +743,15 @@ fn image_markdown(image: &ImageNode) -> String {
 /// (see [`wrap_with_mark`]); slices not covered by any mark are emitted
 /// verbatim. This lets a rendered-offset selection be copied back as Markdown
 /// source (e.g. selecting inside a `**bold**` run yields `**bold**`).
+#[cfg(test)]
 pub(crate) fn reconstruct_markdown(
     text: &str,
     marks: &[(Range<usize>, TextMark)],
     selection: Range<usize>,
 ) -> String {
-    let start = selection.start.min(text.len());
-    let end = selection.end.min(text.len());
-    if start >= end {
-        return String::new();
-    }
-
-    let mut out = String::new();
-    let mut cursor = start;
-    // Marks are stored in ascending, non-overlapping order by the parser.
-    for (range, mark) in marks.iter() {
-        let seg_start = range.start.max(start);
-        let seg_end = range.end.min(end);
-        if seg_start >= seg_end {
-            continue;
-        }
-        // Emit any unmarked text before this mark verbatim.
-        if cursor < seg_start {
-            out.push_str(&text[cursor..seg_start]);
-        }
-        out.push_str(&wrap_with_mark(&text[seg_start..seg_end], mark));
-        cursor = seg_end;
-    }
-    // Trailing unmarked text.
-    if cursor < end {
-        out.push_str(&text[cursor..end]);
-    }
-    out
+    let mut source = MarkdownSource::default();
+    source.push_text(text, marks, selection);
+    source.finish()
 }
 
 /// Reconstruct the Markdown source of the selected cells of `table`.
@@ -788,9 +898,17 @@ impl InlineNode {
         Self {
             text: text.into(),
             image: None,
+            custom: None,
+            custom_selection: Arc::default(),
             marks: vec![],
             state: Arc::new(Mutex::new(InlineState::default())),
         }
+    }
+
+    pub(crate) fn custom(node: MarkdownNode) -> Self {
+        let mut this = Self::new(node.as_text().to_string());
+        this.custom = Some(node);
+        this
     }
 
     pub(crate) fn image(image: ImageNode) -> Self {
@@ -849,6 +967,11 @@ impl Paragraph {
             if let Some(selection) = &state.selection {
                 text.push_str(&state.text[selection.start..selection.end]);
             }
+            if let Some(custom) = &c.custom
+                && c.custom_selection.lock().is_ok_and(|selected| *selected)
+            {
+                text.push_str(custom.as_text());
+            }
         }
 
         if let Ok(state) = self.state.lock()
@@ -880,13 +1003,31 @@ impl Paragraph {
     /// or ends with an image has no run on that side, which counts as reaching
     /// it.
     pub(super) fn selected_source(&self) -> String {
-        let mut source = String::new();
+        let mut source = MarkdownSource::default();
         let mut pending_images: Vec<String> = Vec::new();
         let mut run: Vec<(usize, &InlineNode)> = Vec::new();
         let mut offset = 0;
         let mut enters_image = true;
 
         for child in self.children.iter() {
+            if child.custom.is_some() {
+                let selected = emit_run(&child.state, &run, &mut pending_images, &mut source);
+                let object_selected = child
+                    .custom_selection
+                    .lock()
+                    .is_ok_and(|selected| *selected);
+                if object_selected {
+                    if run.is_empty() || (selected.emitted && selected.at_end) {
+                        source.push_str(&pending_images.join(""));
+                    }
+                    source.push_object(child);
+                }
+                pending_images.clear();
+                enters_image = object_selected;
+                run.clear();
+                offset = 0;
+                continue;
+            }
             let Some(image) = &child.image else {
                 run.push((offset, child));
                 offset += child.text.len();
@@ -915,7 +1056,7 @@ impl Paragraph {
             source.push_str(&pending_images.join(""));
         }
 
-        source
+        source.finish()
     }
 
     pub(super) fn text(&self) -> String {
@@ -930,17 +1071,20 @@ impl Paragraph {
     ///
     /// Mirrors the [`selected_text`](Self::selected_text) traversal.
     pub(super) fn has_selection(&self) -> bool {
-        self.children
-            .iter()
-            .any(|c| c.state.lock().is_ok_and(|state| state.selection.is_some()))
-            || self
-                .state
-                .lock()
-                .is_ok_and(|state| state.selection.is_some())
+        self.children.iter().any(|c| {
+            c.state.lock().is_ok_and(|state| state.selection.is_some())
+                || c.custom_selection.lock().is_ok_and(|selected| *selected)
+        }) || self
+            .state
+            .lock()
+            .is_ok_and(|state| state.selection.is_some())
     }
 
     pub(super) fn clear_selection(&self) {
         for c in self.children.iter() {
+            if let Ok(mut selected) = c.custom_selection.lock() {
+                *selected = false;
+            }
             if let Ok(mut state) = c.state.lock() {
                 state.selection = None;
             }
@@ -1565,7 +1709,8 @@ impl Paragraph {
     fn should_render_inline_flow(&self) -> bool {
         let has_image = self.children.iter().any(|child| child.image.is_some());
         let has_text = self.children.iter().any(|child| !child.text.is_empty());
-        (has_image && has_text)
+        self.children.iter().any(|child| child.custom.is_some())
+            || (has_image && has_text)
             || self
                 .children
                 .iter()
@@ -1580,6 +1725,26 @@ impl Paragraph {
         let mut offset = 0;
 
         for inline_node in &self.children {
+            if let Some(node) = &inline_node.custom {
+                if let Ok(mut state) = inline_node.state.lock() {
+                    state.set_text(text.clone().into());
+                }
+                if !text.is_empty() {
+                    items.push(InlineFlowItem::Text {
+                        state: inline_node.state.clone(),
+                        text: std::mem::take(&mut text).into(),
+                        links: std::mem::take(&mut links),
+                        highlights: std::mem::take(&mut highlights),
+                    });
+                }
+                items.push(InlineFlowItem::Object {
+                    node: node.clone(),
+                    extensions: node_cx.markdown_extensions.clone(),
+                    selected: inline_node.custom_selection.clone(),
+                });
+                offset = 0;
+                continue;
+            }
             let text_len = inline_node.text.len();
             text.push_str(&inline_node.text);
 
@@ -1736,6 +1901,22 @@ fn measure_table_columns(
 
 impl Paragraph {
     fn to_markdown(&self) -> String {
+        if self.children.iter().any(|node| node.custom.is_some()) {
+            let mut source = MarkdownSource::default();
+            for node in &self.children {
+                if node.custom.is_some() {
+                    source.push_object(node);
+                } else {
+                    source.push_text(&node.text, &node.marks, 0..node.text.len());
+                    if let Some(image) = &node.image {
+                        source.push_str(&image_markdown(image));
+                    }
+                }
+            }
+            let mut text = source.finish();
+            text.push_str("\n\n");
+            return text;
+        }
         let mut text = self
             .children
             .iter()
@@ -2521,6 +2702,83 @@ impl BlockNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_inline_objects_coalesce_surrounding_emphasis() {
+        for (object_mark, expected) in [
+            (TextMark::default().italic(), "*fore $x$ aft*"),
+            (TextMark::default().italic().bold(), "*fore **$x$** aft*"),
+        ] {
+            let italic = TextMark::default().italic();
+            let before = InlineNode::new("before ").marks(vec![(0..7, italic.clone())]);
+            let formula =
+                InlineNode::custom(MarkdownNode::new("math", ()).text("x").markdown("$x$"))
+                    .marks(vec![(0..1, object_mark)]);
+            let after = InlineNode::new(" after").marks(vec![(0..6, italic)]);
+            {
+                let mut state = formula.state.lock().unwrap();
+                state.text = "before ".into();
+                state.selection = Some((2..7).into());
+            }
+            *formula.custom_selection.lock().unwrap() = true;
+            let paragraph = Paragraph {
+                children: vec![before, formula, after],
+                ..Default::default()
+            };
+            {
+                let mut state = paragraph.state.lock().unwrap();
+                state.text = " after".into();
+                state.selection = Some((0..4).into());
+            }
+            assert_eq!(paragraph.selected_source(), expected);
+        }
+    }
+
+    #[test]
+    fn consecutive_inline_objects_copy_atomically_without_neighboring_text() {
+        let first =
+            InlineNode::custom(MarkdownNode::new("math", ()).text("甲²").markdown("$甲^2$"));
+        let second = InlineNode::custom(MarkdownNode::new("math", ()).text("b").markdown("$b$"));
+        *first.custom_selection.lock().unwrap() = true;
+        *second.custom_selection.lock().unwrap() = true;
+        let paragraph = Paragraph {
+            children: vec![first, second],
+            ..Default::default()
+        };
+        assert_eq!(paragraph.selected_text(), "甲²b");
+        assert_eq!(paragraph.selected_source(), "$甲^2$$b$");
+        assert!(paragraph.has_selection());
+        paragraph.clear_selection();
+        assert_eq!(paragraph.selected_text(), "");
+        assert_eq!(paragraph.selected_source(), "");
+        assert!(!paragraph.has_selection());
+    }
+
+    #[test]
+    fn selected_inline_object_interleaves_runs_and_preserves_enclosing_mark() {
+        let before = InlineNode::new("中文 ");
+        let formula =
+            InlineNode::custom(MarkdownNode::new("math", ()).text("x²").markdown("$x^2$"))
+                .marks(vec![(0..3, TextMark::default().bold())]);
+        let after = InlineNode::new(" English");
+        {
+            let mut preceding = formula.state.lock().unwrap();
+            preceding.text = "中文 ".into();
+            preceding.selection = Some((3..7).into());
+        }
+        *formula.custom_selection.lock().unwrap() = true;
+        let paragraph = Paragraph {
+            children: vec![before, formula, after],
+            ..Default::default()
+        };
+        {
+            let mut trailing = paragraph.state.lock().unwrap();
+            trailing.text = " English".into();
+            trailing.selection = Some((0..4).into());
+        }
+        assert_eq!(paragraph.selected_text(), "文 x² Eng");
+        assert_eq!(paragraph.selected_source(), "文 **$x^2$** Eng");
+    }
 
     /// Table columns are sized from shaped text, so a column of inline code
     /// has to be measured in the code family. Measured in the body font, the
