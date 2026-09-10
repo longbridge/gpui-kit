@@ -94,6 +94,69 @@
     },
     {
       "source": "ui",
+      "name": "carousel",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Carousel",
+        "exports": [
+          "Carousel"
+        ],
+        "states": [
+          {
+            "export": "CarouselState",
+            "kind": "CarouselState",
+            "role": "retained-selection-and-gesture-state"
+          }
+        ],
+        "related": [
+          {
+            "descriptor": "CarouselContent",
+            "exports": [
+              "CarouselContent"
+            ],
+            "role": "typed-viewport"
+          },
+          {
+            "descriptor": "CarouselItem",
+            "exports": [
+              "CarouselItem"
+            ],
+            "role": "typed-slide"
+          },
+          {
+            "descriptor": "CarouselPrevious",
+            "exports": [
+              "CarouselPrevious"
+            ],
+            "role": "navigation-control"
+          },
+          {
+            "descriptor": "CarouselNext",
+            "exports": [
+              "CarouselNext"
+            ],
+            "role": "navigation-control"
+          },
+          {
+            "descriptor": "CarouselPagination",
+            "exports": [
+              "CarouselPagination"
+            ],
+            "role": "typed-pagination-container"
+          },
+          {
+            "descriptor": "CarouselPaginationItem",
+            "exports": [
+              "CarouselPaginationItem"
+            ],
+            "role": "typed-pagination-control"
+          }
+        ]
+      }
+    },
+    {
+      "source": "ui",
       "name": "chart",
       "classification": "component",
       "registration": {
@@ -1078,6 +1141,69 @@
             "export": "CalendarState",
             "kind": "CalendarState",
             "role": "retained-control-state"
+          }
+        ]
+      }
+    },
+    {
+      "source": "story",
+      "name": "carousel",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Carousel",
+        "exports": [
+          "Carousel"
+        ],
+        "states": [
+          {
+            "export": "CarouselState",
+            "kind": "CarouselState",
+            "role": "retained-selection-and-gesture-state"
+          }
+        ],
+        "related": [
+          {
+            "descriptor": "CarouselContent",
+            "exports": [
+              "CarouselContent"
+            ],
+            "role": "typed-viewport"
+          },
+          {
+            "descriptor": "CarouselItem",
+            "exports": [
+              "CarouselItem"
+            ],
+            "role": "typed-slide"
+          },
+          {
+            "descriptor": "CarouselPrevious",
+            "exports": [
+              "CarouselPrevious"
+            ],
+            "role": "navigation-control"
+          },
+          {
+            "descriptor": "CarouselNext",
+            "exports": [
+              "CarouselNext"
+            ],
+            "role": "navigation-control"
+          },
+          {
+            "descriptor": "CarouselPagination",
+            "exports": [
+              "CarouselPagination"
+            ],
+            "role": "typed-pagination-container"
+          },
+          {
+            "descriptor": "CarouselPaginationItem",
+            "exports": [
+              "CarouselPaginationItem"
+            ],
+            "role": "typed-pagination-control"
           }
         ]
       }

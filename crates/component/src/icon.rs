@@ -6,15 +6,54 @@ use gpui::{
     RenderOnce, SharedString, StyleRefinement, Styled, Svg, Transformation, Window,
     prelude::FluentBuilder as _, svg,
 };
-use gpui_component_macros::icon_named;
+pub use gpui_kit_assets::IconNamed;
 
-/// Types implementing this trait can automatically be converted to [`Icon`].
-///
-/// This allows you to implement a custom version of [`IconName`] that functions as a drop-in
-/// replacement for other UI components.
-pub trait IconNamed {
-    /// Returns the embedded path of the icon.
-    fn path(self) -> SharedString;
+// Preserve the original enum (including exhaustive matches and inherent view)
+// while the complete, shared catalog is owned by gpui-kit-assets.
+macro_rules! component_icon_names {
+    ($($name:ident => $path:literal,)*) => {
+        /// Default component icon names, retained for source compatibility.
+        /// For the complete Lucide catalog, use `gpui_kit_assets::IconName`.
+        #[derive(Clone, IntoElement)]
+        pub enum IconName {
+            $($name,)*
+        }
+
+        impl From<IconName> for gpui_kit_assets::IconName {
+            fn from(name: IconName) -> Self {
+                match name {
+                    $(IconName::$name => Self::$name,)*
+                }
+            }
+        }
+
+        impl IconNamed for IconName {
+            fn path(self) -> SharedString {
+                match self { $(Self::$name => $path,)* }.into()
+            }
+        }
+    };
+}
+
+gpui_kit_assets::__component_icon_names!(component_icon_names);
+
+impl IconName {
+    /// Return the icon as an Entity<Icon>.
+    pub fn view(self, cx: &mut App) -> Entity<Icon> {
+        Icon::build(self).view(cx)
+    }
+}
+
+impl From<IconName> for AnyElement {
+    fn from(name: IconName) -> Self {
+        Icon::build(name).into_any_element()
+    }
+}
+
+impl RenderOnce for IconName {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        Icon::build(self)
+    }
 }
 
 impl<T: IconNamed> From<T> for Icon {
@@ -23,29 +62,15 @@ impl<T: IconNamed> From<T> for Icon {
     }
 }
 
-// Generate `IconName` from the icons that `gpui-kit-assets` ships.
-// The `$VAR` form resolves to the absolute path published by the assets
-// crate's `build.rs` (via cargo's `links` mechanism) and re-exported by
-// our own `build.rs`. See `gpui_component_macros::icon_named!`'s doc
-// comment for the full mechanism.
-icon_named!(IconName, "$GPUI_KIT_DEFAULT_ICONS_DIR");
+/// Component view construction for the shared `gpui_kit_assets::IconName`.
+/// The legacy component `IconName` retains its inherent `view` method.
+pub trait IconNameExt {
+    fn view(self, cx: &mut App) -> Entity<Icon>;
+}
 
-impl IconName {
-    /// Return the icon as a Entity<Icon>
-    pub fn view(self, cx: &mut App) -> Entity<Icon> {
+impl IconNameExt for gpui_kit_assets::IconName {
+    fn view(self, cx: &mut App) -> Entity<Icon> {
         Icon::build(self).view(cx)
-    }
-}
-
-impl From<IconName> for AnyElement {
-    fn from(val: IconName) -> Self {
-        Icon::build(val).into_any_element()
-    }
-}
-
-impl RenderOnce for IconName {
-    fn render(self, _: &mut Window, _cx: &mut App) -> impl IntoElement {
-        Icon::build(self)
     }
 }
 

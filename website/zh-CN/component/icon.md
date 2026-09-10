@@ -9,6 +9,54 @@ Icon 支持通过资源路径或内存中的字节渲染 SVG 图标，并可定�
 
 在开始之前，建议先阅读 [Icons & Assets](../docs/assets.md)，了解如何在 GPUI 与 GPUI Component 应用中使用 SVG。
 
+`gpui_kit::assets::IconName` 提供不依赖 Component 的完整共享目录。
+`gpui_kit::component::IconName` 保留为原来的兼容枚举：现有导入、穷尽匹配和
+`.view(cx)` 调用均无需改动，也无需新增 trait 导入。`Icon::new(...)` 同时接受
+两种类型；旧名称可以通过 `.into()` 转为共享名称。
+
+对于新的共享枚举，需要组件实体时使用 `Icon::new(name).view(cx)`，也可导入
+`gpui_kit::component::IconNameExt` 后使用 `name.view(cx)`。
+
+:::note NOTE — 依赖图标 crate 不等于嵌入全部图标
+
+**补全图标目录不会让现有应用自动嵌入全部图标。** `Assets` 保留原来的
+101 个组件图标，应用仍通过自己的 `AssetSource` 提供额外图标，不需要重新声明
+组件自带的图标。只有显式注册 `AllAssets`，原生程序才会嵌入全部 1,830 个 SVG。
+仅依赖 crate 或使用共享 `IconName` 不会引用全部 SVG 内容。
+
+| 原生资源配置 | 嵌入的 SVG 总量 | 相对默认 `Assets` 的二进制增量 |
+| --- | ---: | ---: |
+| 默认组件图标（101 个） | 44.28 KiB | 0 B（基线） |
+| 默认 + 2 个应用图标（103 个） | 45.04 KiB | +15.19 KiB |
+| 默认 + 10 个应用图标（111 个） | 48.09 KiB | +19.19 KiB |
+| 显式使用 `AllAssets`（1,830 个） | 731.45 KiB | +1.02 MiB |
+
+**本例中，额外使用 10 个应用图标增加约 19 KiB，并不会带入整个图标库。**
+这 10 个 SVG 合计 3,903 字节，二进制实际增加 19,648 字节，包含额外资源源的查找、
+列表合并代码、元数据和对齐开销。这不是固定的单图标成本，也不是整个应用的大小。
+
+测量环境：Lucide 1.43.0、Linux x86_64、Rust 1.98.0、`--release` 并移除符号。
+各组使用相同的 `IconName` 查找和运行时资源路径。额外资源源回退到 `Assets`，
+并合并、排序、去重两个资源源的列表。10 个额外图标为 `Accessibility`、
+`AlarmClock`、`Archive`、`Award`、`Backpack`、`Bike`、`Bird`、`Camera`、
+`Coffee` 和 `Compass`；两图标组使用前两个。实际结果取决于 SVG 复杂度、工具链
+和资源源的实现方式。
+
+二进制大小不等于内存占用。按需资源借用静态字节，不复制或创建缓存；实际渲染仍有
+解析、栅格化和渲染缓存的开销。运行时共享名称查找可能保留名称映射表，Cargo 下载包
+和构建产物也仍包含完整目录。WASM 的 `Assets::new(endpoint)` 和
+`AllAssets::new(endpoint)` 沿用按需下载的 CDN 加载器，不嵌入完整资源包。
+
+:::
+
+
+## 应用额外图标
+
+照常注册默认 `Assets`，应用额外需要的 SVG 由自己的 `AssetSource` 提供，
+并在未找到时回退到默认资源源。也可以用可选的 `icon_assets!` 声明应用额外使用的
+内置 SVG，然后将其资源源与默认资源源组合。详见 [Icons & Assets](../docs/assets.md)。
+
+
 ## 导入
 
 ```rust

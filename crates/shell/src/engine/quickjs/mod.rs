@@ -25,12 +25,13 @@ use anyhow::{Context as _, Result, anyhow};
 use gpui::{App, AppContext as _, ClickEvent, Entity, Global, Subscription, WeakEntity, Window};
 use rquickjs::{
     Array, Context as JsContext, Ctx, Error as JsError, Exception, FromJs, Function, Object,
-    Persistent, Result as JsResult, Runtime as JsRuntime, Value,
+    Persistent, Result as JsResult, Value,
     function::{Args as JsArgs, Func, Opt, This},
     loader::{BuiltinResolver, ImportAttributes, Loader, ModuleLoader, Resolver},
     module::Declared,
     module::{Declarations, Exports, Module, ModuleDef},
 };
+use rquickjs_jit::{JitConfig, JitRuntime};
 use smallvec::SmallVec;
 
 use crate::{
@@ -237,6 +238,27 @@ mod retained_component_state_tests {
                 .to_string()
                 .contains("cannot be updated during render")
         );
+    }
+}
+
+#[cfg(test)]
+mod jit_suspension_tests {
+    use super::*;
+
+    #[test]
+    fn nested_suspension_preserves_the_outer_state() {
+        let runtime = ShellRuntime::new_isolated().unwrap();
+
+        runtime
+            .with_jit_suspended(|| {
+                assert!(runtime.js_runtime.jit().is_suspended());
+                runtime.with_jit_suspended(|| Ok(()))?;
+                assert!(runtime.js_runtime.jit().is_suspended());
+                Ok(())
+            })
+            .unwrap();
+
+        assert!(!runtime.js_runtime.jit().is_suspended());
     }
 }
 
@@ -830,6 +852,7 @@ pub struct ViewObject {
     #[allow(dead_code)] // Its drop owns the resolver registration lifetime.
     module_lease: Option<ApplicationModuleLease>,
     application: Option<Rc<ApplicationGeneration>>,
+    jit_warm: Rc<Cell<bool>>,
 }
 
 impl std::fmt::Debug for ViewObject {
@@ -844,6 +867,7 @@ impl ViewObject {
             value,
             module_lease: None,
             application: None,
+            jit_warm: Rc::new(Cell::new(false)),
         }
     }
 
@@ -1345,7 +1369,38 @@ pub struct ShellRuntime {
     next_application_generation: Cell<u64>,
     /// Held so the context stays alive, and so the module loader can be scoped
     /// to an application directory when one is loaded.
-    js_runtime: JsRuntime,
+    js_runtime: JitRuntime,
+}
+
+struct JitSuspension<'a> {
+    jit: &'a rquickjs_jit::Jit,
+    active: bool,
+}
+
+impl JitSuspension<'_> {
+    fn begin(jit: &rquickjs_jit::Jit) -> Result<JitSuspension<'_>> {
+        let active = !jit.is_suspended();
+        if active {
+            jit.suspend()?;
+        }
+        Ok(JitSuspension { jit, active })
+    }
+
+    fn finish(mut self) -> Result<()> {
+        if self.active {
+            self.jit.resume()?;
+        }
+        self.active = false;
+        Ok(())
+    }
+}
+
+impl Drop for JitSuspension<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = self.jit.resume();
+        }
+    }
 }
 
 impl Drop for ShellRuntime {
@@ -1379,6 +1434,17 @@ struct RuntimeGlobal(Weak<ShellRuntime>);
 impl Global for RuntimeGlobal {}
 
 impl ShellRuntime {
+    fn with_jit_suspended<T>(&self, operation: impl FnOnce() -> Result<T>) -> Result<T> {
+        if !self.js_runtime.has_jit() {
+            return operation();
+        }
+        let jit = self.js_runtime.jit();
+        let suspension = JitSuspension::begin(jit)?;
+        let result = operation();
+        suspension.finish()?;
+        result
+    }
+
     /// Loads an application's JavaScript entry without exposing engine values.
     ///
     /// Resolution, declaration refresh, module generations, capabilities and
@@ -1457,6 +1523,19 @@ impl ShellRuntime {
         Self::new_isolated_with_components_and_dependency_store(
             FrozenComponentRegistry::default(),
             GitDependencyStore::for_user()?,
+            shell_jit_config()?,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_isolated_interpreter() -> Result<Rc<Self>> {
+        let js_runtime = JitRuntime::builder()
+            .build_interpreter()
+            .map_err(|error| anyhow!("failed to start the JavaScript interpreter: {error}"))?;
+        Self::new_isolated_with_components_dependency_store_and_runtime(
+            FrozenComponentRegistry::default(),
+            GitDependencyStore::for_user()?,
+            js_runtime,
         )
     }
 
@@ -1464,6 +1543,7 @@ impl ShellRuntime {
         Self::new_isolated_with_components_and_dependency_store(
             components,
             GitDependencyStore::for_user()?,
+            shell_jit_config()?,
         )
     }
 
@@ -1474,16 +1554,37 @@ impl ShellRuntime {
         Self::new_isolated_with_components_and_dependency_store(
             FrozenComponentRegistry::default(),
             dependency_store,
+            shell_jit_config()?,
         )
     }
 
     fn new_isolated_with_components_and_dependency_store(
         components: FrozenComponentRegistry,
         dependency_store: GitDependencyStore,
+        jit_config: JitConfig,
     ) -> Result<Rc<Self>> {
+        let js_runtime = JitRuntime::builder()
+            .config(jit_config)
+            .build()
+            .map_err(|error| anyhow!("failed to start the JavaScript JIT runtime: {error}"))?;
+        Self::new_isolated_with_components_dependency_store_and_runtime(
+            components,
+            dependency_store,
+            js_runtime,
+        )
+    }
+
+    fn new_isolated_with_components_dependency_store_and_runtime(
+        components: FrozenComponentRegistry,
+        dependency_store: GitDependencyStore,
+        js_runtime: JitRuntime,
+    ) -> Result<Rc<Self>> {
+        let jit_enabled = js_runtime.has_jit();
+        if jit_enabled {
+            js_runtime.jit().suspend()?;
+        }
         let entities = EntityStore::try_new()
             .ok_or_else(|| anyhow!("gpui-shell entity store id space is exhausted"))?;
-        let js_runtime = JsRuntime::new().map_err(js_setup_error)?;
         let context = JsContext::full(&js_runtime).map_err(js_setup_error)?;
 
         let app_modules = AppModules::default();
@@ -1554,7 +1655,11 @@ impl ShellRuntime {
             js_runtime,
         });
 
-        runtime.install_globals()?;
+        let installed = runtime.install_globals();
+        if jit_enabled {
+            runtime.js_runtime.jit().resume()?;
+        }
+        installed?;
         Ok(runtime)
     }
 
@@ -1858,6 +1963,13 @@ impl ShellRuntime {
         self.arena.borrow_mut().reset();
     }
 
+    /// Returns JIT diagnostic counters for the real-process acceptance
+    /// benchmark.
+    #[cfg(test)]
+    pub(crate) fn jit_metrics_for_benchmark(&self) -> rquickjs_jit::JitMetrics {
+        self.js_runtime.metrics()
+    }
+
     /// A reading of the two counters, taken now.
     ///
     /// The host gets the reading rather than the instrument: `Metrics` is the
@@ -2047,21 +2159,24 @@ impl ShellRuntime {
         module_lease: Option<ApplicationModuleLease>,
         application: Option<Rc<ApplicationGeneration>>,
     ) -> Result<ViewType> {
-        self.with_js(|ctx| {
-            let (module, promise) = rquickjs::Module::declare(ctx.clone(), name, source)?.eval()?;
-            promise.finish::<()>()?;
+        self.with_jit_suspended(|| {
+            self.with_js(|ctx| {
+                let (module, promise) =
+                    rquickjs::Module::declare(ctx.clone(), name, source)?.eval()?;
+                promise.finish::<()>()?;
 
-            let default: Value = module.get("default")?;
-            let Some(class) = default.as_object() else {
-                return Err(Exception::throw_message(
-                    ctx,
-                    "main.js must `export default` a class that extends View",
-                ));
-            };
-            Ok(ViewType {
-                value: Persistent::save(ctx, class.clone()),
-                module_lease,
-                application,
+                let default: Value = module.get("default")?;
+                let Some(class) = default.as_object() else {
+                    return Err(Exception::throw_message(
+                        ctx,
+                        "main.js must `export default` a class that extends View",
+                    ));
+                };
+                Ok(ViewType {
+                    value: Persistent::save(ctx, class.clone()),
+                    module_lease,
+                    application,
+                })
             })
         })
     }
@@ -2784,14 +2899,17 @@ impl ShellRuntime {
     }
 
     fn construct(&self, view_type: &ViewType) -> Result<ViewObject> {
-        self.with_js(|ctx| {
-            let class = view_type.value.clone().restore(ctx)?;
-            let construct: Function = ctx.globals().get("__construct")?;
-            let instance: Object = construct.call((class,))?;
-            Ok(ViewObject {
-                value: Persistent::save(ctx, instance),
-                module_lease: view_type.module_lease.clone(),
-                application: view_type.application.clone(),
+        self.with_jit_suspended(|| {
+            self.with_js(|ctx| {
+                let class = view_type.value.clone().restore(ctx)?;
+                let construct: Function = ctx.globals().get("__construct")?;
+                let instance: Object = construct.call((class,))?;
+                Ok(ViewObject {
+                    value: Persistent::save(ctx, instance),
+                    module_lease: view_type.module_lease.clone(),
+                    application: view_type.application.clone(),
+                    jit_warm: Rc::new(Cell::new(false)),
+                })
             })
         })
     }
@@ -2845,14 +2963,16 @@ impl ShellRuntime {
         initial_props: Option<Persistent<Value<'static>>>,
     ) -> Result<()> {
         self.initializing_views.borrow_mut().push(object.clone());
-        let initialized = self.with_js(|ctx| {
-            let instance = object.value.clone().restore(ctx)?;
-            let initialize: Function = ctx.globals().get("__initialize")?;
-            let props = match initial_props {
-                Some(props) => props.restore(ctx)?,
-                None => Value::new_undefined(ctx.clone()),
-            };
-            initialize.call::<_, ()>((instance, props))
+        let initialized = self.with_jit_suspended(|| {
+            self.with_js(|ctx| {
+                let instance = object.value.clone().restore(ctx)?;
+                let initialize: Function = ctx.globals().get("__initialize")?;
+                let props = match initial_props {
+                    Some(props) => props.restore(ctx)?,
+                    None => Value::new_undefined(ctx.clone()),
+                };
+                initialize.call::<_, ()>((instance, props))
+            })
         });
         let initializing = self.initializing_views.borrow_mut().pop();
         debug_assert!(initializing.is_some());
@@ -2903,21 +3023,32 @@ impl ShellRuntime {
         self.arena.borrow_mut().reset();
         let callbacks = self.callbacks.borrow_mut().begin();
 
-        let (root, policy) = self.metrics.time_script_render(|| {
-            let (_guard, generation) = scope::enter_with_application(
-                self,
-                window,
-                cx,
-                ScopePhase::Render,
-                view.clone(),
-                policy.clone(),
-                object.application_generation(),
-            );
-            (self.call_render(object, generation), policy)
-        });
+        let first_render = !object.jit_warm.get();
+        let render = || {
+            self.metrics.time_script_render(|| {
+                let (_guard, generation) = scope::enter_with_application(
+                    self,
+                    window,
+                    cx,
+                    ScopePhase::Render,
+                    view.clone(),
+                    policy.clone(),
+                    object.application_generation(),
+                );
+                (self.call_render(object, generation), policy)
+            })
+        };
+        let (root, policy) = if first_render {
+            self.with_jit_suspended(|| Ok(render()))?
+        } else {
+            render()
+        };
 
         let root = match root {
-            Ok(root) => root,
+            Ok(root) => {
+                object.jit_warm.set(true);
+                root
+            }
             Err(error) => {
                 self.callbacks.borrow_mut().abort();
                 self.arena.borrow_mut().reset();
@@ -4834,6 +4965,21 @@ impl ShellRuntime {
     fn push_op(&self, id: SpecId, op: SpecOp) -> Result<(), crate::spec::SpecError> {
         self.arena.borrow_mut().push_op(id, op)
     }
+}
+
+fn shell_jit_config() -> Result<JitConfig> {
+    let builder = JitConfig::builder();
+
+    // Debug builds exercise many short-lived runtimes concurrently. Keep them on
+    // the interpreter tier: native compilation currently crashes inside the JIT
+    // backend on Linux and Windows under that workload. Release builds retain the
+    // production thresholds and continue to tier hot functions up to native code.
+    #[cfg(debug_assertions)]
+    let builder = builder.call_threshold(u32::MAX).loop_threshold(u32::MAX);
+
+    builder
+        .build()
+        .map_err(|error| anyhow!("invalid JavaScript JIT configuration: {error}"))
 }
 
 /// Resolves and loads an application's own modules, and nothing else.
@@ -11181,6 +11327,14 @@ export default class BrokenChild extends View {
 
 #[cfg(test)]
 mod reserved_element_method_tests {
+    #[cfg(debug_assertions)]
+    #[test]
+    fn debug_runtimes_stay_on_the_interpreter_tier() {
+        let config = super::shell_jit_config().expect("JIT configuration");
+        assert_eq!(config.call_threshold(), u32::MAX);
+        assert_eq!(config.loop_threshold(), u32::MAX);
+    }
+
     /// `typings.rs` withholds these from a registered component that does not
     /// declare them. If the engine started accepting a fourth, the declarations
     /// would keep offering it on every component and the call would throw.

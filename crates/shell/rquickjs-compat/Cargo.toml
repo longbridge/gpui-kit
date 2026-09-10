@@ -1,0 +1,55 @@
+[package]
+name = "rquickjs"
+version = "0.12.7"
+edition = "2021"
+rust-version = "1.87"
+license = "MIT"
+description = "Compatibility facade routing rquickjs dependencies to quickjs-jit"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+upstream = { package = "quickjs-jit", version = "0.12.7", git = "https://github.com/longbridge/quickjs-jit", rev = "9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620", default-features = false }
+
+[features]
+default = ["std"]
+full = ["upstream/full"]
+full-wasi = ["upstream/full-wasi"]
+full-async = ["upstream/full-async"]
+full-async-wasi = ["upstream/full-async-wasi"]
+std = ["upstream/std"]
+jit-abi = ["upstream/jit-abi"]
+chrono = ["upstream/chrono"]
+either = ["upstream/either"]
+indexmap = ["upstream/indexmap"]
+phf = ["upstream/phf"]
+bindgen = ["upstream/bindgen"]
+parallel = ["upstream/parallel"]
+loader = ["upstream/loader"]
+dyn-load = ["upstream/dyn-load"]
+rust-alloc = ["upstream/rust-alloc"]
+macro = ["upstream/macro"]
+half = ["upstream/half"]
+bytes = ["upstream/bytes"]
+futures = ["upstream/futures"]
+dump-bytecode = ["upstream/dump-bytecode"]
+dump-gc = ["upstream/dump-gc"]
+dump-gc-free = ["upstream/dump-gc-free"]
+dump-free = ["upstream/dump-free"]
+dump-leaks = ["upstream/dump-leaks"]
+dump-mem = ["upstream/dump-mem"]
+dump-objects = ["upstream/dump-objects"]
+dump-atoms = ["upstream/dump-atoms"]
+dump-shapes = ["upstream/dump-shapes"]
+dump-module-resolve = ["upstream/dump-module-resolve"]
+dump-promise = ["upstream/dump-promise"]
+dump-read-object = ["upstream/dump-read-object"]
+disable-assertions = ["upstream/disable-assertions"]
+compile-tests = ["upstream/compile-tests"]
+doc-cfg = ["upstream/doc-cfg"]
+classes = ["upstream/classes"]
+array-buffer = ["upstream/array-buffer"]
+allocator = ["upstream/allocator"]
+properties = ["upstream/properties"]

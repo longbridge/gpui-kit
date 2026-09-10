@@ -12,6 +12,16 @@ export const stories = [
     api: "Calendar",
   }),
   pendingStory({
+    id: "carousel",
+    title: "Carousel",
+    group: "Layout & advanced",
+    rustStory: "CarouselStory",
+    description: "Snapping navigation through related content.",
+    states: ["first item", "middle item", "last item"],
+    availability: "pending",
+    api: "Carousel",
+  }),
+  pendingStory({
     id: "chart",
     title: "Chart",
     group: "Layout & advanced",

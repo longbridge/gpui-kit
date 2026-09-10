@@ -1,7 +1,7 @@
 [package]
 name = "gpui-shell"
 description = "A scriptable application runtime for GPUI, built on gpui-base."
-version = "0.6.0"
+version = "0.6.1"
 keywords = ["desktop", "gpui", "javascript", "runtime"]
 license = "Apache-2.0"
 publish = false
@@ -24,11 +24,8 @@ default = ["quickjs"]
 # so a second one can be added without the seam having to be invented first.
 quickjs = [
     "dep:rquickjs",
-    "dep:llrt_buffer",
-    "dep:llrt_crypto",
-    "dep:llrt_path",
-    "dep:llrt_url",
-    "dep:llrt_zlib",
+    "dep:rquickjs-jit",
+    "dep:quickjs-jit-stdlib",
     "dep:reqwest",
     "dep:tungstenite",
 ]
@@ -39,19 +36,15 @@ gpui_platform.workspace = true
 gpui-base = { workspace = true, features = ["inspector"] }
 gpui-fps.workspace = true
 
-rquickjs = { version = "0.12", features = [
+# Keep the bindings, runtime, and LLRT compatibility facade on the same revision.
+rquickjs = { package = "quickjs-jit", version = "0.12.7", git = "https://github.com/longbridge/quickjs-jit", rev = "9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620", features = [
     "macro",
     "loader",
-    "classes",
-    "properties",
+    "jit-abi",
 ], optional = true }
-# LLRT is still pre-release. Keep every module on the same audited revision;
-# crates.io's 0.8.1-beta release uses rquickjs 0.11 and cannot share our VM.
-llrt_buffer = { git = "https://github.com/awslabs/llrt", rev = "7b95c82a9b15e7ddfb2778eca4b5a63111e74f51", optional = true }
-llrt_crypto = { git = "https://github.com/awslabs/llrt", rev = "7b95c82a9b15e7ddfb2778eca4b5a63111e74f51", default-features = false, features = ["crypto-rust"], optional = true }
-llrt_path = { git = "https://github.com/awslabs/llrt", rev = "7b95c82a9b15e7ddfb2778eca4b5a63111e74f51", optional = true }
-llrt_url = { git = "https://github.com/awslabs/llrt", rev = "7b95c82a9b15e7ddfb2778eca4b5a63111e74f51", optional = true }
-llrt_zlib = { git = "https://github.com/awslabs/llrt", rev = "7b95c82a9b15e7ddfb2778eca4b5a63111e74f51", default-features = false, features = ["compression-rust"], optional = true }
+rquickjs-jit = { package = "quickjs-jit-runtime", version = "0.12.7", git = "https://github.com/longbridge/quickjs-jit", rev = "9a83a7f9cdc178a0ab5d7b29c3c9227b0dcb8620", features = ["compiler"], optional = true }
+# The stdlib facade pins LLRT modules and shares our VM through rquickjs-compat.
+quickjs-jit-stdlib = { version = "0.12.7", git = "https://github.com/longbridge/quickjs-jit", rev = "605da483611a3548edb8c33fdff602e3f5f42076", optional = true }
 # The date type `gpui_base::Date` is built from, for the calendar binding. Same
 # version as `gpui-base`'s, because the two exchange `NaiveDate` values.
 chrono = "0.4.38"

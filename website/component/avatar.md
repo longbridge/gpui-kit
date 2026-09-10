@@ -39,6 +39,12 @@ Avatar::new()
     .name("Jane Smith")
 ```
 
+The color is derived from the initials, so the same person always gets the same
+one. It comes from a ring of 12 evenly spaced OkLCH hues held at a fixed
+lightness and chroma, which keeps every avatar at the same visual weight and its
+text above WCAG AA contrast in both the light and dark themes. The outline
+follows the same hue; an Avatar showing an image keeps the neutral border.
+
 ### Avatar Placeholder
 
 For anonymous users or when no name is provided:

@@ -50,6 +50,7 @@ collapsed: false
 - [Sidebar](sidebar) - 侧边栏导航
 - [StatusBar](status-bar) - 底部状态栏，含左/中/右三区
 - [Chart](chart) - 图表组件
+- [Carousel](carousel) - 浏览一组相关内容
 - [DataTable](data-table) - 高性能数据表格
 - [Dock](dock) - 支持标签、分割与状态持久化的生产级 Dock 布局
 - [Tree](tree) - 树形结构组件

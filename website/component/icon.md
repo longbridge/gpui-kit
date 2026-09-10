@@ -9,6 +9,62 @@ A flexible icon component that renders SVG icons from asset paths or in-memory b
 
 Before you start, please make sure you have read: [Icons & Assets](../docs/assets.md) to understand how use SVG in GPUI & GPUI Component application.
 
+`gpui_kit::assets::IconName` provides the complete shared catalog without a
+Component dependency. `gpui_kit::component::IconName` remains the original
+compatibility enum: existing imports, exhaustive matches and `.view(cx)` calls
+continue to work without a new trait import. `Icon::new(...)` accepts either
+type. A legacy name converts into the shared name with `.into()`.
+
+For the new shared enum, use `Icon::new(name).view(cx)` when a component entity
+is needed, or import `gpui_kit::component::IconNameExt` to call `name.view(cx)`.
+
+:::note NOTE — Depending on the crate does not embed every icon
+
+**The complete catalog does not make existing applications embed every icon.**
+`Assets` keeps the original 101 component icons. Applications provide additional
+icons through their own `AssetSource`, as before; they do not need to redeclare
+the component icons. Only explicitly registering `AllAssets` embeds all 1,830
+SVGs on native platforms. Depending on the crate or using the shared `IconName`
+alone does not reference every SVG payload.
+
+| Native asset configuration | Embedded SVG data | Binary increase vs. default `Assets` |
+| --- | ---: | ---: |
+| Default component icons (101) | 44.28 KiB | 0 B (baseline) |
+| Default + 2 application icons (103) | 45.04 KiB | +15.19 KiB |
+| Default + 10 application icons (111) | 48.09 KiB | +19.19 KiB |
+| Explicit `AllAssets` (1,830) | 731.45 KiB | +1.02 MiB |
+
+**In this example, adding 10 application icons costs about 19 KiB, not the full
+catalog.** Their SVGs total 3,903 bytes; the measured binary increase is 19,648
+bytes, including the extra source's lookup/list-composition code, metadata and
+alignment. These are not fixed per-icon costs or whole-application sizes.
+
+Measured with Lucide 1.43.0 on Linux x86_64, Rust 1.98.0, `--release`, and stripped
+symbols. Each program uses the same `IconName` lookup and runtime asset path.
+The extra source falls back to `Assets`, and merges, sorts and deduplicates both
+sources' lists. The 10 extras are `Accessibility`, `AlarmClock`, `Archive`,
+`Award`, `Backpack`, `Bike`, `Bird`, `Camera`, `Coffee` and `Compass`; the two-icon
+case uses the first two. SVG complexity, toolchain and source implementation
+change the result.
+
+Binary size is not RAM usage. Selected sources borrow static bytes without a
+copy/cache; actual rendering still allocates for parsing, rasterization and
+render caches. Runtime shared-name lookup can retain a name/path table, and
+Cargo's downloaded package/build artifacts still contain the complete catalog.
+On WASM, `Assets::new(endpoint)` and `AllAssets::new(endpoint)` use the existing
+on-demand CDN loader instead of embedding the complete bundle.
+
+:::
+
+
+## Additional application icons
+
+Keep the default `Assets` registration. Supply additional SVGs through your
+application's `AssetSource`, falling back to the default source for component
+icons. The optional `icon_assets!` macro can also select bundled SVGs for an
+extra source that you compose with the default. See [Icons & Assets](../docs/assets.md).
+
+
 ## Import
 
 ```rust

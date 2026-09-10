@@ -8,6 +8,17 @@ order: 16
 
 `Editor` 是源代码编辑控件。它建立在共享文本引擎之上，增加语言、行号槽、折叠、空白字符显示、文本装饰、高亮、搜索基础、诊断与 LSP 扩展。单行值使用 [Input](./input.md)，普通多行文本使用 [Textarea](./textarea.md)。
 
+## 语言编辑规则
+
+Base 编辑器接受 `LanguageConfig` 及独立的 `auto_close` / `smart_indent` 选项。
+它读取已注册的语言配置，不加载解析器。Component 在初始化时安装 `LanguageProvider`，
+提供内置语言名称、默认规则及语法提供者；Base 使用者也可通过 `set_language_provider`
+安装自己的服务，并用 `set_language_config` 配置语言规则。
+配置字段及语言注册方式参见
+[语言编辑规则](../../component/editor.md#语言编辑规则)。直接使用 Base 时，从
+`gpui_kit::base::input` 导入相同的配置类型。
+
+
 ## 快捷键
 
 Base 与样式组件共享键盘和鼠标行为。各平台快捷键、多光标编辑和矩形列选的细节请参阅

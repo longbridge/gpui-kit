@@ -1,4 +1,9 @@
-# UI testing in GPUI Kit
+# UI integration testing in GPUI Kit
+
+A UI integration test renders real components in a headless window, simulates
+clicks, keyboard input and scrolling, then checks state, focus, layout and owner
+callbacks. `#[gpui_kit::test]` runs the test; `gpui_kit::test` supplies the tools
+to operate and inspect its UI.
 
 Enable `gpui-kit/test-support` under development dependencies and import
 `gpui_kit::test::{TestWindowExt, TestAppContextExt, TestSupportExt, ElementSnapshot}`.

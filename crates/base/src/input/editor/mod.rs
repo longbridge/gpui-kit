@@ -40,6 +40,10 @@ impl InputModeKind for EditorMode {
         state.extras.decorations.clear();
     }
 
+    fn editing_syntax_context(state: &InputBaseState<Self>, offset: usize) -> super::SyntaxContext {
+        state.syntax_context_at(offset)
+    }
+
     fn adjust_annotations(
         state: &mut InputBaseState<Self>,
         range: &std::ops::Range<usize>,
@@ -180,6 +184,11 @@ impl EditorState {
     /// The LSP providers, mutably. Configure the providers through this.
     pub fn lsp_mut(&mut self) -> &mut super::Lsp {
         &mut self.extras.lsp
+    }
+
+    /// Syntax context at `offset`, or `Code` when the language has no provider.
+    pub(crate) fn syntax_context_at(&self, offset: usize) -> super::SyntaxContext {
+        self.mode.syntax_context_at(&self.text, offset)
     }
 }
 

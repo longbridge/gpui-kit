@@ -1,11 +1,13 @@
 mod clear_button;
 mod content_type;
 mod input;
+pub mod language_config;
 mod number_input;
 mod otp_input;
 mod overlay;
 pub(crate) mod popovers;
 mod search;
+mod syntax_context;
 
 pub(crate) use clear_button::*;
 pub use content_type::*;
@@ -35,9 +37,17 @@ mod editor;
 mod state;
 mod textarea;
 pub use editor::Editor;
+pub use gpui_base::input::{
+    AutoClosingPair, BracketPair, IndentationRules, LanguageProvider, SyntaxContext,
+    SyntaxContextProvider, set_language_config, set_language_provider,
+};
 pub use input::*;
 pub use lsp_types::Position;
 pub use number_input::{NumberInput, NumberInputEvent, NumberStep, StepAction};
 pub use otp_input::*;
 pub use state::AnyInputState;
 pub use textarea::Textarea;
+
+pub(crate) fn init(cx: &mut gpui::App) {
+    language_config::init(cx);
+}

@@ -19,19 +19,27 @@
 //! Run with output:
 //!
 //! ```text
-//! cargo test -p gpui-shell --release --test benchmark -- --nocapture
+//! cargo test -p gpui-shell --release tests::benchmark -- --nocapture
 //! ```
 
 use std::{ops::Deref, time::Instant};
 
 use crate::{RenderSnapshot, ScriptView, ShellRuntime, materialize::materialize};
 use gpui::{AppContext as _, Entity, IntoElement as _, TestAppContext, VisualTestContext};
+#[cfg(not(debug_assertions))]
+use sha2::{Digest as _, Sha256};
 
 /// Rows and columns chosen to land near the doc's "typical panel" figure:
 /// 40 rows x 5 cells plus wrappers is ~250 nodes, each carrying 8-12 ops.
 const ROWS: usize = 40;
 const COLUMNS: usize = 5;
 const ITERATIONS: usize = 50;
+#[cfg(not(debug_assertions))]
+const ACCEPTANCE_ITERATIONS: usize = 200;
+#[cfg(not(debug_assertions))]
+const JIT_WARMUP_RENDERS: usize = 64;
+#[cfg(not(debug_assertions))]
+const RELOAD_OBSERVATIONS: usize = 5;
 /// How many batches of [`ITERATIONS`] a timing takes before believing the
 /// fastest one.
 const ROUNDS: usize = 7;
@@ -90,7 +98,109 @@ export default class Grid extends View {
 }
 "#;
 
+#[cfg(not(debug_assertions))]
+const COMPUTE_TEMPLATE: &str = r#"
+import { View, div } from "gpui-kit";
+
+function layoutKernel(batches, seed) {
+  let checksum = seed;
+  for (let batch = 0; batch < batches; batch += 1) {
+    let a = 0;
+    let b = 1;
+    for (let i = 0; i < 40; i += 1) {
+      const next = a + b;
+      a = b;
+      b = next;
+    }
+    checksum = b;
+  }
+  return checksum;
+}
+
+export default class NumericLayout extends View {
+  render(cx) {
+    return div().child(`layout:${layoutKernel(100, 0)}`);
+  }
+}
+"#;
+
+#[cfg(not(debug_assertions))]
+const MIXED_MARKET_TEMPLATE: &str = r#"
+import { View, div } from "gpui-kit";
+
+function quoteScore(seed, index) {
+  let previous = seed;
+  let current = seed + index + 1;
+  let aggregate = 0;
+  for (let sample = 0; sample < 32; sample += 1) {
+    const next = previous + current;
+    previous = current;
+    current = next;
+    aggregate += current & 2047;
+  }
+  return aggregate;
+}
+
+function compareQuotes(left, right) {
+  return right.score - left.score;
+}
+
+export default class MarketPanel extends View {
+  render(cx) {
+    const quotes = [];
+    let total = 0;
+    for (let index = 0; index < 96; index += 1) {
+      const score = quoteScore(17, index);
+      total += score;
+      quotes.push({ index, score });
+    }
+    quotes.sort(compareQuotes);
+
+    const visible = [];
+    for (let rank = 0; rank < 12; rank += 1) {
+      const quote = quotes[rank];
+      visible.push(
+        div()
+          .h_flex()
+          .justify_between()
+          .child(`SYM${quote.index}`)
+          .child(`${quote.score}`),
+      );
+    }
+    return div().v_flex().gap(2).child(`total:${total}`).children(visible);
+  }
+}
+"#;
+
 const _: () = assert!(ROWS > 0 && COLUMNS > 0);
+
+#[test]
+fn p99_excludes_one_outlier_from_two_hundred_observations() {
+    let mut samples = vec![1_u64; 199];
+    samples.push(1_000);
+
+    assert_eq!(p99(samples), 1);
+}
+
+#[test]
+fn reload_median_retains_normal_observations_when_one_is_interrupted() {
+    assert_eq!(median_ns(vec![700, 710, 720, 730, 4_000]), 720);
+}
+
+fn p99(mut samples: Vec<u64>) -> u64 {
+    assert!(!samples.is_empty(), "P99 needs at least one sample");
+    let rank = (samples.len() * 99).div_ceil(100);
+    *samples.select_nth_unstable(rank - 1).1
+}
+
+fn median_ns(mut samples: Vec<u64>) -> u64 {
+    assert!(
+        samples.len() % 2 == 1,
+        "reload observations must have an odd count"
+    );
+    let middle = samples.len() / 2;
+    *samples.select_nth_unstable(middle).1
+}
 
 fn source(rows: usize, columns: usize) -> String {
     TEMPLATE
@@ -135,12 +245,205 @@ fn describing_a_panel_stays_inside_the_frame_budget(cx: &mut TestAppContext) {
         per_build.as_nanos() as usize / ops.max(1),
     );
 
+    let automatic_tree = context
+        .update(|window, cx| {
+            runtime
+                .build_snapshot(&object, None, crate::policy::default(), window, cx)
+                .expect("automatic parity render")
+        })
+        .debug_tree();
+    let automatic_renders = runtime.read_metrics().script_renders();
+    let (interpreter, mut interpreter_context, interpreter_object) =
+        runtime_with_source(cx, &source(ROWS, COLUMNS), true);
+    let mut interpreted_tree = String::new();
+    for _ in 0..automatic_renders {
+        interpreted_tree = interpreter_context
+            .update(|window, cx| {
+                interpreter
+                    .build_snapshot(
+                        &interpreter_object,
+                        None,
+                        crate::policy::default(),
+                        window,
+                        cx,
+                    )
+                    .expect("interpreter parity render")
+            })
+            .debug_tree();
+    }
+    assert_eq!(automatic_tree, interpreted_tree);
+    assert_eq!(
+        automatic_renders,
+        interpreter.read_metrics().script_renders()
+    );
+
+    let jit = runtime.jit_metrics_for_benchmark();
+    println!(
+        "[A/JIT] enabled={} queued={} failures={} unsupported={} tier1_rejections={} \
+         resource_limits={} cancelled={} panics={} invalid_artifacts={} install_failures={} \
+         installed={} native_entries={} pending_jobs={}",
+        jit.native_enabled(),
+        jit.queued,
+        jit.compile_failures,
+        jit.unsupported_opcode_failures,
+        jit.tier1_rejections,
+        jit.resource_limit_failures,
+        jit.cancelled_compilations,
+        jit.compiler_panics,
+        jit.invalid_artifacts,
+        jit.install_failures,
+        jit.installed,
+        jit.native_entries,
+        jit.pending_worker_jobs,
+    );
+    let categorized_failures = jit
+        .unsupported_opcode_failures
+        .saturating_add(jit.tier1_rejections)
+        .saturating_add(jit.resource_limit_failures)
+        .saturating_add(jit.cancelled_compilations)
+        .saturating_add(jit.compiler_panics)
+        .saturating_add(jit.invalid_artifacts)
+        .saturating_add(jit.install_failures);
+    assert!(
+        jit.compile_failures == 0 || categorized_failures > 0,
+        "aggregate JIT failures had no diagnostic category: {jit:?}"
+    );
+
     // A smoke bound, not the real gate: the doc's 1.5 ms budget is for a
     // release build, and this assertion has to hold in debug too.
     assert!(
         per_build.as_millis() < 200,
         "describing {nodes} nodes took {per_build:?}, which is far outside any budget"
     );
+}
+
+#[gpui::test]
+#[cfg(not(debug_assertions))]
+fn numeric_layout_installs_and_enters_native_code(cx: &mut TestAppContext) {
+    let (runtime, mut context, object) = runtime_with_source(cx, COMPUTE_TEMPLATE, false);
+    let mut tree = String::new();
+    let mut automatic_renders = 0;
+
+    for _ in 0..1_000 {
+        let snapshot = context.update(|window, cx| {
+            runtime
+                .build_snapshot(&object, None, crate::policy::default(), window, cx)
+                .expect("numeric render")
+        });
+        tree = snapshot.debug_tree();
+        automatic_renders += 1;
+        if runtime.jit_metrics_for_benchmark().native_entries > 0 {
+            break;
+        }
+    }
+
+    let (interpreter, mut interpreter_context, interpreter_object) =
+        runtime_with_source(cx, COMPUTE_TEMPLATE, true);
+    let mut interpreted_tree = String::new();
+    for _ in 0..automatic_renders {
+        interpreted_tree = interpreter_context
+            .update(|window, cx| {
+                interpreter
+                    .build_snapshot(
+                        &interpreter_object,
+                        None,
+                        crate::policy::default(),
+                        window,
+                        cx,
+                    )
+                    .expect("interpreter numeric render")
+            })
+            .debug_tree();
+    }
+
+    let jit = runtime.jit_metrics_for_benchmark();
+    println!("\n[N/JIT] {jit:#?}");
+    assert_eq!(tree, interpreted_tree);
+    assert_eq!(
+        runtime.read_metrics().script_renders(),
+        interpreter.read_metrics().script_renders()
+    );
+    assert!(tree.contains("layout:165580141"), "{tree}");
+    assert!(
+        jit.installed > 0,
+        "numeric layout installed no artifact: {jit:?}"
+    );
+    assert!(
+        jit.native_entries > 0,
+        "numeric layout never entered native code: {jit:?}"
+    );
+}
+
+#[gpui::test]
+#[cfg(not(debug_assertions))]
+fn mixed_market_panel_matches_interpreter_and_enters_native_code(cx: &mut TestAppContext) {
+    let (interpreter, mut interpreter_context, interpreter_object) =
+        runtime_with_source(cx, MIXED_MARKET_TEMPLATE, true);
+    let interpreter_tree = interpreter_context.update(|window, cx| {
+        interpreter
+            .build_snapshot(
+                &interpreter_object,
+                None,
+                crate::policy::default(),
+                window,
+                cx,
+            )
+            .expect("interpreter mixed render")
+            .debug_tree()
+    });
+
+    let (automatic, mut automatic_context, automatic_object) =
+        runtime_with_source(cx, MIXED_MARKET_TEMPLATE, false);
+    let mut automatic_tree = String::new();
+    for _ in 0..JIT_WARMUP_RENDERS {
+        automatic_tree = automatic_context.update(|window, cx| {
+            automatic
+                .build_snapshot(
+                    &automatic_object,
+                    None,
+                    crate::policy::default(),
+                    window,
+                    cx,
+                )
+                .expect("JIT mixed render")
+                .debug_tree()
+        });
+        cx.run_until_parked();
+    }
+
+    assert_eq!(automatic_tree, interpreter_tree);
+    let metrics = automatic.jit_metrics_for_benchmark();
+    assert!(metrics.native_entries > 0, "{metrics:?}");
+    assert_eq!(metrics.native_fallbacks, 0, "{metrics:?}");
+    assert_eq!(metrics.deopts, 0, "{metrics:?}");
+}
+
+#[gpui::test]
+#[cfg(not(debug_assertions))]
+fn first_render_defers_jit_profiling_until_the_view_is_warm(cx: &mut TestAppContext) {
+    let (runtime, mut context, object) = runtime_with_source(cx, COMPUTE_TEMPLATE, false);
+
+    context.update(|window, cx| {
+        runtime
+            .build_snapshot(&object, None, crate::policy::default(), window, cx)
+            .expect("first numeric render")
+    });
+    let first = runtime.jit_metrics_for_benchmark();
+    assert_eq!(first.snapshot_requests, 0, "{first:?}");
+
+    for _ in 0..1_000 {
+        context.update(|window, cx| {
+            runtime
+                .build_snapshot(&object, None, crate::policy::default(), window, cx)
+                .expect("warm numeric render")
+        });
+        if runtime.jit_metrics_for_benchmark().native_entries > 0 {
+            break;
+        }
+    }
+    let warm = runtime.jit_metrics_for_benchmark();
+    assert!(warm.snapshot_requests > 0, "{warm:?}");
+    assert!(warm.native_entries > 0, "{warm:?}");
 }
 
 #[gpui::test]
@@ -208,7 +511,7 @@ fn repainting_a_clean_view_never_enters_the_vm(cx: &mut TestAppContext) {
 /// ignored by default because the largest size costs seconds in a debug build:
 ///
 /// ```text
-/// cargo test -p gpui-shell --release --test benchmark -- --ignored --nocapture
+/// cargo test -p gpui-shell --release tests::benchmark -- --ignored --nocapture
 /// ```
 ///
 /// Two runs out of thirteen have seen the largest size report one script render
@@ -325,14 +628,28 @@ fn grid(
     VisualTestContext,
     crate::engine::ViewObject,
 ) {
+    runtime_with_source(cx, &source(rows, columns), false)
+}
+
+fn runtime_with_source(
+    cx: &mut TestAppContext,
+    source: &str,
+    interpreter: bool,
+) -> (
+    std::rc::Rc<ShellRuntime>,
+    VisualTestContext,
+    crate::engine::ViewObject,
+) {
     cx.update(|cx| crate::init(cx));
 
-    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    let runtime = if interpreter {
+        ShellRuntime::new_isolated_interpreter().expect("interpreter runtime")
+    } else {
+        ShellRuntime::new_isolated().expect("automatic JIT runtime")
+    };
     cx.update(|cx| runtime.set_global(cx));
 
-    let view_type = runtime
-        .load_source("grid", &source(rows, columns))
-        .expect("load");
+    let view_type = runtime.load_source("benchmark-view", source).expect("load");
 
     let window = cx.add_window(|_, _| Empty);
     let mut context = VisualTestContext::from_window(*window.deref(), cx);
@@ -341,6 +658,148 @@ fn grid(
         .expect("instantiate");
 
     (runtime, context, object)
+}
+
+/// Emits one independent process sample for the Issue #3 acceptance runner.
+/// The runner launches this test in interleaved interpreter/automatic pairs;
+/// repeated timings inside this process are observations, not independent
+/// benchmark samples.
+#[gpui::test]
+#[cfg(not(debug_assertions))]
+fn emit_one_jit_acceptance_sample(cx: &mut TestAppContext) {
+    let Ok(path) = std::env::var("GPUI_SHELL_JIT_SAMPLE") else {
+        return;
+    };
+    let interpreter = match std::env::var("GPUI_SHELL_JIT_MODE").as_deref() {
+        Ok("interpreter") => true,
+        Ok("automatic") => false,
+        _ => panic!("GPUI_SHELL_JIT_MODE must be interpreter or automatic"),
+    };
+    let pair_index: usize = std::env::var("GPUI_SHELL_JIT_PAIR")
+        .expect("GPUI_SHELL_JIT_PAIR")
+        .parse()
+        .expect("numeric pair index");
+    let workload = std::env::var("GPUI_SHELL_JIT_WORKLOAD").unwrap_or_else(|_| "panel".into());
+    let benchmark_source = match workload.as_str() {
+        "panel" => source(ROWS, COLUMNS),
+        "compute" => COMPUTE_TEMPLATE.to_owned(),
+        "mixed" => MIXED_MARKET_TEMPLATE.to_owned(),
+        _ => panic!("GPUI_SHELL_JIT_WORKLOAD must be panel, compute, or mixed"),
+    };
+
+    let first_started = Instant::now();
+    let (runtime, mut context, object) = runtime_with_source(cx, &benchmark_source, interpreter);
+    let first = context.update(|window, cx| {
+        runtime
+            .build_snapshot(&object, None, crate::policy::default(), window, cx)
+            .expect("first render")
+    });
+    let first_window_ns = first_started.elapsed().as_nanos() as u64;
+    let expected_tree = first.debug_tree();
+    cx.run_until_parked();
+
+    for _ in 0..JIT_WARMUP_RENDERS {
+        let snapshot = context.update(|window, cx| {
+            runtime
+                .build_snapshot(&object, None, crate::policy::default(), window, cx)
+                .expect("warmup render")
+        });
+        assert_eq!(snapshot.debug_tree(), expected_tree);
+    }
+
+    let mut render_ns = Vec::with_capacity(ACCEPTANCE_ITERATIONS);
+    let steady_started = Instant::now();
+    for _ in 0..ACCEPTANCE_ITERATIONS {
+        let started = Instant::now();
+        let snapshot = context.update(|window, cx| {
+            runtime
+                .build_snapshot(&object, None, crate::policy::default(), window, cx)
+                .expect("measured render")
+        });
+        assert_eq!(snapshot.debug_tree(), expected_tree);
+        render_ns.push(started.elapsed().as_nanos() as u64);
+    }
+    let steady_state_ns = steady_started.elapsed().as_nanos() as u64 / ACCEPTANCE_ITERATIONS as u64;
+    let p99_script_render_ns = p99(render_ns);
+    let metrics = runtime.jit_metrics_for_benchmark();
+    assert_eq!(
+        metrics.native_enabled(),
+        !interpreter,
+        "interpreter samples must not attach a JIT backend: {metrics:?}"
+    );
+
+    let mut reload_totals = Vec::with_capacity(RELOAD_OBSERVATIONS);
+    let mut reload_observations = Vec::with_capacity(RELOAD_OBSERVATIONS);
+    let mut reloaded_len = 0;
+    for observation in 0..RELOAD_OBSERVATIONS {
+        let reload_started = Instant::now();
+        let source_started = Instant::now();
+        let reload_type = runtime
+            .load_source(
+                &format!("benchmark-view-reload-{observation}"),
+                &benchmark_source,
+            )
+            .expect("reload source");
+        let source_eval_ns = source_started.elapsed().as_nanos() as u64;
+        let instantiate_started = Instant::now();
+        let reload_object = context
+            .update(|window, cx| runtime.instantiate(&reload_type, window, cx))
+            .expect("reload instantiate");
+        let instantiate_ns = instantiate_started.elapsed().as_nanos() as u64;
+        let render_started = Instant::now();
+        let reloaded = context.update(|window, cx| {
+            runtime
+                .build_snapshot(&reload_object, None, crate::policy::default(), window, cx)
+                .expect("reload render")
+        });
+        let render_ns = render_started.elapsed().as_nanos() as u64;
+        let total_ns = reload_started.elapsed().as_nanos() as u64;
+        assert_eq!(reloaded.debug_tree(), expected_tree);
+        reloaded_len = reloaded.len();
+        reload_totals.push(total_ns);
+        reload_observations.push(serde_json::json!({
+            "source_eval_ns": source_eval_ns,
+            "instantiate_ns": instantiate_ns,
+            "render_ns": render_ns,
+            "total_ns": total_ns,
+        }));
+    }
+    let hot_reload_ns = median_ns(reload_totals);
+
+    let digest = format!("{:x}", Sha256::digest(expected_tree.as_bytes()));
+    let sample = serde_json::json!({
+        "mode": if interpreter { "interpreter" } else { "automatic" },
+        "workload": workload,
+        "pair_index": pair_index,
+        "steady_state_ns": steady_state_ns,
+        "p99_script_render_ns": p99_script_render_ns,
+        "first_window_ns": first_window_ns,
+        "hot_reload_ns": hot_reload_ns,
+        "checksum": format!("{}:{}", reloaded_len, digest),
+        "snapshot_sha256": digest,
+        "script_renders": runtime.read_metrics().script_renders(),
+        "native_enabled": metrics.native_enabled(),
+        "native_entries": metrics.native_entries,
+        "fallback_count": metrics.native_fallbacks,
+        "installed": metrics.installed,
+        "compile_failures": metrics.compile_failures,
+        "unsupported_opcode_failures": metrics.unsupported_opcode_failures,
+        "tier1_rejections": metrics.tier1_rejections,
+        "resource_limit_failures": metrics.resource_limit_failures,
+        "cancelled_compilations": metrics.cancelled_compilations,
+        "compiler_panics": metrics.compiler_panics,
+        "invalid_artifacts": metrics.invalid_artifacts,
+        "install_failures": metrics.install_failures,
+        "native_exits": metrics.native_exits,
+        "osr_entries": metrics.osr_entries,
+        "deopts": metrics.deopts,
+        "reload_observations": reload_observations,
+    });
+    std::fs::write(
+        path,
+        serde_json::to_vec_pretty(&sample).expect("serialize sample"),
+    )
+    .expect("write sample");
 }
 
 struct Empty;

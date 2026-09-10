@@ -2,6 +2,15 @@
 
 **Contents:** [Choose the test level](#choose-the-test-level) · [UI integration workflow](#ui-integration-workflow) · [Complete example](#complete-example) · [Queries and interactions](#queries-and-interactions) · [Frames and async work](#frames-and-async-work) · [Assertion boundaries](#assertion-boundaries) · [Additional resources](#additional-resources)
 
+## UI integration testing
+
+A UI integration test renders real components in a headless window, dispatches
+clicks, keyboard input and scrolling, then checks state, focus, layout and owner
+callbacks. For example: add a Checkbox UI integration test that proves clicking
+toggles the owner's value and disabled controls reject the interaction.
+Use this term when describing component interaction coverage.
+`#[gpui_kit::test]` runs the test; `gpui_kit::test` operates and inspects its UI.
+
 ## Choose the test level
 
 Use ordinary Rust `#[test]` for pure logic. Use `#[gpui_kit::test]` and
@@ -10,7 +19,7 @@ create headless windows too. `VisualTestContext` is available for existing GPUI
 window helpers. For an application UI flow, use `gpui_kit::test::TestWindowExt`
 on the real `Window` and assert the behavior produced by native events.
 
-Keep GPUI types and the test attribute imported from `gpui_kit`. Add
+Import the Kit types you use explicitly and write `#[gpui_kit::test]`. Avoid `use gpui_kit::*;` in test modules: it imports GPUI’s `test` macro and can shadow Rust’s built-in `#[test]`. Add
 `test-support` to the application's `gpui-kit` development dependency, using
 exactly the same source and version as its normal dependency. The helpers
 require a Kit revision that includes them; check the installed API before

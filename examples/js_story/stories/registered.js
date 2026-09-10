@@ -19,6 +19,14 @@ import {
   Button,
   Calendar,
   CalendarState,
+  Carousel,
+  CarouselContent,
+  CarouselItem,
+  CarouselNext,
+  CarouselPagination,
+  CarouselPaginationItem,
+  CarouselPrevious,
+  CarouselState,
   Checkbox,
   Clipboard,
   Collapsible,
@@ -198,6 +206,7 @@ export function initializeRegisteredExamples() {
   retained("date-picker", () => DatePickerState());
   retained("calendar-one", () => CalendarState());
   retained("calendar-two", () => CalendarState());
+  retained("carousel-basic", () => CarouselState(3));
   retained("message-scroller", () => MessageScrollerState(3));
   retained("form-account", () => InputState("Acme Cloud"));
   retained("form-region", () => InputState("us-east-1"));
@@ -1366,6 +1375,50 @@ export function registeredExamples(surface, cx) {
           element: asElement(new Breadcrumb(["Home", "Settings", "Profile"])),
         },
       ];
+    case "Carousel": {
+      const carouselState = retained("carousel-basic", () => CarouselState(3));
+      const slide = (index) =>
+        div()
+          .w_full()
+          .h(224)
+          .flex()
+          .items_center()
+          .justify_center()
+          .border(1)
+          .border_color(cx.theme().colors.border)
+          .rounded(8)
+          .bg(cx.theme().colors.background)
+          .text_size(28)
+          .font_semibold()
+          .child(String(index + 1));
+      return [
+        {
+          label: "Basic",
+          description: "Use the controls, pagination, keyboard, pointer, or trackpad to select a slide.",
+          element: asElement(
+            new Carousel("story-carousel", carouselState)
+              .w(384)
+              .max_w_full()
+              .selected_index(/** @type {number} */ (state("carousel-index", 0)))
+              .on_change((index, cx) => setState("carousel-index", index, cx))
+              .child(
+                new CarouselContent(carouselState)
+                  .child(new CarouselItem("story-slide-1", 0, carouselState).child(slide(0)))
+                  .child(new CarouselItem("story-slide-2", 1, carouselState).child(slide(1)))
+                  .child(new CarouselItem("story-slide-3", 2, carouselState).child(slide(2))),
+              )
+              .child(new CarouselPrevious(carouselState).accessibility_label("Previous slide"))
+              .child(new CarouselNext(carouselState).accessibility_label("Next slide"))
+              .child(
+                new CarouselPagination()
+                  .child(new CarouselPaginationItem("story-page-1", 0, carouselState).child("1"))
+                  .child(new CarouselPaginationItem("story-page-2", 1, carouselState).child("2"))
+                  .child(new CarouselPaginationItem("story-page-3", 2, carouselState).child("3")),
+              ),
+          ),
+        },
+      ];
+    }
     case "Pagination":
       return [
         {

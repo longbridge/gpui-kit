@@ -40,6 +40,7 @@ const RUST_STORY_ORDER = [
   "BubbleStory",
   "ButtonStory",
   "CalendarStory",
+  "CarouselStory",
   "ChartStory",
   "CheckboxStory",
   "ClipboardStory",

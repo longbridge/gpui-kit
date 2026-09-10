@@ -37,6 +37,7 @@ members = [
     "examples/table_in_scrollable",
     "examples/markdown_table",
     "crates/shell",
+    "crates/shell/rquickjs-compat",
     "crates/component-shell",
 ]
 resolver = "2"
@@ -46,15 +47,15 @@ publish = false
 edition = "2024"
 
 [workspace.dependencies]
-gpui-kit = { path = "crates/kit", version = "0.6.0" }
-gpui-component = { path = "crates/component", version = "0.6.0" }
-gpui-base = { path = "crates/base", version = "0.6.0" }
-gpui-component-macros = { path = "crates/component-macros", version = "0.6.0" }
-gpui-kit-assets = { path = "crates/assets", version = "0.6.0" }
-gpui-fps = { path = "crates/fps", version = "0.6.0" }
-gpui-shell = { path = "crates/shell", version = "0.6.0" }
-gpui-wry = { path = "crates/webview", version = "0.6.0" }
-gpui-component-shell = { path = "crates/component-shell", version = "0.6.0" }
+gpui-kit = { path = "crates/kit", version = "0.6.1" }
+gpui-component = { path = "crates/component", version = "0.6.1" }
+gpui-base = { path = "crates/base", version = "0.6.1" }
+gpui-component-macros = { path = "crates/component-macros", version = "0.6.1" }
+gpui-kit-assets = { path = "crates/assets", version = "0.6.1" }
+gpui-fps = { path = "crates/fps", version = "0.6.1" }
+gpui-shell = { path = "crates/shell", version = "0.6.1" }
+gpui-wry = { path = "crates/webview", version = "0.6.1" }
+gpui-component-shell = { path = "crates/component-shell", version = "0.6.1" }
 story = { path = "crates/story" }
 
 gpui = { package = "gpui-pre", version = "0.3.1" }
@@ -146,15 +147,22 @@ lsp-types = { opt-level = 3 }
 gpui-pre-reqwest-client = { opt-level = 3 }
 markdown = { opt-level = 3 }
 xml5ever = { opt-level = 3 }
-# `rquickjs` is a facade that re-exports `rquickjs-core`, so naming it alone
-# optimises neither the interpreter nor the bindings. `rquickjs-sys` builds
+# `quickjs-jit` is a facade that re-exports `quickjs-jit-core`, so naming it alone
+# optimises neither the interpreter nor the bindings. `quickjs-jit-sys` builds
 # QuickJS itself through `cc`, which reads this package's opt-level; without
 # these two a debug build spends roughly three times as long in every script
 # render. See `website/shell/hosting.md`.
-rquickjs = { opt-level = 3 }
-rquickjs-sys = { opt-level = 3 }
-rquickjs-core = { opt-level = 3 }
+quickjs-jit = { opt-level = 3 }
+quickjs-jit-runtime = { opt-level = 3 }
+quickjs-jit-sys = { opt-level = 3 }
+quickjs-jit-core = { opt-level = 3 }
 cap-std = { opt-level = 3 }
+
+[patch.crates-io]
+# LLRT's public modules still name their compatible binding dependency
+# `rquickjs`. Route those dependencies through a source-compatible facade so
+# the shell and LLRT share the exact same quickjs-jit types and VM.
+rquickjs = { path = "crates/shell/rquickjs-compat" }
 
 [workspace.metadata.typos]
 files.extend-exclude = ["**/fixtures/*"]

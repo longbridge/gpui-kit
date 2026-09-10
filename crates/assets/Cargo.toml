@@ -9,18 +9,9 @@ repository = "https://github.com/longbridge/gpui-kit"
 readme = "README.md"
 edition.workspace = true
 publish = true
-version = "0.6.0"
+version = "0.6.1"
 
-# `links` is the documented cargo mechanism for sharing build-time metadata
-# across the dep graph: every dependent (regular OR build-dep) receives the
-# `cargo:KEY=VALUE` lines from our build.rs as `DEP_<links>_<KEY>` env vars
-# in its own build script. We use this to publish the absolute path of our
-# `assets/icons` directory so `gpui-component` can generate its `IconName`
-# enum at proc-macro expansion time without a sibling-crate reference
-# (which would break under `cargo vendor` / `cargo publish`). The value is
-# conventionally a native-library name; we use a unique identifier scoped
-# to this crate's purpose. Cargo enforces uniqueness across the build
-# graph, which also prevents accidental double-linkage in dependents.
+# Retain Cargo icon-directory metadata for existing build-script consumers.
 links = "gpui-kit-default-icons"
 
 [lib]

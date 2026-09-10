@@ -101,6 +101,10 @@ const DEFAULT_FONT: &str = "monospace";
 /// what a frame costs instead, which answers the same question for free and
 /// leaves the readings measuring the application alone.
 ///
+/// The one frame the HUD does cause — the readout clock dirtying the window to
+/// move the digits — announces itself to the sampler and is left out of the
+/// readings, unless the application asked for that frame as well.
+///
 /// ```no_run
 /// # use gpui::*;
 /// # use gpui_fps::FpsMonitor;
@@ -314,6 +318,9 @@ impl FpsMonitor {
                     if sample.is_some() {
                         this.resources = sample;
                     }
+                    // The frame this notify buys is the HUD's, not the
+                    // application's; say so before it is drawn.
+                    this.sampler.expect_own_frame(Instant::now());
                     cx.notify();
                 });
                 if alive.is_err() {
@@ -334,7 +341,11 @@ impl FpsMonitor {
             let executor = cx.background_executor().clone();
             loop {
                 executor.timer(READOUT_INTERVAL).await;
-                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                let alive = this.update(cx, |this, cx| {
+                    this.sampler.expect_own_frame(Instant::now());
+                    cx.notify();
+                });
+                if alive.is_err() {
                     break;
                 }
             }
@@ -644,18 +655,15 @@ impl Render for FpsMonitor {
                                 .child(pair(
                                     "INV",
                                     format!("{invalidations:.1}"),
-                                    // Ungraded, unlike every other reading in
-                                    // the HUD. One per frame is the ideal, but
-                                    // it is not the floor here: in continuous
-                                    // mode the monitor requests an animation
-                                    // frame of its own on every render, so an
-                                    // application invalidating once a frame
-                                    // measures two and a healthy HUD would sit
-                                    // permanently in the red. The baseline
-                                    // depends on that switch and on how the
-                                    // application drives its own redraws, which
-                                    // is not something the HUD can grade — so
-                                    // the number is reported and the reading is
+                                    // Ungraded. One per frame is the ideal,
+                                    // but it is not the floor here: the
+                                    // baseline depends on how the application
+                                    // drives its own redraws — an animation
+                                    // asking for a frame per tick and a data
+                                    // stream invalidating on every message both
+                                    // read above one legitimately — which is
+                                    // not something the HUD can grade. So the
+                                    // number is reported and the reading is
                                     // left to whoever knows what to expect.
                                     style.foreground,
                                     style,

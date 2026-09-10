@@ -103,6 +103,27 @@ TextView::markdown("highlighted", source).code_block_highlighter(|block| {
 
 Ranges are UTF-8 byte ranges relative to `CodeBlock::code()`. Invalid ranges are discarded. The highlighter implementation and its language registrations remain entirely application-owned.
 
+## Markdown extensions
+
+`MarkdownExtensions` starts with CommonMark/GFM-compatible parsing. YAML
+frontmatter is disabled by default because it is not part of either standard.
+Enable the construct explicitly when a block parser or plugin handles
+`markdown_ast::Node::Yaml`:
+
+```rust
+use gpui_base::{MarkdownExtensions, TextView};
+
+let extensions = MarkdownExtensions::default().frontmatter();
+
+TextView::markdown("metadata", source)
+    .markdown_extensions(extensions)
+```
+
+Without a matching plugin, enabled YAML frontmatter uses the existing YAML
+code-block fallback. A custom plugin can be attached with `.plugin(...)`;
+`gpui-component` provides a themed
+`FrontmatterPlugin`; Base remains independent of that presentation.
+
 ## Retained state and streaming updates
 
 Use `TextViewState` when content changes without replacing the view:

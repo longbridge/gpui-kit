@@ -50,25 +50,23 @@ pub(super) fn resolver() -> BuiltinResolver {
 
 pub(super) fn loader() -> ModuleLoader {
     ModuleLoader::default()
-        .with_module("buffer", llrt_buffer::BufferModule)
+        .with_module("buffer", quickjs_jit_stdlib::buffer::BufferModule)
         .with_module("console", console::ConsoleModule)
-        .with_module("crypto", llrt_crypto::CryptoModule)
+        .with_module("crypto", quickjs_jit_stdlib::crypto::CryptoModule)
         .with_module("fs/promises", fs::FsModule)
         .with_module("net", net::NetModule)
         .with_module("os", os::OsModule)
-        .with_module("path", llrt_path::PathModule)
+        .with_module("path", quickjs_jit_stdlib::path::PathModule)
         .with_module("process", process::ProcessModule)
-        .with_module("url", llrt_url::UrlModule)
+        .with_module("url", quickjs_jit_stdlib::url::UrlModule)
         .with_module("websocket", websocket::WebSocketModule)
-        .with_module("zlib", llrt_zlib::ZlibModule)
+        .with_module("zlib", quickjs_jit_stdlib::zlib::ZlibModule)
 }
 
 pub(super) fn install(ctx: &Ctx<'_>) -> Result<()> {
     // Order is significant: URL and Crypto consume Buffer-compatible byte
     // classes installed by the first initializer.
-    llrt_buffer::init(ctx)?;
-    llrt_url::init(ctx)?;
-    llrt_crypto::init(ctx)?;
+    quickjs_jit_stdlib::init(ctx)?;
     console::install(ctx)?;
     super::sandbox::install_process(ctx)?;
     fetch::install(ctx)?;

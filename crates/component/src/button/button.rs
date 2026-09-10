@@ -665,6 +665,7 @@ impl RenderOnce for Button {
                         })
                     })
             })
+            .line_height(relative(1.25))
             .refine_style(&instance_style);
 
         // The explicit name wins: it exists precisely for the cases where the
@@ -700,7 +701,6 @@ impl RenderOnce for Button {
                         .min_w_0()
                         .whitespace_nowrap()
                         .text_ellipsis()
-                        .line_height(relative(1.))
                         .child(label),
                 )
             })

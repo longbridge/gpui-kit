@@ -252,7 +252,7 @@ impl RenderOnce for Tag {
             .flex()
             .items_center()
             .border_1()
-            .line_height(relative(1.))
+            .line_height(relative(1.25))
             .text_xs()
             .map(|this| match self.size {
                 Size::XSmall | Size::Small => this.px_1p5().py_0p5(),

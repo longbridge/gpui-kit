@@ -156,6 +156,27 @@ fn is_block(&self) -> bool {
 
 Inline 插件保留给未来的 `TextView` 支持。
 
+## YAML Frontmatter
+
+YAML frontmatter 不属于 CommonMark 或 GFM，因此默认不启用。启用 parser
+construct 并挂载 `FrontmatterPlugin` 后，顶层 mapping 会渲染为
+`DescriptionList`：
+
+```rust
+use gpui_component::text::{markdown, FrontmatterPlugin, MarkdownExtensions};
+
+let extensions = MarkdownExtensions::default().frontmatter();
+
+markdown("---\nname: example\ndescription: Example metadata.\n---")
+    .markdown_extensions(extensions)
+    .plugin(FrontmatterPlugin::new())
+```
+
+值以纯文本渲染。支持简单的无引号值，以及使用 `|-` 或 `>-` 的 block scalar；
+literal scalar 会保留内容缩进。带引号的值、行尾注释、集合、别名、其他 block
+header，以及包含额外缩进行的 folded scalar 会回退为 YAML code block，
+保留原始内容，避免显示错误解析的值。
+
 ## 代码块操作
 
 可以为 Markdown 代码块渲染操作控件：

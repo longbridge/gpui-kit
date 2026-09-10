@@ -214,6 +214,26 @@ where
     Ok(TypedChildElement::new(element).into_any_element())
 }
 
+pub(super) fn finish_typed_children<E>(
+    request: &mut MaterializeRequest<'_>,
+    mut element: E,
+    parent: &str,
+    allowed: &[&str],
+) -> anyhow::Result<gpui::AnyElement>
+where
+    E: gpui::Styled + gpui::ParentElement + gpui::IntoElement + 'static,
+{
+    let mut children = request.take_typed_children()?;
+    for child in &children {
+        require_child(parent, child.component_name(), allowed)?;
+    }
+    for child in &mut children {
+        element.extend([request.materialize_child(child)?]);
+    }
+    element.style().refine(&request.take_style());
+    Ok(TypedChildElement::new(element).into_any_element())
+}
+
 fn finish_typed<E>(request: &mut MaterializeRequest<'_>, mut element: E) -> gpui::AnyElement
 where
     E: gpui::Styled + gpui::IntoElement + 'static,

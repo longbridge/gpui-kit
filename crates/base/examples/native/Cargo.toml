@@ -1,7 +1,7 @@
 [package]
 name = "gpui-base-examples"
 default-run = "components"
-version = "0.6.0"
+version = "0.6.1"
 publish = false
 edition.workspace = true
 

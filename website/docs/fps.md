@@ -121,4 +121,11 @@ clock — nothing else would wake a HUD in a window that has stopped drawing, an
 the figures would freeze at whatever the application last drew. That clock also
 carries the CPU, GPU and memory sample.
 
+Those frames are not measured. To GPUI the clock's `notify` is an invalidation
+like any other, answered with a full draw of the window, and left in the
+readings it would be a cold frame every 500ms reported as the application's
+`FRAME` and `MAX`. So the clock announces each one, and the sampler leaves out
+the draw that answered it — unless the application asked for that frame too, in
+which case the work was wanted and the cost counts.
+
 [`Entity::cached`]: https://docs.rs/gpui/latest/gpui/struct.Entity.html

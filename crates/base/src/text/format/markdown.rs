@@ -685,6 +685,54 @@ mod tests {
         }
     }
 
+    #[test]
+    fn yaml_frontmatter_is_disabled_by_default() {
+        let source = "---\nSome text\n---";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+
+        assert!(matches!(
+            document.blocks[0],
+            BlockNode::HorizontalRule { .. }
+        ));
+        let BlockNode::Heading {
+            level, children, ..
+        } = &document.blocks[1]
+        else {
+            panic!("expected setext heading");
+        };
+        assert_eq!(*level, 2);
+        assert_eq!(children.text(), "Some text");
+    }
+
+    #[test]
+    fn non_mapping_yaml_frontmatter_falls_back_to_code_block() {
+        let extensions = MarkdownExtensions::default().frontmatter();
+        let mut cx = NodeContext {
+            markdown_extensions: extensions.into(),
+            ..NodeContext::default()
+        };
+        let document = parse("---\n- name: example\n---", &mut cx).unwrap();
+
+        let BlockNode::CodeBlock(code_block) = &document.blocks[0] else {
+            panic!("expected YAML code block fallback");
+        };
+        assert_eq!(code_block.lang().as_deref(), Some("yml"));
+        assert_eq!(code_block.code().as_ref(), "- name: example");
+    }
+
+    #[test]
+    fn fenced_yaml_remains_a_code_block() {
+        let mut cx = NodeContext::default();
+        let document = parse("```yaml\nname: example\n```", &mut cx).unwrap();
+
+        let BlockNode::CodeBlock(code_block) = &document.blocks[0] else {
+            panic!("expected fenced YAML code block");
+        };
+        assert_eq!(code_block.lang().as_deref(), Some("yaml"));
+        assert_eq!(code_block.code().as_ref(), "name: example");
+    }
+
     #[derive(Debug, Clone, PartialEq)]
     struct Ticker {
         symbol: String,

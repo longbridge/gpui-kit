@@ -9,7 +9,7 @@ repository = "https://github.com/longbridge/gpui-kit/tree/main/crates/webview"
 readme = "README.md"
 edition.workspace = true
 publish = true
-version = "0.6.0"
+version = "0.6.1"
 
 [features]
 inspector = ["wry/devtools"]

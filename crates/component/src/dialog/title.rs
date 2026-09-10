@@ -41,7 +41,7 @@ impl RenderOnce for DialogTitle {
         self.base
             .text_base()
             .font_semibold()
-            .line_height(relative(1.))
+            .line_height(relative(1.25))
             .refine_style(&self.style)
             .children(self.children)
     }

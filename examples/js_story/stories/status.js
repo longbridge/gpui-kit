@@ -12,6 +12,7 @@ export const REGISTERED_SURFACES = [
   "Bubble",
   "Button",
   "Calendar",
+  "Carousel",
   "Checkbox",
   "Clipboard",
   "Collapsible",

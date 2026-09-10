@@ -46,7 +46,7 @@ impl RenderOnce for DialogFooter {
         h_flex()
             .gap_2()
             .justify_end()
-            .line_height(relative(1.))
+            .line_height(relative(1.25))
             .rounded_b(cx.theme().radius_lg)
             .refine_style(&self.style)
             .children(self.children)

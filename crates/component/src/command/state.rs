@@ -1,3 +1,4 @@
+use gpui_base::TestSupportExt as _;
 use std::rc::Rc;
 
 use gpui::{
@@ -742,6 +743,7 @@ impl CommandState {
 
         self.item_row(selected, cx)
             .id(self.matched[matched_ix].index_path)
+            .test_support()
             .role(Role::ListBoxOption)
             .aria_selected(selected)
             .when(disabled, |this| this.text_color(muted_foreground))
@@ -816,6 +818,7 @@ impl Render for CommandState {
 
         v_flex()
             .id("command")
+            .test_support()
             .key_context(CONTEXT)
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(Self::on_action_select_up))

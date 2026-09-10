@@ -12,9 +12,64 @@ But for minimal size applications, **we have not embedded any icon assets by def
 
 We split the icon assets into a separate crate [gpui-kit-assets] to allow developers to choose whether to include the icon assets in their applications or if you don't need the icons at all, you can build your own assets.
 
+
+:::note NOTE — Depending on the crate does not embed every icon
+
+**The complete catalog does not make existing applications embed every icon.**
+`Assets` keeps the original 101 component icons. Applications provide additional
+icons through their own `AssetSource`, as before; they do not need to redeclare
+the component icons. Only explicitly registering `AllAssets` embeds all 1,830
+SVGs on native platforms. Depending on the crate or using the shared `IconName`
+alone does not reference every SVG payload.
+
+| Native asset configuration | Embedded SVG data | Binary increase vs. default `Assets` |
+| --- | ---: | ---: |
+| Default component icons (101) | 44.28 KiB | 0 B (baseline) |
+| Default + 2 application icons (103) | 45.04 KiB | +15.19 KiB |
+| Default + 10 application icons (111) | 48.09 KiB | +19.19 KiB |
+| Explicit `AllAssets` (1,830) | 731.45 KiB | +1.02 MiB |
+
+**In this example, adding 10 application icons costs about 19 KiB, not the full
+catalog.** Their SVGs total 3,903 bytes; the measured binary increase is 19,648
+bytes, including the extra source's lookup/list-composition code, metadata and
+alignment. These are not fixed per-icon costs or whole-application sizes.
+
+Measured with Lucide 1.43.0 on Linux x86_64, Rust 1.98.0, `--release`, and stripped
+symbols. Each program uses the same `IconName` lookup and runtime asset path.
+The extra source falls back to `Assets`, and merges, sorts and deduplicates both
+sources' lists. The 10 extras are `Accessibility`, `AlarmClock`, `Archive`,
+`Award`, `Backpack`, `Bike`, `Bird`, `Camera`, `Coffee` and `Compass`; the two-icon
+case uses the first two. SVG complexity, toolchain and source implementation
+change the result.
+
+Binary size is not RAM usage. Selected sources borrow static bytes without a
+copy/cache; actual rendering still allocates for parsing, rasterization and
+render caches. Runtime shared-name lookup can retain a name/path table, and
+Cargo's downloaded package/build artifacts still contain the complete catalog.
+On WASM, `Assets::new(endpoint)` and `AllAssets::new(endpoint)` use the existing
+on-demand CDN loader instead of embedding the complete bundle.
+
+:::
+
+## Shared names and compatibility
+
+`gpui_kit::assets::IconName` provides the complete shared catalog without a
+Component dependency. `gpui_kit::component::IconName` remains the original
+compatibility enum: existing imports, exhaustive matches and `.view(cx)` calls
+continue to work without a new trait import. `Icon::new(...)` accepts either
+type. A legacy name converts into the shared name with `.into()`.
+
+For the new shared enum, use `Icon::new(name).view(cx)` when a component entity
+is needed, or import `gpui_kit::component::IconNameExt` to call `name.view(cx)`.
+
+`IconName::ALL` enumerates all 1,830 names; `IconName::Accessibility.path()`
+returns `icons/accessibility.svg`. The default source contains only the original
+101 component icons. Supply extra icons using the custom source below, or
+explicitly register `AllAssets` to use the complete bundle.
+
 ## Use default bundled assets
 
-The [gpui-kit-assets] crate provides a default bundled assets implementation that includes all the icon files in the `assets/icons` folder.
+The [gpui-kit-assets] crate provides a default bundled assets implementation that embeds the original 101 component icons listed in `crates/assets/default-icons.txt`.
 
 To use the default bundled assets, you need to add the `gpui-kit-assets` crate as a dependency in your `Cargo.toml`:
 
@@ -33,7 +88,7 @@ use gpui_kit::assets::Assets;
 let app = gpui_kit::application().with_assets(Assets);
 ```
 
-Now, we can use `IconName` and `Icon` in our application as usual, the all icon assets are loaded from the default bundled assets.
+Now, we can use `IconName` and `Icon` in our application as usual, the original component icons are loaded from the default bundle.
 
 Continue [Use the icons](#use-the-icons) section to see how to use the icons in your application.
 
@@ -52,8 +107,8 @@ In GPUI application, we can use the [rust-embed] crate to embed the SVG files in
 And GPUI Application providers an `AssetSource` trait to load the assets.
 
 ```rs
-use anyhow::anyhow;
 use gpui_kit::*;
+use gpui_kit::assets::Assets as ComponentAssets;
 use gpui_kit::component::{v_flex, IconName, Root};
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
@@ -70,15 +125,18 @@ impl AssetSource for Assets {
             return Ok(None);
         }
 
-        Self::get(path)
-            .map(|f| Some(f.data))
-            .ok_or_else(|| anyhow!("could not find asset at path \"{path}\""))
+        if let Some(file) = Self::get(path) {
+            return Ok(Some(file.data));
+        }
+        ComponentAssets.load(path)
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
-        Ok(Self::iter()
-            .filter_map(|p| p.starts_with(path).then(|| p.into()))
-            .collect())
+        let mut paths = ComponentAssets.list(path)?;
+        paths.extend(Self::iter().filter_map(|p| p.starts_with(path).then(|| p.into())));
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
     }
 }
 ```
@@ -150,7 +208,7 @@ loading icons, and custom icon types.
 - [Lucide Icons](https://lucide.dev/) - The icon set used in GPUI Component is based on the open-source Lucide Icons library, which provides a wide range of customizable SVG icons.
 
 [rust-embed]: https://docs.rs/rust-embed/latest/rust_embed/
-[IconName]: https://docs.rs/gpui_component/latest/gpui_component/icon/enum.IconName.html
+[IconName]: https://docs.rs/gpui-kit-assets/latest/gpui_kit_assets/enum.IconName.html
 [Icon]: https://docs.rs/gpui_component/latest/gpui_component/icon/struct.Icon.html
 [assets]: https://github.com/longbridge/gpui-kit/tree/main/crates/assets/assets/
 [gpui-kit-assets]: https://crates.io/crates/gpui-kit-assets

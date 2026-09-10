@@ -29,6 +29,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
     navigation::register(registry)?;
     basic::register(registry)?;
     chart::register(registry)?;
+    carousel::register(registry)?;
     Ok(())
 }
 
@@ -36,6 +37,7 @@ mod support;
 mod typed_child;
 
 mod basic;
+mod carousel;
 mod chart;
 mod chat;
 mod collections;

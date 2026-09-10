@@ -1,4 +1,12 @@
-//! Headless interaction and frame snapshots using GPUI's public APIs.
+//! UI integration testing for GPUI Kit components and application views.
+//!
+//! Render real components in a headless window, simulate clicks, keyboard input
+//! and scrolling, then verify state, focus, layout and application callbacks.
+//! For example, test that clicking a Checkbox changes the owner's value while
+//! a disabled Checkbox rejects the same interaction.
+//!
+//! `#[gpui_kit::test]` runs the test and provides its GPUI context. This module
+//! supplies UI interactions and snapshots; it does not inspect rendered pixels.
 //!
 //! [`ElementSnapshot`] is immutable. Call [`TestWindowExt::render_frame`] after
 //! external changes, or use [`TestAppContextExt::wait_for`] for asynchronous UI.

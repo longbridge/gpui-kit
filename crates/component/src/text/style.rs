@@ -48,7 +48,6 @@ pub struct TextViewStyle {
     /// fallback to `cx.theme().accent`, if it is `None`.
     pub inline_code: HighlightStyle,
     /// Whether content-specific rendering should use dark-mode assets.
-    /// Whether content-specific rendering should use dark-mode assets.
     pub is_dark: bool,
 }
 

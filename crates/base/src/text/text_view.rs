@@ -710,12 +710,13 @@ impl Element for TextView {
         GlobalState::global_mut(cx).text_view_state_stack.pop();
 
         if self.selectable {
-            let (adapter, scroll_offset, content_bounds) = {
+            let (adapter, scroll_offset, content_bounds, self_scroll) = {
                 let state = state.read(cx);
                 (
                     state.selection_adapter.clone(),
                     state.scroll_offset(),
                     state.bounds(),
+                    state.scrollable,
                 )
             };
             let document_order = GlobalState::global_mut(cx).next_selection_document_order();
@@ -724,6 +725,7 @@ impl Element for TextView {
                 content_bounds,
                 scroll_offset,
                 document_order,
+                self_scroll,
                 window,
                 cx,
             );
@@ -1438,6 +1440,67 @@ mod tests {
         cx.simulate_click(point(px(10.), px(150.)), Modifiers::default());
 
         assert_eq!(cx.opened_url(), None);
+    }
+
+    #[gpui::test]
+    fn scaled_inline_code_keeps_links_and_drag_selection(cx: &mut TestAppContext) {
+        struct SelectionRoot {
+            text_view: Entity<TextViewState>,
+            format: crate::text::SelectionFormat,
+        }
+        impl Render for SelectionRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(160.))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).selection_format(self.format))
+            }
+        }
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, cx| SelectionRoot {
+            format: crate::text::SelectionFormat::Plain,
+            text_view: cx
+                .new(|cx| TextViewState::markdown("[`code`](https://example.com) after", cx)),
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.simulate_click(point(px(10.), px(10.)), Modifiers::default());
+        assert_eq!(cx.opened_url(), Some("https://example.com".to_string()));
+        cx.simulate_mouse_down(
+            point(px(3.), px(8.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.simulate_mouse_move(
+            point(px(155.), px(20.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.simulate_mouse_up(
+            point(px(155.), px(20.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let selected = view.read_with(cx, |view, cx| view.text_view.read(cx).selected_text());
+        assert_eq!(selected.trim(), "code after");
+        view.update(cx, |view, cx| {
+            view.format = crate::text::SelectionFormat::Source;
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let selected = view.read_with(cx, |view, cx| view.text_view.read(cx).selected_text());
+        assert_eq!(selected.trim(), "[`code`](https://example.com) after");
     }
 
     #[gpui::test]
