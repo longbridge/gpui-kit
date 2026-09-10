@@ -40,6 +40,7 @@ pub mod command;
 pub mod description_list;
 pub mod dialog;
 pub mod dock;
+pub mod empty;
 pub mod form;
 pub mod group_box;
 pub mod highlighter;
