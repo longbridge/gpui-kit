@@ -5,7 +5,7 @@ use gpui_kit::component::{
 };
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{
-    App, AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size,
+    App, AppContext, Context, Entity, Focusable, TestAppContext, Window, div, prelude::*, px, size,
 };
 
 struct Files {
@@ -113,6 +113,35 @@ fn table_selects_rows_and_keyboard_scrolls_virtualized_content(cx: &mut TestAppC
         );
         assert!(window.find(("row", 1usize)).visible());
         assert!(window.try_find(("row", 32usize)).is_none());
+    })
+    .unwrap();
+}
+#[gpui_kit::test]
+fn table_keyboard_leaves_rows_unselected_when_rows_are_not_selectable(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let handle = cx.open_window(size(px(640.), px(320.)), |window, cx| Records {
+        table: cx.new(|cx| TableState::new(Rows, window, cx).row_selectable(false)),
+    });
+    let table = cx
+        .update_window(handle.into(), |root, _, cx| {
+            root.downcast::<Records>().unwrap().read(cx).table.clone()
+        })
+        .unwrap();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click(("row", 1usize), cx);
+        assert!(table.focus_handle(cx).is_focused(window));
+        assert_eq!(table.read(cx).selected_row(), None);
+        for key in ["down", "down", "pagedown", "up", "pageup"] {
+            window.press(key, cx);
+            assert_eq!(
+                table.read(cx).selected_row(),
+                None,
+                "`{key}` moved the row selection"
+            );
+            assert_eq!(window.find(("row", 0usize)).selected(), Some(false));
+        }
+        assert!(window.find(("row", 0usize)).visible());
     })
     .unwrap();
 }

@@ -859,6 +859,9 @@ where
         }
 
         // Row selection mode
+        if !self.row_selectable {
+            return;
+        }
         let mut selected_row = self.selected_row.unwrap_or(0);
         if selected_row > 0 {
             selected_row = selected_row.saturating_sub(1);
@@ -901,6 +904,9 @@ where
         }
 
         // Row selection mode
+        if !self.row_selectable {
+            return;
+        }
         let selected_row = match self.selected_row {
             Some(selected_row) if selected_row < rows_count.saturating_sub(1) => selected_row + 1,
             Some(selected_row) => {
@@ -981,6 +987,9 @@ where
         }
 
         // Row selection mode
+        if !self.row_selectable {
+            return;
+        }
         let current = self.selected_row.unwrap_or(0);
         let target = current.saturating_sub(step);
         self.set_selected_row(target, cx);
@@ -1013,6 +1022,9 @@ where
         }
 
         // Row selection mode
+        if !self.row_selectable {
+            return;
+        }
         let current = self.selected_row.unwrap_or(0);
         let max_row = rows_count.saturating_sub(1);
         let target = (current + step).min(max_row);
