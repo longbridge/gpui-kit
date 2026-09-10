@@ -450,13 +450,17 @@ impl RenderOnce for TabBar {
             tab.indicator_active = has_indicator;
             tab.indicator_ready = indicator_ready;
             tab.indicator_epoch = indicator_epoch;
-            let tab = tab
+            let mut tab = tab
                 .when_some(selected_index, |tab, selected_index| {
                     tab.selected(selected_index == ix)
                 })
                 .when_some(self.on_click.clone(), move |tab, on_click| {
                     tab.on_click(move |_, window, cx| on_click(&ix, window, cx))
                 });
+            // The wrapper below is the flex item the bar lays out, so a tab's
+            // own `flex_grow` / `flex_basis` (e.g. `flex_1()`) must size it.
+            let flex_grow = tab.style().flex_grow;
+            let flex_basis = tab.style().flex_basis;
 
             rendered_tabs.push(if let Some(ref rc) = bounds_rc {
                 let rc = rc.clone();
@@ -465,6 +469,11 @@ impl RenderOnce for TabBar {
                 // only logical tabs occupy those indices.
                 div()
                     .flex_shrink_0()
+                    .map(|mut this| {
+                        this.style().flex_grow = flex_grow;
+                        this.style().flex_basis = flex_basis;
+                        this
+                    })
                     .on_prepaint(move |bounds, _, _| {
                         if let Some(slot) = rc.borrow_mut().tabs.get_mut(ix) {
                             *slot = bounds;
@@ -526,6 +535,9 @@ impl RenderOnce for TabBar {
                     .child(
                         h_flex()
                             .id("tabs-inner")
+                            // Fill the bar so tabs can grow into the free space;
+                            // as a scroll container it still shrinks below its content.
+                            .flex_1()
                             // Keep the scroll viewport inside the wrapper padding so
                             // explicit reveals leave space at both ends of the bar.
                             .relative()
@@ -1030,5 +1042,68 @@ mod tests {
 
         assert_eq!(scroll_handle.bounds().size, viewport_size);
         assert_eq!(scroll_handle.offset().x, px(-100.));
+    }
+
+    struct FlexHarness {
+        variant: TabVariant,
+    }
+
+    impl Render for FlexHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(200.))
+                .debug_selector(|| "flex-bar".into())
+                .child(
+                    TabBar::new("flex-tabs")
+                        .w_full()
+                        .with_variant(self.variant)
+                        .selected_index(0)
+                        .child(
+                            Tab::new()
+                                .flex_1()
+                                .label("A")
+                                .debug_selector(|| "flex-tab-0".into()),
+                        )
+                        .child(
+                            Tab::new()
+                                .flex_1()
+                                .label("B")
+                                .debug_selector(|| "flex-tab-1".into()),
+                        ),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn flex_tabs_share_the_available_width(cx: &mut TestAppContext) {
+        cx.update(crate::theme::init);
+        for variant in [
+            TabVariant::Tab,
+            TabVariant::Outline,
+            TabVariant::Segmented,
+            TabVariant::Pill,
+            TabVariant::Underline,
+        ] {
+            let (_, cx) = cx.add_window_view(move |_, _| FlexHarness { variant });
+            draw(cx);
+            draw(cx);
+
+            let bar = cx.debug_bounds("flex-bar").unwrap();
+            let first = cx.debug_bounds("flex-tab-0").unwrap();
+            let second = cx.debug_bounds("flex-tab-1").unwrap();
+            assert_eq!(first.size.width, second.size.width, "{variant:?}");
+            // Only the bar's own padding may remain on either side.
+            assert_eq!(
+                first.left() - bar.left(),
+                bar.right() - second.right(),
+                "{variant:?}"
+            );
+            assert!(
+                bar.right() - second.right() <= px(4.),
+                "{variant:?}: tabs end at {:?} but the bar ends at {:?}",
+                second.right(),
+                bar.right()
+            );
+        }
     }
 }
