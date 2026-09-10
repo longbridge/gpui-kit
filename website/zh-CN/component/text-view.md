@@ -144,9 +144,9 @@ MarkdownNode::new("ticker", TickerNode { symbol })
 - `text` 是纯文本表示，用于选择和未注册 renderer 时的回退渲染。
 - `markdown` 是 Markdown 表示，用于将文档重新序列化为 Markdown。
 
-## Block 插件
+## Block plugin
 
-块插件在 `is_block()` 中返回 `true`，使用块 parser 和 renderer：
+Block plugin 在 `is_block()` 中返回 `true`，使用 block parser 和 renderer：
 
 ```rust
 fn is_block(&self) -> bool {
@@ -154,7 +154,7 @@ fn is_block(&self) -> bool {
 }
 ```
 
-行内插件保留默认的 `is_block() == false`，使用静态 `render_inline` 契约，支持基线布局、原子选择、纯文本与 Markdown 复制、文本降级和异步布局失效。详见[行内扩展](../base/text-view.md#行内扩展)。Component 层转发相同的 builder，并导出相同的行内类型。
+Inline plugin 保留默认的 `is_block() == false`，使用静态 `render_inline` 契约，支持基线布局、原子选择、纯文本与 Markdown 复制、文本降级和异步布局失效。详见[Inline plugin](../base/text-view.md#inline-plugin)。Component 层转发相同的 builder，并导出相同的行内类型。
 
 ## YAML Frontmatter
 

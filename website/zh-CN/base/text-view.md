@@ -123,9 +123,9 @@ code-block fallback。可以通过 `.plugin(...)` 挂载自定义插件；
 `gpui-component` 提供带主题样式的
 `FrontmatterPlugin`；Base 不依赖该 presentation。
 
-## 行内扩展
+## Inline plugin
 
-行内扩展沿用块扩展机制：parser 按注册顺序匹配，renderer 通过 `MarkdownNode::name()` 查找。`MarkdownPlugin` 默认 `is_block() == false`，使用 `render_inline`；块插件继续使用 `render`。
+Inline plugin 沿用 Block plugin 的机制：parser 按注册顺序匹配，renderer 通过 `MarkdownNode::name()` 查找。`MarkdownPlugin` 默认 `is_block() == false`，使用 `render_inline`；Block plugin 继续使用 `render`。
 
 ```rust
 use gpui_base::{MarkdownExtensions, MarkdownNode, TextView, markdown_ast};
