@@ -1948,6 +1948,71 @@ mod tests {
     }
 
     #[gpui::test]
+    fn inline_object_inherits_bold_and_link_clicks_without_opening_on_drag(
+        cx: &mut TestAppContext,
+    ) {
+        use std::sync::{Arc, Mutex};
+        struct Root {
+            state: Entity<TextViewState>,
+            clicks: Arc<Mutex<Vec<SharedString>>>,
+        }
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let clicks = self.clicks.clone();
+                let extensions = crate::text::MarkdownExtensions::default()
+                    .math()
+                    .inline_parser(|node, _| {
+                        matches!(node, markdown::mdast::Node::InlineMath(_))
+                            .then(|| super::super::MarkdownNode::new("math", ()).text("formula"))
+                    })
+                    .inline_renderer("math", |_, context, _, _| {
+                        assert_eq!(context.text_style.font_weight, gpui::FontWeight::BOLD);
+                        Some(super::super::MarkdownInlinePresentation::text())
+                    });
+                div().w(px(300.)).child(crate::TextSelectionLayer).child(
+                    TextView::new(&self.state)
+                        .markdown_extensions(extensions)
+                        .on_link_click(move |url, _, _, _| {
+                            clicks.lock().unwrap().push(url.clone())
+                        }),
+                )
+            }
+        }
+        cx.update(crate::init);
+        let clicks = Arc::new(Mutex::new(Vec::new()));
+        let captured = clicks.clone();
+        let (root, cx) = cx.add_window_view(move |_, cx| Root {
+            state: cx.new(|cx| TextViewState::markdown("**[$x$](https://example.com)**", cx)),
+            clicks,
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let bounds = root.read_with(cx, |root, cx| {
+            root.state.read(cx).selection_adapter.text_bounds()[0]
+        });
+        for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
+            cx.simulate_mouse_down(bounds.center(), button, Modifiers::default());
+            cx.simulate_mouse_up(bounds.center(), button, Modifiers::default());
+        }
+        assert_eq!(captured.lock().unwrap().len(), 3);
+        let start = point(bounds.left() + px(1.), bounds.center().y);
+        let end = point(bounds.right() - px(1.), bounds.center().y);
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+        assert_eq!(captured.lock().unwrap().len(), 3);
+    }
+
+    #[gpui::test]
     fn linked_image_handler_receives_left_middle_and_right_clicks(cx: &mut TestAppContext) {
         use std::sync::{Arc, Mutex};
 

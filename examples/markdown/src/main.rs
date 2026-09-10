@@ -242,8 +242,18 @@ impl MarkdownPlugin for MathPlugin {
 #[derive(Default)]
 struct InlineMathCache {
     document: String,
-    generation: u64,
     images: HashMap<String, Option<RenderedMathImage>>,
+}
+
+impl InlineMathCache {
+    fn set_document(&mut self, source: &str) {
+        if self.document != source {
+            self.document = source.to_string();
+            // Keep prepared and pending resources for formulas still in the document.
+            self.images
+                .retain(|key, _| source.contains(key.split('\0').next().unwrap_or_default()));
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -261,12 +271,7 @@ impl InlineMathPlugin {
     }
 
     fn set_document(&self, source: &str) {
-        let mut cache = self.cache.lock().unwrap();
-        if cache.document != source {
-            cache.document = source.to_string();
-            cache.generation = cache.generation.wrapping_add(1);
-            cache.images.clear();
-        }
+        self.cache.lock().unwrap().set_document(source);
     }
 }
 
@@ -322,7 +327,6 @@ impl MarkdownPlugin for InlineMathPlugin {
         }
         // None represents pending or unavailable; both use TextView's atomic text fallback.
         cache.images.insert(key.clone(), None);
-        let generation = cache.generation;
         drop(cache);
         let cache = Arc::downgrade(&self.cache);
         let view = self.view.clone();
@@ -334,7 +338,7 @@ impl MarkdownPlugin for InlineMathPlugin {
             if view.upgrade().is_none()
                 || cache
                     .upgrade()
-                    .is_none_or(|cache| cache.lock().unwrap().generation != generation)
+                    .is_none_or(|cache| !cache.lock().unwrap().images.contains_key(&key))
             {
                 return;
             }
@@ -345,7 +349,7 @@ impl MarkdownPlugin for InlineMathPlugin {
                 let image = task.await;
                 let Some(cache) = cache.upgrade() else { return };
                 let mut cache = cache.lock().unwrap();
-                if cache.generation != generation {
+                if !cache.images.contains_key(&key) {
                     return;
                 }
                 cache.images.insert(key, image);
@@ -1510,6 +1514,32 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[::core::prelude::v1::test]
+    fn prose_edits_retain_prepared_and_pending_formula_resources() {
+        let image = Arc::new(Image::from_bytes(ImageFormat::Svg, b"<svg/>".to_vec()));
+        let mut cache = InlineMathCache::default();
+        cache.images.insert(
+            "x^2\0theme".into(),
+            Some(RenderedMathImage {
+                image: image.clone(),
+                width: 20.,
+                height: 20.,
+                baseline: 15.,
+            }),
+        );
+        cache.images.insert("y^2\0theme".into(), None);
+        cache.images.insert("z^2\0theme".into(), None);
+        cache.set_document("Prose edited, still $x^2$ and $y^2$.");
+        assert!(Arc::ptr_eq(
+            &cache.images["x^2\0theme"].as_ref().unwrap().image,
+            &image
+        ));
+        assert!(cache.images.contains_key("y^2\0theme"));
+        assert!(!cache.images.contains_key("z^2\0theme"));
+        cache.set_document("No formulas remain.");
+        assert!(cache.images.is_empty());
+    }
 
     #[::core::prelude::v1::test]
     fn math_fallback_text_prettifies_formula_text() {

@@ -240,9 +240,19 @@ pub struct MarkdownExtensions {
     inline_parsers: Vec<Arc<MarkdownInlineParserFn>>,
     inline_renderers: HashMap<SharedString, Arc<MarkdownInlineRenderFn>>,
     revision: u64,
+    parser_revision: u64,
 }
 
 impl MarkdownExtensions {
+    /// Change this revision when parser captures or plugin configuration change.
+    /// Reusing it allows equivalent registrations rebuilt during rendering to
+    /// retain the parsed document. Renderer-only changes do not need a new value.
+    pub fn parser_revision(mut self, revision: u64) -> Self {
+        self.parser_revision = revision;
+        self.bump_revision();
+        self
+    }
+
     /// Opt into Markdown math (`$...$` inline and `$$` blocks).
     pub fn math(mut self) -> Self {
         self.enable_math = true;
@@ -358,7 +368,8 @@ impl MarkdownExtensions {
     /// Their globally unique revisions differ, but the parser shape remains
     /// stable; render handles may be refreshed without reparsing the document.
     pub(crate) fn has_same_parser_configuration(&self, other: &Self) -> bool {
-        self.enable_mdx == other.enable_mdx
+        self.parser_revision == other.parser_revision
+            && self.enable_mdx == other.enable_mdx
             && self.enable_math == other.enable_math
             && self.enable_frontmatter == other.enable_frontmatter
             && self.block_parsers.len() == other.block_parsers.len()

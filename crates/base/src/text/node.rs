@@ -1737,10 +1737,31 @@ impl Paragraph {
                         highlights: std::mem::take(&mut highlights),
                     });
                 }
+                let mut object_style = HighlightStyle::default();
+                let mut object_link = None;
+                for (_, mark) in &inline_node.marks {
+                    object_style = object_style.highlight(mark_highlight(mark, node_cx, cx).style);
+                    if let Some(link) = &mark.link {
+                        object_link = Some(
+                            link.identifier
+                                .as_ref()
+                                .and_then(|id| node_cx.link_refs.get(id))
+                                .unwrap_or(link)
+                                .clone(),
+                        );
+                        object_style.color = Some(node_cx.style.link());
+                        object_style.underline = Some(gpui::UnderlineStyle {
+                            thickness: px(1.),
+                            ..Default::default()
+                        });
+                    }
+                }
                 items.push(InlineFlowItem::Object {
                     node: node.clone(),
                     extensions: node_cx.markdown_extensions.clone(),
                     selected: inline_node.custom_selection.clone(),
+                    style: object_style,
+                    link: object_link,
                 });
                 offset = 0;
                 continue;
@@ -1832,7 +1853,7 @@ fn measure_table_columns(
     col_count: usize,
     node_cx: &NodeContext,
     window: &mut Window,
-    cx: &App,
+    cx: &mut App,
 ) -> Vec<f32> {
     let text_style = window.text_style();
     let font_size = text_style.font_size.to_pixels(window.rem_size());
@@ -1842,6 +1863,22 @@ fn measure_table_columns(
             let Some(slot) = col_w.get_mut(ix) else {
                 continue;
             };
+            if cell
+                .children
+                .children
+                .iter()
+                .any(|node| node.custom.is_some())
+            {
+                let items = cell.children.inline_flow_items(node_cx, cx);
+                let width = super::inline_flow::intrinsic_width(&items, window, cx);
+                let border = if ix + 1 < col_count {
+                    CELL_BORDER_PX
+                } else {
+                    0.
+                };
+                *slot = slot.max(f32::from(width) + CELL_PAD_PX + border);
+                continue;
+            }
             let text = cell.children.text();
             let highlights = cell.children.inline_highlights(node_cx, cx);
             let mut w = 0.0_f32;
@@ -2778,6 +2815,91 @@ mod tests {
         }
         assert_eq!(paragraph.selected_text(), "文 x² Eng");
         assert_eq!(paragraph.selected_source(), "文 **$x^2$** Eng");
+    }
+
+    #[test]
+    fn custom_inline_inherits_marks_and_resolves_link_references() {
+        use gpui::{Empty, TestApp};
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| Empty);
+        window.update(|_, _, cx| {
+            cx.set_global(crate::Theme::default());
+            let mut node_cx = NodeContext::default();
+            let mut mark = TextMark::default().bold();
+            mark.italic = true;
+            mark.strikethrough = true;
+            mark.link = Some(LinkMark {
+                identifier: Some("ref".into()),
+                ..Default::default()
+            });
+            node_cx.link_refs.insert(
+                "ref".into(),
+                LinkMark {
+                    url: "https://example.com".into(),
+                    ..Default::default()
+                },
+            );
+            let paragraph = Paragraph {
+                children: vec![
+                    InlineNode::custom(MarkdownNode::new("test", ()).text("x"))
+                        .marks(vec![(0..1, mark)]),
+                ],
+                ..Default::default()
+            };
+            let items = paragraph.inline_flow_items(&node_cx, cx);
+            let InlineFlowItem::Object { style, link, .. } = &items[0] else {
+                panic!()
+            };
+            assert_eq!(style.font_weight, Some(FontWeight::BOLD));
+            assert_eq!(style.font_style, Some(FontStyle::Italic));
+            assert!(style.strikethrough.is_some());
+            assert_eq!(link.as_ref().unwrap().url.as_ref(), "https://example.com");
+        });
+    }
+
+    #[test]
+    fn table_column_uses_prepared_inline_metrics_after_resource_update() {
+        use crate::text::{MarkdownInlineMetrics, MarkdownInlinePresentation};
+        use gpui::{Empty, Image, ImageFormat, TestApp};
+        let mut app = TestApp::new();
+        let mut window = app.open_window(|_, _| Empty);
+        let width = Arc::new(std::sync::atomic::AtomicUsize::new(400));
+        let render_width = width.clone();
+        let mut node_cx = NodeContext::default();
+        node_cx.markdown_extensions = Arc::new(MarkdownExtensions::default().inline_renderer(
+            "test",
+            move |_, _, _, _| {
+                Some(MarkdownInlinePresentation::image(
+                    Arc::new(Image::from_bytes(ImageFormat::Svg, b"<svg/>".to_vec())),
+                    MarkdownInlineMetrics::new(
+                        gpui::size(
+                            px(render_width.load(std::sync::atomic::Ordering::Relaxed) as f32),
+                            px(20.),
+                        ),
+                        px(15.),
+                    ),
+                ))
+            },
+        ));
+        let table = table_of(
+            vec![vec![TableCell {
+                children: Paragraph {
+                    children: vec![InlineNode::custom(MarkdownNode::new("test", ()).text("x"))],
+                    ..Default::default()
+                },
+                width: None,
+            }]],
+            vec![],
+        );
+        for expected in [400, 600] {
+            width.store(expected, std::sync::atomic::Ordering::Relaxed);
+            window.update(|_, window, cx| {
+                assert_eq!(
+                    measure_table_columns(&table, 1, &node_cx, window, cx)[0],
+                    expected as f32 + CELL_PAD_PX
+                );
+            });
+        }
     }
 
     /// Table columns are sized from shaped text, so a column of inline code

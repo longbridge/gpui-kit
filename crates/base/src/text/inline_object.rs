@@ -182,9 +182,21 @@ pub(super) struct InlineObject {
     selection_bounds: Bounds<Pixels>,
     line_bounds: Bounds<Pixels>,
     content: AnyElement,
+    link: Option<super::node::LinkMark>,
+    link_click_handler: Option<Arc<super::text_view::LinkClickHandlerFn>>,
 }
 
 impl InlineObject {
+    pub fn link(
+        mut self,
+        link: Option<super::node::LinkMark>,
+        handler: Option<Arc<super::text_view::LinkClickHandlerFn>>,
+    ) -> Self {
+        self.link = link;
+        self.link_click_handler = handler;
+        self
+    }
+
     pub fn new(
         id: impl Into<ElementId>,
         node: MarkdownNode,
@@ -224,6 +236,8 @@ impl InlineObject {
             selection_bounds,
             line_bounds,
             content,
+            link: None,
+            link_click_handler: None,
         }
     }
 }
@@ -363,8 +377,39 @@ impl Element for InlineObject {
             window.paint_quad(gpui::fill(bounds, color).corner_radii(appearance.radius));
         }
         self.content.paint(window, cx);
+        if let Some(link) = self.link.clone() {
+            window.set_cursor_style(CursorStyle::PointingHand, hitbox);
+            let link_hitbox = hitbox.clone();
+            let link_view = view.clone();
+            let handler = self.link_click_handler.clone();
+            window.on_mouse_event(move |event: &gpui::MouseUpEvent, phase, window, cx| {
+                if !phase.bubble()
+                    || !link_hitbox.is_hovered(window)
+                    || link_view
+                        .as_ref()
+                        .is_some_and(|view| view.read(cx).has_selection(cx))
+                {
+                    return;
+                }
+                crate::TextSelection::end(window, cx);
+                cx.stop_propagation();
+                let click = gpui::ClickEvent::Mouse(gpui::MouseClickEvent {
+                    down: MouseDownEvent {
+                        button: event.button,
+                        position: event.position,
+                        modifiers: event.modifiers,
+                        click_count: event.click_count,
+                        first_mouse: false,
+                    },
+                    up: event.clone(),
+                });
+                super::text_view::handle_link_click(&handler, link.url.clone(), click, window, cx);
+            });
+        }
         if selectable {
-            window.set_cursor_style(CursorStyle::IBeam, hitbox);
+            if self.link.is_none() {
+                window.set_cursor_style(CursorStyle::IBeam, hitbox);
+            }
             let visible = bounds.intersect(&window.content_mask().bounds);
             if visible.size.width > Pixels::ZERO && visible.size.height > Pixels::ZERO {
                 view.as_ref().unwrap().update(cx, |state, _| {

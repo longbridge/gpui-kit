@@ -145,6 +145,8 @@ TextView::markdown("inline-formulas", "中文 $x^2$ and $y^2$")
 
 此例显示原子化的纯文本替代内容。注册 `inline_renderer("formula", ...)`，返回 `Some(MarkdownInlinePresentation::image(image, metrics))`，即可显示已准备的 `Arc<gpui::Image>`。`MarkdownInlineMetrics::new(size(width, height), baseline)` 使用当前字号下的逻辑像素，基线距离从顶部计算。renderer 收到的 `MarkdownInlineRenderContext` 包含实际文本样式、字号、行高、rem 大小和可用宽度。返回 `None` 或无效尺寸时使用文本降级。渲染回调应读取已准备的资源，不应在布局期间同步调用公式排版引擎。
 
+当 parser 捕获值或插件配置改变，但注册名称不变时，使用 `MarkdownExtensions::parser_revision(config_version)` 触发重新解析。每次 render 重建相同配置时应保持该 revision 不变。
+
 `MarkdownInlinePresentation::text()` 在正文中显示节点的原子文本。通过 `.hover_card(|window, cx| ...)` 可以在行内对象下方水平居中的 HoverCard 中创建只读 `AnyView`。卡片仅在悬停时创建，不参与行内布局，也不应包含可聚焦控件。可以通过 `text_color`、`text_color_range`、`font_weight`、`underline`、`background`、`hover_background`、`padding_x` 和 `rounded` 设置样式。水平内边距参与测量、换行、选择和等比缩小；背景色绘制在选区高亮下方。`text_color_range` 按 UTF-8 字节范围设置颜色，不拆分原子选区。Markdown 示例用它实现 `[@huacnlee](mention:huacnlee)` 资料卡；纯文本复制输出账号，Markdown 复制保留原始链接语法。
 
 对象与正文基线对齐，只能在对象前后换行。超过可用行宽时，宽、高和基线一同等比缩小。对象不可编辑，不新增焦点停靠点或内部控件；选择只能覆盖整个对象。双击选中对象，三击选中所在混排行；拖选可以双向跨越文字与连续对象。

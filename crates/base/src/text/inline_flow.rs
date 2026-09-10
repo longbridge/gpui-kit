@@ -37,6 +37,8 @@ pub(super) enum InlineFlowItem {
         node: MarkdownNode,
         extensions: Arc<MarkdownExtensions>,
         selected: Arc<Mutex<bool>>,
+        style: gpui::HighlightStyle,
+        link: Option<LinkMark>,
     },
     Text {
         state: Arc<Mutex<InlineState>>,
@@ -94,6 +96,7 @@ enum MeasureItem {
     Object {
         node: MarkdownNode,
         extensions: Arc<MarkdownExtensions>,
+        style: gpui::HighlightStyle,
     },
     Text {
         text: SharedString,
@@ -289,7 +292,13 @@ impl Element for InlineFlow {
                     object,
                     selection_bounds,
                 } => {
-                    let InlineFlowItem::Object { node, selected, .. } = &self.items[item_ix] else {
+                    let InlineFlowItem::Object {
+                        node,
+                        selected,
+                        link,
+                        ..
+                    } = &self.items[item_ix]
+                    else {
                         continue;
                     };
                     let object_size = object.metrics.size;
@@ -310,6 +319,7 @@ impl Element for InlineFlow {
                             size(bounds.size.width, selection_bounds.size.height),
                         ),
                     )
+                    .link(link.clone(), self.link_click_handler.clone())
                     .into_any_element();
                     element.prepaint_as_root(
                         bounds.origin + origin,
@@ -491,10 +501,14 @@ impl From<&InlineFlowItem> for MeasureItem {
     fn from(item: &InlineFlowItem) -> Self {
         match item {
             InlineFlowItem::Object {
-                node, extensions, ..
+                node,
+                extensions,
+                style,
+                ..
             } => Self::Object {
                 node: node.clone(),
                 extensions: extensions.clone(),
+                style: *style,
             },
             InlineFlowItem::Text {
                 state: _,
@@ -527,6 +541,37 @@ impl MeasureItem {
     }
 }
 
+/// Intrinsic width for table sizing, using the same objects and wrapping inputs as painting.
+pub(super) fn intrinsic_width(
+    items: &[InlineFlowItem],
+    window: &mut Window,
+    cx: &mut App,
+) -> Pixels {
+    let items = items.iter().map(MeasureItem::from).collect::<Vec<_>>();
+    let line_height = window.line_height();
+    let rem_size = window.rem_size();
+    let images = items
+        .iter()
+        .enumerate()
+        .map(|(ix, item)| match item {
+            MeasureItem::Image { url, width, height } => Some(measure_image_size(
+                ix,
+                url,
+                *width,
+                *height,
+                line_height,
+                rem_size,
+                window,
+                cx,
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    layout_flow(&items, &images, &window.text_style(), None, window, cx)
+        .size
+        .width
+}
+
 fn layout_flow(
     items: &[MeasureItem],
     image_sizes: &[Option<Size<Pixels>>],
@@ -545,8 +590,17 @@ fn layout_flow(
     let objects = items
         .iter()
         .map(|item| match item {
-            MeasureItem::Object { node, extensions } => Some(MeasuredInlineObject::measure(
-                node, extensions, text_style, wrap_width, window, cx,
+            MeasureItem::Object {
+                node,
+                extensions,
+                style,
+            } => Some(MeasuredInlineObject::measure(
+                node,
+                extensions,
+                &text_style.clone().highlight(*style),
+                wrap_width,
+                window,
+                cx,
             )),
             _ => None,
         })
@@ -1043,10 +1097,12 @@ mod tests {
                 MeasureItem::Object {
                     node: crate::text::MarkdownNode::new("math", ()).text("x²"),
                     extensions: Arc::default(),
+                    style: Default::default(),
                 },
                 MeasureItem::Object {
                     node: crate::text::MarkdownNode::new("math", ()).text("y²"),
                     extensions: Arc::default(),
+                    style: Default::default(),
                 },
                 MeasureItem::Text {
                     text: " English".into(),

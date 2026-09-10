@@ -1280,6 +1280,35 @@ mod tests {
     }
 
     #[gpui::test]
+    fn parser_revision_reparses_same_name_inline_configuration(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("@member", cx)));
+        for (revision, label) in [(1, "Alice"), (2, "Bob")] {
+            let extensions = MarkdownExtensions::default()
+                .parser_revision(revision)
+                .inline_parser(move |node, _| {
+                    matches!(node, markdown::mdast::Node::Text(_))
+                        .then(|| MarkdownNode::new("mention", label).text(label))
+                });
+            state.update(cx, |state, cx| {
+                state.set_markdown_extensions(Arc::new(extensions), cx)
+            });
+            cx.run_until_parked();
+            state.read_with(cx, |state, _| {
+                let node::BlockNode::Paragraph(paragraph) =
+                    &state.parsed_content.document.blocks[0]
+                else {
+                    panic!()
+                };
+                assert_eq!(
+                    paragraph.children[0].custom.as_ref().unwrap().as_text(),
+                    label
+                );
+            });
+        }
+    }
+
+    #[gpui::test]
     fn set_markdown_extensions_reparses_existing_text(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("$TSLA.US", cx)));
