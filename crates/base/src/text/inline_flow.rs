@@ -16,7 +16,9 @@ use gpui::{
 use crate::text::text_view::{LinkClickHandlerFn, handle_link_click};
 
 use super::{
-    inline::{Inline, InlineHighlight, InlineState, text_runs, text_size_ranges},
+    inline::{
+        Inline, InlineHighlight, InlineInteraction, InlineState, text_runs, text_size_ranges,
+    },
     inline_object::{InlineObject, MeasuredInlineObject},
     node::LinkMark,
     utils::image_source,
@@ -28,6 +30,7 @@ pub(super) const INLINE_CODE_PADDING: f32 = 2.;
 pub(super) struct InlineFlow {
     id: ElementId,
     items: Vec<InlineFlowItem>,
+    interaction: Option<Arc<dyn InlineInteraction>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
 }
 
@@ -153,8 +156,14 @@ impl InlineFlow {
         Self {
             id: id.into(),
             items,
+            interaction: None,
             link_click_handler,
         }
+    }
+
+    pub(super) fn interaction(mut self, interaction: Option<Arc<dyn InlineInteraction>>) -> Self {
+        self.interaction = interaction;
+        self
     }
 
     fn image_element(
@@ -443,7 +452,8 @@ impl Element for InlineFlow {
                         highlights,
                         self.link_click_handler.clone(),
                     )
-                    .selection_source(source_state.clone(), source_range)
+                    .selection_source(source_state.clone(), source_range.clone())
+                    .interaction(self.interaction.clone(), source_range)
                     .text_style(text_style.clone())
                     .selection_bounds(Bounds::new(
                         point(bounds.left(), bounds.top() + selection_bounds.top()),

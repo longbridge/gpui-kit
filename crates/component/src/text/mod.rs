@@ -1,6 +1,8 @@
 //! Compatibility facade for rich text now owned by `gpui-base`.
 
 mod compat;
+mod editor;
+pub use editor::{MarkdownEditor, MarkdownEditorEvent, MarkdownEditorState};
 mod frontmatter;
 mod style;
 

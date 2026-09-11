@@ -1,4 +1,5 @@
 mod document;
+pub mod editor;
 mod format;
 mod inline;
 mod inline_element;
@@ -25,6 +26,7 @@ pub use text_view::*;
 
 pub(crate) fn init(cx: &mut App) {
     state::init(cx);
+    editor::init(cx);
 }
 
 /// Create a new markdown text view with code location as id.

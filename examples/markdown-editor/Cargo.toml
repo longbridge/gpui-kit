@@ -1,0 +1,16 @@
+[package]
+name = "example-markdown-editor"
+version = "0.6.1"
+edition.workspace = true
+publish = false
+
+[dependencies]
+gpui-kit.workspace = true
+regex = "1"
+reqwest_client.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }

@@ -157,6 +157,18 @@ pub(super) fn text_size_ranges(
     ranges
 }
 
+// Consumers can own text interaction while sharing the existing layout.
+pub(super) trait InlineInteraction: Send + Sync {
+    fn paint(
+        &self,
+        layout: &TextLayout,
+        bounds: Bounds<Pixels>,
+        source: Range<usize>,
+        window: &mut Window,
+        cx: &mut App,
+    );
+}
+
 /// A inline element used to render a inline text and support selectable.
 ///
 /// All text in TextView (including the CodeBlock) used this for text rendering.
@@ -172,6 +184,8 @@ pub(super) struct Inline {
     selection_bounds: Option<Bounds<Pixels>>,
     selection_source: Option<(Arc<Mutex<InlineState>>, Range<usize>)>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    interaction: Option<Arc<dyn InlineInteraction>>,
+    source_range: Range<usize>,
 
     state: Arc<Mutex<InlineState>>,
 }
@@ -216,8 +230,20 @@ impl Inline {
             selection_bounds: None,
             selection_source: None,
             link_click_handler,
+            interaction: None,
+            source_range: 0..0,
             state,
         }
+    }
+
+    pub(super) fn interaction(
+        mut self,
+        interaction: Option<Arc<dyn InlineInteraction>>,
+        source: Range<usize>,
+    ) -> Self {
+        self.interaction = interaction;
+        self.source_range = source;
+        self
     }
 
     /// Use the resolved style captured by a deferred parent layout.
@@ -463,7 +489,7 @@ impl Inline {
     }
 
     /// Paint the selection background.
-    fn paint_selection(
+    pub(super) fn paint_selection(
         selection: &Selection,
         text_layout: &TextLayout,
         bounds: &Bounds<Pixels>,
@@ -570,7 +596,12 @@ impl Element for Inline {
             .unwrap_or_else(|| window.text_style());
         let runs = text_runs(self.text.len(), &text_style, &self.highlights);
 
-        self.styled_text = StyledText::new(self.text.clone()).with_runs(runs);
+        // Keep an empty editable paragraph measurable for its caret.
+        self.styled_text = if self.interaction.is_some() && self.text.is_empty() {
+            StyledText::new("\u{200b}").with_runs(vec![text_style.to_run("\u{200b}".len())])
+        } else {
+            StyledText::new(self.text.clone()).with_runs(runs)
+        };
         let (layout_id, _) =
             self.styled_text
                 .request_layout(global_element_id, inspector_id, window, cx);
@@ -626,6 +657,13 @@ impl Element for Inline {
         let current_view = window.current_view();
         let hitbox = prepaint;
         let text_layout = self.styled_text.layout().clone();
+        if let Some(interaction) = &self.interaction {
+            interaction.paint(&text_layout, bounds, self.source_range.clone(), window, cx);
+            self.styled_text
+                .paint(global_id, None, bounds, &mut (), &mut (), window, cx);
+            window.set_cursor_style(CursorStyle::IBeam, hitbox);
+            return;
+        }
         self.styled_text
             .paint(global_id, None, bounds, &mut (), &mut (), window, cx);
 
