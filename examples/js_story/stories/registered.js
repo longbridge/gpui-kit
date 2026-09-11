@@ -62,6 +62,12 @@ import {
   Image,
   InfoAlert,
   Input,
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+  InputGroupText,
+  InputGroupTextarea,
   InputState,
   Kbd,
   Label,
@@ -163,6 +169,30 @@ const asElement = (value) =>
  */
 const demo = new Map();
 
+const inputGroupFields = [
+  ["align-start", "Search…", ""], ["align-end", "Enter password", ""],
+  ["align-top", "Enter your full name", ""], ["align-bottom", "0.00", ""],
+  ["icon-email", "Enter your email", ""], ["icon-verified", "Username", "ada"],
+  ["icon-multiple", "Website", "gpui-kit.com"], ["domain", "example", ""],
+  ["username", "Enter your username", ""], ["amount", "0.00", ""],
+  ["tooltip-password", "Enter password", ""], ["tooltip-email", "Your email address", ""],
+  ["dropdown-file", "Enter file name", "notes.txt"], ["dropdown-search", "Enter search query", ""],
+  ["phone", "Phone number", ""], ["popover-url", "example.com", "gpui-kit.com"],
+  ["label-username", "username", ""], ["label-email", "you@example.com", ""],
+  ["button-actions", "Enter a project name", "Input Group"],
+  ["loading-end", "Searching…", ""], ["loading-start", "Processing…", ""],
+  ["loading-text", "Saving changes…", ""], ["profile-name", "Your name", "Ada Lovelace"],
+  ["profile-email", "you@example.com", "ada@example.com"],
+];
+const inputGroupTextareas = [
+  ["textarea-plain", "Enter your text here…", ""],
+  ["textarea-header", "Write your question…", ""],
+  ["textarea-footer", "Enter your message", ""],
+  ["textarea-disabled", "", "This textarea is disabled."],
+  ["textarea-invalid", "Write a short summary…", ""],
+  ["comment", "Share your thoughts…", ""], ["custom", "An automatically growing textarea…", ""],
+];
+
 /** @param {string} key @param {unknown} fallback */
 const state = (key, fallback) => (demo.has(key) ? demo.get(key) : fallback);
 
@@ -196,6 +226,20 @@ const retained = (key, create) => {
  * needs a stable identity so interaction survives subsequent frames.
  */
 export function initializeRegisteredExamples() {
+  for (const [id, placeholder, value] of inputGroupFields) {
+    retained(`input-group-extra:${id}`, () => InputState(placeholder, value));
+  }
+  for (const [id, _placeholder, value] of inputGroupTextareas) {
+    retained(`input-group-extra:${id}`, () => TextareaState(value));
+  }
+  retained("input-group-search", () => InputState("Search components…"));
+  retained("input-group-url", () => InputState("Website", "gpui-kit.com"));
+  retained("input-group-email", () => InputState("you@example.com"));
+  retained("input-group-disabled", () => InputState("Unavailable"));
+  retained("input-group-disabled-invalid", () => InputState("", "Invalid saved value"));
+  retained("input-group-readonly", () => InputState("Documentation", "https://gpui-kit.com"));
+  retained("input-group-notes", () => TextareaState("One shared frame.\nThe native textarea owns editing."));
+  retained("input-group-message", () => TextareaState());
   retained("input-project-name", () => InputState("Enter a project name"));
   retained("empty-search", () => InputState("Search pages"));
   retained("input-locked", () => InputState("Managed by your organization"));
@@ -243,14 +287,218 @@ export function initializeRegisteredExamples() {
 const accordionOpen = (key, fallback, index) =>
   /** @type {number[]} */ (state(key, fallback)).includes(index);
 
+/** @param {import("gpui-kit").Context} cx */
+function expandedInputGroupExamples(cx) {
+  const colors = cx.theme().colors;
+  const key = id => `input-group-extra:${id}`;
+  const spec = id => [...inputGroupFields, ...inputGroupTextareas].find(row => row[0] === id);
+  const value = id => String(state(`${key(id)}:value`, spec(id)?.[2] ?? ""));
+  const update = (id, value, cx) => setState(`${key(id)}:value`, value, cx);
+  const column = () => v_flex().w_full().max_w(384).gap_4();
+  const icon = name => new Icon(`icons/${name}.svg`).size("small");
+  const text = label => new InputGroupText().child(label);
+  const field = (label, description, control) => new Field().label(label).description(description).child(control);
+  const input = (id, label) => new InputGroup(`ig-extra-${id}`)
+    .input(new InputGroupInput(retained(key(id), () => InputState(spec(id)?.[1] ?? "")))
+      .aria_label(label).value(value(id)).masked(id === "align-end" || id === "tooltip-password")
+      .when(id === "align-end" || id === "tooltip-password", input => input.content_type("password"))
+      .on_change((value, cx) => update(id, value, cx)));
+  const textarea = (id, label) => new InputGroup(`ig-extra-${id}`)
+    .input(new InputGroupTextarea(retained(key(id), () => TextareaState()))
+      .aria_label(label).placeholder(spec(id)?.[1] ?? "").rows(3).value(value(id))
+      .on_change((value, cx) => update(id, value, cx)));
+  /** @param {string} id @param {"inline-start" | "inline-end" | "block-start" | "block-end"} [align] */
+  const addon = (id, align = "inline-start") => new InputGroupAddon(`ig-extra-addon-${id}`).align(align);
+  const menu = (id, label) => new DropdownMenu(`ig-extra-menu-${id}`, label)
+    .h(24).px(6).border_0().shadow_none().bg(colors.background).text_color(colors.foreground);
+  const scope = String(state("ig-extra-scope", "Documentation"));
+  const country = String(state("ig-extra-country", "+1"));
+  const remaining = 120 - Array.from(value("textarea-footer")).length;
+  const comment = value("comment");
+  const summary = value("textarea-invalid");
+  const result = [
+    {
+      label: "Alignment",
+      description: "Each side is explicit; the single-line input can also have a header or footer.",
+      element: column()
+        .child(field("Inline start", "A leading search icon.", input("align-start", "Leading icon search")
+          .addon(addon("align-start").child(icon("search")))))
+        .child(field("Inline end", "A trailing icon with a masked input.", input("align-end", "Trailing icon password")
+          .addon(addon("align-end", "inline-end").child(icon("eye-off")))))
+        .child(field("Block start", "The header is inside the shared frame.", input("align-top", "Full name")
+          .addon(addon("align-top", "block-start").child(text("Full Name")))))
+        .child(field("Block end", "The unit sits below the input.", input("align-bottom", "Amount with footer")
+          .addon(addon("align-bottom", "block-end").child(text("USD"))))),
+    },
+    {
+      label: "Icons",
+      description: "Leading, paired, and multiple trailing icons.",
+      element: column()
+        .child(input("icon-email", "Email with icon").addon(addon("icon-email").child(icon("inbox"))))
+        .child(input("icon-verified", "Verified username")
+          .addon(addon("icon-user").child(icon("user")))
+          .addon(addon("icon-check", "inline-end").child(icon("check"))))
+        .child(input("icon-multiple", "Website with multiple icons")
+          .addon(addon("icon-multiple", "inline-end").child(icon("star")).child(icon("info")))),
+    },
+    {
+      label: "Text addons",
+      element: column()
+        .child(input("amount", "Amount").addon(addon("amount-symbol").child(text("$")))
+          .addon(addon("amount-code", "inline-end").child(text("USD"))))
+        .child(input("domain", "Domain").addon(addon("domain-prefix").child(text("https://")))
+          .addon(addon("domain-suffix", "inline-end").child(text(".com"))))
+        .child(input("username", "Work username")
+          .addon(addon("username-domain", "inline-end").child(text("@company.com")))),
+    },
+    {
+      label: "Tooltips",
+      element: column().children([
+        ["tooltip-password", "Password help", "Use at least 8 characters."],
+        ["tooltip-email", "Email help", "Used for notifications about this workspace."],
+      ].map(([id, label, help]) => input(id, label)
+        .addon(addon(id, "inline-end").child(new InputGroupButton(`ig-extra-${id}-help`)
+          .size("icon-xsmall").aria_label(label).tooltip(help).child(icon("info")))))),
+    },
+    {
+      label: "Dropdown menus",
+      description: "Choose a filename action, search scope, or phone country code.",
+      element: column()
+        .child(input("dropdown-file", "File name").addon(addon("dropdown-file", "inline-end")
+          .child(menu("file", "More")
+            .item("Use README.md", cx => update("dropdown-file", "README.md", cx))
+            .item("Reset filename", cx => update("dropdown-file", "notes.txt", cx))
+            .item("Clear filename", cx => update("dropdown-file", "", cx)))))
+        .child(input("dropdown-search", "Scoped search").addon(addon("dropdown-search", "inline-end")
+          .child(menu("scope", scope)
+            .item("Documentation", cx => setState("ig-extra-scope", "Documentation", cx))
+            .item("Blog posts", cx => setState("ig-extra-scope", "Blog posts", cx))
+            .item("Changelog", cx => setState("ig-extra-scope", "Changelog", cx)))))
+        .child(input("phone", "Phone number").addon(addon("phone")
+          .child(menu("country", country)
+            .item("+1", cx => setState("ig-extra-country", "+1", cx))
+            .item("+44", cx => setState("ig-extra-country", "+44", cx))
+            .item("+46", cx => setState("ig-extra-country", "+46", cx))))),
+    },
+    {
+      label: "Popover",
+      description: "A labeled native trigger opens contextual details and restores focus on dismissal.",
+      element: column().child(input("popover-url", "Website with details")
+        .addon(addon("address-details", "block-start")
+          .child(text("Address"))
+          .child(div().ml_auto().child(new Popover("ig-extra-address-details", "Details")
+            .content(v_flex().w(280).gap_2()
+              .child(div().font_semibold().child("Address details"))
+              .child(div().child(`https://${value("popover-url")}`))
+              .child(div().text_sm().child("The protocol prefix stays separate from the editable hostname."))))))
+        .addon(addon("address-prefix").child(text("https://")))),
+    },
+    {
+      label: "Labels and descriptions",
+      element: column()
+        .child(field("Username", "Clicking the @ addon focuses the input.", input("label-username", "Username with label")
+          .addon(addon("label-username").child(new Label("@")))))
+        .child(input("label-email", "Notification email")
+          .addon(addon("label-email", "block-start").child(new Label("Email").text_color(colors.foreground))
+            .child(new InputGroupButton("ig-extra-label-email-help").ml_auto().size("icon-xsmall")
+              .aria_label("Notification email help").tooltip("We'll use this address for workspace notifications.")
+              .child(icon("info"))))),
+    },
+    {
+      label: "Text and icon actions",
+      description: "Larger text actions and a compact copy action share the footer.",
+      element: column().child(input("button-actions", "Project name")
+        .addon(addon("project-actions", "block-end")
+          .child(new Clipboard("ig-extra-project-copy").value(value("button-actions")).tooltip("Copy project name"))
+          .child(new InputGroupButton("ig-extra-project-clear").ml_auto().size("small").label("Clear")
+            .on_click((_event, cx) => update("button-actions", "", cx)))
+          .child(new InputGroupButton("ig-extra-project-reset").size("small").variant("secondary").label("Reset")
+            .on_click((_event, cx) => update("button-actions", "Input Group", cx))))),
+    },
+    {
+      label: "Spinner placement",
+      description: "Progress can lead, trail, or sit next to status text.",
+      element: column()
+        .child(input("loading-end", "Search loading state").readonly(true)
+          .addon(addon("spinner-end", "inline-end").child(new Spinner().size("small"))))
+        .child(input("loading-start", "Processing loading state").readonly(true)
+          .addon(addon("spinner-start").child(new Spinner().size("small"))))
+        .child(input("loading-text", "Saving loading state").readonly(true)
+          .addon(addon("spinner-text", "inline-end").child(text("Saving…")).child(new Spinner().size("small")))),
+    },
+    {
+      label: "Textarea variants",
+      element: column()
+        .child(field("Without addons", "The text viewport owns wrapping and scrolling.", textarea("textarea-plain", "Plain grouped textarea")))
+        .child(textarea("textarea-header", "Textarea with header")
+          .addon(addon("textarea-header", "block-start").child(text("Ask, search, or chat…"))))
+        .child(textarea("textarea-footer", "Textarea with remaining count").invalid(remaining < 0)
+          .addon(addon("textarea-footer", "block-end").child(text(`${remaining} characters left`))))
+        .child(field("Invalid", "Enter a summary to clear the error.", textarea("textarea-invalid", "Required summary")
+          .invalid(summary.trim().length === 0)))
+        .child(field("Disabled", "Text and addon actions are unavailable.", textarea("textarea-disabled", "Disabled textarea")
+          .disabled(true).addon(addon("textarea-disabled", "block-end")
+            .child(new InputGroupButton("ig-extra-disabled-post").label("Post"))))),
+    },
+    {
+      label: "Comment composer",
+      description: "Cancel clears the draft; Post keeps the submitted text below the composer.",
+      element: column()
+        .child(textarea("comment", "Comment draft").addon(addon("comment", "block-end")
+          .child(text(`${Array.from(comment).length} characters`))
+          .child(new InputGroupButton("ig-extra-comment-cancel").ml_auto().size("small").label("Cancel")
+            .disabled(comment.length === 0).on_click((_event, cx) => update("comment", "", cx)))
+          .child(new InputGroupButton("ig-extra-comment-post").size("small").variant("primary").label("Post")
+            .disabled(comment.trim().length === 0).on_click((_event, cx) => {
+              setState("ig-extra-comment-posted", comment, cx);
+              update("comment", "", cx);
+            }))))
+        .child(div().text_sm().child(`Posted: ${state("ig-extra-comment-posted", "—")}`)),
+    },
+    {
+      label: "Auto-growing textarea",
+      description: "Customize editor padding and typography, the focused frame, and the submit label and icon.",
+      element: column()
+        .child(new InputGroup("ig-extra-custom")
+          .focused_style(style => style.border_color(colors.primary))
+          .input(new InputGroupTextarea(retained(key("custom"), () => TextareaState()))
+            .aria_label("Auto-growing draft").placeholder(spec("custom")?.[1] ?? "")
+            .auto_grow(1, 8).value(value("custom"))
+            .editor_style(style => style.p_3().text_base())
+            .on_change((value, cx) => update("custom", value, cx)))
+          .addon(addon("custom", "block-end").child(text("Plain text"))
+            .child(new InputGroupButton("ig-extra-custom-submit").ml_auto().variant("primary").label("Submit")
+              .icon("icons/arrow-up.svg")
+              .label_style(style => style.font_semibold())
+              .icon_style(style => style.size_4())
+              .disabled(value("custom").trim().length === 0).on_click((_event, cx) => {
+                setState("ig-extra-custom-submitted", value("custom"), cx);
+                update("custom", "", cx);
+              }))))
+        .child(div().text_sm().child(`Submitted: ${state("ig-extra-custom-submitted", "—")}`)),
+    },
+    {
+      label: "Form composition",
+      description: "Field and GroupBox keep labels, descriptions, and the save action together.",
+      element: column()
+        .child(new GroupBox().title("Contact details")
+          .child(new Form()
+            .child(new Field().label("Display name").child(input("profile-name", "Profile display name")))
+            .child(new Field().label("Email").description("Shown in this example only.")
+              .child(input("profile-email", "Profile email").addon(addon("profile-email").child(icon("inbox"))))))
+          .child(h_flex().justify_end().child(new Button("ig-extra-profile-save").primary().label("Save contact")
+            .on_click((_event, cx) => setState("ig-extra-profile-saved", `${value("profile-name")} — ${value("profile-email")}`, cx)))))
+        .child(div().text_sm().child(`Saved: ${state("ig-extra-profile-saved", "—")}`)),
+    },
+  ];
+  return result;
+}
+
 
 /**
  * The cases shown for one registered surface.
  *
- * One to three per surface, chosen to introduce the component rather than to
- * mirror the Rust Story exhaustively: what it looks like by default, the one
- * or two variations a reader most needs to see, and any state — disabled,
- * selected, loading — that changes how it reads.
+ * Cases cover each component's useful compositions and interaction states.
  *
  * @param {string} surface
  * @param {import("gpui-kit").Context} cx
@@ -879,6 +1127,98 @@ export function registeredExamples(surface, cx) {
       ];
 
     // --------------------------------------------------------------- inputs
+    case "InputGroup": {
+      const query = String(state("input-group-query", ""));
+      const url = String(state("input-group-url-value", "gpui-kit.com"));
+      const email = String(state("input-group-email-value", ""));
+      const message = String(state("input-group-message-value", ""));
+      const count = ["Button", "Input", "Textarea", "Input Group", "Select", "Combobox"]
+        .filter(name => name.toLowerCase().includes(query.toLowerCase())).length;
+      const invalidEmail = email.length > 0 && (!email.includes("@") || !email.includes("."));
+      const characters = Array.from(message).length;
+      return [
+        {
+          label: "Search with addons",
+          description: "Typing filters the result count and preserves the native editing state.",
+          element: v_flex().w_full().max_w(384).gap_2()
+            .child(new InputGroup("ig-search")
+              .input(new InputGroupInput(retained("input-group-search", () => InputState("Search components…")))
+                .aria_label("Search components").value(query)
+                .on_change((value, cx) => setState("input-group-query", value, cx)))
+              .addon(new InputGroupAddon("ig-search-icon").child(new Icon("icons/search.svg")))
+              .addon(new InputGroupAddon("ig-search-count").align("inline-end")
+                .child(new InputGroupText().child(`${count} results`))))
+            .child(div().text_sm().child(`Query: ${query || "—"}`)),
+        },
+        {
+          label: "URL and multiple actions",
+          element: new InputGroup("ig-url").max_w(384)
+            .input(new InputGroupInput(retained("input-group-url", () => InputState("Website", "gpui-kit.com")))
+              .aria_label("Website").content_type("url").value(url)
+              .on_change((value, cx) => setState("input-group-url-value", value, cx)))
+            .addon(new InputGroupAddon("ig-scheme").child(new InputGroupText().child("https://")))
+            .addon(new InputGroupAddon("ig-url-actions").align("inline-end")
+              .child(new InputGroupButton("ig-favorite").size("icon-xsmall")
+                .aria_label("Favorite website").tooltip("Favorite website")
+                .variant(state("input-group-starred", false) ? "secondary" : "ghost")
+                .icon("icons/star.svg")
+                .on_click((_event, cx) => setState("input-group-starred", !state("input-group-starred", false), cx)))
+              .child(new InputGroupButton("ig-reset-url").label("Reset")
+                .on_click((_event, cx) => setState("input-group-url-value", "gpui-kit.com", cx)))),
+        },
+        {
+          label: "Validation, disabled, and read-only",
+          element: v_flex().w_full().max_w(384).gap_4()
+            .child(new InputGroup("ig-email").invalid(invalidEmail)
+              .input(new InputGroupInput(retained("input-group-email", () => InputState("you@example.com")))
+                .aria_label("Email").content_type("email_address").value(email)
+                .on_change((value, cx) => setState("input-group-email-value", value, cx)))
+              .addon(new InputGroupAddon("ig-email-icon").child(new Icon("icons/info.svg"))))
+            .child(div().text_sm().child(invalidEmail ? "Enter a complete email address." : "Type an email to validate it."))
+            .child(new InputGroup("ig-disabled").disabled(true)
+              .input(new InputGroupInput(retained("input-group-disabled", () => InputState("Unavailable"))).aria_label("Unavailable"))
+              .addon(new InputGroupAddon("ig-disabled-actions").align("inline-end")
+                .child(new InputGroupButton("ig-disabled-send").label("Send"))))
+            .child(new InputGroup("ig-disabled-invalid").disabled(true).invalid(true)
+              .input(new InputGroupInput(retained("input-group-disabled-invalid", () => InputState("", "Invalid saved value")))
+                .aria_label("Disabled invalid input")))
+            .child(div().text_sm().child("The error remains visible while editing is unavailable."))
+            .child(new InputGroup("ig-readonly").readonly(true)
+              .input(new InputGroupInput(retained("input-group-readonly", () => InputState("Documentation", "https://gpui-kit.com")))
+                .aria_label("Read-only documentation URL"))
+              .addon(new InputGroupAddon("ig-readonly-text").align("inline-end").child(new InputGroupText().child("Read-only")))),
+        },
+        {
+          label: "Textarea with header and footer",
+          element: new InputGroup("ig-notes").max_w(448)
+            .input(new InputGroupTextarea(retained("input-group-notes", () => TextareaState("One shared frame.")))
+              .aria_label("Notes").rows(4))
+            .addon(new InputGroupAddon("ig-notes-header").align("block-start")
+              .child(new InputGroupText().child(new Icon("icons/file.svg")).child("notes.txt")))
+            .addon(new InputGroupAddon("ig-notes-footer").align("block-end")
+              .child(new InputGroupText().child("Text and toolbar share one frame"))),
+        },
+        {
+          label: "Chat textarea",
+          description: "Send clears the controlled textarea without echoing a change callback.",
+          element: v_flex().w_full().max_w(448).gap_2()
+            .child(new InputGroup("ig-message").invalid(characters > 280)
+              .input(new InputGroupTextarea(retained("input-group-message", () => TextareaState()))
+                .aria_label("Message").placeholder("Write a message…").auto_grow(2, 6).value(message)
+                .on_change((value, cx) => setState("input-group-message-value", value, cx)))
+              .addon(new InputGroupAddon("ig-message-footer").align("block-end")
+                .child(new InputGroupText().child(`${characters}/280`))
+                .child(new InputGroupButton("ig-send").ml_auto().variant("primary").label("Send")
+                  .disabled(message.trim().length === 0 || characters > 280)
+                  .on_click((_event, cx) => {
+                    setState("input-group-last-message", message, cx);
+                    setState("input-group-message-value", "", cx);
+                  }))))
+            .child(div().text_sm().child(`Sent: ${state("input-group-last-message", "—")}`)),
+        },
+        ...expandedInputGroupExamples(cx),
+      ];
+    }
     case "Input":
       return [
         {

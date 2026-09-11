@@ -62,6 +62,7 @@ const RUST_STORY_ORDER = [
   "IconStory",
   "ImageStory",
   "InputStory",
+  "InputGroupStory",
   "KbdStory",
   "LabelStory",
   "ListStory",

@@ -32,6 +32,7 @@ export const REGISTERED_SURFACES = [
   "Icon",
   "Image",
   "Input",
+  "InputGroup",
   "Kbd",
   "Label",
   "Link",

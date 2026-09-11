@@ -1,5 +1,6 @@
 mod clear_button;
 mod content_type;
+pub(crate) mod control;
 mod input;
 pub mod language_config;
 mod number_input;
@@ -34,7 +35,7 @@ pub use gpui_base::input::{
 pub use gpui_base::input::{EditorMode, InputMode, InputModeKind, TextareaMode};
 #[doc(hidden)]
 mod editor;
-mod state;
+pub(crate) mod state;
 mod textarea;
 pub use editor::Editor;
 pub use gpui_base::input::{

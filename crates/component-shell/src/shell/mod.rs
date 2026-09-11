@@ -8,6 +8,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
     skeleton::register(registry)?;
     chat::register(registry)?;
     empty::register(registry)?;
+    input_group::register(registry)?;
     controls::register(registry)?;
     delegate_collections::register(registry)?;
     delegate_combobox::register(registry)?;
@@ -51,6 +52,7 @@ mod delegate_combobox;
 mod delegate_select;
 mod display;
 mod empty;
+mod input_group;
 mod layout;
 mod lifecycle;
 mod media;
