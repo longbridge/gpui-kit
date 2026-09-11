@@ -6,13 +6,15 @@ order: -2.4
 
 # Mobile
 
-Use `gpui-pre-mobile` to render GPUI Kit inside a native mobile application. The mobile platform supplies the window, touch input, text system, and GPU surface; GPUI and GPUI Kit still own the Rust view tree and components.
+Mobile support builds on [gpui-mobile](https://github.com/itsbalamurali/gpui-mobile), created by [itsbalamurali](https://github.com/itsbalamurali) and developed with the community. Credit for the original mobile platform belongs to that project and its contributors. The platform supplies the window, touch input, text system, and GPU surface; GPUI and GPUI Kit still own the Rust view tree and components.
+
+GPUI Kit currently uses `gpui-pre-mobile`, a temporary compatibility package maintained in the [Longbridge fork](https://github.com/longbridge/gpui-mobile). It adapts the original project for crate packaging and publication alongside `gpui-pre`, and tracks newer GPUI versions to keep the integration compatible. Once the community `gpui-mobile` completes the integration and GPUI is published as a crate, we plan to switch this guide and its dependencies to the community `gpui-mobile`.
 
 The current integration is experimental. The Swift-hosted iOS example has been built and exercised in the iOS simulator. Android has a platform implementation, but the GPUI Kit integration described here has not been validated on Android or a physical iPhone.
 
 ## Run the iOS example
 
-Start with the [Swift container example](https://github.com/longbridge/gpui-mobile/tree/0b882efdac7f524e0bb0b1d4c886b2aa752f9f20/example). It includes a conversation UI with `Message`, `Bubble`, `TextView`, `Input`, thought summaries, and copy actions. Its responses are local sample data; it does not connect to an AI service.
+Start with the compatibility fork’s [Swift container example](https://github.com/longbridge/gpui-mobile/tree/0b882efdac7f524e0bb0b1d4c886b2aa752f9f20/example). It includes a conversation UI with `Message`, `Bubble`, `TextView`, `Input`, thought summaries, and copy actions. Its responses are local sample data; it does not connect to an AI service.
 
 On an Apple Silicon Mac, install Xcode with an iOS simulator runtime, Rust, and XcodeGen:
 

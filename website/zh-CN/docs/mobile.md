@@ -6,13 +6,15 @@ order: -2.4
 
 # 移动端
 
-通过 `gpui-pre-mobile`，可以在原生移动应用中渲染 GPUI Kit。移动平台负责窗口、触摸输入、文本系统和 GPU 渲染表面，GPUI 与 GPUI Kit 继续管理 Rust 视图树和组件。
+移动端支持基于 [gpui-mobile](https://github.com/itsbalamurali/gpui-mobile)，由 [itsbalamurali](https://github.com/itsbalamurali) 创建并与社区共同开发。原始移动平台的成果归功于该项目的作者和贡献者。移动平台负责窗口、触摸输入、文本系统和 GPU 渲染表面，GPUI 与 GPUI Kit 继续管理 Rust 视图树和组件。
+
+GPUI Kit 目前使用 `gpui-pre-mobile`，这是在 [Longbridge fork](https://github.com/longbridge/gpui-mobile) 中维护的临时兼容包。它基于原项目进行打包适配，用于配合 `gpui-pre` 发布 crate，并持续跟进最新的 GPUI 版本、保持集成兼容。待社区 `gpui-mobile` 完成接入、GPUI 也发布 crate 后，我们计划将本文及相关依赖更新为社区的 `gpui-mobile`。
 
 目前该集成仍处于实验阶段。Swift 托管的 iOS 示例已在 iOS 模拟器中构建并运行。仓库中也有 Android 平台实现，但本文介绍的 GPUI Kit 集成尚未在 Android 或实体 iPhone 上验证。
 
 ## 运行 iOS 示例
 
-从 [Swift 容器示例](https://github.com/longbridge/gpui-mobile/tree/0b882efdac7f524e0bb0b1d4c886b2aa752f9f20/example) 开始。它使用 `Message`、`Bubble`、`TextView`、`Input`、思考摘要和复制操作组成聊天界面。回复来自本地示例数据，没有接入 AI 服务。
+从兼容 fork 中的 [Swift 容器示例](https://github.com/longbridge/gpui-mobile/tree/0b882efdac7f524e0bb0b1d4c886b2aa752f9f20/example) 开始。它使用 `Message`、`Bubble`、`TextView`、`Input`、思考摘要和复制操作组成聊天界面。回复来自本地示例数据，没有接入 AI 服务。
 
 在 Apple Silicon Mac 上安装 Xcode、iOS 模拟器运行时、Rust 和 XcodeGen：
 
