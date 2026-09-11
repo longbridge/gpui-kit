@@ -10,8 +10,6 @@ toolbars inside a single frame. It reuses the existing editing state and native
 input engine. The group owns the frame and composition; the application owns
 the text state, validation result, and actions.
 
-The composition and default treatment follow the
-[shadcn/ui Input Group examples](https://ui.shadcn.com/docs/components/base/input-group).
 Colors, corner radii, and focus policy come from the active GPUI Component theme.
 
 ## Import
@@ -200,8 +198,7 @@ and password masking through the existing state and shared integration.
 
 ## Theme and sizing
 
-The default structure follows shadcn/ui's `base-nova` Input Group. Its values
-come from the active GPUI Component theme:
+Default styling comes from the active GPUI Component theme:
 
 | Surface | Theme source |
 | --- | --- |
@@ -287,8 +284,7 @@ new InputGroupButton("send").label("Send").icon("icons/arrow-up.svg")
 
 ## More compositions
 
-The native and JavaScript galleries include these additional recipes, based on
-the shadcn/ui documentation and its larger example gallery:
+The native and JavaScript galleries include these additional recipes:
 
 | Recipe | What to try |
 | --- | --- |
@@ -357,8 +353,7 @@ disabled state; menu and popover wrappers retain their own component contracts.
 
 ### Native auto-grow
 
-shadcn/ui demonstrates a third-party auto-sizing textarea in its Custom Input
-example. The equivalent recipe here uses the existing `TextareaState`:
+Use `TextareaState::auto_grow` for native auto-sizing:
 
 ```rust
 let draft = cx.new(|cx| {

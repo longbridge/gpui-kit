@@ -8,8 +8,6 @@ description: 将输入框、文本域、附加内容和原生操作组合在同�
 `InputGroup` 将一个输入框或文本域与文本、图标、按钮、工具栏组合在同一个外框中，
 复用已有输入状态和原生编辑引擎。Group 负责外框与布局，应用负责文本状态、校验结果和操作。
 
-组合方式和默认样式参考
-[shadcn/ui 的 Input Group 示例](https://ui.shadcn.com/docs/components/base/input-group)。
 颜色、圆角和焦点策略均来自当前 GPUI Component Theme。
 
 ## 导入
@@ -189,7 +187,7 @@ Story 中提供了可操作的字数统计、发送、清空和示例附件。
 
 ## Theme 与尺寸
 
-默认结构遵循 shadcn/ui 的 `base-nova` Input Group，样式数据来自当前 GPUI Component Theme：
+默认样式来自当前 GPUI Component Theme：
 
 | 部分 | Theme 来源 |
 | --- | --- |
@@ -259,7 +257,7 @@ new InputGroupButton("send").label("发送").icon("icons/arrow-up.svg")
 
 ## 更多组合示例
 
-原生 Story 和 JavaScript Story 参考 shadcn/ui 文档及其完整示例集，补充了以下用法：
+原生 Story 和 JavaScript Story 包含以下用法：
 
 | 示例 | 可以尝试的操作 |
 | --- | --- |
@@ -325,8 +323,7 @@ InputGroup::new("website-details")
 
 ### 使用原生自动增高
 
-shadcn/ui 的 Custom Input 示例使用第三方自动增高 Textarea。这里对应的示例使用
-现有 `TextareaState`：
+使用 `TextareaState::auto_grow` 启用原生自动增高：
 
 ```rust
 let draft = cx.new(|cx| {
