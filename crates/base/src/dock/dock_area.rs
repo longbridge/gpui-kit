@@ -38,8 +38,7 @@ use super::{
 /// What the dock area reports outward.
 pub enum DockEvent {
     /// The layout changed. Subscribe to persist it; this fires on every edit,
-    /// including each step of a split-handle drag, so a subscriber that writes to disk
-    /// should debounce.
+    /// so a subscriber that writes to disk should debounce.
     LayoutChanged,
     /// A host-owned drag item was dropped inside the dock.
     DragDrop { item: AnyDrag, target: DropTarget },

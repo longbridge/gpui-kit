@@ -194,8 +194,8 @@ mod tests {
     /// This reads both export lists rather than naming them, because the way
     /// this went wrong was checking the list against a description of base
     /// instead of against base itself: a hand-written list cannot notice a
-    /// name base gained after it was written; two container names were
-    /// missing when this was added.
+    /// name base gained after it was written; two names were missing when
+    /// this was added.
     ///
     /// The parse is deliberately crude — it takes the braces of each
     /// `pub use ...::{..}` and the tail of each single-name `pub use a::b;` —

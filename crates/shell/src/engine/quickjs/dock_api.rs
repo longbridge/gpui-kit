@@ -916,8 +916,7 @@ fn subscribe_dock(
             ctx,
             &format!(
                 "unknown dock event `{name}`; the only one is \"layout_changed\", which fires on \
-                 every edit — including each step of a dock resize, so save on a timer rather \
-                 than on every one"
+                 every edit, so save on a timer rather than on every one"
             ),
         ));
     }

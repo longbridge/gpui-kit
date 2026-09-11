@@ -3375,8 +3375,7 @@ const BASE: &str = r#"  /** A row. */
     /** Clears the zoom, whichever container holds it. */
     zoom_out(): void;
     /**
-     * Fires on every edit — including each step of a dock resize — so save on
-     * a timer rather than on every one.
+     * Fires on every edit, so save on a timer rather than on every one.
      */
     on(event: "layout_changed", handler: (cx: Context) => void): boolean;
     release(): boolean;

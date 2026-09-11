@@ -356,7 +356,7 @@ A tab drag has three parts, and a skin supplies only the middle one.
 
 | Emitter      | Event                                                                               | Meaning                                                                                                          |
 | ------------ | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `DockArea`   | `LayoutChanged`                                                                     | Something changed. Fires on **every** edit, including each step of a dock resize — debounce before writing to disk |
+| `DockArea`   | `LayoutChanged`                                                                     | Something changed. Fires on **every** edit — debounce before writing to disk                                       |
 | `DockArea`   | `DragDrop { item, target }`                                                         | A host-owned drag landed                                                                                         |
 | `TabGroup`   | `Drop` / `DragDrop` / `ClosePanel` / `ActiveChanged` / `ZoomIn` / `ZoomOut`         | A group's intent, applied by the area                                                                            |
 | `Panel`      | `ZoomIn` / `ZoomOut` / `LayoutChanged`                                              | A panel's own signal                                                                                             |

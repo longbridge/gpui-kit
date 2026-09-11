@@ -29,9 +29,8 @@ pub enum InsertTarget {
 /// Only whether anything changed, for now. An earlier revision also carried
 /// the created and removed nodes, the removed panels, and the activation
 /// edges — but nothing outside tests ever read them, and computing them meant
-/// cloning the whole tree on every edit to diff against, on a path that a
-/// split-handle drag walks once per mouse move. Fields are private, so any of them
-/// can come back the day something needs one.
+/// cloning the whole tree on every edit to diff against. Fields are private, so
+/// any of them can come back the day something needs one.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct EditResult {
     changed: bool,

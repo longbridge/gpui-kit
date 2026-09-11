@@ -74,7 +74,7 @@ init(_props, cx) {
 }
 ```
 
-`layout_changed` fires on every edit, including each step of a dock resize, so save on a timer rather than on the event.
+`layout_changed` fires on every edit, so save on a timer rather than on the event.
 
 ## Panels
 
