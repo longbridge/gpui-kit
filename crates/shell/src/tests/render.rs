@@ -675,10 +675,9 @@ fn descriptor_drives_runtime_and_typescript(cx: &mut TestAppContext) {
     assert!(declarations.contains(
         "export type TestBoxElement = Omit<NativeElement, \"tone\" | \"disabled\" | \"selected\" | \"on_click\" | \"role\" | \"transition\"> & {"
     ));
-    assert!(
-        declarations
-            .contains("import { ClickEvent, Context, Element, NativeElement } from \"gpui-kit\";")
-    );
+    assert!(declarations.contains(
+        "import { ClickEvent, Context, Element, NativeElement, StyleDeclaration } from \"gpui-kit\";"
+    ));
     assert!(declarations.contains("export const TestBox: { new(id: string): TestBoxElement }"));
     assert!(declarations.contains("tone(value: string): TestBoxElement;"));
     assert!(declarations.contains("A test component."));
