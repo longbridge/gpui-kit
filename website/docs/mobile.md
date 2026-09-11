@@ -105,6 +105,16 @@ In `layoutSubviews`, update the child controller's frame only when nonzero bound
 
 The host drives `gpui_ios_request_frame` through a `CADisplayLink` while visible and invalidates the link when the controller disappears. Forward application active/inactive callbacks as shown in `App.swift`. Keep UIKit and bridge calls on the main thread.
 
+## Platform-specific behavior
+
+`gpui_kit::is_mobile()` is an inline `const fn` that returns `true` for iOS and Android targets. It checks the compilation target, not window width or whether a mouse is connected.
+
+```rust
+if gpui_kit::is_mobile() {
+    // Use touch-friendly interaction.
+}
+```
+
 ## Design for mobile
 
 Share component behavior and content with desktop, while adapting the screen to touch and a narrow viewport:

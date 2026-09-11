@@ -110,7 +110,7 @@ pub struct TooltipOverlay {
 impl TooltipOverlay {
     pub fn new() -> Self {
         Self {
-            enabled: !cfg!(any(target_os = "ios", target_os = "android")),
+            enabled: !crate::is_mobile(),
             content: None,
             previous_bounds: None,
             epoch: 0,

@@ -105,6 +105,16 @@ NSLayoutConstraint.activate([
 
 宿主在界面可见时使用 `CADisplayLink` 驱动 `gpui_ios_request_frame`，在控制器消失时停止 display link。同时按 `App.swift` 转发应用激活与失活事件。UIKit 和桥接调用均应在主线程执行。
 
+## 平台判断
+
+`gpui_kit::is_mobile()` 是带 `#[inline]` 的 `const fn`，在 iOS 和 Android 目标上返回 `true`。它判断编译目标，不判断窗口宽度或是否连接鼠标。
+
+```rust
+if gpui_kit::is_mobile() {
+    // 使用适合触摸的交互。
+}
+```
+
 ## 移动界面设计
 
 可以与桌面端共享组件行为和内容，但应针对触摸操作与窄屏调整界面：

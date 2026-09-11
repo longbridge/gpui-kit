@@ -37,7 +37,7 @@ impl HoverCard {
         Self {
             id: id.into(),
             anchor: Anchor::TopCenter,
-            tap_to_open: cfg!(any(target_os = "ios", target_os = "android")),
+            tap_to_open: crate::is_mobile(),
             trigger: None,
             content: None,
             open_delay: Duration::from_secs_f64(0.6),

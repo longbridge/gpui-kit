@@ -195,6 +195,14 @@ pub use virtual_list::{VirtualList, VirtualListScrollHandle, h_virtual_list, v_v
 
 use gpui::App;
 
+/// Returns whether the application is compiled for iOS or Android.
+///
+/// This is a compile-time platform check, not a screen-size or input-device check.
+#[inline]
+pub const fn is_mobile() -> bool {
+    cfg!(any(target_os = "ios", target_os = "android"))
+}
+
 /// Initializes global infrastructure owned by the base layer.
 pub fn init(cx: &mut App) {
     let _ = Theme::global_mut(cx);

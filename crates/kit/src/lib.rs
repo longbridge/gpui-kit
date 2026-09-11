@@ -108,6 +108,7 @@ pub use ::gpui_base as base;
 pub use ::gpui_platform as platform;
 #[cfg(target_family = "wasm")]
 pub use ::gpui_web as web;
+pub use gpui_base::is_mobile;
 
 /// The styled component library.
 ///
