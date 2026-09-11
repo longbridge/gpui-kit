@@ -40,7 +40,14 @@ extern "C" fn hit_test_forwarder(this: &NSWindow, _cmd: Sel, point: NSPoint) -> 
 }
 
 fn ns_view(window: &Window) -> Option<&NSView> {
-    let handle = HasWindowHandle::window_handle(window).ok()?;
+    // A test window's `window_handle()` panics instead of returning `Err`.
+    // Probe only that call under `catch_unwind` (the forwarder is then not
+    // installed); kept narrow so a real failure below still surfaces.
+    let handle = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        HasWindowHandle::window_handle(window).ok()
+    }))
+    .ok()
+    .flatten()?;
     let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
         return None;
     };

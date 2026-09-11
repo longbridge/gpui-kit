@@ -281,6 +281,7 @@ impl TabGroup {
             zoomed: self.zoomed,
             collapsed: self.constraints.is_collapsed(),
             closable: self.is_closable(cx),
+            close_permitted: self.constraints.is_closable(),
             locked: self.is_locked(),
             draggable: self.draggable(cx),
             droppable: self.droppable(),
@@ -787,6 +788,7 @@ pub struct TabGroupContext {
     draggable: bool,
     droppable: bool,
     closable: bool,
+    close_permitted: bool,
     drop_indicator: Option<DropIndicator>,
     on_select_tab: SelectTabHandler,
     on_close: ClosePanelHandler,
@@ -830,10 +832,18 @@ impl TabGroupContext {
         self.collapsed
     }
 
-    /// Whether closing the displayed panel is allowed at all, so a skin knows
-    /// whether to offer a Close control.
+    /// Whether the *active* panel can be closed. For a per-tab control use
+    /// [`Self::is_close_permitted`] with the tab's own [`PanelView::closable`].
     pub fn is_closable(&self) -> bool {
         self.closable
+    }
+
+    /// Whether the container permits closing panels at all -- the group-level
+    /// half of [`TabGroup::close_panel`]'s gate, before the per-panel check.
+    /// False for a dock's last group. Combine with [`Self::is_draggable`] and
+    /// the tab's own `closable` for a per-tab close control.
+    pub fn is_close_permitted(&self) -> bool {
+        self.close_permitted
     }
 
     pub fn is_locked(&self) -> bool {

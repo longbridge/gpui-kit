@@ -138,6 +138,10 @@ pub struct DockArea {
     tiles: HashMap<NodeId, Cached<TilesState>>,
     panels: HashMap<PanelId, Arc<dyn PanelView>>,
 
+    /// Tab-group leaf rects, recorded in `on_prepaint`, for host-painted
+    /// spatial overlays. Pruned to live nodes on `reconcile`.
+    node_bounds: HashMap<NodeId, Bounds<Pixels>>,
+
     locked: bool,
     zoomed: Option<Zoomed>,
     focus_handle: FocusHandle,
@@ -171,6 +175,7 @@ impl DockArea {
             splits: HashMap::new(),
             tiles: HashMap::new(),
             panels: HashMap::new(),
+            node_bounds: HashMap::new(),
             locked: false,
             zoomed: None,
             focus_handle: cx.focus_handle(),
@@ -208,6 +213,12 @@ impl DockArea {
     /// against it.
     pub fn bounds(&self) -> Bounds<Pixels> {
         self.bounds
+    }
+
+    /// Last-rendered rect of tab-group leaf `node`, or `None` if it is not a
+    /// rendered tab group.
+    pub fn node_bounds(&self, node: NodeId) -> Option<Bounds<Pixels>> {
+        self.node_bounds.get(&node).copied()
     }
 
     /// The tree for one region, or `None` for a dock that does not exist.
@@ -599,6 +610,11 @@ impl DockArea {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A panel this area does not own (e.g. dropped from a nested dock) has
+        // no backing entity here; inserting it would strand a ghost tab.
+        if self.panel(panel).is_none() {
+            return;
+        }
         let Some(destination) = self.placement_of_node(target_node(&target)) else {
             return;
         };
@@ -682,7 +698,10 @@ impl DockArea {
         self.commit(result, window, cx);
     }
 
-    fn remove_panel_id(&mut self, panel: PanelId, window: &mut Window, cx: &mut Context<Self>) {
+    /// Remove a panel by id. Unlike [`Self::remove_panel`] this needs no live
+    /// `Entity`, so it can close a panel held only by `PanelId` (e.g. an
+    /// unresolved `InvalidPanel` leaf from a restored layout).
+    pub fn remove_panel_id(&mut self, panel: PanelId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(region) = self.placement_of_panel(panel) else {
             return;
         };
@@ -1090,6 +1109,8 @@ impl DockArea {
         self.groups.retain(|node, _| live_nodes.contains(node));
         self.splits.retain(|node, _| live_nodes.contains(node));
         self.tiles.retain(|node, _| live_nodes.contains(node));
+        // A removed leaf must report no bounds, not a stale rect.
+        self.node_bounds.retain(|node, _| live_nodes.contains(node));
 
         let departed: Vec<Arc<dyn PanelView>> = self
             .panels
@@ -1500,7 +1521,23 @@ impl DockArea {
                     .into_any_element()
             }
             PaneRef::Tabs { .. } => match self.groups.get(&node.id()) {
-                Some(cached) => cached.entity.clone().into_any_element(),
+                Some(cached) => {
+                    // Wrapper records the group's rect for spatial overlays; it
+                    // only holds bounds, so sizing stays on `resizable_panel`.
+                    let node_id = node.id();
+                    let area = self.this.clone();
+                    // The probe must precede the content child so it measures
+                    // the wrapper's origin, not a point below it.
+                    div()
+                        .size_full()
+                        .on_prepaint(move |bounds, _, cx| {
+                            _ = area.update(cx, |area, _| {
+                                area.node_bounds.insert(node_id, bounds);
+                            });
+                        })
+                        .child(cached.entity.clone())
+                        .into_any_element()
+                }
                 None => Empty.into_any_element(),
             },
             PaneRef::Tiles { .. } => match self.tiles.get(&node.id()) {
@@ -2653,6 +2690,21 @@ mod tests {
             (left - right).abs() <= (left + right) * 0.02,
             "the two halves must be within 2% of each other, got {left} and {right}"
         );
+    }
+
+    /// Moving a panel this area does not own is a no-op, not a ghost insert.
+    #[gpui::test]
+    fn a_move_of_an_unowned_panel_is_ignored(cx: &mut TestAppContext) {
+        let log = Log::default();
+        let (area, _panels, cx) = one_group(&log, &["Alpha", "Beta"], None, cx);
+        let group = child_node(&area, 0, cx);
+        let before = cx.read(|cx| area.read(cx).dump(cx));
+
+        // A PanelId from nowhere, as if dropped from another DockArea.
+        move_panel_into(&area, PanelId::from_u64(9_999_999), group, None, true, cx);
+
+        let after = cx.read(|cx| area.read(cx).dump(cx));
+        assert_eq!(before, after, "an unowned panel move must not touch the tree");
     }
 
     /// The other drop geometry: a placement whose axis differs from the
@@ -4709,6 +4761,28 @@ mod tests {
         assert!(
             !cx.read(|cx| area.read(cx).is_zoomed()),
             "the area must not fill itself with a group that never zoomed"
+        );
+    }
+
+    /// `remove_panel_id` drops the panel named only by its `PanelId`.
+    #[gpui::test]
+    fn remove_panel_id_drops_the_panel_it_names(cx: &mut TestAppContext) {
+        let log = Log::default();
+        let (area, alpha, cx) = two_groups(&log, cx);
+        let alpha_id = panel_id_of(&alpha);
+        assert!(
+            cx.read(|cx| area.read(cx).panel(alpha_id).is_some()),
+            "alpha starts owned by the area"
+        );
+
+        cx.update(|window, cx| {
+            area.update(cx, |area, cx| area.remove_panel_id(alpha_id, window, cx));
+        });
+        cx.run_until_parked();
+
+        assert!(
+            cx.read(|cx| area.read(cx).panel(alpha_id).is_none()),
+            "remove_panel_id removes the panel identified only by its id"
         );
     }
 }
