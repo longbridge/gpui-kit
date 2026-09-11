@@ -2096,6 +2096,68 @@ mod tests {
         }
     }
 
+    #[test]
+    fn inline_code_fragment_does_not_paint_past_its_reserved_row() {
+        use crate::text::inline::test_fonts::{MONO, WideMonoTextSystem};
+        use gpui::TestApp;
+
+        const TEXT_BACKGROUND: u32 = 0x20f0b0;
+
+        struct MarkdownRoot {
+            text_view: Entity<TextViewState>,
+        }
+
+        impl Render for MarkdownRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(640.))
+                    .text_size(px(17.9))
+                    .text_bg(gpui::rgb(TEXT_BACKGROUND))
+                    .child(TextView::new(&self.text_view))
+            }
+        }
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        app.update(|cx| {
+            crate::init(cx);
+            crate::Theme::global_mut(cx).tokens.typography.mono = MONO.into();
+        });
+        let mut window = app.open_window(|_, cx| MarkdownRoot {
+            text_view: cx.new(|cx| TextViewState::markdown("`main` starts the paragraph", cx)),
+        });
+        window.draw();
+        app.run_until_parked();
+        window.draw();
+
+        let (view_bounds, painted) = window.update(|root, window, cx| {
+            let view_bounds = root
+                .text_view
+                .read(cx)
+                .bounds()
+                .scale(window.scale_factor());
+            let text_background: gpui::Background = gpui::rgb(TEXT_BACKGROUND).into();
+            let painted = window
+                .painted_quads()
+                .into_iter()
+                .filter(|quad| quad.background == text_background)
+                .map(|quad| quad.bounds)
+                .collect::<Vec<_>>();
+            (view_bounds, painted)
+        });
+
+        assert!(
+            !painted.is_empty(),
+            "the inherited text background must make actual text paint observable"
+        );
+        assert!(
+            painted
+                .iter()
+                .all(|bounds| bounds.bottom() <= view_bounds.bottom()),
+            "an inline-code fragment wrapped a second time after InlineFlow reserved one row; \
+             text background quads={painted:?}, reserved TextView bounds={view_bounds:?}"
+        );
+    }
+
     #[gpui::test]
     fn markdown_link_opens_url_without_handler(cx: &mut TestAppContext) {
         cx.update(crate::init);

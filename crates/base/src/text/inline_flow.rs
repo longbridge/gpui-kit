@@ -458,6 +458,8 @@ impl Element for InlineFlow {
                         })
                         .text_size(font_size)
                         .line_height(fragment_size.height)
+                        // Fragments are already wrapped, so this leaf must not wrap independently.
+                        .whitespace_nowrap()
                         .child(inline)
                         .into_any_element();
                     window.with_rem_size(Some(typography.rem_size), |window| {
