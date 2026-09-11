@@ -549,13 +549,17 @@ impl LanguageRegistry {
         let config = self
             .language(name)
             .ok_or_else(|| anyhow::anyhow!("language {name:?} is not registered"))?;
-        if let Some(factory) = self
+        // Bind the clone in its own statement so the guard is dropped before
+        // calling the factory. Otherwise a factory that re-enters the registry
+        // self-deadlocks on the non-reentrant mutex, every call is serialized
+        // behind the factory, and a panicking factory poisons the singleton.
+        let factory = self
             .parser_factories
             .lock()
             .unwrap()
             .get(&config.name)
-            .cloned()
-        {
+            .cloned();
+        if let Some(factory) = factory {
             return factory();
         }
 
@@ -563,6 +567,26 @@ impl LanguageRegistry {
             .language
             .ok_or_else(|| anyhow::anyhow!("language {name:?} has no grammar"))?;
         Ok((tree_sitter::Parser::new(), language))
+    }
+
+    /// Returns whether `name` can produce a parser, either through a registered
+    /// parser factory or a statically linked grammar.
+    pub(crate) fn has_parser(&self, name: &str) -> bool {
+        let Some(config) = self.language(name) else {
+            return false;
+        };
+
+        config.language.is_some()
+            || self
+                .parser_factories
+                .lock()
+                .unwrap()
+                .contains_key(&config.name)
+    }
+
+    /// Returns the grammar for `name`, preferring a registered parser factory.
+    pub(crate) fn grammar(&self, name: &str) -> Result<tree_sitter::Language> {
+        Ok(self.parser(name)?.1)
     }
 
     pub(crate) fn editing_language_name(&self, name: &str) -> SharedString {
@@ -715,5 +739,46 @@ mod tests {
 
         assert!(called.load(Ordering::Relaxed));
         assert_eq!(language, tree_sitter_json::LANGUAGE.into());
+    }
+
+    #[test]
+    fn factory_only_language_highlights_without_static_grammar() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, Ordering},
+        };
+
+        use super::LanguageRegistry;
+        use crate::highlighter::SyntaxHighlighter;
+
+        let registry = LanguageRegistry::singleton();
+        let called = Arc::new(AtomicBool::new(false));
+        // No statically linked grammar: `language` is `None`, so the grammar can
+        // only come from the registered factory.
+        registry.register(
+            "__dynamic_factory_only__",
+            &GrammarConfig::plain("__dynamic_factory_only__"),
+        );
+        assert!(
+            !registry
+                .language("__dynamic_factory_only__")
+                .unwrap()
+                .has_grammar()
+        );
+        registry.register_parser_factory("__dynamic_factory_only__", {
+            let called = called.clone();
+            Arc::new(move || {
+                called.store(true, Ordering::Relaxed);
+                Ok((
+                    tree_sitter::Parser::new(),
+                    tree_sitter_json::LANGUAGE.into(),
+                ))
+            })
+        });
+
+        let highlighter = SyntaxHighlighter::new("__dynamic_factory_only__");
+
+        assert!(called.load(Ordering::Relaxed));
+        assert_eq!(highlighter.language().as_ref(), "__dynamic_factory_only__");
     }
 }

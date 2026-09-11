@@ -21,8 +21,7 @@ use super::{LanguageRegistry, SyntaxHighlighter};
 
 pub(crate) fn input_highlighter_factory() -> InputHighlighterFactory {
     Rc::new(|language| {
-        let config = LanguageRegistry::singleton().language(language)?;
-        config.has_grammar().then(|| {
+        LanguageRegistry::singleton().has_parser(language).then(|| {
             Box::new(TreeSitterInputHighlighter::new(language)) as Box<dyn InputHighlighter>
         })
     })

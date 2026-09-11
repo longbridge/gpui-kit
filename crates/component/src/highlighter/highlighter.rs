@@ -378,11 +378,12 @@ impl SyntaxHighlighter {
             ));
         };
 
-        // Languages without grammar default to a highlighter that never
-        // parses and creates no styles.
-        let Some(_) = config.language.as_ref() else {
+        // Languages without a parser (neither a statically linked grammar nor a
+        // registered parser factory) default to a highlighter that never parses
+        // and creates no styles.
+        if !LanguageRegistry::singleton().has_parser(lang) {
             return Ok(Self::build_inert(config.name.clone()));
-        };
+        }
 
         let (mut parser, grammar) = LanguageRegistry::singleton().parser(lang)?;
         parser
@@ -674,7 +675,8 @@ impl SyntaxHighlighter {
                 return Some((config.name, query.clone()));
             }
 
-            let query = match Query::new(config.language.as_ref()?, &config.highlights) {
+            let grammar = LanguageRegistry::singleton().grammar(language_name).ok()?;
+            let query = match Query::new(&grammar, &config.highlights) {
                 Ok(query) => Arc::new(query),
                 Err(error) => {
                     tracing::error!(
