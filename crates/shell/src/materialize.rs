@@ -1073,6 +1073,23 @@ fn materialize_component(
                 view = view.on_link_click(move |url, _event, window, cx| {
                     route.emit(crate::HostValue::from(url.to_string()), window, cx);
                 });
+            } else {
+                view = view.on_link_click(|url, event, _, cx| {
+                    // Preserve Base's activation behavior, but apply Shell's URL rules.
+                    let activate = match event {
+                        gpui::ClickEvent::Mouse(click) => {
+                            matches!(click.up.button, MouseButton::Left | MouseButton::Middle)
+                        }
+                        gpui::ClickEvent::Keyboard(_) => true,
+                        gpui::ClickEvent::Touch(click) => !click.long_press,
+                    };
+                    let valid = reqwest::Url::parse(url).is_ok_and(|parsed| {
+                        matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some()
+                    });
+                    if activate && valid {
+                        cx.open_url(url);
+                    }
+                });
             }
             Styled::style(&mut view).refine(&refinement);
             view.into_any_element()
