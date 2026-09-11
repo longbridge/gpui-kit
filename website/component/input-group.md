@@ -1,378 +1,324 @@
 ---
 title: Input Group
-description: Inputs and textareas with shared frames, addons, and native actions.
+description: Combine inputs and textareas with text, icons, buttons, and toolbars.
 ---
 
 # Input Group
 
-`InputGroup` combines one input or textarea with text, icons, buttons, and
-toolbars inside a single frame. It reuses the existing editing state and native
-input engine. The group owns the frame and composition; the application owns
-the text state, validation result, and actions.
+Use `InputGroup` to place text, icons, buttons, or toolbars around an input or
+textarea inside one frame. For a simple prefix or suffix, use [Input](./input.md).
 
-Colors, corner radii, and focus policy come from the active GPUI Component theme.
+The examples below define views for an initialized GPUI Kit application. See
+[Getting Started](../docs/getting-started.md) for application setup.
 
-## Import
+## Input with a clear button
+
+Create an `InputState` once in your view and pass it to `InputGroupInput`.
+Subscribe to `InputEvent::Change` to refresh anything that depends on the text.
+Keep the returned `Subscription` in the view so the callback stays active.
+
+This view shows a character count and lets the user clear the input:
 
 ```rust
-use gpui_kit::{AppContext as _, ClipboardItem, ParentElement as _, Styled as _};
+use gpui_kit::{
+    AppContext as _, ClickEvent, Context, Entity, IntoElement, ParentElement as _,
+    Render, Styled as _, Subscription, Window, rems,
+};
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, Icon, Sizable as _, Size,
-    button::ButtonVariants as _,
-    input::{InputContentType, InputEvent, InputState, TextareaState},
+    Disableable as _, Icon,
+    input::{InputEvent, InputState},
     input_group::{
         InputGroup, InputGroupAddon, InputGroupAddonAlignment,
-        InputGroupButton, InputGroupButtonSize, InputGroupInput,
-        InputGroupText, InputGroupTextarea,
+        InputGroupButton, InputGroupInput, InputGroupText,
     },
-    menu::{DropdownMenu as _, PopupMenuItem},
-    popover::Popover,
 };
+
+struct SearchField {
+    query: Entity<InputState>,
+    _change: Subscription,
+}
+
+impl SearchField {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let query = cx.new(|cx| InputState::new(window, cx).placeholder("Search…"));
+        let change = cx.subscribe(&query, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        });
+        Self { query, _change: change }
+    }
+
+    fn clear(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.query.update(cx, |state, cx| {
+            state.set_value("", window, cx);
+            state.focus(window, cx);
+        });
+        cx.notify();
+    }
+}
+
+impl Render for SearchField {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let count = self.query.read(cx).value().chars().count();
+        InputGroup::new("search")
+            .max_w(rems(24.))
+            .input(InputGroupInput::new(&self.query).aria_label("Search"))
+            .addon(InputGroupAddon::new("search-icon")
+                .child(Icon::new(IconName::Search).size_4()))
+            .addon(InputGroupAddon::new("search-actions")
+                .align(InputGroupAddonAlignment::InlineEnd)
+                .child(InputGroupText::new().child(format!("{count} characters")))
+                .child(InputGroupButton::new("clear").label("Clear")
+                    .disabled(count == 0)
+                    .on_click(cx.listener(Self::clear))))
+    }
+}
 ```
 
-## Basic usage
-
-Create the state once in the owning view's constructor and retain its Entity:
+Read or set the value through the same state:
 
 ```rust
-let query = cx.new(|cx| InputState::new(window, cx).placeholder("Search…"));
+let value = self.query.read(cx).value();
+
+self.query.update(cx, |state, cx| {
+    state.set_value("gpui", window, cx);
+});
+cx.notify();
 ```
 
-Build the group in `render` using that retained state:
+`InputEvent::Change` reports user edits. Setting a value with `set_value` does
+not emit this event; call `cx.notify()` when other content in your view must
+refresh after a programmatic update.
 
-```rust
-InputGroup::new("search")
-    .input(InputGroupInput::new(&query).aria_label("Search components"))
-    .addon(
-        InputGroupAddon::new("search-icon")
-            .child(Icon::new(IconName::Search).size_4()),
-    )
-    .addon(
-        InputGroupAddon::new("search-count")
-            .align(InputGroupAddonAlignment::InlineEnd)
-            .child(InputGroupText::new().child("12 results")),
-    )
-```
+## Parts and alignment
 
-Subscribe to `InputEvent::Change` when an addon or another part of the view
-depends on the text. Read the value from the same state and notify the owning
-view. There is no `InputGroupState` and no second copy of the text or selection.
-
-## Anatomy and alignment
-
-| Part | Constructor / composition | Purpose |
-| --- | --- | --- |
-| `InputGroup` | `new(id)`, `.input(...)`, `.addon(...)` | Shared frame and layout |
-| `InputGroupInput` | `new(&Entity<InputState>)` | Single-line text control |
-| `InputGroupTextarea` | `new(&Entity<TextareaState>)` | Multiline text control |
-| `InputGroupAddon` | `new(id)`, `.align(...)`, `.child(...)`, `.children(...)` | Text, icons, and actions on one side |
-| `InputGroupButton` | `new(id)`, `.label(...)`, `.icon(...)`, `.on_click(...)` | Compact native action |
-| `InputGroupText` | `new()`, `.child(...)` | Muted helper content |
-
-All parts implement `Styled`. Addon, Button, and Text accept ordinary children.
-The root and text controls use their explicit typed slots.
-
-`input` accepts either `InputGroupInput` or `InputGroupTextarea`, via the opaque
-`InputGroupControl` conversion type. The last call replaces the control.
-`addon` appends a part, preserving insertion order among addons on the same side.
-Within an addon, `.child(...)` and `.children(...)` preserve the complete insertion
-order of text, icons, buttons, and custom content. Direct `InputGroupButton` children
-inherit the group disabled state.
-Use stable IDs for dynamically added, removed, or reordered parts.
-
-| `InputGroupAddonAlignment` | Position |
+| Part | Use |
 | --- | --- |
-| `InlineStart` (default) | Before the text control |
-| `InlineEnd` | After the text control |
-| `BlockStart` | Above the row containing the control |
-| `BlockEnd` | Below the row containing the control |
+| `InputGroup` | Combine one input with any number of addons |
+| `InputGroupInput` | Add a single-line input using `InputState` |
+| `InputGroupTextarea` | Add multiline text using `TextareaState` |
+| `InputGroupAddon` | Position text, icons, buttons, or custom content |
+| `InputGroupButton` | Add a compact action button |
+| `InputGroupText` | Display helper text, a prefix, suffix, or counter |
 
-Inline and block addons can coexist. Builder call order does not change these
-regions. Keyboard traversal follows native element order, and buttons retain
-their normal desktop keyboard behavior.
+Pass the input to `.input(...)` and each addon to `.addon(...)`. Use `.child(...)`
+or `.children(...)` inside an addon. A later `.input(...)` replaces the earlier
+input; repeated `.addon(...)` calls keep all addons.
 
-## Text, icons, and loading
+Set an addon's position with `.align(InputGroupAddonAlignment::...)`:
+
+| Alignment | Position |
+| --- | --- |
+| `InlineStart` (default) | Before the input |
+| `InlineEnd` | After the input |
+| `BlockStart` | Above the input row |
+| `BlockEnd` | Below the input row |
+
+You can combine all four positions. Addons on the same side and children within
+an addon appear in the order you add them. Give each part a stable, distinct ID.
+Clicking text, icons, or empty space in an addon focuses the input.
+
+For example, add a protocol prefix and domain suffix to a single-line input:
 
 ```rust
 InputGroup::new("website")
-    .input(InputGroupInput::new(&query)
-        .aria_label("Website").content_type(InputContentType::Url))
-    .addon(InputGroupAddon::new("scheme")
+    .input(InputGroupInput::new(&self.query).aria_label("Website"))
+    .addon(InputGroupAddon::new("protocol")
         .child(InputGroupText::new().child("https://")))
     .addon(InputGroupAddon::new("domain")
         .align(InputGroupAddonAlignment::InlineEnd)
         .child(InputGroupText::new().child(".com")))
 ```
 
-An addon can contain `Icon`, `Kbd`, `Spinner`, or application-owned content.
-Size icons explicitly with the normal scale helpers. Clicking ordinary addon
-content or the frame's inset focuses the text control. The Story includes
-search counts, currency text, keyboard hints, and progress indicators.
+## Buttons, icons, and menus
 
-## Buttons
-
-Use `.child(...)` to make an action inherit the group's disabled state:
+Use `.label(...)` for a text button or `.icon(...)` for an icon button. Give
+icon-only buttons an `.aria_label(...)`; `.tooltip(...)` adds a visible hint.
 
 ```rust
-let copy_state = query.clone();
-InputGroup::new("copyable-url")
-    .readonly(true)
-    .input(InputGroupInput::new(&query).aria_label("URL"))
-    .addon(InputGroupAddon::new("url-actions")
-        .align(InputGroupAddonAlignment::InlineEnd)
-        .child(InputGroupButton::new("copy-url")
-            .with_size(InputGroupButtonSize::IconXSmall)
-            .icon(IconName::Copy)
-            .aria_label("Copy URL").tooltip("Copy URL")
-            .on_click(move |_, _, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(
-                    copy_state.read(cx).value().to_string(),
-                ));
-            })))
-```
+use gpui_kit::component::input_group::InputGroupButtonSize;
 
-The default button is ghost and compact. `ButtonVariants` supplies semantic
-variants such as `.primary()`, `.secondary()`, and `.danger()`.
-Use `.aria_label(...)`, `.tooltip(...)`, `.loading(...)`, and `.outline()` directly.
-`with_button` configures additional native Button capabilities. The button implements
-`Selectable`, `InteractiveElement`, and `DropdownMenu`, so it can also be used as a
-Popover trigger or receive `.dropdown_menu(...)`.
+InputGroupButton::new("clear-icon")
+    .with_size(InputGroupButtonSize::IconXSmall)
+    .icon(IconName::X)
+    .aria_label("Clear search")
+    .tooltip("Clear search")
+    .on_click(cx.listener(Self::clear))
+```
 
 | `InputGroupButtonSize` | Use |
 | --- | --- |
-| `XSmall` (default) | Compact text action |
-| `Small` | Larger text action |
-| `IconXSmall` | Compact square icon action |
-| `IconSmall` | Larger square icon action |
+| `XSmall` (default) | Compact text button |
+| `Small` | Larger text button |
+| `IconXSmall` | Compact square icon button |
+| `IconSmall` | Larger square icon button |
 
-Native buttons keep their mouse-down focus policy. Clicking an action does not
-redirect focus to the text control after the action runs. Custom interactive
-addon content should follow the same native focus conventions.
+Buttons default to ghost styling. Import `button::ButtonVariants` to use
+`.primary()`, `.secondary()`, or `.danger()`. Use `.outline()` for an outline,
+`.disabled(true)` to disable an action, and `.loading(true)` to show progress
+and prevent repeated clicks. Clicking a button runs its action without moving
+focus back to the input afterwards.
 
-## Textarea and toolbars
+For an action menu, use `.dropdown_menu(...)` with the [menu API](./menu.md).
+For contextual help, pass an `InputGroupButton` to [Popover](./popover.md)'s
+`.trigger(...)`, then add the Popover to an addon. Use `.with_button(...)` to
+configure other [Button](./button.md) options.
 
-Create a `TextareaState` for multiline content. Rows, wrapping, scrolling, and
-auto-grow remain part of that state:
+## Textarea with a counter and submit action
+
+Use `TextareaState` with `InputGroupTextarea`. `.auto_grow(min, max)` grows the
+input between the given row counts; longer content scrolls. Use `.rows(n)` for
+a fixed row count or `InputGroupTextarea::h(...)` for a fixed height.
+
+This complete view counts characters, disables submission for empty or oversized
+drafts, and displays the submitted text below the composer. Submitting clears
+and focuses the textarea.
 
 ```rust
-let message = cx.new(|cx| {
-    TextareaState::new(window, cx)
-        .placeholder("Write a message…").auto_grow(2, 6)
-});
+use gpui_kit::{
+    AppContext as _, ClickEvent, Context, Entity, IntoElement, ParentElement as _,
+    Render, SharedString, Styled as _, Subscription, Window, rems,
+};
+use gpui_kit::component::{
+    Disableable as _, button::ButtonVariants as _, v_flex,
+    input::{InputEvent, TextareaState},
+    input_group::{
+        InputGroup, InputGroupAddon, InputGroupAddonAlignment,
+        InputGroupButton, InputGroupText, InputGroupTextarea,
+    },
+};
+
+struct MessageComposer {
+    message: Entity<TextareaState>,
+    submitted: Option<SharedString>,
+    _change: Subscription,
+}
+
+impl MessageComposer {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let message = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder("Write a message…")
+                .auto_grow(2, 6)
+        });
+        let change = cx.subscribe(&message, |_, _, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                cx.notify();
+            }
+        });
+        Self { message, submitted: None, _change: change }
+    }
+
+    fn submit(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let value = self.message.read(cx).value();
+        if value.trim().is_empty() || value.chars().count() > 280 {
+            return;
+        }
+        self.submitted = Some(value);
+        self.message.update(cx, |state, cx| {
+            state.set_value("", window, cx);
+            state.focus(window, cx);
+        });
+        cx.notify();
+    }
+}
+
+impl Render for MessageComposer {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let value = self.message.read(cx).value();
+        let count = value.chars().count();
+        v_flex().max_w(rems(28.)).gap_2()
+            .child(InputGroup::new("message")
+                .invalid(count > 280)
+                .input(InputGroupTextarea::new(&self.message).aria_label("Message"))
+                .addon(InputGroupAddon::new("message-footer")
+                    .align(InputGroupAddonAlignment::BlockEnd)
+                    .child(InputGroupText::new().child(format!("{count}/280")))
+                    .child(InputGroupButton::new("submit").ml_auto().primary().label("Submit")
+                        .disabled(value.trim().is_empty() || count > 280)
+                        .on_click(cx.listener(Self::submit)))))
+            .children(self.submitted.as_ref().map(|text| format!("Submitted: {text}")))
+    }
+}
 ```
 
-```rust
-InputGroup::new("message")
-    .input(InputGroupTextarea::new(&message).aria_label("Message"))
-    .addon(InputGroupAddon::new("message-header")
-        .align(InputGroupAddonAlignment::BlockStart)
-        .border_b_1().border_color(cx.theme().border)
-        .child(InputGroupText::new().child("New message")))
-    .addon(InputGroupAddon::new("message-footer")
-        .align(InputGroupAddonAlignment::BlockEnd)
-        .child(InputGroupText::new().child("0/280"))
-        .child(InputGroupButton::new("send").ml_auto().primary().label("Send")))
-```
-
-Attach an owner callback to Send and derive its disabled state from the message.
-The Story demonstrates a working character counter, submission, clearing, and a
-sample attachment. Use `.h(...)` on `InputGroupTextarea` for a fixed viewport.
-The scrollbar belongs to the text viewport; toolbars do not scroll with the text.
+Use `BlockStart` for a heading or toolbar above the textarea. Addons stay in place
+while the text scrolls. See [Textarea](./textarea.md) for more text options.
 
 ## Disabled, read-only, and validation
 
-`.disabled(true)` disables the text control and typed addon buttons and guards
-the group against pointer and keyboard activation. `.readonly(true)` prevents
-editing while preserving focus, selection, copying, and addon actions. A disabled
-input part also disables its group. An enabled child cannot override group policy.
-
-`.invalid(true)` displays the application's validation result on the shared
-frame without rejecting edits. `InputState::validate` instead participates in
-deciding whether an edit can be accepted. Place an explanatory error next to the
-group and give the text control an accessible label.
-
-The input parts preserve the existing native context menu and expose
-`.context_menu(...)` to replace it. Single-line inputs retain content-type hints
-and password masking through the existing state and shared integration.
-
-## Theme and sizing
-
-Default styling comes from the active GPUI Component theme:
-
-| Surface | Theme source |
+| Method | Effect |
 | --- | --- |
-| Frame border | `theme.input` |
-| Background | Transparent in light mode; `theme.input` at 30% opacity in dark mode |
-| Foreground / helper text | `theme.foreground` / `theme.muted_foreground` |
-| Frame / button corners | `theme.radius`; compact XS buttons use `theme.radius_tokens().sm` |
-| Focus / error ink | `theme.ring` / `theme.danger` |
-| Outward ring policy | `theme.focus_ring` and `.focus_ring(...)` |
+| `.disabled(true)` | Disables the input and direct `InputGroupButton` children |
+| `.readonly(true)` | Prevents editing while allowing focus, selection, copying, and addon actions |
+| `.invalid(true)` | Shows an error state while allowing further edits |
 
-The frame and compact buttons have no resting elevation shadow. Focus and error
-rings have zero blur and themed ink. Hairlines and ring widths are control
-boundaries; text, spacing, and control sizing use the normal relative scale.
-Default border and background colors transition over 150 ms and respect reduced motion.
-The error border takes precedence over focus, with a 20% error ring in light mode
-and 40% in dark mode. Disabled groups retain their error indication; disabled
-controls do not acquire a focus ring.
-The group supports `.xsmall()`, `.small()`, and `.large()` through `Sizable`.
-Medium is the default; select it explicitly with `.with_size(Size::Medium)`. Use `Styled` to refine the group and its parts.
+An input part with `.disabled(true)` also disables its group. Pass the disabled
+flag to custom interactive addon content and wrapped controls separately.
 
-Existing `Input::prefix` and `Input::suffix` remain unchanged. They suit simple
-standalone adornments; Input Group adds shared frames and toolbar composition.
+Set `.invalid(...)` from your validation result and show an explanation next to
+the group. To reject particular edits, use [`InputState::validate`](./input.md).
+Give each input an `.aria_label(...)`, even if you also name the group.
 
-## Internal and state styles
+Use `.content_type(...)` on `InputGroupInput` for hints such as a URL or email
+address. Password masking is configured with `InputState::masked`. Both input
+parts support `.context_menu(...)` for a custom right-click menu.
 
-Use each part's `Styled` methods for its outer frame. Stable internal parts have
-their own style builders:
+## Sizes and custom styles
 
-| Component | Style builder | Target |
+The default group size is Medium. Import `Sizable` to use `.xsmall()`, `.small()`,
+`.large()`, or `.with_size(Size::Medium)`. Colors and corners follow your [Theme](./theme.md).
+Use `Styled` methods to set the group's width, spacing, and other appearance.
+
+Use these methods to customize a specific part or state:
+
+| Component | Method | What it styles |
 | --- | --- | --- |
-| `InputGroupInput`, `InputGroupTextarea` | `editor_style` | Editing viewport: padding, typography, background, and text alignment |
-| `InputGroupButton` | `label_style` | The text supplied by `label`, independently of custom children |
-| `InputGroupButton` | `icon_style` | The icon or loading icon, after its default size and color |
-| `InputGroup` | `focused_style` | The frame while the editor is focused and valid |
-| `InputGroup` | `invalid_style` | The invalid frame, including when disabled |
-| `InputGroup` | `disabled_style` | The disabled frame; interaction remains disabled |
+| `InputGroupInput`, `InputGroupTextarea` | `editor_style` | Text area padding, typography, background, and alignment |
+| `InputGroupButton` | `label_style` | The text supplied by `.label(...)` |
+| `InputGroupButton` | `icon_style` | The icon, including its loading state |
+| `InputGroup` | `focused_style` | The frame while the input is focused and valid |
+| `InputGroup` | `invalid_style` | The frame when invalid, including while disabled |
+| `InputGroup` | `disabled_style` | The disabled frame |
+
+For example, customize the input and its clear button in `SearchField`:
 
 ```rust
-InputGroup::new("draft")
+use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _};
+
+InputGroup::new("styled-search")
+    .small()
+    .max_w(rems(24.))
     .focused_style(|style| style.border_color(cx.theme().primary))
     .invalid_style(|style| style.bg(cx.theme().danger.opacity(0.05)))
     .disabled_style(|style| style.opacity(0.7))
-    .input(InputGroupTextarea::new(&message)
-        .editor_style(|style| style.p_3().text_base()))
-    .addon(InputGroupAddon::new("draft-actions")
-        .align(InputGroupAddonAlignment::BlockEnd)
-        .child(InputGroupButton::new("send").primary().label("Send")
-            .icon(IconName::ArrowUp)
+    .input(InputGroupInput::new(&self.query)
+        .aria_label("Search")
+        .editor_style(|style| style.px_3().text_base()))
+    .addon(InputGroupAddon::new("styled-actions")
+        .align(InputGroupAddonAlignment::InlineEnd)
+        .child(InputGroupButton::new("styled-clear").label("Clear").icon(IconName::X)
             .label_style(|style| style.font_semibold())
-            .icon_style(|style| style.size_4())))
+            .icon_style(|style| style.size_4())
+            .on_click(cx.listener(Self::clear))))
 ```
 
-Each closure runs immediately and receives the accumulated `StyleRefinement`.
-Repeated calls preserve earlier overrides unless they set the same property.
-Only overrides are retained; theme and size defaults are resolved during render.
-Addon and Text already expose their content through `Styled` and ordinary children.
+Repeated style calls combine; the last value for a property wins. State styles
+override the ordinary frame style. Invalid border and ring styling takes priority
+over focus and disabled styling; customizing a disabled style keeps interaction
+disabled. A state's `border_color` also changes its ring color. Import
+`FocusableExt` and use `.focus_ring(false)` to hide the default ring.
 
-Textarea padding is passed to the native editing engine, so caret hit testing,
-selection, IME bounds, and scrolling use the same insets. Relative padding tracks
-the measured viewport width after layout and resize. Text color and typography
-style the editable text; placeholder, caret, and selection colors retain their
-semantic theme tokens.
+`editor_style` changes editable text, but placeholder, caret, and selection
+colors follow the Theme. Percentage padding is relative to the editing area's
+width. Style an addon or helper text directly with its `Styled` methods.
 
-State defaults override the ordinary frame style; each state builder then
-overrides that state's defaults. Invalid border and ring styling takes precedence
-over focused or disabled styling. A state-specific `border_color` also tints its
-default outward ring. The ring uses the final border widths and corner radii;
-`focus_ring(false)` suppresses it when supplying your own shadow treatment.
+## JavaScript
 
-JavaScript exposes the same six method names. Its function receives a
-`StyleDeclaration` with style methods, `when`, and `map`. The function runs during
-description building; native repainting reuses the recorded refinement.
-Children, event handlers, and returning a different element are rejected.
-
-```javascript
-new InputGroupTextarea(this.message)
-  .editor_style(style => style.p_3().text_base());
-
-new InputGroupButton("send").label("Send").icon("icons/arrow-up.svg")
-  .label_style(style => style.font_semibold())
-  .icon_style(style => style.size_4());
-```
-
-## More compositions
-
-The native and JavaScript galleries include these additional recipes:
-
-| Recipe | What to try |
-| --- | --- |
-| Alignment | Leading/trailing icons and a header/footer around a single-line input |
-| Icons | Email, a username with a checkmark, and multiple trailing icons |
-| Text addons | Currency, protocol/domain suffix, and a work-email suffix |
-| Tooltips | Password requirements and notification-email help |
-| Dropdown menus | Change/reset the filename, select a search scope, and select a country code |
-| Popover | Open address details and dismiss with Escape |
-| Labels and descriptions | An `@` label and a label inside a block-start addon |
-| Text and icon actions | Clear, reset, and copy a project name |
-| Spinner placement | Leading, trailing, and text-plus-spinner loading states |
-| Textarea variants | No addons, header, remaining-character footer, invalid, and disabled |
-| Comment composer | Cancel the draft or post it and retain the submitted text |
-| Auto-growing textarea | Grow from one to eight rows, submit, and clear |
-| Form composition | Combine standalone Input, Input Group, Field, and GroupBox |
-
-Each text control has its own retained state. Counters use Unicode character
-counts. Submission examples keep their result in the Story; they do not send
-messages or save contacts to an external service.
-
-### Dropdown menu in an addon
-
-`InputGroupButton` supports `DropdownMenu` directly and can be supplied as addon
-content. This preserves the menu's pressed state, keyboard navigation, and
-focus restoration. The following menu resets the retained filename:
-
-```rust
-let filename = self.filename.clone();
-InputGroup::new("filename")
-    .input(InputGroupInput::new(&self.filename).aria_label("File name"))
-    .addon(InputGroupAddon::new("filename-menu").align(InputGroupAddonAlignment::InlineEnd)
-        .child(InputGroupButton::new("filename-more").label("More")
-            .dropdown_menu(move |menu, _, _| {
-                let filename = filename.clone();
-                menu.item(PopupMenuItem::new("Reset filename")
-                    .on_click(move |_, window, cx| {
-                        filename.update(cx, |state, cx| {
-                            state.set_value("notes.txt", window, cx);
-                        });
-                    }))
-            })))
-```
-
-### Popover in an addon
-
-Use the existing Popover with an `InputGroupButton` trigger for contextual content.
-Popover owns the open state; the input keeps its existing editing state:
-
-```rust
-InputGroup::new("website-details")
-    .input(InputGroupInput::new(&self.website).aria_label("Website"))
-    .addon(InputGroupAddon::new("website-info")
-        .child(Popover::new("address-details")
-            .trigger(InputGroupButton::new("address-details-trigger")
-                .with_size(InputGroupButtonSize::IconXSmall)
-                .icon(IconName::Info).aria_label("Address details"))
-            .child("The protocol prefix is separate from the editable hostname."))
-        .child(InputGroupText::new().child("https://")))
-```
-
-The native Story uses compact icon triggers. The JavaScript Popover host
-provides a labeled trigger, so its example places the details control in a
-block-start addon. All addon content uses `.child(...)`. Direct button parts inherit
-disabled state; menu and popover wrappers retain their own component contracts.
-
-### Native auto-grow
-
-Use `TextareaState::auto_grow` for native auto-sizing:
-
-```rust
-let draft = cx.new(|cx| {
-    TextareaState::new(window, cx)
-        .placeholder("An automatically growing textarea…")
-        .auto_grow(1, 8)
-});
-```
-
-Pass it to `InputGroupTextarea`, refine typography with `Styled`, and place
-Submit in a block-end addon. The group's control slot still accepts the native
-typed input or textarea; this recipe does not introduce a custom-control slot.
-
-## JavaScript shell
-
-All six parts are registered in `gpui-component-shell`, reusing the existing
-`InputState` and `TextareaState` constructors. The shell's common `.input(...)`
-slot accepts either `InputGroupInput` or `InputGroupTextarea`; repeated calls
-replace the control. Create states in `View.init`:
+Import the same parts from `gpui-component`. Create text states in `View.init`.
+Use `.value(...)` and `.on_change(...)` for a controlled input:
 
 ```javascript
 import { View } from "gpui-kit";
@@ -399,18 +345,30 @@ export default class Search extends View {
 }
 ```
 
-`value(...)` updates native text only when it differs. Programmatic changes are
-silent; equal values preserve selection and undo history. Omit `value` for
-uncontrolled retained text. `on_change(value, cx)` reports edits. Re-rendering
-updates callbacks without adding duplicate subscriptions.
+Programmatic `.value(...)` updates do not call `on_change`. Setting the same value
+keeps the selection and undo history. Omit `.value(...)` to let the input keep its
+own value, and use `on_change(value, cx)` when you need to react to edits.
 
-`InputGroupTextarea` adds `.rows(n)` and `.auto_grow(min, max)`; `.placeholder`
-is available on both controls. `InputGroupInput` adds `.masked(bool)` and
-`.content_type(...)`, whose literals follow `InputContentType` in snake_case,
-such as `email_address`, `url`, and `new_password`.
-Shell button sizes are `xsmall`, `small`, `icon-xsmall`, and `icon-small`.
-Use `.icon("icons/search.svg")` for button icons and `.aria_label(...)` for their names.
-`.child(...)` remains available for custom button content.
+`InputGroupTextarea` accepts `TextareaState` and supports `.rows(n)` and
+`.auto_grow(min, max)`. Both input parts provide `.placeholder(...)`.
+`InputGroupInput` also provides `.masked(bool)` and `.content_type(...)`, with
+values such as `email_address`, `url`, and `new_password`.
 
-The native and JavaScript Stories both include working input groups. Regenerate
-declarations with `gpui-component-shell types <application>` for editor completion.
+Set group size with `.size("small")`; available values are `xsmall`, `small`,
+`medium`, and `large`. Button sizes are `xsmall`, `small`, `icon-xsmall`, and
+`icon-small`. Button icons take an asset path, such as `.icon("icons/search.svg")`.
+
+The six style methods above are also available in JavaScript:
+
+```javascript
+new InputGroupInput(this.input)
+  .editor_style(style => style.px(12).text_base());
+
+new InputGroupButton("clear").label("Clear").icon("icons/x.svg")
+  .label_style(style => style.font_semibold())
+  .icon_style(style => style.size_4());
+```
+
+A style callback can call style methods, `when`, and `map`. Return the supplied
+style or return nothing; children and event handlers belong on the component.
+Run `gpui-component-shell types <application>` to generate editor completion.
