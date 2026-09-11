@@ -378,14 +378,17 @@ impl SyntaxHighlighter {
             ));
         };
 
-        // Languages without grammar default to a highlighter that never
-        // parses and creates no styles.
-        let Some(grammar) = config.language.as_ref() else {
+        // Languages without a parser (neither a statically linked grammar nor a
+        // registered parser factory) default to a highlighter that never parses
+        // and creates no styles.
+        if !LanguageRegistry::singleton().has_parser(lang) {
             return Ok(Self::build_inert(config.name.clone()));
-        };
+        }
 
-        let mut parser = Parser::new();
-        parser.set_language(grammar).context("parse set_language")?;
+        let (mut parser, grammar) = LanguageRegistry::singleton().parser(lang)?;
+        parser
+            .set_language(&grammar)
+            .context("parse set_language")?;
 
         // Concatenate the query strings, keeping track of the start offset of each section.
         let mut query_source = String::new();
@@ -397,7 +400,7 @@ impl SyntaxHighlighter {
 
         // Construct a single query by concatenating the three query strings, but record the
         // range of pattern indices that belong to each individual string.
-        let mut query = Query::new(grammar, &query_source).context("new query")?;
+        let mut query = Query::new(&grammar, &query_source).context("new query")?;
 
         let mut locals_pattern_index = 0;
         let mut highlights_pattern_index = 0;
@@ -414,7 +417,7 @@ impl SyntaxHighlighter {
         }
 
         let injections_query = if !config.injections.is_empty() {
-            Query::new(grammar, &config.injections).ok().map(Arc::new)
+            Query::new(&grammar, &config.injections).ok().map(Arc::new)
         } else {
             None
         };
@@ -672,7 +675,8 @@ impl SyntaxHighlighter {
                 return Some((config.name, query.clone()));
             }
 
-            let query = match Query::new(config.language.as_ref()?, &config.highlights) {
+            let grammar = LanguageRegistry::singleton().grammar(language_name).ok()?;
+            let query = match Query::new(&grammar, &config.highlights) {
                 Ok(query) => Arc::new(query),
                 Err(error) => {
                     tracing::error!(
@@ -847,9 +851,8 @@ impl SyntaxHighlighter {
             let end = ranges.iter().map(|r| r.end_byte).max()?;
             Some(start..end)
         }
-        let config = LanguageRegistry::singleton().language(language_name)?;
-        let mut parser = Parser::new();
-        parser.set_language(config.language.as_ref()?).ok()?;
+        let (mut parser, grammar) = LanguageRegistry::singleton().parser(language_name).ok()?;
+        parser.set_language(&grammar).ok()?;
         parser.set_included_ranges(&ranges).ok()?;
         let parse_start = Instant::now();
         let mut timed_out = false;

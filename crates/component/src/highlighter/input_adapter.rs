@@ -15,14 +15,13 @@ use gpui_base::input::{
     InputHighlighterFactory,
 };
 use ropey::Rope;
-use tree_sitter::{InputEdit, ParseOptions, Parser, Point};
+use tree_sitter::{InputEdit, ParseOptions, Point};
 
 use super::{LanguageRegistry, SyntaxHighlighter};
 
 pub(crate) fn input_highlighter_factory() -> InputHighlighterFactory {
     Rc::new(|language| {
-        let config = LanguageRegistry::singleton().language(language)?;
-        config.has_grammar().then(|| {
+        LanguageRegistry::singleton().has_parser(language).then(|| {
             Box::new(TreeSitterInputHighlighter::new(language)) as Box<dyn InputHighlighter>
         })
     })
@@ -108,10 +107,9 @@ impl InputHighlighter for TreeSitterInputHighlighter {
             let result = cx
                 .background_executor()
                 .spawn(async move {
-                    let config = LanguageRegistry::singleton().language(&language)?;
-                    let grammar = config.language.as_ref()?;
-                    let mut parser = Parser::new();
-                    parser.set_language(grammar).ok()?;
+                    let (mut parser, grammar) =
+                        LanguageRegistry::singleton().parser(&language).ok()?;
+                    parser.set_language(&grammar).ok()?;
                     let mut progress = |_: &tree_sitter::ParseState| {
                         if parse_cancel.load(Ordering::Relaxed) {
                             std::ops::ControlFlow::Break(())

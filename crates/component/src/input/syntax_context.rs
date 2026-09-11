@@ -10,8 +10,7 @@ use gpui_base::input::SyntaxContextProvider;
 pub(crate) fn syntax_context_provider(language: &str) -> Option<Rc<dyn SyntaxContextProvider>> {
     use crate::highlighter::LanguageRegistry;
 
-    let config = LanguageRegistry::singleton().language(language)?;
-    let grammar = config.language?;
+    let grammar = LanguageRegistry::singleton().grammar(language).ok()?;
     TreeSitterSyntaxContext::new(grammar)
         .map(|provider| Rc::new(provider) as Rc<dyn SyntaxContextProvider>)
 }

@@ -850,7 +850,7 @@ html.dark .astro-code span {
   height: calc(100vh - var(--nav-height));
   overflow-y: auto;
   flex-shrink: 0;
-  padding: 1.5rem 1rem 1.5rem 0;
+  padding: 1.5rem 1rem 1.5rem 0.5rem;
   border-right: 1px solid var(--border);
   scrollbar-gutter: stable;
 }
@@ -1202,7 +1202,7 @@ html[lang^="zh"] :is(
     width: auto;
     height: auto;
     max-height: 60vh;
-    padding: 1rem 0;
+    padding: 1rem 0.5rem;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }
