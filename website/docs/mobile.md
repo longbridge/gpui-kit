@@ -112,6 +112,7 @@ Share component behavior and content with desktop, while adapting the screen to 
 - Let the native container handle navigation, safe areas, and keyboard avoidance. Avoid stacking a second title bar or duplicating safe-area padding inside Rust.
 - Give each conversation one vertical scroll owner. For a `TextView` within that scroller, use `.w_full().min_w_0().scrollable(false)` so text and images fit the available width.
 - Keep the composer compact when empty. Use a single-line input when multiline composition is unnecessary, and ensure the keyboard does not cover the send action.
+- HoverCard opens and closes by tapping its trigger on iOS and Android. Tap outside to dismiss it; moving a finger does not open the card.
 - Make actions discoverable by touch. Keep copy actions aligned with the reply and use a brief checkmark after copying. Do not rely on hover text to explain an action.
 - Prefer short paragraphs and purposeful headings. Let code, tables, and images support the conversation rather than presenting every Markdown format in each reply.
 - Use Kit theme colors, type sizes, and spacing consistently. Check long replies, wide code, image loading, and Chinese or other scripts at the actual device width.
