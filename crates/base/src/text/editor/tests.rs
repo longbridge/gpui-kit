@@ -541,7 +541,7 @@ fn double_click_selects_words_in_editable_and_readonly_markdown(cx: &mut gpui::T
     cx.update(crate::init);
     for readonly in [false, true] {
         for (source, offset, expected) in [
-            ("before **hel**lo after", 9, "hello"),
+            ("before **some**thing after", 9, "something"),
             ("before `hello` after", 9, "hello"),
             ("中文", 3, "文"),
         ] {
