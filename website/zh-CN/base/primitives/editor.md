@@ -51,7 +51,13 @@ Editor::new(&editor)
 
 ## 空白字符与装饰
 
-通过 `show_whitespaces(true)` 显示空白字符，通过 `create_decorations_collection` 创建随文本编辑自动跟踪范围的装饰集合。只要装饰仍需生效，就应保留返回的 collection。
+通过 `show_whitespaces(true)` 显示空白字符，通过 `create_decorations_collection` 创建随文本编辑自动跟踪范围的装饰集合。保留句柄用于更新或清空条目；丢弃句柄不会移除装饰。
+
+`create_range_decorations_collection` 创建独立的 `RangeDecoration` 填充或边框集合，只参与绘制。
+文本装饰和几何装饰共享 UTF-8 范围归一化与编辑跟踪。
+所有权、边界亲和性、删除、撤销重做、折叠、绘制顺序及索引语义参见
+[几何范围装饰](../../component/editor.md#几何范围装饰)；直接使用 Base 时，从
+`gpui_kit::base::input` 导入相同的类型。
 
 ## 高亮与语言功能
 

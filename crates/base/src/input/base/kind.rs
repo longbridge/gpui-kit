@@ -29,7 +29,8 @@ use ropey::Rope;
 use super::decorations::DecorationCollections;
 use super::lsp::{ContextMenuContent, HoverDefinition, InlineCompletion};
 use crate::input::{
-    HighlightStyleResolver, InputEdit, InputHighlighter, SyntaxContext, TextDecoration,
+    HighlightStyleResolver, InputEdit, InputHighlighter, RangeDecoration, SyntaxContext,
+    TextDecoration,
 };
 use crate::input::{HoverPopoverState, Lsp};
 use gpui::Task;
@@ -79,6 +80,11 @@ impl MultiLineMode for EditorMode {}
 pub trait InputExtras: Default + 'static {
     /// Decoration ranges to paint, innermost collection first.
     fn decoration_layers(&self) -> Vec<&[TextDecoration]> {
+        Vec::new()
+    }
+
+    /// Geometric decorations intersecting visible, non-folded buffer spans.
+    fn range_decorations(&self, _ranges: &[std::ops::Range<usize>]) -> Vec<&RangeDecoration> {
         Vec::new()
     }
 
@@ -336,6 +342,7 @@ impl InputModeKind for TextareaMode {
 pub struct EditorExtras {
     pub(crate) lsp: Lsp,
     pub(crate) decorations: DecorationCollections,
+    pub(crate) range_decorations: DecorationCollections<RangeDecoration>,
     pub(crate) inline_completion: InlineCompletion,
     pub(crate) context_menu_content: ContextMenuContent,
     pub(crate) hover_popover: Option<HoverPopoverState>,
@@ -348,6 +355,7 @@ impl Default for EditorExtras {
         Self {
             lsp: Lsp::default(),
             decorations: DecorationCollections::default(),
+            range_decorations: DecorationCollections::default(),
             inline_completion: InlineCompletion::default(),
             context_menu_content: ContextMenuContent::default(),
             hover_popover: None,
