@@ -8391,6 +8391,55 @@ impl ShellRuntime {
             (ArgumentSchema::Boolean, Argument::Value(Bridged::Bool(value))) => {
                 Some(ComponentArgument::Boolean(*value))
             }
+            (ArgumentSchema::Style, Argument::Handler(handler)) => {
+                let node = self.arena.borrow_mut().push(Component::Div);
+                self.arena
+                    .borrow_mut()
+                    .claim(node)
+                    .map_err(|error| Exception::throw_type(ctx, &error.to_string()))?;
+                let module: Object = ctx.globals().get("__gpui")?;
+                let element: Function = module.get("__element")?;
+                let target: Object = element.call((node,))?;
+                let result: Value = handler.clone().restore(ctx)?.call((target,))?;
+                if !result.is_undefined()
+                    && result
+                        .as_object()
+                        .and_then(|object| object.get::<_, u32>("__id").ok())
+                        != Some(node)
+                {
+                    return Err(Exception::throw_type(
+                        ctx,
+                        &format!("{api}({name}) must return its style argument or undefined"),
+                    ));
+                }
+                let arena = self.arena.borrow();
+                let declaration = arena.node(node).expect("style declaration is live");
+                if !declaration.children().is_empty() {
+                    return Err(Exception::throw_type(
+                        ctx,
+                        &format!("{api}({name}) accepts only style declarations"),
+                    ));
+                }
+                let mut refinement = gpui::StyleRefinement::default();
+                for operation in declaration.ops() {
+                    refinement = match operation {
+                        SpecOp::NullaryStyle(index) => {
+                            crate::style::apply_nullary(*index, refinement)
+                        }
+                        SpecOp::ParamStyle(method, arguments) => {
+                            crate::style::apply_param(method, arguments, refinement)
+                                .map_err(|error| Exception::throw_type(ctx, &error.to_string()))?
+                        }
+                        _ => {
+                            return Err(Exception::throw_type(
+                                ctx,
+                                &format!("{api}({name}) accepts only style declarations"),
+                            ));
+                        }
+                    };
+                }
+                Some(ComponentArgument::Style(Box::new(refinement)))
+            }
             (ArgumentSchema::Element, Argument::Element(id)) => {
                 self.arena
                     .borrow()
@@ -9647,6 +9696,7 @@ fn schema_name(schema: &ArgumentSchema) -> String {
         ArgumentSchema::String => "a string".into(),
         ArgumentSchema::Number => "a finite number".into(),
         ArgumentSchema::Boolean => "a boolean".into(),
+        ArgumentSchema::Style => "a style declaration function".into(),
         ArgumentSchema::Element => "an Element".into(),
         ArgumentSchema::Entity(kind) => format!("a {kind} entity"),
         ArgumentSchema::Callback(_) => "a function".into(),
@@ -9674,6 +9724,7 @@ fn collect_component_elements(argument: &ComponentArgument, elements: &mut Vec<S
         ComponentArgument::String(_)
         | ComponentArgument::Number(_)
         | ComponentArgument::Boolean(_)
+        | ComponentArgument::Style(_)
         | ComponentArgument::Entity { .. }
         | ComponentArgument::Callback(_)
         | ComponentArgument::Enum(_)
