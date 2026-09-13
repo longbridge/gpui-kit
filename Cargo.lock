@@ -2719,6 +2719,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-markdown-editor"
+version = "0.6.1"
+dependencies = [
+ "gpui-kit",
+ "gpui-pre-reqwest-client",
+ "regex",
+]
+
+[[package]]
 name = "example-stream-markdown"
 version = "0.6.1"
 dependencies = [
