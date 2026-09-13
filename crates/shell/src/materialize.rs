@@ -138,6 +138,7 @@ use gpui_base::{
 mod components;
 
 use crate::{
+    capability::is_openable_url,
     engine::ShellRuntime,
     scroll::Scrollable,
     snapshot::RenderSnapshot,
@@ -1072,6 +1073,20 @@ fn materialize_component(
                 );
                 view = view.on_link_click(move |url, _event, window, cx| {
                     route.emit(crate::HostValue::from(url.to_string()), window, cx);
+                });
+            } else {
+                view = view.on_link_click(|url, event, _, cx| {
+                    // Preserve Base's activation behavior, but apply Shell's URL rules.
+                    let activate = match event {
+                        gpui::ClickEvent::Mouse(click) => {
+                            matches!(click.up.button, MouseButton::Left | MouseButton::Middle)
+                        }
+                        gpui::ClickEvent::Keyboard(_) => true,
+                        gpui::ClickEvent::Touch(click) => !click.long_press,
+                    };
+                    if activate && is_openable_url(url) {
+                        cx.open_url(url);
+                    }
                 });
             }
             Styled::style(&mut view).refine(&refinement);
