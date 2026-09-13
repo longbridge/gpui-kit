@@ -8,6 +8,19 @@ use std::path::{Path, PathBuf};
 
 use cap_std::{ambient_authority, fs::Dir};
 
+/// Whether a script may hand `url` to the system URL opener.
+///
+/// One rule for every route out: `Link.href`, `cx.open_url`, and a link in
+/// `TextView` content. The scheme check is the part that matters. Without it
+/// any of them becomes a way to hand an arbitrary URI to whatever handler the
+/// desktop has registered for its scheme, which is a considerably larger thing
+/// than opening a page.
+pub(crate) fn is_openable_url(url: &str) -> bool {
+    reqwest::Url::parse(url).is_ok_and(|parsed| {
+        matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some()
+    })
+}
+
 /// A capability grant. Every field is private so adding a capability later is
 /// not a breaking change for embedders.
 #[derive(Clone, Debug, Default)]

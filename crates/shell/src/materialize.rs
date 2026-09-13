@@ -138,6 +138,7 @@ use gpui_base::{
 mod components;
 
 use crate::{
+    capability::is_openable_url,
     engine::ShellRuntime,
     scroll::Scrollable,
     snapshot::RenderSnapshot,
@@ -1083,10 +1084,7 @@ fn materialize_component(
                         gpui::ClickEvent::Keyboard(_) => true,
                         gpui::ClickEvent::Touch(click) => !click.long_press,
                     };
-                    let valid = reqwest::Url::parse(url).is_ok_and(|parsed| {
-                        matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some()
-                    });
-                    if activate && valid {
+                    if activate && is_openable_url(url) {
                         cx.open_url(url);
                     }
                 });
