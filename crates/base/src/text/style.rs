@@ -26,16 +26,8 @@ pub struct TextViewStyle {
     table_head: StyleRefinement,
     table_cell: StyleRefinement,
     inline_code: HighlightStyle,
-    inline_code_font_scale: Option<f32>,
     is_dark: bool,
 }
-
-/// The factor inline code is drawn at, relative to the text around it.
-///
-/// A monospace span tends to read larger than the proportional text beside it,
-/// so it is shrunk slightly by default. See
-/// [`TextViewStyle::with_inline_code_font_scale`].
-pub const INLINE_CODE_FONT_SCALE: f32 = 0.875;
 
 impl PartialEq for TextViewStyle {
     fn eq(&self, other: &Self) -> bool {
@@ -60,7 +52,6 @@ impl PartialEq for TextViewStyle {
             && self.table_head == other.table_head
             && self.table_cell == other.table_cell
             && self.inline_code == other.inline_code
-            && self.inline_code_font_scale == other.inline_code_font_scale
             && self.is_dark == other.is_dark
     }
 }
@@ -104,7 +95,6 @@ impl TextViewStyle {
                 background_color: Some(colors.accent),
                 ..Default::default()
             },
-            inline_code_font_scale: Some(INLINE_CODE_FONT_SCALE),
             is_dark,
         }
     }
@@ -184,21 +174,6 @@ impl TextViewStyle {
     /// which keeps [`TextViewStyle::default`] usable without a theme.
     pub fn with_inline_code(mut self, style: HighlightStyle) -> Self {
         self.inline_code = style;
-        self
-    }
-
-    /// Sets the font size of inline code, as a factor of the surrounding text.
-    ///
-    /// Defaults to [`INLINE_CODE_FONT_SCALE`], which keeps a monospace span
-    /// from towering over proportional prose. Pass `None` to draw inline code
-    /// at the size of the text around it.
-    ///
-    /// A GPUI run may vary its font but not its size, so a span drawn at a
-    /// different size must be shaped as its own line. Passing `None` keeps the
-    /// paragraph a single shaped line, which matters when the surrounding text
-    /// is already monospace, or when a span is long enough to wrap.
-    pub fn with_inline_code_font_scale(mut self, scale: Option<f32>) -> Self {
-        self.inline_code_font_scale = scale;
         self
     }
 
@@ -314,12 +289,6 @@ impl TextViewStyle {
         self.inline_code
     }
 
-    /// The font size of inline code as a factor of the surrounding text, or
-    /// `None` when it is drawn at the size of the text around it.
-    pub fn inline_code_font_scale(&self) -> Option<f32> {
-        self.inline_code_font_scale
-    }
-
     /// Whether content-specific assets should use their dark variant.
     pub fn is_dark(&self) -> bool {
         self.is_dark
@@ -384,22 +353,6 @@ mod tests {
         let style = style.with_heading_font_size(|level, base| base * (7. - level as f32));
         assert_eq!(style.heading_font_size(1), Some(px(14.) * 6.));
         assert_eq!(style.heading_font_size(6), Some(px(14.)));
-    }
-
-    #[test]
-    fn inline_code_is_shrunk_by_default_and_can_be_left_alone() {
-        assert_eq!(
-            TextViewStyle::default().inline_code_font_scale(),
-            Some(INLINE_CODE_FONT_SCALE),
-            "the default must not change: every caller renders against it"
-        );
-        assert_eq!(
-            TextViewStyle::default()
-                .with_inline_code_font_scale(None)
-                .inline_code_font_scale(),
-            None,
-            "None is what keeps a paragraph one shaped line"
-        );
     }
 
     #[test]

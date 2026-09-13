@@ -35,6 +35,22 @@ pub(super) struct InlineHighlight {
 }
 
 impl InlineHighlight {
+    /// The size this span is drawn at, relative to the text around it.
+    ///
+    /// Inline code is shrunk to compensate for a monospace family reading
+    /// larger than the proportional prose beside it. When the span is already
+    /// set in the surrounding family there is nothing to compensate for, and
+    /// shrinking it only costs: a differing size forces the paragraph to be
+    /// shaped in pieces (see [`text_size_ranges`]), and a span long enough to
+    /// wrap inside its own piece is then laid out against a line the other
+    /// pieces never agreed to.
+    pub(super) fn font_size_scale_in(&self, body_family: &str) -> f32 {
+        match &self.font_family {
+            Some(family) if family.as_ref() == body_family => 1.,
+            _ => self.font_size_scale.unwrap_or(1.),
+        }
+    }
+
     /// Layers `other` over `self`, the way [`HighlightStyle::highlight`] does.
     fn highlight(mut self, other: &InlineHighlight) -> Self {
         self.style = self.style.highlight(other.style);
@@ -132,6 +148,7 @@ pub(super) fn text_runs(
 pub(super) fn text_size_ranges(
     text_len: usize,
     highlights: &[(Range<usize>, InlineHighlight)],
+    body_family: &str,
 ) -> Vec<(Range<usize>, f32)> {
     let mut ranges: Vec<(Range<usize>, f32)> = Vec::new();
     let mut push = |range: Range<usize>, scale: f32| {
@@ -150,7 +167,7 @@ pub(super) fn text_size_ranges(
     let mut cursor = 0;
     for (range, highlight) in highlights {
         push(cursor..range.start, 1.);
-        push(range.clone(), highlight.font_size_scale.unwrap_or(1.));
+        push(range.clone(), highlight.font_size_scale_in(body_family));
         cursor = range.end;
     }
     push(cursor..text_len, 1.);
@@ -1088,7 +1105,9 @@ pub(super) mod test_fonts {
 
 #[cfg(test)]
 mod tests {
-    use super::{InlineHighlight, combine_highlights, point_in_text_selection, text_runs};
+    use super::{
+        InlineHighlight, combine_highlights, point_in_text_selection, text_runs, text_size_ranges,
+    };
     use gpui::{FontWeight, HighlightStyle, SharedString, TextStyle, point, px};
 
     fn mono(style: HighlightStyle) -> InlineHighlight {
@@ -1097,6 +1116,53 @@ mod tests {
             font_family: Some(SharedString::from("Mono")),
             font_size_scale: None,
         }
+    }
+
+    /// A code span in a family of its own is drawn smaller, so the paragraph
+    /// has to be shaped in pieces: GPUI runs vary the font but not its size.
+    #[test]
+    fn a_code_span_in_another_family_splits_the_paragraph() {
+        let mut code = mono(HighlightStyle::default());
+        code.font_size_scale = Some(0.875);
+        let highlights = vec![(4..8, code)];
+
+        assert_eq!(
+            text_size_ranges(12, &highlights, "Body"),
+            vec![(0..4, 1.), (4..8, 0.875), (8..12, 1.)],
+            "the span is a different size, so it is shaped on its own"
+        );
+    }
+
+    /// The shrink compensates for a monospace family beside proportional prose.
+    /// In a document already set in that family there is nothing to compensate
+    /// for, and splitting the paragraph is all the shrink would achieve — which
+    /// a span long enough to wrap inside its own piece does not survive.
+    #[test]
+    fn a_code_span_in_the_surrounding_family_keeps_the_paragraph_whole() {
+        let mut code = mono(HighlightStyle::default());
+        code.font_size_scale = Some(0.875);
+        let highlights = vec![(4..8, code)];
+
+        assert_eq!(
+            text_size_ranges(12, &highlights, "Mono"),
+            vec![(0..12, 1.)],
+            "same family, same size, one shaped line"
+        );
+    }
+
+    #[test]
+    fn a_span_with_no_family_of_its_own_is_unaffected() {
+        let plain = InlineHighlight {
+            style: HighlightStyle::default(),
+            font_family: None,
+            font_size_scale: Some(0.5),
+        };
+
+        assert_eq!(
+            text_size_ranges(12, &vec![(4..8, plain)], "Body"),
+            vec![(0..4, 1.), (4..8, 0.5), (8..12, 1.)],
+            "a size asked for without a family change is still honoured"
+        );
     }
 
     #[test]

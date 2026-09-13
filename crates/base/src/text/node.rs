@@ -1536,10 +1536,7 @@ fn mark_highlight(mark: &TextMark, node_cx: &NodeContext, cx: &App) -> InlineHig
     InlineHighlight {
         style: highlight,
         font_family,
-        font_size_scale: mark
-            .code
-            .then(|| node_cx.style.inline_code_font_scale())
-            .flatten(),
+        font_size_scale: mark.code.then_some(0.875),
     }
 }
 
@@ -1914,7 +1911,9 @@ fn measure_table_columns(
                     })
                     .collect::<Vec<_>>();
                 let mut line_w = gpui::Pixels::ZERO;
-                for (range, scale) in text_size_ranges(line.len(), &line_highlights) {
+                for (range, scale) in
+                    text_size_ranges(line.len(), &line_highlights, &text_style.font_family)
+                {
                     let highlights = slice_ranges(
                         &line_highlights,
                         range.start,

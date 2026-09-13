@@ -738,7 +738,9 @@ fn layout_measured_flow(
                 } => {
                     let local_start = line_range.start.max(item_start) - item_start;
                     let local_end = line_range.end.min(item_end) - item_start;
-                    for (segment, scale) in text_size_ranges(text.len(), highlights) {
+                    for (segment, scale) in
+                        text_size_ranges(text.len(), highlights, &text_style.font_family)
+                    {
                         let start = local_start.max(segment.start);
                         let end = local_end.min(segment.end);
                         if start >= end {
@@ -1010,7 +1012,7 @@ fn push_text_wrap_fragments<'a>(
                 .text_system()
                 .layout_line(
                     text,
-                    font_size * highlight.font_size_scale.unwrap_or(1.),
+                    font_size * highlight.font_size_scale_in(&text_style.font_family),
                     &runs,
                     None,
                 )
