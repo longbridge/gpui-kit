@@ -1536,7 +1536,10 @@ fn mark_highlight(mark: &TextMark, node_cx: &NodeContext, cx: &App) -> InlineHig
     InlineHighlight {
         style: highlight,
         font_family,
-        font_size_scale: mark.code.then_some(0.875),
+        font_size_scale: mark
+            .code
+            .then(|| node_cx.style.inline_code_font_scale())
+            .flatten(),
     }
 }
 
