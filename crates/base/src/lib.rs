@@ -99,7 +99,7 @@ pub use dialog::{
     Dialog, DialogBackdrop, DialogChangeReason, DialogClose, DialogDescription, DialogHandle,
     DialogPopup, DialogTitle, DialogTrigger,
 };
-pub use elastic_scroll::ElasticScroll;
+pub use elastic_scroll::{ElasticScroll, ElasticScrollMotion};
 pub use element_ext::ElementExt;
 pub use event::{InteractiveElementExt, OngoingScrollExt};
 pub use focus_trap::FocusTrapElement;

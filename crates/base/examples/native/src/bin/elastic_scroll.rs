@@ -73,7 +73,7 @@ impl Example {
 impl Render for Example {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         palette::activate(window, cx);
-        let colors = gpui_base::Theme::global(cx).tokens.colors.clone();
+        let colors = gpui_base::Theme::global(cx).tokens.colors;
         let border = colors.border;
         let surface = colors.surface;
         let generation = self.generation;

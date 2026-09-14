@@ -1,13 +1,86 @@
 //! Boundary displacement only: the list keeps its clamped logical position.
 
-use crate::ScrollbarHandle;
+use crate::{OngoingScrollExt as _, ScrollbarHandle};
 use gpui::{
     AnyElement, App, Bounds, ContentMask, DispatchPhase, Element, ElementId, GlobalElementId,
-    Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId, Pixels, ScrollDelta,
-    ScrollWheelEvent, TouchPhase, Window, point, px,
+    Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId, OngoingScroll, Pixels,
+    ScrollDelta, ScrollWheelEvent, TouchPhase, Window, point, px,
 };
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 use web_time::Instant;
+
+/// Motion tokens for [`ElasticScroll`]: how far a drag stretches the viewport
+/// past an edge, and how quickly a released edge returns.
+///
+/// Base plays the stretch and the return; the feel belongs to the caller.
+/// The default is tuned to feel like a `UIScrollView` bounce.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ElasticScrollMotion {
+    tracking: f32,
+    response: Duration,
+}
+
+impl Default for ElasticScrollMotion {
+    fn default() -> Self {
+        Self::ios()
+    }
+}
+
+impl ElasticScrollMotion {
+    /// Motion tuned to feel like a `UIScrollView` bounce; not UIKit constants.
+    pub fn ios() -> Self {
+        Self {
+            tracking: 0.55,
+            response: Duration::from_millis(524),
+        }
+    }
+
+    /// Fraction of finger travel the stretched edge follows at first.
+    ///
+    /// The edge follows less and less as it approaches the viewport height,
+    /// which it never reaches. Tracking is independent of the return, so
+    /// slowing the return does not change how the finger feels.
+    ///
+    /// # Panics
+    ///
+    /// Panics when `tracking` is not finite or not positive.
+    pub fn with_tracking(mut self, tracking: f32) -> Self {
+        assert!(
+            tracking.is_finite() && tracking > 0.,
+            "elastic scroll tracking must be finite and positive"
+        );
+        self.tracking = tracking;
+        self
+    }
+
+    /// Time scale of the return once the finger lifts.
+    ///
+    /// Read the way [`crate::Spring::new`] reads its response: the period one
+    /// full oscillation would take without damping, which is the scale the
+    /// return is felt at rather than the moment it stops. The return is
+    /// critically damped, so it never crosses the edge. A zero response snaps
+    /// the edge back on the spot.
+    pub fn with_response(mut self, response: Duration) -> Self {
+        self.response = response;
+        self
+    }
+
+    /// Fraction of finger travel the stretched edge follows at first.
+    pub fn tracking(&self) -> f32 {
+        self.tracking
+    }
+
+    /// Time scale of the return once the finger lifts.
+    pub fn response(&self) -> Duration {
+        self.response
+    }
+
+    /// Undamped angular frequency of the return, or `None` when it snaps.
+    fn omega(&self) -> Option<f32> {
+        let seconds = self.response.as_secs_f32();
+        (seconds > 0.).then(|| std::f32::consts::TAU / seconds)
+    }
+}
 
 /// Adds vertical touch overscroll to an existing scroll viewport.
 ///
@@ -25,6 +98,7 @@ pub struct ElasticScroll<H: ScrollbarHandle + Clone> {
     handle: H,
     child: AnyElement,
     enabled: bool,
+    motion: ElasticScrollMotion,
     on_scroll: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
 }
 
@@ -35,6 +109,7 @@ impl<H: ScrollbarHandle + Clone> ElasticScroll<H> {
             handle: handle.clone(),
             child: child.into_any_element(),
             enabled: cfg!(any(target_os = "ios", target_os = "android")),
+            motion: ElasticScrollMotion::default(),
             on_scroll: None,
         }
     }
@@ -42,6 +117,12 @@ impl<H: ScrollbarHandle + Clone> ElasticScroll<H> {
     /// Opt in on a platform with compatible touch phase semantics.
     pub fn enabled(mut self, enabled: bool) -> Self {
         self.enabled = enabled;
+        self
+    }
+
+    /// Set how far a drag stretches past an edge and how the edge returns.
+    pub fn motion(mut self, motion: ElasticScrollMotion) -> Self {
+        self.motion = motion;
         self
     }
 
@@ -58,6 +139,14 @@ impl<H: ScrollbarHandle + Clone> ElasticScroll<H> {
 struct State {
     physics: Physics,
     sampled_at: Option<Instant>,
+    ongoing_scroll: OngoingScroll,
+}
+
+/// `ScrollbarHandle` has no `max_offset`; recover it from the definition
+/// `content_size = viewport + max_offset`. Both dispatch phases clamp against
+/// this bound and must agree on it.
+fn max_scroll_extent(handle: &impl ScrollbarHandle) -> Pixels {
+    (handle.content_size().height - handle.viewport_bounds().size.height).max(px(0.))
 }
 
 #[doc(hidden)]
@@ -115,6 +204,7 @@ impl<H: ScrollbarHandle + Clone> Element for ElasticScroll<H> {
             if !self.enabled || cx.reduce_motion() {
                 *state = State::default();
             }
+            state.physics.motion = self.motion;
             let now = Instant::now();
             let elapsed = state
                 .sampled_at
@@ -152,13 +242,23 @@ impl<H: ScrollbarHandle + Clone> Element for ElasticScroll<H> {
             let on_scroll = self.on_scroll.clone();
             let mut before = 0.;
             window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
-                let ScrollDelta::Pixels(delta) = event.delta else {
+                let ScrollDelta::Pixels(mut delta) = event.delta else {
                     return;
                 };
-                if !hitbox.should_handle_scroll(window) || delta.x.abs() > delta.y.abs() {
+                if !hitbox.should_handle_scroll(window) {
                     return;
                 }
                 let mut state = state.borrow_mut();
+                // Lock the gesture to the axis it started on, so a diagonal
+                // swipe cannot wobble out of the stretch from one packet to
+                // the next. Both dispatch phases see the same packet, and the
+                // lock gives both the same answer.
+                state
+                    .ongoing_scroll
+                    .lock_axis(&mut delta, event.touch_phase);
+                if delta.x.abs() > delta.y.abs() {
+                    return;
+                }
                 let ended = matches!(event.touch_phase, TouchPhase::Ended | TouchPhase::Cancelled);
                 let mut scrolled = false;
                 let mut changed = false;
@@ -174,9 +274,7 @@ impl<H: ScrollbarHandle + Clone> Element for ElasticScroll<H> {
                     if state.physics.offset() != 0. {
                         let remainder = state.physics.pull(delta.y.as_f32());
                         if remainder != 0. {
-                            let max = (handle.content_size().height
-                                - handle.viewport_bounds().size.height)
-                                .max(px(0.));
+                            let max = max_scroll_extent(&handle);
                             let mut offset = handle.offset();
                             offset.y = px(before + remainder).clamp(-max, px(0.));
                             handle.set_offset(offset);
@@ -195,8 +293,7 @@ impl<H: ScrollbarHandle + Clone> Element for ElasticScroll<H> {
                     // prepaint. Clamp here so that boundary deltas are not
                     // mistaken for consumed scrolling (ListState clamps eagerly).
                     let mut offset = handle.offset();
-                    let max = (handle.content_size().height - handle.viewport_bounds().size.height)
-                        .max(px(0.));
+                    let max = max_scroll_extent(&handle);
                     let clamped = offset.y.clamp(-max, px(0.));
                     if clamped != offset.y {
                         offset.y = clamped;
@@ -250,13 +347,15 @@ struct Physics {
     pub dragging: bool,
     pub suppress_momentum: bool,
     extent: f32,
+    motion: ElasticScrollMotion,
 }
 
 impl Physics {
     pub fn offset(&self) -> f32 {
         if self.dragging {
             let d = self.extent.max(1.);
-            self.position * 0.55 / (1. + 0.55 * self.position.abs() / d)
+            let tracking = self.motion.tracking;
+            self.position * tracking / (1. + tracking * self.position.abs() / d)
         } else {
             self.position
         }
@@ -264,9 +363,16 @@ impl Physics {
 
     pub fn begin(&mut self, extent: f32) {
         let offset = self.offset();
-        self.extent = extent.max(1.);
+        // A displaced edge keeps the extent it was stretched under. The
+        // rubber-band curve saturates at the extent, so re-reading a viewport
+        // that shrank mid-return (rotation, keyboard) could not place the
+        // finger where the edge is: it would snap, then need a long pull back.
+        if offset == 0. {
+            self.extent = extent.max(1.);
+        }
         // Invert the rubber-band curve so grabbing a returning edge is continuous.
-        self.position = offset / (0.55 * (1. - offset.abs() / self.extent).max(0.01));
+        let tracking = self.motion.tracking;
+        self.position = offset / (tracking * (1. - offset.abs() / self.extent).max(0.01));
         self.velocity = 0.;
         self.dragging = true;
         self.suppress_momentum = false;
@@ -298,9 +404,11 @@ impl Physics {
         if self.dragging || self.position == 0. {
             return false;
         }
-        // Tuned return speed, not a UIKit constant. Keep the drag resistance
-        // independent so slowing the return does not change finger tracking.
-        let omega = 12.;
+        let Some(omega) = self.motion.omega() else {
+            self.position = 0.;
+            self.velocity = 0.;
+            return false;
+        };
         let decay = (-omega * seconds).exp();
         let c = self.velocity + omega * self.position;
         self.position = (self.position + c * seconds) * decay;
@@ -566,6 +674,116 @@ mod tests {
         assert!(scroll.offset() > 0. && scroll.offset() < 55.);
         assert_eq!(scroll.pull(-130.), -30.);
         assert_eq!(scroll.offset(), 0.);
+    }
+
+    #[gpui::test]
+    fn diagonal_wobble_stays_with_the_stretch(cx: &mut TestAppContext) {
+        let handle = ScrollHandle::new();
+        let (_, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            move |_, _| ScrollTest {
+                handle,
+                enabled: true,
+            }
+        });
+        draw(cx);
+        let origin = handle.bounds().origin.y;
+        scroll(cx, 100., TouchPhase::Started);
+        draw(cx);
+        let stretched = handle.bounds().origin.y;
+        assert!(stretched > origin);
+        // A trackpad swipe that started vertical wobbles horizontal-dominant
+        // for a packet. Dispatch within one update so the packets stay within
+        // the axis lock's gesture separation.
+        cx.update(|window, cx| {
+            for delta in [point(px(30.), px(-20.)), point(px(0.), px(-20.))] {
+                window.dispatch_event(
+                    gpui::PlatformInput::ScrollWheel(ScrollWheelEvent {
+                        position: point(px(100.), px(100.)),
+                        delta: ScrollDelta::Pixels(delta),
+                        touch_phase: TouchPhase::Moved,
+                        ..Default::default()
+                    }),
+                    cx,
+                );
+            }
+        });
+        draw(cx);
+        // Both packets shrink the stretch; neither scrolls the list.
+        assert!(handle.bounds().origin.y < stretched);
+        assert!(handle.bounds().origin.y > origin);
+        assert_eq!(handle.offset(), point(px(0.), px(0.)));
+    }
+
+    #[test]
+    fn motion_builder_configures_tracking_and_response() {
+        let motion = ElasticScrollMotion::ios()
+            .with_tracking(0.4)
+            .with_response(Duration::from_millis(300));
+        assert_eq!(motion.tracking(), 0.4);
+        assert_eq!(motion.response(), Duration::from_millis(300));
+        assert_eq!(ElasticScrollMotion::default(), ElasticScrollMotion::ios());
+    }
+
+    #[test]
+    fn tracking_scales_the_first_stretch() {
+        let stretch = |tracking: f32| {
+            let mut scroll = Physics {
+                motion: ElasticScrollMotion::ios().with_tracking(tracking),
+                ..Physics::default()
+            };
+            scroll.begin(600.);
+            scroll.pull(100.);
+            scroll.offset()
+        };
+        assert!(stretch(0.3) < stretch(0.55));
+        assert!(stretch(0.55) < stretch(0.8));
+    }
+
+    #[test]
+    fn response_scales_the_return_and_zero_snaps() {
+        let remaining = |response: Duration| {
+            let mut scroll = Physics {
+                motion: ElasticScrollMotion::ios().with_response(response),
+                ..Physics::default()
+            };
+            scroll.begin(600.);
+            scroll.pull(180.);
+            scroll.release();
+            scroll.step(0.25);
+            scroll.offset()
+        };
+        assert!(remaining(Duration::from_secs(1)) > remaining(Duration::from_millis(524)));
+        assert!(remaining(Duration::from_millis(524)) > remaining(Duration::from_millis(200)));
+        assert_eq!(remaining(Duration::ZERO), 0.);
+    }
+
+    #[test]
+    fn regrabbing_a_displaced_edge_keeps_its_extent() {
+        let mut scroll = Physics::default();
+        scroll.begin(600.);
+        scroll.pull(-150.);
+        scroll.release();
+        scroll.step(0.08);
+        let before = scroll.offset();
+        // The viewport shrank below the displacement while the edge was
+        // returning. The finger still lands on the edge where it is.
+        scroll.begin(40.);
+        assert!((scroll.offset() - before).abs() < 0.001);
+        // And a short pull inward moves the edge right away.
+        scroll.pull(10.);
+        assert!(scroll.offset() > before);
+        assert!(scroll.offset() < before + 10.);
+    }
+
+    #[test]
+    fn a_gesture_from_rest_adopts_the_current_extent() {
+        let mut scroll = Physics::default();
+        scroll.begin(600.);
+        scroll.begin(40.);
+        scroll.pull(-100.);
+        // The stretch saturates below the 40 px viewport, not the 600 px one.
+        assert!(scroll.offset() > -40.);
     }
 
     #[test]
