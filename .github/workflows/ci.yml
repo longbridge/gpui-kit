@@ -11,11 +11,20 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.ref_name == 'main' && github.sha || 'anysha' }}
   cancel-in-progress: true
 
+env:
+  # Debug info is most of a build's disk footprint and a large share of its
+  # link time, and nothing in CI reads it. Dropping it keeps every job's
+  # dependency cache small enough to stay under the repository's 10 GB cache
+  # limit instead of being evicted before the next run can use it.
+  CARGO_PROFILE_DEV_DEBUG: 0
+
 # Every job that compiles Rust relies on the dependency cache that
 # `actions-rust-lang/setup-rust-toolchain` installs (Swatinem/rust-cache).
-# Keep each job on one feature set: a second `cargo` invocation with different
-# features recompiles GPUI from scratch, which is what made the old single
-# macOS job take half an hour.
+# Only `main` saves caches; pull requests restore the closest `main` cache
+# through rust-cache's prefix fallback, so PR runs never crowd `main`'s
+# caches out of the 10 GB limit. Keep each job on one feature set: a second
+# `cargo` invocation with different features recompiles GPUI from scratch,
+# which is what made the old single macOS job take half an hour.
 jobs:
   checks:
     name: Checks
@@ -50,6 +59,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Lint
         run: cargo clippy -p gpui-component -p gpui-component-story -p gpui-kit-assets --locked -- --deny warnings
 
@@ -59,6 +69,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Replaces the system `ld` on Linux and is a no-op elsewhere.
+      - uses: rui314/setup-mold@v1
       - name: Install system dependencies
         run: script/bootstrap
       - name: Check without default features (tree-sitter disabled)
@@ -82,6 +96,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Replaces the system `ld` on Linux and is a no-op elsewhere.
+      - uses: rui314/setup-mold@v1
       - name: Install system dependencies
         if: ${{ matrix.run_on != 'windows-latest' }}
         run: script/bootstrap
@@ -108,6 +126,10 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-shared-key: gpui-shell-release
+      # Replaces the system `ld` on Linux and is a no-op elsewhere.
+      - uses: rui314/setup-mold@v1
       - name: Install system dependencies
         run: script/bootstrap
       - name: Test runtime core without standard-library integration cases
@@ -131,9 +153,12 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Replaces the system `ld` on Linux and is a no-op elsewhere.
+      - uses: rui314/setup-mold@v1
       - name: Install system dependencies
         run: script/bootstrap
       - name: Test component bindings
@@ -166,6 +191,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-shared-key: gpui-shell-release
+      # Replaces the system `ld` on Linux and is a no-op elsewhere.
+      - uses: rui314/setup-mold@v1
       - name: Install system dependencies
         if: ${{ matrix.run_on != 'windows-latest' }}
         run: script/bootstrap
