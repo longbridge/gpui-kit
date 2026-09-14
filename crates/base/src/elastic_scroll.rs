@@ -6,7 +6,10 @@ use gpui::{
     Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId, OngoingScroll, Pixels,
     ScrollDelta, ScrollWheelEvent, TouchPhase, Window, point, px,
 };
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
 use std::{cell::RefCell, rc::Rc, time::Duration};
+#[cfg(target_family = "wasm")]
 use web_time::Instant;
 
 /// Motion tokens for [`ElasticScroll`]: how far a drag stretches the viewport
