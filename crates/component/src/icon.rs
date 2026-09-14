@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::{ActiveTheme, Sizable, Size};
+use crate::{ActiveTheme, Sizable, Size, StyledExt as _};
 use gpui::{
     AnyElement, App, AppContext, Context, Entity, Hsla, IntoElement, Pixels, Radians, Render,
     RenderOnce, SharedString, StyleRefinement, Styled, Svg, Transformation, Window,
@@ -83,6 +83,7 @@ pub(crate) enum IconSource {
 #[derive(Clone, IntoElement)]
 pub struct Icon {
     style: StyleRefinement,
+    render_style: Option<Box<StyleRefinement>>,
     source: IconSource,
     text_color: Option<Hsla>,
     size: Option<Size>,
@@ -93,6 +94,7 @@ impl Default for Icon {
     fn default() -> Self {
         Self {
             style: StyleRefinement::default(),
+            render_style: None,
             source: IconSource::Path("".into()),
             text_color: None,
             size: None,
@@ -102,6 +104,12 @@ impl Default for Icon {
 }
 
 impl Icon {
+    /// A compound control's explicit override, after the icon's semantic size.
+    pub(crate) fn refine_render_style(mut self, style: Box<StyleRefinement>) -> Self {
+        self.render_style = Some(style);
+        self
+    }
+
     pub fn new(icon: impl Into<Icon>) -> Self {
         icon.into()
     }
@@ -192,6 +200,7 @@ impl Icon {
             .when_some(self.transformation, |this, transformation| {
                 this.with_transformation(transformation)
             })
+            .when_some(self.render_style, |this, style| this.refine_style(&style))
     }
 }
 

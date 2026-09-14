@@ -172,7 +172,7 @@ impl<T: Styled + Sized> ThemeStyled for T {
     /// The ring sits outside the element's border, so an ancestor that clips
     /// its content will cut it off — leave it a few pixels of room, or don't
     /// clip.
-    fn focus_ring_style(mut self, window: &Window, cx: &App) -> Self
+    fn focus_ring_style(self, window: &Window, cx: &App) -> Self
     where
         Self: ParentElement,
     {
@@ -183,71 +183,10 @@ impl<T: Styled + Sized> ThemeStyled for T {
             return self.border_color(cx.theme().ring);
         }
 
-        let rem_size = window.rem_size();
-        let style = self.style();
-        let border_widths = Edges::<Pixels> {
-            top: style
-                .border_widths
-                .top
-                .map(|v| v.to_pixels(rem_size))
-                .unwrap_or_default(),
-            bottom: style
-                .border_widths
-                .bottom
-                .map(|v| v.to_pixels(rem_size))
-                .unwrap_or_default(),
-            left: style
-                .border_widths
-                .left
-                .map(|v| v.to_pixels(rem_size))
-                .unwrap_or_default(),
-            right: style
-                .border_widths
-                .right
-                .map(|v| v.to_pixels(rem_size))
-                .unwrap_or_default(),
-        };
-        let radius = Corners::<Pixels> {
-            top_left: style
-                .corner_radii
-                .top_left
-                .map(|v| v.to_pixels(rem_size))
-                .unwrap_or_default(),
-            top_right: style
-                .corner_radii
-                .top_right
-                .map(|v| v.to_pixels(rem_size))
-                .unwrap_or_default(),
-            bottom_left: style
-                .corner_radii
-                .bottom_left
-                .map(|v| v.to_pixels(rem_size))
-                .unwrap_or_default(),
-            bottom_right: style
-                .corner_radii
-                .bottom_right
-                .map(|v| v.to_pixels(rem_size))
-                .unwrap_or_default(),
-        }
-        .map(|value| *value + FOCUS_RING_WIDTH);
-        let mut ring_style = StyleRefinement::default();
-        ring_style.corner_radii.top_left = Some(radius.top_left.into());
-        ring_style.corner_radii.top_right = Some(radius.top_right.into());
-        ring_style.corner_radii.bottom_left = Some(radius.bottom_left.into());
-        ring_style.corner_radii.bottom_right = Some(radius.bottom_right.into());
-        let inset = FOCUS_RING_WIDTH;
-
-        self.border_color(cx.theme().ring).child(
-            div()
-                .flex_none()
-                .absolute()
-                .top(-(inset + border_widths.top))
-                .left(-(inset + border_widths.left))
-                .right(-(inset + border_widths.right))
-                .bottom(-(inset + border_widths.bottom))
-                .border(FOCUS_RING_WIDTH)
-                .border_color(cx.theme().ring.alpha(FOCUS_RING_OPACITY))
-                .refine_style(&ring_style),
+        focus_ring(
+            self.border_color(cx.theme().ring),
+            window,
+            cx.theme().ring.alpha(FOCUS_RING_OPACITY),
         )
     }
 
@@ -260,4 +199,78 @@ impl<T: Styled + Sized> ThemeStyled for T {
             .shadow(popover_shadow(popover_ring(cx), 1.))
             .rounded(theme.radius)
     }
+}
+
+/// Paint only the outside band, preserving translucent control backgrounds.
+pub(crate) fn focus_ring<T: Styled + ParentElement>(
+    mut element: T,
+    window: &Window,
+    color: Hsla,
+) -> T {
+    let rem_size = window.rem_size();
+    let style = element.style();
+    let border_widths = Edges::<Pixels> {
+        top: style
+            .border_widths
+            .top
+            .map(|v| v.to_pixels(rem_size))
+            .unwrap_or_default(),
+        bottom: style
+            .border_widths
+            .bottom
+            .map(|v| v.to_pixels(rem_size))
+            .unwrap_or_default(),
+        left: style
+            .border_widths
+            .left
+            .map(|v| v.to_pixels(rem_size))
+            .unwrap_or_default(),
+        right: style
+            .border_widths
+            .right
+            .map(|v| v.to_pixels(rem_size))
+            .unwrap_or_default(),
+    };
+    let radius = Corners::<Pixels> {
+        top_left: style
+            .corner_radii
+            .top_left
+            .map(|v| v.to_pixels(rem_size))
+            .unwrap_or_default(),
+        top_right: style
+            .corner_radii
+            .top_right
+            .map(|v| v.to_pixels(rem_size))
+            .unwrap_or_default(),
+        bottom_left: style
+            .corner_radii
+            .bottom_left
+            .map(|v| v.to_pixels(rem_size))
+            .unwrap_or_default(),
+        bottom_right: style
+            .corner_radii
+            .bottom_right
+            .map(|v| v.to_pixels(rem_size))
+            .unwrap_or_default(),
+    }
+    .map(|value| *value + FOCUS_RING_WIDTH);
+    let mut ring_style = StyleRefinement::default();
+    ring_style.corner_radii.top_left = Some(radius.top_left.into());
+    ring_style.corner_radii.top_right = Some(radius.top_right.into());
+    ring_style.corner_radii.bottom_left = Some(radius.bottom_left.into());
+    ring_style.corner_radii.bottom_right = Some(radius.bottom_right.into());
+    let inset = FOCUS_RING_WIDTH;
+
+    element.child(
+        div()
+            .flex_none()
+            .absolute()
+            .top(-(inset + border_widths.top))
+            .left(-(inset + border_widths.left))
+            .right(-(inset + border_widths.right))
+            .bottom(-(inset + border_widths.bottom))
+            .border(FOCUS_RING_WIDTH)
+            .border_color(color)
+            .refine_style(&ring_style),
+    )
 }

@@ -5,6 +5,8 @@ description: Text input component with validation, masking, and various features
 
 # Input
 
+For multiple addons, shared frames, and textarea toolbars, see [Input Group](./input-group.md).
+
 A single-line text input with validation, masking, prefix/suffix elements, and
 different visual states. Use [Textarea](./textarea.md) for ordinary multi-line
 text and [Editor](./editor.md) for source code.

@@ -275,7 +275,7 @@ impl OverlayMode for crate::input::EditorMode {
 }
 
 #[derive(Default)]
-pub(super) struct InputOverlays {
+pub(crate) struct InputOverlays {
     pub search: Option<AnyElement>,
     pub floating: Vec<AnyElement>,
 }

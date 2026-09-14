@@ -34,6 +34,7 @@ export const coveredBy = [
   { route: "icon", registrations: ["Icon"] },
   { route: "image", registrations: ["Image"] },
   { route: "input", registrations: ["Input"] },
+  { route: "input-group", registrations: ["InputGroup"] },
   { route: "kbd", registrations: ["Kbd"] },
   { route: "label", registrations: ["Label"] },
   { route: "list", registrations: ["List"] },

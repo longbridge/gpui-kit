@@ -218,6 +218,18 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
     out.push_str(&parametric_styles(&parametric));
     out.push_str(&nullary_styles(&nullary));
     out.push_str("  }\n");
+    out.push_str("  /** Immediate style overrides for a registered component part; accepts no children or event handlers. */\n");
+    out.push_str("  export interface StyleDeclaration {\n");
+    out.push_str("    when(condition: unknown, branch: (style: this) => this): this;\n");
+    out.push_str("    map<T>(transform: (style: this) => T): T;\n");
+    out.push_str(
+        &parametric_styles(&parametric)
+            .replace("Self extends Element", "Self extends StyleDeclaration"),
+    );
+    out.push_str(
+        &nullary_styles(&nullary).replace("Self extends Element", "Self extends StyleDeclaration"),
+    );
+    out.push_str("  }\n");
     out.push_str(ELEMENTS);
     out.push_str(WINDOW);
     out.push_str(CAPABILITIES);
@@ -231,7 +243,7 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
     out.push_str(BASE);
     out.push_str("}\n\n");
     out.push_str("declare module \"gpui-component\" {\n");
-    out.push_str("  import { ClickEvent, Context, Element, NativeElement } from \"gpui-kit\";\n");
+    out.push_str("  import { ClickEvent, Context, Element, NativeElement, StyleDeclaration } from \"gpui-kit\";\n");
     for state in components.states() {
         push_jsdoc(&mut out, state.documentation(), None, "  ");
         out.push_str("  export interface ");
@@ -368,6 +380,9 @@ fn argument_type(schema: &crate::ArgumentSchema) -> String {
         crate::ArgumentSchema::String => "string".into(),
         crate::ArgumentSchema::Number => "number".into(),
         crate::ArgumentSchema::Boolean => "boolean".into(),
+        crate::ArgumentSchema::Style => {
+            "(style: StyleDeclaration) => StyleDeclaration | void".into()
+        }
         crate::ArgumentSchema::Element => "Element".into(),
         crate::ArgumentSchema::Entity(kind) => (*kind).into(),
         crate::ArgumentSchema::Callback(signature) => (*signature).into(),

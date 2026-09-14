@@ -1,5 +1,5 @@
-use crate::{Icon, Sizable, Size, progress::ProgressCircle, spinner::Spinner};
-use gpui::{App, IntoElement, RenderOnce, Window, prelude::FluentBuilder};
+use crate::{Icon, Sizable, Size, StyledExt as _, progress::ProgressCircle, spinner::Spinner};
+use gpui::{App, IntoElement, RenderOnce, StyleRefinement, Window, prelude::FluentBuilder};
 
 /// Button icon which can be an Icon, Spinner, or Progress use for `icon` method of Button.
 #[doc(hidden)]
@@ -9,6 +9,7 @@ pub struct ButtonIcon {
     loading_icon: Option<Icon>,
     loading: bool,
     size: Size,
+    style: Option<Box<StyleRefinement>>,
 }
 
 impl<T> From<T> for ButtonIcon
@@ -28,6 +29,7 @@ impl ButtonIcon {
             loading_icon: None,
             loading: false,
             size: Size::Medium,
+            style: None,
         }
     }
 
@@ -38,6 +40,11 @@ impl ButtonIcon {
 
     pub(crate) fn loading(mut self, loading: bool) -> Self {
         self.loading = loading;
+        self
+    }
+
+    pub(crate) fn refine_icon_style(mut self, style: Box<StyleRefinement>) -> Self {
+        self.style = Some(style);
         self
     }
 }
@@ -80,6 +87,14 @@ impl From<ProgressCircle> for ButtonIconVariant {
 }
 
 impl ButtonIconVariant {
+    fn refine_icon_style(self, style: Box<StyleRefinement>) -> Self {
+        match self {
+            Self::Icon(icon) => Self::Icon(icon.refine_render_style(style)),
+            Self::Spinner(spinner) => Self::Spinner(spinner.refine_icon_style(style)),
+            Self::Progress(progress) => Self::Progress(progress.refine_style(&style)),
+        }
+    }
+
     /// Returns true if the ButtonIconKind is an Icon.
     #[inline]
     pub(crate) fn is_spinner(&self) -> bool {
@@ -117,15 +132,22 @@ impl RenderOnce for ButtonIcon {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         if self.loading {
             if self.icon.is_spinner() || self.icon.is_progress() {
-                self.icon.with_size(self.size).into_any_element()
+                self.icon
+                    .with_size(self.size)
+                    .when_some(self.style, |this, style| this.refine_icon_style(style))
+                    .into_any_element()
             } else {
                 Spinner::new()
                     .when_some(self.loading_icon, |this, icon| this.icon(icon))
                     .with_size(self.size)
+                    .when_some(self.style, |this, style| this.refine_icon_style(style))
                     .into_any_element()
             }
         } else {
-            self.icon.with_size(self.size).into_any_element()
+            self.icon
+                .with_size(self.size)
+                .when_some(self.style, |this, style| this.refine_icon_style(style))
+                .into_any_element()
         }
     }
 }

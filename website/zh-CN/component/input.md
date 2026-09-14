@@ -5,6 +5,8 @@ description: 带校验、掩码和多种扩展能力的文本输入组件。
 
 # Input
 
+多个附加元素、共享外框和文本域工具栏的组合方式，见 [Input Group](./input-group.md)。
+
 Input 是一个单行文本输入组件，支持校验、输入掩码、前后缀元素以及多种交互状态。普通多行文本请使用 [Textarea](./textarea.md)，源代码编辑请使用 [Editor](./editor.md)。
 
 ## 导入

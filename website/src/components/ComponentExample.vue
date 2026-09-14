@@ -50,6 +50,7 @@ const storyNames: Record<string, string> = {
     "focus-trap": "Dialog",
     "group-box": "GroupBox",
     "hover-card": "HoverCard",
+    "input-group": "Input Group",
     "native-menu": "NativeMenu",
     notification: "Notification",
     "number-input": "NumberInput",

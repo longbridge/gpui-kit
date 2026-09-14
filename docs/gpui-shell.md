@@ -2142,12 +2142,19 @@ published `gpui-kit.d.ts` look documented without anyone having described it.
 
 **Arguments are schemas, and the schema is the validator.** An
 `ArgumentDescriptor` pairs a name with an `ArgumentSchema` — string, number,
-boolean, element, an entity of a named kind, a callback with a TypeScript
+boolean, a style declaration, element, an entity of a named kind, a callback with a TypeScript
 signature, an enum of literals, an array, or an optional. The engine validates
 a script's call against that schema before the adapter sees it, and
 `typings.rs` emits the matching TypeScript from the same value. A registered
 method's declared type and its enforced type cannot drift, because they are one
 value read twice.
+
+`ArgumentSchema::Style` evaluates a declaration immediately on a detached style
+builder and records `ComponentArgument::Style(Box<StyleRefinement>)`. The builder
+accepts only style operations; children, event handlers, and a different returned
+element are rejected. Generated `StyleDeclaration` types expose the same style
+methods plus `when` and `map`. Component adapters refine their native part styles
+from the recorded value, so repainting does not call JavaScript.
 
 **Recording and materializing are separate.** A method call from script is
 _recorded_: the descriptor's recorder decodes the validated arguments once, into

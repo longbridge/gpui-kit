@@ -204,6 +204,10 @@ pub struct Button {
     hover_group: Option<SharedString>,
     hover_group_held: bool,
     size: Size,
+    content_style: StyleRefinement,
+    label_style: Option<Box<StyleRefinement>>,
+    icon_style: Option<Box<StyleRefinement>>,
+    icon_size: Option<Size>,
     compact: bool,
     tooltip: Option<(
         SharedString,
@@ -252,6 +256,10 @@ impl Button {
             },
             border_edges: Edges::all(true),
             size: Size::Medium,
+            content_style: StyleRefinement::default(),
+            label_style: None,
+            icon_style: None,
+            icon_size: None,
             tooltip: None,
             tooltip_placement: None,
             tooltip_builder: None,
@@ -276,16 +284,34 @@ impl Button {
         self
     }
 
-    pub(super) fn variant(&self) -> ButtonVariant {
+    pub(crate) fn variant(&self) -> ButtonVariant {
         self.variant
+    }
+
+    /// Presentation supplied by a styled compound control. Standalone buttons
+    /// retain their normal size-derived content style.
+    pub(crate) fn content_style(mut self, style: StyleRefinement, icon_size: Size) -> Self {
+        self.content_style = style;
+        self.icon_size = Some(icon_size);
+        self
+    }
+
+    pub(crate) fn part_styles(mut self, label: StyleRefinement, icon: StyleRefinement) -> Self {
+        self.label_style = (label != StyleRefinement::default()).then(|| Box::new(label));
+        self.icon_style = (icon != StyleRefinement::default()).then(|| Box::new(icon));
+        self
     }
 
     pub(super) fn button_size(&self) -> Size {
         self.size
     }
 
-    pub(super) fn is_disabled(&self) -> bool {
+    pub(crate) fn is_disabled(&self) -> bool {
         self.disabled
+    }
+
+    pub(crate) fn is_outline(&self) -> bool {
+        self.outline
     }
 
     pub fn role(mut self, role: impl Into<RoleOverride>) -> Self {
@@ -556,10 +582,10 @@ impl RenderOnce for Button {
         let normal_style = style.normal(self.outline, cx);
         let selected_style = style.selected(self.outline, cx);
         let disabled_style = style.disabled(self.outline, cx);
-        let icon_size = match self.size {
+        let icon_size = self.icon_size.unwrap_or_else(|| match self.size {
             Size::Size(v) => Size::Size(v * 0.75),
             _ => self.size,
-        };
+        });
         let has_content = self.icon.is_some() || self.label.is_some() || !children.is_empty();
 
         let focus_handle = window
@@ -688,11 +714,13 @@ impl RenderOnce for Button {
                 Size::Small => this.gap_1(),
                 _ => this.gap_2(),
             })
+            .refine_style(&self.content_style)
             .when_some(self.icon, |this, icon| {
                 this.child(
                     icon.loading_icon(self.loading_icon)
                         .loading(self.loading)
-                        .with_size(icon_size),
+                        .with_size(icon_size)
+                        .when_some(self.icon_style, |this, style| this.refine_icon_style(style)),
                 )
             })
             .when_some(self.label, |this, label| {
@@ -701,6 +729,7 @@ impl RenderOnce for Button {
                         .min_w_0()
                         .whitespace_nowrap()
                         .text_ellipsis()
+                        .when_some(self.label_style, |this, style| this.refine_style(&style))
                         .child(label),
                 )
             })

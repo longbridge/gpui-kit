@@ -218,8 +218,13 @@ pub enum ComponentArgument {
     String(String),
     Number(f64),
     Boolean(bool),
+    /// A style declaration evaluated while the script builds its description.
+    Style(Box<StyleRefinement>),
     Element(u32),
-    Entity { kind: &'static str, handle: u64 },
+    Entity {
+        kind: &'static str,
+        handle: u64,
+    },
     Callback(u64),
     Enum(String),
     Array(Vec<ComponentArgument>),
@@ -318,6 +323,8 @@ pub enum ArgumentSchema {
     String,
     Number,
     Boolean,
+    /// An immediate `(style) => style | void` declaration, never an event callback.
+    Style,
     Element,
     Entity(&'static str),
     Callback(&'static str),
@@ -2082,6 +2089,7 @@ fn validate_argument_schema(schema: &ArgumentSchema, top_level: bool) -> Result<
         ArgumentSchema::String
         | ArgumentSchema::Number
         | ArgumentSchema::Boolean
+        | ArgumentSchema::Style
         | ArgumentSchema::Element => Ok(()),
         ArgumentSchema::Entity(kind) if kind.trim().is_empty() => {
             Err("entity kind must not be empty")
