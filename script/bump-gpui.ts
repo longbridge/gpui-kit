@@ -2008,11 +2008,11 @@ async function verifyKitAgainstStaging(staging: string, crates: Crate[], version
     }
 
     // The same commands the repository's CI runs.
-    // Staged crates are injected as path dependencies, so keep `-D warnings`
-    // scoped to gpui-kit instead of promoting upstream GPUI warnings to errors.
+    // Staged crates are injected as path dependencies, so keep Clippy scoped
+    // to gpui-kit and do not promote upstream GPUI deprecations to errors.
     const commands = [
       ["cargo", "check", ...patches, "--workspace", "--all-targets"],
-      ["cargo", "clippy", ...patches, "--no-deps", "-p", "gpui-component", "-p", "gpui-component-story", "-p", "gpui-kit-assets", "-p", "gpui-kit", "--", "--deny", "warnings"],
+      ["cargo", "clippy", ...patches, "--no-deps", "-p", "gpui-component", "-p", "gpui-component-story", "-p", "gpui-kit-assets", "-p", "gpui-kit", "--", "--deny", "warnings", "--allow", "deprecated"],
       ["cargo", "test", ...patches, "--workspace", "--exclude", "gpui-shell", "--features", "gpui-component-story/test-support"],
     ];
     for (const cmd of commands) {
