@@ -22,6 +22,7 @@ pub mod component_traits;
 mod date_picker;
 mod dialog;
 pub mod dock;
+mod elastic_scroll;
 mod element_ext;
 mod event;
 mod focus_trap;
@@ -98,6 +99,7 @@ pub use dialog::{
     Dialog, DialogBackdrop, DialogChangeReason, DialogClose, DialogDescription, DialogHandle,
     DialogPopup, DialogTitle, DialogTrigger,
 };
+pub use elastic_scroll::ElasticScroll;
 pub use element_ext::ElementExt;
 pub use event::{InteractiveElementExt, OngoingScrollExt};
 pub use focus_trap::FocusTrapElement;
