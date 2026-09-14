@@ -11,8 +11,8 @@ use gpui::{
     Anchor, App, Axis, Background, BorderStyle, Bounds, ContentMask, CursorStyle, Edges, Element,
     ElementId, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement,
     IsZero, LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels,
-    Point, Position, ScrollHandle, ScrollWheelEvent, Size, Style, UniformListScrollHandle, Window,
-    fill, point, prelude::FluentBuilder, px, relative, size,
+    Point, Position, ScrollHandle, ScrollWheelEvent, Size, Style, TouchDragEvent, TouchPhase,
+    UniformListScrollHandle, Window, fill, point, prelude::FluentBuilder, px, relative, size,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -1531,6 +1531,73 @@ impl Element for Scrollbar {
 
                     let safe_range = (-scroll_area_size + container_size)..px(0.);
 
+                    // A thumb follows the finger, unlike content panning. Claim
+                    // this touch before the window turns it into wheel deltas.
+                    window.on_mouse_event({
+                        let state = scrollbar_state.clone();
+                        let scroll_handle = self.scroll_handle.clone();
+                        move |event: &TouchDragEvent, phase, window, cx| {
+                            if !phase.bubble() {
+                                return;
+                            }
+                            if event.phase == TouchPhase::Started {
+                                if !is_visible
+                                    || window.default_prevented()
+                                    || !thumb_bounds.contains(&event.start_position)
+                                {
+                                    return;
+                                }
+                                scroll_handle.start_drag();
+                                state.set(state.get().with_drag_pos(
+                                    axis,
+                                    event.start_position - thumb_bounds.origin,
+                                ));
+                            } else if state.get().dragged_axis != Some(axis) {
+                                return;
+                            } else {
+                                if matches!(event.phase, TouchPhase::Moved | TouchPhase::Ended) {
+                                    let drag_pos = state.get().drag_pos;
+                                    let (position, origin, grab, track) = if is_vertical {
+                                        (
+                                            event.position.y,
+                                            bounds.origin.y,
+                                            drag_pos.y,
+                                            bounds.size.height - thumb_size,
+                                        )
+                                    } else {
+                                        (
+                                            event.position.x,
+                                            bounds.origin.x,
+                                            drag_pos.x,
+                                            bounds.size.width - thumb_size - margin_end,
+                                        )
+                                    };
+                                    if track > px(0.) {
+                                        let percentage =
+                                            ((position - origin - grab) / track).clamp(0., 1.);
+                                        let mut offset = scroll_handle.offset();
+                                        let value =
+                                            -(scroll_area_size - container_size) * percentage;
+                                        if is_vertical {
+                                            offset.y = value;
+                                        } else {
+                                            offset.x = value;
+                                        }
+                                        scroll_handle.set_offset(offset);
+                                    }
+                                }
+                                if matches!(event.phase, TouchPhase::Ended | TouchPhase::Cancelled)
+                                {
+                                    scroll_handle.end_drag();
+                                    state.set(state.get().with_unset_drag_pos(Instant::now()));
+                                }
+                            }
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            cx.notify(view_id);
+                        }
+                    });
+
                     if is_visible {
                         window.on_mouse_event({
                             let state = scrollbar_state.clone();
@@ -2369,6 +2436,35 @@ mod tests {
 
         cx.simulate_click(point(px(95.), px(80.)), Modifiers::default());
         assert!(handle.offset().y < px(0.));
+    }
+
+    #[gpui::test]
+    fn touch_thumb_drag_moves_down_and_cancel_releases_handle(cx: &mut TestAppContext) {
+        let (cx, handle) = harness(
+            cx,
+            ScrollbarAxis::Vertical,
+            ScrollbarMode::Always,
+            size(px(100.), px(500.)),
+        );
+        let start_position = point(px(95.), px(20.));
+        for (phase, position) in [
+            (TouchPhase::Started, start_position),
+            (TouchPhase::Moved, point(px(95.), px(45.))),
+            (TouchPhase::Cancelled, point(px(95.), px(45.))),
+        ] {
+            cx.simulate_event(TouchDragEvent {
+                phase,
+                start_position,
+                position,
+            });
+        }
+        assert!(
+            handle.offset().y < px(0.),
+            "thumb down must scroll toward later content"
+        );
+        assert_eq!(handle.offset().x, px(0.));
+        assert_eq!(handle.drag_starts.get(), 1);
+        assert_eq!(handle.drag_ends.get(), 1);
     }
 
     #[gpui::test]

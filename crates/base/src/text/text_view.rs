@@ -2563,6 +2563,58 @@ mod tests {
     }
 
     #[gpui::test]
+    fn long_press_selects_word_then_drag_extends_selection(cx: &mut TestAppContext) {
+        struct TouchRoot {
+            text_view: Entity<TextViewState>,
+        }
+        impl Render for TouchRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(300.))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).selectable(true))
+            }
+        }
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, cx| TouchRoot {
+            text_view: cx.new(|cx| TextViewState::markdown("quick select value", cx)),
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let start_position = point(px(10.), px(16.));
+        cx.simulate_event(gpui::LongPressEvent {
+            phase: gpui::TouchPhase::Started,
+            start_position,
+            position: start_position,
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(
+            view.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim(),
+            "quick"
+        );
+        for phase in [gpui::TouchPhase::Moved, gpui::TouchPhase::Ended] {
+            cx.simulate_event(gpui::LongPressEvent {
+                phase,
+                start_position,
+                position: point(px(220.), px(16.)),
+            });
+        }
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(
+            view.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim(),
+            "quick select value"
+        );
+    }
+
+    #[gpui::test]
     fn triple_click_selects_paragraph(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) =
