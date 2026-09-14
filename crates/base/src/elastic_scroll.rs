@@ -347,14 +347,14 @@ impl Element for ElasticScroll {
 struct Physics {
     position: f32,
     velocity: f32,
-    pub dragging: bool,
-    pub suppress_momentum: bool,
+    dragging: bool,
+    suppress_momentum: bool,
     extent: f32,
     motion: ElasticScrollMotion,
 }
 
 impl Physics {
-    pub fn offset(&self) -> f32 {
+    fn offset(&self) -> f32 {
         if self.dragging {
             let d = self.extent.max(1.);
             let tracking = self.motion.tracking;
@@ -364,7 +364,7 @@ impl Physics {
         }
     }
 
-    pub fn begin(&mut self, extent: f32) {
+    fn begin(&mut self, extent: f32) {
         let offset = self.offset();
         // A displaced edge keeps the extent it was stretched under. The
         // rubber-band curve saturates at the extent, so re-reading a viewport
@@ -382,7 +382,7 @@ impl Physics {
     }
 
     /// Apply finger displacement. Return the part that crosses back into the list.
-    pub fn pull(&mut self, delta: f32) -> f32 {
+    fn pull(&mut self, delta: f32) -> f32 {
         let previous = self.position;
         let next = previous + delta;
         if previous != 0. && previous.signum() != next.signum() {
@@ -394,7 +394,7 @@ impl Physics {
         }
     }
 
-    pub fn release(&mut self) {
+    fn release(&mut self) {
         self.position = self.offset();
         self.dragging = false;
         if self.position != 0. {
@@ -403,7 +403,7 @@ impl Physics {
     }
 
     /// Exact critically damped spring integration, independent of refresh rate.
-    pub fn step(&mut self, seconds: f32) -> bool {
+    fn step(&mut self, seconds: f32) -> bool {
         if self.dragging || self.position == 0. {
             return false;
         }
