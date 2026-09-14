@@ -1300,10 +1300,13 @@ mod tests {
         let cx: &mut VisualTestContext = cx;
 
         cx.run_until_parked();
-        assert!(
-            renders.load(Ordering::Relaxed) <= 2,
-            "an unchanged TextView must settle after its parse, but rendered {} times",
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let renders_after_redraw = renders.load(Ordering::Relaxed);
+        cx.run_until_parked();
+        assert_eq!(
             renders.load(Ordering::Relaxed),
+            renders_after_redraw,
+            "an unchanged TextView must not schedule another render after its parser is rebuilt",
         );
     }
 
@@ -2560,6 +2563,58 @@ mod tests {
 
         let selected_text = view.read_with(cx, |root, cx| root.text_view.read(cx).selected_text());
         assert_eq!(selected_text.trim(), "quick");
+    }
+
+    #[gpui::test]
+    fn long_press_selects_word_then_drag_extends_selection(cx: &mut TestAppContext) {
+        struct TouchRoot {
+            text_view: Entity<TextViewState>,
+        }
+        impl Render for TouchRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(300.))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).selectable(true))
+            }
+        }
+        cx.update(crate::init);
+        let (view, cx) = cx.add_window_view(|_, cx| TouchRoot {
+            text_view: cx.new(|cx| TextViewState::markdown("quick select value", cx)),
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let start_position = point(px(10.), px(16.));
+        cx.simulate_event(gpui::LongPressEvent {
+            phase: gpui::TouchPhase::Started,
+            start_position,
+            position: start_position,
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(
+            view.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim(),
+            "quick"
+        );
+        for phase in [gpui::TouchPhase::Moved, gpui::TouchPhase::Ended] {
+            cx.simulate_event(gpui::LongPressEvent {
+                phase,
+                start_position,
+                position: point(px(220.), px(16.)),
+            });
+        }
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(
+            view.read_with(cx, |root, cx| root.text_view.read(cx).selected_text())
+                .trim(),
+            "quick select value"
+        );
     }
 
     #[gpui::test]

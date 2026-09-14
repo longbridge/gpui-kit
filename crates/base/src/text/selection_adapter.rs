@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::RangeInclusive, rc::Rc};
 
 use crate::{
     TextSelectionContentKey, TextSelectionCoverage, TextSelectionEndpoint, TextSelectionEvent,
-    TextSelectionHandle, TextSelectionRegistration, TextSelectionSnapshot,
+    TextSelectionHandle, TextSelectionRegistration, TextSelectionRun, TextSelectionSnapshot,
 };
 use gpui::{App, Bounds, EntityId, Hitbox, Pixels, Point, WeakEntity, Window};
 
@@ -73,6 +73,7 @@ impl VirtualBlockSelection {
 pub(super) struct TextViewSelectionAdapter {
     selection: TextSelectionHandle,
     text_bounds: Vec<Bounds<Pixels>>,
+    text_runs: Vec<TextSelectionRun>,
     layout_revision: Option<usize>,
 }
 
@@ -169,6 +170,7 @@ impl TextViewSelectionAdapter {
         Self {
             selection,
             text_bounds: Vec::new(),
+            text_runs: Vec::new(),
             layout_revision: None,
         }
     }
@@ -185,6 +187,11 @@ impl TextViewSelectionAdapter {
 
     pub(super) fn begin_frame(&mut self) {
         self.text_bounds.clear();
+        self.text_runs.clear();
+    }
+
+    pub(super) fn register_text_run(&mut self, run: TextSelectionRun) {
+        self.text_runs.push(run);
     }
 
     pub(super) fn register_inline(&mut self, bounds: Vec<Bounds<Pixels>>) {
@@ -202,6 +209,7 @@ impl TextViewSelectionAdapter {
         window: &mut Window,
         cx: &mut App,
     ) {
+        self.selection.set_hit_test_runs(&self.text_runs, cx);
         self.selection.register(
             TextSelectionRegistration::new(hitbox, bounds)
                 .with_scroll_offset(scroll_offset)

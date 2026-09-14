@@ -114,6 +114,27 @@ has keyboard focus, and resumes when the pointer leaves or focus moves on. It
 keeps running while the window is inactive, so a message that must not be missed
 should disable auto-hide or use system delivery.
 
+### Placement
+
+Notifications appear at the top right of the window by default. Set a global
+default for all notifications, or override it for a single notification.
+Notifications are stacked separately for each placement.
+
+```rust
+use gpui_kit::Anchor;
+
+// Global default (default: Anchor::TopRight)
+Theme::global_mut(cx).notification.placement = Anchor::BottomRight;
+
+// Per-notification override
+Notification::info("Download complete.")
+    .placement(Anchor::BottomLeft)
+```
+
+Supported values are `Anchor::TopLeft`, `Anchor::TopCenter`,
+`Anchor::TopRight`, `Anchor::LeftCenter`, `Anchor::RightCenter`,
+`Anchor::BottomLeft`, `Anchor::BottomCenter`, and `Anchor::BottomRight`.
+
 ### With Action Button
 
 ```rust

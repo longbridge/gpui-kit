@@ -88,7 +88,10 @@ const READOUT_INTERVAL: Duration = Duration::from_millis(500);
 const DEFAULT_FONT: &str = "Menlo";
 #[cfg(target_os = "windows")]
 const DEFAULT_FONT: &str = "Consolas";
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+// The iOS backend resolves this native family but not the generic monospace alias.
+#[cfg(target_os = "ios")]
+const DEFAULT_FONT: &str = ".SystemUIFont";
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "ios")))]
 const DEFAULT_FONT: &str = "monospace";
 
 /// A realtime performance HUD: frames per second, a rolling frame time chart,

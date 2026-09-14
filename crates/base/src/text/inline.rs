@@ -677,6 +677,13 @@ impl Element for Inline {
                 );
                 text_view_state.update(cx, |state, _| {
                     state.selection_adapter.register_inline(text_bounds);
+                    state
+                        .selection_adapter
+                        .register_text_run(crate::TextSelectionRun::new(
+                            self.text.clone(),
+                            text_layout.clone(),
+                            hitbox.bounds,
+                        ));
                 });
             }
 
