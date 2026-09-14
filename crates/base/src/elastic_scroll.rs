@@ -24,20 +24,16 @@ pub struct ElasticScrollMotion {
 }
 
 impl Default for ElasticScrollMotion {
+    /// Tuned to feel like a `UIScrollView` bounce; these are not UIKit constants.
     fn default() -> Self {
-        Self::ios()
-    }
-}
-
-impl ElasticScrollMotion {
-    /// Motion tuned to feel like a `UIScrollView` bounce; not UIKit constants.
-    pub fn ios() -> Self {
         Self {
             tracking: 0.55,
             response: Duration::from_millis(524),
         }
     }
+}
 
+impl ElasticScrollMotion {
     /// Fraction of finger travel the stretched edge follows at first.
     ///
     /// The edge follows less and less as it approaches the viewport height,
@@ -720,19 +716,18 @@ mod tests {
 
     #[test]
     fn motion_builder_configures_tracking_and_response() {
-        let motion = ElasticScrollMotion::ios()
+        let motion = ElasticScrollMotion::default()
             .with_tracking(0.4)
             .with_response(Duration::from_millis(300));
         assert_eq!(motion.tracking(), 0.4);
         assert_eq!(motion.response(), Duration::from_millis(300));
-        assert_eq!(ElasticScrollMotion::default(), ElasticScrollMotion::ios());
     }
 
     #[test]
     fn tracking_scales_the_first_stretch() {
         let stretch = |tracking: f32| {
             let mut scroll = Physics {
-                motion: ElasticScrollMotion::ios().with_tracking(tracking),
+                motion: ElasticScrollMotion::default().with_tracking(tracking),
                 ..Physics::default()
             };
             scroll.begin(600.);
@@ -747,7 +742,7 @@ mod tests {
     fn response_scales_the_return_and_zero_snaps() {
         let remaining = |response: Duration| {
             let mut scroll = Physics {
-                motion: ElasticScrollMotion::ios().with_response(response),
+                motion: ElasticScrollMotion::default().with_response(response),
                 ..Physics::default()
             };
             scroll.begin(600.);
