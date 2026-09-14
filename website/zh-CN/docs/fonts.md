@@ -83,8 +83,8 @@ Theme::global_mut(cx).font_family = "MyFont".into();
 Theme::sync_base(cx);
 ```
 
-Web 版画廊就是这样打包 `Inter`、`JetBrains Mono`、`NotoSansSC` 和
-`NotoEmoji` 的，参见 `crates/story-web/src/lib.rs`。
+Web 版画廊就是这样打包 `Inter`、`JetBrains Mono`、`Noto Sans SC` 和
+`IBM Plex Sans` 的，参见 `crates/story-web/src/lib.rs`。
 
 ## 主题 JSON 配置
 
@@ -116,3 +116,33 @@ ThemeRegistry::watch_dir(PathBuf::from("./themes"), cx, move |cx| {
 浏览器不会向 WASM 应用暴露系统字体。在 `gpui-kit.com/gallery/` 运行的
 `story-web` 画廊必须打包它用到的每一种字体，并在 `Theme::change` 之后重新
 声明，否则文本系统会 panic。桌面应用完全不需要这一步。
+
+打包字体画不出来的文字仍然可以交给浏览器绘制。Web 平台会用 Canvas 2D
+和访问者本机的字体渲染 emoji，应用不必再打包 emoji 字体。回退策略在构造
+平台时选定，之后不能更改：
+
+| `CanvasFontFallback` | 由浏览器绘制的内容 |
+| --- | --- |
+| `Emoji`（默认） | emoji，包括肤色、旗帜、键帽和 ZWJ 序列 |
+| `EmojiAndCjk` | emoji，外加横排的汉字、假名和现代谚文 |
+| `Disabled` | 不回退，只使用打包字体 |
+
+`gpui_kit::application()` 和 `gpui_kit::platform::single_threaded_web()`
+沿用默认策略。要放宽范围，就自己构造平台：
+
+```rust
+use gpui_kit::web::{CanvasFontFallback, WebBackendPreference, WebPlatform};
+
+let platform = Rc::new(WebPlatform::new_with_backend_and_font_fallback(
+    false,
+    WebBackendPreference::Auto,
+    CanvasFontFallback::EmojiAndCjk,
+));
+let http_client = Arc::new(platform.fetch_http_client());
+let app = Application::with_platform(platform).with_http_client(http_client);
+```
+
+只要打包字体里有对应字形，就仍然优先使用打包字体。回退是逐个字素独立绘制的，
+所以这样渲染的 CJK 文字以可读为先，不保证精确的间距和字体特性，外观也取决于
+访问者机器上安装的字体。画廊选择了 `EmojiAndCjk`：它打包的字体只包含
+故事本身用到的字形，访问者在输入框里键入的其他文字否则都会显示成方块。

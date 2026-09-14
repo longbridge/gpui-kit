@@ -88,8 +88,8 @@ Theme::global_mut(cx).font_family = "MyFont".into();
 Theme::sync_base(cx);
 ```
 
-The gallery's web build bundles `Inter`, `JetBrains Mono`, `NotoSansSC` and
-`NotoEmoji` this way — see `crates/story-web/src/lib.rs`.
+The gallery's web build bundles `Inter`, `JetBrains Mono`, `Noto Sans SC` and
+`IBM Plex Sans` this way — see `crates/story-web/src/lib.rs`.
 
 ## Theme JSON config
 
@@ -122,3 +122,36 @@ Browsers expose **no system fonts** to WASM apps. The `story-web` gallery
 (which runs at `gpui-kit.com/gallery/`) must bundle every family it uses and
 re-assert them after `Theme::change`, or the text system panics. Desktop apps
 skip this entirely.
+
+Text the bundled fonts cannot draw can still come from the browser. The web
+platform renders emoji through Canvas 2D with the visitor's local fonts, so
+an application does not have to bundle an emoji font. The policy is chosen
+when the platform is constructed and cannot change afterwards:
+
+| `CanvasFontFallback` | Browser draws |
+| --- | --- |
+| `Emoji` (default) | Emoji, including skin tones, flags, keycaps and ZWJ sequences |
+| `EmojiAndCjk` | Emoji plus horizontal Han, kana and modern Hangul text |
+| `Disabled` | Nothing; only bundled fonts are used |
+
+`gpui_kit::application()` and `gpui_kit::platform::single_threaded_web()` keep
+the default. To widen it, build the platform yourself:
+
+```rust
+use gpui_kit::web::{CanvasFontFallback, WebBackendPreference, WebPlatform};
+
+let platform = Rc::new(WebPlatform::new_with_backend_and_font_fallback(
+    false,
+    WebBackendPreference::Auto,
+    CanvasFontFallback::EmojiAndCjk,
+));
+let http_client = Arc::new(platform.fetch_http_client());
+let app = Application::with_platform(platform).with_http_client(http_client);
+```
+
+Bundled fonts stay preferred wherever they have the glyph. The fallback draws
+each grapheme on its own, so CJK text rendered this way favors readability
+over exact spacing and font features, and its appearance depends on the
+fonts installed on the visitor's machine. The gallery opts into
+`EmojiAndCjk`: its bundled fonts hold only the glyphs its own stories use, and
+anything a visitor types into an input would otherwise render as tofu.
