@@ -60,8 +60,10 @@ jobs:
         with:
           components: clippy
           cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Lints every member and, as a side effect, type-checks the example
+      # crates that the `test` job leaves out.
       - name: Lint
-        run: cargo clippy -p gpui-component -p gpui-component-story -p gpui-kit-assets --locked -- --deny warnings
+        run: cargo clippy --workspace --exclude gpui-shell --locked -- --deny warnings
 
   recipes:
     name: Recipes
@@ -93,6 +95,10 @@ jobs:
           - target: x86_64-windows-msvc
             run_on: windows-latest
     runs-on: ${{ matrix.run_on }}
+    defaults:
+      run:
+        # `$TEST_EXCLUDES` must word-split, which PowerShell does not do.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -103,20 +109,40 @@ jobs:
       - name: Install system dependencies
         if: ${{ matrix.run_on != 'windows-latest' }}
         run: script/bootstrap
+      # Compiling and linking a test binary for every `examples/` crate was
+      # most of the warm-cache build time; the `lint` job type-checks them
+      # instead. Leaving them out changes no crate's feature set.
+      - name: Leave the example crates to the lint job
+        run: |
+          excludes=$(cargo metadata --no-deps --format-version 1 | jq -r '
+            ((.workspace_root | gsub("\\\\"; "/")) + "/examples/") as $examples
+            | .packages[]
+            | select((.manifest_path | gsub("\\\\"; "/")) | startswith($examples))
+            | "--exclude \(.name)"' | tr '\n' ' ')
+          echo "TEST_EXCLUDES=$excludes" >> "$GITHUB_ENV"
       # `gpui-component-story/test-support` turns on `gpui-kit/test-support`, so
       # this single run also covers the headless UI integration tests in
       # `crates/kit/tests`.
       - name: Test
-        run: cargo test --workspace --exclude gpui-shell --features gpui-component-story/test-support --locked
+        run: >-
+          cargo test --workspace --exclude gpui-shell
+          --features gpui-component-story/test-support --locked
+          $TEST_EXCLUDES
       - name: Doc tests
         if: ${{ matrix.run_on == 'macos-latest' }}
-        run: cargo test --workspace --exclude gpui-shell --features gpui-component-story/test-support --locked --doc
+        run: >-
+          cargo test --workspace --exclude gpui-shell
+          --features gpui-component-story/test-support --locked
+          $TEST_EXCLUDES --doc
       # `crates/kit/tests/rendering.rs` needs a real Metal device and is opted
       # out of the default test set; select it with the same feature set so it
       # reuses the build above.
       - name: Metal UI rendering tests
         if: ${{ matrix.run_on == 'macos-latest' }}
-        run: cargo test --workspace --exclude gpui-shell --features gpui-component-story/test-support --locked --test rendering
+        run: >-
+          cargo test --workspace --exclude gpui-shell
+          --features gpui-component-story/test-support --locked
+          $TEST_EXCLUDES --test rendering
 
   gpui-shell-core:
     name: GPUI Shell Core
