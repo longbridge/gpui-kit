@@ -12,18 +12,18 @@ use std::{cell::RefCell, rc::Rc, time::Duration};
 #[cfg(target_family = "wasm")]
 use web_time::Instant;
 
-/// Motion tokens for [`ElasticScroll`]: how far a drag stretches the viewport
+/// Motion tokens for [`ScrollBounce`]: how far a drag stretches the viewport
 /// past an edge, and how quickly a released edge returns.
 ///
 /// Base plays the stretch and the return; the feel belongs to the caller.
 /// The default is tuned to feel like a `UIScrollView` bounce.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct ElasticScrollMotion {
+pub struct ScrollBounceMotion {
     tracking: f32,
     response: Duration,
 }
 
-impl Default for ElasticScrollMotion {
+impl Default for ScrollBounceMotion {
     /// Tuned to feel like a `UIScrollView` bounce; these are not UIKit constants.
     fn default() -> Self {
         Self {
@@ -33,7 +33,7 @@ impl Default for ElasticScrollMotion {
     }
 }
 
-impl ElasticScrollMotion {
+impl ScrollBounceMotion {
     /// Fraction of finger travel the stretched edge follows at first.
     ///
     /// The edge follows less and less as it approaches the viewport height,
@@ -46,7 +46,7 @@ impl ElasticScrollMotion {
     pub fn with_tracking(mut self, tracking: f32) -> Self {
         assert!(
             tracking.is_finite() && tracking > 0.,
-            "elastic scroll tracking must be finite and positive"
+            "scroll bounce tracking must be finite and positive"
         );
         self.tracking = tracking;
         self
@@ -92,16 +92,16 @@ impl ElasticScrollMotion {
 /// explicitly enabled; their input must emit `Ended` at finger release, before momentum.
 /// Reduced motion disables displacement. Keyboard, focus, and line-wheel input
 /// remain owned by the child. No colors, padding, or dimensions are imposed.
-pub struct ElasticScroll {
+pub struct ScrollBounce {
     id: ElementId,
     handle: Rc<dyn ScrollbarHandle>,
     child: AnyElement,
     enabled: bool,
-    motion: ElasticScrollMotion,
+    motion: ScrollBounceMotion,
     on_scroll: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
 }
 
-impl ElasticScroll {
+impl ScrollBounce {
     pub fn new<H: ScrollbarHandle + Clone>(
         id: impl Into<ElementId>,
         handle: &H,
@@ -112,7 +112,7 @@ impl ElasticScroll {
             handle: Rc::new(handle.clone()),
             child: child.into_any_element(),
             enabled: cfg!(any(target_os = "ios", target_os = "android")),
-            motion: ElasticScrollMotion::default(),
+            motion: ScrollBounceMotion::default(),
             on_scroll: None,
         }
     }
@@ -124,12 +124,12 @@ impl ElasticScroll {
     }
 
     /// Set how far a drag stretches past an edge and how the edge returns.
-    pub fn motion(mut self, motion: ElasticScrollMotion) -> Self {
+    pub fn motion(mut self, motion: ScrollBounceMotion) -> Self {
         self.motion = motion;
         self
     }
 
-    /// Observe a logical scroll performed when a reverse drag leaves the elastic
+    /// Observe a logical scroll performed when a reverse drag leaves the stretched
     /// region. Runs after the handle update, with no internal state borrowed.
     /// Ordinary child scrolling continues to use the child's own notifications.
     pub fn on_scroll(mut self, handler: impl Fn(&mut Window, &mut App) + 'static) -> Self {
@@ -153,21 +153,21 @@ fn max_scroll_extent(handle: &dyn ScrollbarHandle) -> Pixels {
 }
 
 #[doc(hidden)]
-pub struct ElasticScrollPrepaintState {
+pub struct ScrollBouncePrepaintState {
     state: Rc<RefCell<State>>,
     hitbox: Hitbox,
 }
 
-impl IntoElement for ElasticScroll {
+impl IntoElement for ScrollBounce {
     type Element = Self;
     fn into_element(self) -> Self {
         self
     }
 }
 
-impl Element for ElasticScroll {
+impl Element for ScrollBounce {
     type RequestLayoutState = ();
-    type PrepaintState = ElasticScrollPrepaintState;
+    type PrepaintState = ScrollBouncePrepaintState;
 
     fn id(&self) -> Option<ElementId> {
         Some(self.id.clone())
@@ -196,7 +196,7 @@ impl Element for ElasticScroll {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let state = window.with_element_state(
-            id.expect("ElasticScroll has an id"),
+            id.expect("ScrollBounce has an id"),
             |state: Option<Rc<RefCell<State>>>, _| {
                 let state = state.unwrap_or_default();
                 (state.clone(), state)
@@ -224,7 +224,7 @@ impl Element for ElasticScroll {
                 self.child.prepaint(window, cx);
             });
         });
-        ElasticScrollPrepaintState { state, hitbox }
+        ScrollBouncePrepaintState { state, hitbox }
     }
 
     fn paint(
@@ -350,7 +350,7 @@ struct Physics {
     dragging: bool,
     suppress_momentum: bool,
     extent: f32,
-    motion: ElasticScrollMotion,
+    motion: ScrollBounceMotion,
 }
 
 impl Physics {
@@ -442,8 +442,8 @@ mod tests {
     impl Render for ScrollTest {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div().p(px(20.)).child(
-                ElasticScroll::new(
-                    "elastic",
+                ScrollBounce::new(
+                    "bounce",
                     &self.handle,
                     div()
                         .id("viewport")
@@ -475,8 +475,8 @@ mod tests {
 
     impl Render for ListTest {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            ElasticScroll::new(
-                "elastic-list",
+            ScrollBounce::new(
+                "bounce-list",
                 &self.0,
                 gpui::list(self.0.clone(), |_, _, _| {
                     div().h(px(40.)).into_any_element()
@@ -720,7 +720,7 @@ mod tests {
 
     #[test]
     fn motion_builder_configures_tracking_and_response() {
-        let motion = ElasticScrollMotion::default()
+        let motion = ScrollBounceMotion::default()
             .with_tracking(0.4)
             .with_response(Duration::from_millis(300));
         assert_eq!(motion.tracking(), 0.4);
@@ -731,7 +731,7 @@ mod tests {
     fn tracking_scales_the_first_stretch() {
         let stretch = |tracking: f32| {
             let mut scroll = Physics {
-                motion: ElasticScrollMotion::default().with_tracking(tracking),
+                motion: ScrollBounceMotion::default().with_tracking(tracking),
                 ..Physics::default()
             };
             scroll.begin(600.);
@@ -746,7 +746,7 @@ mod tests {
     fn response_scales_the_return_and_zero_snaps() {
         let remaining = |response: Duration| {
             let mut scroll = Physics {
-                motion: ElasticScrollMotion::default().with_response(response),
+                motion: ScrollBounceMotion::default().with_response(response),
                 ..Physics::default()
             };
             scroll.begin(600.);

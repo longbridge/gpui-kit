@@ -22,7 +22,6 @@ pub mod component_traits;
 mod date_picker;
 mod dialog;
 pub mod dock;
-mod elastic_scroll;
 mod element_ext;
 mod event;
 mod focus_trap;
@@ -50,6 +49,7 @@ mod progress;
 mod radio;
 mod radio_group;
 mod resizable;
+mod scroll_bounce;
 mod scrollable_mask;
 mod scrollbar;
 mod select;
@@ -99,7 +99,6 @@ pub use dialog::{
     Dialog, DialogBackdrop, DialogChangeReason, DialogClose, DialogDescription, DialogHandle,
     DialogPopup, DialogTitle, DialogTrigger,
 };
-pub use elastic_scroll::{ElasticScroll, ElasticScrollMotion};
 pub use element_ext::ElementExt;
 pub use event::{InteractiveElementExt, OngoingScrollExt};
 pub use focus_trap::FocusTrapElement;
@@ -146,6 +145,7 @@ pub use resizable::{
     ResizablePanel, ResizablePanelEvent, ResizablePanelGroup, ResizableState, ResizeHandleContext,
     ResizeHandleRenderer, h_resizable, resizable_panel, v_resizable,
 };
+pub use scroll_bounce::{ScrollBounce, ScrollBounceMotion};
 pub use scrollable_mask::ScrollableMask;
 pub use scrollbar::{
     Scrollbar, ScrollbarAxis, ScrollbarEntrance, ScrollbarHandle, ScrollbarMode, ScrollbarMotion,

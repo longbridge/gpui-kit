@@ -1,4 +1,4 @@
-//! Run with `cargo run -p gpui-base-examples --bin elastic_scroll --release`.
+//! Run with `cargo run -p gpui-base-examples --bin scroll_bounce --release`.
 //! Trackpad gestures exercise the same viewport wrapper as the iOS host.
 
 #[allow(dead_code)]
@@ -11,7 +11,7 @@ use gpui::{
     ScrollHandle, ScrollWheelEvent, StatefulInteractiveElement as _, Styled as _, TouchPhase,
     Window, WindowBounds, WindowOptions, div, list, point, px, size,
 };
-use gpui_base::{Button, ElasticScroll};
+use gpui_base::{Button, ScrollBounce};
 
 struct Example {
     list: ListState,
@@ -88,7 +88,7 @@ impl Render for Example {
             .on_mouse_up(MouseButton::Left, cx.listener(|this, _, window, cx| this.end_drag(window, cx)))
             .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, window, cx| this.end_drag(window, cx)))
             .bg(colors.background).text_color(colors.foreground)
-            .child(div().text_xl().child("Elastic scroll"))
+            .child(div().text_xl().child("Scroll bounce"))
             .child("Hold the left mouse button on the list and drag past an edge, then release. Trackpad scrolling also works.")
             .child(div().flex().gap_3()
                 .child(Button::new("toggle").border_1().border_color(border).px_3().py_2()
@@ -117,7 +117,7 @@ impl Render for Example {
                             this.begin_drag(event.position, window, cx);
                             cx.stop_propagation();
                         }))
-                        .child(ElasticScroll::new(("long", generation), &self.list,
+                        .child(ScrollBounce::new(("long", generation), &self.list,
                         list(self.list.clone(), move |ix, _, _| {
                             div().p_4().border_b_1().border_color(border).bg(surface)
                                 .child(format!("Message {} — swipe, hold, release, reverse", ix + 1))
@@ -125,7 +125,7 @@ impl Render for Example {
                         }).flex_1()).enabled(self.enabled))))
                 .child(div().flex().flex_col().flex_1().min_w_0().min_h_0().gap_2()
                     .child("Short content · both edges")
-                    .child(ElasticScroll::new(("short", generation), &self.short,
+                    .child(ScrollBounce::new(("short", generation), &self.short,
                         div().id("short-viewport").flex_1().min_h_0()
                             .overflow_y_scroll().track_scroll(&self.short).bg(surface)
                             .child(div().flex().flex_col().p_4().gap_4()
@@ -160,7 +160,7 @@ fn main() {
                 })
             },
         )
-        .expect("open elastic scroll example");
+        .expect("open scroll bounce example");
         cx.activate(true);
     });
 }
@@ -233,7 +233,7 @@ mod tests {
             position: anchor + point(px(0.), px(140.)),
             ..Default::default()
         });
-        // ElasticScroll uses the real monotonic clock, not the test executor's
+        // ScrollBounce uses the real monotonic clock, not the test executor's
         // virtual timer. A delayed frame may settle fully; either is valid.
         std::thread::sleep(std::time::Duration::from_millis(30));
         cx.update(|window, cx| window.draw(cx).clear(cx));
