@@ -547,6 +547,35 @@ impl DockArea {
         }
     }
 
+    /// Display `panel` in the tab group that holds it, wherever that is.
+    ///
+    /// A host that is handed a file already open, or restores the tab a
+    /// layout recorded as active, wants that tab shown where it sits.
+    /// [`Self::move_panel`] with `activate` would also move it, and the group
+    /// entities are the dock's own, so this is the one way to select a panel
+    /// by identity. Nothing happens for a panel the dock does not hold, or
+    /// one already displayed.
+    pub fn select_panel(&mut self, panel: PanelId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(placement) = self.placement_of_panel(panel) else {
+            return;
+        };
+        let Some(tree) = self.tree_mut(placement) else {
+            return;
+        };
+        let Some(node) = tree.find_panel_node(panel) else {
+            return;
+        };
+        let ix = tree.find_node(node).and_then(|node| match node.kind() {
+            PaneRef::Tabs { panels, .. } => panels.iter().position(|held| *held == panel),
+            PaneRef::Split { .. } => None,
+        });
+        let Some(ix) = ix else {
+            return;
+        };
+        let result = tree.set_active(node, ix);
+        self.commit(result, window, cx);
+    }
+
     /// Put `panel` in a new tab group beside `node`.
     pub fn split_at(
         &mut self,
@@ -3505,6 +3534,54 @@ mod tests {
         cx.run_until_parked();
 
         assert_eq!(drain_active(&log), [("A", false), ("B", true)]);
+    }
+
+    #[gpui::test]
+    fn select_panel_displays_that_tab_where_it_sits(cx: &mut TestAppContext) {
+        let log = log_of();
+        let (area, panels, cx) = one_group(&log, &["A", "B", "C"], None, cx);
+        cx.run_until_parked();
+        drain(&log);
+
+        let b = panel_id_of(&panels[1]);
+        cx.update(|window, cx| area.update(cx, |area, cx| area.select_panel(b, window, cx)));
+        cx.run_until_parked();
+
+        assert_eq!(drain_active(&log), [("A", false), ("B", true)]);
+        let (order, active_ix) = cx.read(|cx| {
+            let tree = area.read(cx).layout(DockPlacement::Center).unwrap();
+            let node = tree.find_panel_node(b).unwrap();
+            match tree.find_node(node).unwrap().kind() {
+                PaneRef::Tabs { panels, active_ix } => (panels.to_vec(), active_ix),
+                PaneRef::Split { .. } => panic!("a tab group"),
+            }
+        });
+        assert_eq!(active_ix, 1, "the selected tab is displayed");
+        assert_eq!(
+            order,
+            panels.iter().map(panel_id_of).collect::<Vec<_>>(),
+            "selecting a tab does not move it"
+        );
+    }
+
+    #[gpui::test]
+    fn select_panel_is_silent_for_the_displayed_or_an_unknown_panel(cx: &mut TestAppContext) {
+        let log = log_of();
+        let (area, panels, cx) = one_group(&log, &["A", "B"], None, cx);
+        cx.run_until_parked();
+        drain(&log);
+
+        let a = panel_id_of(&panels[0]);
+        let stranger = cx.update(|_, cx| panel_id_of(&TestPanel::logging("Z", &log, cx)));
+        cx.update(|window, cx| {
+            area.update(cx, |area, cx| {
+                area.select_panel(a, window, cx);
+                area.select_panel(stranger, window, cx);
+            })
+        });
+        cx.run_until_parked();
+
+        assert_eq!(drain_active(&log), []);
     }
 
     #[gpui::test]
