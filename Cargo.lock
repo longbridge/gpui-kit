@@ -3845,6 +3845,7 @@ version = "0.6.1"
 dependencies = [
  "anyhow",
  "gpui-pre",
+ "gpui-pre-platform",
  "gpui-pre-reqwest",
  "log",
  "rust-embed",
