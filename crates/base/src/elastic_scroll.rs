@@ -92,20 +92,24 @@ impl ElasticScrollMotion {
 /// explicitly enabled; their input must emit `Ended` at finger release, before momentum.
 /// Reduced motion disables displacement. Keyboard, focus, and line-wheel input
 /// remain owned by the child. No colors, padding, or dimensions are imposed.
-pub struct ElasticScroll<H: ScrollbarHandle + Clone> {
+pub struct ElasticScroll {
     id: ElementId,
-    handle: H,
+    handle: Rc<dyn ScrollbarHandle>,
     child: AnyElement,
     enabled: bool,
     motion: ElasticScrollMotion,
     on_scroll: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
 }
 
-impl<H: ScrollbarHandle + Clone> ElasticScroll<H> {
-    pub fn new(id: impl Into<ElementId>, handle: &H, child: impl IntoElement) -> Self {
+impl ElasticScroll {
+    pub fn new<H: ScrollbarHandle + Clone>(
+        id: impl Into<ElementId>,
+        handle: &H,
+        child: impl IntoElement,
+    ) -> Self {
         Self {
             id: id.into(),
-            handle: handle.clone(),
+            handle: Rc::new(handle.clone()),
             child: child.into_any_element(),
             enabled: cfg!(any(target_os = "ios", target_os = "android")),
             motion: ElasticScrollMotion::default(),
@@ -144,7 +148,7 @@ struct State {
 /// `ScrollbarHandle` has no `max_offset`; recover it from the definition
 /// `content_size = viewport + max_offset`. Both dispatch phases clamp against
 /// this bound and must agree on it.
-fn max_scroll_extent(handle: &impl ScrollbarHandle) -> Pixels {
+fn max_scroll_extent(handle: &dyn ScrollbarHandle) -> Pixels {
     (handle.content_size().height - handle.viewport_bounds().size.height).max(px(0.))
 }
 
@@ -154,14 +158,14 @@ pub struct ElasticScrollPrepaintState {
     hitbox: Hitbox,
 }
 
-impl<H: ScrollbarHandle + Clone> IntoElement for ElasticScroll<H> {
+impl IntoElement for ElasticScroll {
     type Element = Self;
     fn into_element(self) -> Self {
         self
     }
 }
 
-impl<H: ScrollbarHandle + Clone> Element for ElasticScroll<H> {
+impl Element for ElasticScroll {
     type RequestLayoutState = ();
     type PrepaintState = ElasticScrollPrepaintState;
 
@@ -273,7 +277,7 @@ impl<H: ScrollbarHandle + Clone> Element for ElasticScroll<H> {
                     if state.physics.offset() != 0. {
                         let remainder = state.physics.pull(delta.y.as_f32());
                         if remainder != 0. {
-                            let max = max_scroll_extent(&handle);
+                            let max = max_scroll_extent(handle.as_ref());
                             let mut offset = handle.offset();
                             offset.y = px(before + remainder).clamp(-max, px(0.));
                             handle.set_offset(offset);
@@ -292,7 +296,7 @@ impl<H: ScrollbarHandle + Clone> Element for ElasticScroll<H> {
                     // prepaint. Clamp here so that boundary deltas are not
                     // mistaken for consumed scrolling (ListState clamps eagerly).
                     let mut offset = handle.offset();
-                    let max = max_scroll_extent(&handle);
+                    let max = max_scroll_extent(handle.as_ref());
                     let clamped = offset.y.clamp(-max, px(0.));
                     if clamped != offset.y {
                         offset.y = clamped;
