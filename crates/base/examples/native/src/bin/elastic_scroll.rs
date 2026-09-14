@@ -1,6 +1,7 @@
 //! Run with `cargo run -p gpui-base-examples --bin elastic_scroll --release`.
 //! Trackpad gestures exercise the same viewport wrapper as the iOS host.
 
+#[allow(dead_code)]
 #[path = "../../../shared/palette.rs"]
 mod palette;
 

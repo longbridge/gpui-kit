@@ -16,8 +16,8 @@ use web_time::Instant;
 /// The stable `id` owns gesture and spring state. Change it when replacing the
 /// document. Put fixed chrome (scrollbars, toolbars) outside this wrapper.
 ///
-/// Enabled by default on iOS. Other platforms pass through unless explicitly
-/// enabled; their input must emit `Ended` at finger release, before momentum.
+/// Enabled by default on iOS and Android. Other platforms pass through unless
+/// explicitly enabled; their input must emit `Ended` at finger release, before momentum.
 /// Reduced motion disables displacement. Keyboard, focus, and line-wheel input
 /// remain owned by the child. No colors, padding, or dimensions are imposed.
 pub struct ElasticScroll<H: ScrollbarHandle + Clone> {
@@ -34,7 +34,7 @@ impl<H: ScrollbarHandle + Clone> ElasticScroll<H> {
             id: id.into(),
             handle: handle.clone(),
             child: child.into_any_element(),
-            enabled: cfg!(target_os = "ios"),
+            enabled: cfg!(any(target_os = "ios", target_os = "android")),
             on_scroll: None,
         }
     }
