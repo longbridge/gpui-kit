@@ -114,6 +114,9 @@ impl TextViewSelectionAdapter {
                         });
                     }
                     TextSelectionEvent::Cleared => {}
+                    TextSelectionEvent::TouchSelectionChanged => {
+                        let _ = view_for_events.update(cx, |_, cx| cx.notify());
+                    }
                 },
                 cx,
             )
