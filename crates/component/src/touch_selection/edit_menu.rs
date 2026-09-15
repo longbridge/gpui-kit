@@ -16,6 +16,9 @@ use crate::{
 };
 use gpui_base::TestSupportExt as _;
 
+/// The height of a menu row.
+const ROW_HEIGHT: Pixels = px(32.);
+
 /// One command in the edit menu.
 pub(crate) struct EditMenuItem {
     label: SharedString,
@@ -104,10 +107,9 @@ impl RenderOnce for EditMenu {
                     Button::new(ix)
                         .custom(item_style)
                         // This is a finger's menu wherever it shows: body
-                        // text with room around it.
+                        // text in a 32px row.
                         .large()
-                        .h_auto()
-                        .py_2p5()
+                        .h(ROW_HEIGHT)
                         .px_3()
                         .rounded(radius)
                         .border_corners(corners)
