@@ -22,6 +22,7 @@ members = [
     "examples/html",
     "examples/large-text",
     "examples/markdown",
+    "examples/markdown-editor",
     "examples/stream-markdown",
     "examples/window_title",
     "examples/dialog_overlay",

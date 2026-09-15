@@ -21,7 +21,8 @@ use crate::{
         MarkdownNode, TableActionsFn,
         document::NodeRenderOptions,
         inline::{
-            Inline, InlineHighlight, InlineState, combine_highlights, text_runs, text_size_ranges,
+            Inline, InlineHighlight, InlineInteraction, InlineState, combine_highlights, text_runs,
+            text_size_ranges,
         },
         inline_flow::{InlineFlow, InlineFlowItem, slice_ranges},
         text_view::handle_link_click,
@@ -1477,6 +1478,8 @@ impl CodeBlock {
 /// A context for rendering nodes, contains link references.
 #[derive(Default, Clone)]
 pub(crate) struct NodeContext {
+    // Optional interaction over the shared paragraph layout.
+    pub(super) paragraph_interaction: Option<Arc<ParagraphInteraction>>,
     /// The byte offset of the node in the original markdown text.
     /// Used for incremental updates.
     pub(crate) offset: usize,
@@ -1494,6 +1497,9 @@ impl NodeContext {
         self.link_refs.insert(identifier, link);
     }
 }
+
+pub(super) type ParagraphInteraction =
+    dyn Fn(&Paragraph) -> Option<Arc<dyn InlineInteraction>> + Send + Sync;
 
 impl PartialEq for NodeContext {
     fn eq(&self, other: &Self) -> bool {
@@ -1569,6 +1575,10 @@ impl Paragraph {
     }
 
     fn render(&self, node_cx: &NodeContext, _window: &mut Window, cx: &mut App) -> AnyElement {
+        let interaction = node_cx
+            .paragraph_interaction
+            .as_ref()
+            .and_then(|interaction| interaction(self));
         let span = self.span;
         let children = &self.children;
 
@@ -1578,6 +1588,7 @@ impl Paragraph {
                 self.inline_flow_items(node_cx, cx),
                 node_cx.link_click_handler.clone(),
             )
+            .interaction(interaction)
             .into_any_element();
         }
 
@@ -1684,7 +1695,7 @@ impl Paragraph {
         }
 
         // Add the last text node
-        if text.len() > 0 {
+        if text.len() > 0 || interaction.is_some() {
             if let Ok(mut state) = self.state.lock() {
                 state.set_text(text.into());
             }
@@ -1696,6 +1707,7 @@ impl Paragraph {
                     highlights,
                     node_cx.link_click_handler.clone(),
                 )
+                .interaction(interaction, 0..self.text_len())
                 .into_any_element(),
             );
         }
@@ -2048,7 +2060,14 @@ impl BlockNode {
                     } else {
                         "- ".to_string()
                     };
-                    format!("{}{}", prefix, child.to_markdown())
+                    let body = child.to_markdown();
+                    let indent = " ".repeat(prefix.len());
+                    let mut lines = body.split('\n');
+                    let first = format!("{}{}", prefix, lines.next().unwrap_or_default());
+                    std::iter::once(first)
+                        .chain(lines.map(|line| format!("{indent}{line}")))
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
