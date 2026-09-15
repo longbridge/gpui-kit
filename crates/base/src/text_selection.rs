@@ -1549,17 +1549,31 @@ impl WindowSelectionState {
         let Some((participant, registration)) = self.anchor_registration() else {
             return;
         };
-        let text = registration.text_bounds.iter();
-        let (Some(first), Some(last)) = (
-            text.clone().min_by_key(|line| (line.top(), line.left())),
-            text.max_by_key(|line| (line.bottom(), line.right())),
-        ) else {
-            return;
+        // From the participant's text runs, not its painted line bounds:
+        // those are clipped to the viewport, and a message taller than the
+        // screen would only select what is on it.
+        let (anchor, cursor) = {
+            let runs = &participant.read(cx).runs;
+            let (Some(first), Some(last)) = (
+                runs.iter().min_by_key(|run| run.document_order),
+                runs.iter().max_by_key(|run| run.document_order),
+            ) else {
+                return;
+            };
+            let (Some(start), Some(end)) = (
+                first.layout.position_for_index(0),
+                last.layout.position_for_index(last.text.len()),
+            ) else {
+                return;
+            };
+            // Just inside the first and the last glyph, mid-line, so both
+            // land on text.
+            let inset = px(1.);
+            (
+                point(start.x + inset, start.y + first.layout.line_height() / 2.),
+                point(end.x - inset, end.y + last.layout.line_height() / 2.),
+            )
         };
-        // Just inside the first and the last line, so both land on text.
-        let inset = px(1.);
-        let anchor = point(first.left() + inset, first.center().y);
-        let cursor = point(last.right() - inset, last.center().y);
         let content_key_resolver = participant.read(cx).content_key_resolver.clone();
         let to_endpoint = |window_point: Point<Pixels>| {
             let content_point =

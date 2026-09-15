@@ -2,8 +2,9 @@
 //! `Input` and in a `TextView`.
 
 use gpui::{
-    AppContext, Context, Entity, InputEvent as _, LongPressEvent, Pixels, Point, StyleRefinement,
-    TestAppContext, TouchDragEvent, TouchPhase, Window, WindowHandle, div, prelude::*, px,
+    AppContext, Context, Entity, InputEvent as _, LongPressEvent, Modifiers, MouseButton,
+    MouseDownEvent, MouseUpEvent, Pixels, Point, StyleRefinement, TestAppContext, TouchDragEvent,
+    TouchPhase, Window, WindowHandle, div, prelude::*, px,
 };
 use gpui_base::TextSelection;
 use gpui_component::{
@@ -77,6 +78,77 @@ impl Render for CachedScreen {
                 .cached(StyleRefinement::default().w(px(320.)).h(px(120.))),
         )
     }
+}
+
+/// A screen whose text is taller than the scroll box it sits in.
+struct TallScreen {
+    text: Entity<TextViewState>,
+}
+
+impl Render for TallScreen {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().p_4().child(
+            div()
+                .id("box")
+                .w(px(200.))
+                .h(px(48.))
+                .overflow_y_scroll()
+                .child(
+                    div()
+                        .id("text")
+                        .test_support()
+                        .child(TextView::new(&self.text).selectable(true)),
+                ),
+        )
+    }
+}
+
+fn tall_screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
+    cx.update(gpui_component::init);
+    cx.add_window(|window, cx| {
+        let view = cx.new(|cx| TallScreen {
+            text: cx.new(|cx| {
+                TextViewState::markdown("first line\n\nsecond line\n\nthird line\n\nlast line", cx)
+            }),
+        });
+        Root::new(view, window, cx)
+    })
+}
+
+/// A finger's double tap: the touch is offered as a drag first, as GPUI
+/// does, then arrives as a two-click press.
+fn double_tap(window: &mut Window, cx: &mut gpui::App, position: Point<Pixels>) {
+    window.dispatch_event(
+        TouchDragEvent {
+            phase: TouchPhase::Started,
+            start_position: position,
+            position,
+        }
+        .to_platform_input(),
+        cx,
+    );
+    window.dispatch_event(
+        MouseDownEvent {
+            button: MouseButton::Left,
+            position,
+            modifiers: Modifiers::default(),
+            click_count: 2,
+            first_mouse: false,
+        }
+        .to_platform_input(),
+        cx,
+    );
+    window.dispatch_event(
+        MouseUpEvent {
+            button: MouseButton::Left,
+            position,
+            modifiers: Modifiers::default(),
+            click_count: 2,
+        }
+        .to_platform_input(),
+        cx,
+    );
+    window.render_frame(cx);
 }
 
 fn cached_screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
@@ -553,6 +625,50 @@ fn a_selection_under_a_cached_view_holds_still_and_keeps_its_handles(cx: &mut Te
             TextSelection::selected_text(window, cx).trim(),
             "quick select value",
             "the handle claimed the drag"
+        );
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn a_double_tap_in_text_view_selects_the_word_with_handles(cx: &mut TestAppContext) {
+    let handle = screen(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let text = window.find("text").bounds();
+        double_tap(
+            window,
+            cx,
+            point(text.left() + px(8.), text.top() + px(10.)),
+        );
+        window.render_frame(cx);
+        assert_eq!(TextSelection::selected_text(window, cx).trim(), "quick");
+        let snapshot =
+            TextSelection::touch_selection(window, cx).expect("a finger's word gets handles");
+        assert!(snapshot.is_menu_open());
+        assert!(window.try_find("Copy").is_some(), "and the menu");
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn select_all_takes_the_text_beyond_the_viewport(cx: &mut TestAppContext) {
+    let handle = tall_screen(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let text = window.find("text").bounds();
+        long_press(
+            window,
+            cx,
+            point(text.left() + px(8.), text.top() + px(10.)),
+        );
+        assert_eq!(TextSelection::selected_text(window, cx).trim(), "first");
+
+        window.click("Select All", cx);
+        assert_eq!(
+            TextSelection::selected_text(window, cx).trim(),
+            "first line\nsecond line\nthird line\nlast line",
+            "the whole text, not the lines the box shows"
         );
     })
     .unwrap();

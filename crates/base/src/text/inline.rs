@@ -747,6 +747,13 @@ impl Element for Inline {
                         return;
                     }
 
+                    // A double tap is a finger's word selection: the window
+                    // layer makes it a point selection with handles and the
+                    // menu, as a long press does. The mouse's stays here.
+                    if event.click_count == 2 && GlobalState::is_touch_press(cx) {
+                        return;
+                    }
+
                     let kind = match event.click_count {
                         2 => TextViewMultiClickKind::Word,
                         3 => TextViewMultiClickKind::Paragraph,
