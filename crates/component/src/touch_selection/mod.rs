@@ -16,15 +16,20 @@ use gpui::{AnyElement, App, Bounds, ElementId, IntoElement, Pixels, Point, Touch
 use gpui_base::{SelectionEdge, TouchSelectionSnapshot};
 
 pub(crate) use edit_menu::{EditMenu, EditMenuItem};
-pub(crate) use handle::{DragHandler, SelectionHandle, SurfaceHandler};
+pub(crate) use handle::{DragHandler, SelectionHandles, SnapshotSource, SurfaceHandler};
 pub(crate) use window_overlay::WindowTouchSelectionOverlay;
 
 use handle::KNOB_EXTENT;
 
 /// Draws one touch selection: its handles and, when open, its edit menu.
+///
+/// The handles read the selection's geometry as they paint, so they follow
+/// text that scrolls in the same frame. The menu is placed from the snapshot
+/// read here; it steps aside while the text scrolls, so a frame's lag in its
+/// anchor never shows.
 pub(crate) struct TouchSelectionOverlay {
     id: ElementId,
-    snapshot: TouchSelectionSnapshot,
+    source: SnapshotSource,
     items: Vec<EditMenuItem>,
     on_drag: DragHandler,
     on_paint: Option<SurfaceHandler>,
@@ -33,12 +38,12 @@ pub(crate) struct TouchSelectionOverlay {
 impl TouchSelectionOverlay {
     pub(crate) fn new(
         id: impl Into<ElementId>,
-        snapshot: TouchSelectionSnapshot,
+        source: impl Fn(&Window, &App) -> Option<TouchSelectionSnapshot> + 'static,
         on_drag: impl Fn(SelectionEdge, TouchPhase, Point<Pixels>, &mut Window, &mut App) + 'static,
     ) -> Self {
         Self {
             id: id.into(),
-            snapshot,
+            source: Rc::new(source),
             items: Vec::new(),
             on_drag: Rc::new(on_drag),
             on_paint: None,
@@ -61,31 +66,20 @@ impl TouchSelectionOverlay {
         self
     }
 
-    /// The elements to add to the owner: a handle for each end of a
-    /// non-empty selection that is in view, and the menu when it is open.
-    /// Each floats in window coordinates.
-    pub(crate) fn into_elements(self, window: &Window) -> Vec<AnyElement> {
-        let snapshot = self.snapshot;
-        let window_bounds = Bounds::new(Point::default(), window.viewport_size());
-        let mut elements = Vec::with_capacity(3);
-        if !snapshot.is_empty() {
-            for edge in [SelectionEdge::Start, SelectionEdge::End] {
-                // No handle for an end scrolled out of its owner, nor for one
-                // outside the window, where the positioner would only drag it
-                // back to the edge.
-                let caret = snapshot.edge(edge);
-                if !snapshot.is_edge_visible(edge) || !window_bounds.contains(&caret.origin) {
-                    continue;
-                }
-                let handle = SelectionHandle::new(edge, caret, self.on_drag.clone())
-                    .dragging(snapshot.dragging() == Some(edge));
-                let handle = match self.on_paint.clone() {
-                    Some(on_paint) => handle.on_paint(on_paint),
-                    None => handle,
-                };
-                elements.push(handle.into_any_element());
-            }
-        }
+    /// The elements to add to the owner: the handles, and the menu when it
+    /// is open. Each floats in window coordinates.
+    pub(crate) fn into_elements(self, window: &Window, cx: &App) -> Vec<AnyElement> {
+        let Some(snapshot) = (self.source)(window, cx) else {
+            return Vec::new();
+        };
+        let mut elements = Vec::with_capacity(2);
+        let handles = SelectionHandles::new(self.source, self.on_drag);
+        let handles = match self.on_paint.clone() {
+            Some(on_paint) => handles.on_paint(on_paint),
+            None => handles,
+        };
+        elements.push(handles.into_any_element());
+
         if let Some(mut anchor) = snapshot
             .bounds()
             .filter(|_| snapshot.is_menu_open() && !self.items.is_empty())

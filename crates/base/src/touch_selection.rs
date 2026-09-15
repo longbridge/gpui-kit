@@ -9,7 +9,7 @@
 //! to draw them. The handles and the menu themselves are drawn by the styled
 //! layer, which also decides how large a handle's touch target is.
 
-use gpui::{Bounds, Pixels, Point, point, px, size};
+use gpui::{Bounds, Half as _, Pixels, Point, point, px, size};
 
 /// One end of a selection, as a touch handle grabs it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -159,6 +159,8 @@ pub(crate) fn caret_in_view(caret: Bounds<Pixels>, viewport: Bounds<Pixels>) -> 
 pub(crate) struct EdgeDrag {
     edge: SelectionEdge,
     offset: Point<Pixels>,
+    /// The caret line box the dragged end is on now.
+    line: Bounds<Pixels>,
 }
 
 impl EdgeDrag {
@@ -166,6 +168,7 @@ impl EdgeDrag {
         Self {
             edge,
             offset: caret.center() - finger,
+            line: caret,
         }
     }
 
@@ -178,8 +181,26 @@ impl EdgeDrag {
         self.edge = edge;
     }
 
+    /// The dragged end landed on `caret`; that is the line it is on now.
+    pub(crate) fn follow(&mut self, caret: Bounds<Pixels>) {
+        self.line = caret;
+    }
+
+    /// The text position the finger points at.
+    ///
+    /// A finger is not an I-beam: the end stays on its line until the finger
+    /// is more than half a line into the next one above or below, instead of
+    /// hopping lines the moment it crosses the line's edge.
     pub(crate) fn text_position(&self, finger: Point<Pixels>) -> Point<Pixels> {
-        point(finger.x + self.offset.x, finger.y + self.offset.y)
+        let x = finger.x + self.offset.x;
+        let y = finger.y + self.offset.y;
+        let half = self.line.size.height.half();
+        let y = if y >= self.line.top() - half && y <= self.line.bottom() + half {
+            self.line.center().y
+        } else {
+            y
+        };
+        point(x, y)
     }
 }
 
@@ -231,14 +252,30 @@ mod tests {
     }
 
     #[test]
-    fn edge_drag_keeps_the_finger_offset() {
+    fn edge_drag_keeps_the_finger_offset_and_holds_its_line() {
         let caret = caret_line_box(point(px(100.), px(40.)), px(20.));
         let drag = EdgeDrag::begin(SelectionEdge::End, caret, point(px(102.), px(72.)));
         assert_eq!(drag.edge(), SelectionEdge::End);
-        // The finger started 22px below the caret's center; it stays there.
+        // The finger started 22px below the caret's center. Nine pixels
+        // further down is still this line (40..60, held to 30..70).
         assert_eq!(
-            drag.text_position(point(px(150.), px(90.))),
-            point(px(148.), px(68.))
+            drag.text_position(point(px(150.), px(81.))),
+            point(px(148.), px(50.))
+        );
+        // Past half a line into the next: the position passes through, and
+        // the end will land there.
+        assert_eq!(
+            drag.text_position(point(px(150.), px(93.))),
+            point(px(148.), px(71.))
+        );
+        // Back up: the same half-line grace above the line.
+        assert_eq!(
+            drag.text_position(point(px(150.), px(52.))),
+            point(px(148.), px(50.))
+        );
+        assert_eq!(
+            drag.text_position(point(px(150.), px(50.))),
+            point(px(148.), px(28.))
         );
     }
 }

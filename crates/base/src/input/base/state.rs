@@ -2269,6 +2269,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         // Double click to select word
         if event.button == MouseButton::Left && event.click_count == 2 {
             self.select_word(offset, window, cx);
+            // A double tap is touch's other way to select a word, and it
+            // gets the handles and the menu like a long press does.
+            if crate::GlobalState::is_touch_press(cx) {
+                self.keep_touch_selection(cx);
+            }
             return;
         }
 

@@ -16,6 +16,9 @@ use crate::{
 };
 use gpui_base::TestSupportExt as _;
 
+/// The height of a menu item under a finger, iOS's minimum touch target.
+const MOBILE_ROW_HEIGHT: Pixels = px(44.);
+
 /// One command in the edit menu.
 pub(crate) struct EditMenuItem {
     label: SharedString,
@@ -102,8 +105,15 @@ impl RenderOnce for EditMenu {
                 .child(
                     Button::new(ix)
                         .custom(item_style)
-                        .small()
-                        .compact()
+                        .map(|this| {
+                            // A finger needs iOS's row: 44pt tall, body text,
+                            // room on both sides. A pointer does not.
+                            if gpui_base::is_mobile() {
+                                this.large().h(MOBILE_ROW_HEIGHT).px_4()
+                            } else {
+                                this.small().compact()
+                            }
+                        })
                         .rounded(radius)
                         .border_corners(corners)
                         .tab_stop(false)

@@ -301,3 +301,37 @@ fn a_handle_stops_at_the_other_end_instead_of_collapsing_the_selection(cx: &mut 
     })
     .unwrap();
 }
+
+#[gpui::test]
+fn copy_after_select_all_keeps_the_whole_selection(cx: &mut TestAppContext) {
+    let handle = screen(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let text = window.find("text").bounds();
+        long_press(
+            window,
+            cx,
+            point(text.left() + px(8.), text.top() + px(10.)),
+        );
+        window.click("Select All", cx);
+        assert_eq!(
+            TextSelection::selected_text(window, cx).trim(),
+            "quick select value"
+        );
+        window.click("Copy", cx);
+        assert_eq!(
+            TextSelection::selected_text(window, cx).trim(),
+            "quick select value",
+            "the tap on Copy must not touch the selection"
+        );
+        let snapshot = TextSelection::touch_selection(window, cx).expect("handles stay");
+        assert!(!snapshot.is_menu_open());
+        assert_eq!(
+            cx.read_from_clipboard()
+                .and_then(|item| item.text())
+                .as_deref(),
+            Some("quick select value")
+        );
+    })
+    .unwrap();
+}

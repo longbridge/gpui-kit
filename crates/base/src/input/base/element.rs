@@ -9,7 +9,7 @@ use gpui::{
     HighlightStyle, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, LayoutId,
     LongPressEvent, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement as _, Path, Pixels,
     Point, Position, ShapedLine, SharedString, Size, Style, Styled as _, TextAlign, TextRun,
-    TextStyle, TouchPhase, UnderlineStyle, Window, fill, point, px, relative, size,
+    TextStyle, TouchDragEvent, TouchPhase, UnderlineStyle, Window, fill, point, px, relative, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -417,6 +417,14 @@ impl<M: InputModeKind> TextElement<M> {
     }
 
     fn paint_mouse_listeners(&mut self, hitbox: &Hitbox, window: &mut Window, _: &mut App) {
+        // Every touch is offered as a drag first; that is how a tap's mouse
+        // events are later told apart from a mouse's.
+        window.on_mouse_event(move |event: &TouchDragEvent, phase, _, cx| {
+            if phase.capture() && event.phase == TouchPhase::Started {
+                crate::GlobalState::note_touch(cx);
+            }
+        });
+
         // A long press is touch's way to select: the word under the finger,
         // then whatever the finger sweeps over. Claiming it keeps the moves
         // out of the pan recognizer, so the input does not scroll instead.

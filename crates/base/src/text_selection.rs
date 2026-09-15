@@ -10,7 +10,7 @@ use gpui::{
     Global, GlobalElementId, Half, Hitbox, InputEvent as _, InspectorElementId, IntoElement,
     LayoutId, LongPressEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
     Point, ScrollDelta, ScrollWheelEvent, SharedString, Style, Subscription, TextLayout,
-    TouchPhase, WeakEntity, Window, point, px,
+    TouchDragEvent, TouchPhase, WeakEntity, Window, point, px,
 };
 
 use crate::text_boundary::{line_range_at, word_range_at};
@@ -877,8 +877,11 @@ struct TouchSelection {
     active: bool,
     menu_open: bool,
     drag: Option<EdgeDrag>,
-    /// Where the handles and the menu were painted this frame.
+    /// Where the handles and the menu were painted this frame, and the frame
+    /// before: a press arrives between frames, and the surfaces may have
+    /// moved in the one that has not painted yet.
     ui_bounds: Vec<Bounds<Pixels>>,
+    previous_ui_bounds: Vec<Bounds<Pixels>>,
     /// The ends as last laid out: `(start, end, start_visible, end_visible)`.
     /// A frame in which no participant paints a selection — the cursor sits
     /// between two characters mid-drag — would otherwise lose the handle the
@@ -892,7 +895,13 @@ impl TouchSelection {
             && self
                 .ui_bounds
                 .iter()
+                .chain(&self.previous_ui_bounds)
                 .any(|bounds| bounds.contains(&position))
+    }
+
+    /// A new frame begins: what was painted last frame is kept one frame more.
+    fn begin_frame(&mut self) {
+        self.previous_ui_bounds = std::mem::take(&mut self.ui_bounds);
     }
 
     /// Drops the handles and the menu; returns whether there were any.
@@ -1121,6 +1130,15 @@ impl WindowSelectionState {
         );
         self.publish_snapshots(cx);
         if edges_moved {
+            // The dragged end landed on a line only the paint could tell.
+            if let Some(drag) = self.touch.drag {
+                let landed = self
+                    .touch_selection()
+                    .map(|snapshot| snapshot.edge(drag.edge()));
+                if let (Some(caret), Some(drag)) = (landed, self.touch.drag.as_mut()) {
+                    drag.follow(caret);
+                }
+            }
             self.touch_changed(cx);
         }
     }
@@ -2260,7 +2278,7 @@ impl Element for TextSelectionLayer {
         GlobalState::global_mut(cx).begin_selection_frame();
         let state = retain_text_selection_state(global_id, window, cx);
         // The handles and the menu register again as they paint this frame.
-        state.update(cx, |state, _| state.touch.ui_bounds.clear());
+        state.update(cx, |state, _| state.touch.begin_frame());
         TextSelectionLayerPrepaintState(state)
     }
 
@@ -2313,7 +2331,14 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
             // the held cursor after paint registers the new scroll geometry.
             let refresh_cursor = state.update(cx, |state, cx| {
                 if std::mem::take(&mut state.refresh_held_cursor) && state.is_selecting {
-                    state.update_in_window(window.mouse_position(), window, cx);
+                    // A handle drag holds the finger off the text; keep the
+                    // same offset, or the cursor would hop between the two.
+                    let position = window.mouse_position();
+                    let position = state
+                        .touch
+                        .drag
+                        .map_or(position, |drag| drag.text_position(position));
+                    state.update_in_window(position, window, cx);
                     true
                 } else {
                     false
@@ -2364,10 +2389,24 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
             if GlobalState::is_text_selection_suppressed(cx) {
                 return;
             }
+            let touch = GlobalState::is_touch_press(cx);
             state.update(cx, |state, cx| {
-                state.select_at(event.position, event.click_count, window, cx)
+                state.select_at(event.position, event.click_count, window, cx);
+                // A double tap is touch's other way to select a word, and it
+                // gets the handles and the menu like a long press does.
+                if touch {
+                    state.keep_touch_selection(cx);
+                }
             });
             WindowSelectionState::resolve_content_keys(&state, cx);
+        }
+    });
+
+    // Every touch is offered as a drag first; that is how a tap's mouse
+    // events are later told apart from a mouse's.
+    window.on_mouse_event(move |event: &TouchDragEvent, phase, _, cx| {
+        if phase.capture() && event.phase == TouchPhase::Started {
+            GlobalState::note_touch(cx);
         }
     });
 
@@ -2463,6 +2502,11 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
             let position = window.mouse_position();
             state.update(cx, |state, cx| {
                 state.edit_menu_on_scroll(event.touch_phase, cx);
+                // A handle drag holds the finger off the text; keep its offset.
+                let position = state
+                    .touch
+                    .drag
+                    .map_or(position, |drag| drag.text_position(position));
                 state.update_in_window(position, window, cx)
             });
             WindowSelectionState::resolve_content_keys(&state, cx);

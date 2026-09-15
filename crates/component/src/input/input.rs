@@ -335,9 +335,9 @@ impl Input {
         window: &Window,
         cx: &App,
     ) -> Vec<AnyElement> {
-        let Some(snapshot) = state.touch_selection(cx) else {
+        if state.touch_selection(cx).is_none() {
             return Vec::new();
-        };
+        }
         let capabilities = state.context_menu_capabilities(cx);
         let editable = capabilities.is_editable();
         let copyable = capabilities.is_copyable();
@@ -384,9 +384,10 @@ impl Input {
         }
 
         let drag_state = state.clone();
+        let source_state = state.clone();
         TouchSelectionOverlay::new(
             ("input-touch-selection", state.entity_id()),
-            snapshot,
+            move |_, cx| source_state.touch_selection(cx),
             move |edge, phase, position, _, cx| match phase {
                 TouchPhase::Started => drag_state.begin_edge_drag(edge, position, cx),
                 TouchPhase::Moved => drag_state.update_edge_drag(position, cx),
@@ -394,7 +395,7 @@ impl Input {
             },
         )
         .items(items)
-        .into_elements(window)
+        .into_elements(window, cx)
     }
 
     fn render_toggle_mask_button(state: &TextInputState, cx: &App) -> impl IntoElement {

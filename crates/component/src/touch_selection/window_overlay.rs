@@ -44,12 +44,12 @@ impl WindowTouchSelectionOverlay {
 
 impl Render for WindowTouchSelectionOverlay {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let Some(snapshot) = TextSelection::touch_selection(window, cx) else {
+        if TextSelection::touch_selection(window, cx).is_none() {
             return div();
-        };
+        }
         let overlay = TouchSelectionOverlay::new(
             "window-touch-selection",
-            snapshot,
+            |window, cx| TextSelection::touch_selection(window, cx),
             |edge, phase, position, window, cx| match phase {
                 TouchPhase::Started => TextSelection::begin_edge_drag(edge, position, window, cx),
                 TouchPhase::Moved => TextSelection::update_edge_drag(position, window, cx),
@@ -63,6 +63,6 @@ impl Render for WindowTouchSelectionOverlay {
             EditMenuItem::new(t!("Input.Select All"), Self::select_all),
         ])
         .on_paint(|bounds, window, cx| TextSelection::register_touch_ui(bounds, window, cx));
-        div().children(overlay.into_elements(window))
+        div().children(overlay.into_elements(window, cx))
     }
 }

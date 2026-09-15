@@ -18,6 +18,9 @@ pub struct GlobalState {
     suppress_text_selection: bool,
     pub(crate) text_view_state_stack: Vec<Entity<TextViewState>>,
     selection_document_order: u64,
+    /// When a finger last went down. A tap reaches controls as a mouse press;
+    /// this is how they tell it from one.
+    last_touch: Option<std::time::Instant>,
 }
 
 impl Global for GlobalState {}
@@ -30,7 +33,24 @@ impl GlobalState {
             suppress_text_selection: false,
             text_view_state_stack: Vec::new(),
             selection_document_order: 1,
+            last_touch: None,
         }
+    }
+
+    /// Records that a finger went down. Called from the touch drag GPUI
+    /// offers on every touch, before it becomes a tap, a long press or a pan.
+    pub fn note_touch(cx: &mut App) {
+        Self::init(cx);
+        Self::global_mut(cx).last_touch = Some(std::time::Instant::now());
+    }
+
+    /// Whether the press being handled came from a finger: a touch went
+    /// down recently enough that the mouse events of a tap are still
+    /// arriving. A double tap takes up to twice the tap interval.
+    pub fn is_touch_press(cx: &App) -> bool {
+        cx.try_global::<Self>()
+            .and_then(|state| state.last_touch)
+            .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(1))
     }
 
     /// Ensures that the Base global exists.

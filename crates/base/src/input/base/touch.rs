@@ -72,6 +72,15 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.touch_selection.range = Some((selection.start, selection.end));
     }
 
+    /// Keeps the current selection as a touch selection, with the menu open
+    /// over it: what a double tap's word selection asks for.
+    pub(super) fn keep_touch_selection(&mut self, cx: &mut Context<Self>) {
+        self.retain_touch_selection();
+        self.touch_selection.menu_open = true;
+        self.touch_selection.drag = None;
+        cx.notify();
+    }
+
     /// Drops the handles and the edit menu. Called where the selection is
     /// about to be moved by something other than the gesture.
     pub(super) fn dismiss_touch_selection(&mut self, cx: &mut Context<Self>) {
@@ -282,10 +291,14 @@ impl<M: InputModeKind> InputBaseState<M> {
         } else {
             SelectionEdge::End
         };
+        self.retain_touch_selection();
+        let landed = self.touch_selection().map(|snapshot| snapshot.edge(edge));
         if let Some(drag) = self.touch_selection.drag.as_mut() {
             drag.set_edge(edge);
+            if let Some(caret) = landed {
+                drag.follow(caret);
+            }
         }
-        self.retain_touch_selection();
         cx.notify();
     }
 
@@ -415,6 +428,41 @@ mod tests {
             let snapshot = state.touch_selection().expect("touch selection is live");
             assert!(snapshot.is_menu_open());
             assert!(snapshot.start().left() < snapshot.end().left());
+        });
+    }
+
+    #[gpui::test]
+    fn double_tap_selects_word_with_handles_and_menu(cx: &mut TestAppContext) {
+        let (input, cx) = open_input(cx, "quick select value");
+        let at = caret_at(&input, cx, 8);
+        let position = point(px(at.0), px(at.1));
+        // A tap arrives as mouse events; the touch that began it is what
+        // tells the input they came from a finger.
+        cx.update(|_, cx| crate::GlobalState::note_touch(cx));
+        for click_count in [1, 2] {
+            cx.simulate_event(gpui::MouseDownEvent {
+                position,
+                button: MouseButton::Left,
+                modifiers: Default::default(),
+                click_count,
+                first_mouse: false,
+            });
+            cx.simulate_event(gpui::MouseUpEvent {
+                position,
+                button: MouseButton::Left,
+                modifiers: Default::default(),
+                click_count,
+            });
+        }
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        input.read_with(cx, |state, _| {
+            assert_eq!(state.selected_text().to_string(), "select");
+            let snapshot = state
+                .touch_selection()
+                .expect("a double tap is a touch selection");
+            assert!(snapshot.is_menu_open());
         });
     }
 
