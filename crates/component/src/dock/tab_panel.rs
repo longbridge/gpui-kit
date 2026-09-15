@@ -27,8 +27,27 @@ use gpui_base::{
 };
 use rust_i18n::t;
 
+/// The title bar's buttons: a pointer's compact ones, a finger's 32px ones.
+fn title_bar_button_size() -> Size {
+    if gpui_base::is_mobile() {
+        Size::Medium
+    } else {
+        Size::XSmall
+    }
+}
+
+/// The title bar's height: 30px for a pointer, a finger gets room for its
+/// buttons.
+fn title_bar_height() -> gpui::Pixels {
+    if gpui_base::is_mobile() {
+        px(44.)
+    } else {
+        px(30.)
+    }
+}
+
 use crate::{
-    ActiveTheme as _, IconName, Selectable as _, Sizable as _,
+    ActiveTheme as _, IconName, Selectable as _, Sizable as _, Size,
     button::{Button, ButtonVariants as _},
     dock::{ClosePanel, PanelControl, PanelHandle, PanelStyle, SkinShared, ToggleZoom},
     h_flex,
@@ -251,7 +270,7 @@ impl TabGroupSkin {
         Some(
             Button::new(SharedString::from(format!("toggle-dock:{:?}", placement)))
                 .icon(icon)
-                .xsmall()
+                .with_size(title_bar_button_size())
                 .ghost()
                 .tab_stop(false)
                 .tooltip(match is_open {
@@ -289,11 +308,12 @@ impl TabGroupSkin {
             .gap_1()
             .occlude()
             .when_some(buttons, |this, buttons| {
-                this.children(
-                    buttons
-                        .into_iter()
-                        .map(|button| button.xsmall().ghost().tab_stop(false)),
-                )
+                this.children(buttons.into_iter().map(|button| {
+                    button
+                        .with_size(title_bar_button_size())
+                        .ghost()
+                        .tab_stop(false)
+                }))
             })
             .when_some(
                 match (zoomed, toolbar_zoom) {
@@ -305,7 +325,7 @@ impl TabGroupSkin {
                     this.child(
                         Button::new(id)
                             .icon(icon)
-                            .xsmall()
+                            .with_size(title_bar_button_size())
                             .ghost()
                             .tab_stop(false)
                             .tooltip_with_action(tooltip, &ToggleZoom, None)
@@ -325,7 +345,7 @@ impl TabGroupSkin {
             .child(
                 Button::new("menu")
                     .icon(IconName::Ellipsis)
-                    .xsmall()
+                    .with_size(title_bar_button_size())
                     .ghost()
                     .tab_stop(false)
                     .dropdown_menu(move |menu, window, cx| {
@@ -369,8 +389,12 @@ impl TabGroupSkin {
 
         h_flex()
             .justify_between()
-            .h(px(30.))
-            .py_2()
+            .h(title_bar_height())
+            .py(if gpui_base::is_mobile() {
+                px(4.)
+            } else {
+                px(8.)
+            })
             .pl_3()
             .pr_2()
             .when(left_button.is_some(), |this| this.pl_2())
