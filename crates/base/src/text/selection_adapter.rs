@@ -242,6 +242,29 @@ impl TextViewSelectionAdapter {
         self.selection.register(registration, window, cx);
     }
 
+    /// Lays out the touch handles this view owns; see
+    /// [`TextSelectionHandle::prepaint_touch_handles`].
+    pub(super) fn prepaint_touch_handles(
+        &self,
+        window: &mut Window,
+        cx: &App,
+    ) -> crate::TouchHandleLayout {
+        self.selection.prepaint_touch_handles(window, cx)
+    }
+
+    /// Paints the touch handles this view owns, after its content for the
+    /// frame; see [`TextSelectionHandle::paint_touch_handles`].
+    pub(super) fn paint_touch_handles(
+        &self,
+        layout: &crate::TouchHandleLayout,
+        color: gpui::Hsla,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.selection
+            .paint_touch_handles(layout, color, window, cx);
+    }
+
     pub(super) fn selection_points(&self, cx: &App) -> Option<(Point<Pixels>, Point<Pixels>)> {
         let points = self.selection.snapshot(cx)?.window_points()?;
         Some((points.anchor(), points.cursor()))

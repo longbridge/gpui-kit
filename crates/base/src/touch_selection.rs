@@ -9,7 +9,7 @@
 //! to draw them. The handles and the menu themselves are drawn by the styled
 //! layer, which also decides how large a handle's touch target is.
 
-use gpui::{Bounds, Half as _, Pixels, Point, point, px, size};
+use gpui::{Bounds, Hsla, Pixels, Point, Window, fill, point, px, size};
 
 /// One end of a selection, as a touch handle grabs it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -135,6 +135,56 @@ impl TouchSelectionSnapshot {
     }
 }
 
+/// The grab handle at one end of a touch selection: a bar down the caret
+/// line with a knob at its outer end, the start's above and the end's below.
+///
+/// Base paints the handle where it belongs in the paint order — inside the
+/// text that owns the selection, so that whatever covers the text covers
+/// the handle — and only with the selection's own color. Its shape is the
+/// one every platform draws; a styled layer supplies the color.
+pub struct TouchHandle;
+
+impl TouchHandle {
+    /// How wide the finger may miss the knob and still take it.
+    pub const HIT_SIZE: Pixels = px(44.);
+    /// The knob's diameter.
+    pub const KNOB_SIZE: Pixels = px(10.);
+    /// The bar down the caret line.
+    pub const BAR_WIDTH: Pixels = px(2.);
+    /// Room the knob takes beyond the line, which an edit menu keeps clear.
+    pub const EXTENT: Pixels = px(12.);
+
+    /// The touch target, centered on the caret and reaching out past the knob.
+    pub fn hit_bounds(edge: SelectionEdge, caret: Bounds<Pixels>) -> Bounds<Pixels> {
+        let top = match edge {
+            SelectionEdge::Start => caret.top() - Self::EXTENT,
+            SelectionEdge::End => caret.top(),
+        };
+        Bounds::new(
+            point(caret.left() - Self::HIT_SIZE / 2., top),
+            size(Self::HIT_SIZE, caret.size.height + Self::EXTENT),
+        )
+    }
+
+    /// Paints the handle for `edge` on the caret line box `caret`.
+    pub fn paint(edge: SelectionEdge, caret: Bounds<Pixels>, color: Hsla, window: &mut Window) {
+        let bar = Bounds::new(
+            point(caret.left() - Self::BAR_WIDTH / 2., caret.top()),
+            size(Self::BAR_WIDTH, caret.size.height),
+        );
+        let knob_top = match edge {
+            SelectionEdge::Start => caret.top() - Self::KNOB_SIZE,
+            SelectionEdge::End => caret.bottom(),
+        };
+        let knob = Bounds::new(
+            point(caret.left() - Self::KNOB_SIZE / 2., knob_top),
+            size(Self::KNOB_SIZE, Self::KNOB_SIZE),
+        );
+        window.paint_quad(fill(bar, color));
+        window.paint_quad(fill(knob, color).corner_radii(Self::KNOB_SIZE / 2.));
+    }
+}
+
 /// The caret line box at `position`, for reporting a selection end.
 pub(crate) fn caret_line_box(position: Point<Pixels>, line_height: Pixels) -> Bounds<Pixels> {
     Bounds::new(position, size(px(0.), line_height))
@@ -153,24 +203,21 @@ pub(crate) fn caret_in_view(caret: Bounds<Pixels>, viewport: Bounds<Pixels>) -> 
 /// Maps a finger to the text position a handle drag selects.
 ///
 /// The knob a finger holds sits above or below the line, so the finger itself
-/// starts off the text it moves. Sideways, the finger's offset from the caret
-/// is kept for the whole drag. Up and down, the end stays on its line until
-/// the finger is past the middle of the line above or below; from there the
-/// finger's own height picks the line, as it would with an I-beam.
+/// is never over the text it moves. The offset from the finger to the caret
+/// box is captured when the drag begins and kept for the rest of it; the
+/// mapped point then picks lines exactly as a pointer does, crossing into the
+/// line above or below at its edge.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct EdgeDrag {
     edge: SelectionEdge,
-    offset_x: Pixels,
-    /// The caret line box the dragged end is on now.
-    line: Bounds<Pixels>,
+    offset: Point<Pixels>,
 }
 
 impl EdgeDrag {
     pub(crate) fn begin(edge: SelectionEdge, caret: Bounds<Pixels>, finger: Point<Pixels>) -> Self {
         Self {
             edge,
-            offset_x: caret.left() - finger.x,
-            line: caret,
+            offset: caret.center() - finger,
         }
     }
 
@@ -183,21 +230,9 @@ impl EdgeDrag {
         self.edge = edge;
     }
 
-    /// The dragged end landed on `caret`; that is the line it is on now.
-    pub(crate) fn follow(&mut self, caret: Bounds<Pixels>) {
-        self.line = caret;
-    }
-
     /// The text position the finger points at.
     pub(crate) fn text_position(&self, finger: Point<Pixels>) -> Point<Pixels> {
-        let x = finger.x + self.offset_x;
-        let half = self.line.size.height.half();
-        let y = if finger.y >= self.line.top() - half && finger.y <= self.line.bottom() + half {
-            self.line.center().y
-        } else {
-            finger.y
-        };
-        point(x, y)
+        point(finger.x + self.offset.x, finger.y + self.offset.y)
     }
 }
 
@@ -249,30 +284,14 @@ mod tests {
     }
 
     #[test]
-    fn edge_drag_holds_its_line_until_the_finger_is_past_the_next_line_middle() {
-        // The line runs 40..60; the finger holds the end knob just below it.
+    fn edge_drag_keeps_the_finger_offset() {
         let caret = caret_line_box(point(px(100.), px(40.)), px(20.));
-        let drag = EdgeDrag::begin(SelectionEdge::End, caret, point(px(102.), px(66.)));
+        let drag = EdgeDrag::begin(SelectionEdge::End, caret, point(px(102.), px(72.)));
         assert_eq!(drag.edge(), SelectionEdge::End);
-        // Sideways the finger's offset is kept; down to the middle of the
-        // next line (70) is still this line.
+        // The finger started 22px below the caret's center; it stays there.
         assert_eq!(
-            drag.text_position(point(px(150.), px(70.))),
-            point(px(148.), px(50.))
-        );
-        // Past it, the finger's own height picks the line.
-        assert_eq!(
-            drag.text_position(point(px(150.), px(71.))),
-            point(px(148.), px(71.))
-        );
-        // Up: the middle of the line above (30) is the threshold too.
-        assert_eq!(
-            drag.text_position(point(px(150.), px(30.))),
-            point(px(148.), px(50.))
-        );
-        assert_eq!(
-            drag.text_position(point(px(150.), px(29.))),
-            point(px(148.), px(29.))
+            drag.text_position(point(px(150.), px(90.))),
+            point(px(148.), px(68.))
         );
     }
 }

@@ -13,13 +13,11 @@ mod window_overlay;
 use std::rc::Rc;
 
 use gpui::{AnyElement, App, Bounds, ElementId, IntoElement, Pixels, Point, TouchPhase, Window};
-use gpui_base::{SelectionEdge, TouchSelectionSnapshot};
+use gpui_base::{SelectionEdge, TouchHandle, TouchSelectionSnapshot};
 
 pub(crate) use edit_menu::{EditMenu, EditMenuItem};
 pub(crate) use handle::{DragHandler, SelectionHandles, SnapshotSource, SurfaceHandler};
 pub(crate) use window_overlay::WindowTouchSelectionOverlay;
-
-use handle::KNOB_EXTENT;
 
 /// Draws one touch selection: its handles and, when open, its edit menu.
 ///
@@ -31,7 +29,7 @@ pub(crate) struct TouchSelectionOverlay {
     id: ElementId,
     source: SnapshotSource,
     items: Vec<EditMenuItem>,
-    on_drag: DragHandler,
+    on_drag: Option<DragHandler>,
     on_paint: Option<SurfaceHandler>,
 }
 
@@ -39,15 +37,24 @@ impl TouchSelectionOverlay {
     pub(crate) fn new(
         id: impl Into<ElementId>,
         source: impl Fn(&Window, &App) -> Option<TouchSelectionSnapshot> + 'static,
-        on_drag: impl Fn(SelectionEdge, TouchPhase, Point<Pixels>, &mut Window, &mut App) + 'static,
     ) -> Self {
         Self {
             id: id.into(),
             source: Rc::new(source),
             items: Vec::new(),
-            on_drag: Rc::new(on_drag),
+            on_drag: None,
             on_paint: None,
         }
+    }
+
+    /// Draws floating handles, dragged through `on_drag`. An owner whose
+    /// text paints its own handles in place leaves this unset.
+    pub(crate) fn handles(
+        mut self,
+        on_drag: impl Fn(SelectionEdge, TouchPhase, Point<Pixels>, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_drag = Some(Rc::new(on_drag));
+        self
     }
 
     /// The commands the edit menu offers. With none, no menu is drawn.
@@ -73,12 +80,14 @@ impl TouchSelectionOverlay {
             return Vec::new();
         };
         let mut elements = Vec::with_capacity(2);
-        let handles = SelectionHandles::new(self.source, self.on_drag);
-        let handles = match self.on_paint.clone() {
-            Some(on_paint) => handles.on_paint(on_paint),
-            None => handles,
-        };
-        elements.push(handles.into_any_element());
+        if let Some(on_drag) = self.on_drag {
+            let handles = SelectionHandles::new(self.source, on_drag);
+            let handles = match self.on_paint.clone() {
+                Some(on_paint) => handles.on_paint(on_paint),
+                None => handles,
+            };
+            elements.push(handles.into_any_element());
+        }
 
         if let Some(mut anchor) = snapshot
             .bounds()
@@ -87,8 +96,8 @@ impl TouchSelectionOverlay {
             // Leave the knobs uncovered: the menu anchors to the selection
             // plus the room its handles take above and below.
             if !snapshot.is_empty() {
-                anchor.origin.y -= KNOB_EXTENT;
-                anchor.size.height += KNOB_EXTENT * 2.;
+                anchor.origin.y -= TouchHandle::EXTENT;
+                anchor.size.height += TouchHandle::EXTENT * 2.;
             }
             let menu = EditMenu::new(self.id, anchor).items(self.items);
             let menu = match self.on_paint {

@@ -1,6 +1,5 @@
 use gpui::{
-    App, ClipboardItem, Context, IntoElement, ParentElement as _, Render, Subscription, TouchPhase,
-    Window, div,
+    App, ClipboardItem, Context, IntoElement, ParentElement as _, Render, Subscription, Window, div,
 };
 use gpui_base::TextSelection;
 use rust_i18n::t;
@@ -47,17 +46,11 @@ impl Render for WindowTouchSelectionOverlay {
         if TextSelection::touch_selection(window, cx).is_none() {
             return div();
         }
-        let overlay = TouchSelectionOverlay::new(
-            "window-touch-selection",
-            |window, cx| TextSelection::touch_selection(window, cx),
-            |edge, phase, position, window, cx| match phase {
-                TouchPhase::Started => TextSelection::begin_edge_drag(edge, position, window, cx),
-                TouchPhase::Moved => TextSelection::update_edge_drag(position, window, cx),
-                TouchPhase::Ended | TouchPhase::Cancelled => {
-                    TextSelection::end_edge_drag(window, cx)
-                }
-            },
-        )
+        // The handles are painted by the text that owns them, where they
+        // are covered by whatever covers the text; only the menu floats.
+        let overlay = TouchSelectionOverlay::new("window-touch-selection", |window, cx| {
+            TextSelection::touch_selection(window, cx)
+        })
         .items([
             EditMenuItem::new(t!("Input.Copy"), Self::copy),
             EditMenuItem::new(t!("Input.Select All"), Self::select_all),

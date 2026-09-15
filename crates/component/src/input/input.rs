@@ -388,12 +388,12 @@ impl Input {
         TouchSelectionOverlay::new(
             ("input-touch-selection", state.entity_id()),
             move |_, cx| source_state.touch_selection(cx),
-            move |edge, phase, position, _, cx| match phase {
-                TouchPhase::Started => drag_state.begin_edge_drag(edge, position, cx),
-                TouchPhase::Moved => drag_state.update_edge_drag(position, cx),
-                TouchPhase::Ended | TouchPhase::Cancelled => drag_state.end_edge_drag(cx),
-            },
         )
+        .handles(move |edge, phase, position, _, cx| match phase {
+            TouchPhase::Started => drag_state.begin_edge_drag(edge, position, cx),
+            TouchPhase::Moved => drag_state.update_edge_drag(position, cx),
+            TouchPhase::Ended | TouchPhase::Cancelled => drag_state.end_edge_drag(cx),
+        })
         .items(items)
         .into_elements(window, cx)
     }

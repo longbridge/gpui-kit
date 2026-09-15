@@ -48,7 +48,9 @@ cargo run -p gpui-base-examples -- text-selection
 
 在参与者上长按会选中手指下的单词；抬起手指后，这个选区成为*触摸选区*：两端各带一个拖动 handle，并附带编辑菜单。手势和拖动由 Base 负责；展示层根据 `TextSelectionSnapshot` 之外的 `TouchSelectionSnapshot` 绘制 handle 和菜单，它以窗口坐标提供选区两端的光标行框。
 
-通过 `TextSelection::touch_selection` 读取快照，用 `TextSelection::observe_touch_selection` 在快照变化时重绘；`begin_edge_drag`、`update_edge_drag`、`end_edge_drag` 拖动其中一端，`select_all` 全选被按下的参与者，`close_edit_menu` 在菜单自身的命令执行后关闭菜单。绘制 handle 和菜单的一方需要在每帧 paint 时调用 `TextSelection::register_touch_ui` 登记各个表面的 bounds，这样落在这些表面上的按压不会清除它们所属的选区。参与者通过 `TextSelectionRegistration::with_selection_edges` 上报其选区两端的绘制位置，`TextView` 已为每个 inline 完成这一步；GPUI Component 的 `Root` 提供完整的展示实现。
+通过 `TextSelection::touch_selection` 读取快照，用 `TextSelection::observe_touch_selection` 在快照变化时重绘；`begin_edge_drag`、`update_edge_drag`、`end_edge_drag` 拖动其中一端，`select_all` 全选被按下的参与者，`close_edit_menu` 在菜单自身的命令执行后关闭菜单。handle 由参与者自己绘制，位于它在绘制顺序中的位置，因此盖住文字的东西也会盖住 handle：在 prepaint 调用 `TextSelectionHandle::prepaint_touch_handles`（插入手指可按的 hitbox），在 paint 末尾、`register` 之后调用 `TextSelectionHandle::paint_touch_handles` 并传入选区颜色；`TextView` 已完成这两步。参与者通过 `TextSelectionRegistration::with_selection_edges` 上报其选区两端的绘制位置。绘制菜单的一方需要在每帧 paint 时调用 `TextSelection::register_touch_ui` 登记菜单 bounds，这样落在菜单上的按压不会清除它所属的选区；GPUI Component 的 `Root` 负责绘制菜单。
+
+长按选中时会通过 `Haptics::play(HapticFeedback::Selection, cx)` 请求触觉反馈。GPUI 本身没有触觉反馈；移动宿主用 `Haptics::set_provider` 安装一次 provider，把 `HapticFeedback::Selection` 与 `HapticFeedback::Impact` 映射到平台的反馈生成器；没有 provider 时请求不会有任何效果。
 
 ## 高级参与者适配器
 

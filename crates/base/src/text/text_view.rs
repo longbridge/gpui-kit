@@ -410,6 +410,8 @@ pub struct TextViewPrepaintState {
     /// straddles the bottom of the box. `None` leaves the clip at the box edge,
     /// where the container's hidden overflow already applies it.
     clip_bottom: Option<Pixels>,
+    /// The touch handles this view owns, with their hitboxes.
+    touch_handles: crate::TouchHandleLayout,
 }
 
 /// Absorbs sub-pixel layout jitter: a line ending within a pixel of the box
@@ -671,9 +673,20 @@ impl Element for TextView {
             }
         }
 
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        // Over the text, so after its hitbox.
+        let touch_handles = if self.selectable {
+            state
+                .read(cx)
+                .selection_adapter
+                .prepaint_touch_handles(window, cx)
+        } else {
+            crate::TouchHandleLayout::default()
+        };
         TextViewPrepaintState {
-            hitbox: window.insert_hitbox(bounds, HitboxBehavior::Normal),
+            hitbox,
             clip_bottom,
+            touch_handles,
         }
     }
 
@@ -710,13 +723,14 @@ impl Element for TextView {
         GlobalState::global_mut(cx).text_view_state_stack.pop();
 
         if self.selectable {
-            let (adapter, scroll_offset, content_bounds, self_scroll) = {
+            let (adapter, scroll_offset, content_bounds, self_scroll, handle_color) = {
                 let state = state.read(cx);
                 (
                     state.selection_adapter.clone(),
                     state.scroll_offset(),
                     state.bounds(),
                     state.scrollable,
+                    state.text_view_style.selection().alpha(1.),
                 )
             };
             let document_order = GlobalState::global_mut(cx).next_selection_document_order();
@@ -729,6 +743,9 @@ impl Element for TextView {
                 window,
                 cx,
             );
+            // The handles of a touch selection go over the text, and under
+            // whatever is painted over the text after it.
+            adapter.paint_touch_handles(&prepaint.touch_handles, handle_color, window, cx);
         }
     }
 }

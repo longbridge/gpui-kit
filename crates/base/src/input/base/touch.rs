@@ -196,6 +196,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 }
                 self.selecting = true;
                 self.retain_touch_selection();
+                crate::Haptics::play(crate::HapticFeedback::Selection, cx);
                 cx.notify();
                 true
             }
@@ -291,14 +292,10 @@ impl<M: InputModeKind> InputBaseState<M> {
         } else {
             SelectionEdge::End
         };
-        self.retain_touch_selection();
-        let landed = self.touch_selection().map(|snapshot| snapshot.edge(edge));
         if let Some(drag) = self.touch_selection.drag.as_mut() {
             drag.set_edge(edge);
-            if let Some(caret) = landed {
-                drag.follow(caret);
-            }
         }
+        self.retain_touch_selection();
         cx.notify();
     }
 

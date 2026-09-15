@@ -27,6 +27,7 @@ mod event;
 mod focus_trap;
 mod geometry;
 mod global_state;
+mod haptics;
 mod history;
 mod hover_card;
 mod index_path;
@@ -107,6 +108,7 @@ pub use focus_trap::FocusTrapElement;
 pub use focus_trap::active_focus_trap;
 pub use geometry::*;
 pub use global_state::{DeferredPopover, GlobalState};
+pub use haptics::{HapticFeedback, Haptics};
 pub use history::History;
 pub use hover_card::{HoverCard, HoverCardState};
 pub use index_path::IndexPath;
@@ -174,7 +176,7 @@ pub use text_selection::{
     TextSelection, TextSelectionContentKey, TextSelectionCoverage, TextSelectionEndpoint,
     TextSelectionEvent, TextSelectionHandle, TextSelectionLayer, TextSelectionProjection,
     TextSelectionRegistration, TextSelectionRun, TextSelectionScopeId, TextSelectionSnapshot,
-    TextSelectionWindowPoints,
+    TextSelectionWindowPoints, TouchHandleLayout,
 };
 pub use theme::{ResizableTheme, ScrollbarTheme, Theme, ThemeAppearance};
 pub use theme_tokens::{
@@ -188,7 +190,7 @@ pub use toast::{
 pub use toggle::{Toggle, ToggleStyles};
 pub use toggle_group::ToggleGroup;
 pub use tooltip::{Tooltip, TooltipOverlay, TooltipPositioner, TooltipRequest, TooltipTransition};
-pub use touch_selection::{SelectionEdge, TouchSelectionSnapshot};
+pub use touch_selection::{SelectionEdge, TouchHandle, TouchSelectionSnapshot};
 pub use tree::{Tree, TreeEntry, TreeEntryState, TreeEvent, TreeItem, TreeState};
 #[doc(hidden)]
 pub use tree::{init as init_tree, key_context as tree_key_context};

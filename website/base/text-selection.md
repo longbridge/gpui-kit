@@ -224,7 +224,9 @@ TextSelection::select_all(window, cx);     // the participant that was pressed
 TextSelection::close_edit_menu(window, cx); // after the menu's own action ran
 ```
 
-Whatever draws the handles and the menu must call `TextSelection::register_touch_ui(bounds, window, cx)` with each surface's bounds as it paints, every frame. A press inside a registered surface is then left to that surface instead of clearing the selection it belongs to. Participants report where their selection ends were painted through `TextSelectionRegistration::with_selection_edges`; `TextView` does this for every inline it paints. `Root` in GPUI Component installs a complete presentation.
+A participant paints its own handles, where it is in the paint order, so that whatever covers the text covers them too: call `TextSelectionHandle::prepaint_touch_handles` in prepaint (it inserts the hitboxes the finger takes) and `TextSelectionHandle::paint_touch_handles` at the end of paint, after `register`, with the selection color. `TextView` does both. Participants report where their selection ends were painted through `TextSelectionRegistration::with_selection_edges`. Whatever draws the menu must call `TextSelection::register_touch_ui(bounds, window, cx)` with its bounds as it paints, every frame; a press inside a registered surface is then left to that surface instead of clearing the selection it belongs to. `Root` in GPUI Component draws the menu.
+
+A long press that takes a selection asks for haptic feedback through `Haptics::play(HapticFeedback::Selection, cx)`. GPUI has no haptics; a mobile host installs `Haptics::set_provider` once, mapping `HapticFeedback::Selection` and `HapticFeedback::Impact` to its own generators, and without a provider the request goes nowhere.
 
 ## Advanced participant adapters
 

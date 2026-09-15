@@ -78,7 +78,8 @@ impl RenderOnce for EditMenu {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let id = self.id;
         let on_paint = self.on_paint;
-        let radius = cx.theme().radius;
+        // A pill-like bar, as iOS draws its edit menu.
+        let radius = cx.theme().radius_lg;
         // The menu family's hover, not the ghost button's: the ghost's grey
         // is the bar's own ring color and would blur the edge.
         let item_style = ButtonCustomVariant::new(cx)
@@ -117,9 +118,10 @@ impl RenderOnce for EditMenu {
                         .on_click(move |_: &ClickEvent, window, cx| on_click(window, cx)),
                 )
                 .into_any_element();
-            // A rule between neighbours, none before the first.
+            // A rule between neighbours, none before the first: shorter than
+            // the row, so it reads as a divider rather than a cell wall.
             (ix > 0)
-                .then(|| Separator::vertical().into_any_element())
+                .then(|| Separator::vertical().h_5().into_any_element())
                 .into_iter()
                 .chain([button])
         });
@@ -134,6 +136,7 @@ impl RenderOnce for EditMenu {
                         .relative()
                         .overflow_hidden()
                         .popover_style(cx)
+                        .rounded(radius)
                         .children(items)
                         .when_some(on_paint, |this, on_paint| {
                             this.child(

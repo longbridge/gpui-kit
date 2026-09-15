@@ -3,20 +3,11 @@ use std::rc::Rc;
 use gpui::{
     App, Bounds, Hitbox, HitboxBehavior, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, Point, RenderOnce, Styled as _, TouchDragEvent, TouchPhase, Window,
-    canvas, deferred, fill, point, px, size,
+    canvas, deferred,
 };
-use gpui_base::{SelectionEdge, TouchSelectionSnapshot};
+use gpui_base::{SelectionEdge, TouchHandle, TouchSelectionSnapshot};
 
 use crate::ActiveTheme as _;
-
-/// How wide the finger may miss the knob and still take it.
-const HANDLE_HIT_SIZE: Pixels = px(44.);
-/// The knob's diameter.
-const KNOB_SIZE: Pixels = px(10.);
-/// The bar down the caret line.
-const BAR_WIDTH: Pixels = px(2.);
-/// Room the knob takes beyond the line, kept clear by the edit menu.
-pub(super) const KNOB_EXTENT: Pixels = px(12.);
 
 /// Reads the touch selection as laid out by the time the handles paint.
 pub(crate) type SnapshotSource = Rc<dyn Fn(&Window, &App) -> Option<TouchSelectionSnapshot>>;
@@ -26,12 +17,15 @@ pub(crate) type DragHandler =
 /// Where a surface was painted this frame, for owners that must protect it.
 pub(crate) type SurfaceHandler = Rc<dyn Fn(Bounds<Pixels>, &mut Window, &mut App)>;
 
-/// The grab handles at the ends of a touch selection: a bar down each caret
-/// line with a knob at its outer end, the start's above and the end's below.
+/// The grab handles at the ends of an input's touch selection, floating
+/// above the input: its knobs reach past the field's edge, where the input's
+/// own clip would cut them off. (Text that takes part in the window selection
+/// paints its handles itself, in place; see
+/// [`gpui_base::TextSelectionHandle::paint_touch_handles`].)
 ///
-/// The handles read the selection's geometry as they paint, after the text
-/// that owns it has painted this frame, so they sit on the text as it is now
-/// rather than as it was a frame ago while it scrolls.
+/// The handles read the selection's geometry as they paint, after the input
+/// has painted this frame, so they sit on the text as it is now rather than
+/// as it was a frame ago while it scrolls.
 ///
 /// A handle claims the touch drag that begins on it before the window can
 /// take the drag for panning, and blocks the mouse so a stray tap on it does
@@ -65,18 +59,6 @@ impl SelectionHandles {
         self
     }
 
-    /// The touch target, centered on the caret and reaching out past the knob.
-    fn hit_bounds(edge: SelectionEdge, caret: Bounds<Pixels>) -> Bounds<Pixels> {
-        let top = match edge {
-            SelectionEdge::Start => caret.top() - KNOB_EXTENT,
-            SelectionEdge::End => caret.top(),
-        };
-        Bounds::new(
-            point(caret.left() - HANDLE_HIT_SIZE / 2., top),
-            size(HANDLE_HIT_SIZE, caret.size.height + KNOB_EXTENT),
-        )
-    }
-
     /// Lays out a handle for each end of a non-empty selection that is in
     /// view, and returns which end the finger holds.
     fn layout(
@@ -97,8 +79,10 @@ impl SelectionHandles {
                 if !snapshot.is_edge_visible(edge) || !window_bounds.contains(&caret.origin) {
                     continue;
                 }
-                let hitbox =
-                    window.insert_hitbox(Self::hit_bounds(edge, caret), HitboxBehavior::BlockMouse);
+                let hitbox = window.insert_hitbox(
+                    TouchHandle::hit_bounds(edge, caret),
+                    HitboxBehavior::BlockMouse,
+                );
                 handles.push(LaidOutHandle {
                     edge,
                     caret,
@@ -110,22 +94,12 @@ impl SelectionHandles {
     }
 
     fn paint_handle(handle: &LaidOutHandle, window: &mut Window, cx: &mut App) {
-        let caret = handle.caret;
-        let color = cx.theme().selection.alpha(1.);
-        let bar = Bounds::new(
-            point(caret.left() - BAR_WIDTH / 2., caret.top()),
-            size(BAR_WIDTH, caret.size.height),
+        TouchHandle::paint(
+            handle.edge,
+            handle.caret,
+            cx.theme().selection.alpha(1.),
+            window,
         );
-        let knob_top = match handle.edge {
-            SelectionEdge::Start => caret.top() - KNOB_SIZE,
-            SelectionEdge::End => caret.bottom(),
-        };
-        let knob = Bounds::new(
-            point(caret.left() - KNOB_SIZE / 2., knob_top),
-            size(KNOB_SIZE, KNOB_SIZE),
-        );
-        window.paint_quad(fill(bar, color));
-        window.paint_quad(fill(knob, color).corner_radii(KNOB_SIZE / 2.));
     }
 
     /// The drag begins on whichever handle is under the finger or pointer;
