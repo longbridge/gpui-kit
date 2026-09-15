@@ -294,6 +294,15 @@ through `ScrollbarTheme::motion`. A zero duration always means "adopt the
 target now", which is also how reduced motion and always-visible scrollbars
 reach the same code path.
 
+`TextView` follows it through `TextViewMotion`. Streamed text is painted glyph
+by glyph inside the view, so only the view can fade the words an update
+appended. Base tracks which rendered text is new and samples the fade, but
+`TextViewMotion::default()` has zero `stream_fade` and `stream_fade_stagger`
+durations; the styled `TextView::stream_fade(true)` projects its own timing
+(350 ms per chunk, measured from claude.ai) the way `ScrollbarTheme` carries
+the scrollbar's, because a reveal that must overlap a model's chunk cadence
+is not one of the four UI transition tiers.
+
 ## Transition Identity
 
 A transition ID identifies one independently animated value. Use a stable
