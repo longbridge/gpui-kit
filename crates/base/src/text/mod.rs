@@ -11,6 +11,7 @@ mod node;
 pub(crate) mod selection;
 mod selection_adapter;
 mod state;
+mod stream_fade;
 mod style;
 mod text_view;
 mod utils;
@@ -20,6 +21,7 @@ pub use inline_element::*;
 pub use markdown_ext::*;
 pub use node::{CodeBlock, TableData};
 pub use state::*;
+pub use stream_fade::TextViewMotion;
 pub use style::*;
 pub use text_view::*;
 

@@ -1,10 +1,14 @@
 use futures::Stream as _;
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
 use std::{
     ops::RangeInclusive,
     pin::Pin,
     sync::{Arc, Mutex},
     task::Poll,
 };
+#[cfg(target_family = "wasm")]
+use web_time::Instant;
 
 use gpui::{
     App, AppContext as _, Bounds, Context, FocusHandle, IntoElement, KeyBinding, ListState,
@@ -23,6 +27,7 @@ use crate::{
         format,
         node::{self, NodeContext},
         selection_adapter::TextViewSelectionAdapter,
+        stream_fade::{StreamFadeTracker, TextViewMotion},
     },
     v_flex,
 };
@@ -116,6 +121,7 @@ pub struct TextViewState {
     pub(super) selection_adapter: TextViewSelectionAdapter,
 
     pub(super) parsed_content: ParsedContent,
+    pub(super) stream_fade: StreamFadeTracker,
     /// Content format (markdown / html), used for bounded synchronous parsing
     /// of small full-replace updates.
     format: TextViewFormat,
@@ -162,6 +168,11 @@ impl TextViewState {
 
                         match parsed_update.result {
                             Ok(content) => {
+                                state.stream_fade.record(
+                                    &state.parsed_content.document,
+                                    &content.document,
+                                    Instant::now(),
+                                );
                                 state.parsed_content = content;
                                 state.parsed_error = None;
                                 state.compatible_layout_update = parsed_update.selection_compatible;
@@ -170,6 +181,7 @@ impl TextViewState {
                                 }
                             }
                             Err(err) => {
+                                state.stream_fade.discard_pending();
                                 state.parsed_error = Some(err);
                             }
                         }
@@ -215,6 +227,7 @@ impl TextViewState {
             auto_scroll: AutoScroll::default(),
             selection_adapter,
             parsed_content: Default::default(),
+            stream_fade: StreamFadeTracker::default(),
             format,
             parsed_error: None,
             text: text.to_string(),
@@ -285,9 +298,20 @@ impl TextViewState {
     }
 
     /// Set the text content.
+    ///
+    /// With a streamed fade-in enabled, text that extends the current text
+    /// fades in like [`Self::push_str`] would; any other replacement shows at
+    /// once.
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
         if self.text.as_str() == text {
             return;
+        }
+        if self.stream_fade.is_enabled() {
+            if text.starts_with(self.text.as_str()) {
+                self.stream_fade.note_extend(self.text.len());
+            } else {
+                self.stream_fade.note_replace();
+            }
         }
 
         self.text.clear();
@@ -301,8 +325,20 @@ impl TextViewState {
         if new_text.is_empty() {
             return;
         }
+        self.stream_fade.note_extend(self.text.len());
         self.text.push_str(new_text);
         self.increment_update(new_text, true, cx);
+    }
+
+    /// Set the motion policy; see [`TextViewMotion`].
+    pub fn motion(mut self, motion: TextViewMotion) -> Self {
+        self.set_motion(motion);
+        self
+    }
+
+    /// Set the motion policy; see [`TextViewMotion`].
+    pub fn set_motion(&mut self, motion: TextViewMotion) {
+        self.stream_fade.set_motion(motion);
     }
 
     pub(crate) fn set_markdown_extensions(
@@ -435,6 +471,11 @@ impl TextViewState {
         if parse_synchronously {
             match parse_content(self.format, ParsedContent::default(), &update_options) {
                 Ok(content) => {
+                    self.stream_fade.record(
+                        &self.parsed_content.document,
+                        &content.document,
+                        Instant::now(),
+                    );
                     self.parsed_content = content;
                     self.parsed_error = None;
                     self.invalidate_measured_heights();
@@ -443,6 +484,7 @@ impl TextViewState {
                     }
                 }
                 Err(err) => {
+                    self.stream_fade.discard_pending();
                     self.parsed_error = Some(err);
                 }
             }
@@ -704,6 +746,10 @@ impl Render for TextViewState {
         node_cx.link_click_handler = self.link_click_handler.clone();
         node_cx.markdown_extensions = self.markdown_extensions.clone();
         node_cx.style = self.text_view_style.clone();
+        node_cx.stream_fade = self.stream_fade.frame(Instant::now(), cx.reduce_motion());
+        if node_cx.stream_fade.is_some() {
+            window.request_animation_frame();
+        }
 
         v_flex()
             .w_full()
@@ -940,6 +986,205 @@ mod tests {
     use super::*;
     use crate::text::MarkdownNode;
     use gpui::TestAppContext;
+
+    mod stream_fade {
+        use std::{ops::Range, time::Duration};
+
+        use gpui::{Entity, TestAppContext};
+
+        use super::super::*;
+        use crate::{motion::Easing, text::stream_fade::TextLeafKey};
+
+        /// Long enough that a debug test cannot outrun the fade before it
+        /// samples the first frame.
+        const FADE: Duration = Duration::from_secs(10);
+
+        fn fading_state(markdown: &str, cx: &mut TestAppContext) -> Entity<TextViewState> {
+            cx.update(crate::init);
+            let state = cx.update(|cx| {
+                cx.new(|cx| {
+                    TextViewState::markdown(markdown, cx).motion(
+                        TextViewMotion::default()
+                            .with_stream_fade(FADE)
+                            .with_stream_fade_easing(Easing::Linear),
+                    )
+                })
+            });
+            cx.run_until_parked();
+            state
+        }
+
+        /// The fade ranges of `key` sampled right now, or `None` when the
+        /// state has nothing fading.
+        fn fades(
+            state: &Entity<TextViewState>,
+            key: TextLeafKey,
+            cx: &mut TestAppContext,
+        ) -> Option<Vec<Range<usize>>> {
+            state.update(cx, |state, _| {
+                let frame = state.stream_fade.frame(Instant::now(), false)?;
+                let fades = frame.fades(key)?;
+                assert!(
+                    fades.iter().all(|(_, fade_out)| *fade_out > 0.9),
+                    "a fade sampled right after it starts is still transparent: {fades:?}"
+                );
+                Some(fades.iter().map(|(range, _)| range.clone()).collect())
+            })
+        }
+
+        #[gpui::test]
+        fn push_str_fades_only_the_appended_text(cx: &mut TestAppContext) {
+            let state = fading_state("hello", cx);
+            state.update(cx, |state, cx| state.push_str(" world", cx));
+            cx.run_until_parked();
+
+            assert_eq!(fades(&state, TextLeafKey::block(0), cx), Some(vec![5..11]));
+
+            state.update(cx, |state, _| {
+                let later = Instant::now() + FADE + Duration::from_secs(1);
+                assert!(state.stream_fade.frame(later, false).is_none());
+                assert!(state.stream_fade.frame(Instant::now(), false).is_none());
+            });
+        }
+
+        #[gpui::test]
+        fn set_text_extending_the_text_fades_like_push_str(cx: &mut TestAppContext) {
+            let state = fading_state("hello", cx);
+            state.update(cx, |state, cx| state.set_text("hello world", cx));
+            cx.run_until_parked();
+
+            assert_eq!(fades(&state, TextLeafKey::block(0), cx), Some(vec![5..11]));
+        }
+
+        #[gpui::test]
+        fn set_text_replacing_the_text_shows_it_at_once(cx: &mut TestAppContext) {
+            let state = fading_state("hello", cx);
+            state.update(cx, |state, cx| state.push_str(" world", cx));
+            cx.run_until_parked();
+            assert!(fades(&state, TextLeafKey::block(0), cx).is_some());
+
+            state.update(cx, |state, cx| state.set_text("other", cx));
+            cx.run_until_parked();
+
+            assert_eq!(fades(&state, TextLeafKey::block(0), cx), None);
+        }
+
+        #[gpui::test]
+        fn completed_markup_refades_from_the_divergence(cx: &mut TestAppContext) {
+            // The paragraph renders `text` (trailing space trimmed), then
+            // `text **bo` literally.
+            let state = fading_state("text ", cx);
+            state.update(cx, |state, cx| state.push_str("**bo", cx));
+            cx.run_until_parked();
+            assert_eq!(fades(&state, TextLeafKey::block(0), cx), Some(vec![4..9]));
+
+            // `text **bold**` renders `text bold`: the space keeps its fade,
+            // the glyphs from byte 5 on changed and fade again as one run.
+            state.update(cx, |state, cx| state.push_str("ld**", cx));
+            cx.run_until_parked();
+            assert_eq!(
+                fades(&state, TextLeafKey::block(0), cx),
+                Some(vec![4..5, 5..9])
+            );
+        }
+
+        #[gpui::test]
+        fn without_stagger_an_update_fades_as_one_chunk(cx: &mut TestAppContext) {
+            let state = fading_state("hello", cx);
+            state.update(cx, |state, cx| state.push_str(" one two three", cx));
+            cx.run_until_parked();
+
+            assert_eq!(fades(&state, TextLeafKey::block(0), cx), Some(vec![5..19]));
+        }
+
+        #[gpui::test]
+        fn words_of_one_update_start_one_after_another(cx: &mut TestAppContext) {
+            let stagger = Duration::from_millis(100);
+            let state = fading_state("hello", cx);
+            state.update(cx, |state, _| {
+                state.set_motion(
+                    TextViewMotion::default()
+                        .with_stream_fade(FADE)
+                        .with_stream_fade_stagger(stagger)
+                        .with_stream_fade_easing(Easing::Linear),
+                )
+            });
+            state.update(cx, |state, cx| state.push_str(" one two three", cx));
+            cx.run_until_parked();
+
+            state.update(cx, |state, _| {
+                let frame = state
+                    .stream_fade
+                    .frame(Instant::now() + stagger * 3, false)
+                    .expect("words still fading");
+                let fades = frame.fades(TextLeafKey::block(0)).expect("paragraph fades");
+                let ranges: Vec<_> = fades.iter().map(|(range, _)| range.clone()).collect();
+                assert_eq!(ranges, vec![5..10, 10..14, 14..19]);
+                // A later word has faded less, so it is still more transparent.
+                assert!(
+                    fades[0].1 < fades[1].1 && fades[1].1 < fades[2].1,
+                    "{fades:?}"
+                );
+            });
+        }
+
+        #[gpui::test]
+        fn a_new_paragraph_fades_as_a_whole(cx: &mut TestAppContext) {
+            let state = fading_state("first", cx);
+            state.update(cx, |state, cx| state.push_str("\n\nsecond", cx));
+            cx.run_until_parked();
+
+            assert_eq!(fades(&state, TextLeafKey::block(0), cx), None);
+            assert_eq!(fades(&state, TextLeafKey::block(7), cx), Some(vec![0..6]));
+        }
+
+        #[gpui::test]
+        fn code_block_text_fades_by_block(cx: &mut TestAppContext) {
+            let state = fading_state("```rs\nlet", cx);
+            state.update(cx, |state, cx| state.push_str(" x", cx));
+            cx.run_until_parked();
+
+            assert_eq!(fades(&state, TextLeafKey::block(0), cx), Some(vec![3..5]));
+        }
+
+        #[gpui::test]
+        fn table_cells_fade_by_ordinal(cx: &mut TestAppContext) {
+            let state = fading_state("| a | b |\n|---|---|\n| c | d", cx);
+            state.update(cx, |state, cx| state.push_str("e |", cx));
+            cx.run_until_parked();
+
+            assert_eq!(fades(&state, TextLeafKey::table_cell(0, 2), cx), None);
+            assert_eq!(
+                fades(&state, TextLeafKey::table_cell(0, 3), cx),
+                Some(vec![1..2])
+            );
+        }
+
+        #[gpui::test]
+        fn zero_duration_records_nothing(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("hello", cx)));
+            cx.run_until_parked();
+            state.update(cx, |state, cx| state.push_str(" world", cx));
+            cx.run_until_parked();
+
+            state.update(cx, |state, _| {
+                assert!(state.stream_fade.frame(Instant::now(), false).is_none());
+            });
+        }
+
+        #[gpui::test]
+        fn reduced_motion_drops_the_fade(cx: &mut TestAppContext) {
+            let state = fading_state("hello", cx);
+            state.update(cx, |state, cx| state.push_str(" world", cx));
+            cx.run_until_parked();
+
+            state.update(cx, |state, _| {
+                assert!(state.stream_fade.frame(Instant::now(), true).is_none());
+                assert!(state.stream_fade.frame(Instant::now(), false).is_none());
+            });
+        }
+    }
 
     #[gpui::test]
     fn small_full_replace_parses_before_background_executor_runs(cx: &mut TestAppContext) {

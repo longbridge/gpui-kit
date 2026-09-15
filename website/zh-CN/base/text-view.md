@@ -201,6 +201,23 @@ TextView::new(&document)
 document.update(cx, |state, cx| state.set_text(updated_source, cx));
 ```
 
+`TextViewMotion` 是视图的动效策略。Base 负责播放，但不带任何时长：所有时长默认为零，未加样式的视图会直接显示流式到达的文字。给 `stream_fade` 一个时长，更新追加的文字就会在落点处淡入；可选的 `stream_fade_stagger` 让同一次更新里后面的词比前一个词稍晚开始：
+
+```rust
+use std::time::Duration;
+
+use gpui_kit::base::{Easing, TextView, TextViewMotion};
+
+TextView::new(&document).motion(
+    TextViewMotion::default()
+        .with_stream_fade(Duration::from_millis(350))
+        .with_stream_fade_stagger(Duration::from_millis(30))
+        .with_stream_fade_easing(Easing::EaseOut),
+)
+```
+
+不设错位时每次更新整块一起淡入。设了错位时，追加的文字按词拆分（词带上其后的空白），中日韩文字按字拆分；一次追加很长时会压缩错位，保证最后一个词在一个淡入时长内开始。追踪器比较的是渲染后的文字而不是源码字节，因此 `set_text` 传入以当前文本为前缀的更长文本会被视为追加；流式过程中被补齐的 Markdown 标记（`**bo` 变成粗体 `bold`）只让发生变化的字形重新淡入，不会整段闪烁。每次只比较更新触及的块，并且只在还有文字在淡入时才请求下一帧。系统开启减少动态效果时跳过淡入。
+
 通过 `SelectionFormat` 可以选择复制渲染文本或 Markdown 源码。链接路由、代码块操作、表格操作、图片和 Markdown 插件继续使用与兼容 API 相同的 builder，详见 [gpui-component TextView 文档](../component/text-view.md)。
 
 ## 可运行源码

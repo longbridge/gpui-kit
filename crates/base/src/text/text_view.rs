@@ -13,6 +13,7 @@ use crate::text::TextViewFormat;
 use crate::text::markdown_ext::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
 use crate::text::node::{CodeBlock, TableData};
 use crate::text::state::{LineSpan, SelectionFormat, TextViewState};
+use crate::text::stream_fade::TextViewMotion;
 use crate::{GlobalState, TextSelection, text::TextViewStyle};
 
 /// Type for code block actions generator function.
@@ -129,6 +130,7 @@ pub struct TextView {
     table_actions: Option<Arc<TableActionsFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     markdown_extensions: Arc<MarkdownExtensions>,
+    motion: Option<TextViewMotion>,
 }
 
 /// A plugin that can configure a [`TextView`].
@@ -173,6 +175,7 @@ impl TextView {
             table_actions: None,
             link_click_handler: None,
             markdown_extensions: Arc::default(),
+            motion: None,
         }
     }
 
@@ -194,6 +197,7 @@ impl TextView {
             table_actions: None,
             link_click_handler: None,
             markdown_extensions: Arc::default(),
+            motion: None,
         }
     }
 
@@ -215,6 +219,7 @@ impl TextView {
             table_actions: None,
             link_click_handler: None,
             markdown_extensions: Arc::default(),
+            motion: None,
         }
     }
 
@@ -336,6 +341,13 @@ impl TextView {
     /// Replace the Markdown extension registry.
     pub fn markdown_extensions(mut self, extensions: MarkdownExtensions) -> Self {
         self.markdown_extensions = Arc::new(extensions);
+        self
+    }
+
+    /// Set the motion policy; see [`TextViewMotion`]. Without one, the
+    /// state's own policy applies, which plays no motion by default.
+    pub fn motion(mut self, motion: TextViewMotion) -> Self {
+        self.motion = Some(motion);
         self
     }
 
@@ -557,6 +569,9 @@ impl Element for TextView {
             state.table_actions = self.table_actions.clone();
             state.link_click_handler = self.link_click_handler.clone();
             state.set_markdown_extensions(self.markdown_extensions.clone(), cx);
+            if let Some(motion) = &self.motion {
+                state.set_motion(motion.clone());
+            }
             state.selectable = self.selectable;
             state.selection_format = self.selection_format;
             state.scrollable = self.scrollable;

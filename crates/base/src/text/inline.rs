@@ -97,6 +97,36 @@ pub(super) fn combine_highlights(
     combined
 }
 
+/// Layers a streamed fade-in over `highlights`: text inside each fade range
+/// loses that share of its color, and a highlight background fades with it so
+/// an inline code chip does not appear before its text.
+pub(super) fn fade_highlights(
+    highlights: Vec<(Range<usize>, InlineHighlight)>,
+    fades: &[(Range<usize>, f32)],
+) -> Vec<(Range<usize>, InlineHighlight)> {
+    if fades.is_empty() {
+        return highlights;
+    }
+    let fade_highlights = fades.iter().map(|(range, fade_out)| {
+        (
+            range.clone(),
+            InlineHighlight::from(HighlightStyle {
+                fade_out: Some(*fade_out),
+                ..Default::default()
+            }),
+        )
+    });
+    let mut combined = combine_highlights(highlights, fade_highlights);
+    for (_, highlight) in &mut combined {
+        if let Some(fade_out) = highlight.style.fade_out
+            && let Some(background) = highlight.style.background_color.as_mut()
+        {
+            background.fade_out(fade_out);
+        }
+    }
+    combined
+}
+
 /// Builds the [`TextRun`]s for `text_len` bytes of inline text: each
 /// highlight refines `default_style` over its range, and a highlight that
 /// names a font family shapes its run in that family.
@@ -923,6 +953,45 @@ pub(super) fn point_in_text_selection(
         return x <= bottom_point.x;
     } else {
         return true;
+    }
+}
+
+#[cfg(test)]
+mod fade_highlights_tests {
+    use super::*;
+
+    #[test]
+    fn fades_text_and_background_only_inside_the_range() {
+        let code = InlineHighlight::from(HighlightStyle {
+            background_color: Some(gpui::red()),
+            ..Default::default()
+        });
+        let combined = fade_highlights(vec![(0..4, code)], &[(2..6, 0.5)]);
+
+        let ranges: Vec<_> = combined.iter().map(|(range, _)| range.clone()).collect();
+        assert_eq!(ranges, vec![0..2, 2..4, 4..6]);
+
+        let (_, untouched) = &combined[0];
+        assert_eq!(untouched.style.fade_out, None);
+        assert_eq!(untouched.style.background_color.unwrap().a, 1.0);
+
+        let (_, faded_code) = &combined[1];
+        assert_eq!(faded_code.style.fade_out, Some(0.5));
+        assert_eq!(faded_code.style.background_color.unwrap().a, 0.5);
+
+        let (_, faded_text) = &combined[2];
+        assert_eq!(faded_text.style.fade_out, Some(0.5));
+        assert!(faded_text.style.background_color.is_none());
+    }
+
+    #[test]
+    fn no_fades_leave_highlights_untouched() {
+        let bold = InlineHighlight::from(HighlightStyle {
+            font_weight: Some(gpui::FontWeight::BOLD),
+            ..Default::default()
+        });
+        let highlights = vec![(1..3, bold)];
+        assert_eq!(fade_highlights(highlights.clone(), &[]), highlights);
     }
 }
 
