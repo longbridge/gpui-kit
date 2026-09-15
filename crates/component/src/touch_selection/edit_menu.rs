@@ -1,15 +1,15 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, Bounds, ClickEvent, ElementId, InteractiveElement as _, IntoElement, ParentElement as _,
-    Pixels, RenderOnce, SharedString, Styled as _, Window, canvas, deferred, div,
-    prelude::FluentBuilder as _, px,
+    App, Bounds, ClickEvent, Corners, ElementId, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, RenderOnce, SharedString, Styled as _, Window, canvas, deferred,
+    div, prelude::FluentBuilder as _, px,
 };
 use gpui_base::{Placement, Positioner};
 
 use super::handle::SurfaceHandler;
 use crate::{
-    Sizable as _, ThemeStyled as _,
+    ActiveTheme as _, Sizable as _, ThemeStyled as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     separator::Separator,
@@ -75,8 +75,19 @@ impl RenderOnce for EditMenu {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let id = self.id;
         let on_paint = self.on_paint;
+        let radius = cx.theme().radius;
+        let last = self.items.len().saturating_sub(1);
         let items = self.items.into_iter().enumerate().flat_map(|(ix, item)| {
             let on_click = item.on_click;
+            // The items fill the bar edge to edge, so each one's press
+            // surface takes the bar's own corners: the first the left pair,
+            // the last the right pair, the ones between none.
+            let corners = Corners {
+                top_left: ix == 0,
+                bottom_left: ix == 0,
+                top_right: ix == last,
+                bottom_right: ix == last,
+            };
             // Observed under its label, so a test can press "Copy".
             let button = div()
                 .id(item.label.clone())
@@ -86,6 +97,8 @@ impl RenderOnce for EditMenu {
                         .ghost()
                         .small()
                         .compact()
+                        .rounded(radius)
+                        .border_corners(corners)
                         .tab_stop(false)
                         .label(item.label)
                         .on_click(move |_: &ClickEvent, window, cx| on_click(window, cx)),
@@ -93,7 +106,7 @@ impl RenderOnce for EditMenu {
                 .into_any_element();
             // A rule between neighbours, none before the first.
             (ix > 0)
-                .then(|| Separator::vertical().h_4().into_any_element())
+                .then(|| Separator::vertical().into_any_element())
                 .into_iter()
                 .chain([button])
         });
@@ -106,8 +119,7 @@ impl RenderOnce for EditMenu {
                     h_flex()
                         .id(id)
                         .relative()
-                        .p_0p5()
-                        .gap_0p5()
+                        .overflow_hidden()
                         .popover_style(cx)
                         .children(items)
                         .when_some(on_paint, |this, on_paint| {
