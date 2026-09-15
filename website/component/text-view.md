@@ -70,6 +70,31 @@ than the whole budget keeps the part that fits rather than emptying the box.
 `max_lines` only applies to the fit-content mode and is ignored when
 `scrollable` is set.
 
+### Fade in streamed text
+
+A chat reply arrives in chunks. `stream_fade(true)` fades each chunk in where
+it lands instead of popping it onto the screen, the way Claude reveals a
+response:
+
+```rust
+TextView::new(&self.reply).stream_fade(true)
+```
+
+The fade follows the rendered text. Whatever a `push_str`, or a `set_text`
+whose text extends the current one, adds starts transparent and reaches full
+color over 350 ms on an ease-out curve, the timing measured from Claude:
+longer than the 50–300 ms a model's chunks arrive at, so consecutive chunks
+overlap into one gradient tail rather than the newest chunk blinking in. Code
+in fenced blocks and text in table cells fade the same way. Markdown that
+completes as it streams (`**bo` becoming bold `bold`) fades the changed
+glyphs rather than the whole paragraph. Text that replaces the current
+content shows at once, and so does everything when the system asks for
+reduced motion. Nothing animates unless the view opts in.
+
+Pass a `TextViewMotion` through `.motion(...)` to choose the duration or
+easing yourself, or to reveal each chunk word by word; see
+[GPUI Base TextView](/base/text-view#retained-state-and-streaming-updates).
+
 ## Touch Selection
 
 On a touch screen, a long press selects the word under the finger and keeps
