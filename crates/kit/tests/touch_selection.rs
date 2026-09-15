@@ -2,9 +2,10 @@
 //! `Input` and in a `TextView`.
 
 use gpui::{
-    AppContext, Context, Entity, InputEvent as _, LongPressEvent, Modifiers, MouseButton,
-    MouseDownEvent, MouseUpEvent, Pixels, Point, StyleRefinement, TestAppContext, TouchDragEvent,
-    TouchPhase, Window, WindowHandle, div, prelude::*, px,
+    AppContext, Context, DispatchPhase, Entity, InputEvent as _, LongPressEvent, Modifiers,
+    MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent,
+    StyleRefinement, TestAppContext, TouchDragEvent, TouchPhase, Window, WindowHandle, canvas, div,
+    prelude::*, px,
 };
 use gpui_base::TextSelection;
 use gpui_component::{
@@ -149,6 +150,51 @@ fn double_tap(window: &mut Window, cx: &mut gpui::App, position: Point<Pixels>) 
         cx,
     );
     window.render_frame(cx);
+}
+
+/// A screen whose scroll container swallows every scroll packet on capture,
+/// as `ScrollBounce` does while it is stretched past the end of its list.
+struct SwallowingScreen {
+    text: Entity<TextViewState>,
+}
+
+impl Render for SwallowingScreen {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .p_4()
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    |_, _, window, _| {
+                        window.on_mouse_event(|_: &ScrollWheelEvent, phase, _, cx| {
+                            if phase == DispatchPhase::Capture {
+                                cx.stop_propagation();
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_0(),
+            )
+            .child(
+                div()
+                    .id("text")
+                    .test_support()
+                    .w(px(320.))
+                    .child(TextView::new(&self.text).selectable(true)),
+            )
+    }
+}
+
+fn swallowing_screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
+    cx.update(gpui_component::init);
+    cx.add_window(|window, cx| {
+        let view = cx.new(|cx| SwallowingScreen {
+            text: cx.new(|cx| TextViewState::markdown("quick select value", cx)),
+        });
+        Root::new(view, window, cx)
+    })
 }
 
 fn cached_screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
@@ -670,6 +716,52 @@ fn select_all_takes_the_text_beyond_the_viewport(cx: &mut TestAppContext) {
             "first line\nsecond line\nthird line\nlast line",
             "the whole text, not the lines the box shows"
         );
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn the_menu_comes_back_after_a_scroll_the_container_swallowed(cx: &mut TestAppContext) {
+    let handle = swallowing_screen(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let text = window.find("text").bounds();
+        long_press(
+            window,
+            cx,
+            point(text.left() + px(8.), text.top() + px(10.)),
+        );
+        assert!(window.try_find("Copy").is_some(), "the menu is up");
+
+        // A finger scrolls: the menu steps aside while it moves, and comes
+        // back when it lifts — even when the scroll container stopped every
+        // packet before the selection's own listener, as a bounce does.
+        let position = point(text.center().x, text.bottom() + px(40.));
+        let mut menu_seen = Vec::new();
+        for (touch_phase, dy) in [
+            (TouchPhase::Started, 0.),
+            (TouchPhase::Moved, -12.),
+            (TouchPhase::Ended, 0.),
+        ] {
+            window.dispatch_event(
+                ScrollWheelEvent {
+                    position,
+                    delta: ScrollDelta::Pixels(point(px(0.), px(dy))),
+                    modifiers: Modifiers::default(),
+                    touch_phase,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.render_frame(cx);
+            menu_seen.push(window.try_find("Copy").is_some());
+        }
+        assert_eq!(
+            menu_seen,
+            [false, false, true],
+            "aside while the finger moves, back when it lifts"
+        );
+        assert_eq!(TextSelection::selected_text(window, cx).trim(), "quick");
     })
     .unwrap();
 }

@@ -2751,12 +2751,21 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
 
     let scroll_state = state.downgrade();
     window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
-        if phase.bubble()
-            && let Some(state) = scroll_state.upgrade()
-        {
+        let Some(state) = scroll_state.upgrade() else {
+            return;
+        };
+        // On capture, before a scroll container can stop the event: one
+        // stretched past its end swallows the whole stream, the lift
+        // included, and the menu would never come back.
+        if phase.capture() {
+            state.update(cx, |state, cx| {
+                state.edit_menu_on_scroll(event.touch_phase, cx)
+            });
+            return;
+        }
+        if phase.bubble() {
             let position = window.mouse_position();
             state.update(cx, |state, cx| {
-                state.edit_menu_on_scroll(event.touch_phase, cx);
                 // A handle drag holds the finger off the text; keep its offset.
                 let position = state
                     .touch
