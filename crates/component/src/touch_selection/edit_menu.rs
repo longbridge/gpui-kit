@@ -119,10 +119,10 @@ impl RenderOnce for EditMenu {
                         .on_click(move |_: &ClickEvent, window, cx| on_click(window, cx)),
                 )
                 .into_any_element();
-            // A rule between neighbours, none before the first: shorter than
-            // the row, so it reads as a divider rather than a cell wall.
+            // A rule between neighbours, none before the first, the full
+            // height of the bar.
             (ix > 0)
-                .then(|| Separator::vertical().h_5().into_any_element())
+                .then(|| Separator::vertical().h(ROW_HEIGHT).into_any_element())
                 .into_iter()
                 .chain([button])
         });
