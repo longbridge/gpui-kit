@@ -17,6 +17,8 @@ description: 系统字体、主题字体、元素级覆盖与自定义字体打�
 编辑器使用 `mono_font_family` 和 `mono_font_size` 绘制代码，详见
 [Editor](../component/editor.md)。
 
+应用主题时会对照系统已安装的字体检查这两个默认值：等宽默认字体缺失时换成已安装的备选；当 `.SystemUIFont` 解析到的是 GPUI 回退栈里的某个字体而不是系统字体本身（Linux 桌面通常没有 GPUI 映射到的那个字体），主题会直接记下该字体名，让文本查找一直命中缓存。你自己设置的字体保持不变。
+
 ## 系统字体
 
 桌面应用可以直接按名称使用**操作系统已安装的任意字体**，无需打包、无需配置。GPUI 会实时向系统字库解析（macOS 用 CoreText，Windows 用 DirectWrite，Linux 用 fontconfig）。
