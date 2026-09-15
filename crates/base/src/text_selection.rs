@@ -2640,7 +2640,6 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
             if !selected {
                 return;
             }
-            crate::Haptics::play(crate::HapticFeedback::Selection, cx);
             window.capture_long_press(&state);
         } else if !window.has_long_press_capture(&state) {
             return;

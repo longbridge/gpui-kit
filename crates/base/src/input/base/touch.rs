@@ -196,7 +196,6 @@ impl<M: InputModeKind> InputBaseState<M> {
                 }
                 self.selecting = true;
                 self.retain_touch_selection();
-                crate::Haptics::play(crate::HapticFeedback::Selection, cx);
                 cx.notify();
                 true
             }

@@ -16,10 +16,6 @@ use crate::{
 };
 use gpui_base::TestSupportExt as _;
 
-/// The height of a menu item: iOS's edit menu row, a little under its
-/// 44pt touch minimum, which the bar's own edges make up for.
-const ROW_HEIGHT: Pixels = px(36.);
-
 /// One command in the edit menu.
 pub(crate) struct EditMenuItem {
     label: SharedString,
@@ -107,10 +103,11 @@ impl RenderOnce for EditMenu {
                 .child(
                     Button::new(ix)
                         .custom(item_style)
-                        // This is a finger's menu wherever it shows: iOS's
-                        // row, with body text and room on both sides.
+                        // This is a finger's menu wherever it shows: body
+                        // text with room around it.
                         .large()
-                        .h(ROW_HEIGHT)
+                        .h_auto()
+                        .py_2p5()
                         .px_3()
                         .rounded(radius)
                         .border_corners(corners)
@@ -122,7 +119,7 @@ impl RenderOnce for EditMenu {
             // A rule between neighbours, none before the first, the full
             // height of the bar.
             (ix > 0)
-                .then(|| Separator::vertical().h(ROW_HEIGHT).into_any_element())
+                .then(|| Separator::vertical().into_any_element())
                 .into_iter()
                 .chain([button])
         });
@@ -135,6 +132,7 @@ impl RenderOnce for EditMenu {
                     h_flex()
                         .id(id)
                         .relative()
+                        .items_stretch()
                         .overflow_hidden()
                         .popover_style(cx)
                         .rounded(radius)
