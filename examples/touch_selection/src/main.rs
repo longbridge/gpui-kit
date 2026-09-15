@@ -78,17 +78,22 @@ impl TouchSelectionExample {
             .on_click(move |_, window, cx| {
                 let bounds = bounds.get();
                 let position = point(bounds.left() + px(48.), bounds.top() + first_line);
-                for phase in [TouchPhase::Started, TouchPhase::Ended] {
-                    window.dispatch_event(
-                        LongPressEvent {
-                            phase,
-                            start_position: position,
-                            position,
-                        }
-                        .to_platform_input(),
-                        cx,
-                    );
-                }
+                // The click that runs this is itself being dispatched; an
+                // event sent from inside it would find no listeners. Send the
+                // gesture once the click is over.
+                window.defer(cx, move |window, cx| {
+                    for phase in [TouchPhase::Started, TouchPhase::Ended] {
+                        window.dispatch_event(
+                            LongPressEvent {
+                                phase,
+                                start_position: position,
+                                position,
+                            }
+                            .to_platform_input(),
+                            cx,
+                        );
+                    }
+                });
             })
     }
 
