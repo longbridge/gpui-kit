@@ -17,6 +17,13 @@ Every app starts with a UI font and a monospace font from the theme:
 The editor paints its code in `mono_font_family` at `mono_font_size`. See
 [Editor](../component/editor.md) for details.
 
+Both defaults are checked against the installed fonts when the theme is
+applied. A missing monospace default is swapped for an installed alternative,
+and when `.SystemUIFont` resolves to one of GPUI's fallback families rather
+than the system font itself (Linux desktops without the family GPUI maps it
+to), the theme names that family directly so text lookups stay cached. A
+family you set yourself is used as-is.
+
 ## System fonts
 
 Desktop apps can use **any font installed on the OS** by name — no bundling,
