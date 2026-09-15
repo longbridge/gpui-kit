@@ -335,3 +335,50 @@ fn copy_after_select_all_keeps_the_whole_selection(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+#[gpui::test]
+fn the_first_move_after_taking_a_handle_is_not_lost(cx: &mut TestAppContext) {
+    let handle = screen(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let input_bounds = window.find("input").bounds();
+        long_press(
+            window,
+            cx,
+            point(input_bounds.left() + px(24.), input_bounds.center().y),
+        );
+        let input = window
+            .focused_input(cx)
+            .and_then(|state| state.as_input().cloned())
+            .expect("the long press focused the input");
+        let snapshot = input.read(cx).touch_selection().unwrap();
+        let start = end_knob(&snapshot);
+        let far_right = point(input_bounds.right() - px(8.), start.y);
+        // No frame between the three phases: the drag begins, moves and ends
+        // before the handles could re-render around it.
+        for (phase, position) in [
+            (TouchPhase::Started, start),
+            (TouchPhase::Moved, far_right),
+            (TouchPhase::Ended, far_right),
+        ] {
+            window.dispatch_event(
+                TouchDragEvent {
+                    phase,
+                    start_position: start,
+                    position,
+                }
+                .to_platform_input(),
+                cx,
+            );
+        }
+        window.render_frame(cx);
+        assert_eq!(
+            input.read(cx).selected_text().to_string(),
+            "quick select value"
+        );
+        let snapshot = input.read(cx).touch_selection().unwrap();
+        assert_eq!(snapshot.dragging(), None);
+        assert!(snapshot.is_menu_open());
+    })
+    .unwrap();
+}

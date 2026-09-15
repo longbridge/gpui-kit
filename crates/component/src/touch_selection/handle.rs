@@ -60,14 +60,10 @@ impl SelectionHandles {
     }
 
     /// Lays out a handle for each end of a non-empty selection that is in
-    /// view, and returns which end the finger holds.
-    fn layout(
-        source: &SnapshotSource,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (Vec<LaidOutHandle>, Option<SelectionEdge>) {
+    /// view.
+    fn layout(source: &SnapshotSource, window: &mut Window, cx: &mut App) -> Vec<LaidOutHandle> {
         let Some(snapshot) = source(window, cx) else {
-            return (Vec::new(), None);
+            return Vec::new();
         };
         let window_bounds = Bounds::new(Point::default(), window.viewport_size());
         let mut handles = Vec::with_capacity(2);
@@ -90,7 +86,7 @@ impl SelectionHandles {
                 });
             }
         }
-        (handles, snapshot.dragging())
+        handles
     }
 
     fn paint_handle(handle: &LaidOutHandle, window: &mut Window, cx: &mut App) {
@@ -107,7 +103,7 @@ impl SelectionHandles {
     /// they keep coming even if that handle is not laid out for a frame.
     fn listen(
         handles: &[LaidOutHandle],
-        dragging: Option<SelectionEdge>,
+        source: &SnapshotSource,
         on_drag: &DragHandler,
         window: &mut Window,
     ) {
@@ -149,32 +145,49 @@ impl SelectionHandles {
             });
         }
 
-        let Some(edge) = dragging else {
-            return;
+        // The drag in progress is read live: it may have begun after this
+        // frame painted, and its first moves must not be lost.
+        let dragging = {
+            let source = source.clone();
+            move |window: &Window, cx: &App| source(window, cx).and_then(|s| s.dragging())
         };
         window.on_mouse_event({
             let on_drag = on_drag.clone();
+            let dragging = dragging.clone();
             move |event: &TouchDragEvent, phase, window, cx| {
-                if phase.bubble() && event.phase != TouchPhase::Started {
-                    cx.stop_propagation();
-                    on_drag(edge, event.phase, event.position, window, cx);
+                if !phase.bubble() || event.phase == TouchPhase::Started {
+                    return;
                 }
+                let Some(edge) = dragging(window, cx) else {
+                    return;
+                };
+                cx.stop_propagation();
+                on_drag(edge, event.phase, event.position, window, cx);
             }
         });
         window.on_mouse_event({
             let on_drag = on_drag.clone();
+            let dragging = dragging.clone();
             move |event: &MouseMoveEvent, phase, window, cx| {
-                if phase.bubble() && event.pressed_button == Some(MouseButton::Left) {
-                    on_drag(edge, TouchPhase::Moved, event.position, window, cx);
+                if !phase.bubble() || event.pressed_button != Some(MouseButton::Left) {
+                    return;
                 }
+                let Some(edge) = dragging(window, cx) else {
+                    return;
+                };
+                on_drag(edge, TouchPhase::Moved, event.position, window, cx);
             }
         });
         window.on_mouse_event({
             let on_drag = on_drag.clone();
             move |event: &MouseUpEvent, phase, window, cx| {
-                if phase.bubble() && event.button == MouseButton::Left {
-                    on_drag(edge, TouchPhase::Ended, event.position, window, cx);
+                if !phase.bubble() || event.button != MouseButton::Left {
+                    return;
                 }
+                let Some(edge) = dragging(window, cx) else {
+                    return;
+                };
+                on_drag(edge, TouchPhase::Ended, event.position, window, cx);
             }
         });
     }
@@ -187,15 +200,18 @@ impl RenderOnce for SelectionHandles {
         let on_paint = self.on_paint;
         deferred(
             canvas(
-                move |_, window, cx| Self::layout(&source, window, cx),
-                move |_, (handles, dragging), window, cx| {
+                {
+                    let source = source.clone();
+                    move |_, window, cx| Self::layout(&source, window, cx)
+                },
+                move |_, handles, window, cx| {
                     for handle in &handles {
                         Self::paint_handle(handle, window, cx);
                         if let Some(on_paint) = on_paint.as_ref() {
                             on_paint(handle.hitbox.bounds, window, cx);
                         }
                     }
-                    Self::listen(&handles, dragging, &on_drag, window);
+                    Self::listen(&handles, &source, &on_drag, window);
                 },
             )
             .absolute()
