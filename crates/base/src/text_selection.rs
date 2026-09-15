@@ -558,7 +558,6 @@ struct SelectableTextState {
     on_focus: Option<FocusCallback>,
     clear: Option<ClearHandler>,
     copy: Option<CopyCallback>,
-    select_all: Option<ClearHandler>,
     content_key_resolver: Option<ContentKeyResolver>,
 }
 
@@ -575,7 +574,6 @@ impl SelectableTextState {
             on_focus: None,
             clear: None,
             copy: None,
-            select_all: None,
             content_key_resolver: None,
         }
     }
@@ -639,11 +637,6 @@ impl SelectableTextState {
     /// Installs a participant-specific copy projection.
     fn copy_with(&mut self, callback: impl Fn(&mut App) -> String + 'static) {
         self.copy = Some(Rc::new(callback));
-    }
-
-    /// Installs the command that selects all of the participant's text.
-    fn select_all_with(&mut self, callback: impl Fn(&mut App) + 'static) {
-        self.select_all = Some(Rc::new(callback));
     }
 
     /// Installs a participant-specific lookup for stable virtualized content keys.
@@ -896,13 +889,6 @@ impl TextSelectionHandle {
                 }
             });
         }
-    }
-
-    /// Sets the command that selects all of the participant's text, which the
-    /// touch edit menu's Select All runs on the participant that was pressed.
-    pub fn select_all_with(&self, callback: impl Fn(&mut App) + 'static, cx: &mut App) {
-        self.0
-            .update(cx, |state, _| state.select_all_with(callback));
     }
 
     /// Sets a participant-specific lookup for stable virtualized content keys.
@@ -1526,21 +1512,51 @@ impl WindowSelectionState {
     }
 
     /// Selects all of the participant the touch selection started in.
+    ///
+    /// This stays a point selection — anchored on the participant's first
+    /// line of text, ending on its last — rather than switching the
+    /// participant to a local select-all: one selection, painted, reported
+    /// and copied the one way, with handles that drag on from its ends.
     fn select_all_touched(&mut self, cx: &mut App) {
         if !self.touch.active {
             return;
         }
-        let select_all = self
-            .anchor
-            .as_ref()
-            .and_then(|anchor| anchor.participant.as_ref())
-            .and_then(WeakEntity::upgrade)
-            .and_then(|participant| participant.read(cx).select_all.clone());
-        if let Some(select_all) = select_all {
-            select_all(cx);
-            self.touch.menu_open = true;
-            self.touch_changed(cx);
-        }
+        let Some((participant, registration)) = self.anchor_registration() else {
+            return;
+        };
+        let text = registration.text_bounds.iter();
+        let (Some(first), Some(last)) = (
+            text.clone().min_by_key(|line| (line.top(), line.left())),
+            text.max_by_key(|line| (line.bottom(), line.right())),
+        ) else {
+            return;
+        };
+        // Just inside the first and the last line, so both land on text.
+        let inset = px(1.);
+        let anchor = point(first.left() + inset, first.center().y);
+        let cursor = point(last.right() - inset, last.center().y);
+        let content_key_resolver = participant.read(cx).content_key_resolver.clone();
+        let to_endpoint = |window_point: Point<Pixels>| {
+            let content_point =
+                window_point - registration.bounds.origin - registration.scroll_offset;
+            SelectionEndpoint {
+                participant: Some(participant.downgrade()),
+                point: content_point,
+                inside: true,
+                inside_text: true,
+                content_key: None,
+                content_key_resolver: content_key_resolver
+                    .clone()
+                    .map(|resolver| (resolver, content_point)),
+            }
+        };
+        self.anchor = Some(to_endpoint(anchor));
+        self.cursor = Some(to_endpoint(cursor));
+        self.did_hit_text = true;
+        self.is_selecting = false;
+        self.touch.menu_open = true;
+        self.publish_snapshots(cx);
+        self.touch_changed(cx);
     }
 
     /// Starts dragging one end of the touch selection from `finger`.

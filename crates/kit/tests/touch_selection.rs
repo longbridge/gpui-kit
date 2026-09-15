@@ -382,3 +382,41 @@ fn the_first_move_after_taking_a_handle_is_not_lost(cx: &mut TestAppContext) {
     })
     .unwrap();
 }
+
+#[gpui::test]
+fn select_all_after_a_drag_stays_put_frame_after_frame(cx: &mut TestAppContext) {
+    let handle = screen(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let text = window.find("text").bounds();
+        long_press(
+            window,
+            cx,
+            point(text.left() + px(8.), text.top() + px(10.)),
+        );
+        let snapshot = TextSelection::touch_selection(window, cx).unwrap();
+        let start = end_knob(&snapshot);
+        window.drag(start, point(text.left() + px(120.), start.y), cx);
+        assert_eq!(TextSelection::selected_text(window, cx), "quick select \n");
+
+        window.click("Select All", cx);
+        let mut seen = Vec::new();
+        for _ in 0..6 {
+            window.render_frame(cx);
+            let snapshot = TextSelection::touch_selection(window, cx).expect("still live");
+            seen.push((
+                TextSelection::selected_text(window, cx),
+                snapshot.start().origin,
+                snapshot.end().origin,
+                snapshot.is_menu_open(),
+            ));
+        }
+        assert_eq!(seen[0].0.trim(), "quick select value");
+        assert!(seen[0].3, "the menu stays open over the whole selection");
+        assert!(
+            seen.iter().all(|frame| frame == &seen[0]),
+            "nothing may change from one frame to the next: {seen:#?}"
+        );
+    })
+    .unwrap();
+}

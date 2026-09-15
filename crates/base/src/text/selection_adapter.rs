@@ -147,14 +147,6 @@ impl TextViewSelectionAdapter {
             cx,
         );
 
-        let view_for_select_all = view.clone();
-        selection.select_all_with(
-            move |cx| {
-                let _ = view_for_select_all.update(cx, |state, cx| state.select_all(cx));
-            },
-            cx,
-        );
-
         let view_for_content_key = view.clone();
         selection.resolve_content_key_with(
             move |point, cx| {

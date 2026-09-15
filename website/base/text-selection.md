@@ -241,7 +241,6 @@ Plain text usually needs only `refresh_window_on_change` and `update_runs`. Rich
 | `resolve_content_key_with` | Attach a stable `TextSelectionContentKey` to an endpoint.                             |
 | `focus_with`               | Focus the participant when a drag begins inside it.                                   |
 | `clear_with`               | Synchronously clear participant-local state when the window selection clears.         |
-| `select_all_with`          | Select all of the participant's text when the touch edit menu asks for it.            |
 | `set_local_selection`      | Report participant-local selection such as select-all.                                |
 
 Callbacks are invoked outside selection-state leases. They may update the participant or query `TextSelection` without causing a reentrant entity borrow.
