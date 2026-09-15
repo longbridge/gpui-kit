@@ -15,7 +15,9 @@
 use gpui::{Context, LongPressEvent, Pixels, Point, TouchPhase, Window, point};
 
 use super::{InputBaseState, InputModeKind};
-use crate::touch_selection::{EdgeDrag, SelectionEdge, TouchSelectionSnapshot, caret_line_box};
+use crate::touch_selection::{
+    EdgeDrag, SelectionEdge, TouchSelectionSnapshot, caret_in_view, caret_line_box,
+};
 
 /// The selection a touch gesture made, and what it is doing now.
 #[derive(Debug, Default)]
@@ -38,17 +40,29 @@ impl<M: InputModeKind> InputBaseState<M> {
             return None;
         }
 
-        let line_height = self.last_layout.as_ref()?.line_height;
+        let layout = self.last_layout.as_ref()?;
+        let line_height = layout.line_height;
+        let laid_out = layout.visible_range_offset.clone();
         let origin = self.last_bounds?.origin;
-        let (_, _, start) = self.line_and_position_for_offset(range.0);
-        let (_, _, end) = self.line_and_position_for_offset(range.1);
+        let viewport = self.input_bounds;
+        // An end scrolled out of the input gets no handle. Its line may not
+        // even be laid out; it then stands just outside the viewport on its
+        // side, which is all the other end's drag needs to know about it.
+        let caret_box = |offset: usize, stand_in_y: Pixels| {
+            let (_, _, position) = self.line_and_position_for_offset(offset);
+            match position.filter(|_| laid_out.contains(&offset) || laid_out.end == offset) {
+                Some(position) => caret_line_box(origin + position, line_height),
+                None => caret_line_box(point(viewport.left(), stand_in_y), line_height),
+            }
+        };
+        let start = caret_box(range.0, viewport.top() - line_height);
+        let end = caret_box(range.1, viewport.bottom());
         Some(
-            TouchSelectionSnapshot::new(
-                caret_line_box(origin + start?, line_height),
-                caret_line_box(origin + end?, line_height),
-            )
-            .with_menu_open(self.touch_selection.menu_open)
-            .with_dragging(self.touch_selection.drag.map(|drag| drag.edge())),
+            TouchSelectionSnapshot::new(start, end)
+                .with_edge_visible(SelectionEdge::Start, caret_in_view(start, viewport))
+                .with_edge_visible(SelectionEdge::End, caret_in_view(end, viewport))
+                .with_menu_open(self.touch_selection.menu_open)
+                .with_dragging(self.touch_selection.drag.map(|drag| drag.edge())),
         )
     }
 
@@ -60,7 +74,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Drops the handles and the edit menu. Called where the selection is
     /// about to be moved by something other than the gesture.
-    pub fn dismiss_touch_selection(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn dismiss_touch_selection(&mut self, cx: &mut Context<Self>) {
         if self.touch_selection.range.is_none() {
             return;
         }
@@ -249,14 +263,21 @@ impl<M: InputModeKind> InputBaseState<M> {
     }
 
     fn extend_edge_drag_to(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
-        let Some(drag) = self.touch_selection.drag else {
+        if self.touch_selection.drag.is_none() {
             return;
-        };
+        }
         let (offset, line_end_affinity, _) = self.resolve_mouse_position(position);
         self.select_to_with_affinity(offset, line_end_affinity, cx);
-        // Crossing the other end flips which end is which; the handle the
-        // finger holds keeps following it either way.
-        self.active_selection_mut().reversed = drag.edge() == SelectionEdge::Start;
+        // Dragging one end past the other swaps them: the selection now runs
+        // the other way and the finger holds what became the other handle.
+        let edge = if self.active_selection().reversed {
+            SelectionEdge::Start
+        } else {
+            SelectionEdge::End
+        };
+        if let Some(drag) = self.touch_selection.drag.as_mut() {
+            drag.set_edge(edge);
+        }
         self.retain_touch_selection();
         cx.notify();
     }
@@ -308,7 +329,8 @@ mod tests {
 
     impl Render for TextareaRoot {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            div().size_full().child(self.0.clone())
+            // Short enough that forty lines scroll.
+            div().w(px(300.)).h(px(80.)).child(self.0.clone())
         }
     }
 
@@ -456,6 +478,57 @@ mod tests {
     }
 
     #[gpui::test]
+    fn dragging_one_handle_past_the_other_swaps_them(cx: &mut TestAppContext) {
+        let (input, cx) = open_input(cx, "quick select value");
+        let start = caret_at(&input, cx, 8);
+        long_press(cx, TouchPhase::Started, start, start);
+        long_press(cx, TouchPhase::Ended, start, start);
+        input.read_with(cx, |state, _| {
+            assert_eq!(state.selected_text().to_string(), "select");
+        });
+
+        // Take the start handle and pull it past the end of "select" to the
+        // end of the text: the finger now holds the end handle, and the
+        // selection runs from the old end forward.
+        let start_caret = caret_at(&input, cx, 6);
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                state.begin_edge_drag(
+                    SelectionEdge::Start,
+                    point(px(start_caret.0), px(start_caret.1)),
+                    cx,
+                );
+            });
+        });
+        let target = caret_at(&input, cx, 18);
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                state.update_edge_drag(point(px(target.0), px(target.1)), cx);
+            });
+        });
+        input.read_with(cx, |state, _| {
+            assert_eq!(state.selected_text().to_string(), " value");
+            assert_eq!(
+                state.touch_selection().unwrap().dragging(),
+                Some(SelectionEdge::End)
+            );
+        });
+
+        // And back across again: it is the start handle once more.
+        let target = caret_at(&input, cx, 0);
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                state.update_edge_drag(point(px(target.0), px(target.1)), cx);
+                state.end_edge_drag(cx);
+            });
+        });
+        input.read_with(cx, |state, _| {
+            assert_eq!(state.selected_text().to_string(), "quick select");
+            assert!(state.is_edit_menu_open());
+        });
+    }
+
+    #[gpui::test]
     fn touch_selection_goes_away_when_something_else_moves_the_selection(cx: &mut TestAppContext) {
         let (input, cx) = open_input(cx, "quick select value");
         let start = caret_at(&input, cx, 2);
@@ -543,6 +616,25 @@ mod tests {
             let snapshot = state.touch_selection().expect("handles follow the text");
             assert!(!snapshot.is_menu_open());
             assert_eq!(state.selected_text().to_string(), "line");
+        });
+
+        // Scrolled far enough, the selection leaves the viewport: no handle
+        // for it, and no menu anchored to nothing.
+        cx.update(|_, cx| {
+            textarea.update(cx, |state, cx| {
+                state.set_scroll_offset(point(px(0.), px(-600.)), cx);
+            });
+        });
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        textarea.read_with(cx, |state, _| {
+            let snapshot = state
+                .touch_selection()
+                .expect("the selection is still the touch one");
+            assert!(!snapshot.is_edge_visible(SelectionEdge::Start));
+            assert!(!snapshot.is_edge_visible(SelectionEdge::End));
+            assert_eq!(snapshot.bounds(), None);
         });
     }
 }

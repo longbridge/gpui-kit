@@ -330,7 +330,11 @@ impl Input {
     /// and Select All, leaving out what cannot apply right now rather than
     /// disabling it. Cut, Copy and Paste go through the input's actions, so a
     /// custom key binding or an open completion menu sees them the same way.
-    fn render_touch_selection(state: &TextInputState, cx: &App) -> Vec<AnyElement> {
+    fn render_touch_selection(
+        state: &TextInputState,
+        window: &Window,
+        cx: &App,
+    ) -> Vec<AnyElement> {
         let Some(snapshot) = state.touch_selection(cx) else {
             return Vec::new();
         };
@@ -390,7 +394,7 @@ impl Input {
             },
         )
         .items(items)
-        .into_elements()
+        .into_elements(window)
     }
 
     fn render_toggle_mask_button(state: &TextInputState, cx: &App) -> impl IntoElement {
@@ -556,7 +560,7 @@ impl RenderOnce for Input {
         let mut overlays = state.render_overlays(window, cx);
         overlays
             .floating
-            .extend(Self::render_touch_selection(&state, cx));
+            .extend(Self::render_touch_selection(&state, window, cx));
 
         let presentation = state.presentation(cx);
         let content_type = self.content_type;

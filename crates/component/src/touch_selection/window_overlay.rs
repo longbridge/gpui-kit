@@ -63,6 +63,6 @@ impl Render for WindowTouchSelectionOverlay {
             EditMenuItem::new(t!("Input.Select All"), Self::select_all),
         ])
         .on_paint(|bounds, window, cx| TextSelection::register_touch_ui(bounds, window, cx));
-        div().children(overlay.into_elements())
+        div().children(overlay.into_elements(window))
     }
 }

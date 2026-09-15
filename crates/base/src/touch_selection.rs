@@ -41,6 +41,11 @@ impl SelectionEdge {
 pub struct TouchSelectionSnapshot {
     start: Bounds<Pixels>,
     end: Bounds<Pixels>,
+    /// Whether each end is inside its owner's viewport. An end scrolled out
+    /// of view keeps its geometry, for the drag that holds the other end,
+    /// but gets no handle.
+    start_visible: bool,
+    end_visible: bool,
     menu_open: bool,
     dragging: Option<SelectionEdge>,
 }
@@ -50,9 +55,19 @@ impl TouchSelectionSnapshot {
         Self {
             start,
             end,
+            start_visible: true,
+            end_visible: true,
             menu_open: false,
             dragging: None,
         }
+    }
+
+    pub(crate) const fn with_edge_visible(mut self, edge: SelectionEdge, visible: bool) -> Self {
+        match edge {
+            SelectionEdge::Start => self.start_visible = visible,
+            SelectionEdge::End => self.end_visible = visible,
+        }
+        self
     }
 
     pub(crate) const fn with_menu_open(mut self, menu_open: bool) -> Self {
@@ -83,14 +98,29 @@ impl TouchSelectionSnapshot {
         }
     }
 
+    /// Whether the given end is in view. A handle is drawn only for an end
+    /// that is; the menu anchors to the ends that are.
+    pub const fn is_edge_visible(&self, edge: SelectionEdge) -> bool {
+        match edge {
+            SelectionEdge::Start => self.start_visible,
+            SelectionEdge::End => self.end_visible,
+        }
+    }
+
     /// Whether the selection is a bare caret, which gets a menu but no handles.
     pub fn is_empty(&self) -> bool {
         self.start == self.end
     }
 
-    /// The smallest box holding both ends, for anchoring the edit menu.
-    pub fn bounds(&self) -> Bounds<Pixels> {
-        self.start.union(&self.end)
+    /// The smallest box holding the ends in view, for anchoring the edit
+    /// menu. `None` when the whole selection is scrolled away.
+    pub fn bounds(&self) -> Option<Bounds<Pixels>> {
+        match (self.start_visible, self.end_visible) {
+            (true, true) => Some(self.start.union(&self.end)),
+            (true, false) => Some(self.start),
+            (false, true) => Some(self.end),
+            (false, false) => None,
+        }
     }
 
     /// Whether the edit menu is open. It closes while a handle is dragged and
@@ -108,6 +138,16 @@ impl TouchSelectionSnapshot {
 /// The caret line box at `position`, for reporting a selection end.
 pub(crate) fn caret_line_box(position: Point<Pixels>, line_height: Pixels) -> Bounds<Pixels> {
     Bounds::new(position, size(px(0.), line_height))
+}
+
+/// Whether a caret line box shows inside `viewport`: its line overlaps the
+/// viewport vertically and its x lies within it. A zero-width box never
+/// intersects anything, so this is not `Bounds::intersects`.
+pub(crate) fn caret_in_view(caret: Bounds<Pixels>, viewport: Bounds<Pixels>) -> bool {
+    caret.bottom() > viewport.top()
+        && caret.top() < viewport.bottom()
+        && caret.left() >= viewport.left()
+        && caret.left() <= viewport.right()
 }
 
 /// Maps a finger to the text position a handle drag selects.
@@ -131,6 +171,11 @@ impl EdgeDrag {
 
     pub(crate) const fn edge(&self) -> SelectionEdge {
         self.edge
+    }
+
+    /// The finger dragged its end past the other one; it now holds that one.
+    pub(crate) fn set_edge(&mut self, edge: SelectionEdge) {
+        self.edge = edge;
     }
 
     pub(crate) fn text_position(&self, finger: Point<Pixels>) -> Point<Pixels> {
@@ -157,11 +202,32 @@ mod tests {
         assert_eq!(snapshot.dragging(), Some(SelectionEdge::End));
         assert_eq!(
             snapshot.bounds(),
-            Bounds::from_corners(point(px(10.), px(20.)), point(px(80.), px(68.)))
+            Some(Bounds::from_corners(
+                point(px(10.), px(20.)),
+                point(px(80.), px(68.))
+            ))
         );
 
         let caret = TouchSelectionSnapshot::new(start, start);
         assert!(caret.is_empty());
+    }
+
+    #[test]
+    fn a_scrolled_away_end_keeps_its_geometry_but_no_handle() {
+        let start = caret_line_box(point(px(10.), px(-30.)), px(16.));
+        let end = caret_line_box(point(px(80.), px(52.)), px(16.));
+        let viewport = Bounds::new(point(px(0.), px(0.)), size(px(200.), px(100.)));
+        assert!(!caret_in_view(start, viewport));
+        assert!(caret_in_view(end, viewport));
+
+        let snapshot =
+            TouchSelectionSnapshot::new(start, end).with_edge_visible(SelectionEdge::Start, false);
+        assert!(!snapshot.is_edge_visible(SelectionEdge::Start));
+        assert_eq!(snapshot.edge(SelectionEdge::Start), start);
+        assert_eq!(snapshot.bounds(), Some(end));
+
+        let gone = snapshot.with_edge_visible(SelectionEdge::End, false);
+        assert_eq!(gone.bounds(), None);
     }
 
     #[test]

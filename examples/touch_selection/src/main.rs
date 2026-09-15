@@ -8,6 +8,10 @@
 //! - The word under the press is selected, with a grab handle at each end and
 //!   an edit menu above it (Cut / Copy / Paste / Select All as they apply).
 //! - Drag a handle with the mouse to move that end; the other end stays put.
+//! - Drag one handle past the other: they swap, and the selection runs the
+//!   other way.
+//! - Scroll the page or the textarea: a handle whose end left the view goes
+//!   away, and the menu steps aside until the scroll ends.
 //! - Click anywhere else to drop the handles; an `Input` also drops them when
 //!   you type or press `Escape`, and brings the menu back when you click the
 //!   selected text.
@@ -42,12 +46,11 @@ impl TouchSelectionExample {
                     .default_value("The quick brown fox jumps over the lazy dog")
             }),
             textarea: cx.new(|cx| {
-                TextareaState::new(window, cx).default_value(
-                    "Online content authoring isn't a solved problem.\n\
-                     You might go with an HTML-based editor, and hope it gives you \
-                     the kind of HTML you want. Or you might use a text-based markup \
-                     format, and hope your users understand how to use it.",
-                )
+                // Enough lines to scroll inside its fixed height.
+                let lines = (1..=12)
+                    .map(|n| format!("Line {n}: online content authoring isn't a solved problem."))
+                    .collect::<Vec<_>>();
+                TextareaState::new(window, cx).default_value(lines.join("\n"))
             }),
             input_bounds: Rc::default(),
             textarea_bounds: Rc::default(),
@@ -97,6 +100,21 @@ impl TouchSelectionExample {
             })
     }
 
+    /// Paragraphs above and below the pressed one, so the page scrolls with
+    /// the selection somewhere in the middle of it.
+    fn filler(id: &'static str, paragraphs: usize) -> impl IntoElement {
+        let text = (0..paragraphs)
+            .map(|_| {
+                "Online content authoring isn't a solved problem. You might go with \
+                 an HTML-based editor, and hope it gives you the kind of HTML you \
+                 want. Or you might use a text-based markup format, and hope your \
+                 users understand how to use it."
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        TextView::markdown(id, text).selectable(true)
+    }
+
     fn row(label: &'static str, button: impl IntoElement, cx: &App) -> impl IntoElement {
         h_flex()
             .items_center()
@@ -109,7 +127,9 @@ impl TouchSelectionExample {
 impl Render for TouchSelectionExample {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
+            .id("page")
             .size_full()
+            .overflow_y_scroll()
             .p_6()
             .gap_6()
             .child(
@@ -143,6 +163,7 @@ impl Render for TouchSelectionExample {
                         Self::press_button("press-text", &self.text_bounds, window),
                         cx,
                     ))
+                    .child(Self::filler("text-before", 3))
                     .child(Self::measured(
                         TextView::markdown(
                             "text",
@@ -153,7 +174,8 @@ impl Render for TouchSelectionExample {
                         )
                         .selectable(true),
                         &self.text_bounds,
-                    )),
+                    ))
+                    .child(Self::filler("text-after", 6)),
             )
     }
 }

@@ -61,14 +61,23 @@ impl TouchSelectionOverlay {
         self
     }
 
-    /// The elements to add to the owner: handles for a non-empty selection,
-    /// and the menu when it is open. Each floats in window coordinates.
-    pub(crate) fn into_elements(self) -> Vec<AnyElement> {
+    /// The elements to add to the owner: a handle for each end of a
+    /// non-empty selection that is in view, and the menu when it is open.
+    /// Each floats in window coordinates.
+    pub(crate) fn into_elements(self, window: &Window) -> Vec<AnyElement> {
         let snapshot = self.snapshot;
+        let window_bounds = Bounds::new(Point::default(), window.viewport_size());
         let mut elements = Vec::with_capacity(3);
         if !snapshot.is_empty() {
             for edge in [SelectionEdge::Start, SelectionEdge::End] {
-                let handle = SelectionHandle::new(edge, snapshot.edge(edge), self.on_drag.clone())
+                // No handle for an end scrolled out of its owner, nor for one
+                // outside the window, where the positioner would only drag it
+                // back to the edge.
+                let caret = snapshot.edge(edge);
+                if !snapshot.is_edge_visible(edge) || !window_bounds.contains(&caret.origin) {
+                    continue;
+                }
+                let handle = SelectionHandle::new(edge, caret, self.on_drag.clone())
                     .dragging(snapshot.dragging() == Some(edge));
                 let handle = match self.on_paint.clone() {
                     Some(on_paint) => handle.on_paint(on_paint),
@@ -77,10 +86,12 @@ impl TouchSelectionOverlay {
                 elements.push(handle.into_any_element());
             }
         }
-        if snapshot.is_menu_open() && !self.items.is_empty() {
+        if let Some(mut anchor) = snapshot
+            .bounds()
+            .filter(|_| snapshot.is_menu_open() && !self.items.is_empty())
+        {
             // Leave the knobs uncovered: the menu anchors to the selection
             // plus the room its handles take above and below.
-            let mut anchor = snapshot.bounds();
             if !snapshot.is_empty() {
                 anchor.origin.y -= KNOB_EXTENT;
                 anchor.size.height += KNOB_EXTENT * 2.;

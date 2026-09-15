@@ -14,7 +14,7 @@ use gpui::{
 };
 
 use crate::text_boundary::{line_range_at, word_range_at};
-use crate::touch_selection::{EdgeDrag, SelectionEdge, TouchSelectionSnapshot};
+use crate::touch_selection::{EdgeDrag, SelectionEdge, TouchSelectionSnapshot, caret_in_view};
 use crate::{AutoScroll, GlobalState};
 
 /// An opaque selection layer identifier.
@@ -1264,8 +1264,10 @@ impl WindowSelectionState {
         if !self.touch.active {
             return None;
         }
-        let mut start: Option<(u64, Bounds<Pixels>)> = None;
-        let mut end: Option<(u64, Bounds<Pixels>)> = None;
+        // Each end with its owner's viewport: an end scrolled out of its
+        // participant gets no handle.
+        let mut start: Option<(u64, Bounds<Pixels>, bool)> = None;
+        let mut end: Option<(u64, Bounds<Pixels>, bool)> = None;
         for registration in self.participants.values() {
             let geometry = &registration.registration;
             if geometry.scope != self.active_scope || registration.participant.upgrade().is_none() {
@@ -1275,15 +1277,20 @@ impl WindowSelectionState {
                 continue;
             };
             let order = geometry.document_order;
-            if start.is_none_or(|(best, _)| order < best) {
-                start = Some((order, edge_start));
+            let viewport = geometry.hitbox.bounds;
+            if start.is_none_or(|(best, ..)| order < best) {
+                start = Some((order, edge_start, caret_in_view(edge_start, viewport)));
             }
-            if end.is_none_or(|(best, _)| order >= best) {
-                end = Some((order, edge_end));
+            if end.is_none_or(|(best, ..)| order >= best) {
+                end = Some((order, edge_end, caret_in_view(edge_end, viewport)));
             }
         }
+        let (_, start, start_visible) = start?;
+        let (_, end, end_visible) = end?;
         Some(
-            TouchSelectionSnapshot::new(start?.1, end?.1)
+            TouchSelectionSnapshot::new(start, end)
+                .with_edge_visible(SelectionEdge::Start, start_visible)
+                .with_edge_visible(SelectionEdge::End, end_visible)
                 .with_menu_open(self.touch.menu_open)
                 .with_dragging(self.touch.drag.map(|drag| drag.edge())),
         )
@@ -1390,6 +1397,23 @@ impl WindowSelectionState {
             return;
         };
         self.update_in_window(drag.text_position(finger), window, cx);
+        // Dragging one end past the other swaps them: the cursor now lies
+        // before the anchor, so the finger holds what became the start.
+        if let Some(points) = self
+            .snapshot()
+            .and_then(|snapshot| snapshot.window_points())
+        {
+            let (anchor, cursor) = (points.anchor(), points.cursor());
+            let cursor_first = cursor.y < anchor.y || (cursor.y == anchor.y && cursor.x < anchor.x);
+            let edge = if cursor_first {
+                SelectionEdge::Start
+            } else {
+                SelectionEdge::End
+            };
+            if let Some(drag) = self.touch.drag.as_mut() {
+                drag.set_edge(edge);
+            }
+        }
         self.touch_changed(cx);
     }
 
