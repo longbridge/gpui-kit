@@ -192,8 +192,65 @@ let decorations = editor.update(cx, |state, cx| {
 });
 ```
 
-Keep the returned `TextDecorationCollection` alive while the decorations are
-needed. Its ranges follow subsequent text edits.
+Keep the returned `TextDecorationCollection` to update or clear that owner's
+text styles. Ranges follow edits; dropping the handle does not remove decorations.
+
+### Geometric range decorations
+
+Use a separate `RangeDecorationCollection` for continuous fills or one-logical-pixel
+frames. These are paint-only annotations: they do not reserve inline space, add
+widgets, intercept pointer events, or change keyboard focus.
+
+```rust
+use gpui_kit::component::input::{RangeDecoration, RangeDecorationStyle};
+
+let review_ranges = editor.update(cx, |state, cx| {
+    state.create_range_decorations_collection(
+        vec![
+            RangeDecoration::new(0..8).with_style(RangeDecorationStyle::Fill),
+            RangeDecoration::new(12..24), // Frame is the default.
+        ],
+        cx,
+    )
+});
+
+review_ranges.set(vec![RangeDecoration::new(4..16)], cx);
+review_ranges.append(vec![RangeDecoration::new(20..28)], cx);
+let tracked_ranges = review_ranges.get_ranges(cx);
+review_ranges.clear(cx);   // Keep the collection available for reuse.
+review_ranges.dispose(cx); // Invalidate this handle and all its clones.
+```
+
+Each collection owns only its own entries, so separate extensions cannot overwrite
+one another. Dropping a handle leaves its collection in the editor; `dispose`
+releases it permanently. Calls on disposed collections or a dropped editor are
+no-ops. Individual decorations do not require an ID.
+
+Ranges are half-open UTF-8 **byte offsets**, not character indices or line numbers.
+Start/end offsets are clipped outward to valid character boundaries; empty,
+reversed, and entirely out-of-document ranges are discarded. Both text and
+geometric decorations share these tracking rules:
+
+- Inserting at either edge does not grow the range; inserting inside it does.
+- Replacements clip overlapping anchors to the replaced span; deleting an entire
+  range removes the decoration.
+- Undo/redo, `set_value`, and `replace_all` (including formatting) apply the same
+  edit transforms. Annotations are **not** snapshots in undo history: undoing a
+  deletion does not resurrect a removed decoration, and undoing a replacement
+  does not recover its former interior anchors. Reset the collection from your
+  semantic source when that distinction matters.
+- Folding changes only visual projection. Hidden-only ranges are not painted;
+  visible portions remain clipped to the viewport and follow soft-wrapped glyphs.
+
+Fills paint behind frames, and both sit below the selection and glyphs. Within
+one style, later collections/items paint over earlier ones. Without `with_color`,
+frames use the editor foreground and fills use that color at 12% opacity, so the
+fallback follows theme changes. An explicit color is owned by the application.
+
+Visible-range queries use an interval index and skip folded buffer spans; they
+do not scan every decoration per frame. Setting/appending entries rebuilds that
+collection's index; edits update affected collections linearly without re-sorting.
+The Editor showcase's **Decorations** tab demonstrates both collection types.
 
 ## Value and events
 

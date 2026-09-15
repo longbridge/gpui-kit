@@ -25,10 +25,11 @@ pub use gpui_base::input::{
     IndentInline, InputEdit, InputEvent, InputHighlighter, InputHighlighterFactory, InputState,
     Lsp, MaskPattern, MoveDown, MoveEnd, MoveHome, MoveLeft, MovePageDown, MovePageUp, MoveRight,
     MoveToEnd, MoveToEndOfLine, MoveToNextWord, MoveToPreviousWord, MoveToStart, MoveToStartOfLine,
-    MoveUp, Outdent, OutdentInline, Paste, Point, Redo, Replace, Rope, RopeExt, RopeLines, Search,
-    SelectAll, SelectToEnd, SelectToEndOfLine, SelectToNextWordEnd, SelectToPreviousWordStart,
-    SelectToStart, SelectToStartOfLine, Selection, ShowCharacterPalette, ShowDocumentHandler,
-    TabSize, TextDecoration, TextDecorationCollection, TextareaState, ToggleCodeActions, Undo,
+    MoveUp, Outdent, OutdentInline, Paste, Point, RangeDecoration, RangeDecorationCollection,
+    RangeDecorationStyle, Redo, Replace, Rope, RopeExt, RopeLines, Search, SelectAll, SelectToEnd,
+    SelectToEndOfLine, SelectToNextWordEnd, SelectToPreviousWordStart, SelectToStart,
+    SelectToStartOfLine, Selection, ShowCharacterPalette, ShowDocumentHandler, TabSize,
+    TextDecoration, TextDecorationCollection, TextareaState, ToggleCodeActions, Undo,
     WrappingIndent,
 };
 pub use gpui_base::input::{EditorMode, InputMode, InputModeKind, TextareaMode};

@@ -159,7 +159,56 @@ let decorations = editor.update(cx, |state, cx| {
 });
 ```
 
-需要装饰存在多久，就应将返回的 `TextDecorationCollection` 保留多久；文本修改后，其 range 会自动跟随内容变化。
+保留返回的 `TextDecorationCollection`，以便更新或清空该调用方的文本样式。
+范围会跟随文本编辑；丢弃句柄不会移除装饰。
+
+### 几何范围装饰
+
+使用独立的 `RangeDecorationCollection` 绘制连续填充或一个逻辑像素宽的边框。
+它们只参与绘制，不预留行内空间、不添加 widget、不拦截鼠标事件，也不改变键盘焦点。
+
+```rust
+use gpui_kit::component::input::{RangeDecoration, RangeDecorationStyle};
+
+let review_ranges = editor.update(cx, |state, cx| {
+    state.create_range_decorations_collection(
+        vec![
+            RangeDecoration::new(0..8).with_style(RangeDecorationStyle::Fill),
+            RangeDecoration::new(12..24), // 默认为 Frame。
+        ],
+        cx,
+    )
+});
+
+review_ranges.set(vec![RangeDecoration::new(4..16)], cx);
+review_ranges.append(vec![RangeDecoration::new(20..28)], cx);
+let tracked_ranges = review_ranges.get_ranges(cx);
+review_ranges.clear(cx);   // 清空，但保留集合以便复用。
+review_ranges.dispose(cx); // 释放集合，使该句柄及其克隆全部失效。
+```
+
+每个集合只管理自己的条目，不同扩展不会互相覆盖。丢弃句柄后，集合仍保存在编辑器中；
+调用 `dispose` 才会永久释放它。对已释放集合或已销毁编辑器的调用不会产生效果。
+单个装饰不需要提供 ID。
+
+范围使用左闭右开的 UTF-8 **字节偏移量**，不是字符下标或行号。起止偏移量向外裁剪到有效
+字符边界；空范围、反向范围和完全超出文档的范围会被丢弃。文本装饰和几何装饰共享跟踪规则：
+
+- 在两端插入文字不会扩展范围，在内部插入则会扩展。
+- 替换文字时，重叠锚点裁剪到替换区域；删除整个范围会移除该装饰。
+- 撤销、重做、`set_value`、`replace_all`（包括格式化）都应用相同的编辑变换。
+  装饰**不是**撤销历史中的快照：撤销删除不会恢复已移除的装饰，撤销替换也不会恢复原先的
+  内部锚点。如果业务需要这种语义，请依据自己的语义数据重新设置集合。
+- 折叠只改变显示投影，不修改存储的范围。完全隐藏的范围不绘制；可见部分按视口裁剪，
+  并跟随软换行后的实际字形位置。
+
+填充绘制在边框下方，两者均位于选区和字形下方。同一种样式内，后创建的集合和后加入的
+条目覆盖先前的条目。不调用 `with_color` 时，边框使用编辑器前景色，填充使用其 12% 透明度
+版本，因此默认颜色会跟随主题变化；显式颜色由应用自行维护。
+
+可见范围查询使用区间索引并跳过折叠的缓冲区范围，不会逐帧扫描全部装饰。设置或追加条目
+会重建对应集合的索引；编辑文本时线性更新受影响的集合，不重新排序。
+Editor 展示页的 **Decorations** 标签演示了两种集合的组合使用。
 
 ## 值与事件
 
