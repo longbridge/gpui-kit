@@ -267,7 +267,14 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         }
         let (offset, line_end_affinity, _) = self.resolve_mouse_position(position);
+        let before = *self.active_selection();
         self.select_to_with_affinity(offset, line_end_affinity, cx);
+        // A handle never collapses the selection: at the other end it stops,
+        // and the finger has to pass that end to swap the two.
+        if self.active_selection().is_empty() {
+            *self.active_selection_mut() = before;
+            return;
+        }
         // Dragging one end past the other swaps them: the selection now runs
         // the other way and the finger holds what became the other handle.
         let edge = if self.active_selection().reversed {

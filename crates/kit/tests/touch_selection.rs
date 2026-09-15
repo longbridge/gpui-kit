@@ -249,3 +249,55 @@ fn end_handle_drags_the_text_view_selection_with_a_mouse(cx: &mut TestAppContext
     })
     .unwrap();
 }
+
+#[gpui::test]
+fn a_handle_stops_at_the_other_end_instead_of_collapsing_the_selection(cx: &mut TestAppContext) {
+    let handle = screen(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let text = window.find("text").bounds();
+        long_press(
+            window,
+            cx,
+            point(text.left() + px(8.), text.top() + px(10.)),
+        );
+        assert_eq!(TextSelection::selected_text(window, cx).trim(), "quick");
+
+        // Pull the end handle back over the word, one short drag at a time,
+        // then past its start where the paragraph has nothing more to select.
+        for delta in [-6., -12., -20., -30., -40.] {
+            let snapshot = TextSelection::touch_selection(window, cx).expect("still live");
+            let start = end_knob(&snapshot);
+            window.drag(start, point(start.x + px(delta), start.y), cx);
+        }
+        assert_eq!(TextSelection::selected_text(window, cx).trim(), "q");
+        let snapshot = TextSelection::touch_selection(window, cx).expect("a character is left");
+        assert!(snapshot.is_menu_open());
+    })
+    .unwrap();
+
+    cx.update_window(handle.into(), |_, window, cx| {
+        // The text's menu floats over the input; put it away first.
+        TextSelection::clear(window, cx);
+        window.render_frame(cx);
+        let input_bounds = window.find("input").bounds();
+        long_press(
+            window,
+            cx,
+            point(input_bounds.left() + px(24.), input_bounds.center().y),
+        );
+        let input = window
+            .focused_input(cx)
+            .and_then(|state| state.as_input().cloned())
+            .expect("the long press focused the input");
+        assert_eq!(input.read(cx).selected_text().to_string(), "quick");
+        for delta in [-6., -12., -20., -30.] {
+            let snapshot = input.read(cx).touch_selection().expect("still live");
+            let start = end_knob(&snapshot);
+            window.drag(start, point(start.x + px(delta), start.y), cx);
+        }
+        assert_eq!(input.read(cx).selected_text().to_string(), "q");
+        assert!(input.read(cx).touch_selection().is_some());
+    })
+    .unwrap();
+}

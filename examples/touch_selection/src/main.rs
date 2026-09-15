@@ -163,7 +163,9 @@ impl Render for TouchSelectionExample {
                         Self::press_button("press-text", &self.text_bounds, window),
                         cx,
                     ))
-                    .child(Self::filler("text-before", 3))
+                    // One paragraph above keeps the pressed one on screen at
+                    // start; scroll to move it out either way.
+                    .child(Self::filler("text-before", 1))
                     .child(Self::measured(
                         TextView::markdown(
                             "text",

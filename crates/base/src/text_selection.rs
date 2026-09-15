@@ -879,6 +879,11 @@ struct TouchSelection {
     drag: Option<EdgeDrag>,
     /// Where the handles and the menu were painted this frame.
     ui_bounds: Vec<Bounds<Pixels>>,
+    /// The ends as last laid out: `(start, end, start_visible, end_visible)`.
+    /// A frame in which no participant paints a selection — the cursor sits
+    /// between two characters mid-drag — would otherwise lose the handle the
+    /// finger holds, and with it the rest of the drag.
+    last_edges: std::cell::Cell<Option<(Bounds<Pixels>, Bounds<Pixels>, bool, bool)>>,
 }
 
 impl TouchSelection {
@@ -896,6 +901,7 @@ impl TouchSelection {
         self.active = false;
         self.menu_open = false;
         self.drag = None;
+        self.last_edges.set(None);
         had
     }
 }
@@ -1199,6 +1205,25 @@ impl WindowSelectionState {
         resolve_copy_items(self.copy_items(cx), cx)
     }
 
+    /// Whether the current endpoints take in at least one character of some
+    /// participant's painted text, as opposed to two points with nothing
+    /// between them.
+    fn selects_text(&self, cx: &App) -> bool {
+        self.snapshot().is_some()
+            && self.participants.values().any(|registration| {
+                registration
+                    .participant
+                    .upgrade()
+                    .is_some_and(|participant| {
+                        let participant = participant.read(cx);
+                        project_ranges(participant.snapshot, &participant.runs)
+                            .ranges()
+                            .iter()
+                            .any(|range| range.as_ref().is_some_and(|range| !range.is_empty()))
+                    })
+            })
+    }
+
     /// Returns whether a drag or a participant-local selection is active.
     pub fn has_selection(&self, cx: &App) -> bool {
         self.snapshot().is_some()
@@ -1285,8 +1310,16 @@ impl WindowSelectionState {
                 end = Some((order, edge_end, caret_in_view(edge_end, viewport)));
             }
         }
-        let (_, start, start_visible) = start?;
-        let (_, end, end_visible) = end?;
+        let edges = match (start, end) {
+            (Some((_, start, start_visible)), Some((_, end, end_visible))) => {
+                let edges = (start, end, start_visible, end_visible);
+                self.touch.last_edges.set(Some(edges));
+                edges
+            }
+            _ if self.touch.drag.is_some() => self.touch.last_edges.get()?,
+            _ => return None,
+        };
+        let (start, end, start_visible, end_visible) = edges;
         Some(
             TouchSelectionSnapshot::new(start, end)
                 .with_edge_visible(SelectionEdge::Start, start_visible)
@@ -1396,7 +1429,15 @@ impl WindowSelectionState {
         let Some(drag) = self.touch.drag else {
             return;
         };
+        let before = self.cursor.clone();
         self.update_in_window(drag.text_position(finger), window, cx);
+        // A handle never collapses the selection: at the other end it stops,
+        // and the finger has to pass that end, onto text, to swap the two.
+        if !self.selects_text(cx) {
+            self.cursor = before;
+            self.publish_snapshots(cx);
+            return;
+        }
         // Dragging one end past the other swaps them: the cursor now lies
         // before the anchor, so the finger holds what became the start.
         if let Some(points) = self
