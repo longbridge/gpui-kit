@@ -1171,9 +1171,14 @@ impl WindowSelectionState {
     }
 
     /// Tells whoever draws the handles and the menu that they changed.
+    ///
+    /// Deferred, because the change may come from a participant painting its
+    /// selection ends: a notification raised inside a draw marks the view
+    /// dirty but starts no frame, and the handles would sit where they were
+    /// until something else redrew the window.
     fn touch_changed(&self, cx: &mut App) {
         if let Some(entity_id) = self.entity_id {
-            cx.notify(entity_id);
+            cx.defer(move |cx| cx.notify(entity_id));
         }
     }
 

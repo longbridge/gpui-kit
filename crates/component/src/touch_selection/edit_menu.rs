@@ -10,7 +10,7 @@ use gpui_base::{Placement, Positioner};
 use super::handle::SurfaceHandler;
 use crate::{
     ActiveTheme as _, Sizable as _, ThemeStyled as _,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonCustomVariant, ButtonVariants as _},
     h_flex,
     separator::Separator,
 };
@@ -76,6 +76,13 @@ impl RenderOnce for EditMenu {
         let id = self.id;
         let on_paint = self.on_paint;
         let radius = cx.theme().radius;
+        // The menu family's hover, not the ghost button's: the ghost's grey
+        // is the bar's own ring color and would blur the edge.
+        let item_style = ButtonCustomVariant::new(cx)
+            .color(cx.theme().transparent)
+            .foreground(cx.theme().popover_foreground)
+            .hover(cx.theme().accent)
+            .active(cx.theme().accent);
         let last = self.items.len().saturating_sub(1);
         let items = self.items.into_iter().enumerate().flat_map(|(ix, item)| {
             let on_click = item.on_click;
@@ -94,7 +101,7 @@ impl RenderOnce for EditMenu {
                 .test_support()
                 .child(
                     Button::new(ix)
-                        .ghost()
+                        .custom(item_style)
                         .small()
                         .compact()
                         .rounded(radius)
