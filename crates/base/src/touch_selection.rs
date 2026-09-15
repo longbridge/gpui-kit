@@ -153,12 +153,14 @@ pub(crate) fn caret_in_view(caret: Bounds<Pixels>, viewport: Bounds<Pixels>) -> 
 /// Maps a finger to the text position a handle drag selects.
 ///
 /// The knob a finger holds sits above or below the line, so the finger itself
-/// is never over the text it moves. The offset from the finger to the caret
-/// box is captured when the drag begins and kept for the rest of it.
+/// starts off the text it moves. Sideways, the finger's offset from the caret
+/// is kept for the whole drag. Up and down, the end stays on its line until
+/// the finger is past the middle of the line above or below; from there the
+/// finger's own height picks the line, as it would with an I-beam.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct EdgeDrag {
     edge: SelectionEdge,
-    offset: Point<Pixels>,
+    offset_x: Pixels,
     /// The caret line box the dragged end is on now.
     line: Bounds<Pixels>,
 }
@@ -167,7 +169,7 @@ impl EdgeDrag {
     pub(crate) fn begin(edge: SelectionEdge, caret: Bounds<Pixels>, finger: Point<Pixels>) -> Self {
         Self {
             edge,
-            offset: caret.center() - finger,
+            offset_x: caret.left() - finger.x,
             line: caret,
         }
     }
@@ -187,18 +189,13 @@ impl EdgeDrag {
     }
 
     /// The text position the finger points at.
-    ///
-    /// A finger is not an I-beam: the end stays on its line until the finger
-    /// is more than half a line into the next one above or below, instead of
-    /// hopping lines the moment it crosses the line's edge.
     pub(crate) fn text_position(&self, finger: Point<Pixels>) -> Point<Pixels> {
-        let x = finger.x + self.offset.x;
-        let y = finger.y + self.offset.y;
+        let x = finger.x + self.offset_x;
         let half = self.line.size.height.half();
-        let y = if y >= self.line.top() - half && y <= self.line.bottom() + half {
+        let y = if finger.y >= self.line.top() - half && finger.y <= self.line.bottom() + half {
             self.line.center().y
         } else {
-            y
+            finger.y
         };
         point(x, y)
     }
@@ -252,30 +249,30 @@ mod tests {
     }
 
     #[test]
-    fn edge_drag_keeps_the_finger_offset_and_holds_its_line() {
+    fn edge_drag_holds_its_line_until_the_finger_is_past_the_next_line_middle() {
+        // The line runs 40..60; the finger holds the end knob just below it.
         let caret = caret_line_box(point(px(100.), px(40.)), px(20.));
-        let drag = EdgeDrag::begin(SelectionEdge::End, caret, point(px(102.), px(72.)));
+        let drag = EdgeDrag::begin(SelectionEdge::End, caret, point(px(102.), px(66.)));
         assert_eq!(drag.edge(), SelectionEdge::End);
-        // The finger started 22px below the caret's center. Nine pixels
-        // further down is still this line (40..60, held to 30..70).
+        // Sideways the finger's offset is kept; down to the middle of the
+        // next line (70) is still this line.
         assert_eq!(
-            drag.text_position(point(px(150.), px(81.))),
+            drag.text_position(point(px(150.), px(70.))),
             point(px(148.), px(50.))
         );
-        // Past half a line into the next: the position passes through, and
-        // the end will land there.
+        // Past it, the finger's own height picks the line.
         assert_eq!(
-            drag.text_position(point(px(150.), px(93.))),
+            drag.text_position(point(px(150.), px(71.))),
             point(px(148.), px(71.))
         );
-        // Back up: the same half-line grace above the line.
+        // Up: the middle of the line above (30) is the threshold too.
         assert_eq!(
-            drag.text_position(point(px(150.), px(52.))),
+            drag.text_position(point(px(150.), px(30.))),
             point(px(148.), px(50.))
         );
         assert_eq!(
-            drag.text_position(point(px(150.), px(50.))),
-            point(px(148.), px(28.))
+            drag.text_position(point(px(150.), px(29.))),
+            point(px(148.), px(29.))
         );
     }
 }

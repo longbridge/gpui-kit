@@ -16,8 +16,8 @@ use crate::{
 };
 use gpui_base::TestSupportExt as _;
 
-/// The height of a menu item under a finger, iOS's minimum touch target.
-const MOBILE_ROW_HEIGHT: Pixels = px(44.);
+/// The height of a menu item, iOS's minimum touch target.
+const ROW_HEIGHT: Pixels = px(44.);
 
 /// One command in the edit menu.
 pub(crate) struct EditMenuItem {
@@ -41,9 +41,9 @@ impl EditMenuItem {
 /// — whichever apply. It floats above the selection, or below it when there
 /// is no room above, and stays out of the way of the handles' knobs.
 ///
-/// Every item is a ghost [`Button`], so the row keeps the button family's
-/// height, padding and press feedback. It carries no arrow: it belongs to the
-/// selection it sits on, not to a trigger.
+/// Every item is a [`Button`] sized for a finger, so the row keeps the button
+/// family's press feedback. It carries no arrow: it belongs to the selection
+/// it sits on, not to a trigger.
 #[derive(IntoElement)]
 pub(crate) struct EditMenu {
     id: ElementId,
@@ -105,15 +105,11 @@ impl RenderOnce for EditMenu {
                 .child(
                     Button::new(ix)
                         .custom(item_style)
-                        .map(|this| {
-                            // A finger needs iOS's row: 44pt tall, body text,
-                            // room on both sides. A pointer does not.
-                            if gpui_base::is_mobile() {
-                                this.large().h(MOBILE_ROW_HEIGHT).px_4()
-                            } else {
-                                this.small().compact()
-                            }
-                        })
+                        // This is a finger's menu wherever it shows: iOS's
+                        // row, 44pt tall with body text and room on both sides.
+                        .large()
+                        .h(ROW_HEIGHT)
+                        .px_4()
                         .rounded(radius)
                         .border_corners(corners)
                         .tab_stop(false)
