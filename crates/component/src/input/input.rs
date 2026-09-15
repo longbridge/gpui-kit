@@ -134,6 +134,10 @@ pub struct Input {
     ///
     /// If set, this overrides the built-in context menu.
     context_menu_builder: Option<Rc<dyn Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu>>,
+
+    /// An optional paste handler. If set, it is invoked with the clipboard item
+    /// before the default text insertion. Return `true` if handled.
+    paste_handler: Option<Rc<dyn Fn(&gpui::ClipboardItem, &mut Window, &mut App) -> bool>>,
 }
 
 impl Sizable for Input {
@@ -208,6 +212,7 @@ impl Input {
             accessibility_id: None,
             aria_label: None,
             context_menu_builder: None,
+            paste_handler: None,
         }
     }
 
@@ -321,6 +326,27 @@ impl Input {
         f: impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static,
     ) -> Self {
         self.context_menu_builder = Some(Rc::new(f));
+        self
+    }
+
+    /// Intercept paste payloads (images, files) before the default text insertion.
+    ///
+    /// The handler receives the clipboard item and returns whether it took the
+    /// paste: `true` stops the `input::Paste` action so the input inserts
+    /// nothing, `false` lets it reach the engine, which inserts
+    /// `clipboard.text()` as today. Text stays in the `Rope`; images and
+    /// copied files (`ClipboardEntry::Image`, `ClipboardEntry::ExternalPaths`)
+    /// belong in app-owned state beside the input (e.g. `Attachment`s), never
+    /// inside it.
+    ///
+    /// Known limit: on web `read_from_clipboard()` is `None` (text arrives
+    /// through the platform input handler); image paste there needs
+    /// `read_from_clipboard_async` and permission, out of scope here.
+    pub fn on_paste(
+        mut self,
+        handler: impl Fn(&gpui::ClipboardItem, &mut Window, &mut App) -> bool + 'static,
+    ) -> Self {
+        self.paste_handler = Some(Rc::new(handler));
         self
     }
 
@@ -558,6 +584,7 @@ impl RenderOnce for Input {
             }),
             cx,
         );
+        let paste_handler = self.paste_handler.clone();
         let mut overlays = state.render_overlays(window, cx);
         overlays
             .floating
@@ -718,6 +745,15 @@ impl RenderOnce for Input {
             })
             .relative()
             .children(overlays.floating)
+            .when_some(paste_handler, |this, handler| {
+                this.capture_action(move |_: &gpui_base::input::Paste, window, cx| {
+                    if let Some(clipboard) = cx.read_from_clipboard() {
+                        if handler(&clipboard, window, cx) {
+                            cx.stop_propagation();
+                        }
+                    }
+                })
+            })
             .render(window, cx)
     }
 }
@@ -865,6 +901,28 @@ mod tests {
             RoleOverride::Role(Role::Button)
         );
         assert_eq!(RoleOverride::from(None), RoleOverride::Presentational);
+    }
+
+    #[gpui::test]
+    fn test_on_paste_builder(cx: &mut gpui::TestAppContext) {
+        use gpui::{AppContext as _, Render};
+
+        struct Probe;
+        impl Render for Probe {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                div()
+            }
+        }
+
+        cx.update(crate::init);
+        let _ = cx.add_window_view(|window, cx| {
+            let state = cx.new(|cx| InputState::new(window, cx));
+
+            assert!(Input::new(&state).paste_handler.is_none());
+            let input = Input::new(&state).on_paste(|_, _, _| true);
+            assert!(input.paste_handler.is_some());
+            Probe
+        });
     }
 
     #[gpui::test]
