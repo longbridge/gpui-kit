@@ -747,10 +747,12 @@ impl Element for Inline {
                         return;
                     }
 
-                    // A double tap is a finger's word selection: the window
-                    // layer makes it a point selection with handles and the
-                    // menu, as a long press does. The mouse's stays here.
+                    // A finger selects read-only text with a long press only;
+                    // a double tap selects nothing here, neither the mouse's
+                    // plain word nor the window layer's touch selection. The
+                    // handles and the menu on a double tap belong to `Input`.
                     if event.click_count == 2 && GlobalState::is_touch_press(cx) {
+                        GlobalState::suppress_text_selection(cx);
                         return;
                     }
 

@@ -677,7 +677,7 @@ fn a_selection_under_a_cached_view_holds_still_and_keeps_its_handles(cx: &mut Te
 }
 
 #[gpui::test]
-fn a_double_tap_in_text_view_selects_the_word_with_handles(cx: &mut TestAppContext) {
+fn a_double_tap_in_text_view_selects_nothing(cx: &mut TestAppContext) {
     let handle = screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -688,11 +688,12 @@ fn a_double_tap_in_text_view_selects_the_word_with_handles(cx: &mut TestAppConte
             point(text.left() + px(8.), text.top() + px(10.)),
         );
         window.render_frame(cx);
-        assert_eq!(TextSelection::selected_text(window, cx).trim(), "quick");
-        let snapshot =
-            TextSelection::touch_selection(window, cx).expect("a finger's word gets handles");
-        assert!(snapshot.is_menu_open());
-        assert!(window.try_find("Copy").is_some(), "and the menu");
+        // Read-only text takes a finger's long press only. (The mouse's
+        // double click still selects the word; a touch just went down here,
+        // so that is for another test.)
+        assert_eq!(TextSelection::selected_text(window, cx).trim(), "");
+        assert!(TextSelection::touch_selection(window, cx).is_none());
+        assert!(window.try_find("Copy").is_none());
     })
     .unwrap();
 }
