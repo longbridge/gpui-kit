@@ -464,6 +464,29 @@ impl Inline {
         line_bounds
     }
 
+    /// The caret line boxes at the two ends of a painted selection, where the
+    /// touch handles are drawn.
+    fn selection_edges(
+        selection: &Selection,
+        text_layout: &TextLayout,
+    ) -> Option<(Bounds<Pixels>, Bounds<Pixels>)> {
+        let (start, end) = (
+            selection.start.min(selection.end),
+            selection.start.max(selection.end),
+        );
+        let line_height = text_layout.line_height();
+        Some((
+            crate::touch_selection::caret_line_box(
+                text_layout.position_for_index(start)?,
+                line_height,
+            ),
+            crate::touch_selection::caret_line_box(
+                text_layout.position_for_index(end)?,
+                line_height,
+            ),
+        ))
+    }
+
     /// Paint the selection background.
     fn paint_selection(
         selection: &Selection,
@@ -668,6 +691,13 @@ impl Element for Inline {
                 .map(|state| state.read(cx).text_view_style.selection())
                 .unwrap_or_else(|| crate::Theme::global(cx).tokens.colors.selection);
             Self::paint_selection(selection, &text_layout, &bounds, window, color);
+            if let Some((start, end)) = Self::selection_edges(selection, &text_layout)
+                && let Some(text_view_state) = GlobalState::global(cx).text_view_state().cloned()
+            {
+                text_view_state.update(cx, |state, _| {
+                    state.selection_adapter.register_selection_edges(start, end);
+                });
+            }
         }
 
         if is_selectable {

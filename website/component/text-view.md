@@ -70,6 +70,19 @@ than the whole budget keeps the part that fits rather than emptying the box.
 `max_lines` only applies to the fit-content mode and is ignored when
 `scrollable` is set.
 
+## Touch Selection
+
+On a touch screen, a long press selects the word under the finger and keeps
+following the finger while it stays down. Lifting it opens an edit menu with
+`Copy` and `Select All` over the selection and puts a grab handle at each end.
+Dragging a handle moves that end while the other stays put; `Select All`
+selects the view that was pressed, and its handles keep working on the result.
+
+The handles and the menu are drawn by [`Root`](/component/root) for the whole
+window selection, so they cover a selection that spans several views. A tap
+elsewhere clears them, and the menu steps aside while the content scrolls
+under a finger.
+
 ## Link Click Handling
 
 Use `on_link_click` when links should be routed by the application instead of

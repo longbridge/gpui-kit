@@ -230,6 +230,26 @@ Input::new(&input).context_menu(|menu, window, cx| {
 })
 ```
 
+### Touch Selection
+
+On a touch screen, a long press selects the word under the finger and keeps
+following the finger while it stays down. Lifting it opens an edit menu over
+the selection with the commands that apply — `Cut`, `Copy`, `Paste`, and
+`Select All` — and puts a grab handle at each end of the selection. Dragging a
+handle moves that end; the other end stays put, and a multi-line input scrolls
+when the finger reaches its edge. A long press on whitespace or in an empty
+field places the caret and offers `Paste` and `Select All`.
+
+The handles and the menu belong to the selection the gesture made. They
+disappear as soon as anything else moves the selection — a tap, typing, an
+arrow key, `Escape` — and the menu steps aside while the content scrolls under
+a finger. Tapping the selected text brings the menu back.
+
+Cut, Copy, and Paste go through the input's own actions, so a custom key
+binding or an open completion menu sees them the same way. A read-only input
+offers only `Copy` and `Select All`; a masked input keeps its value out of the
+clipboard.
+
 ## Examples
 
 ### Search Input

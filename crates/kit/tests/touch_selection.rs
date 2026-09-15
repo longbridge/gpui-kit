@@ -1,0 +1,251 @@
+//! A long press leaves a selection with grab handles and an edit menu, in an
+//! `Input` and in a `TextView`.
+
+use gpui::{
+    AppContext, Context, Entity, InputEvent as _, LongPressEvent, Pixels, Point, TestAppContext,
+    TouchDragEvent, TouchPhase, Window, WindowHandle, div, prelude::*, px,
+};
+use gpui_base::TextSelection;
+use gpui_component::{
+    Root, WindowExt as _,
+    input::{Input, InputState},
+    text::{TextView, TextViewState},
+};
+use gpui_kit::test::{TestSupportExt as _, TestWindowExt};
+
+struct Screen {
+    input: Entity<InputState>,
+    text: Entity<TextViewState>,
+}
+
+impl Render for Screen {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .p_4()
+            .child(Input::new(&self.input).id("input").w(px(320.)))
+            .child(
+                div()
+                    .id("text")
+                    .test_support()
+                    .w(px(320.))
+                    .child(TextView::new(&self.text).selectable(true)),
+            )
+    }
+}
+
+fn screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
+    cx.update(gpui_component::init);
+    cx.add_window(|window, cx| {
+        let view = cx.new(|cx| Screen {
+            input: cx.new(|cx| InputState::new(window, cx).default_value("quick select value")),
+            text: cx.new(|cx| TextViewState::markdown("quick select value", cx)),
+        });
+        Root::new(view, window, cx)
+    })
+}
+
+fn long_press(window: &mut Window, cx: &mut gpui::App, position: Point<Pixels>) {
+    for phase in [TouchPhase::Started, TouchPhase::Ended] {
+        window.dispatch_event(
+            LongPressEvent {
+                phase,
+                start_position: position,
+                position,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.render_frame(cx);
+    }
+}
+
+#[gpui::test]
+fn long_press_in_input_offers_copy_which_closes_the_menu(cx: &mut TestAppContext) {
+    let handle = screen(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let input = window.find("input").bounds();
+        long_press(window, cx, point(input.left() + px(24.), input.center().y));
+
+        assert!(window.try_find("Copy").is_some(), "the menu offers Copy");
+        assert!(
+            window.try_find("Cut").is_some(),
+            "an editable input offers Cut"
+        );
+        assert!(
+            window.try_find("Select All").is_some(),
+            "only one word is selected, so Select All is left"
+        );
+
+        window.click("Copy", cx);
+        let copied = cx
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .unwrap_or_default();
+        assert_eq!(copied, "quick");
+        assert!(
+            window.try_find("Copy").is_none(),
+            "Copy has done its work; the menu closes"
+        );
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn long_press_in_input_select_all_keeps_the_menu(cx: &mut TestAppContext) {
+    let handle = screen(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let input = window.find("input").bounds();
+        long_press(window, cx, point(input.left() + px(24.), input.center().y));
+        window.click("Select All", cx);
+        assert_eq!(window.find("input").value(), Some("quick select value"));
+        assert!(
+            window.try_find("Select All").is_none(),
+            "everything is selected; nothing is left to select"
+        );
+        assert!(window.try_find("Copy").is_some(), "the menu stays open");
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn long_press_in_text_view_offers_copy_and_select_all(cx: &mut TestAppContext) {
+    let handle = screen(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let text = window.find("text").bounds();
+        long_press(
+            window,
+            cx,
+            point(text.left() + px(8.), text.top() + px(10.)),
+        );
+        assert_eq!(TextSelection::selected_text(window, cx).trim(), "quick");
+        assert!(window.try_find("Copy").is_some());
+        assert!(
+            window.try_find("Cut").is_none(),
+            "read-only text has nothing to cut"
+        );
+
+        window.click("Select All", cx);
+        assert_eq!(
+            TextSelection::selected_text(window, cx).trim(),
+            "quick select value"
+        );
+
+        window.click("Copy", cx);
+        let copied = cx
+            .read_from_clipboard()
+            .and_then(|item| item.text())
+            .unwrap_or_default();
+        assert_eq!(copied.trim(), "quick select value");
+    })
+    .unwrap();
+}
+
+fn point(x: Pixels, y: Pixels) -> Point<Pixels> {
+    Point { x, y }
+}
+
+/// The knob the finger takes hangs below the line for the end handle.
+fn end_knob(snapshot: &gpui_base::TouchSelectionSnapshot) -> Point<Pixels> {
+    let end = snapshot.end();
+    point(end.left(), end.bottom() + px(6.))
+}
+
+#[gpui::test]
+fn end_handle_drags_the_input_selection_with_a_finger(cx: &mut TestAppContext) {
+    let handle = screen(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let input_bounds = window.find("input").bounds();
+        long_press(
+            window,
+            cx,
+            point(input_bounds.left() + px(24.), input_bounds.center().y),
+        );
+        let input = window
+            .focused_input(cx)
+            .and_then(|state| state.as_input().cloned())
+            .expect("the long press focused the input");
+        let snapshot = input.read(cx).touch_selection().expect("handles are shown");
+        assert!(snapshot.is_menu_open());
+        let start = end_knob(&snapshot);
+
+        // The drag is offered on the first touch; the handle claims it and
+        // the menu steps aside until the finger lifts.
+        let far_right = point(input_bounds.right() - px(8.), start.y);
+        for (phase, position) in [(TouchPhase::Started, start), (TouchPhase::Moved, far_right)] {
+            window.dispatch_event(
+                TouchDragEvent {
+                    phase,
+                    start_position: start,
+                    position,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.render_frame(cx);
+        }
+        assert!(
+            window.try_find("Copy").is_none(),
+            "the menu hides while dragging"
+        );
+        assert_eq!(
+            input.read(cx).selected_text().to_string(),
+            "quick select value"
+        );
+
+        window.dispatch_event(
+            TouchDragEvent {
+                phase: TouchPhase::Ended,
+                start_position: start,
+                position: far_right,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.render_frame(cx);
+        assert!(
+            window.try_find("Copy").is_some(),
+            "the menu is back once the finger lifts"
+        );
+        assert_eq!(
+            input.read(cx).selected_text().to_string(),
+            "quick select value"
+        );
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn end_handle_drags_the_text_view_selection_with_a_mouse(cx: &mut TestAppContext) {
+    let handle = screen(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let text = window.find("text").bounds();
+        long_press(
+            window,
+            cx,
+            point(text.left() + px(8.), text.top() + px(10.)),
+        );
+        let snapshot = TextSelection::touch_selection(window, cx).expect("handles are shown");
+        let start = end_knob(&snapshot);
+        window.drag(start, point(text.right() - px(8.), start.y), cx);
+        assert_eq!(
+            TextSelection::selected_text(window, cx).trim(),
+            "quick select value"
+        );
+        let snapshot = TextSelection::touch_selection(window, cx).unwrap();
+        assert!(
+            snapshot.is_menu_open(),
+            "the menu is back once the button is released"
+        );
+        assert_eq!(snapshot.dragging(), None);
+    })
+    .unwrap();
+}

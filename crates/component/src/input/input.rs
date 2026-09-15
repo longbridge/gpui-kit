@@ -4,13 +4,15 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AccessibleAction, AnyElement, App, DefiniteLength, Edges, ElementId, Entity, Hsla,
     InteractiveElement as _, IntoElement, ParentElement as _, Rems, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement as _, StyleRefinement, Styled, TextAlign, Window, div, px, relative,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, TextAlign, TouchPhase, Window, div,
+    px, relative,
 };
 
 use crate::button::{Button, ButtonRounded, ButtonVariants as _};
 use crate::input::clear_button;
 use crate::native_menu::NativeMenu;
 use crate::spinner::Spinner;
+use crate::touch_selection::{EditMenuItem, TouchSelectionOverlay};
 use crate::{ActiveTheme, Colorize, v_flex};
 use crate::{IconName, Size};
 use crate::{RoleOverride, Selectable, StyledExt, h_flex};
@@ -322,6 +324,75 @@ impl Input {
         self
     }
 
+    /// The handles and the edit menu of the selection a long press made.
+    ///
+    /// The menu offers what the native context menu would: Cut, Copy, Paste
+    /// and Select All, leaving out what cannot apply right now rather than
+    /// disabling it. Cut, Copy and Paste go through the input's actions, so a
+    /// custom key binding or an open completion menu sees them the same way.
+    fn render_touch_selection(state: &TextInputState, cx: &App) -> Vec<AnyElement> {
+        let Some(snapshot) = state.touch_selection(cx) else {
+            return Vec::new();
+        };
+        let capabilities = state.context_menu_capabilities(cx);
+        let editable = capabilities.is_editable();
+        let copyable = capabilities.is_copyable();
+        // Offered whenever the text can change, without peeking at the
+        // clipboard: on iOS every read of it shows the system's paste banner,
+        // and an empty clipboard pastes nothing.
+        let pasteable = editable;
+        let selectable = state.text(cx).len() > 0 && !state.is_all_selected(cx);
+        let focus_handle = state.presentation(cx).focus_handle().clone();
+
+        let dispatch = {
+            let focus_handle = focus_handle.clone();
+            move |action: &dyn gpui::Action, window: &mut Window, cx: &mut App| {
+                focus_handle.dispatch_action(action, window, cx);
+            }
+        };
+        let mut items = Vec::with_capacity(4);
+        if editable && copyable {
+            let dispatch = dispatch.clone();
+            items.push(EditMenuItem::new(t!("Input.Cut"), move |window, cx| {
+                dispatch(&gpui_base::input::Cut, window, cx);
+            }));
+        }
+        if copyable {
+            let dispatch = dispatch.clone();
+            let state = state.clone();
+            items.push(EditMenuItem::new(t!("Input.Copy"), move |window, cx| {
+                dispatch(&gpui_base::input::Copy, window, cx);
+                state.close_edit_menu(cx);
+            }));
+        }
+        if pasteable {
+            let dispatch = dispatch.clone();
+            items.push(EditMenuItem::new(t!("Input.Paste"), move |window, cx| {
+                dispatch(&gpui_base::input::Paste, window, cx);
+            }));
+        }
+        if selectable {
+            let state = state.clone();
+            items.push(EditMenuItem::new(
+                t!("Input.Select All"),
+                move |window, cx| state.select_all_from_edit_menu(window, cx),
+            ));
+        }
+
+        let drag_state = state.clone();
+        TouchSelectionOverlay::new(
+            ("input-touch-selection", state.entity_id()),
+            snapshot,
+            move |edge, phase, position, _, cx| match phase {
+                TouchPhase::Started => drag_state.begin_edge_drag(edge, position, cx),
+                TouchPhase::Moved => drag_state.update_edge_drag(position, cx),
+                TouchPhase::Ended | TouchPhase::Cancelled => drag_state.end_edge_drag(cx),
+            },
+        )
+        .items(items)
+        .into_elements()
+    }
+
     fn render_toggle_mask_button(state: &TextInputState, cx: &App) -> impl IntoElement {
         let masked = state.presentation(cx).is_masked();
         Button::new("toggle-mask")
@@ -482,7 +553,10 @@ impl RenderOnce for Input {
             }),
             cx,
         );
-        let overlays = state.render_overlays(window, cx);
+        let mut overlays = state.render_overlays(window, cx);
+        overlays
+            .floating
+            .extend(Self::render_touch_selection(&state, cx));
 
         let presentation = state.presentation(cx);
         let content_type = self.content_type;

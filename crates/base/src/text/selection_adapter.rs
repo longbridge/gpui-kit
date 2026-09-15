@@ -74,6 +74,9 @@ pub(super) struct TextViewSelectionAdapter {
     selection: TextSelectionHandle,
     text_bounds: Vec<Bounds<Pixels>>,
     text_runs: Vec<TextSelectionRun>,
+    /// The caret boxes at the first and last selected character painted this
+    /// frame, where the touch handles go.
+    selection_edges: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
     layout_revision: Option<usize>,
 }
 
@@ -144,6 +147,14 @@ impl TextViewSelectionAdapter {
             cx,
         );
 
+        let view_for_select_all = view.clone();
+        selection.select_all_with(
+            move |cx| {
+                let _ = view_for_select_all.update(cx, |state, cx| state.select_all(cx));
+            },
+            cx,
+        );
+
         let view_for_content_key = view.clone();
         selection.resolve_content_key_with(
             move |point, cx| {
@@ -171,6 +182,7 @@ impl TextViewSelectionAdapter {
             selection,
             text_bounds: Vec::new(),
             text_runs: Vec::new(),
+            selection_edges: None,
             layout_revision: None,
         }
     }
@@ -188,6 +200,14 @@ impl TextViewSelectionAdapter {
     pub(super) fn begin_frame(&mut self) {
         self.text_bounds.clear();
         self.text_runs.clear();
+        self.selection_edges = None;
+    }
+
+    /// Records one inline's painted selection ends. Inlines paint in document
+    /// order, so the first start and the last end are the view's.
+    pub(super) fn register_selection_edges(&mut self, start: Bounds<Pixels>, end: Bounds<Pixels>) {
+        let first = self.selection_edges.map_or(start, |(first, _)| first);
+        self.selection_edges = Some((first, end));
     }
 
     pub(super) fn register_text_run(&mut self, run: TextSelectionRun) {
@@ -210,15 +230,16 @@ impl TextViewSelectionAdapter {
         cx: &mut App,
     ) {
         self.selection.set_hit_test_runs(&self.text_runs, cx);
-        self.selection.register(
-            TextSelectionRegistration::new(hitbox, bounds)
-                .with_scroll_offset(scroll_offset)
-                .with_document_order(document_order)
-                .with_text_bounds(self.text_bounds.clone())
-                .with_self_scroll(self_scroll),
-            window,
-            cx,
-        );
+        let registration = TextSelectionRegistration::new(hitbox, bounds)
+            .with_scroll_offset(scroll_offset)
+            .with_document_order(document_order)
+            .with_text_bounds(self.text_bounds.clone())
+            .with_self_scroll(self_scroll);
+        let registration = match self.selection_edges {
+            Some((start, end)) => registration.with_selection_edges(start, end),
+            None => registration,
+        };
+        self.selection.register(registration, window, cx);
     }
 
     pub(super) fn selection_points(&self, cx: &App) -> Option<(Point<Pixels>, Point<Pixels>)> {

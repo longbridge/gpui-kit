@@ -6,6 +6,7 @@ use crate::{
     notification::{Notification, NotificationList},
     sheet::Sheet,
     tooltip::render_tooltip,
+    touch_selection::WindowTouchSelectionOverlay,
     window_border,
 };
 use gpui::{
@@ -42,6 +43,7 @@ pub struct Root {
     pub notification: Entity<NotificationList>,
     pub(crate) tooltip_overlay: Entity<gpui_base::TooltipOverlay>,
     pub(crate) native_menu_overlay: Entity<FallbackMenuOverlay>,
+    touch_selection_overlay: Entity<WindowTouchSelectionOverlay>,
     sheet_size: Option<DefiniteLength>,
     window_shadow_size: Pixels,
     /// Render the Linux CSD `window_border` wrapper.
@@ -109,6 +111,7 @@ impl Root {
             tooltip_overlay: cx
                 .new(|_| gpui_base::TooltipOverlay::new().render_with(render_tooltip)),
             native_menu_overlay: cx.new(|_| FallbackMenuOverlay::new()),
+            touch_selection_overlay: cx.new(|cx| WindowTouchSelectionOverlay::new(window, cx)),
             sheet_size: None,
             window_shadow_size: window_border::SHADOW_SIZE,
             bordered: true,
@@ -594,6 +597,7 @@ impl Render for Root {
             .refine_style(&self.style)
             .child(TextSelectionLayer)
             .child(self.view.clone())
+            .child(self.touch_selection_overlay.clone())
             .child(self.tooltip_overlay.clone())
             .child(self.native_menu_overlay.clone());
 

@@ -1,0 +1,127 @@
+use std::rc::Rc;
+
+use gpui::{
+    App, Bounds, ClickEvent, ElementId, InteractiveElement as _, IntoElement, ParentElement as _,
+    Pixels, RenderOnce, SharedString, Styled as _, Window, canvas, deferred, div,
+    prelude::FluentBuilder as _, px,
+};
+use gpui_base::{Placement, Positioner};
+
+use super::handle::SurfaceHandler;
+use crate::{
+    Sizable as _, ThemeStyled as _,
+    button::{Button, ButtonVariants as _},
+    h_flex,
+    separator::Separator,
+};
+use gpui_base::TestSupportExt as _;
+
+/// One command in the edit menu.
+pub(crate) struct EditMenuItem {
+    label: SharedString,
+    on_click: Rc<dyn Fn(&mut Window, &mut App)>,
+}
+
+impl EditMenuItem {
+    pub(crate) fn new(
+        label: impl Into<SharedString>,
+        on_click: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            on_click: Rc::new(on_click),
+        }
+    }
+}
+
+/// The row of commands a touch selection offers: Cut, Copy, Paste, Select All
+/// — whichever apply. It floats above the selection, or below it when there
+/// is no room above, and stays out of the way of the handles' knobs.
+///
+/// Every item is a ghost [`Button`], so the row keeps the button family's
+/// height, padding and press feedback. It carries no arrow: it belongs to the
+/// selection it sits on, not to a trigger.
+#[derive(IntoElement)]
+pub(crate) struct EditMenu {
+    id: ElementId,
+    /// The selection, including the room its handles take.
+    anchor: Bounds<Pixels>,
+    items: Vec<EditMenuItem>,
+    on_paint: Option<SurfaceHandler>,
+}
+
+impl EditMenu {
+    pub(crate) fn new(id: impl Into<ElementId>, anchor: Bounds<Pixels>) -> Self {
+        Self {
+            id: id.into(),
+            anchor,
+            items: Vec::new(),
+            on_paint: None,
+        }
+    }
+
+    pub(crate) fn items(mut self, items: impl IntoIterator<Item = EditMenuItem>) -> Self {
+        self.items.extend(items);
+        self
+    }
+
+    pub(crate) fn on_paint(mut self, on_paint: SurfaceHandler) -> Self {
+        self.on_paint = Some(on_paint);
+        self
+    }
+}
+
+impl RenderOnce for EditMenu {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let id = self.id;
+        let on_paint = self.on_paint;
+        let items = self.items.into_iter().enumerate().flat_map(|(ix, item)| {
+            let on_click = item.on_click;
+            // Observed under its label, so a test can press "Copy".
+            let button = div()
+                .id(item.label.clone())
+                .test_support()
+                .child(
+                    Button::new(ix)
+                        .ghost()
+                        .small()
+                        .compact()
+                        .tab_stop(false)
+                        .label(item.label)
+                        .on_click(move |_: &ClickEvent, window, cx| on_click(window, cx)),
+                )
+                .into_any_element();
+            // A rule between neighbours, none before the first.
+            (ix > 0)
+                .then(|| Separator::vertical().h_4().into_any_element())
+                .into_iter()
+                .chain([button])
+        });
+        deferred(
+            Positioner::side(self.anchor)
+                .placement(Placement::Top)
+                .offset(px(8.))
+                .occlude()
+                .child(
+                    h_flex()
+                        .id(id)
+                        .relative()
+                        .p_0p5()
+                        .gap_0p5()
+                        .popover_style(cx)
+                        .children(items)
+                        .when_some(on_paint, |this, on_paint| {
+                            this.child(
+                                canvas(
+                                    move |bounds, window, cx| on_paint(bounds, window, cx),
+                                    |_, _, _, _| {},
+                                )
+                                .absolute()
+                                .inset_0(),
+                            )
+                        }),
+                ),
+        )
+        .with_priority(gpui_base::POPUP_PRIORITY)
+    }
+}
