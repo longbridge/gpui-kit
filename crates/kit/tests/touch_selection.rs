@@ -2,8 +2,8 @@
 //! `Input` and in a `TextView`.
 
 use gpui::{
-    AppContext, Context, Entity, InputEvent as _, LongPressEvent, Pixels, Point, TestAppContext,
-    TouchDragEvent, TouchPhase, Window, WindowHandle, div, prelude::*, px,
+    AppContext, Context, Entity, InputEvent as _, LongPressEvent, Pixels, Point, StyleRefinement,
+    TestAppContext, TouchDragEvent, TouchPhase, Window, WindowHandle, div, prelude::*, px,
 };
 use gpui_base::TextSelection;
 use gpui_component::{
@@ -46,6 +46,56 @@ fn screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
         });
         Root::new(view, window, cx)
     })
+}
+
+/// The text alone, for a screen that caches it.
+struct Text {
+    text: Entity<TextViewState>,
+}
+
+impl Render for Text {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("text")
+            .test_support()
+            .w(px(320.))
+            .child(TextView::new(&self.text).selectable(true))
+    }
+}
+
+/// A screen that shows its text through a cached view, the way a dock shows
+/// its panels: a frame in which only the overlay changed replays the text
+/// from the cache instead of painting it.
+struct CachedScreen {
+    text: Entity<Text>,
+}
+
+impl Render for CachedScreen {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().p_4().child(
+            gpui::AnyView::from(self.text.clone())
+                .cached(StyleRefinement::default().w(px(320.)).h(px(120.))),
+        )
+    }
+}
+
+fn cached_screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
+    cx.update(gpui_component::init);
+    cx.add_window(|window, cx| {
+        let view = cx.new(|cx| CachedScreen {
+            text: cx.new(|cx| Text {
+                text: cx.new(|cx| TextViewState::markdown("quick select value", cx)),
+            }),
+        });
+        Root::new(view, window, cx)
+    })
+}
+
+/// A frame as the app draws one: what is not dirty is replayed from the
+/// cache. `render_frame` refreshes the window first, which paints everything
+/// afresh and would hide what a cached view does.
+fn frame(window: &mut Window, cx: &mut gpui::App) {
+    window.draw(cx).clear(cx);
 }
 
 fn long_press(window: &mut Window, cx: &mut gpui::App, position: Point<Pixels>) {
@@ -416,6 +466,93 @@ fn select_all_after_a_drag_stays_put_frame_after_frame(cx: &mut TestAppContext) 
         assert!(
             seen.iter().all(|frame| frame == &seen[0]),
             "nothing may change from one frame to the next: {seen:#?}"
+        );
+    })
+    .unwrap();
+}
+
+#[gpui::test]
+fn a_selection_under_a_cached_view_holds_still_and_keeps_its_handles(cx: &mut TestAppContext) {
+    let handle = cached_screen(cx);
+    // One update per step: what a frame defers — the sweep of participants
+    // that did not paint, the overlay's notification — runs when the update
+    // ends, as it does between the app's frames.
+    let text = cx
+        .update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let text = window.find("text").bounds();
+            long_press(
+                window,
+                cx,
+                point(text.left() + px(8.), text.top() + px(10.)),
+            );
+            assert_eq!(TextSelection::selected_text(window, cx).trim(), "quick");
+            text
+        })
+        .unwrap();
+
+    // Only the overlay drew after the press; the text was replayed from the
+    // cache. The selection must not be taken for gone.
+    let mut seen = Vec::new();
+    for _ in 0..6 {
+        let frame = cx
+            .update_window(handle.into(), |_, window, cx| {
+                frame(window, cx);
+                (
+                    TextSelection::touch_selection(window, cx).map(|snapshot| {
+                        (
+                            snapshot.start().origin,
+                            snapshot.end().origin,
+                            snapshot.is_menu_open(),
+                        )
+                    }),
+                    window.try_find("Copy").is_some(),
+                )
+            })
+            .unwrap();
+        seen.push(frame);
+    }
+    assert!(
+        seen[0].0.is_some_and(|(_, _, menu_open)| menu_open) && seen[0].1,
+        "the handles and the menu are up: {seen:#?}"
+    );
+    assert!(
+        seen.iter().all(|frame| frame == &seen[0]),
+        "nothing may change from one frame to the next: {seen:#?}"
+    );
+
+    // And the end handle takes a finger, which needs its hitbox in the frame
+    // the replayed text left behind.
+    let start = cx
+        .update_window(handle.into(), |_, window, cx| {
+            end_knob(&TextSelection::touch_selection(window, cx).unwrap())
+        })
+        .unwrap();
+    let far_right = point(text.right() - px(8.), start.y);
+    for (phase, position) in [
+        (TouchPhase::Started, start),
+        (TouchPhase::Moved, far_right),
+        (TouchPhase::Ended, far_right),
+    ] {
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.dispatch_event(
+                TouchDragEvent {
+                    phase,
+                    start_position: start,
+                    position,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            frame(window, cx);
+        })
+        .unwrap();
+    }
+    cx.update_window(handle.into(), |_, window, cx| {
+        assert_eq!(
+            TextSelection::selected_text(window, cx).trim(),
+            "quick select value",
+            "the handle claimed the drag"
         );
     })
     .unwrap();

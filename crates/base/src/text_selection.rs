@@ -521,6 +521,11 @@ pub enum TextSelectionEvent {
     AutoScroll(Option<Pixels>),
     /// Window selection cleared the participant's participant-local state.
     Cleared,
+    /// The touch selection the participant takes part in changed: it
+    /// appeared, its ends moved, a handle drag began or ended, or it went
+    /// away. The participant paints the handles and lays their hitboxes out
+    /// from the ends it painted last frame, so it renders once more.
+    TouchSelectionChanged,
 }
 
 struct CopyItem {
@@ -1284,10 +1289,30 @@ impl WindowSelectionState {
     /// selection ends: a notification raised inside a draw marks the view
     /// dirty but starts no frame, and the handles would sit where they were
     /// until something else redrew the window.
+    ///
+    /// The participants in the selection hear it too: they paint the
+    /// handles, and lay the handles' hitboxes out from the ends they painted
+    /// last frame, so they render once more. A participant under a cached
+    /// view would otherwise not, and the next frame would replay this one,
+    /// with no hitbox where a handle is.
     fn touch_changed(&self, cx: &mut App) {
-        if let Some(entity_id) = self.entity_id {
-            cx.defer(move |cx| cx.notify(entity_id));
-        }
+        let participants = self
+            .participants
+            .values()
+            .filter_map(|registration| registration.participant.upgrade())
+            .filter(|participant| participant.read(cx).snapshot.is_some())
+            .collect::<Vec<_>>();
+        let entity_id = self.entity_id;
+        cx.defer(move |cx| {
+            for participant in participants {
+                participant.update(cx, |_, cx| {
+                    cx.emit(TextSelectionEvent::TouchSelectionChanged)
+                });
+            }
+            if let Some(entity_id) = entity_id {
+                cx.notify(entity_id);
+            }
+        });
     }
 
     fn copy_items(&self, cx: &App) -> Vec<CopyItem> {
