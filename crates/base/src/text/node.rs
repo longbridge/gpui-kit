@@ -6,8 +6,8 @@ use std::{
 
 use gpui::{
     AnyElement, App, DefiniteLength, Div, ElementId, FontStyle, FontWeight, HighlightStyle, Hsla,
-    Image, ImageFormat, ImageSource, InteractiveElement as _, IntoElement, Length, ObjectFit,
-    Overflow, ParentElement, Pixels, ScrollHandle, SharedString, SharedUri,
+    Image, ImageFormat, ImageSource, InteractiveElement as _, IntoElement, IsZero as _, Length,
+    ObjectFit, Overflow, ParentElement, Pixels, Rems, ScrollHandle, SharedString, SharedUri,
     StatefulInteractiveElement, StyleRefinement, Styled, StyledImage as _, WhiteSpace, Window, div,
     img, prelude::FluentBuilder as _, px, relative, rems,
 };
@@ -1499,12 +1499,14 @@ impl CodeBlock {
             None => block.into_any_element(),
         };
 
-        div()
-            .w_full()
-            .min_w_0()
-            .when(!options.is_last, |this| this.pb(style.paragraph_gap()))
-            .child(block)
-            .into_any_element()
+        gapped(
+            block,
+            if options.is_last {
+                rems(0.)
+            } else {
+                style.paragraph_gap()
+            },
+        )
     }
 }
 
@@ -1635,6 +1637,7 @@ impl Paragraph {
         }
 
         let mut child_nodes: Vec<AnyElement> = vec![];
+        let has_image = children.iter().any(|child| child.image.is_some());
 
         let mut text = String::new();
         let mut highlights: Vec<(Range<usize>, InlineHighlight)> = vec![];
@@ -1758,6 +1761,15 @@ impl Paragraph {
                 )
                 .into_any_element(),
             );
+        }
+
+        // Text alone is one `Inline`, which needs no box of its own. Images
+        // keep an identified box: an image's element state is its animation,
+        // and the box scopes that state per paragraph.
+        if !has_image {
+            return child_nodes
+                .pop()
+                .unwrap_or_else(|| div().into_any_element());
         }
 
         div()
@@ -1939,6 +1951,16 @@ fn block_element_id(kind: &'static str, span: Option<Span>, ix: usize) -> Elemen
 /// document; the HTML parser records no spans, so its paragraphs share one.
 fn leaf_element_id(fade_key: Option<TextLeafKey>) -> ElementId {
     fade_key.map_or_else(|| ElementId::from("p"), ElementId::from)
+}
+
+/// `block` with `gap` below it. The box only exists to hold the padding,
+/// so a block with no gap below it is returned as is.
+fn gapped(block: AnyElement, gap: Rems) -> AnyElement {
+    if gap.is_zero() {
+        block
+    } else {
+        div().pb(gap).child(block).into_any_element()
+    }
 }
 
 /// The fade ranges overlapping `start..end`, rebased to start at `start`.
@@ -2717,15 +2739,15 @@ impl BlockNode {
                     node.render_block(NodeRenderOptions { ix, ..options }, node_cx, window, cx)
                 }))
                 .into_any_element(),
-            BlockNode::Paragraph(paragraph) => div()
-                .pb(mb)
-                .child(paragraph.render(
+            BlockNode::Paragraph(paragraph) => gapped(
+                paragraph.render(
                     paragraph.span.map(|span| TextLeafKey::block(span.start)),
                     node_cx,
                     window,
                     cx,
-                ))
-                .into_any_element(),
+                ),
+                mb,
+            ),
             BlockNode::Heading {
                 level,
                 children,
@@ -2759,25 +2781,23 @@ impl BlockNode {
                     ))
                     .into_any_element()
             }
-            BlockNode::Blockquote { children, .. } => div()
-                .w_full()
-                .pb(mb)
-                .child(
-                    div()
-                        .w_full()
-                        .text_color(node_cx.style.muted_foreground())
-                        .border_l_3()
-                        .border_color(node_cx.style.border())
-                        .px_4()
-                        .children({
-                            let children_len = children.len();
-                            children.into_iter().enumerate().map(move |(index, c)| {
-                                let is_last = index == children_len - 1;
-                                c.render_block(options.is_last(is_last), node_cx, window, cx)
-                            })
-                        }),
-                )
-                .into_any_element(),
+            BlockNode::Blockquote { children, .. } => gapped(
+                div()
+                    .w_full()
+                    .text_color(node_cx.style.muted_foreground())
+                    .border_l_3()
+                    .border_color(node_cx.style.border())
+                    .px_4()
+                    .children({
+                        let children_len = children.len();
+                        children.into_iter().enumerate().map(move |(index, c)| {
+                            let is_last = index == children_len - 1;
+                            c.render_block(options.is_last(is_last), node_cx, window, cx)
+                        })
+                    })
+                    .into_any_element(),
+                mb,
+            ),
             BlockNode::List {
                 children, ordered, ..
             } => v_flex()
@@ -2822,10 +2842,13 @@ impl BlockNode {
             BlockNode::Table { .. } => {
                 Self::render_table(self, &options, node_cx, window, cx).into_any_element()
             }
-            BlockNode::HorizontalRule { .. } => div()
-                .pb(mb)
-                .child(div().bg(node_cx.style.border()).h(px(2.)))
-                .into_any_element(),
+            BlockNode::HorizontalRule { .. } => gapped(
+                div()
+                    .bg(node_cx.style.border())
+                    .h(px(2.))
+                    .into_any_element(),
+                mb,
+            ),
             BlockNode::Break { .. } => div().into_any_element(),
             BlockNode::Unknown { .. } | BlockNode::Definition { .. } => div().into_any_element(),
             _ => {
