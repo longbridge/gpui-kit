@@ -552,20 +552,31 @@ impl Element for TextView {
         // whole line, so it only applies to the fit-content mode.
         let max_lines = self.max_lines.filter(|_| !self.scrollable);
 
-        let defaults = TextViewDefaults::global(cx);
-        let text_view_style = self
-            .text_view_style
-            .clone()
-            .or(defaults.style)
-            .unwrap_or_else(|| TextViewStyle::from_theme(&crate::Theme::global(cx)));
+        // Resolve the style by reference: this runs every frame, and the
+        // style only reaches the state when it changed.
+        let defaults = cx.try_global::<TextViewDefaults>();
+        let theme_style;
+        let text_view_style = match (
+            &self.text_view_style,
+            defaults.and_then(|d| d.style.as_ref()),
+        ) {
+            (Some(style), _) | (None, Some(style)) => style,
+            (None, None) => {
+                theme_style = TextViewStyle::from_theme(&crate::Theme::global(cx));
+                &theme_style
+            }
+        };
+        let foreground = text_view_style.foreground();
+        let text_view_style = (*state.read(cx).text_view_style != *text_view_style)
+            .then(|| Arc::new(text_view_style.clone()));
         let code_block_highlighter = self
             .code_block_highlighter
             .clone()
-            .or(defaults.code_block_highlighter);
+            .or_else(|| defaults.and_then(|d| d.code_block_highlighter.clone()));
 
         state.update(cx, |state, cx| {
             state.code_block_actions = self.code_block_actions.clone();
-            state.code_block_highlighter = code_block_highlighter.clone();
+            state.code_block_highlighter = code_block_highlighter;
             state.table_actions = self.table_actions.clone();
             state.link_click_handler = self.link_click_handler.clone();
             state.set_markdown_extensions(self.markdown_extensions.clone(), cx);
@@ -576,13 +587,13 @@ impl Element for TextView {
             state.selection_format = self.selection_format;
             state.scrollable = self.scrollable;
             state.max_lines = max_lines;
-            if state.text_view_style != text_view_style {
+            if let Some(text_view_style) = text_view_style {
                 state.selection_revision = state.selection_revision.wrapping_add(1);
+                state.text_view_style = text_view_style;
             }
-            state.text_view_style = text_view_style.clone();
 
-            if let Some(text) = self.text.clone() {
-                state.set_text(text.as_str(), cx);
+            if let Some(text) = &self.text {
+                state.set_element_text(text, cx);
             }
         });
 
@@ -604,7 +615,7 @@ impl Element for TextView {
             .when(self.scrollable, |this| this.size_full())
             .when_some(max_lines_cap, |this, cap| this.max_h(cap).overflow_hidden())
             .relative()
-            .text_color(text_view_style.foreground())
+            .text_color(foreground)
             .on_action(move |_: &crate::input::Copy, window, cx| {
                 let text = TextSelection::selected_text(window, cx).trim().to_string();
                 if text.is_empty() {

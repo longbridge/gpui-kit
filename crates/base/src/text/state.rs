@@ -104,7 +104,7 @@ pub struct TextViewState {
     pub(super) line_spans: Arc<Mutex<Vec<LineSpan>>>,
     /// Whether the last painted frame clipped content due to `max_lines`.
     pub(super) clamped: bool,
-    pub(super) text_view_style: TextViewStyle,
+    pub(super) text_view_style: Arc<TextViewStyle>,
     pub(super) code_block_actions: Option<std::sync::Arc<CodeBlockActionsFn>>,
     pub(super) code_block_highlighter: Option<std::sync::Arc<CodeBlockHighlighterFn>>,
     pub(super) table_actions: Option<std::sync::Arc<TableActionsFn>>,
@@ -126,6 +126,9 @@ pub struct TextViewState {
     /// of small full-replace updates.
     format: TextViewFormat,
     text: String,
+    /// The text a `TextView` element last handed over, to recognize the same
+    /// string next frame without comparing its bytes.
+    element_text: Option<SharedString>,
     revision: usize,
     pub(super) selection_revision: usize,
     compatible_layout_update: bool,
@@ -216,7 +219,7 @@ impl TextViewState {
             // as zero height until scrolled into view, which makes the
             // scrollbar jitter as more blocks get measured during scrolling.
             list_state: ListState::new(0, gpui::ListAlignment::Top, px(1000.)).measure_all(),
-            text_view_style: TextViewStyle::default(),
+            text_view_style: Arc::default(),
             code_block_actions: None,
             code_block_highlighter: None,
             table_actions: None,
@@ -231,6 +234,7 @@ impl TextViewState {
             format,
             parsed_error: None,
             text: text.to_string(),
+            element_text: None,
             revision: 0,
             selection_revision: 0,
             compatible_layout_update: false,
@@ -318,6 +322,21 @@ impl TextViewState {
         self.text.push_str(text);
         self.parsed_error = None;
         self.increment_update(text, false, cx);
+    }
+
+    /// [`Self::set_text`] for the text a `TextView` element hands over every
+    /// frame: the string it handed over last time (the same allocation, not
+    /// merely equal bytes) is recognized without a comparison, as long as the
+    /// state still holds a text of its length.
+    pub(super) fn set_element_text(&mut self, text: &SharedString, cx: &mut Context<Self>) {
+        let same_string = self.element_text.as_ref().is_some_and(|current| {
+            current.as_ptr() == text.as_ptr() && current.len() == text.len()
+        });
+        if same_string && self.text.len() == text.len() {
+            return;
+        }
+        self.element_text = Some(text.clone());
+        self.set_text(text, cx);
     }
 
     /// Append partial text content to the existing text.
@@ -737,27 +756,30 @@ impl Render for TextViewState {
         }
         self.layout_text_style = Some(typography);
         let state = cx.entity();
-        let document = self.parsed_content.document.clone();
-        let mut node_cx = self.parsed_content.node_cx.clone();
-
-        node_cx.code_block_actions = self.code_block_actions.clone();
-        node_cx.code_block_highlighter = self.code_block_highlighter.clone();
-        node_cx.table_actions = self.table_actions.clone();
-        node_cx.link_click_handler = self.link_click_handler.clone();
-        node_cx.markdown_extensions = self.markdown_extensions.clone();
-        node_cx.style = self.text_view_style.clone();
-        node_cx.stream_fade = self.stream_fade.frame(Instant::now(), cx.reduce_motion());
-        if node_cx.stream_fade.is_some() {
+        let stream_fade = self.stream_fade.frame(Instant::now(), cx.reduce_motion());
+        if stream_fade.is_some() {
             window.request_animation_frame();
         }
+        // Built every frame, so everything in it is shared, not copied.
+        let node_cx = NodeContext {
+            offset: self.parsed_content.node_cx.offset,
+            link_refs: self.parsed_content.node_cx.link_refs.clone(),
+            style: self.text_view_style.clone(),
+            code_block_actions: self.code_block_actions.clone(),
+            code_block_highlighter: self.code_block_highlighter.clone(),
+            table_actions: self.table_actions.clone(),
+            link_click_handler: self.link_click_handler.clone(),
+            markdown_extensions: self.markdown_extensions.clone(),
+            stream_fade,
+        };
 
         v_flex()
             .w_full()
             // Clamped content must keep its natural height: stretching it to
             // the capped box would hide the overflow the clamp has to measure.
             .when(self.max_lines.is_none(), |this| this.h_full())
-            .map(|this| match &mut self.parsed_error {
-                None => this.child(document.render_root(
+            .map(|this| match &self.parsed_error {
+                None => this.child(self.parsed_content.document.render_root(
                     if self.scrollable {
                         Some(self.list_state.clone())
                     } else {
@@ -1326,6 +1348,33 @@ mod tests {
             assert!(text.contains("first"), "lost the first block: {text:?}");
             assert!(text.contains("second"), "lost the appended block: {text:?}");
         });
+    }
+
+    #[gpui::test]
+    fn element_text_of_the_same_string_is_not_compared_again(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("", cx)));
+        let revision = |cx: &mut TestAppContext| state.read_with(cx, |state, _| state.revision);
+        let text = SharedString::from("hello");
+
+        state.update(cx, |state, cx| state.set_element_text(&text, cx));
+        let parsed = revision(cx);
+        assert!(parsed > 0);
+
+        // The same allocation again, and equal bytes in another allocation,
+        // both leave the parsed text alone.
+        state.update(cx, |state, cx| state.set_element_text(&text, cx));
+        assert_eq!(revision(cx), parsed);
+        let equal = SharedString::from("hello".to_string());
+        state.update(cx, |state, cx| state.set_element_text(&equal, cx));
+        assert_eq!(revision(cx), parsed);
+
+        // Once the state's text moved on, the element's string is set again.
+        state.update(cx, |state, cx| {
+            state.push_str(" world", cx);
+            state.set_element_text(&equal, cx);
+        });
+        state.read_with(cx, |state, _| assert_eq!(state.text.as_str(), "hello"));
     }
 
     #[gpui::test]
