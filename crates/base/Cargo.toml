@@ -57,8 +57,17 @@ async-channel = "2.3.1"
 [target.'cfg(target_os = "macos")'.dependencies]
 raw-window-handle.workspace = true
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3", features = ["NSAccessibility", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", features = ["NSGeometry", "NSString"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+# The reduced-motion preference (SystemParametersInfoW).
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# The reduced-motion preference, through the XDG desktop portal's Settings
+# interface. The same version and features `gpui-pre-linux` already pulls in.
+ashpd = { version = "0.13", default-features = false, features = ["async-io", "settings"] }
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }

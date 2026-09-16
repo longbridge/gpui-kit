@@ -211,7 +211,8 @@ The transition owns lifecycle mechanics only:
 - easing;
 - animation-frame requests;
 - smooth reversal from the currently sampled value;
-- reduced-motion handling.
+- reduced-motion handling, against the operating system's preference that
+  `gpui_base::init` reads into `App::set_reduce_motion` (see `reduce_motion`).
 
 The caller chooses what the value means and applies it to opacity, color,
 geometry, or another interpolatable property.
@@ -427,5 +428,7 @@ may continue to use its module-qualified API.
 6. Disabled is the last semantic layer.
 7. Part styling is explicit and typed; base does not traverse arbitrary child
    trees to apply styles.
-8. Reduced-motion preferences are honored by generic transitions and springs.
+8. Reduced-motion preferences are honored by generic transitions and springs,
+   and the operating system's preference is read into GPUI's flag at `init`;
+   an application that sets the flag itself is never overridden.
 9. Corner radius is derived from the theme, never written as a literal.

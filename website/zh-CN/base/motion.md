@@ -88,6 +88,8 @@ offset 必须从 `0` 开始、以 `1` 结束并保持单调。不可插值属性
 
 Transition、spring、keyframes、presence 和 reveal 控件都遵守 GPUI 的 reduced-motion 偏好。有限动画会直接同步目标、更新 retained state，并且不留下待处理 frame。动画不能成为表达状态的唯一方式。
 
+这个偏好来自操作系统。`gpui_base::init`（因此 `gpui_component::init` 也一样）会把系统设置读入 `App::set_reduce_motion`：macOS 的「减弱动态效果」（`NSWorkspace.accessibilityDisplayShouldReduceMotion`）、Windows 的「动画效果」（`SPI_GETCLIENTAREAANIMATION`，关闭即为减弱动效），以及 Linux 上 XDG desktop portal `org.freedesktop.appearance` 命名空间的 `reduced-motion` 键——它经 D-Bus 在 `init` 返回后片刻送达，之后持续跟随其变化。其他目标（包括 wasm）不改动这个标志。应用一旦自己调用 `cx.set_reduce_motion(...)`，就接管了这个标志：Base 只在标志仍是自己上次写入的值时才会写入。macOS 和 Windows 只在 `init` 时读取一次；需要重新读取时调用 `gpui_base::apply_system_reduce_motion(cx)`。
+
 benchmark 覆盖的纯稳定采样路径——timing/easing、关键帧查找、解析式 spring 积分和 stagger delay 计算——均为零分配。Keyed transition、spring、presence 和 reveal 生命周期由 GPUI retained state 与 frame-request 测试覆盖，因为这些更新属于框架生命周期，而不是纯采样器。采样使用绝对时间，关键帧查找使用二分搜索。运行 release benchmark：
 
 ```bash

@@ -557,6 +557,9 @@ Call `gpui_base::init(cx)` before constructing base controls. Initialization:
 
 - installs the base global theme if absent;
 - initializes shared global state;
+- reads the operating system's reduced-motion preference into
+  `App::set_reduce_motion` (see `reduce_motion.rs` for the per-platform
+  sources and the rule that an application's own setting wins);
 - registers key bindings and infrastructure for dialog, focus traps, popover,
   sheet, combobox, color picker, select, number input, input, and tree.
 

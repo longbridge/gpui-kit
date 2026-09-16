@@ -48,6 +48,7 @@ mod positioner;
 mod progress;
 mod radio;
 mod radio_group;
+mod reduce_motion;
 mod resizable;
 mod scroll_bounce;
 mod scrollable_mask;
@@ -140,6 +141,7 @@ pub use positioner::{Align, Positioner, ResolvedPosition};
 pub use progress::{Progress, ProgressIndicator, ProgressTrack};
 pub use radio::{Radio, RadioStyles};
 pub use radio_group::RadioGroup;
+pub use reduce_motion::apply_system_reduce_motion;
 #[doc(hidden)]
 pub use resizable::{PANEL_MIN_SIZE, resize_handle};
 pub use resizable::{
@@ -211,6 +213,7 @@ pub const fn is_mobile() -> bool {
 pub fn init(cx: &mut App) {
     let _ = Theme::global_mut(cx);
     GlobalState::init(cx);
+    reduce_motion::init(cx);
     dialog::init(cx);
     focus_trap::init(cx);
     popover::init(cx);

@@ -110,6 +110,8 @@ let delay = stagger.delay(index, item_count);
 
 Transitions, springs, keyframes, presence, and reveal-compatible controls honor GPUI's reduced-motion preference. Finite motion snaps to the target, synchronizes retained state, and leaves no pending animation frame. Motion must never be the only way state is communicated.
 
+The preference is the operating system's. `gpui_base::init` (and so `gpui_component::init`) reads the system setting into `App::set_reduce_motion` — macOS's "Reduce motion" (`NSWorkspace.accessibilityDisplayShouldReduceMotion`), Windows' "Animation effects" (`SPI_GETCLIENTAREAANIMATION`, off means reduce), and on Linux the XDG desktop portal's `org.freedesktop.appearance` `reduced-motion` key, which arrives over D-Bus a moment after `init` and is then followed as it changes. Other targets, wasm included, leave the flag alone. An application that calls `cx.set_reduce_motion(...)` itself owns the flag from then on: Base only writes it while it still holds what Base last wrote. macOS and Windows are read once, at `init`; call `gpui_base::apply_system_reduce_motion(cx)` to read them again.
+
 The pure steady sampling paths measured by the benchmark—timing/easing, keyframe lookup, analytic spring integration, and stagger delay calculation—are allocation-free. Keyed transition, spring, presence, and reveal lifecycles are covered by GPUI retained-state and frame-request tests because those updates belong to the framework lifecycle rather than the pure sampler. Sampling uses absolute elapsed time, and keyframe lookup uses binary search. Run the release benchmark with:
 
 ```bash
