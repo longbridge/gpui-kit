@@ -28,7 +28,7 @@ cargo run -p gpui-base-examples --bin motion
 | Stagger | `Stagger` | 无分配地为列表计算错峰时间 |
 | Presence | `Presence` | 退出动画完成前继续挂载内容 |
 
-此外还提供 `Easing`、`Discrete`、`MotionTransform` 和 `MotionReveal`，它们与同一套 primitive 组合，不需要额外动画 runtime。
+此外还提供 `Sequence`、`Easing`、`Discrete`、`MotionTransform` 和 `MotionReveal`，它们与同一套 primitive 组合，不需要额外动画 runtime。
 
 ## Transition
 
@@ -80,6 +80,29 @@ offset 必须从 `0` 开始、以 `1` 结束并保持单调。不可插值属性
 
 `Stagger` 可以从首项、末项、中心或指定位置开始，为每个 index 计算 delay；它不分配时间表，也不接管列表 identity。
 
+## Sequence
+
+`Sequence` 把多个 transition 串成链，每一步在前一步结束时开始。它在首次采样的那一帧从 `from` 出发，每个 ID 只播放一次；采样结果包含当前值、正在播放的 step 序号，以及一个只在最后一步完成后才为 `Finished` 的 `MotionStatus`。
+
+```rust,ignore
+let opacity = Sequence::new(("toast", "opacity"), 0.0)
+    .with_step(1.0, Transition::new(Duration::from_millis(160)))
+    .with_step(0.0, Transition::new(Duration::from_millis(200)).delay(Duration::from_secs(3)))
+    .sample(window, cx);
+
+div().opacity(*opacity.value())
+```
+
+每一步在绝对时刻结束，下一步从该时刻开始，而不是从发现它结束的那一帧开始，因此掉帧不会让后续步骤延后。零时长的步骤会在同一帧内完成。改变正在播放那一步的目标值，会让 sequence 从当时的采样值重新开始第一步；尚未到达的步骤会在到达时读取。需要重播时，把应用持有的 generation 放进 ID。Reduced motion 会直接采用最后一步的目标值，并且不留下待处理 frame。
+
+`Stagger` 可以作为第一步的 delay 与 sequence 组合：
+
+```rust,ignore
+Sequence::new(("row", index), px(12.))
+    .with_step(px(0.), Transition::new(Duration::from_millis(120)).delay(stagger.delay(index, count)))
+    .sample(window, cx)
+```
+
 ## 测量式展开
 
 `MotionReveal` 按 child 的自然尺寸测量，再根据 progress 裁剪可见高度。`Collapsible::motion_id(...)` 是控件层的便捷入口；没有 motion ID 时仍保持即时挂载/卸载。
@@ -94,7 +117,7 @@ benchmark 覆盖的纯稳定采样路径——timing/easing、关键帧查找、
 cargo bench -p gpui-base --bench motion
 ```
 
-选择最小且合适的 primitive：固定时长目标使用 `transition`，频繁变化的空间目标使用 `spring`，编排序列使用 keyframes，卸载前退出使用 `Presence`，列表错峰使用 `Stagger`。
+选择最小且合适的 primitive：固定时长目标使用 `transition`，频繁变化的空间目标使用 `spring`，编排序列使用 keyframes，卸载前退出使用 `Presence`，前后相继的步骤使用 `Sequence`，列表错峰使用 `Stagger`。
 
 ## Benchmark 结果
 

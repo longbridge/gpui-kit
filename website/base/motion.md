@@ -28,7 +28,7 @@ The example contains five separate demos. Use the tabs at the top to inspect one
 | Stagger | `Stagger` | Allocation-free timing offsets across a list |
 | Presence | `Presence` | Exit animation that keeps content mounted until it becomes absent |
 
-The library also exposes `Easing`, `Discrete`, `MotionTransform`, and `MotionReveal`. They compose with the same primitives rather than requiring separate animation runtimes.
+The library also exposes `Sequence`, `Easing`, `Discrete`, `MotionTransform`, and `MotionReveal`. They compose with the same primitives rather than requiring separate animation runtimes.
 
 ## Target transitions
 
@@ -102,6 +102,29 @@ let stagger = Stagger::new(Duration::from_millis(80), StaggerOrigin::First);
 let delay = stagger.delay(index, item_count);
 ```
 
+## Sequences
+
+`Sequence` chains transitions so each step starts when the previous one ends. It begins at `from` on the first frame it is sampled and plays once per ID; its sample reports the value, the step being played, and a `MotionStatus` that reads `Finished` only after the last step.
+
+```rust,ignore
+let opacity = Sequence::new(("toast", "opacity"), 0.0)
+    .with_step(1.0, Transition::new(Duration::from_millis(160)))
+    .with_step(0.0, Transition::new(Duration::from_millis(200)).delay(Duration::from_secs(3)))
+    .sample(window, cx);
+
+div().opacity(*opacity.value())
+```
+
+A step ends at an absolute instant and the next one starts there, not on the frame that noticed it, so a skipped frame does not start a step late. Zero-duration steps complete within one frame. Changing the target of the step being played restarts the sequence from its first step at the value sampled at that instant; steps not yet reached are read when the sequence gets to them. To replay, put an application-owned generation in the ID. Reduced motion adopts the last target at once with no pending frame.
+
+`Stagger` composes with a sequence as a delay on its first step:
+
+```rust,ignore
+Sequence::new(("row", index), px(12.))
+    .with_step(px(0.), Transition::new(Duration::from_millis(120)).delay(stagger.delay(index, count)))
+    .sample(window, cx)
+```
+
 ## Measured reveal
 
 `MotionReveal` measures a child at its natural size and clips its visible height by progress. `Collapsible::motion_id(...)` is the convenient control-level facade. Without a motion ID, the control keeps immediate mount/unmount behavior.
@@ -116,7 +139,7 @@ The pure steady sampling paths measured by the benchmark—timing/easing, keyfra
 cargo bench -p gpui-base --bench motion
 ```
 
-Choose the smallest suitable primitive: `transition` for duration-based targets, `spring` for changing spatial targets, keyframes for authored sequences, `Presence` for exit-before-unmount, and `Stagger` for list choreography.
+Choose the smallest suitable primitive: `transition` for duration-based targets, `spring` for changing spatial targets, keyframes for authored sequences, `Presence` for exit-before-unmount, `Sequence` for steps that follow one another, and `Stagger` for list choreography.
 
 ## Benchmark results
 
