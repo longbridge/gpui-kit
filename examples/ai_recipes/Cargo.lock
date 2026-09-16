@@ -2249,6 +2249,7 @@ dependencies = [
  "anyhow",
  "async-channel",
  "chrono",
+ "data-url",
  "futures",
  "gpui-pre",
  "gpui-pre-macros",
