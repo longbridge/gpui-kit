@@ -13,6 +13,11 @@
 //! on the theme directly, so every later lookup hits the cache and the text
 //! is drawn exactly as before. A family the application or a theme file
 //! chose explicitly is used as-is.
+//!
+//! `TextSystem::resolve_font` panics when neither the alias nor any fallback
+//! is present. WASM hosts have no system fonts, so the probe is skipped until
+//! a family from that stack has been registered with `add_fonts`. Calling it
+//! blindly would abort the gallery (wasm is `panic=abort`).
 
 use gpui::{App, SharedString, font};
 
@@ -21,23 +26,51 @@ use super::mono_font::installed_font_names;
 /// The virtual family GPUI resolves on every platform.
 const SYSTEM_UI_FONT: &str = ".SystemUIFont";
 
+/// Families `TextSystem::resolve_font(".SystemUIFont")` can land on.
+///
+/// `.SystemUIFont` maps to the platform system name (`IBM Plex Sans` on Linux
+/// and web). `.ZedSans` / `.ZedMono` map to IBM Plex Sans / Lilex. The rest is
+/// the hardcoded stack in `TextSystem::new`. A bundled UI font such as Inter
+/// is not on this list, so loading Inter alone does not make the probe safe.
+const SYSTEM_UI_RESOLVABLE_FAMILIES: &[&str] = &[
+    "IBM Plex Sans",
+    "Lilex",
+    "Helvetica",
+    "Segoe UI",
+    "Ubuntu",
+    "Adwaita Sans",
+    "Cantarell",
+    "Noto Sans",
+    "DejaVu Sans",
+    "Arial",
+];
+
 /// Replaces `.SystemUIFont` on the global theme with the installed family GPUI
 /// resolves it to, when that differs. Any other family is left alone.
 pub(super) fn resolve_default_font(cx: &mut App) {
     if cx.global::<super::Theme>().font_family != SYSTEM_UI_FONT {
         return;
     }
+    let installed = installed_font_names(cx);
+    if !can_resolve_system_ui_font(installed) {
+        return;
+    }
     let text_system = cx.text_system();
     let resolved = text_system
         .get_font_for_id(text_system.resolve_font(&font(SYSTEM_UI_FONT)))
         .map(|font| font.family);
-    let Some(family) = substitute(SYSTEM_UI_FONT, resolved.as_deref(), || {
-        installed_font_names(cx)
-    }) else {
+    let Some(family) = substitute(SYSTEM_UI_FONT, resolved.as_deref(), || installed) else {
         return;
     };
     tracing::info!("UI font {SYSTEM_UI_FONT:?} resolves to {family:?}, naming it on the theme.");
     cx.global_mut::<super::Theme>().font_family = family;
+}
+
+/// Whether `resolve_font(".SystemUIFont")` can succeed against `installed`.
+fn can_resolve_system_ui_font(installed: &[String]) -> bool {
+    SYSTEM_UI_RESOLVABLE_FAMILIES
+        .iter()
+        .any(|family| installed.iter().any(|name| name == family))
 }
 
 /// The family to name instead of `requested`: the one GPUI resolved it to,
@@ -90,5 +123,20 @@ mod tests {
             None
         );
         assert_eq!(substitute(".SystemUIFont", None, || &installed), None);
+    }
+
+    #[test]
+    fn skips_the_probe_when_no_fallback_family_is_installed() {
+        assert!(!can_resolve_system_ui_font(&names(&[
+            "Inter",
+            "JetBrains Mono"
+        ])));
+        assert!(!can_resolve_system_ui_font(&[]));
+    }
+
+    #[test]
+    fn probes_when_a_gpui_fallback_family_is_installed() {
+        assert!(can_resolve_system_ui_font(&names(&["Inter", "Noto Sans"])));
+        assert!(can_resolve_system_ui_font(&names(&["IBM Plex Sans"])));
     }
 }

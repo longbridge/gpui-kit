@@ -68,7 +68,9 @@ div()
 
 ## 打包自定义字体
 
-用户系统中没有的字体必须打包，并在**首帧之前**注册到文本系统：
+用户系统中没有的字体必须打包，并在 **`gpui_kit::init` 之前**（以及首帧之前）
+注册到文本系统。`init` 会调用 `Theme::change`，后者用会 panic 的
+`resolve_font` 探测 `.SystemUIFont`。
 
 ```rust
 cx.text_system()
@@ -116,8 +118,10 @@ ThemeRegistry::watch_dir(PathBuf::from("./themes"), cx, move |cx| {
 ## WebAssembly 说明
 
 浏览器不会向 WASM 应用暴露系统字体。在 `gpui-kit.com/gallery/` 运行的
-`story-web` 画廊必须打包它用到的每一种字体，并在 `Theme::change` 之后重新
-声明，否则文本系统会 panic。桌面应用完全不需要这一步。
+`story-web` 画廊必须在 `gpui_kit::init` **之前**打包它用到的每一种字体，并在
+`Theme::change` 之后重新声明，否则文本系统会 panic。Inter 不在 GPUI 的
+`.SystemUIFont` 回退栈里，所以画廊另外打包了 IBM Plex Sans，好让这个别名
+能解析。桌面应用完全不需要这一步。
 
 打包字体画不出来的文字仍然可以交给浏览器绘制。Web 平台会用 Canvas 2D
 和访问者本机的字体渲染 emoji，应用不必再打包 emoji 字体。回退策略在构造

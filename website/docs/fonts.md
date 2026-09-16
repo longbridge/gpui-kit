@@ -78,7 +78,9 @@ methods, so they compose with the rest of the style chain.
 ## Bundling custom fonts
 
 Fonts that are not installed on the user's system must be bundled and
-registered with the text system **before the first frame**:
+registered with the text system **before `gpui_kit::init`** (and before the
+first frame). `Theme::change`, which init calls, probes `.SystemUIFont` with
+GPUI's panicking `resolve_font`.
 
 ```rust
 cx.text_system()
@@ -126,8 +128,10 @@ See [Theme](../component/theme.md) for the full config reference.
 ## WebAssembly note
 
 Browsers expose **no system fonts** to WASM apps. The `story-web` gallery
-(which runs at `gpui-kit.com/gallery/`) must bundle every family it uses and
-re-assert them after `Theme::change`, or the text system panics. Desktop apps
+(which runs at `gpui-kit.com/gallery/`) must bundle every family it uses
+**before** `gpui_kit::init`, and re-assert them after `Theme::change`, or the
+text system panics. Inter is not on GPUI's `.SystemUIFont` fallback stack; the
+gallery also bundles IBM Plex Sans so that alias can resolve. Desktop apps
 skip this entirely.
 
 Text the bundled fonts cannot draw can still come from the browser. The web

@@ -61,14 +61,24 @@ fn installed_default_mono_font_family(cx: &App) -> SharedString {
         .clone()
 }
 
-/// The families installed on the machine, listed once per process.
+/// The families available to the text system, listed once per process.
 ///
-/// Enumerating fonts costs around a hundred milliseconds on macOS, and the
-/// answer only depends on the system fonts, which do not change while the
-/// process runs.
+/// Enumerating fonts costs around a hundred milliseconds on macOS. On desktop
+/// the answer only depends on the system fonts, which do not change while the
+/// process runs. On wasm there are no system fonts: families appear later via
+/// `add_fonts`. An empty first probe (typical: `Theme::change` during init,
+/// fonts registered afterwards) is therefore not cached, so a later probe
+/// sees the bundled families.
 pub(super) fn installed_font_names(cx: &App) -> &'static [String] {
     static NAMES: OnceLock<Vec<String>> = OnceLock::new();
-    NAMES.get_or_init(|| cx.text_system().all_font_names())
+    if let Some(names) = NAMES.get() {
+        return names;
+    }
+    let names = cx.text_system().all_font_names();
+    if names.is_empty() {
+        return &[];
+    }
+    NAMES.get_or_init(|| names)
 }
 
 /// `default` when it is installed, else the first installed alternate, else
