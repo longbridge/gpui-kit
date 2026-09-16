@@ -56,8 +56,6 @@ pub enum PopupMenuItem {
         handler: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     },
     /// A submenu item that opens another popup menu.
-    ///
-    /// NOTE: This is only supported when the parent menu is not `scrollable`.
     Submenu {
         icon: Option<Icon>,
         label: SharedString,
@@ -317,6 +315,11 @@ pub struct PopupMenu {
     /// in `render_item` with `priority + 1`. Keeping a single deferred layer
     /// per level matters because GPUI caps nested deferred depth (see
     /// `prepaint_deferred_draws`).
+    ///
+    /// Deferring is also what lets a submenu open from a `scrollable` menu:
+    /// GPUI paints a deferred draw at the window level with no inherited
+    /// content mask, so the items container's `overflow_y_scroll` clip never
+    /// reaches it, while the scroll offset is still baked into its anchor.
     priority: usize,
 
     _subscriptions: Vec<Subscription>,
@@ -417,8 +420,6 @@ impl PopupMenu {
     }
 
     /// Set the menu to be scrollable to show vertical scrollbar.
-    ///
-    /// NOTE: If this is true, the sub-menus will cannot be support.
     pub fn scrollable(mut self, scrollable: bool) -> Self {
         self.scrollable = scrollable;
         self
@@ -1468,7 +1469,6 @@ impl Render for PopupMenu {
                     .on_prepaint(move |bounds, _, cx| view.update(cx, |r, _| r.bounds = bounds)),
             )
             .when(self.scrollable, |this| {
-                // TODO: When the menu is limited by `overflow_y_scroll`, the sub-menu will cannot be displayed.
                 this.vertical_scrollbar(&self.scroll_handle)
             })
     }

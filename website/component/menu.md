@@ -273,11 +273,8 @@ menu.submenu_with_icon(
 
 ### Scrollable Menus
 
-:::warning
-When you have enabled `scrollable()` on a menu, avoid using submenus within it, as this can lead to usability issues.
-:::
-
-For menus with many items, enable scrolling:
+For menus with many items, enable scrolling. Submenus open from a scrollable
+menu the same way as from any other menu:
 
 ```rust
 Button::new("large-menu")
