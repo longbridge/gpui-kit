@@ -118,6 +118,12 @@ window.open_dialog(cx, |dialog, window, cx| {
 })
 ```
 
+A dialog never extends past the window. Its width is capped at the viewport
+minus a 16px margin on each side, and its height at the space between its top
+offset and a 16px bottom margin, so the title and footer stay visible while the
+body scrolls. `w`, `max_w`, `h`, and `margin_top` apply within those limits;
+a dialog that already fits keeps its requested size and default position.
+
 ### Dialog Options
 
 ```rust
