@@ -237,6 +237,10 @@ menu.action_context(focus_handle) // Set context for shortcuts
     .menu("Cut", Box::new(Cut))       // Will show "Ctrl+X"
 ```
 
+A shortcut is shown where the item's action will be dispatched: the
+`action_context` when one is set, otherwise the key contexts the menu's
+trigger sits in. The hints appear on the same frame as the menu items.
+
 ### Submenus
 
 Create nested menus with submenu support:

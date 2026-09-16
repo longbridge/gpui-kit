@@ -215,6 +215,9 @@ menu.action_context(focus_handle)
     .menu("Cut", Box::new(Cut))
 ```
 
+快捷键按菜单项 action 实际派发的位置来解析：设置了 `action_context` 时按它解析，
+否则按菜单触发元素所在的 key context 解析。快捷键提示与菜单项在同一帧显示。
+
 ### 子菜单
 
 ```rust

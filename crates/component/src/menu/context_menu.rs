@@ -1,10 +1,10 @@
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{
-    Anchor, AnyElement, App, Context, DismissEvent, Element, ElementId, Entity, Focusable,
-    GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement,
-    MouseButton, MouseDownEvent, ParentElement, Pixels, Point, StyleRefinement, Styled,
-    Subscription, Window, anchored, deferred, div, prelude::FluentBuilder, px,
+    Anchor, AnyElement, App, Context, DismissEvent, Element, ElementId, Entity, FocusHandle,
+    Focusable, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement,
+    IntoElement, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, StyleRefinement,
+    Styled, Subscription, Window, anchored, deferred, div, prelude::FluentBuilder, px,
 };
 
 use crate::menu::PopupMenu;
@@ -118,6 +118,11 @@ struct ContextMenuSharedState {
     menu_view: Option<Entity<PopupMenu>>,
     open: bool,
     position: Point<Pixels>,
+    /// Registered on this element's dispatch node every frame and never
+    /// focused, so the menu can resolve its shortcut hints against the
+    /// trigger's key contexts on the frame it opens: GPUI looks a handle up in
+    /// the previously rendered frame, where the menu's own element is not yet.
+    trigger_focus_handle: Option<FocusHandle>,
     _subscription: Option<Subscription>,
 }
 
@@ -134,6 +139,7 @@ impl Default for ContextMenuState {
                 menu_view: None,
                 open: false,
                 position: Default::default(),
+                trigger_focus_handle: None,
                 _subscription: None,
             })),
         }
@@ -170,6 +176,11 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                     let shared_state = state.shared_state.borrow();
                     (shared_state.position, shared_state.open)
                 };
+                state
+                    .shared_state
+                    .borrow_mut()
+                    .trigger_focus_handle
+                    .get_or_insert_with(|| cx.focus_handle());
                 let menu_view = state.shared_state.borrow().menu_view.clone();
                 let mut menu_element = None;
                 if open {
@@ -226,7 +237,7 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                     layout_id,
                     ContextMenuState {
                         element: Some(element),
-                        ..Default::default()
+                        shared_state: state.shared_state.clone(),
                     },
                 )
             },
@@ -242,6 +253,14 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        if let Some(trigger_focus) = request_layout
+            .shared_state
+            .borrow()
+            .trigger_focus_handle
+            .as_ref()
+        {
+            window.set_focus_handle(trigger_focus, cx);
+        }
         if let Some(element) = &mut request_layout.element {
             element.prepaint(window, cx);
         }
@@ -312,7 +331,10 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                                     };
                                     build(menu, window, cx)
                                 });
+                                let trigger_focus_handle =
+                                    shared_state.borrow().trigger_focus_handle.clone();
                                 menu.update(cx, |menu, cx| {
+                                    menu.set_trigger_focus(trigger_focus_handle, cx);
                                     menu.set_previous_focus(previous_focus_handle, cx);
                                 });
 
@@ -346,12 +368,12 @@ mod tests {
     use super::*;
     use crate::theme::Theme;
     use gpui::{
-        Context, FocusHandle, IntoElement, Render, TestAppContext, VisualTestContext, actions,
-        point, px,
+        Context, FocusHandle, IntoElement, KeyBinding, Render, TestAppContext, VisualTestContext,
+        actions, point, px,
     };
     use std::cell::Cell;
 
-    actions!(context_menu_test, [RemoveTab]);
+    actions!(context_menu_test, [RemoveTab, CopyText]);
 
     /// The regression shape: the action handler lives on the trigger's
     /// ancestor (like an action bar), which is NOT on the focus path while
@@ -441,5 +463,71 @@ mod tests {
         cx.update(|window, cx| {
             assert_eq!(window.focused(cx).as_ref(), Some(&content_focus));
         });
+    }
+
+    const CONTEXT: &str = "context_menu_test";
+
+    /// The story shape: nothing is focused, the key binding lives in the key
+    /// context of the trigger's ancestor, and other content outside that
+    /// context paints after the trigger.
+    struct UnfocusedRoot {
+        frames: Rc<Cell<usize>>,
+    }
+
+    impl Render for UnfocusedRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            self.frames.set(self.frames.get() + 1);
+            div()
+                .size_full()
+                .child(
+                    div()
+                        .key_context(CONTEXT)
+                        .on_action(|_: &CopyText, _, _| {})
+                        .child(
+                            div()
+                                .id("tab")
+                                .w(px(100.))
+                                .h(px(30.))
+                                .context_menu(|menu, _, _| menu.menu("Copy", Box::new(CopyText))),
+                        ),
+                )
+                .child(div().child("Status"))
+        }
+    }
+
+    #[gpui::test]
+    fn shortcut_hint_is_painted_on_the_frame_the_menu_opens(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.bind_keys([KeyBinding::new("ctrl-c", CopyText, Some(CONTEXT))]);
+        });
+        let frames = Rc::new(Cell::new(0));
+        let (_, cx) = cx.add_window_view({
+            let frames = frames.clone();
+            move |_, _| UnfocusedRoot { frames }
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert!(window.focused(cx).is_none());
+        });
+        let frames_before_open = frames.get();
+
+        // Right-click inside the tab; the menu is built in a deferred callback
+        // and drawn on the frame that follows.
+        cx.simulate_mouse_down(
+            point(px(10.), px(10.)),
+            MouseButton::Right,
+            Default::default(),
+        );
+
+        assert_eq!(
+            frames.get(),
+            frames_before_open + 1,
+            "the press must be followed by exactly one frame for this to test the first one"
+        );
+        assert!(
+            cx.debug_bounds("kbd:ctrl-c").is_some(),
+            "the shortcut hint must be painted on the same frame as its item"
+        );
     }
 }
