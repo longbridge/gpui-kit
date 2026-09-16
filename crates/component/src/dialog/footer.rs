@@ -90,8 +90,9 @@ impl ParentElement for DialogClose {
 }
 
 impl RenderOnce for DialogClose {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        div().size_full().child(self.base)
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let focus = crate::Root::topmost_dialog_focus(window, cx);
+        div().size_full().child(self.base.focus(focus))
     }
 }
 
@@ -120,7 +121,11 @@ impl RenderOnce for DialogAction {
             .size_full()
             .id("dialog-action")
             .on_click(move |_, window, cx| {
-                window.dispatch_action(Box::new(Confirm { secondary: false }), cx)
+                crate::Root::dispatch_to_topmost_dialog(
+                    Box::new(Confirm { secondary: false }),
+                    window,
+                    cx,
+                )
             })
             .children(self.children)
     }

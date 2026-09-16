@@ -114,7 +114,11 @@ impl DialogButtonProps {
             .label(ok_text)
             .with_variant(ok_variant)
             .on_click(|_, window, cx| {
-                window.dispatch_action(Box::new(Confirm { secondary: false }), cx)
+                crate::Root::dispatch_to_topmost_dialog(
+                    Box::new(Confirm { secondary: false }),
+                    window,
+                    cx,
+                )
             })
             .into_any_element()
     }
@@ -129,7 +133,9 @@ impl DialogButtonProps {
         Button::new("cancel")
             .label(cancel_text)
             .with_variant(cancel_variant)
-            .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx))
+            .on_click(|_, window, cx| {
+                crate::Root::dispatch_to_topmost_dialog(Box::new(Cancel), window, cx)
+            })
             .into_any_element()
     }
 }
@@ -650,6 +656,7 @@ impl RenderOnce for Dialog {
                                         let right = (paddings.right - px(10.)).max(px(8.));
 
                                         gpui_base::DialogClose::new()
+                                            .focus(Some(self.focus_handle.clone()))
                                             .absolute()
                                             .top(top)
                                             .right(right)

@@ -332,6 +332,7 @@ pub struct DialogClose {
     style: StyleRefinement,
     children: SmallVec<[AnyElement; 1]>,
     trigger: Option<AnyElement>,
+    focus: Option<FocusHandle>,
 }
 
 impl DialogClose {
@@ -340,7 +341,21 @@ impl DialogClose {
             style: StyleRefinement::default(),
             children: SmallVec::new(),
             trigger: None,
+            focus: None,
         }
+    }
+
+    /// The dialog this control belongs to.
+    ///
+    /// Without it the cancel action is routed by whatever holds focus when the
+    /// control is clicked, which is not necessarily this dialog.
+    ///
+    /// Call this *before* [`Self::trigger`]: that builder bakes the handle into
+    /// the button's click handler there and then, so a later call never reaches
+    /// it and the control silently falls back to focus routing.
+    pub fn focus(mut self, handle: Option<FocusHandle>) -> Self {
+        self.focus = handle;
+        self
     }
 
     /// Styles a button with the accessible name "Close" and cancel activation.
@@ -349,15 +364,19 @@ impl DialogClose {
     /// activation. The builder only needs to supply presentation.
     /// The wrapper does not also handle clicks when a trigger is supplied.
     pub fn trigger<E: IntoElement>(mut self, build: impl FnOnce(crate::Button) -> E) -> Self {
+        let focus = self.focus.clone();
         let button = crate::Button::new("close")
             .accessibility_label("Close")
-            .on_click(Self::activate);
+            .on_click(move |_, window, cx| Self::activate(focus.as_ref(), window, cx));
         self.trigger = Some(build(button).into_any_element());
         self
     }
 
-    fn activate(_: &ClickEvent, window: &mut Window, cx: &mut App) {
-        window.dispatch_action(Box::new(Cancel), cx);
+    fn activate(focus: Option<&FocusHandle>, window: &mut Window, cx: &mut App) {
+        match focus {
+            Some(handle) => handle.dispatch_action(&Cancel, window, cx),
+            None => window.dispatch_action(Box::new(Cancel), cx),
+        }
     }
 }
 impl Default for DialogClose {
@@ -377,9 +396,12 @@ impl Styled for DialogClose {
 }
 impl RenderOnce for DialogClose {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let focus = self.focus.clone();
         div()
             .id("dialog-close")
-            .when(self.trigger.is_none(), |this| this.on_click(Self::activate))
+            .when(self.trigger.is_none(), |this| {
+                this.on_click(move |_, window, cx| Self::activate(focus.as_ref(), window, cx))
+            })
             .children(self.trigger)
             .children(self.children)
             .refine_style(&self.style)
