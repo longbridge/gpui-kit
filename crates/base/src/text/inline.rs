@@ -191,7 +191,6 @@ pub(super) fn text_size_ranges(
 ///
 /// All text in TextView (including the CodeBlock) used this for text rendering.
 pub(super) struct Inline {
-    id: ElementId,
     text: SharedString,
     links: Rc<Vec<(Range<usize>, LinkMark)>>,
     highlights: Vec<(Range<usize>, InlineHighlight)>,
@@ -224,7 +223,6 @@ impl InlineState {
 
 impl Inline {
     pub(super) fn new(
-        id: impl Into<ElementId>,
         state: Arc<Mutex<InlineState>>,
         links: Vec<(Range<usize>, LinkMark)>,
         highlights: Vec<(Range<usize>, InlineHighlight)>,
@@ -236,7 +234,6 @@ impl Inline {
             .unwrap_or_default();
 
         Self {
-            id: id.into(),
             links: Rc::new(links),
             highlights,
             text: text.clone(),
@@ -605,7 +602,7 @@ impl Element for Inline {
     type PrepaintState = Hitbox;
 
     fn id(&self) -> Option<ElementId> {
-        Some(self.id.clone())
+        None
     }
 
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {

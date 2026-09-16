@@ -439,20 +439,15 @@ impl Element for InlineFlow {
                     } else {
                         None
                     };
-                    let inline = Inline::new(
-                        elements.len(),
-                        state,
-                        links,
-                        highlights,
-                        self.link_click_handler.clone(),
-                    )
-                    .selection_source(source_state.clone(), source_range)
-                    .text_style(text_style.clone())
-                    .selection_bounds(Bounds::new(
-                        point(bounds.left(), bounds.top() + selection_bounds.top()),
-                        size(bounds.size.width, selection_bounds.size.height),
-                    ))
-                    .paint_origin(bounds.origin + origin + point(padding, Pixels::ZERO));
+                    let inline =
+                        Inline::new(state, links, highlights, self.link_click_handler.clone())
+                            .selection_source(source_state.clone(), source_range)
+                            .text_style(text_style.clone())
+                            .selection_bounds(Bounds::new(
+                                point(bounds.left(), bounds.top() + selection_bounds.top()),
+                                size(bounds.size.width, selection_bounds.size.height),
+                            ))
+                            .paint_origin(bounds.origin + origin + point(padding, Pixels::ZERO));
                     let mut element = div()
                         .font(text_style.font())
                         .text_color(text_style.color)

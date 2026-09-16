@@ -441,12 +441,6 @@ pub struct Span {
     pub end: usize,
 }
 
-impl From<Span> for ElementId {
-    fn from(value: Span) -> Self {
-        ElementId::Name(format!("md-{}:{}", value.start, value.end).into())
-    }
-}
-
 #[allow(unused)]
 #[derive(Default, Clone)]
 pub struct ImageNode {
@@ -1460,52 +1454,56 @@ impl CodeBlock {
     ) -> AnyElement {
         let style = &node_cx.style;
 
+        let block = div()
+            .w_full()
+            .min_w_0()
+            .p_3()
+            .bg(style.code_background())
+            .font_family(cx.theme().tokens.typography.mono.clone())
+            .text_size(cx.theme().tokens.typography.mono_md.size)
+            .relative()
+            .refine_style(&style.code_block())
+            .child(Inline::new(
+                self.state.clone(),
+                vec![],
+                fade_highlights(
+                    node_cx
+                        .code_block_highlighter
+                        .as_ref()
+                        .map(|highlighter| self.highlighted_styles(highlighter))
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(|(range, style)| (range, InlineHighlight::from(style)))
+                        .collect(),
+                    node_cx.stream_fades(self.span.map(|span| TextLeafKey::block(span.start))),
+                ),
+                node_cx.link_click_handler.clone(),
+            ));
+        // The id scopes the caller's action ids per code block, so plain ids
+        // like `"copy"` don't collide across blocks; without actions nothing
+        // under the block needs element state.
+        let block = match node_cx.code_block_actions.clone() {
+            Some(actions) => block
+                .id(block_element_id("codeblock", self.span, options.ix))
+                .child(
+                    div()
+                        .id("actions")
+                        .absolute()
+                        .top_2()
+                        .right_2()
+                        .bg(style.code_background())
+                        .rounded(cx.theme().tokens.radius.md)
+                        .child(actions(&self, window, cx)),
+                )
+                .into_any_element(),
+            None => block.into_any_element(),
+        };
+
         div()
             .w_full()
             .min_w_0()
             .when(!options.is_last, |this| this.pb(style.paragraph_gap()))
-            .child(
-                div()
-                    .id(("codeblock", options.ix))
-                    .w_full()
-                    .min_w_0()
-                    .p_3()
-                    .bg(style.code_background())
-                    .font_family(cx.theme().tokens.typography.mono.clone())
-                    .text_size(cx.theme().tokens.typography.mono_md.size)
-                    .relative()
-                    .refine_style(&style.code_block())
-                    .child(Inline::new(
-                        "code",
-                        self.state.clone(),
-                        vec![],
-                        fade_highlights(
-                            node_cx
-                                .code_block_highlighter
-                                .as_ref()
-                                .map(|highlighter| self.highlighted_styles(highlighter))
-                                .unwrap_or_default()
-                                .into_iter()
-                                .map(|(range, style)| (range, InlineHighlight::from(style)))
-                                .collect(),
-                            node_cx
-                                .stream_fades(self.span.map(|span| TextLeafKey::block(span.start))),
-                        ),
-                        node_cx.link_click_handler.clone(),
-                    ))
-                    .when_some(node_cx.code_block_actions.clone(), |this, actions| {
-                        this.child(
-                            div()
-                                .id("actions")
-                                .absolute()
-                                .top_2()
-                                .right_2()
-                                .bg(style.code_background())
-                                .rounded(cx.theme().tokens.radius.md)
-                                .child(actions(&self, window, cx)),
-                        )
-                    }),
-            )
+            .child(block)
             .into_any_element()
     }
 }
@@ -1624,13 +1622,12 @@ impl Paragraph {
         _window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
-        let span = self.span;
         let children = &self.children;
         let fades = node_cx.stream_fades(fade_key);
 
         if self.should_render_inline_flow() {
             return InlineFlow::new(
-                span.unwrap_or_default(),
+                leaf_element_id(fade_key),
                 self.inline_flow_items(fades, node_cx, cx),
                 node_cx.link_click_handler.clone(),
             )
@@ -1647,8 +1644,7 @@ impl Paragraph {
         // is the byte space the fade ranges use.
         let mut consumed = 0;
 
-        let mut ix = 0;
-        for inline_node in children {
+        for (ix, inline_node) in children.iter().enumerate() {
             let text_len = inline_node.text.len();
             text.push_str(&inline_node.text);
 
@@ -1659,7 +1655,6 @@ impl Paragraph {
                     }
                     child_nodes.push(
                         Inline::new(
-                            ix,
                             inline_node.state.clone(),
                             links.clone(),
                             fade_highlights(
@@ -1743,7 +1738,6 @@ impl Paragraph {
                 highlights = combine_highlights(highlights, node_highlights);
                 offset += text_len;
             }
-            ix += 1;
         }
 
         // Add the last text node
@@ -1757,7 +1751,6 @@ impl Paragraph {
             }
             child_nodes.push(
                 Inline::new(
-                    ix,
                     self.state.clone(),
                     links,
                     highlights,
@@ -1768,7 +1761,7 @@ impl Paragraph {
         }
 
         div()
-            .id(span.unwrap_or_default())
+            .id(leaf_element_id(fade_key))
             .children(child_nodes)
             .into_any_element()
     }
@@ -1930,6 +1923,22 @@ impl Paragraph {
 
         items
     }
+}
+
+/// The element id of a block that needs one, from `kind` and the block's
+/// source start, which is unique across a parsed Markdown document. The HTML
+/// parser records no spans, so its blocks fall back to their index among
+/// their siblings: unique among them, though not across nesting levels.
+fn block_element_id(kind: &'static str, span: Option<Span>, ix: usize) -> ElementId {
+    (kind, span.map_or(ix, |span| span.start)).into()
+}
+
+/// The element id of a paragraph that needs one: an inline flow, whose
+/// objects are accessibility nodes, or an image, whose element state is its
+/// animation. The leaf key is unique per paragraph in a parsed Markdown
+/// document; the HTML parser records no spans, so its paragraphs share one.
+fn leaf_element_id(fade_key: Option<TextLeafKey>) -> ElementId {
+    fade_key.map_or_else(|| ElementId::from("p"), ElementId::from)
 }
 
 /// The fade ranges overlapping `start..end`, rebased to start at `start`.
@@ -2273,7 +2282,6 @@ impl BlockNode {
                 checked,
                 ..
             } => v_flex()
-                .id(("li", options.ix))
                 .w_full()
                 .min_w_0()
                 .when(*spread, |this| this.child(div()))
@@ -2486,22 +2494,12 @@ impl BlockNode {
         };
         let min_total_w: f32 = col_min_w.iter().sum::<f32>() + TABLE_BORDER_PX;
 
-        let table_scroll_key = if let Some(span) = table.span {
-            SharedString::from(format!(
-                "{}-table-scroll-{}:{}",
-                window.current_view(),
-                span.start,
-                span.end
-            ))
-        } else {
-            SharedString::from(format!(
-                "{}-table-scroll-{}",
-                window.current_view(),
-                options.ix
-            ))
-        };
         let scroll_handle = window
-            .use_keyed_state(table_scroll_key, cx, |_, _| ScrollHandle::default())
+            .use_keyed_state(
+                block_element_id("table-scroll", table.span, options.ix),
+                cx,
+                |_, _| ScrollHandle::default(),
+            )
             .read(cx)
             .clone();
         let row_count = table.children.len();
@@ -2520,7 +2518,6 @@ impl BlockNode {
                 let min_width = col_min_w.get(ix).copied().unwrap_or(CELL_MIN_PX);
                 cells.push(
                     div()
-                        .id(("cell", ix))
                         // Measured max-content width is the flex-basis;
                         // `flex_grow` (proportional to it) distributes extra
                         // space so a narrow table still fills the frame, while
@@ -2545,7 +2542,6 @@ impl BlockNode {
             }
             rows.push(
                 div()
-                    .id("row")
                     .w_full()
                     .when(row_ix < row_count - 1, |this| this.border_b_1())
                     .border_color(style.border())
@@ -2577,7 +2573,7 @@ impl BlockNode {
                 // is consumed before an ancestor scroller (`gpui::list` under
                 // `TextView::scrollable`) can take its vertical component.
                 horizontal_scroll_area(
-                    ("table", options.ix),
+                    block_element_id("table", table.span, options.ix),
                     &scroll_handle,
                     &StyleRefinement::default()
                         .bg(cx.theme().tokens.colors.surface)
@@ -2599,11 +2595,10 @@ impl BlockNode {
             // id scopes the caller's element ids per table, so plain ids like
             // `"copy"` don't collide across tables (same as code blocks).
             .children(node_cx.table_actions.clone().map(|f| {
-                div().id(("table-actions", options.ix)).mt_1().child(f(
-                    &table.table_data(),
-                    window,
-                    cx,
-                ))
+                div()
+                    .id(block_element_id("table-actions", table.span, options.ix))
+                    .mt_1()
+                    .child(f(&table.table_data(), window, cx))
             }))
             .into_any_element()
     }
@@ -2641,7 +2636,6 @@ impl BlockNode {
 
                 cells.push(
                     div()
-                        .id(("cell", ix))
                         .overflow_hidden()
                         .when(align == ColumnumnAlign::Center, |this| this.text_center())
                         .when(align == ColumnumnAlign::Right, |this| this.text_right())
@@ -2659,7 +2653,6 @@ impl BlockNode {
 
             rows.push(
                 div()
-                    .id("row")
                     .w_full()
                     .when(row_ix < row_count - 1, |this| this.border_b_1())
                     .border_color(style.border())
@@ -2682,7 +2675,6 @@ impl BlockNode {
             .w_full()
             .child(
                 div()
-                    .id(("table", options.ix))
                     .w_full()
                     .bg(cx.theme().tokens.colors.surface)
                     .border_1()
@@ -2698,11 +2690,10 @@ impl BlockNode {
             // id scopes the caller's element ids per table, so plain ids like
             // `"copy"` don't collide across tables (same as code blocks).
             .children(node_cx.table_actions.clone().map(|f| {
-                div().id(("table-actions", options.ix)).mt_1().child(f(
-                    &table.table_data(),
-                    window,
-                    cx,
-                ))
+                div()
+                    .id(block_element_id("table-actions", table.span, options.ix))
+                    .mt_1()
+                    .child(f(&table.table_data(), window, cx))
             }))
             .into_any_element()
     }
@@ -2714,7 +2705,6 @@ impl BlockNode {
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
-        let ix = options.ix;
         let mb = if options.in_list || options.is_last {
             rems(0.)
         } else {
@@ -2723,13 +2713,11 @@ impl BlockNode {
 
         match self {
             BlockNode::Root { children, .. } => div()
-                .id(("div", ix))
                 .children(children.into_iter().enumerate().map(move |(ix, node)| {
                     node.render_block(NodeRenderOptions { ix, ..options }, node_cx, window, cx)
                 }))
                 .into_any_element(),
             BlockNode::Paragraph(paragraph) => div()
-                .id(("p", ix))
                 .pb(mb)
                 .child(paragraph.render(
                     paragraph.span.map(|span| TextLeafKey::block(span.start)),
@@ -2759,7 +2747,6 @@ impl BlockNode {
                 }
 
                 div()
-                    .id(SharedString::from(format!("h{}-{}", level, ix)))
                     .pb(rems(0.3))
                     .whitespace_normal()
                     .text_size(text_size)
@@ -2777,7 +2764,6 @@ impl BlockNode {
                 .pb(mb)
                 .child(
                     div()
-                        .id(("blockquote", ix))
                         .w_full()
                         .text_color(node_cx.style.muted_foreground())
                         .border_l_3()
@@ -2795,7 +2781,6 @@ impl BlockNode {
             BlockNode::List {
                 children, ordered, ..
             } => v_flex()
-                .id((if *ordered { "ol" } else { "ul" }, ix))
                 .w_full()
                 .min_w_0()
                 .pb(mb)
@@ -2839,14 +2824,9 @@ impl BlockNode {
             }
             BlockNode::HorizontalRule { .. } => div()
                 .pb(mb)
-                .child(
-                    div()
-                        .id("horizontal-rule")
-                        .bg(node_cx.style.border())
-                        .h(px(2.)),
-                )
+                .child(div().bg(node_cx.style.border()).h(px(2.)))
                 .into_any_element(),
-            BlockNode::Break { .. } => div().id("break").into_any_element(),
+            BlockNode::Break { .. } => div().into_any_element(),
             BlockNode::Unknown { .. } | BlockNode::Definition { .. } => div().into_any_element(),
             _ => {
                 if cfg!(debug_assertions) {

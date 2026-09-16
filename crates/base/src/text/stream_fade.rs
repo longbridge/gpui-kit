@@ -12,7 +12,7 @@ use std::{ops::Range, sync::Arc, time::Duration};
 #[cfg(target_family = "wasm")]
 use web_time::Instant;
 
-use gpui::SharedString;
+use gpui::{ElementId, SharedString};
 
 use super::{
     document::ParsedDocument,
@@ -88,6 +88,18 @@ impl TextViewMotion {
 pub(crate) struct TextLeafKey {
     block_start: usize,
     ordinal: usize,
+}
+
+/// The key as an element id, for a leaf that needs element state or an
+/// accessibility identity: unique per leaf, and allocation-free, as it is
+/// built every frame.
+impl From<TextLeafKey> for ElementId {
+    fn from(key: TextLeafKey) -> Self {
+        let mut bytes = [0; 20];
+        bytes[..8].copy_from_slice(&(key.block_start as u64).to_le_bytes());
+        bytes[8..16].copy_from_slice(&(key.ordinal as u64).to_le_bytes());
+        ElementId::OpaqueId(bytes)
+    }
 }
 
 impl TextLeafKey {
