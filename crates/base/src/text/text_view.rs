@@ -26,8 +26,8 @@ pub(crate) type CodeBlockHighlighterFn =
 /// presentation or syntax-highlighting overrides.
 #[derive(Clone, Default)]
 pub struct TextViewDefaults {
-    style: Option<TextViewStyle>,
-    code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
+    pub(super) style: Option<TextViewStyle>,
+    pub(super) code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
 }
 
 impl Global for TextViewDefaults {}
