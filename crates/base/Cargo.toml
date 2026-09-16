@@ -28,6 +28,7 @@ inspector = ["gpui_macros/inspector", "gpui/inspector"]
 anyhow.workspace = true
 aho-corasick = "1.1.3"
 chrono = "0.4.38"
+data-url = "0.3"
 futures = "0.3"
 gpui.workspace = true
 gpui_macros.workspace = true

@@ -115,6 +115,38 @@ opening behavior. If no handler is installed, links continue to use
 `App::open_url` as usual. The callback is used for both text links and linked
 images.
 
+## Images
+
+A Markdown `![alt](src)` or HTML `<img src>` renders through GPUI's `img`
+element, and `src` decides where the bytes come from:
+
+- `http://` and `https://` URLs are fetched with the application's HTTP client.
+- `data:` URLs are decoded in place, so a document can embed its own images
+  (`data:image/png;base64,…`, or a percent-encoded `data:image/svg+xml,…`).
+  Any image format GPUI can decode is accepted; a `data:` URL with another
+  media type is left to the loader and reports an error like any other
+  unreachable image.
+- Every other value — a relative path, `file://`, a custom scheme — is passed
+  through as a URI. `TextView` never reads the filesystem or the asset bundle
+  on a document's behalf.
+
+To resolve those other sources, or to change how any image is loaded, wrap the
+`TextView` in an element that installs a GPUI `ImageCache`. Every `img` inside
+it, including the ones the document produces, asks that cache for its
+`Resource` before falling back to the default loader:
+
+```rust
+use gpui_kit::{ImageCache, ImageCacheProvider};
+
+div()
+    .image_cache(app_image_cache.clone())
+    .child(markdown("![diagram](app://diagrams/pipeline.svg)"))
+```
+
+`ImageCache::load` receives the `Resource::Uri` and decides how to turn it into
+a `RenderImage`, so the application owns the loading policy while the document
+stays plain Markdown.
+
 ## Markdown Plugins
 
 Use `.plugin(...)` to support custom Markdown formats. A plugin owns both parsing and rendering, so callers only need to attach it to the `TextView`:

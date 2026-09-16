@@ -6,9 +6,9 @@ use unicode_segmentation::UnicodeSegmentation as _;
 
 use gpui::{
     AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, DefiniteLength, Element, ElementId,
-    GlobalElementId, InspectorElementId, InteractiveElement as _, IntoElement, LayoutId,
-    LineFragment as WrapLineFragment, ObjectFit, ParentElement as _, Pixels, Refineable as _,
-    ShapedLine, SharedString, SharedUri, Size, StatefulInteractiveElement as _, Styled,
+    GlobalElementId, ImageSource, InspectorElementId, InteractiveElement as _, IntoElement,
+    LayoutId, LineFragment as WrapLineFragment, ObjectFit, ParentElement as _, Pixels,
+    Refineable as _, ShapedLine, SharedString, Size, StatefulInteractiveElement as _, Styled,
     StyledImage as _, TextRun, TextStyle, WhiteSpace, Window, div, img, point,
     prelude::FluentBuilder as _, px, relative, size,
 };
@@ -19,7 +19,6 @@ use super::{
     inline::{Inline, InlineHighlight, InlineState, text_runs, text_size_ranges},
     inline_object::{InlineObject, MeasuredInlineObject},
     node::LinkMark,
-    utils::image_source,
 };
 
 const IMAGE_LEN: usize = 1;
@@ -52,7 +51,7 @@ pub(super) enum InlineFlowItem {
         highlights: Vec<(Range<usize>, InlineHighlight)>,
     },
     Image {
-        url: SharedUri,
+        source: ImageSource,
         link: Option<LinkMark>,
         title: String,
         width: Option<DefiniteLength>,
@@ -119,7 +118,7 @@ enum MeasureItem {
         highlights: Vec<(Range<usize>, InlineHighlight)>,
     },
     Image {
-        url: SharedUri,
+        source: ImageSource,
         width: Option<DefiniteLength>,
         height: Option<DefiniteLength>,
     },
@@ -159,13 +158,13 @@ impl InlineFlow {
 
     fn image_element(
         ix: usize,
-        url: &SharedUri,
+        source: &ImageSource,
         link: &Option<LinkMark>,
         _title: &str,
         size: Size<Pixels>,
         link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     ) -> AnyElement {
-        img(image_source(url))
+        img(source.clone())
             .id(ix)
             .object_fit(ObjectFit::Contain)
             .max_w(relative(1.))
@@ -242,9 +241,13 @@ impl Element for InlineFlow {
             .iter()
             .enumerate()
             .map(|(ix, item)| match item {
-                MeasureItem::Image { url, width, height } => Some(measure_image_size(
+                MeasureItem::Image {
+                    source,
+                    width,
+                    height,
+                } => Some(measure_image_size(
                     ix,
-                    url,
+                    source,
                     *width,
                     *height,
                     typography.line_height,
@@ -481,14 +484,17 @@ impl Element for InlineFlow {
                     size: fragment_size,
                 } => {
                     let InlineFlowItem::Image {
-                        url, link, title, ..
+                        source,
+                        link,
+                        title,
+                        ..
                     } = &self.items[item_ix]
                     else {
                         continue;
                     };
                     let mut element = Self::image_element(
                         elements.len(),
-                        url,
+                        source,
                         link,
                         title.as_str(),
                         fragment_size,
@@ -569,9 +575,12 @@ impl From<&InlineFlowItem> for MeasureItem {
                 highlights: highlights.clone(),
             },
             InlineFlowItem::Image {
-                url, width, height, ..
+                source,
+                width,
+                height,
+                ..
             } => MeasureItem::Image {
-                url: url.clone(),
+                source: source.clone(),
                 width: *width,
                 height: *height,
             },
@@ -601,9 +610,13 @@ pub(super) fn intrinsic_width(
         .iter()
         .enumerate()
         .map(|(ix, item)| match item {
-            MeasureItem::Image { url, width, height } => Some(measure_image_size(
+            MeasureItem::Image {
+                source,
+                width,
+                height,
+            } => Some(measure_image_size(
                 ix,
-                url,
+                source,
                 *width,
                 *height,
                 line_height,
@@ -1049,7 +1062,7 @@ fn push_text_wrap_fragments<'a>(
 #[allow(clippy::too_many_arguments)]
 fn measure_image_size(
     ix: usize,
-    url: &SharedUri,
+    source: &ImageSource,
     width: Option<DefiniteLength>,
     height: Option<DefiniteLength>,
     line_height: Pixels,
@@ -1060,20 +1073,20 @@ fn measure_image_size(
     let intrinsic_size = if width.is_some() && height.is_some() {
         None
     } else {
-        intrinsic_image_size(ix, url, width, height, window, cx)
+        intrinsic_image_size(ix, source, width, height, window, cx)
     };
     image_size(width, height, intrinsic_size, line_height, rem_size)
 }
 
 fn intrinsic_image_size(
     ix: usize,
-    url: &SharedUri,
+    source: &ImageSource,
     width: Option<DefiniteLength>,
     height: Option<DefiniteLength>,
     window: &mut Window,
     cx: &mut App,
 ) -> Option<Size<Pixels>> {
-    let mut element = img(image_source(url))
+    let mut element = img(source.clone())
         .id(ix)
         .object_fit(ObjectFit::Contain)
         .max_w(relative(1.))
@@ -1185,6 +1198,7 @@ pub(super) fn slice_ranges<T, U>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::SharedUri;
 
     #[test]
     fn atomic_objects_wrap_and_share_a_baseline_at_multiple_font_sizes() {
@@ -1310,7 +1324,7 @@ mod tests {
                 highlights: vec![],
             },
             MeasureItem::Image {
-                url: SharedUri::from("https://example.com/badge.png"),
+                source: SharedUri::from("https://example.com/badge.png").into(),
                 width: None,
                 height: None,
             },
@@ -1402,7 +1416,7 @@ mod tests {
         ] {
             let items = vec![
                 MeasureItem::Image {
-                    url: "https://example.com/icon.png".into(),
+                    source: SharedUri::from("https://example.com/icon.png").into(),
                     width: None,
                     height: None,
                 },

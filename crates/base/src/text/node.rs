@@ -1,15 +1,15 @@
 use std::{
     collections::HashMap,
     ops::Range,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use gpui::{
     AnyElement, App, DefiniteLength, Div, ElementId, FontStyle, FontWeight, HighlightStyle, Hsla,
-    Image, ImageFormat, InteractiveElement as _, IntoElement, Length, ObjectFit, Overflow,
-    ParentElement, Pixels, ScrollHandle, SharedString, SharedUri, StatefulInteractiveElement,
-    StyleRefinement, Styled, StyledImage as _, WhiteSpace, Window, div, img,
-    prelude::FluentBuilder as _, px, relative, rems,
+    Image, ImageFormat, ImageSource, InteractiveElement as _, IntoElement, Length, ObjectFit,
+    Overflow, ParentElement, Pixels, ScrollHandle, SharedString, SharedUri,
+    StatefulInteractiveElement, StyleRefinement, Styled, StyledImage as _, WhiteSpace, Window, div,
+    img, prelude::FluentBuilder as _, px, relative, rems,
 };
 use markdown::mdast;
 
@@ -32,7 +32,7 @@ use crate::{
 
 use super::{
     SelectionFormat, TextViewStyle,
-    utils::{image_source, list_item_prefix},
+    utils::{data_url_image, list_item_prefix},
 };
 
 const CHECK_SVG_LIGHT: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none"><path d="m3.25 8.25 3 3 6.5-7" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"#;
@@ -446,7 +446,7 @@ impl From<Span> for ElementId {
 }
 
 #[allow(unused)]
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct ImageNode {
     pub url: SharedUri,
     pub link: Option<LinkMark>,
@@ -454,6 +454,9 @@ pub struct ImageNode {
     pub alt: Option<SharedString>,
     pub width: Option<DefiniteLength>,
     pub height: Option<DefiniteLength>,
+    /// The image a `data:` URL carries, decoded on first render and kept for
+    /// the node's lifetime so it is not decoded again every frame.
+    pub(super) embedded: OnceLock<Option<Arc<Image>>>,
 }
 
 impl ImageNode {
@@ -462,6 +465,33 @@ impl ImageNode {
             .clone()
             .unwrap_or_else(|| self.alt.clone().unwrap_or_default())
             .to_string()
+    }
+
+    /// The [`ImageSource`] to render, without granting implicit filesystem
+    /// access.
+    ///
+    /// A `data:` URL carries its image inline, so it is decoded here rather
+    /// than handed to GPUI's resource loader, which only fetches over HTTP.
+    /// Every other document-provided value remains URI-backed, including
+    /// `file://` and scheme-less strings.
+    pub(super) fn source(&self) -> ImageSource {
+        match self.embedded.get_or_init(|| data_url_image(&self.url)) {
+            Some(image) => ImageSource::Image(image.clone()),
+            None => self.url.clone().into(),
+        }
+    }
+}
+
+impl std::fmt::Debug for ImageNode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImageNode")
+            .field("url", &self.url)
+            .field("link", &self.link)
+            .field("title", &self.title)
+            .field("alt", &self.alt)
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish()
     }
 }
 
@@ -1611,7 +1641,7 @@ impl Paragraph {
                 }
                 let link_click_handler = node_cx.link_click_handler.clone();
                 child_nodes.push(
-                    img(image_source(&image.url))
+                    img(image.source())
                         .id(ix)
                         .object_fit(ObjectFit::Contain)
                         .max_w(relative(1.))
@@ -1789,7 +1819,7 @@ impl Paragraph {
                 }
 
                 items.push(InlineFlowItem::Image {
-                    url: image.url.clone(),
+                    source: image.source(),
                     link: image.link.clone(),
                     title: image.title(),
                     width: image.width,
@@ -3417,6 +3447,51 @@ mod tests {
 
         // No rows at all (a table still streaming in): an empty snapshot.
         assert_eq!(Table::default().table_data(), TableData::default());
+    }
+
+    #[test]
+    fn test_image_node_source() {
+        use gpui::{ImageFormat, ImageSource, Resource};
+
+        fn image_node(url: &str) -> ImageNode {
+            ImageNode {
+                url: url.into(),
+                ..Default::default()
+            }
+        }
+
+        // Document-provided values stay URI-backed, including `file://` and
+        // scheme-less strings, so the document never gets implicit
+        // filesystem access through `Resource::Embedded`.
+        fn assert_uri(url: &str) {
+            match image_node(url).source() {
+                ImageSource::Resource(Resource::Uri(uri)) => assert_eq!(uri.as_ref(), url),
+                _ => panic!("expected Uri for {url:?}"),
+            }
+        }
+        assert_uri("https://example.com/logo.png");
+        assert_uri("http://example.com/logo.png");
+        assert_uri("website/public/logo.svg");
+        assert_uri("./images/a.png");
+        assert_uri("../images/a.png");
+        assert_uri("/absolute/path/logo.svg");
+        assert_uri("file:///absolute/path/logo.svg");
+        assert_uri(r"C:\images\logo.png");
+        assert_uri("docs/a:b.png");
+        assert_uri("data:text/plain;base64,aGVsbG8=");
+
+        // A `data:` image is decoded once and the same decoded image is
+        // handed to every render.
+        let node = image_node("data:image/png;base64,iVBORw0KGgo=");
+        let ImageSource::Image(first) = node.source() else {
+            panic!("expected an embedded image");
+        };
+        assert_eq!(first.format(), ImageFormat::Png);
+        assert_eq!(first.bytes(), b"\x89PNG\r\n\x1a\n");
+        let ImageSource::Image(second) = node.source() else {
+            panic!("expected an embedded image");
+        };
+        assert!(Arc::ptr_eq(&first, &second));
     }
 
     fn image_paragraph(alt: &str, url: &str) -> Paragraph {

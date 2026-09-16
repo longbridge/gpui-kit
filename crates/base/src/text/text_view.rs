@@ -1328,6 +1328,37 @@ mod tests {
     }
 
     #[gpui::test]
+    fn markdown_data_url_image_is_decoded_inline(cx: &mut TestAppContext) {
+        use gpui::{Image, ImageFormat, ImageSource};
+
+        // A 1x1 red PNG.
+        const PNG_BASE64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+
+        cx.update(crate::init);
+        let markdown = format!("Inline ![dot](data:image/png;base64,{PNG_BASE64}) image");
+        let (_, cx) = cx.add_window_view(|_, cx| TextViewTestRoot::new(&markdown, cx));
+        let cx: &mut VisualTestContext = cx;
+
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        // `Image` keys the asset system by a hash of its bytes, so rebuilding it
+        // from the same body finds the entry the text view's `img` registered
+        // when it rendered — proof the body was decoded in place instead of
+        // being fetched over HTTP.
+        let bytes = data_url::DataUrl::process(&format!("data:image/png;base64,{PNG_BASE64}"))
+            .unwrap()
+            .decode_to_vec()
+            .unwrap()
+            .0;
+        let image = Arc::new(Image::from_bytes(ImageFormat::Png, bytes));
+        assert!(
+            cx.update(|_, cx| ImageSource::Image(image).is_asset_cached(cx)),
+            "the data URL image must be handed to GPUI as decoded bytes",
+        );
+    }
+
+    #[gpui::test]
     fn unstyled_text_view_uses_base_tokens_for_link_and_input_selection(cx: &mut TestAppContext) {
         cx.update(crate::init);
         cx.update(|cx| {
