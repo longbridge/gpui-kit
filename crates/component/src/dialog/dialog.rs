@@ -2,9 +2,9 @@ use gpui_base::TestSupportExt as _;
 use std::{rc::Rc, sync::LazyLock, time::Duration};
 
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, BoxShadow, ClickEvent, Edges, FocusHandle, Hsla,
-    InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString,
-    StyleRefinement, Styled, Window, WindowControlArea, anchored, div, hsla, point,
+    Action, Animation, AnimationExt as _, AnyElement, App, BoxShadow, ClickEvent, Edges,
+    FocusHandle, Hsla, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce,
+    SharedString, StyleRefinement, Styled, Window, WindowControlArea, anchored, div, hsla, point,
     prelude::FluentBuilder, px,
 };
 use gpui_base::{ElementExt as _, TextSelectionScopeId};
@@ -14,7 +14,7 @@ use crate::{
     ActiveTheme as _, IconName, Root, Sizable as _, StyledExt, TITLE_BAR_HEIGHT, WindowExt as _,
     animation::cubic_bezier,
     button::{Button, ButtonVariant, ButtonVariants as _},
-    dialog::{DialogContent, DialogTitle},
+    dialog::{DialogContent, DialogDispatchAnchor, DialogTitle},
     scroll::ScrollableElement as _,
     v_flex,
 };
@@ -108,19 +108,15 @@ impl DialogButtonProps {
             .ok_text
             .clone()
             .unwrap_or_else(|| t!("Dialog.ok").into());
-        let ok_variant = self.ok_variant;
 
-        Button::new("ok")
-            .label(ok_text)
-            .with_variant(ok_variant)
-            .on_click(|_, window, cx| {
-                crate::Root::dispatch_to_topmost_dialog(
-                    Box::new(Confirm { secondary: false }),
-                    window,
-                    cx,
-                )
-            })
-            .into_any_element()
+        DialogButton {
+            anchor_key: "dialog-ok-anchor",
+            button: Button::new("ok")
+                .label(ok_text)
+                .with_variant(self.ok_variant),
+            action: Rc::new(Confirm { secondary: false }),
+        }
+        .into_any_element()
     }
 
     pub(crate) fn render_cancel(&self, _: &mut Window, _: &mut App) -> AnyElement {
@@ -128,15 +124,34 @@ impl DialogButtonProps {
             .cancel_text
             .clone()
             .unwrap_or_else(|| t!("Dialog.cancel").into());
-        let cancel_variant = self.cancel_variant;
 
-        Button::new("cancel")
-            .label(cancel_text)
-            .with_variant(cancel_variant)
-            .on_click(|_, window, cx| {
-                crate::Root::dispatch_to_topmost_dialog(Box::new(Cancel), window, cx)
-            })
-            .into_any_element()
+        DialogButton {
+            anchor_key: "dialog-cancel-anchor",
+            button: Button::new("cancel")
+                .label(cancel_text)
+                .with_variant(self.cancel_variant),
+            action: Rc::new(Cancel),
+        }
+        .into_any_element()
+    }
+}
+
+/// A default dialog button: activating it dispatches `action` on the dialog
+/// it sits in, whatever holds focus at that moment.
+#[derive(IntoElement)]
+struct DialogButton {
+    /// Distinct per button: OK and Cancel render as siblings in one scope.
+    anchor_key: &'static str,
+    button: Button,
+    action: Rc<dyn Action>,
+}
+
+impl RenderOnce for DialogButton {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let anchor = DialogDispatchAnchor::new(self.anchor_key, window, cx);
+        self.button
+            .child(anchor.element())
+            .on_click(move |_, window, cx| anchor.dispatch(&*self.action, window, cx))
     }
 }
 
@@ -656,7 +671,6 @@ impl RenderOnce for Dialog {
                                         let right = (paddings.right - px(10.)).max(px(8.));
 
                                         gpui_base::DialogClose::new()
-                                            .focus(Some(self.focus_handle.clone()))
                                             .absolute()
                                             .top(top)
                                             .right(right)

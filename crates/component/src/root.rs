@@ -238,33 +238,6 @@ impl Root {
         None
     }
 
-    /// Dispatch an action on the topmost dialog's own focus node.
-    ///
-    /// A dialog button knows which dialog it belongs to, but
-    /// [`Window::dispatch_action`] routes by whatever holds focus at that
-    /// moment. A surface that keeps grabbing focus back (a native web view, a
-    /// floating always-on-top window) therefore leaves the buttons inert.
-    pub fn dispatch_to_topmost_dialog(
-        action: Box<dyn gpui::Action>,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        match Self::topmost_dialog_focus(window, cx) {
-            Some(handle) => handle.dispatch_action(action.as_ref(), window, cx),
-            None => window.dispatch_action(action, cx),
-        }
-    }
-
-    /// The focus handle of the dialog currently on top, if any.
-    pub fn topmost_dialog_focus(window: &mut Window, cx: &App) -> Option<gpui::FocusHandle> {
-        window.root::<Root>().flatten().and_then(|root| {
-            root.read(cx)
-                .active_dialogs
-                .last()
-                .map(|d| d.focus_handle.clone())
-        })
-    }
-
     /// Render the Dialog layer.
     pub fn render_dialog_layer(
         window: &mut Window,

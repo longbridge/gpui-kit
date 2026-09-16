@@ -3,7 +3,12 @@ use gpui::{
     StatefulInteractiveElement, StyleRefinement, Styled, Window, div, relative,
 };
 
-use crate::{ActiveTheme as _, StyledExt as _, button::Button, dialog::Confirm, h_flex};
+use crate::{
+    ActiveTheme as _, StyledExt as _,
+    button::Button,
+    dialog::{Confirm, DialogDispatchAnchor},
+    h_flex,
+};
 
 /// Footer section of a dialog, typically contains action buttons.
 ///
@@ -90,9 +95,8 @@ impl ParentElement for DialogClose {
 }
 
 impl RenderOnce for DialogClose {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let focus = crate::Root::topmost_dialog_focus(window, cx);
-        div().size_full().child(self.base.focus(focus))
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        div().size_full().child(self.base)
     }
 }
 
@@ -116,16 +120,14 @@ impl ParentElement for DialogAction {
 }
 
 impl RenderOnce for DialogAction {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let anchor = DialogDispatchAnchor::new("dialog-action-anchor", window, cx);
         div()
             .size_full()
             .id("dialog-action")
+            .child(anchor.element())
             .on_click(move |_, window, cx| {
-                crate::Root::dispatch_to_topmost_dialog(
-                    Box::new(Confirm { secondary: false }),
-                    window,
-                    cx,
-                )
+                anchor.dispatch(&Confirm { secondary: false }, window, cx)
             })
             .children(self.children)
     }
