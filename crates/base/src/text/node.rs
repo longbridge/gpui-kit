@@ -29,7 +29,6 @@ use crate::{
         text_view::handle_link_click,
     },
     theme::ActiveTheme as _,
-    v_flex,
 };
 
 use super::{
@@ -2243,7 +2242,6 @@ impl BlockNode {
     ) -> Div {
         h_flex()
             .w_full()
-            .flex_1()
             .min_w_0()
             .relative()
             .items_start()
@@ -2303,7 +2301,7 @@ impl BlockNode {
                 spread,
                 checked,
                 ..
-            } => v_flex()
+            } => div()
                 .w_full()
                 .min_w_0()
                 .when(*spread, |this| this.child(div()))
@@ -2334,7 +2332,7 @@ impl BlockNode {
                                 if last_not_list {
                                     if let Some(preceding_row) = items.pop() {
                                         items.push(
-                                            v_flex().child(preceding_row).child(
+                                            div().child(preceding_row).child(
                                                 div()
                                                     .w_full()
                                                     .pl(rems(1.))
@@ -2800,7 +2798,7 @@ impl BlockNode {
             ),
             BlockNode::List {
                 children, ordered, ..
-            } => v_flex()
+            } => div()
                 .w_full()
                 .min_w_0()
                 .pb(mb)
