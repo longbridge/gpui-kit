@@ -15,8 +15,8 @@ use gpui::{
     Styled as _, Window, WindowOptions, div, prelude::FluentBuilder as _, px,
 };
 use gpui_base::{
-    Button, Easing, IterationCount, Keyframe, Keyframes, Presence, Spring, Stagger, StaggerOrigin,
-    Timing, Transition, animate_keyframes, spring, transition,
+    Button, Easing, IterationCount, Keyframe, Keyframes, MotionStatus, Presence, Sequence, Spring,
+    Stagger, StaggerOrigin, Timing, Transition, animate_keyframes, spring, transition,
 };
 use palette::{activate as activate_palette, canvas as example_canvas, example_rgb};
 #[cfg(target_family = "wasm")]
@@ -33,15 +33,17 @@ enum Demo {
     Keyframes,
     Presence,
     Stagger,
+    Sequence,
 }
 
 impl Demo {
-    const ALL: [Self; 5] = [
+    const ALL: [Self; 6] = [
         Self::SlidingTime,
         Self::Spring,
         Self::Keyframes,
         Self::Stagger,
         Self::Presence,
+        Self::Sequence,
     ];
 
     fn label(self) -> &'static str {
@@ -51,6 +53,7 @@ impl Demo {
             Self::Keyframes => "Keyframes",
             Self::Presence => "Presence",
             Self::Stagger => "Stagger",
+            Self::Sequence => "Sequence",
         }
     }
 
@@ -63,6 +66,7 @@ impl Demo {
             Self::Keyframes => "Seven values follow one keyframe track with offset timing.",
             Self::Presence => "A surface stays mounted until its exit transition completes.",
             Self::Stagger => "List rows enter in order from one allocation-free delay policy.",
+            Self::Sequence => "Three steps play in turn: slide in, fill, then rest and fade out.",
         }
     }
 }
@@ -75,6 +79,7 @@ pub struct MotionExample {
     spring_selected: bool,
     present: bool,
     stagger_generation: usize,
+    sequence_generation: usize,
 }
 
 impl MotionExample {
@@ -87,6 +92,7 @@ impl MotionExample {
             spring_selected: false,
             present: true,
             stagger_generation: 0,
+            sequence_generation: 0,
         }
     }
 
@@ -444,6 +450,119 @@ impl MotionExample {
     }
 }
 
+impl MotionExample {
+    /// One `Sequence<f32>` runs 0 → 1 → 2 → 3 with a different transition per
+    /// step, and the demo reads each property off the segment the value is in:
+    /// step 0 slides the card in, step 1 fills its bar, step 2 rests and fades.
+    fn sequence_demo(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        const STEPS: [&str; 3] = ["Slide in", "Fill", "Rest, then fade out"];
+        let sample = Sequence::new(format!("sequence-card-{}", self.sequence_generation), 0.)
+            .with_step(
+                1.,
+                Transition::new(Duration::from_millis(360)).easing(Easing::EaseOut),
+            )
+            .with_step(
+                2.,
+                Transition::new(Duration::from_millis(900)).easing(Easing::EaseInOut),
+            )
+            .with_step(
+                3.,
+                Transition::new(Duration::from_millis(420))
+                    .delay(Duration::from_millis(600))
+                    .easing(Easing::EaseIn),
+            )
+            .sample(window, cx);
+        let value = *sample.value();
+        let slide = value.min(1.);
+        let fill = (value - 1.).clamp(0., 1.);
+        let fade = (value - 2.).clamp(0., 1.);
+        let status = match sample.status() {
+            MotionStatus::Idle => "idle",
+            MotionStatus::Delayed => "delayed",
+            MotionStatus::Running => "running",
+            MotionStatus::Finished => "finished",
+        };
+        let entity = cx.entity().downgrade();
+        div()
+            .w(px(380.))
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(
+                div().h(px(96.)).flex().items_center().child(
+                    div()
+                        .w_full()
+                        .ml(px((1. - slide) * 48.))
+                        .opacity(slide * (1. - fade))
+                        .p_3()
+                        .border_1()
+                        .border_color(example_rgb(0xd4d4d4))
+                        .bg(example_rgb(0xffffff))
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .justify_between()
+                                .child(
+                                    div()
+                                        .text_sm()
+                                        .font_weight(gpui::FontWeight::MEDIUM)
+                                        .child("Uploading report.pdf"),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(example_rgb(0x737373))
+                                        .child(format!("{}%", (fill * 100.).round())),
+                                ),
+                        )
+                        .child(
+                            div().h(px(6.)).w_full().bg(example_rgb(0xe5e5e5)).child(
+                                div()
+                                    .h_full()
+                                    .w(gpui::relative(fill))
+                                    .bg(example_rgb(0x171717)),
+                            ),
+                        ),
+                ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(example_rgb(0x737373))
+                            .child(format!(
+                                "step {} of {} · {} · {status}",
+                                sample.step() + 1,
+                                STEPS.len(),
+                                STEPS[sample.step()],
+                            )),
+                    )
+                    .child(
+                        Button::new("replay-sequence")
+                            .h_9()
+                            .px_3()
+                            .border_1()
+                            .border_color(example_rgb(0xd4d4d4))
+                            .child("Replay")
+                            .on_click(move |_, _, cx| {
+                                _ = entity.update(cx, |this, cx| {
+                                    this.sequence_generation += 1;
+                                    cx.notify();
+                                });
+                            }),
+                    ),
+            )
+    }
+}
+
 impl Render for MotionExample {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         activate_palette(window, cx);
@@ -454,6 +573,7 @@ impl Render for MotionExample {
             Demo::Keyframes => self.keyframes_demo(window, cx).into_any_element(),
             Demo::Presence => self.presence_demo(window, cx).into_any_element(),
             Demo::Stagger => self.stagger_demo(window, cx).into_any_element(),
+            Demo::Sequence => self.sequence_demo(window, cx).into_any_element(),
         };
         div()
             .size_full()

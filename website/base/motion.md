@@ -27,8 +27,9 @@ The example contains five separate demos. Use the tabs at the top to inspect one
 | Keyframes | `Keyframes`, `Timing`, `animate_keyframes` | A repeating multi-stop activity signal |
 | Stagger | `Stagger` | Allocation-free timing offsets across a list |
 | Presence | `Presence` | Exit animation that keeps content mounted until it becomes absent |
+| Sequence | `Sequence` | Three chained steps — slide in, fill, rest then fade — each starting when the last one ends |
 
-The library also exposes `Sequence`, `Easing`, `Discrete`, `MotionTransform`, and `MotionReveal`. They compose with the same primitives rather than requiring separate animation runtimes.
+The library also exposes `Easing`, `Discrete`, `MotionTransform`, and `MotionReveal`. They compose with the same primitives rather than requiring separate animation runtimes.
 
 ## Target transitions
 

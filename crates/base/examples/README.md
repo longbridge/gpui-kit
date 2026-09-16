@@ -18,7 +18,7 @@ Run without a component slug to show the overview:
 cargo run -p gpui-base-examples
 ```
 
-Motion has a separate example because it demonstrates continuous behavior rather than a component catalog entry. It contains focused pages for transitions, springs, keyframes, presence, and stagger:
+Motion has a separate example because it demonstrates continuous behavior rather than a component catalog entry. It contains focused pages for transitions, springs, keyframes, presence, stagger, and sequences:
 
 ```bash
 cargo run -p gpui-base-examples --bin motion

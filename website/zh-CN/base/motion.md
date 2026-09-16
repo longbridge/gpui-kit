@@ -27,8 +27,9 @@ cargo run -p gpui-base-examples --bin motion
 | Keyframes | `Keyframes`、`Timing`、`animate_keyframes` | 持续循环的多段活动信号 |
 | Stagger | `Stagger` | 无分配地为列表计算错峰时间 |
 | Presence | `Presence` | 退出动画完成前继续挂载内容 |
+| Sequence | `Sequence` | 三个串联步骤——滑入、填满、停留后淡出——每一步在前一步结束时开始 |
 
-此外还提供 `Sequence`、`Easing`、`Discrete`、`MotionTransform` 和 `MotionReveal`，它们与同一套 primitive 组合，不需要额外动画 runtime。
+此外还提供 `Easing`、`Discrete`、`MotionTransform` 和 `MotionReveal`，它们与同一套 primitive 组合，不需要额外动画 runtime。
 
 ## Transition
 
