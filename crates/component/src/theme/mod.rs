@@ -74,11 +74,16 @@ const SCROLLBAR_EXPAND: Duration = Duration::from_millis(300);
 /// those platforms draw. Hover and drag keep Base's desktop widths, so a
 /// grabbed thumb still grows under the finger.
 const MOBILE_SCROLLBAR_THUMB_WIDTH: Pixels = px(3.);
+/// How far the resting thumb sits from the edge on iOS and Android. Base's
+/// desktop inset leaves a 3px thumb floating too far from the edge.
+const MOBILE_SCROLLBAR_THUMB_INSET: Pixels = px(2.);
 /// Base's resting thumb width, restated so the hovered thumb keeps it when
 /// the mobile resting width would otherwise cascade into it.
 const SCROLLBAR_THUMB_HOVER_WIDTH: Pixels = px(6.);
 /// Base's dragged thumb width, restated for the same reason.
 const SCROLLBAR_THUMB_ACTIVE_WIDTH: Pixels = px(8.);
+/// Base's hovered and dragged thumb inset, restated for the same reason.
+const SCROLLBAR_THUMB_INSET: Pixels = px(4.);
 
 /// The scrollbar motion this design system projects onto Base.
 ///
@@ -309,6 +314,7 @@ impl Theme {
                                 .when(gpui_base::is_mobile(), |style| {
                                     style
                                         .width(MOBILE_SCROLLBAR_THUMB_WIDTH)
+                                        .inset(MOBILE_SCROLLBAR_THUMB_INSET)
                                         .radius(RADIUS_FULL)
                                 })
                         })
@@ -317,7 +323,9 @@ impl Theme {
                                 .bg(self.tokens.scrollbar_thumb_hover)
                                 .radius(self.radius)
                                 .when(gpui_base::is_mobile(), |style| {
-                                    style.width(SCROLLBAR_THUMB_HOVER_WIDTH)
+                                    style
+                                        .width(SCROLLBAR_THUMB_HOVER_WIDTH)
+                                        .inset(SCROLLBAR_THUMB_INSET)
                                 })
                         })
                         .thumb_active(|style| {
@@ -325,7 +333,9 @@ impl Theme {
                                 .bg(self.tokens.scrollbar_thumb_hover)
                                 .radius(self.radius)
                                 .when(gpui_base::is_mobile(), |style| {
-                                    style.width(SCROLLBAR_THUMB_ACTIVE_WIDTH)
+                                    style
+                                        .width(SCROLLBAR_THUMB_ACTIVE_WIDTH)
+                                        .inset(SCROLLBAR_THUMB_INSET)
                                 })
                         }),
                 ),
