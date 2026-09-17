@@ -3,10 +3,9 @@ use std::sync::Arc;
 use gpui_component::{
     Disableable as _, FocusableExt as _, Sizable as _, Size,
     button::{ButtonVariant, ButtonVariants as _},
-    input::{InputState, TextareaState},
-    input_group::{
+    input::{
         InputGroup, InputGroupAddon, InputGroupAddonAlignment, InputGroupButton, InputGroupInput,
-        InputGroupText, InputGroupTextarea,
+        InputGroupText, InputGroupTextarea, InputState, TextareaState,
     },
 };
 use gpui_shell::{

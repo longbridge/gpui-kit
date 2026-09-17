@@ -27,10 +27,9 @@ use gpui_kit::{
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     Disableable as _, Icon,
-    input::{InputEvent, InputState},
-    input_group::{
-        InputGroup, InputGroupAddon, InputGroupAddonAlignment,
-        InputGroupButton, InputGroupInput, InputGroupText,
+    input::{
+        InputEvent, InputGroup, InputGroupAddon, InputGroupAddonAlignment,
+        InputGroupButton, InputGroupInput, InputGroupText, InputState,
     },
 };
 
@@ -177,10 +176,9 @@ use gpui_kit::{
 };
 use gpui_kit::component::{
     Disableable as _, button::ButtonVariants as _, v_flex,
-    input::{InputEvent, TextareaState},
-    input_group::{
-        InputGroup, InputGroupAddon, InputGroupAddonAlignment,
-        InputGroupButton, InputGroupText, InputGroupTextarea,
+    input::{
+        InputEvent, InputGroup, InputGroupAddon, InputGroupAddonAlignment,
+        InputGroupButton, InputGroupText, InputGroupTextarea, TextareaState,
     },
 };
 

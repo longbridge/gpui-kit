@@ -456,15 +456,22 @@
     },
     {
       "source": "ui",
-      "name": "input_group",
+      "name": "input",
       "classification": "component",
       "registration": {
         "status": "registered",
-        "descriptor": "InputGroup",
+        "descriptor": "Input",
         "exports": [
-          "InputGroup"
+          "Input"
         ],
         "related": [
+          {
+            "descriptor": "InputGroup",
+            "exports": [
+              "InputGroup"
+            ],
+            "role": "companion-control"
+          },
           {
             "descriptor": "InputGroupAddon",
             "exports": [
@@ -500,30 +507,6 @@
             ],
             "role": "named-slot-part"
           }
-        ],
-        "states": [
-          {
-            "export": "InputState",
-            "kind": "InputState",
-            "role": "retained-single-line-state"
-          },
-          {
-            "export": "TextareaState",
-            "kind": "TextareaState",
-            "role": "retained-multi-line-state"
-          }
-        ]
-      }
-    },
-    {
-      "source": "ui",
-      "name": "input",
-      "classification": "component",
-      "registration": {
-        "status": "registered",
-        "descriptor": "Input",
-        "exports": [
-          "Input"
         ],
         "states": [
           {

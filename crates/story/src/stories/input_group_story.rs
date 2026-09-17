@@ -3,10 +3,10 @@ use std::collections::BTreeMap;
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, Size,
     button::ButtonVariants as _,
-    input::{InputContentType, InputEvent, InputState, TextareaState},
-    input_group::{
-        InputGroup, InputGroupAddon, InputGroupAddonAlignment as Align, InputGroupButton,
-        InputGroupInput, InputGroupText, InputGroupTextarea,
+    input::{
+        InputContentType, InputEvent, InputGroup, InputGroupAddon,
+        InputGroupAddonAlignment as Align, InputGroupButton, InputGroupInput, InputGroupText,
+        InputGroupTextarea, InputState, TextareaState,
     },
     kbd::Kbd,
     spinner::Spinner,

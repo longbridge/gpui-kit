@@ -34,13 +34,15 @@ pub use gpui_base::input::{
 pub use gpui_base::input::{EditorMode, InputMode, InputModeKind, TextareaMode};
 #[doc(hidden)]
 mod editor;
-pub(crate) mod state;
+mod group;
+mod state;
 mod textarea;
 pub use editor::Editor;
 pub use gpui_base::input::{
     AutoClosingPair, BracketPair, IndentationRules, LanguageProvider, SyntaxContext,
     SyntaxContextProvider, set_language_config, set_language_provider,
 };
+pub use group::*;
 pub use input::*;
 pub use lsp_types::Position;
 pub use number_input::{NumberInput, NumberInputEvent, NumberStep, StepAction};

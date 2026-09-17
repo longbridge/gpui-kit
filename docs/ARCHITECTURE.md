@@ -340,7 +340,7 @@ gutter, and scrollbar geometry local to the editing engine.
 
 ### Input groups
 
-`gpui-component::input_group` composes one `Input` or `Textarea` with typed
+`gpui-component::input::InputGroup` composes one `Input` or `Textarea` with typed
 addons and buttons in a shared frame. It owns no editing state: the control is
 the ordinary styled `Input`, rendered without its own border, background and
 focus ring, so every capability the input gains — paste hooks, touch
