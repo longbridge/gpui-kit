@@ -16,7 +16,12 @@ class PublishedRecipes(unittest.TestCase):
         (self.root / "examples/ai_recipes").mkdir(parents=True)
         (self.root / "source.rs").write_text("fn main() {}\n")
         (self.root / "examples/ai_recipes/recipes.json").write_text(json.dumps([
-            {"id": "startup", "source": "source.rs", "documents": ["guide.md"]}
+            {
+                "id": "startup",
+                "source": "source.rs",
+                "documents": ["guide.md"],
+                "trust": "Tested consumer recipe",
+            }
         ]))
         (self.root / "guide.md").write_text("Before\n<!-- recipe:startup:start -->\n```rust\nfn main() {}\n```\n<!-- recipe:startup:end -->\nAfter\n")
 
@@ -40,8 +45,42 @@ class PublishedRecipes(unittest.TestCase):
 
     def test_empty_inventory_cannot_report_success(self):
         (self.root / "examples/ai_recipes/recipes.json").write_text("[]")
-        with self.assertRaisesRegex(ValueError, "no published fragments"):
+        with self.assertRaisesRegex(ValueError, "recipe inventory is empty"):
             fragments(self.root)
+
+    def test_invalid_trust_label_is_rejected(self):
+        self._write_inventory(trust="Contextual fragment")
+        with self.assertRaisesRegex(ValueError, "invalid trust label"):
+            fragments(self.root)
+
+    def test_duplicate_recipe_ids_are_rejected(self):
+        recipe = {
+            "id": "startup",
+            "source": "source.rs",
+            "documents": ["guide.md"],
+            "trust": "Tested consumer recipe",
+        }
+        (self.root / "examples/ai_recipes/recipes.json").write_text(json.dumps([recipe, recipe]))
+        with self.assertRaisesRegex(ValueError, "duplicate recipe id: startup"):
+            fragments(self.root)
+
+    def test_missing_recipe_destination_is_rejected(self):
+        self._write_inventory(documents=[])
+        with self.assertRaisesRegex(ValueError, "missing recipe destinations"):
+            fragments(self.root)
+        self._write_inventory(documents=["missing.md"])
+        with self.assertRaisesRegex(ValueError, "missing recipe destination: missing.md"):
+            fragments(self.root)
+
+    def _write_inventory(self, **overrides):
+        recipe = {
+            "id": "startup",
+            "source": "source.rs",
+            "documents": ["guide.md"],
+            "trust": "Tested consumer recipe",
+        }
+        recipe.update(overrides)
+        (self.root / "examples/ai_recipes/recipes.json").write_text(json.dumps([recipe]))
 
 
 if __name__ == "__main__":

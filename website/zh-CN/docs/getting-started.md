@@ -99,9 +99,9 @@ use gpui_kit::{
 };
 
 pub struct Settings {
-    pub name: Entity<InputState>,
-    pub preview: SharedString,
-    pub changes: usize,
+    name: Entity<InputState>,
+    preview: SharedString,
+    changes: usize,
     enabled: bool,
     remember: bool,
     delivery: Option<usize>,
@@ -127,6 +127,18 @@ impl Settings {
             delivery: Some(0),
             _subscriptions: vec![subscription],
         }
+    }
+
+    pub fn input(&self) -> Entity<InputState> {
+        self.name.clone()
+    }
+
+    pub fn preview(&self) -> &SharedString {
+        &self.preview
+    }
+
+    pub fn changes(&self) -> usize {
+        self.changes
     }
 }
 

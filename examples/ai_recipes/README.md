@@ -1,6 +1,6 @@
 # Executable application recipes
 
-This standalone consumer imports only `gpui-kit`. Its own workspace prevents unrelated workspace members from supplying missing features or dependencies. The settings example retains state and subscriptions, uses the shared `on_change` convention for Checkbox, Switch, and RadioGroup, separates typed Form fields from its footer, installs Root, and renders dialog, sheet, and notification layers.
+This standalone consumer imports only `gpui-kit`. Its own workspace prevents unrelated workspace members from supplying missing features or dependencies. It holds the small set of **Tested consumer recipes**: complete sources for public ownership patterns that need compilation and interaction evidence. The settings recipe retains state and subscriptions, uses the shared `on_change` convention for Checkbox, Switch, and RadioGroup, separates typed Form fields from its footer, installs Root, and renders dialog, sheet, and notification layers.
 
 From the repository root:
 
@@ -11,7 +11,16 @@ script/check-ai rust
 
 The interaction test types into the input, checks the owner receives changes, forces an unrelated redraw, and types again. It catches both dropped subscriptions and state lifetime regressions. This is a GPUI test-window check; visual layout and OS accessibility require native review.
 
-`recipes.json` maps source files to published documentation fragments. After editing and formatting the source, run `script/check-ai-recipes --sync`. CI rejects stale, missing, or duplicated fragments.
+## Maintaining recipes
+
+Documentation has two material classes:
+
+- **Tested consumer recipes** are complete sources in this workspace. Use one for a public initialization sequence, ownership boundary, extension-trait import, or lifecycle that can otherwise drift. Add its stable ID, source, destinations, and `Tested consumer recipe` trust label to `recipes.json`, then add marker-delimited Rust fences at every destination.
+- **Contextual fragments** explain one local API detail. Keep them concise and label their context when a reader could mistake them for a complete application; do not create a recipe merely to duplicate every component page.
+
+Choose a canonical recipe when consumers need to combine components, retain state, or import a trait to make a public call work. Keep the authoritative source in `src/`, compile it using only this package's `gpui-kit` dependency, and add an interaction test for behavior-bearing recipes.
+
+`recipes.json` maps canonical source files to published documentation fragments. After editing and formatting a source, run `script/check-ai-recipes --sync`. Sync replaces only Rust fenced content between matching `<!-- recipe:<id>:start -->` and `<!-- recipe:<id>:end -->` markers; it never rewrites prose outside those markers. CI rejects an empty inventory, missing or duplicated IDs/destinations, invalid trust labels, and stale fragments.
 
 ## Acceptance standards
 

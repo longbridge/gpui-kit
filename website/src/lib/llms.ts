@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { extname, join, relative } from 'node:path';
+import { extname, join, relative, resolve } from 'node:path';
 
 const SITE_TITLE = 'GPUI Kit';
 const SITE_DESCRIPTION =
@@ -11,6 +11,34 @@ interface PageEntry {
   url: string;
   body: string;
   description?: string;
+  recipes: string[];
+}
+
+interface RecipeInventoryEntry {
+  id: string;
+  documents: string[];
+  trust: string;
+}
+
+const TESTED_RECIPE_LABEL = 'Tested consumer recipe';
+
+function recipeDestinations(websiteRoot: string): Map<string, string[]> {
+  const destinations = new Map<string, string[]>();
+  try {
+    const inventory = JSON.parse(
+      readFileSync(join(websiteRoot, '..', 'examples/ai_recipes/recipes.json'), 'utf8'),
+    ) as RecipeInventoryEntry[];
+    for (const recipe of inventory) {
+      if (recipe.trust !== TESTED_RECIPE_LABEL) continue;
+      for (const document of recipe.documents) {
+        const path = resolve(websiteRoot, '..', document);
+        destinations.set(path, [...(destinations.get(path) ?? []), recipe.id]);
+      }
+    }
+  } catch {
+    // The website can still build when checked out independently of the recipes workspace.
+  }
+  return destinations;
 }
 
 function parseFrontmatterField(content: string, field: string): string | undefined {
@@ -86,7 +114,12 @@ export function expandSnippets(body: string, fileDir: string): string {
   });
 }
 
-function scanDir(dir: string, baseDir: string, urlPrefix: string): PageEntry[] {
+function scanDir(
+  dir: string,
+  baseDir: string,
+  urlPrefix: string,
+  recipePaths: Map<string, string[]>,
+): PageEntry[] {
   const results: PageEntry[] = [];
   let entries: string[];
   try {
@@ -104,7 +137,7 @@ function scanDir(dir: string, baseDir: string, urlPrefix: string): PageEntry[] {
       // `relPath` below is already relative to `baseDir`, so the prefix must
       // stay the tree's root — appending the directory here counted it twice
       // and repeated the nested directory in every URL.
-      const sub = scanDir(fullPath, baseDir, urlPrefix);
+      const sub = scanDir(fullPath, baseDir, urlPrefix, recipePaths);
       results.push(...sub);
     } else if (extname(name) === '.md') {
       let content = '';
@@ -122,7 +155,13 @@ function scanDir(dir: string, baseDir: string, urlPrefix: string): PageEntry[] {
       const body = expandSnippets(bodyWithoutFrontmatter(content), dir);
 
       try {
-        results.push({ title, url, body, description: parseFrontmatterField(content, 'description') });
+        results.push({
+          title,
+          url,
+          body,
+          description: parseFrontmatterField(content, 'description'),
+          recipes: recipePaths.get(resolve(fullPath)) ?? [],
+        });
       } catch (err) {
         console.warn(`[llms] skipping ${fullPath}:`, err);
       }
@@ -148,15 +187,21 @@ const SECTIONS = (root: string) => [
  * `llms-full.txt` is everything at once.
  */
 export function buildLlmsIndex(websiteRoot: string): string {
-  const entries = SECTIONS(websiteRoot).flatMap(({ dir, prefix }) => scanDir(dir, dir, prefix));
+  const recipePaths = recipeDestinations(websiteRoot);
+  const entries = SECTIONS(websiteRoot).flatMap(({ dir, prefix }) => scanDir(dir, dir, prefix, recipePaths));
   const lines = entries
     .sort((a, b) => a.title.localeCompare(b.title, 'en') || a.url.localeCompare(b.url))
-    .map((entry) => `- [${entry.title}](${entry.url}.md)${entry.description ? `: ${entry.description}` : ''}`);
+    .map((entry) =>
+      `- [${entry.title}](${entry.url}.md)${entry.description ? `: ${entry.description}` : ''}${
+        entry.recipes.length ? ` — ${TESTED_RECIPE_LABEL}: ${entry.recipes.join(', ')}` : ''
+      }`,
+    );
 
   return `# ${SITE_TITLE}\n\n> ${SITE_DESCRIPTION}\n\n## Table of Contents\n\n${lines.join('\n')}\n`;
 }
 
 export function buildLlmsContent(websiteRoot: string): string {
+  const recipePaths = recipeDestinations(websiteRoot);
   const sections = [
     { dir: join(websiteRoot, 'docs'), prefix: 'docs' },
     { dir: join(websiteRoot, 'component'), prefix: 'component' },
@@ -172,10 +217,13 @@ export function buildLlmsContent(websiteRoot: string): string {
 
   const pages: string[] = [];
   for (const { dir, prefix } of sections) {
-    const entries = scanDir(dir, dir, prefix);
+    const entries = scanDir(dir, dir, prefix, recipePaths);
     for (const entry of entries) {
       const body = forPlainText(withoutLeadingHeading(entry.body, entry.title), entry.url);
-      pages.push(`# ${entry.title}\n\nSource: ${entry.url}\n\n${body}`);
+      const provenance = entry.recipes.length
+        ? `\n\n${TESTED_RECIPE_LABEL}: ${entry.recipes.join(', ')}`
+        : '';
+      pages.push(`# ${entry.title}\n\nSource: ${entry.url}${provenance}\n\n${body}`);
     }
   }
 

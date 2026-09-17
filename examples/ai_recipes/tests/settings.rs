@@ -13,18 +13,18 @@ fn typing_updates_the_owner_after_unrelated_redraws(cx: &mut TestAppContext) {
     });
     let settings = settings.unwrap();
     cx.update(|window, cx| {
-        let input = settings.read(cx).name.clone();
+        let input = settings.read(cx).input();
         input.update(cx, |input, cx| input.focus(window, cx));
     });
     cx.simulate_keystrokes("a");
     settings.read_with(cx, |view, _| {
-        assert_eq!(view.preview.as_ref(), "a");
-        assert_eq!(view.changes, 1);
+        assert_eq!(view.preview().as_ref(), "a");
+        assert_eq!(view.changes(), 1);
     });
     settings.update(cx, |_, cx| cx.notify());
     cx.simulate_keystrokes("b");
     settings.read_with(cx, |view, _| {
-        assert_eq!(view.preview.as_ref(), "ab");
-        assert_eq!(view.changes, 2);
+        assert_eq!(view.preview().as_ref(), "ab");
+        assert_eq!(view.changes(), 2);
     });
 }

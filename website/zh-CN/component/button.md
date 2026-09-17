@@ -10,10 +10,29 @@ description: 显示一个按钮，或外观表现为按钮的组件。
 ## 导入
 
 ```rust
-use gpui_kit::component::button::{Button, ButtonGroup};
+use gpui_kit::component::{
+    Sizable as _,
+    button::{Button, ButtonGroup, ButtonVariants as _},
+};
 ```
 
 ## 用法
+
+下面标记的 recipe 是完整的、**Tested consumer recipe**。其余示例均为上下文片段；使用变体或尺寸构建器时请保留上面的导入。
+
+<!-- recipe:command-control:start -->
+```rust
+use gpui_kit::IntoElement;
+use gpui_kit::component::{
+    Sizable as _,
+    button::{Button, ButtonVariants as _},
+};
+
+pub fn primary_command() -> impl IntoElement {
+    Button::new("save").primary().small().label("Save changes")
+}
+```
+<!-- recipe:command-control:end -->
 
 ### 基础按钮
 
@@ -28,6 +47,8 @@ Button::new("my-button")
 ### 变体
 
 ```rust
+use gpui_kit::component::button::ButtonVariants as _;
+
 // Primary button
 Button::new("btn-primary").primary().label("Primary")
 
@@ -61,6 +82,8 @@ Button::new("btn-text").text().label("Text")
 `outline` 不是独立变体，而是可以和其它变体叠加使用：
 
 ```rust
+use gpui_kit::component::button::ButtonVariants as _;
+
 Button::new("btn").primary().outline().label("Primary Outline")
 Button::new("btn").danger().outline().label("Danger Outline")
 ```
@@ -80,6 +103,8 @@ Button::new("btn")
 Button 支持 [Sizable] trait：
 
 ```rust
+use gpui_kit::component::Sizable as _;
+
 Button::new("btn").xsmall().label("Extra Small")
 Button::new("btn").small().label("Small")
 Button::new("btn").label("Medium") // default
@@ -116,7 +141,7 @@ Button::new("btn")
 #### Spinner
 
 ```rust
-use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::{ActiveTheme as _, spinner::Spinner};
 
 Button::new("btn")
     .icon(Spinner::new())
@@ -134,7 +159,11 @@ Button::new("btn")
 #### ProgressCircle
 
 ```rust
-use gpui_kit::component::progress::ProgressCircle;
+use gpui_kit::component::{
+    ActiveTheme as _, Sizable as _,
+    button::ButtonVariants as _,
+    progress::ProgressCircle,
+};
 
 Button::new("btn")
     .icon(ProgressCircle::new("install-progress").value(45.0))
@@ -212,6 +241,8 @@ Button::new("btn")
 Button 常见状态包括 `disabled`、`loading` 和 `selected`：
 
 ```rust
+use gpui_kit::component::{Disableable as _, Selectable as _};
+
 Button::new("btn")
     .label("Disabled")
     .disabled(true)
@@ -237,6 +268,8 @@ ButtonGroup::new("btn-group")
 ### 切换式按钮组
 
 ```rust
+use gpui_kit::component::Selectable as _;
+
 ButtonGroup::new("toggle-group")
     .multiple(true)
     .child(Button::new("btn1").label("Option 1").selected(true))
@@ -250,12 +283,14 @@ ButtonGroup::new("toggle-group")
 ## 自定义变体
 
 ```rust
-use gpui_kit::component::button::ButtonCustomVariant;
+use gpui_kit::component::{
+    ActiveTheme as _, Colorize as _,
+    button::{ButtonCustomVariant, ButtonVariants as _},
+};
 
 let custom = ButtonCustomVariant::new(cx)
     .color(cx.theme().magenta)
     .foreground(cx.theme().primary_foreground)
-    .border(cx.theme().magenta)
     .hover(cx.theme().magenta.opacity(0.1))
     .active(cx.theme().magenta);
 

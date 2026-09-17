@@ -1,11 +1,3 @@
-# Tested application recipe
-
-This complete view comes from `examples/ai_recipes/src/lib.rs`. Its standalone consumer depends only on `gpui-kit`; the same source is compiled and tested by `script/check-ai-recipes`. Pair it with that example's `src/main.rs`, which installs assets, initializes the library, and wraps the window in `Root`.
-
-The view owns both input state and subscriptions. Rendering creates only elements. Application content renders each overlay layer once; `Root` alone does not render dialog, sheet, or notification content.
-
-<!-- recipe:settings:start -->
-```rust
 use gpui_kit::component::{
     ActiveTheme, IconName, Root, WindowExt,
     button::Button,
@@ -128,7 +120,3 @@ impl Render for Settings {
             .children(Root::render_notification_layer(window, cx))
     }
 }
-```
-<!-- recipe:settings:end -->
-
-For changes in this repository, run `script/check-ai docs`, `script/check-ai rust`, or `script/check-ai shell` for the relevant verification profile (or `script/check-ai all` for all three). For a downstream app, compile and test your own consumer, then verify keyboard/focus and visuals in a real window. Automated recipe tests do not establish a model success rate.

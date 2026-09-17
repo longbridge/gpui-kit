@@ -136,6 +136,14 @@ test('component links and discovery use canonical routes', () => {
   assert.ok(!full.includes('/docs/components'));
 });
 
+test('LLM discovery identifies tested consumer recipes', () => {
+  const index = read('llms.txt');
+  const full = read('llms-full.txt');
+  assert.match(index, /Tested consumer recipe: command-control/);
+  assert.match(full, /Tested consumer recipe: command-control/);
+  assert.match(full, /Source: \/component\/button/);
+});
+
 test('primary navigation follows the Kit section order', () => {
   for (const [locale, labels] of [
     ['', ['Docs', 'Component', 'Base', 'Shell', 'App Stories']],

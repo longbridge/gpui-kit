@@ -10,24 +10,46 @@ example: false
 
 这一点很重要。如果不把 [Root] 放在窗口的第一层，许多行为都会出现异常或不符合预期。
 
-```rs
-fn main() {
-    gpui_kit::application().run(move |cx| {
-        // This must be called before using any GPUI Component features.
-        gpui_kit::init(cx);
+下面这份完整的 **Tested consumer recipe** 在隔离的 `gpui-kit` 消费者工作区中编译。它会在创建窗口前初始化 GPUI Kit，将 `Root` 作为窗口的第一层视图，并渲染全部 Root 浮层。
 
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| Example);
-                // This first level on the window, should be a Root.
-                cx.new(|cx| Root::new(view, window, cx))
+<!-- recipe:bootstrap:start -->
+```rust
+use gpui_kit::component::Root;
+use gpui_kit::{
+    AppContext as _, Context, IntoElement, ParentElement as _, Render, Styled as _, Window,
+    WindowOptions, div,
+};
+
+pub fn run() {
+    gpui_kit::application()
+        .with_assets(gpui_kit::assets::Assets)
+        .run(|cx| {
+            gpui_kit::init(cx);
+            cx.spawn(async move |cx| {
+                cx.open_window(WindowOptions::default(), |window, cx| {
+                    let view = cx.new(|_| BootstrapView);
+                    cx.new(|cx| Root::new(view, window, cx))
+                })
+                .expect("failed to open window");
             })
-            .expect("Failed to open window");
-        })
-        .detach();
-    });
+            .detach();
+        });
+}
+
+struct BootstrapView;
+
+impl Render for BootstrapView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child("My application")
+            .children(Root::render_dialog_layer(window, cx))
+            .children(Root::render_sheet_layer(window, cx))
+            .children(Root::render_notification_layer(window, cx))
+    }
 }
 ```
+<!-- recipe:bootstrap:end -->
 
 ## 窗口边框
 
@@ -45,22 +67,7 @@ cx.new(|cx| Root::new(view, window, cx).bordered(false))
 - [Root::render_sheet_layer](https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html#method.render_sheet_layer) - 渲染当前打开的抽屉
 - [Root::render_notification_layer](https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html#method.render_notification_layer) - 渲染通知列表
 
-可以在你的第一层视图中这样放置这些图层（Root > YourFirstView）：
-
-```rs
-struct MyApp;
-
-impl Render for MyApp {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .child("My App Content")
-            .children(Root::render_dialog_layer(cx))
-            .children(Root::render_sheet_layer(cx))
-            .children(Root::render_notification_layer(cx))
-    }
-}
-```
+在 `Root` 之下的第一层视图的 `render` 方法中放置这些图层；上方经过测试的 recipe 展示了所需的 `window, cx` 参数。
 
 :::tip
 这里使用的是 `children` 而不是 `child`，因为当没有打开的 dialog、sheet 或 notification 时，这些方法会返回 `None`，GPUI 就不会渲染任何内容。

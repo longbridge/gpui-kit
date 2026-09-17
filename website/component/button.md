@@ -10,10 +10,29 @@ The [Button] element with multiple variants, sizes, and states. Supports icons, 
 ## Import
 
 ```rust
-use gpui_kit::component::button::{Button, ButtonGroup};
+use gpui_kit::component::{
+    Sizable as _,
+    button::{Button, ButtonGroup, ButtonVariants as _},
+};
 ```
 
 ## Usage
+
+The marked recipe below is a complete, **Tested consumer recipe**. The remaining examples are contextual fragments; keep the imports above when using variant or size builders.
+
+<!-- recipe:command-control:start -->
+```rust
+use gpui_kit::IntoElement;
+use gpui_kit::component::{
+    Sizable as _,
+    button::{Button, ButtonVariants as _},
+};
+
+pub fn primary_command() -> impl IntoElement {
+    Button::new("save").primary().small().label("Save changes")
+}
+```
+<!-- recipe:command-control:end -->
 
 ### Basic Button
 
@@ -28,6 +47,8 @@ Button::new("my-button")
 ### Variants
 
 ```rust
+use gpui_kit::component::button::ButtonVariants as _;
+
 // Primary button
 Button::new("btn-primary").primary().label("Primary")
 
@@ -61,6 +82,8 @@ Button::new("btn-text").text().label("Text")
 Outline style is not a variant itself, but can be combined with other variants.
 
 ```rust
+use gpui_kit::component::button::ButtonVariants as _;
+
 Button::new("btn").primary().outline().label("Primary Outline")
 Button::new("btn").danger().outline().label("Danger Outline")
 ```
@@ -81,6 +104,8 @@ Button::new("btn")
 The Button supports the [Sizable] trait for different sizes.
 
 ```rust
+use gpui_kit::component::Sizable as _;
+
 Button::new("btn").xsmall().label("Extra Small")
 Button::new("btn").small().label("Small")
 Button::new("btn").label("Medium") // default
@@ -122,7 +147,7 @@ Button::new("btn")
 Use a [Spinner] to indicate loading or processing state:
 
 ```rust
-use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::{ActiveTheme as _, spinner::Spinner};
 
 // Basic spinner
 Button::new("btn")
@@ -145,7 +170,11 @@ Button::new("btn")
 Use a [ProgressCircle] to show progress percentage:
 
 ```rust
-use gpui_kit::component::progress::ProgressCircle;
+use gpui_kit::component::{
+    ActiveTheme as _, Sizable as _,
+    button::ButtonVariants as _,
+    progress::ProgressCircle,
+};
 
 // Basic progress circle
 Button::new("btn")
@@ -238,6 +267,8 @@ Button::new("btn")
 There have `disabled`, `loading`, `selected` state for buttons to indicate different statuses.
 
 ```rust
+use gpui_kit::component::{Disableable as _, Selectable as _};
+
 // Disabled
 Button::new("btn")
     .label("Disabled")
@@ -266,6 +297,8 @@ ButtonGroup::new("btn-group")
 ### Toggle Button Group
 
 ```rust
+use gpui_kit::component::Selectable as _;
+
 ButtonGroup::new("toggle-group")
     .multiple(true) // Allow multiple selections
     .child(Button::new("btn1").label("Option 1").selected(true))
@@ -279,12 +312,14 @@ ButtonGroup::new("toggle-group")
 ## Custom Variant
 
 ```rust
-use gpui_kit::component::button::ButtonCustomVariant;
+use gpui_kit::component::{
+    ActiveTheme as _, Colorize as _,
+    button::{ButtonCustomVariant, ButtonVariants as _},
+};
 
 let custom = ButtonCustomVariant::new(cx)
     .color(cx.theme().magenta)
     .foreground(cx.theme().primary_foreground)
-    .border(cx.theme().magenta)
     .hover(cx.theme().magenta.opacity(0.1))
     .active(cx.theme().magenta);
 

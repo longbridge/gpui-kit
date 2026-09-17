@@ -378,7 +378,7 @@ v_flex().gap_4().p_4()
 
 ## Overlay Layers (Dialogs, Sheets, Notifications)
 
-To render overlays, add these to your first-level view's render:
+To render overlays, add these to your first-level view's render. The complete tested consumer recipe is [`examples/ai_recipes/src/bootstrap.rs`](../../../examples/ai_recipes/src/bootstrap.rs):
 
 ```rust
 impl Render for MyApp {
@@ -386,9 +386,9 @@ impl Render for MyApp {
         div()
             .size_full()
             .child(self.main_content(window, cx))
-            .children(Root::render_dialog_layer(cx))
-            .children(Root::render_sheet_layer(cx))
-            .children(Root::render_notification_layer(cx))
+            .children(Root::render_dialog_layer(window, cx))
+            .children(Root::render_sheet_layer(window, cx))
+            .children(Root::render_notification_layer(window, cx))
     }
 }
 ```

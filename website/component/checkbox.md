@@ -32,27 +32,46 @@ The `on_change` callback is triggered when the user toggles the checkbox, receiv
 
 ### Controlled Checkbox
 
+This complete **Tested consumer recipe** keeps the value on the rendering owner and applies the requested value from `on_change` before notifying:
+
+<!-- recipe:controlled-value:start -->
 ```rust
-struct MyView {
-    is_checked: bool,
+use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::{Context, IntoElement, Render, Window};
+
+pub struct ControlledCheckbox {
+    checked: bool,
 }
 
-impl Render for MyView {
+impl ControlledCheckbox {
+    pub fn new() -> Self {
+        Self { checked: false }
+    }
+
+    pub fn is_checked(&self) -> bool {
+        self.checked
+    }
+}
+
+impl Render for ControlledCheckbox {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        Checkbox::new("checkbox")
-            .label("Option")
-            .checked(self.is_checked)
-            .on_change(cx.listener(|view, checked, _, cx| {
-                view.is_checked = *checked;
+        Checkbox::new("marketing-emails")
+            .label("Receive product updates")
+            .checked(self.checked)
+            .on_change(cx.listener(|this, checked, _, cx| {
+                this.checked = *checked;
                 cx.notify();
             }))
     }
 }
 ```
+<!-- recipe:controlled-value:end -->
 
 ### Different Sizes
 
 ```rust
+use gpui_kit::component::Sizable as _;
+
 Checkbox::new("cb").text_xs().label("Extra Small")
 Checkbox::new("cb").text_sm().label("Small")
 Checkbox::new("cb").label("Medium") // default
@@ -62,6 +81,8 @@ Checkbox::new("cb").text_lg().label("Large")
 ### Disabled State
 
 ```rust
+use gpui_kit::component::Disableable as _;
+
 Checkbox::new("checkbox")
     .label("Disabled checkbox")
     .disabled(true)
