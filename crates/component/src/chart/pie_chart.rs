@@ -1,21 +1,41 @@
 use std::rc::Rc;
 
-use gpui::{App, Bounds, Hsla, Pixels, SharedString, TextAlign, Window, point};
+use gpui::{
+    AnyElement, App, Bounds, ElementId, Hsla, IntoElement, Pixels, Point, SharedString, TextAlign,
+    Window, point, prelude::FluentBuilder, px,
+};
+use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
 use num_traits::Zero;
 
 use crate::{
     ActiveTheme,
     plot::{
-        Plot,
+        PathCaches, Plot,
         label::{PlotLabel, TEXT_HEIGHT, TEXT_SIZE, Text},
         polygon,
         shape::{Arc, ArcData, Pie},
+        tooltip::{Tooltip, TooltipState},
     },
 };
 
 /// The default extra gap (in pixels) between `outer_radius` and the label radius.
 const DEFAULT_LABEL_GAP: f32 = 15.;
+
+/// How far the hovered slice moves out past its outer radius, in pixels.
+const HOVER_LIFT: f32 = 6.;
+
+/// How much the slices other than the hovered one fade, as a share of their opacity.
+const HOVER_DIM: f32 = 0.35;
+
+/// The hover a pie chart paints, sampled once per frame in [`Plot::hover`].
+struct PieHover {
+    /// How far each datum's slice has lifted, `0..=1`, springing up on the
+    /// hovered slice and back down on the one the cursor left.
+    lift: Vec<f32>,
+    /// How far the hover has faded in.
+    focus: f32,
+}
 
 #[derive(IntoPlot)]
 pub struct PieChart<T: 'static> {
@@ -31,6 +51,9 @@ pub struct PieChart<T: 'static> {
     label_line_color: Option<Rc<dyn Fn(&T) -> Hsla + 'static>>,
     label_color: Option<Hsla>,
     label_gap: f32,
+    id: Option<ElementId>,
+    name: Option<SharedString>,
+    hover: Option<PieHover>,
 }
 
 impl<T> PieChart<T> {
@@ -51,7 +74,26 @@ impl<T> PieChart<T> {
             label_line_color: None,
             label_color: None,
             label_gap: DEFAULT_LABEL_GAP,
+            id: None,
+            name: None,
+            hover: None,
         }
+    }
+
+    /// Enable an interactive hover tooltip for this chart: the hovered slice
+    /// lifts out of the ring and the tooltip shows its value and share.
+    ///
+    /// The `id` must be unique among sibling elements. Without it, the chart
+    /// stays a non-interactive plot.
+    pub fn id(mut self, id: impl Into<ElementId>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
+    /// Set the series name shown in the hover tooltip row (e.g. "Desktop").
+    pub fn name(mut self, name: impl Into<SharedString>) -> Self {
+        self.name = Some(name.into());
+        self
     }
 
     /// Set the inner radius of the pie chart.
@@ -147,43 +189,94 @@ impl<T> PieChart<T> {
         self.label_gap = gap;
         self
     }
+
+    /// The outer radius the ring is laid out with: the set one, or 40% of the
+    /// bounds height.
+    fn resolve_outer_radius(&self, bounds: &Bounds<Pixels>) -> f32 {
+        if self.outer_radius.is_zero() {
+            bounds.size.height.as_f32() * 0.4
+        } else {
+            self.outer_radius
+        }
+    }
+
+    /// The slices, in ring order. Shared by `paint` and `tooltip_state` so the
+    /// two stay in sync; empty without a value accessor.
+    fn arcs(&self) -> Vec<ArcData<'_, T>> {
+        let Some(value_fn) = self.value.clone() else {
+            return vec![];
+        };
+        Pie::<T>::new()
+            .value(move |d| Some(value_fn(d)))
+            .pad_angle(self.pad_angle)
+            .arcs(&self.data)
+    }
+
+    /// The fill of a slice: the per-datum color, or the theme's.
+    fn slice_color(&self, datum: &T, cx: &App) -> Hsla {
+        match self.color.as_ref() {
+            Some(color_fn) => color_fn(datum),
+            None => cx.theme().chart_2,
+        }
+    }
+
+    /// How far the slice of datum `index` has lifted and how much it has faded
+    /// behind the hovered one this frame, as `(lift, opacity)`.
+    fn slice_emphasis(&self, index: usize) -> (f32, f32) {
+        let Some(hover) = self.hover.as_ref() else {
+            return (0., 1.);
+        };
+        let lift = hover.lift.get(index).copied().unwrap_or(0.) * hover.focus;
+        (lift, 1. - HOVER_DIM * hover.focus * (1. - lift))
+    }
 }
 
 impl<T> Plot for PieChart<T> {
     fn paint(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
-        let Some(value_fn) = self.value.as_ref() else {
+        if self.value.is_none() {
             return;
-        };
+        }
 
-        let outer_radius = if self.outer_radius.is_zero() {
-            bounds.size.height.as_f32() * 0.4
-        } else {
-            self.outer_radius
-        };
+        let outer_radius = self.resolve_outer_radius(&bounds);
 
         let arc = Arc::new()
             .inner_radius(self.inner_radius)
             .outer_radius(outer_radius);
-        let value_fn = value_fn.clone();
-        let mut pie = Pie::<T>::new().value(move |d| Some(value_fn(d)));
-        pie = pie.pad_angle(self.pad_angle);
-        let arcs = pie.arcs(&self.data);
+        let arcs = self.arcs();
 
-        for a in &arcs {
+        // An identified chart keeps its slices tessellated across frames; without
+        // an id, sibling charts would share one cache and thrash it.
+        let caches = self
+            .id
+            .is_some()
+            .then(|| PathCaches::for_paint("slices", window, cx));
+        for (ix, a) in arcs.iter().enumerate() {
             let inner_radius = self.get_inner_radius(a);
-            let outer_radius = self.get_outer_radius(a);
-            arc.paint(
-                a,
-                if let Some(color_fn) = self.color.as_ref() {
-                    color_fn(a.data)
-                } else {
-                    cx.theme().chart_2
-                },
-                Some(inner_radius),
-                Some(outer_radius),
-                &bounds,
-                window,
-            );
+            // The hovered slice lifts out of the ring while the others fade behind it.
+            let (lift, opacity) = self.slice_emphasis(a.index);
+            let outer_radius = self.get_outer_radius(a) + HOVER_LIFT * lift;
+            let color = self.slice_color(a.data, cx).opacity(opacity);
+            match caches.as_ref() {
+                Some(caches) => caches.update(cx, |caches, _| {
+                    arc.paint_cached(
+                        a,
+                        color,
+                        Some(inner_radius),
+                        Some(outer_radius),
+                        &bounds,
+                        caches.slot(ix),
+                        window,
+                    );
+                }),
+                None => arc.paint(
+                    a,
+                    color,
+                    Some(inner_radius),
+                    Some(outer_radius),
+                    &bounds,
+                    window,
+                ),
+            }
         }
 
         // Draw leader-line labels outside the ring (only when `label` is set).
@@ -272,6 +365,96 @@ impl<T> Plot for PieChart<T> {
         }
 
         PlotLabel::new(labels).paint(&bounds, window, cx);
+    }
+
+    fn id(&self) -> Option<ElementId> {
+        self.id.clone()
+    }
+
+    fn tooltip_state(
+        &self,
+        position: Point<Pixels>,
+        bounds: Bounds<Pixels>,
+        _cx: &App,
+    ) -> Option<TooltipState> {
+        let outer_radius = self.resolve_outer_radius(&bounds);
+        let arc = Arc::new()
+            .inner_radius(self.inner_radius)
+            .outer_radius(outer_radius);
+        let position = point(position.x.as_f32(), position.y.as_f32());
+
+        let index = self.arcs().into_iter().find_map(|a| {
+            arc.contains(
+                &a,
+                position,
+                Some(self.get_inner_radius(&a)),
+                Some(self.get_outer_radius(&a)),
+                &bounds,
+            )
+            .then_some(a.index)
+        })?;
+
+        Some(TooltipState::new(
+            index,
+            point(px(position.x), px(position.y)),
+            vec![],
+        ))
+    }
+
+    fn hover(&mut self, state: Option<&TooltipState>, window: &mut Window, cx: &mut App) {
+        self.hover = state.map(|state| {
+            // Every slice springs toward lifted or resting, so the one the cursor
+            // left settles back while the new one rises. On the first hovered
+            // frame the target is rest, so the slice rises from the ring rather
+            // than adopting the lifted position outright.
+            let policy = cx.theme().motion_tokens().spring_control;
+            let lift = (0..self.data.len())
+                .map(|ix| {
+                    let lifted = state.is_hovered() && !state.is_entering() && ix == state.index;
+                    spring(
+                        ElementId::named_usize("pie-slice", ix),
+                        if lifted { 1. } else { 0. },
+                        policy,
+                        window,
+                        cx,
+                    )
+                })
+                .collect();
+            PieHover {
+                lift,
+                focus: state.focus(),
+            }
+        });
+    }
+
+    fn tooltip(
+        &self,
+        state: &TooltipState,
+        cursor: Point<Pixels>,
+        bounds: Bounds<Pixels>,
+        _window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        let value_fn = self.value.as_ref()?;
+        let d = self.data.get(state.index)?;
+        let value = value_fn(d);
+        let total: f32 = self.data.iter().map(|d| value_fn(d).max(0.)).sum();
+        let share = if total > 0. { value / total * 100. } else { 0. };
+        let name = self.name.clone().unwrap_or_default();
+
+        Some(
+            // Follow the cursor; the lifted slice marks the datum.
+            Tooltip::new(cursor, bounds.size)
+                .focus(state.focus())
+                .gap(px(8.))
+                .when_some(self.label.as_ref(), |this, label| this.title(label(d)))
+                .row(
+                    self.slice_color(d, cx),
+                    name,
+                    format!("{} ({:.1}%)", value, share),
+                )
+                .into_any_element(),
+        )
     }
 }
 

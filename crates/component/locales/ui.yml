@@ -360,3 +360,24 @@ Carousel:
     zh-CN: 前往第 %{current} 张
     zh-HK: 前往第 %{current} 張
     zh-TW: 前往第 %{current} 張
+Chart:
+  open:
+    en: Open
+    zh-CN: 开盘
+    zh-HK: 開市
+    zh-TW: 開盤
+  high:
+    en: High
+    zh-CN: 最高
+    zh-HK: 最高
+    zh-TW: 最高
+  low:
+    en: Low
+    zh-CN: 最低
+    zh-HK: 最低
+    zh-TW: 最低
+  close:
+    en: Close
+    zh-CN: 收盘
+    zh-HK: 收市
+    zh-TW: 收盤

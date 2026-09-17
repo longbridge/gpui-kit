@@ -12,7 +12,7 @@ const STAGGER_RATIO: f32 = 0.15;
 ///
 /// Mirrors d3-sankey's `sankeyLeft` / `sankeyRight` / `sankeyCenter` /
 /// `sankeyJustify`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
 pub enum SankeyAlign {
     Left,
     Right,
@@ -135,7 +135,7 @@ impl std::fmt::Display for SankeyError {
 impl std::error::Error for SankeyError {}
 
 /// How flow values map to node heights and ribbon widths.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
 pub enum SankeyValueScale {
     /// Height is proportional to the value (standard sankey semantics).
     #[default]

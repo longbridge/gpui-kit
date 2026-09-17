@@ -5,9 +5,8 @@ use gpui_kit::component::{
     command::{CommandEntry, CommandItem},
     h_flex,
     input::{Input, InputEvent, InputState},
-    resizable::{h_resizable, resizable_panel},
     separator::Separator,
-    sidebar::{Sidebar, SidebarHeader, SidebarMenu, SidebarMenuItem},
+    sidebar::{Sidebar, SidebarCollapsible, SidebarHeader, SidebarMenu, SidebarMenuItem},
     status_bar::StatusBar,
     v_flex,
 };
@@ -296,145 +295,145 @@ impl Render for Gallery {
                 .into_any_element();
         }
 
-        let body = h_resizable("gallery-container")
+        let content = v_flex()
+            .flex_1()
+            .h_full()
+            .overflow_x_hidden()
             .child(
-                resizable_panel()
-                    .size(px(255.))
-                    .size_range(px(200.)..px(320.))
+                h_flex()
+                    .id("header")
+                    .p_4()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .justify_between()
+                    .items_start()
                     .child(
-                        Sidebar::new("gallery-sidebar")
-                            .w(relative(1.))
-                            .border_0()
-                            .collapsed(self.collapsed)
-                            .header(
-                                v_flex()
-                                    .w_full()
-                                    .gap_4()
-                                    .child(
-                                        SidebarHeader::new()
-                                            .w_full()
-                                            .child(
-                                                div()
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .rounded(cx.theme().radius_lg)
-                                                    .bg(cx.theme().primary)
-                                                    .text_color(cx.theme().primary_foreground)
-                                                    .size_8()
-                                                    .flex_shrink_0()
-                                                    .when(!self.collapsed, |this| {
-                                                        this.child(Icon::new(
-                                                            IconName::GalleryVerticalEnd,
-                                                        ))
-                                                    })
-                                                    .when(self.collapsed, |this| {
-                                                        this.size_4()
-                                                            .bg(cx.theme().transparent)
-                                                            .text_color(cx.theme().foreground)
-                                                            .child(Icon::new(
-                                                                IconName::GalleryVerticalEnd,
-                                                            ))
-                                                    }),
-                                            )
-                                            .when(!self.collapsed, |this| {
-                                                this.child(
-                                                    v_flex()
-                                                        .gap_0()
-                                                        .text_sm()
-                                                        .flex_1()
-                                                        .line_height(relative(1.25))
-                                                        .overflow_hidden()
-                                                        .text_ellipsis()
-                                                        .child("GPUI Component")
-                                                        .child(
-                                                            div()
-                                                                .text_color(
-                                                                    cx.theme().muted_foreground,
-                                                                )
-                                                                .child("Component showcase")
-                                                                .text_xs(),
-                                                        ),
-                                                )
-                                            }),
-                                    )
-                                    .child(
-                                        div()
-                                            .bg(cx.theme().sidebar_accent)
-                                            .rounded_full_style(cx)
-                                            .px_1()
-                                            .flex_1()
-                                            .mx_1()
-                                            .child(
-                                                Input::new(&self.search_input)
-                                                    .appearance(false)
-                                                    .cleanable(true),
-                                            ),
-                                    ),
-                            )
-                            .children(stories.clone().into_iter().enumerate().map(
-                                |(group_ix, (_, sub_stories))| {
-                                    SidebarMenu::new().children(sub_stories.iter().enumerate().map(
-                                        |(ix, story)| {
-                                            SidebarMenuItem::new(story.read(cx).name.clone())
-                                                .active(
-                                                    self.active_group_index == Some(group_ix)
-                                                        && self.active_index == Some(ix),
-                                                )
-                                                .on_click(cx.listener(
-                                                    move |this, _: &ClickEvent, _, cx| {
-                                                        this.active_group_index = Some(group_ix);
-                                                        this.active_index = Some(ix);
-                                                        cx.notify();
-                                                    },
-                                                ))
-                                        },
-                                    ))
-                                },
-                            )),
+                        v_flex()
+                            .gap_1()
+                            .child(div().text_2xl().font_semibold().child(story_name))
+                            .child(
+                                div()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(description),
+                            ),
                     ),
             )
             .child(
-                v_flex()
+                div()
+                    .id("story")
                     .flex_1()
-                    .h_full()
-                    .overflow_x_hidden()
-                    .child(
-                        h_flex()
-                            .id("header")
-                            .p_4()
-                            .border_b_1()
-                            .border_color(cx.theme().border)
-                            .justify_between()
-                            .items_start()
+                    .overflow_y_scroll()
+                    .when_some(active_story, |this, active_story| {
+                        this.child(active_story.clone())
+                    }),
+            );
+
+        // The sidebar slides out of the layout when collapsed and back when the
+        // toggle in the status bar reopens it.
+        let body = h_flex()
+            .size_full()
+            .child(
+                Sidebar::new("gallery-sidebar")
+                    .w(px(255.))
+                    .collapsible(SidebarCollapsible::Offcanvas)
+                    .collapsed(self.collapsed)
+                    .header(
+                        v_flex()
+                            .w_full()
+                            .gap_4()
                             .child(
-                                v_flex()
-                                    .gap_1()
-                                    .child(div().text_2xl().font_semibold().child(story_name))
+                                SidebarHeader::new()
+                                    .w_full()
                                     .child(
                                         div()
-                                            .text_color(cx.theme().muted_foreground)
-                                            .child(description),
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .rounded(cx.theme().radius_lg)
+                                            .bg(cx.theme().primary)
+                                            .text_color(cx.theme().primary_foreground)
+                                            .size_8()
+                                            .flex_shrink_0()
+                                            .child(Icon::new(IconName::GalleryVerticalEnd)),
+                                    )
+                                    .child(
+                                        v_flex()
+                                            .gap_0()
+                                            .text_sm()
+                                            .flex_1()
+                                            .line_height(relative(1.25))
+                                            .overflow_hidden()
+                                            .text_ellipsis()
+                                            .child("GPUI Component")
+                                            .child(
+                                                div()
+                                                    .text_color(cx.theme().muted_foreground)
+                                                    .child("Component showcase")
+                                                    .text_xs(),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .bg(cx.theme().sidebar_accent)
+                                    .rounded_full_style(cx)
+                                    .px_1()
+                                    .flex_1()
+                                    .mx_1()
+                                    .child(
+                                        Input::new(&self.search_input)
+                                            .appearance(false)
+                                            .cleanable(true),
                                     ),
                             ),
                     )
-                    .child(
-                        div()
-                            .id("story")
-                            .flex_1()
-                            .overflow_y_scroll()
-                            .when_some(active_story, |this, active_story| {
-                                this.child(active_story.clone())
-                            }),
-                    )
-                    .into_any_element(),
-            );
+                    .children(stories.clone().into_iter().enumerate().map(
+                        |(group_ix, (_, sub_stories))| {
+                            SidebarMenu::new().children(sub_stories.iter().enumerate().map(
+                                |(ix, story)| {
+                                    SidebarMenuItem::new(story.read(cx).name.clone())
+                                        .active(
+                                            self.active_group_index == Some(group_ix)
+                                                && self.active_index == Some(ix),
+                                        )
+                                        .on_click(cx.listener(
+                                            move |this, _: &ClickEvent, _, cx| {
+                                                this.active_group_index = Some(group_ix);
+                                                this.active_index = Some(ix);
+                                                cx.notify();
+                                            },
+                                        ))
+                                },
+                            ))
+                        },
+                    )),
+            )
+            .child(content);
 
         v_flex()
             .size_full()
             .child(div().flex_1().min_h_0().child(body))
             .child(
                 StatusBar::new()
+                    .child(
+                        Button::new("toggle-sidebar")
+                            .ghost()
+                            .xsmall()
+                            .icon(if self.collapsed {
+                                IconName::PanelLeftOpen
+                            } else {
+                                IconName::PanelLeftClose
+                            })
+                            .tooltip(if self.collapsed {
+                                "Show sidebar"
+                            } else {
+                                "Hide sidebar"
+                            })
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.collapsed = !this.collapsed;
+                                cx.notify();
+                            })),
+                    )
                     .child(Icon::new(IconName::GalleryVerticalEnd).xsmall())
                     .child(format!("{total_components} components"))
                     .child(Separator::vertical())

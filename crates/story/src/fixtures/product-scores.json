@@ -1,0 +1,32 @@
+[
+  {
+    "dimension": "Performance",
+    "alpha": 88,
+    "beta": 72
+  },
+  {
+    "dimension": "Reliability",
+    "alpha": 81,
+    "beta": 90
+  },
+  {
+    "dimension": "Security",
+    "alpha": 76,
+    "beta": 84
+  },
+  {
+    "dimension": "Usability",
+    "alpha": 92,
+    "beta": 68
+  },
+  {
+    "dimension": "Docs",
+    "alpha": 70,
+    "beta": 79
+  },
+  {
+    "dimension": "Support",
+    "alpha": 64,
+    "beta": 86
+  }
+]

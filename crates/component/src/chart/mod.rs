@@ -16,12 +16,40 @@ pub use sankey_chart::{SankeyChart, SankeyLabel};
 
 use std::hash::Hash;
 
-use gpui::{Hsla, SharedString, TextAlign};
+use gpui::{App, Hsla, Pixels, SharedString, TextAlign, px};
+use gpui_base::Spring;
 
-use crate::plot::{
-    AxisText,
-    scale::{Scale, ScaleBand, ScalePoint},
+use crate::{
+    ActiveTheme,
+    plot::{
+        AxisText,
+        scale::{Scale, ScaleBand, ScalePoint},
+    },
 };
+
+/// The spring a chart's pointer — the crosshair, highlight band or hover dot —
+/// follows the hovered datum with.
+///
+/// A pointer chases the cursor across neighbouring data, so it has to arrive
+/// well within the time the cursor takes to reach the next datum: ECharts moves
+/// its axis pointer over 200 ms on an exponential ease-out, which is most of
+/// the way there in the first third. The fast tier as a critically damped
+/// response lands in the same place, and the tolerance is sub-pixel so the
+/// spring rests once nothing visible moves.
+pub(crate) fn pointer_spring(cx: &App) -> Spring {
+    Spring::new(cx.theme().motion_tokens().duration_fast).with_epsilon(0.1)
+}
+
+/// The size of the dot marking the hovered data point.
+pub(crate) const HOVER_DOT_SIZE: Pixels = px(8.);
+
+/// The ring behind the hovered dot at full focus.
+const HOVER_HALO_SIZE: f32 = 20.;
+
+/// The ring behind a hovered dot, growing out of the dot as the hover fades in.
+pub(crate) fn hover_halo_size(focus: f32) -> Pixels {
+    px(HOVER_HALO_SIZE * focus)
+}
 
 /// Build x-axis labels for point-based scales (`LineChart`, `AreaChart`).
 ///

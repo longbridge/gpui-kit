@@ -53,6 +53,16 @@ impl<T> ScaleBand<T> {
         (self.avg_width * (1. - self.padding_inner)).min(30.)
     }
 
+    /// The distance between the starts of two adjacent bands: the band width
+    /// plus the inner padding. The whole range for a single band.
+    pub fn step(&self) -> f32 {
+        if self.len() <= 1 {
+            self.range_diff
+        } else {
+            self.display_avg_width() * self.ratio()
+        }
+    }
+
     /// Set the padding inner of the band.
     pub fn padding_inner(mut self, padding_inner: f32) -> Self {
         self.padding_inner = padding_inner;
@@ -142,6 +152,26 @@ mod tests {
         assert_eq!(scale.tick(&2), Some(30.));
         assert_eq!(scale.tick(&3), Some(60.));
         assert_eq!(scale.band_width(), 30.);
+    }
+
+    #[test]
+    fn test_scale_band_step() {
+        // Adjacent bands start one step apart, whatever the padding.
+        let scale = ScaleBand::new(vec![1, 2, 3], vec![0., 90.]);
+        assert_eq!(
+            scale.step(),
+            scale.tick(&2).unwrap() - scale.tick(&1).unwrap()
+        );
+
+        let padded = ScaleBand::new(vec![1, 2, 3], vec![0., 90.])
+            .padding_inner(0.4)
+            .padding_outer(0.2);
+        assert!(
+            (padded.step() - (padded.tick(&2).unwrap() - padded.tick(&1).unwrap())).abs() < 1e-4
+        );
+
+        // A single band spans the range.
+        assert_eq!(ScaleBand::new(vec![1], vec![0., 90.]).step(), 90.);
     }
 
     #[test]

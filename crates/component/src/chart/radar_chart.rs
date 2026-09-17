@@ -7,6 +7,7 @@ use gpui::{
     AnyElement, App, AvailableSpace, Background, Bounds, ElementId, Hsla, IntoElement, Pixels,
     Point, SharedString, TextAlign, Window, point, px,
 };
+use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
 use num_traits::{Num, ToPrimitive, Zero};
 
@@ -21,6 +22,8 @@ use crate::{
         tooltip::{Dot, Tooltip, TooltipState},
     },
 };
+
+use super::{HOVER_DOT_SIZE, hover_halo_size, pointer_spring};
 
 const HALF_PI: f32 = PI / 2.;
 
@@ -94,6 +97,9 @@ where
     grid_levels: usize,
     dot: bool,
     id: Option<ElementId>,
+    /// Where each series' hover dot has slid to, sampled once per frame in
+    /// [`Plot::hover`]; the dots travel along their polygon's edge between spokes.
+    hover_dots: Option<Vec<Point<Pixels>>>,
 }
 
 impl<T, Y> RadarChart<T, Y>
@@ -120,6 +126,7 @@ where
             grid_levels: DEFAULT_GRID_LEVELS,
             dot: false,
             id: None,
+            hover_dots: None,
         }
     }
 
@@ -531,6 +538,38 @@ where
         Some(TooltipState::new(index, position, dots))
     }
 
+    fn hover(&mut self, state: Option<&TooltipState>, window: &mut Window, cx: &mut App) {
+        self.hover_dots = state.map(|state| {
+            // Each series' dot slides to the hovered spoke's vertex; on the first
+            // hovered frame it adopts the vertex instead of travelling from where
+            // the last hover ended.
+            let policy = pointer_spring(cx).with_travel(!state.is_entering());
+            state
+                .dots
+                .iter()
+                .enumerate()
+                .map(|(i, dot)| {
+                    point(
+                        spring(
+                            ElementId::named_usize("radar-dot-x", i),
+                            dot.x,
+                            policy,
+                            window,
+                            cx,
+                        ),
+                        spring(
+                            ElementId::named_usize("radar-dot-y", i),
+                            dot.y,
+                            policy,
+                            window,
+                            cx,
+                        ),
+                    )
+                })
+                .collect()
+        });
+    }
+
     fn tooltip(
         &self,
         state: &TooltipState,
@@ -543,16 +582,22 @@ where
 
         let dot_stroke = cx.theme().background;
 
+        // Where the dots have slid to this frame; the vertices themselves before the
+        // first `hover` sample.
+        let dots = self.hover_dots.as_ref().unwrap_or(&state.dots);
+
         // No crosshair: a radar has no cartesian axis to snap to; the dots mark
         // the hovered dimension's vertices instead.
-        let mut tooltip =
-            Tooltip::new(cursor, bounds.size)
-                .gap(px(8.))
-                .dots(state.dots.iter().enumerate().map(|(i, p)| {
-                    Dot::new(*p)
-                        .stroke(dot_stroke)
-                        .fill(self.series_stroke(i, cx))
-                }));
+        let mut tooltip = Tooltip::new(cursor, bounds.size)
+            .focus(state.focus())
+            .gap(px(8.))
+            .dots(dots.iter().enumerate().map(|(i, p)| {
+                Dot::new(*p)
+                    .size(HOVER_DOT_SIZE)
+                    .halo(hover_halo_size(state.focus()))
+                    .stroke(dot_stroke)
+                    .fill(self.series_stroke(i, cx))
+            }));
 
         // Filled by `prepaint`, which runs first; element labels leave no title.
         if let Some(title) = self.label_texts.get(state.index).cloned().flatten() {

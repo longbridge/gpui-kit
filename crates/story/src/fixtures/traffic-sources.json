@@ -1,0 +1,22 @@
+[
+  {
+    "source": "Direct",
+    "visitors": 4820
+  },
+  {
+    "source": "Organic Search",
+    "visitors": 6930
+  },
+  {
+    "source": "Social",
+    "visitors": 2140
+  },
+  {
+    "source": "Referral",
+    "visitors": 1580
+  },
+  {
+    "source": "Email",
+    "visitors": 960
+  }
+]

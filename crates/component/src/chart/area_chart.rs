@@ -4,20 +4,30 @@ use gpui::{
     AnyElement, App, Background, Bounds, ElementId, Hsla, IntoElement, Pixels, Point, SharedString,
     Window, point, px,
 };
+use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
 use num_traits::{Num, ToPrimitive};
 
 use crate::{
     ActiveTheme,
     plot::{
-        AXIS_GAP, Grid, Plot, PlotAxis, StrokeStyle,
+        AXIS_GAP, Grid, PathCaches, Plot, PlotAxis, StrokeStyle,
         scale::{Scale, ScaleLinear, ScalePoint, Sealed},
         shape::Area,
         tooltip::{CrossLine, Dot, Tooltip, TooltipState},
     },
 };
 
-use super::build_point_x_labels;
+use super::{HOVER_DOT_SIZE, build_point_x_labels, hover_halo_size, pointer_spring};
+
+/// The hover an area chart paints, sampled once per frame in [`Plot::hover`].
+#[derive(Clone)]
+struct AreaHover {
+    /// Where the crosshair has slid to along the x axis.
+    x: Pixels,
+    /// Where each series' dot has slid to; the dots follow their series.
+    dots: Vec<Point<Pixels>>,
+}
 
 #[derive(IntoPlot)]
 pub struct AreaChart<T, X, Y>
@@ -37,6 +47,7 @@ where
     x_axis: bool,
     grid: bool,
     id: Option<ElementId>,
+    hover: Option<AreaHover>,
 }
 
 impl<T, X, Y> AreaChart<T, X, Y>
@@ -60,6 +71,7 @@ where
             x_axis: true,
             grid: true,
             id: None,
+            hover: None,
         }
     }
 
@@ -200,19 +212,16 @@ where
         }
 
         // Draw area
-        for (i, y_fn) in self.y.iter().enumerate() {
+        let default_fill: Background = cx.theme().chart_2.opacity(0.4).into();
+        let default_stroke = cx.theme().chart_2;
+        let areas = self.y.iter().enumerate().map(|(i, y_fn)| {
             let x = x.clone();
             let y = y.clone();
             let x_fn = x_fn.clone();
             let y_fn = y_fn.clone();
 
-            let fill = *self
-                .fills
-                .get(i)
-                .unwrap_or(&cx.theme().chart_2.opacity(0.4).into());
-
-            let stroke = *self.strokes.get(i).unwrap_or(&cx.theme().chart_2);
-
+            let fill = *self.fills.get(i).unwrap_or(&default_fill);
+            let stroke = *self.strokes.get(i).unwrap_or(&default_stroke);
             let stroke_style = *self
                 .stroke_styles
                 .get(i)
@@ -226,7 +235,22 @@ where
                 .stroke(stroke)
                 .stroke_style(stroke_style)
                 .fill(fill)
-                .paint(&bounds, window);
+        });
+
+        // An identified chart keeps its fills and strokes tessellated across
+        // frames; without an id, sibling charts would share one cache and thrash it.
+        if self.id.is_some() {
+            let caches = PathCaches::for_paint("areas", window, cx);
+            caches.update(cx, |caches, _| {
+                for (i, area) in areas.enumerate() {
+                    let (fill, line) = caches.slot_pair(i);
+                    area.paint_cached(&bounds, fill, line, window);
+                }
+            });
+        } else {
+            for area in areas {
+                area.paint(&bounds, window);
+            }
         }
     }
 
@@ -267,6 +291,26 @@ where
         ))
     }
 
+    fn hover(&mut self, state: Option<&TooltipState>, window: &mut Window, cx: &mut App) {
+        self.hover = state.map(|state| {
+            // The crosshair and each series' dot slide to the hovered point; on the
+            // first hovered frame they adopt it instead of travelling from where the
+            // last hover ended.
+            let policy = pointer_spring(cx).with_travel(!state.is_entering());
+            let x = spring(("area-chart", "x"), state.cross_line.x, policy, window, cx);
+            let dots = state
+                .dots
+                .iter()
+                .enumerate()
+                .map(|(i, dot)| {
+                    let id = ElementId::named_usize("area-chart-dot", i);
+                    point(x, spring(id, dot.y, policy, window, cx))
+                })
+                .collect();
+            AreaHover { x, dots }
+        });
+    }
+
     fn tooltip(
         &self,
         state: &TooltipState,
@@ -283,21 +327,29 @@ where
         let dot_stroke = cx.theme().background;
         let color = |i: usize| *self.strokes.get(i).unwrap_or(&default_color);
 
+        // Where the hover has slid to this frame; the data points themselves before
+        // the first `hover` sample.
+        let (x, dots) = match self.hover.as_ref() {
+            Some(hover) => (hover.x, &hover.dots),
+            None => (state.cross_line.x, &state.dots),
+        };
+
         // Follow the cursor; the crosshair and dots stay snapped to the data point.
         let mut tooltip = Tooltip::new(cursor, bounds.size)
+            .focus(state.focus())
             .gap(px(8.))
             // Confine the crosshair to the plot area so it doesn't cross the x-axis.
             .cross_line(
-                CrossLine::new(state.cross_line)
+                CrossLine::new(point(x, state.cross_line.y))
                     .height(bounds.size.height.as_f32() - if self.x_axis { AXIS_GAP } else { 0. }),
             )
-            .dots(
-                state
-                    .dots
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| Dot::new(*p).stroke(dot_stroke).fill(color(i))),
-            )
+            .dots(dots.iter().enumerate().map(|(i, p)| {
+                Dot::new(*p)
+                    .size(HOVER_DOT_SIZE)
+                    .halo(hover_halo_size(state.focus()))
+                    .stroke(dot_stroke)
+                    .fill(color(i))
+            }))
             .title(title);
 
         // One row per series: swatch + label + value.
