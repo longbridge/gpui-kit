@@ -30,6 +30,7 @@ pub struct InputContextMenuCapabilities {
     masked: bool,
     go_to_definition: bool,
     code_actions: bool,
+    token_activation: bool,
 }
 
 impl InputContextMenuCapabilities {
@@ -112,6 +113,14 @@ impl InputContextMenuCapabilities {
 
     pub fn has_definition(&self) -> bool {
         self.go_to_definition
+    }
+
+    pub fn token_activation(mut self, available: bool) -> Self {
+        self.token_activation = available;
+        self
+    }
+    pub fn has_token_activation(&self) -> bool {
+        self.token_activation
     }
 
     pub fn has_code_actions(&self) -> bool {

@@ -35,6 +35,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
     Ok(())
 }
 
+mod input_tokens;
 mod support;
 mod typed_child;
 

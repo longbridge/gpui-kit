@@ -279,3 +279,120 @@ v_flex()
     .child(Input::new(&self.name_input))
     .child(Input::new(&self.email_input))
 ```
+
+## 原子行内 token
+
+使用行内 token，可以在输入中加入需要整块选中、删除的人员提及、文件引用或命令。例如，输入框显示一个名为“Alice”的标签，而 `value()` 和复制操作返回它的真实文本 `@alice`。
+
+### 插入引用
+
+创建并保留输入状态，在用户选中引用时插入 token：
+
+```rust
+use gpui_kit::component::input::{InlineToken, Input, InputState};
+
+let input = cx.new(|cx| InputState::new(window, cx));
+
+input.update(cx, |state, cx| {
+    state.replace_with_token(
+        InlineToken::new("person-1", "@alice").with_label("Alice"),
+        window,
+        cx,
+    ).expect("有效的引用");
+});
+
+Input::new(&input)
+```
+
+`replace_with_token` 替换当前选区，空选区则在光标处插入，不自动添加空格。要替换 `@ali` 这样的补全查询，使用 `replace_range_with_token(range, token, window, cx)`。Rust 范围是 UTF-8 字节半开区间，可以使用 `str::find` 等方法返回的字节偏移。
+
+每次出现的 token 都需要唯一 ID，即使它们指向同一资源。`text` 用于复制和提交，`with_label` 指定显示名称；省略 `with_label` 时直接显示真实文本。
+
+用户可以将光标移到 token 两侧，选中它，或用 Backspace／Delete 删除它。选区覆盖部分 token 时会包含整块 token。Undo／Redo 同时恢复文本和引用。粘贴得到普通文本。
+
+### 自定义外观与打开引用
+
+使用默认标签时无需设置 renderer。需要图标或 tooltip 时，让 `render_token` 返回 `InputToken`，并通过 `on_token_click` 打开引用：
+
+```rust
+use gpui_kit::component::{
+    IconName,
+    input::{InlineTokenClickEvent, InputToken},
+};
+
+Input::new(&input)
+    .render_token(|token, _, _| {
+        InputToken::new(token)
+            .with_icon(IconName::File)
+            .with_tooltip("打开引用")
+    })
+    .on_token_click(|event: &InlineTokenClickEvent, _, _| {
+        // 根据 event.token().id() 查找并打开资源。
+    });
+```
+
+也可以返回自己的单行元素。元素应保持在输入框行高内，超出可用行宽的内容会被裁切。通过 renderer 的上下文读取选中、只读和禁用状态。在事件回调中修改输入，不要在 renderer 中修改。悬停和选中样式应保持尺寸稳定。外部数据改变某个 token 的尺寸时调用 `refresh_token(id, cx)`；所有 token 的尺寸都可能变化时调用 `refresh(cx)`。
+
+拖选或 Shift 扩选不会打开引用。只读输入允许打开引用，禁用输入不允许。若要为打开选中的整块 token 提供快捷键，可以将 `ActivateToken` 绑定到自己选择的按键。输入框的上下文菜单和无障碍操作也提供此功能。
+
+如果 token 内含按钮，应消费按钮的 mouse-down 和 click 事件，避免同时打开引用。所有子操作（包括无障碍操作）都应遵守 `token.is_disabled()`；会修改内容的操作还应遵守 `token.is_readonly()`。
+
+### 保存、恢复与提交
+
+保存草稿时，使用 `content()` 一起保留文本和引用：
+
+```rust
+let draft = input.read(cx).content();
+
+// 稍后恢复保存的草稿。
+input.update(cx, |state, cx| {
+    state.set_content(draft, window, cx).expect("有效的草稿");
+});
+```
+
+从应用自己的存储中恢复数据时，可以用相匹配的文本和 token 范围构造 `InputContent`：
+
+```rust
+use gpui_kit::component::input::InputContent;
+
+let draft = InputContent::new("Ask @alice")
+    .with_token(4..10, InlineToken::new("person-1", "@alice").with_label("Alice"));
+```
+
+提交时重新读取 `content()`：`text()` 是消息文本，`tokens()` 是其中仍然存在的引用。根据 token ID 查找资源，并在发送前处理资源已不存在的情况。
+
+`set_content` 清空撤销历史，不触发 `InputEvent::Change`。要重置为普通文本，使用 `set_value`；即使文字未变，它也会移除 token。需要可撤销的纯文本替换时使用 `replace_all`。token 编辑会触发 `InputEvent::Change`，包括为已有文本添加引用。程序化 setter 可以修改只读或禁用的输入，因此不应对用户开放的应用命令需要自行检查这些状态。
+
+### 校验与适用范围
+
+token 适用于 Input 和 Textarea，不支持 Editor、NumberInput、格式化 mask 或密码输入。ID 不能全为空白；真实文本和标签必须非空、单行且不含控制字符。范围不能重叠或切开 Unicode grapheme（例如 emoji 或带组合重音的字符）；恢复草稿时，每个 token 的真实文本必须与对应范围匹配。
+
+token 操作返回 `Result<_, InlineTokenError>`，失败时输入保持原样。如果插入返回 `CompositionActive`，应等待用户完成当前输入法组合后再插入。
+
+### JavaScript
+
+在 `init()` 中创建并保留 `InputState`，渲染时将它传给 Input。JavaScript 范围使用 **UTF-16 字符串偏移**，与 `slice()`、`indexOf()` 一致：
+
+```javascript
+import { Input, InputState } from "gpui-component";
+
+// 在 init() 中：
+this.input = InputState();
+this.input.set_content({
+  text: "🙂 @alice",
+  tokens: [{
+    range: { start: 3, end: 9 },
+    token: { id: "person-1", text: "@alice", label: "Alice" },
+  }],
+});
+
+// 在 render() 中：
+new Input(this.input)
+  .on_token_click((event, cx) => {
+    // 根据 event.token.id 查找并打开资源。
+  });
+```
+
+用 `replace_with_token` 或 `replace_range_with_token` 插入引用，用 `content()` 和 `set_content()` 保存、恢复草稿，用 `tokens()` 读取当前引用。要删除引用，将它的当前范围传给 `set_selected_range`，再调用 `replace("")`。返回的快照是独立对象，修改快照不会更新输入。应在初始化、事件或任务回调中编辑，不要在 renderer 中编辑。
+
+token 校验异常提供 `error.code`，例如 `DuplicateId` 或 `CompositionActive`；参数形状无效时也会抛出异常。Textarea 的 `TextareaState()` 提供相同方法。使用 `gpui-base` 时，改用 `InputState.new()` 或 `TextareaState.new()` 构造状态。

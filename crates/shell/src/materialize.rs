@@ -334,6 +334,8 @@ struct Behavior {
     href: Option<SharedString>,
     on_click: Option<CallbackId>,
     on_change: Option<CallbackId>,
+    render_token: Option<CallbackId>,
+    on_token_click: Option<CallbackId>,
     on_mouse_move: Option<CallbackId>,
     on_hover: Option<CallbackId>,
     /// Reports a key press that reached this element.
@@ -1499,7 +1501,18 @@ fn materialize_component(
             frame.extend(children);
             let frame = with_hover(frame, &states);
             let frame = with_active_and_focus(frame, &states);
-            frame.child(Input::new(&state)).into_any_element()
+            let presentation = crate::input_token_presentation(
+                &state,
+                behavior
+                    .render_token
+                    .map(|id| crate::ComponentElementCallback::from_runtime(runtime, id)),
+                behavior
+                    .on_token_click
+                    .map(|id| crate::ComponentCallback::from_runtime(runtime, id)),
+            );
+            frame
+                .child(Input::new(&state).token_presentation(presentation))
+                .into_any_element()
         }
         Component::OtpInput(handle) => components::otp_input::otp_input(
             runtime, handle, refinement, behavior, states, children, window, cx,
@@ -2494,6 +2507,8 @@ pub(in crate::materialize) fn resolve_ops(
                 "on_scroll_wheel" => behavior.on_scroll_wheel = Some(*id),
                 "on_resize" => behavior.on_resize = Some(*id),
                 "on_change" => behavior.on_change = Some(*id),
+                "render_token" => behavior.render_token = Some(*id),
+                "on_token_click" => behavior.on_token_click = Some(*id),
                 "on_step" => behavior.on_step = Some(*id),
                 "on_open_change" => behavior.on_open_change = Some(*id),
                 "on_confirm" => behavior.on_confirm = Some(*id),

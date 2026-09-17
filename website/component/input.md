@@ -331,3 +331,165 @@ v_flex()
     .child(Input::new(&self.name_input))
     .child(Input::new(&self.email_input))
 ```
+
+## Atomic inline tokens
+
+Use inline tokens for mentions, file references or commands that should be selected
+and deleted as a whole. For example, an input can display “Alice” as a token while
+`value()` and Copy return its text, `@alice`.
+
+### Insert a reference
+
+Create the input state once, then insert a token when the user picks a reference:
+
+```rust
+use gpui_kit::component::input::{InlineToken, Input, InputState};
+
+let input = cx.new(|cx| InputState::new(window, cx));
+
+input.update(cx, |state, cx| {
+    state.replace_with_token(
+        InlineToken::new("person-1", "@alice").with_label("Alice"),
+        window,
+        cx,
+    ).expect("valid reference");
+});
+
+Input::new(&input)
+```
+
+`replace_with_token` replaces the selection, or inserts at the caret. It does not
+add a space. To replace a completion query such as `@ali`, use
+`replace_range_with_token(range, token, window, cx)`. Rust ranges are half-open
+UTF-8 byte ranges; use byte offsets such as those returned by `str::find`.
+
+Give each occurrence a unique ID, even when two tokens refer to the same resource.
+Use `text` for the value to copy or submit and `with_label` for its displayed name.
+Omit `with_label` to display the text itself.
+
+Users can move the caret to either side of a token, select it, or delete it with
+Backspace/Delete. A selection that crosses part of a token includes the whole
+token. Undo/Redo restores both its text and reference. Pasting inserts plain text.
+
+### Customize appearance and opening a reference
+
+The default label needs no renderer. To add an icon or tooltip, return an
+`InputToken` from `render_token`, and use `on_token_click` to open the reference:
+
+```rust
+use gpui_kit::component::{
+    IconName,
+    input::{InlineTokenClickEvent, InputToken},
+};
+
+Input::new(&input)
+    .render_token(|token, _, _| {
+        InputToken::new(token)
+            .with_icon(IconName::File)
+            .with_tooltip("Open reference")
+    })
+    .on_token_click(|event: &InlineTokenClickEvent, _, _| {
+        // Look up event.token().id() and open its resource.
+    });
+```
+
+You can also return your own single-row element. Keep it within the input's line
+height; content wider than the available row is clipped. Read selection and
+read-only/disabled state from the renderer's context. Do not edit the input from
+the renderer; event callbacks may update it. Keep hover and selection styles the
+same size. If external data changes a token's size, call `refresh_token(id, cx)`;
+use `refresh(cx)` when the size of all tokens may have changed.
+
+Dragging or Shift-selecting a token does not open it. Read-only inputs allow
+opening references; disabled inputs do not. To offer a keyboard shortcut for
+opening an exactly selected token, bind `ActivateToken` to a key of your choice.
+The action is also available in the input's context menu and through accessibility.
+
+If your token includes a button, consume its mouse-down and click events so that
+it does not also open the reference. Apply `token.is_disabled()` to every child
+action, including accessibility actions, and `token.is_readonly()` to actions
+that change the content.
+
+### Save, restore and submit
+
+Use `content()` to keep the text and references together when saving a draft:
+
+```rust
+let draft = input.read(cx).content();
+
+// Restore the saved draft later.
+input.update(cx, |state, cx| {
+    state.set_content(draft, window, cx).expect("valid draft");
+});
+```
+
+To restore data from your own storage, build an `InputContent` with matching text
+and token ranges:
+
+```rust
+use gpui_kit::component::input::InputContent;
+
+let draft = InputContent::new("Ask @alice")
+    .with_token(4..10, InlineToken::new("person-1", "@alice").with_label("Alice"));
+```
+
+At submission time, read a fresh `content()`: `text()` is the message, and
+`tokens()` contains the references still present in it. Use each token's ID to
+look up its resource and handle missing resources before sending.
+
+`set_content` clears undo history and does not emit `InputEvent::Change`.
+Use `set_value` to reset to plain text; it removes tokens even if the text is
+unchanged. Use `replace_all` for an undoable plain-text replacement. Token edits,
+including adding a reference to existing text, emit `InputEvent::Change`.
+Programmatic setters can update read-only or disabled inputs, so check these
+states in application commands that should be unavailable to users.
+
+### Validation and supported inputs
+
+Tokens work with Input and Textarea. They are not available in Editor,
+NumberInput, formatted masks or password fields. A token's ID must not be blank;
+its text and label must be nonempty, single-line strings without control
+characters. Ranges cannot overlap or split a Unicode grapheme (such as an emoji
+or a character with a combining accent), and each token's text must match its
+range when restoring a draft.
+
+Token operations return `Result<_, InlineTokenError>`. A rejected operation leaves
+the input unchanged. If insertion returns `CompositionActive`, wait until the
+user finishes composing with their input method before inserting the token.
+
+### JavaScript
+
+Create and keep an `InputState` in `init()`, then render an Input with that state.
+JavaScript ranges use **UTF-16 string offsets**, matching `slice()` and `indexOf()`:
+
+```javascript
+import { Input, InputState } from "gpui-component";
+
+// In init():
+this.input = InputState();
+this.input.set_content({
+  text: "🙂 @alice",
+  tokens: [{
+    range: { start: 3, end: 9 },
+    token: { id: "person-1", text: "@alice", label: "Alice" },
+  }],
+});
+
+// In render():
+new Input(this.input)
+  .on_token_click((event, cx) => {
+    // Look up event.token.id and open its resource.
+  });
+```
+
+Use `replace_with_token` or `replace_range_with_token` to insert references,
+`content()` and `set_content()` to save and restore drafts, and `tokens()` to read
+the current references. To remove a reference, pass its current range to
+`set_selected_range`, then call `replace("")`. Returned snapshots are independent
+objects; changing one does not update the input. Make edits from initialization,
+event or task callbacks, not from renderers.
+
+Token validation errors expose an `error.code`, such as `DuplicateId` or
+`CompositionActive`; invalid argument shapes also throw. Textarea offers the same
+methods on `TextareaState()`. If you use `gpui-base`, construct these states with
+`InputState.new()` or `TextareaState.new()` instead.

@@ -109,6 +109,7 @@ pub(crate) fn input_style(disabled: bool, cx: &App) -> (Hsla, Hsla) {
 /// A text input element bind to an [`InputState`].
 #[derive(IntoElement)]
 pub struct Input {
+    token_presentation: super::InlineTokenPresentation,
     id: Option<ElementId>,
     state: TextInputState,
     style: StyleRefinement,
@@ -170,6 +171,28 @@ impl crate::FocusableExt for Input {
 }
 
 impl Input {
+    /// Customize atomic inline tokens; state and history stay with the input.
+    pub fn render_token<R: IntoElement>(
+        mut self,
+        render: impl Fn(&super::InlineTokenContext, &mut Window, &mut App) -> R + 'static,
+    ) -> Self {
+        self.token_presentation = self.token_presentation.render_token(render);
+        self
+    }
+    /// Activate a reference after a completed, unconsumed token click.
+    pub fn on_token_click(
+        mut self,
+        listener: impl Fn(&super::InlineTokenClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.token_presentation = self.token_presentation.on_token_click(listener);
+        self
+    }
+    #[doc(hidden)]
+    pub fn token_presentation(mut self, presentation: super::InlineTokenPresentation) -> Self {
+        self.token_presentation = presentation;
+        self
+    }
+
     /// Sets the GPUI identity of the input frame. By default it uses the state entity ID.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.id = Some(id.into());
@@ -213,6 +236,8 @@ impl Input {
             aria_label: None,
             context_menu_builder: None,
             paste_handler: None,
+            token_presentation: super::InlineTokenPresentation::new()
+                .with_fallback(|token, _, _| super::InputToken::new(token).into_any_element()),
         }
     }
 
@@ -489,6 +514,13 @@ impl RenderOnce for Input {
         const LINE_HEIGHT: Rems = Rems(1.25);
         let text_align = self.style.text.text_align.unwrap_or(TextAlign::Left);
         let state = self.state.clone();
+        state.set_token_presentation(
+            self.token_presentation.secret(matches!(
+                self.content_type,
+                Some(InputContentType::Password | InputContentType::NewPassword)
+            )),
+            cx,
+        );
         // Which kind of input this registers as follows from the state itself.
         sync_focused_input_registry(&state, window, cx);
 
@@ -566,6 +598,14 @@ impl RenderOnce for Input {
                                 t!("Input.Show Code Actions"),
                                 !(editable && capabilities.has_code_actions()),
                                 Box::new(gpui_base::input::ToggleCodeActions),
+                            )
+                            .separator();
+                    }
+                    if capabilities.has_token_activation() {
+                        menu = menu
+                            .menu(
+                                t!("Input.Activate token"),
+                                Box::new(gpui_base::input::ActivateToken),
                             )
                             .separator();
                     }

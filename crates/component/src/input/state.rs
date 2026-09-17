@@ -52,6 +52,15 @@ macro_rules! dispatch {
 }
 
 impl TextInputState {
+    pub(crate) fn set_token_presentation(
+        &self,
+        presentation: super::InlineTokenPresentation,
+        cx: &mut App,
+    ) {
+        dispatch!(self, |state| state
+            .update(cx, |state, _| state.set_token_presentation(presentation)))
+    }
+
     pub(crate) fn entity_id(&self) -> gpui::EntityId {
         dispatch!(self, |state| state.entity_id())
     }

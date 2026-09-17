@@ -58,5 +58,16 @@ pub(in crate::materialize) fn textarea(
     frame.extend(children);
     let frame = with_hover(frame, &states);
     let frame = with_active_and_focus(frame, &states);
-    frame.child(Textarea::new(&state)).into_any_element()
+    let presentation = crate::textarea_token_presentation(
+        &state,
+        behavior
+            .render_token
+            .map(|id| crate::ComponentElementCallback::from_runtime(runtime, id)),
+        behavior
+            .on_token_click
+            .map(|id| crate::ComponentCallback::from_runtime(runtime, id)),
+    );
+    frame
+        .child(Textarea::new(&state).token_presentation(presentation))
+        .into_any_element()
 }
