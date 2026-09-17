@@ -839,7 +839,7 @@ impl<M: InputModeKind> TextElement<M> {
         cx: &mut App,
     ) -> Vec<(Path<Pixels>, bool)> {
         let state = self.state.read(cx);
-        if !state.search_session.open {
+        if !state.search_session.is_active() {
             return vec![];
         }
         let ranges = state.search_session.matcher.matched_ranges();

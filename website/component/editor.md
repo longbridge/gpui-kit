@@ -184,6 +184,59 @@ editor.update(cx, |state, cx| {
 A read-only editor can still be searched — the replace UI is hidden
 automatically.
 
+### Custom search UI
+
+The search engine is usable without the panel, so an application can draw
+its own search bar on top of the editor's matching, highlighting, scrolling
+and replacing. `set_search_query` starts a search; the editor highlights the
+matches until `close_search`. An editor that is not `searchable` never opens
+the built-in panel and leaves `Ctrl-F` / `Cmd-F` to its ancestors, so the
+application can bind the shortcut to its own search field.
+
+```rust
+let editor = cx.new(|cx| EditorState::new(window, cx).searchable(false));
+
+// Search from the application's own field
+editor.update(cx, |state, cx| {
+    state.set_search_query("needle", true, cx);
+});
+
+// Navigate; each call scrolls the match into view
+editor.update(cx, |state, cx| {
+    state.next_search_match(cx);
+    state.previous_search_match(cx);
+});
+
+// Describe the matches: "2/5"
+let matcher = &editor.read(cx).search_session().matcher;
+let label = matcher.label();
+let count = matcher.len();
+let current = matcher.current(); // None without matches
+
+// Replace, when the editor is editable
+editor.update(cx, |state, cx| {
+    state.replace_current_search_match("replacement", window, cx);
+    state.replace_all_search_matches("replacement", window, cx);
+});
+
+// End the search and its highlights
+editor.update(cx, |state, cx| {
+    state.close_search(cx);
+});
+```
+
+Take the shortcut on the view that owns the search field:
+
+```rust
+use gpui_kit::component::input::Search;
+
+div()
+    .on_action(cx.listener(|this: &mut Self, _: &Search, window, cx| {
+        this.search.update(cx, |search, cx| search.focus(window, cx));
+    }))
+    .child(Editor::new(&this.editor))
+```
+
 ## Decorations
 
 ```rust
