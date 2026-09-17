@@ -46,6 +46,51 @@ TextView::markdown("preview", markdown_source)
 TextView::html("html-preview", "<strong>Hello</strong>")
 ```
 
+### 流式文字淡入
+
+聊天回复是分块到达的。`stream_fade(true)` 会让每一块新文字在落点处淡入，而不是直接蹦出来，观感与 Claude 展示回复的方式一致：
+
+```rust
+TextView::new(&self.reply).stream_fade(true)
+```
+
+淡入以渲染后的文字为准：`push_str`，或者 `set_text` 传入以当前文本为前缀的更长文本，新增的部分从透明渐变到正常颜色，用时 350ms、ease-out 曲线，这是从 Claude 实测得到的节奏：比模型每块 50–300ms 的到达间隔更长，于是相邻几块的淡入互相重叠，尾部呈现为一段渐变，而不是最新一块突然变实。代码块里的代码和表格单元格里的文字同样参与。流式过程中被补齐的 Markdown 标记（`**bo` 变成粗体 `bold`）只让发生变化的字形重新淡入，不会整段闪烁。替换当前内容的文本直接显示；系统开启减少动态效果时也直接显示。不开启就没有任何动画。
+
+需要自定义时长、缓动，或者让每块按词逐个浮现时，通过 `.motion(...)` 传入 `TextViewMotion`，详见 [GPUI Base TextView](/zh-CN/base/text-view#保留状态与动态更新)。
+
+## 触摸选择
+
+在触摸屏上，长按会选中手指下的单词，手指按住不放时选区跟随手指移动。抬起手指后，选区上方会出现包含 `复制` 和 `全选` 的编辑菜单，并在选区两端各显示一个拖动 handle。拖动 handle 会移动对应的一端，另一端保持不动；`全选` 选中被按下的那个视图，其 handle 仍可继续调整结果。
+
+handle 和菜单由 [`Root`](/zh-CN/component/root) 为整个窗口选区绘制，因此跨多个视图的选区也能覆盖到。点击其他位置会清除它们；手指滚动内容时菜单会暂时让开。
+
+## 图片
+
+Markdown 的 `![alt](src)` 和 HTML 的 `<img src>` 都通过 GPUI 的 `img` 元素渲染，
+`src` 决定字节从哪里来：
+
+- `http://`、`https://` URL 使用应用的 HTTP client 拉取。
+- `data:` URL 就地解码，文档可以内嵌自己的图片（`data:image/png;base64,…`，
+  或者百分号编码的 `data:image/svg+xml,…`）。GPUI 能解码的图片格式都可以；
+  media type 不是图片的 `data:` URL 会交给默认加载器，像其他加载失败的图片一样报错。
+- 其余的值——相对路径、`file://`、自定义 scheme——原样作为 URI 传下去。
+  `TextView` 不会替文档读文件系统或 asset bundle。
+
+要解析这些来源，或者改变任意图片的加载方式，把 `TextView` 包在一个安装了 GPUI
+`ImageCache` 的元素里。它内部的每个 `img`（包括文档生成的）都会先向这个 cache
+请求自己的 `Resource`，再回退到默认加载器：
+
+```rust
+use gpui_kit::{ImageCache, ImageCacheProvider};
+
+div()
+    .image_cache(app_image_cache.clone())
+    .child(markdown("![diagram](app://diagrams/pipeline.svg)"))
+```
+
+`ImageCache::load` 拿到 `Resource::Uri` 后自行决定怎样得到 `RenderImage`，
+加载策略归应用所有，文档本身仍是普通 Markdown。
+
 ## Markdown 插件
 
 使用 `.plugin(...)` 支持自定义 Markdown 格式。插件同时拥有解析和渲染逻辑，调用方只需要把它挂到 `TextView` 上：

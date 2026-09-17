@@ -397,11 +397,11 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &Rc<Node>) {
 
                 paragraph.push_image(ImageNode {
                     url: src.into(),
-                    link: None,
                     alt: alt.map(Into::into),
                     width,
                     height,
                     title: title.map(Into::into),
+                    ..Default::default()
                 });
             }
             _ => {
@@ -493,11 +493,11 @@ fn parse_node(
                 let mut paragraph = Paragraph::default();
                 paragraph.push_image(ImageNode {
                     url: src.into(),
-                    link: None,
                     title: title.map(Into::into),
                     alt: alt.map(Into::into),
                     width,
                     height,
+                    ..Default::default()
                 });
 
                 if children.len() > 0 {

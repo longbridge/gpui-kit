@@ -1,6 +1,7 @@
 mod axis;
 mod grid;
 pub mod label;
+mod path_cache;
 pub mod scale;
 pub mod shape;
 pub mod tooltip;
@@ -17,6 +18,7 @@ use gpui::{
 pub use axis::{AXIS_GAP, AxisLabelSide, AxisText, PlotAxis};
 pub use grid::Grid;
 pub use label::PlotLabel;
+pub use path_cache::{PathCache, PathCaches, ShapeKey};
 
 use tooltip::TooltipState;
 
@@ -89,7 +91,7 @@ pub trait Plot: IntoElement {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Hash, PartialEq, Eq)]
 pub enum StrokeStyle {
     #[default]
     Natural,

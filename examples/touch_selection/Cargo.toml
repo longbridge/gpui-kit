@@ -1,0 +1,13 @@
+[package]
+name = "touch_selection"
+description = "Touch selection handles and edit menu of Input, Textarea and TextView, driven without a touch screen."
+version = "0.6.1"
+publish = false
+edition.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true

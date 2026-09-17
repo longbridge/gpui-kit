@@ -192,22 +192,46 @@ where
                             .delegate
                             .on_will_change(&mut selection, &changes);
 
-                        let new_selection = weak_confirm.update(cx, |this, cx| {
+                        let confirmed = weak_confirm.update(cx, |this, cx| {
                             this.state.selection = selection;
 
                             let final_value =
                                 this.state.selection.first().map(|(_, i)| i.value().clone());
 
-                            cx.emit(SelectEvent::Confirm(final_value));
+                            cx.emit(SelectEvent::Confirm(final_value.clone()));
                             cx.notify();
                             this.set_open(false, cx);
                             this.focus(window, cx);
 
-                            this.state.selection.clone()
+                            (this.state.selection.clone(), final_value)
                         });
 
-                        // Sync snapshot and fire on_confirm directly — same re-entrancy guard.
-                        if let Ok(new_selection) = new_selection {
+                        // Clear the query through list_state directly — an entity-handle
+                        // update here would re-enter the ListState lock held above.
+                        // The committed index pointed into the filtered view, so resolve
+                        // the confirmed value in the restored full list; otherwise the
+                        // cursor and the mark would disagree on the next open.
+                        if let Ok((mut new_selection, final_value)) = confirmed {
+                            if !list_state.query_input.read(cx).value().is_empty() {
+                                list_state.set_query("", window, cx);
+                            }
+
+                            if let Some(ix) = final_value
+                                .as_ref()
+                                .and_then(|value| list_state.delegate().delegate.position(value))
+                            {
+                                list_state.set_selected_index(Some(ix), window, cx);
+                                if let Some((slot, _)) = new_selection.first_mut() {
+                                    *slot = ix;
+                                }
+                                _ = weak_confirm.update(cx, |this, cx| {
+                                    if let Some((slot, _)) = this.state.selection.first_mut() {
+                                        *slot = ix;
+                                    }
+                                    cx.notify();
+                                });
+                            }
+
                             list_state
                                 .delegate_mut()
                                 .update_selection_snapshot(new_selection.clone());
@@ -219,7 +243,7 @@ where
                     }
                 });
             },
-            // on_cancel — restore cursor to committed index, close
+            // on_cancel — clear the query, restore cursor to committed index, close
             move |_final_selected_index, window, cx| {
                 cx.defer_in(window, {
                     let weak_cancel = weak_cancel.clone();
@@ -228,6 +252,9 @@ where
                             .upgrade()
                             .and_then(|e| e.read(cx).state.selection.first().map(|(ix, _)| *ix));
 
+                        if !list_state.query_input.read(cx).value().is_empty() {
+                            list_state.set_query("", window, cx);
+                        }
                         list_state.set_selected_index(committed_ix, window, cx);
 
                         _ = weak_cancel.update(cx, |this, cx| {
@@ -355,13 +382,7 @@ where
             return;
         }
 
-        let committed_ix = self.state.selection.first().map(|(ix, _)| *ix);
-        if self.selected_index(cx) != committed_ix {
-            self.state.list.update(cx, |list, cx| {
-                list.set_selected_index(committed_ix, window, cx);
-            });
-        }
-
+        self.clear_query_and_restore_cursor(window, cx);
         self.set_open(false, cx);
         cx.notify();
     }
@@ -373,6 +394,8 @@ where
 
         if self.state.open {
             self.state.list.focus_handle(cx).focus(window, cx);
+        } else {
+            self.clear_query_and_restore_cursor(window, cx);
         }
 
         cx.notify();
@@ -385,9 +408,24 @@ where
         }
 
         cx.stop_propagation();
+        self.clear_query_and_restore_cursor(window, cx);
         self.set_open(false, cx);
         self.focus(window, cx);
         cx.notify();
+    }
+
+    /// Drop the search query and move the cursor back to the committed
+    /// selection, so the next open shows every item. Call on every menu
+    /// close that does not go through the confirm/cancel callbacks.
+    fn clear_query_and_restore_cursor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.state.clear_query(window, cx);
+
+        let committed_ix = self.state.selection.first().map(|(ix, _)| *ix);
+        self.state.list.update(cx, |list, cx| {
+            if list.selected_index() != committed_ix {
+                list.set_selected_index(committed_ix, window, cx);
+            }
+        });
     }
 
     fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
@@ -802,8 +840,13 @@ where
             .focus_handle(&focus_handle)
             .content_focus_handle(&content_focus_handle)
             .accessibility_value(accessibility_value)
-            .on_open_change(move |open, _, cx| {
-                open_state.update(cx, |state, cx| state.set_open(open, cx));
+            .on_open_change(move |open, window, cx| {
+                open_state.update(cx, |state, cx| {
+                    if !open {
+                        state.clear_query_and_restore_cursor(window, cx);
+                    }
+                    state.set_open(open, cx);
+                });
             })
             .size_full()
             .child(self.state)

@@ -7,13 +7,16 @@ use std::{
 
 use gpui::{
     App, AppContext as _, Bounds, Context, Element, ElementId, Entity, EntityId, EventEmitter,
-    Global, GlobalElementId, Half, Hitbox, InputEvent as _, InspectorElementId, IntoElement,
-    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    ScrollDelta, ScrollWheelEvent, SharedString, Style, Subscription, TextLayout, WeakEntity,
-    Window, point, px,
+    Global, GlobalElementId, Half, Hitbox, HitboxBehavior, Hsla, InputEvent as _,
+    InspectorElementId, IntoElement, LayoutId, LongPressEvent, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent, SharedString,
+    Style, Subscription, TextLayout, TouchDragEvent, TouchPhase, WeakEntity, Window, point, px,
 };
 
 use crate::text_boundary::{line_range_at, word_range_at};
+use crate::touch_selection::{
+    EdgeDrag, SelectionEdge, TouchHandle, TouchSelectionSnapshot, caret_in_view,
+};
 use crate::{AutoScroll, GlobalState};
 
 /// An opaque selection layer identifier.
@@ -209,6 +212,7 @@ pub struct TextSelectionRegistration {
     document_order: u64,
     text_bounds: Vec<Bounds<Pixels>>,
     self_scroll: bool,
+    selection_edges: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
 }
 
 impl TextSelectionRegistration {
@@ -222,6 +226,7 @@ impl TextSelectionRegistration {
             document_order: 0,
             text_bounds: Vec::new(),
             self_scroll: false,
+            selection_edges: None,
         }
     }
 
@@ -258,6 +263,14 @@ impl TextSelectionRegistration {
         self
     }
 
+    /// Sets where the participant painted the two ends of its selection: the
+    /// caret line box before its first selected character and the one after
+    /// its last, in window coordinates. The touch handles are drawn there.
+    pub fn with_selection_edges(mut self, start: Bounds<Pixels>, end: Bounds<Pixels>) -> Self {
+        self.selection_edges = Some((start, end));
+        self
+    }
+
     /// Returns the participant hitbox.
     pub fn hitbox(&self) -> &Hitbox {
         &self.hitbox
@@ -286,6 +299,11 @@ impl TextSelectionRegistration {
     /// Returns the glyph-bearing bounds used to reject blank-only gestures.
     pub fn text_bounds(&self) -> &[Bounds<Pixels>] {
         &self.text_bounds
+    }
+
+    /// Returns the caret line boxes at the participant's selection ends.
+    pub const fn selection_edges(&self) -> Option<(Bounds<Pixels>, Bounds<Pixels>)> {
+        self.selection_edges
     }
 }
 
@@ -503,6 +521,11 @@ pub enum TextSelectionEvent {
     AutoScroll(Option<Pixels>),
     /// Window selection cleared the participant's participant-local state.
     Cleared,
+    /// The touch selection the participant takes part in changed: it
+    /// appeared, its ends moved, a handle drag began or ended, or it went
+    /// away. The participant paints the handles and lays their hitboxes out
+    /// from the ends it painted last frame, so it renders once more.
+    TouchSelectionChanged,
 }
 
 struct CopyItem {
@@ -669,6 +692,12 @@ impl SelectableTextState {
     }
 }
 
+/// The touch handles a participant laid out for a frame, with their hitboxes.
+#[derive(Default)]
+pub struct TouchHandleLayout {
+    hitboxes: Vec<(SelectionEdge, Hitbox)>,
+}
+
 /// A stable, participant-neutral handle for text that participates in window selection.
 #[derive(Clone)]
 pub struct TextSelectionHandle(Entity<SelectableTextState>);
@@ -729,6 +758,11 @@ impl TextSelectionHandle {
         self.0.update(cx, |state, _| state.update_runs(runs))
     }
 
+    // Rich text renders its own selection; retain geometry only for word hit testing.
+    pub(crate) fn set_hit_test_runs(&self, runs: &[TextSelectionRun], cx: &mut App) {
+        self.0.update(cx, |state, _| state.runs = runs.to_vec());
+    }
+
     /// Subscribes to participant selection notifications.
     pub fn subscribe(
         &self,
@@ -766,6 +800,100 @@ impl TextSelectionHandle {
     /// Sets a participant-specific copy projection.
     pub fn copy_with(&self, callback: impl Fn(&mut App) -> String + 'static, cx: &mut App) {
         self.0.update(cx, |state, _| state.copy_with(callback));
+    }
+
+    /// Lays out the touch handles at the ends of this participant's
+    /// selection, as they were painted last frame, and gives each a hitbox
+    /// where the finger takes it. Call during the participant's prepaint;
+    /// hand the result to [`Self::paint_touch_handles`].
+    pub fn prepaint_touch_handles(&self, window: &mut Window, cx: &App) -> TouchHandleLayout {
+        let Some(state) = WindowSelectionState::existing(window, cx) else {
+            return TouchHandleLayout::default();
+        };
+        let hitboxes = state
+            .read(cx)
+            .touch_handles_of(self.entity_id())
+            .into_iter()
+            .map(|(edge, caret)| {
+                let hitbox = window.insert_hitbox(
+                    TouchHandle::hit_bounds(edge, caret),
+                    HitboxBehavior::BlockMouse,
+                );
+                (edge, hitbox)
+            })
+            .collect();
+        TouchHandleLayout { hitboxes }
+    }
+
+    /// Paints the touch handles at the ends of this participant's selection,
+    /// in `color`, where the participant is in the paint order — so whatever
+    /// is drawn over the text is drawn over its handles too. Call at the end
+    /// of the participant's paint, after [`Self::register`] for the frame.
+    ///
+    /// The handles take the finger's drag from there; Base moves the
+    /// selection with it.
+    pub fn paint_touch_handles(
+        &self,
+        layout: &TouchHandleLayout,
+        color: Hsla,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let Some(state) = WindowSelectionState::existing(window, cx) else {
+            return;
+        };
+        for (edge, caret) in state.read(cx).touch_handles_of(self.entity_id()) {
+            TouchHandle::paint(edge, caret, color, window);
+        }
+        for (edge, hitbox) in &layout.hitboxes {
+            let edge = *edge;
+            state.update(cx, |state, _| state.register_touch_ui(hitbox.bounds));
+            // Touch: the drag is offered on the first touch, before it can
+            // become a tap, a long press or a pan.
+            window.on_mouse_event({
+                let hitbox = hitbox.clone();
+                let state = state.downgrade();
+                move |event: &TouchDragEvent, phase, window, cx| {
+                    if !phase.bubble()
+                        || event.phase != TouchPhase::Started
+                        || window.default_prevented()
+                        || !hitbox.is_hovered(window)
+                    {
+                        return;
+                    }
+                    let Some(state) = state.upgrade() else {
+                        return;
+                    };
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    state.update(cx, |state, cx| {
+                        state.begin_edge_drag(edge, event.position, window, cx)
+                    });
+                    WindowSelectionState::resolve_content_keys(&state, cx);
+                }
+            });
+            // Mouse: the same drag for a pointer.
+            window.on_mouse_event({
+                let hitbox = hitbox.clone();
+                let state = state.downgrade();
+                move |event: &MouseDownEvent, phase, window, cx| {
+                    if !phase.bubble()
+                        || event.button != MouseButton::Left
+                        || !hitbox.is_hovered(window)
+                    {
+                        return;
+                    }
+                    let Some(state) = state.upgrade() else {
+                        return;
+                    };
+                    cx.stop_propagation();
+                    state.update(cx, |state, cx| {
+                        state.begin_edge_drag(edge, event.position, window, cx)
+                    });
+                    WindowSelectionState::resolve_content_keys(&state, cx);
+                }
+            });
+        }
     }
 
     /// Sets a participant-specific lookup for stable virtualized content keys.
@@ -831,6 +959,55 @@ impl SelectionEndpoint {
     }
 }
 
+/// What a long press left behind: the handles and the edit menu.
+///
+/// The presentation layer draws both and reports their bounds each frame, so
+/// that a press on a handle or a menu item is not taken for a press on the
+/// text underneath, which would clear the very selection they belong to.
+#[derive(Default)]
+struct TouchSelection {
+    /// The current selection was made by touch and carries handles.
+    active: bool,
+    menu_open: bool,
+    drag: Option<EdgeDrag>,
+    /// Where the handles and the menu were painted this frame, and the frame
+    /// before: a press arrives between frames, and the surfaces may have
+    /// moved in the one that has not painted yet.
+    ui_bounds: Vec<Bounds<Pixels>>,
+    previous_ui_bounds: Vec<Bounds<Pixels>>,
+    /// The ends as last laid out: `(start, end, start_visible, end_visible)`.
+    /// A frame in which no participant paints a selection — the cursor sits
+    /// between two characters mid-drag — would otherwise lose the handle the
+    /// finger holds, and with it the rest of the drag.
+    last_edges: std::cell::Cell<Option<(Bounds<Pixels>, Bounds<Pixels>, bool, bool)>>,
+}
+
+impl TouchSelection {
+    fn covers(&self, position: Point<Pixels>) -> bool {
+        self.active
+            && self
+                .ui_bounds
+                .iter()
+                .chain(&self.previous_ui_bounds)
+                .any(|bounds| bounds.contains(&position))
+    }
+
+    /// A new frame begins: what was painted last frame is kept one frame more.
+    fn begin_frame(&mut self) {
+        self.previous_ui_bounds = std::mem::take(&mut self.ui_bounds);
+    }
+
+    /// Drops the handles and the menu; returns whether there were any.
+    fn reset(&mut self) -> bool {
+        let had = self.active;
+        self.active = false;
+        self.menu_open = false;
+        self.drag = None;
+        self.last_edges.set(None);
+        had
+    }
+}
+
 /// Window-local generic text-selection state.
 #[derive(Default)]
 struct WindowSelectionState {
@@ -846,6 +1023,15 @@ struct WindowSelectionState {
     refresh_held_cursor: bool,
     mouse_down_prepared: bool,
     auto_scroll: AutoScroll,
+    /// Where the anchor's text was when the last synthetic wheel went out,
+    /// and how many went out without moving it. A container at its end
+    /// cannot scroll further; pushing it on would only make one that
+    /// bounces stretch and snap back on every tick.
+    auto_scroll_stall: (Option<(Bounds<Pixels>, Point<Pixels>)>, u8),
+    touch: TouchSelection,
+    /// This entity, so that touch changes can notify observers from paths that
+    /// only hold an [`App`].
+    entity_id: Option<EntityId>,
 }
 
 impl WindowSelectionState {
@@ -918,6 +1104,7 @@ impl WindowSelectionState {
             .detach();
             Self {
                 active_scope,
+                entity_id: Some(entity_id),
                 ..Self::default()
             }
         });
@@ -1022,6 +1209,15 @@ impl WindowSelectionState {
         {
             self.refresh_held_cursor = true;
         }
+        // The handles sit on the painted ends; when those moved — a scroll, a
+        // reflow, a select-all — whoever draws the handles needs to know.
+        let edges_moved = self.touch.active
+            && self
+                .participants
+                .get(&selection.entity_id())
+                .is_none_or(|previous| {
+                    previous.registration.selection_edges != registration.selection_edges
+                });
         self.participants.insert(
             selection.entity_id(),
             ParticipantRegistration {
@@ -1031,6 +1227,9 @@ impl WindowSelectionState {
             },
         );
         self.publish_snapshots(cx);
+        if edges_moved {
+            self.touch_changed(cx);
+        }
     }
 
     /// Starts a selection gesture using bounds hit testing (useful to adapters/tests).
@@ -1073,12 +1272,47 @@ impl WindowSelectionState {
         self.pending_extension_anchor = None;
         self.is_selecting = false;
         self.did_hit_text = false;
+        if self.touch.reset() {
+            self.touch_changed(cx);
+        }
         self.prune_dead_participants();
         self.participants
             .values()
             .filter_map(|registration| registration.participant.upgrade())
             .filter_map(|participant| participant.update(cx, |state, cx| state.clear_state(cx)))
             .collect()
+    }
+
+    /// Tells whoever draws the handles and the menu that they changed.
+    ///
+    /// Deferred, because the change may come from a participant painting its
+    /// selection ends: a notification raised inside a draw marks the view
+    /// dirty but starts no frame, and the handles would sit where they were
+    /// until something else redrew the window.
+    ///
+    /// The participants in the selection hear it too: they paint the
+    /// handles, and lay the handles' hitboxes out from the ends they painted
+    /// last frame, so they render once more. A participant under a cached
+    /// view would otherwise not, and the next frame would replay this one,
+    /// with no hitbox where a handle is.
+    fn touch_changed(&self, cx: &mut App) {
+        let participants = self
+            .participants
+            .values()
+            .filter_map(|registration| registration.participant.upgrade())
+            .filter(|participant| participant.read(cx).snapshot.is_some())
+            .collect::<Vec<_>>();
+        let entity_id = self.entity_id;
+        cx.defer(move |cx| {
+            for participant in participants {
+                participant.update(cx, |_, cx| {
+                    cx.emit(TextSelectionEvent::TouchSelectionChanged)
+                });
+            }
+            if let Some(entity_id) = entity_id {
+                cx.notify(entity_id);
+            }
+        });
     }
 
     fn copy_items(&self, cx: &App) -> Vec<CopyItem> {
@@ -1096,6 +1330,25 @@ impl WindowSelectionState {
     #[cfg(test)]
     fn selected_text(&self, cx: &mut App) -> String {
         resolve_copy_items(self.copy_items(cx), cx)
+    }
+
+    /// Whether the current endpoints take in at least one character of some
+    /// participant's painted text, as opposed to two points with nothing
+    /// between them.
+    fn selects_text(&self, cx: &App) -> bool {
+        self.snapshot().is_some()
+            && self.participants.values().any(|registration| {
+                registration
+                    .participant
+                    .upgrade()
+                    .is_some_and(|participant| {
+                        let participant = participant.read(cx);
+                        project_ranges(participant.snapshot, &participant.runs)
+                            .ranges()
+                            .iter()
+                            .any(|range| range.as_ref().is_some_and(|range| !range.is_empty()))
+                    })
+            })
     }
 
     /// Returns whether a drag or a participant-local selection is active.
@@ -1139,6 +1392,9 @@ impl WindowSelectionState {
         self.pending_extension_anchor = None;
         self.is_selecting = false;
         self.did_hit_text = false;
+        if self.touch.reset() {
+            self.touch_changed(cx);
+        }
         self.prune_dead_participants();
         let handlers = self
             .participants
@@ -1148,6 +1404,278 @@ impl WindowSelectionState {
             .collect();
         self.pending_extension_anchor = pending_extension_anchor;
         handlers
+    }
+
+    /// The touch selection laid out for its handles and edit menu.
+    ///
+    /// The ends come from the participants: the first selected character of
+    /// the earliest participant in document order and the last of the latest.
+    /// A participant whose selection is entirely scrolled away paints no ends,
+    /// so the handles disappear with the text they mark.
+    fn touch_selection(&self) -> Option<TouchSelectionSnapshot> {
+        if !self.touch.active {
+            return None;
+        }
+        // Each end with its owner's viewport: an end scrolled out of its
+        // participant gets no handle.
+        let mut start: Option<(u64, Bounds<Pixels>, bool)> = None;
+        let mut end: Option<(u64, Bounds<Pixels>, bool)> = None;
+        for registration in self.participants.values() {
+            let geometry = &registration.registration;
+            if geometry.scope != self.active_scope || registration.participant.upgrade().is_none() {
+                continue;
+            }
+            let Some((edge_start, edge_end)) = geometry.selection_edges else {
+                continue;
+            };
+            let order = geometry.document_order;
+            let viewport = geometry.hitbox.bounds;
+            if start.is_none_or(|(best, ..)| order < best) {
+                start = Some((order, edge_start, caret_in_view(edge_start, viewport)));
+            }
+            if end.is_none_or(|(best, ..)| order >= best) {
+                end = Some((order, edge_end, caret_in_view(edge_end, viewport)));
+            }
+        }
+        let edges = match (start, end) {
+            (Some((_, start, start_visible)), Some((_, end, end_visible))) => {
+                let edges = (start, end, start_visible, end_visible);
+                self.touch.last_edges.set(Some(edges));
+                edges
+            }
+            _ if self.touch.drag.is_some() => self.touch.last_edges.get()?,
+            _ => return None,
+        };
+        let (start, end, start_visible, end_visible) = edges;
+        Some(
+            TouchSelectionSnapshot::new(start, end)
+                .with_edge_visible(SelectionEdge::Start, start_visible)
+                .with_edge_visible(SelectionEdge::End, end_visible)
+                .with_menu_open(self.touch.menu_open)
+                .with_dragging(self.touch.drag.map(|drag| drag.edge())),
+        )
+    }
+
+    /// The handles `participant` paints: the start when no participant
+    /// earlier in document order has a selection end, the end when none
+    /// later has. Participants paint in document order, so a later one that
+    /// takes the end over has registered its ends by the time it asks.
+    fn touch_handles_of(&self, participant: EntityId) -> Vec<(SelectionEdge, Bounds<Pixels>)> {
+        if !self.touch.active {
+            return Vec::new();
+        }
+        let Some(own) = self.participants.get(&participant) else {
+            return Vec::new();
+        };
+        let Some((start, end)) = own.registration.selection_edges else {
+            return Vec::new();
+        };
+        if start == end {
+            return Vec::new();
+        }
+        let order = own.registration.document_order;
+        let others = self.participants.iter().filter(|(id, registration)| {
+            **id != participant
+                && registration.registration.scope == self.active_scope
+                && registration.registration.selection_edges.is_some()
+                && registration.participant.upgrade().is_some()
+        });
+        let (mut earlier, mut later) = (false, false);
+        for (_, registration) in others {
+            let other = registration.registration.document_order;
+            earlier |= other < order;
+            later |= other > order;
+        }
+        let viewport = own.registration.hitbox.bounds;
+        let mut handles = Vec::with_capacity(2);
+        if !earlier && caret_in_view(start, viewport) {
+            handles.push((SelectionEdge::Start, start));
+        }
+        if !later && caret_in_view(end, viewport) {
+            handles.push((SelectionEdge::End, end));
+        }
+        handles
+    }
+
+    /// Keeps the selection a long press made, and opens the edit menu over it.
+    fn keep_touch_selection(&mut self, cx: &mut App) {
+        self.touch.active = self.snapshot().is_some();
+        self.touch.menu_open = self.touch.active;
+        self.touch.drag = None;
+        self.touch_changed(cx);
+    }
+
+    /// Records where the handles and the menu are painted this frame.
+    fn register_touch_ui(&mut self, bounds: Bounds<Pixels>) {
+        self.touch.ui_bounds.push(bounds);
+    }
+
+    fn close_edit_menu(&mut self, cx: &mut App) {
+        if !self.touch.menu_open {
+            return;
+        }
+        self.touch.menu_open = false;
+        self.touch_changed(cx);
+    }
+
+    /// The handles follow the text, but the menu would sit over whatever
+    /// scrolls underneath it: it steps aside while a finger scrolls and comes
+    /// back over the handles once the finger lifts.
+    fn edit_menu_on_scroll(&mut self, phase: TouchPhase, cx: &mut App) {
+        if !self.touch.active || self.touch.drag.is_some() {
+            return;
+        }
+        match phase {
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                if !self.touch.menu_open {
+                    self.touch.menu_open = true;
+                    self.touch_changed(cx);
+                }
+            }
+            _ => self.close_edit_menu(cx),
+        }
+    }
+
+    /// Selects all of the participant the touch selection started in.
+    ///
+    /// This stays a point selection — anchored on the participant's first
+    /// line of text, ending on its last — rather than switching the
+    /// participant to a local select-all: one selection, painted, reported
+    /// and copied the one way, with handles that drag on from its ends.
+    fn select_all_touched(&mut self, cx: &mut App) {
+        if !self.touch.active {
+            return;
+        }
+        let Some((participant, registration)) = self.anchor_registration() else {
+            return;
+        };
+        // From the participant's text runs, not its painted line bounds:
+        // those are clipped to the viewport, and a message taller than the
+        // screen would only select what is on it.
+        let (anchor, cursor) = {
+            let runs = &participant.read(cx).runs;
+            let (Some(first), Some(last)) = (
+                runs.iter().min_by_key(|run| run.document_order),
+                runs.iter().max_by_key(|run| run.document_order),
+            ) else {
+                return;
+            };
+            let (Some(start), Some(end)) = (
+                first.layout.position_for_index(0),
+                last.layout.position_for_index(last.text.len()),
+            ) else {
+                return;
+            };
+            // Just inside the first and the last glyph, mid-line, so both
+            // land on text.
+            let inset = px(1.);
+            (
+                point(start.x + inset, start.y + first.layout.line_height() / 2.),
+                point(end.x - inset, end.y + last.layout.line_height() / 2.),
+            )
+        };
+        let content_key_resolver = participant.read(cx).content_key_resolver.clone();
+        let to_endpoint = |window_point: Point<Pixels>| {
+            let content_point =
+                window_point - registration.bounds.origin - registration.scroll_offset;
+            SelectionEndpoint {
+                participant: Some(participant.downgrade()),
+                point: content_point,
+                inside: true,
+                inside_text: true,
+                content_key: None,
+                content_key_resolver: content_key_resolver
+                    .clone()
+                    .map(|resolver| (resolver, content_point)),
+            }
+        };
+        self.anchor = Some(to_endpoint(anchor));
+        self.cursor = Some(to_endpoint(cursor));
+        self.did_hit_text = true;
+        self.is_selecting = false;
+        self.touch.menu_open = true;
+        self.publish_snapshots(cx);
+        self.touch_changed(cx);
+    }
+
+    /// Starts dragging one end of the touch selection from `finger`.
+    ///
+    /// The selection is rebuilt from the painted ends, anchored at the end that
+    /// stays: a select-all or a word selection becomes an ordinary point
+    /// selection which the drag then extends.
+    fn begin_edge_drag(
+        &mut self,
+        edge: SelectionEdge,
+        finger: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let Some(snapshot) = self.touch_selection() else {
+            return;
+        };
+        let handlers = self.prepare_for_mouse_down(false, cx);
+        dispatch_clear_handlers(handlers, cx);
+        let held = snapshot.edge(edge.opposite());
+        // Just inside the held end, so the anchor lands on the character it
+        // marks rather than on the boundary between two participants.
+        let nudge = px(1.);
+        let anchor_point = match edge {
+            SelectionEdge::Start => point(held.left() - nudge, held.center().y),
+            SelectionEdge::End => point(held.left() + nudge, held.center().y),
+        };
+        let anchor = self.endpoint(anchor_point, None, cx);
+        let drag = EdgeDrag::begin(edge, snapshot.edge(edge), finger);
+        let cursor = self.endpoint(drag.text_position(finger), Some(window), cx);
+        self.did_hit_text = anchor.inside_text || cursor.inside_text;
+        self.anchor = Some(anchor);
+        self.cursor = Some(cursor);
+        self.is_selecting = true;
+        self.touch.active = true;
+        self.touch.menu_open = false;
+        self.touch.drag = Some(drag);
+        self.publish_snapshots(cx);
+        self.touch_changed(cx);
+    }
+
+    fn update_edge_drag(&mut self, finger: Point<Pixels>, window: &Window, cx: &mut Context<Self>) {
+        let Some(drag) = self.touch.drag else {
+            return;
+        };
+        let before = self.cursor.clone();
+        self.update_in_window(drag.text_position(finger), window, cx);
+        // A handle never collapses the selection: at the other end it stops,
+        // and the finger has to pass that end, onto text, to swap the two.
+        if !self.selects_text(cx) {
+            self.cursor = before;
+            self.publish_snapshots(cx);
+            return;
+        }
+        // Dragging one end past the other swaps them: the cursor now lies
+        // before the anchor, so the finger holds what became the start.
+        if let Some(points) = self
+            .snapshot()
+            .and_then(|snapshot| snapshot.window_points())
+        {
+            let (anchor, cursor) = (points.anchor(), points.cursor());
+            let cursor_first = cursor.y < anchor.y || (cursor.y == anchor.y && cursor.x < anchor.x);
+            let edge = if cursor_first {
+                SelectionEdge::Start
+            } else {
+                SelectionEdge::End
+            };
+            if let Some(drag) = self.touch.drag.as_mut() {
+                drag.set_edge(edge);
+            }
+        }
+        self.touch_changed(cx);
+    }
+
+    fn end_edge_drag(&mut self, cx: &mut App) {
+        if self.touch.drag.take().is_none() {
+            return;
+        }
+        self.end(cx);
+        self.keep_touch_selection(cx);
     }
 
     fn begin_in_window(
@@ -1525,11 +2053,29 @@ impl WindowSelectionState {
             ),
         );
         self.auto_scroll.last_drag_position = Some(event_position);
+        self.auto_scroll_stall = (None, 0);
         let window = window.window_handle();
         self.auto_scroll.set(delta, cx, move |delta, state, cx| {
             let Some(position) = state.auto_scroll.last_drag_position else {
                 return;
             };
+            // Hold off once the container has shown, over a few ticks, that
+            // it has nowhere left to go; the next move of the finger asks
+            // again.
+            const STALLED_TICKS: u8 = 3;
+            let geometry = state
+                .anchor_registration()
+                .map(|(_, registration)| (registration.bounds, registration.scroll_offset));
+            let (last, stalled) = &mut state.auto_scroll_stall;
+            if *last == geometry {
+                *stalled = stalled.saturating_add(1);
+                if *stalled >= STALLED_TICKS {
+                    return;
+                }
+            } else {
+                *last = geometry;
+                *stalled = 0;
+            }
             let window = window;
             cx.defer(move |cx| {
                 _ = window.update(cx, |_, window, cx| {
@@ -1707,6 +2253,81 @@ impl TextSelection {
         }
     }
 
+    /// Calls `callback` whenever the touch selection changes: it appears, its
+    /// handles move, its menu opens or closes, or it goes away. Whoever draws
+    /// the handles and the menu re-renders from here.
+    pub fn observe_touch_selection(
+        window: &Window,
+        cx: &mut App,
+        callback: impl Fn(&mut App) + 'static,
+    ) -> Subscription {
+        let state = WindowSelectionState::acquire(window.window_handle().window_id(), cx);
+        cx.observe(&state, move |_, cx| callback(cx))
+    }
+
+    /// Returns the selection a long press made, laid out for its handles and
+    /// edit menu, or `None` when the selection was made with a pointer.
+    pub fn touch_selection(window: &Window, cx: &App) -> Option<TouchSelectionSnapshot> {
+        WindowSelectionState::existing(window, cx)?
+            .read(cx)
+            .touch_selection()
+    }
+
+    /// Records where a touch handle or the edit menu is painted this frame, so
+    /// that pressing it does not clear the selection it belongs to. Call from
+    /// paint, every frame the surface is shown.
+    pub fn register_touch_ui(bounds: Bounds<Pixels>, window: &Window, cx: &mut App) {
+        if let Some(state) = WindowSelectionState::existing(window, cx) {
+            state.update(cx, |state, _| state.register_touch_ui(bounds));
+        }
+    }
+
+    /// Closes the edit menu and keeps the selection with its handles.
+    pub fn close_edit_menu(window: &mut Window, cx: &mut App) {
+        if let Some(state) = live_text_selection_state(window, cx) {
+            state.update(cx, |state, cx| state.close_edit_menu(cx));
+        }
+    }
+
+    /// Selects all of the text the touch selection started in, keeping the
+    /// handles and the edit menu over the result.
+    pub fn select_all(window: &mut Window, cx: &mut App) {
+        if let Some(state) = live_text_selection_state(window, cx) {
+            state.update(cx, |state, cx| state.select_all_touched(cx));
+        }
+    }
+
+    /// Starts dragging one end of the touch selection from `finger`. The other
+    /// end stays; the menu closes until [`Self::end_edge_drag`].
+    pub fn begin_edge_drag(
+        edge: SelectionEdge,
+        finger: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        if let Some(state) = live_text_selection_state(window, cx) {
+            state.update(cx, |state, cx| {
+                state.begin_edge_drag(edge, finger, window, cx)
+            });
+            WindowSelectionState::resolve_content_keys(&state, cx);
+        }
+    }
+
+    /// Moves the dragged end to the text under `finger`.
+    pub fn update_edge_drag(finger: Point<Pixels>, window: &mut Window, cx: &mut App) {
+        if let Some(state) = live_text_selection_state(window, cx) {
+            state.update(cx, |state, cx| state.update_edge_drag(finger, window, cx));
+            WindowSelectionState::resolve_content_keys(&state, cx);
+        }
+    }
+
+    /// Ends the handle drag and reopens the edit menu over the result.
+    pub fn end_edge_drag(window: &mut Window, cx: &mut App) {
+        if let Some(state) = live_text_selection_state(window, cx) {
+            state.update(cx, |state, cx| state.end_edge_drag(cx));
+        }
+    }
+
     /// Activates the opaque selection scope for this window.
     pub fn activate_scope(scope: TextSelectionScopeId, window: &mut Window, cx: &mut App) {
         let Some(state) = WindowSelectionState::existing(window, cx) else {
@@ -1867,7 +2488,10 @@ impl Element for TextSelectionLayer {
         // against the previous frame and alternates coverage forever.
         GlobalState::init(cx);
         GlobalState::global_mut(cx).begin_selection_frame();
-        TextSelectionLayerPrepaintState(retain_text_selection_state(global_id, window, cx))
+        let state = retain_text_selection_state(global_id, window, cx);
+        // The handles and the menu register again as they paint this frame.
+        state.update(cx, |state, _| state.touch.begin_frame());
+        TextSelectionLayerPrepaintState(state)
     }
 
     fn paint(
@@ -1919,7 +2543,14 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
             // the held cursor after paint registers the new scroll geometry.
             let refresh_cursor = state.update(cx, |state, cx| {
                 if std::mem::take(&mut state.refresh_held_cursor) && state.is_selecting {
-                    state.update_in_window(window.mouse_position(), window, cx);
+                    // A handle drag holds the finger off the text; keep the
+                    // same offset, or the cursor would hop between the two.
+                    let position = window.mouse_position();
+                    let position = state
+                        .touch
+                        .drag
+                        .map_or(position, |drag| drag.text_position(position));
+                    state.update_in_window(position, window, cx);
                     true
                 } else {
                     false
@@ -1939,6 +2570,11 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
         let Some(state) = mouse_down_state.upgrade() else {
             return;
         };
+        // A press on a handle or on the edit menu acts on the selection; it
+        // must not clear it.
+        if state.read(cx).touch.covers(event.position) {
+            return;
+        }
         if phase.capture() {
             GlobalState::init(cx);
             GlobalState::reset_text_selection_suppression(cx);
@@ -1965,10 +2601,122 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
             if GlobalState::is_text_selection_suppressed(cx) {
                 return;
             }
+            let touch = GlobalState::is_touch_press(cx);
             state.update(cx, |state, cx| {
-                state.select_at(event.position, event.click_count, window, cx)
+                state.select_at(event.position, event.click_count, window, cx);
+                // A double tap is touch's other way to select a word, and it
+                // gets the handles and the menu like a long press does.
+                if touch {
+                    state.keep_touch_selection(cx);
+                }
             });
             WindowSelectionState::resolve_content_keys(&state, cx);
+        }
+    });
+
+    // Every touch is offered as a drag first; that is how a tap's mouse
+    // events are later told apart from a mouse's.
+    window.on_mouse_event(move |event: &TouchDragEvent, phase, _, cx| {
+        if phase.capture() && event.phase == TouchPhase::Started {
+            GlobalState::note_touch(cx);
+        }
+    });
+
+    // Touch panning remains scrolling until a long press actually hits text.
+    // Claiming the gesture keeps subsequent moves out of the pan recognizer.
+    let long_press_state = state.downgrade();
+    window.on_mouse_event(move |event: &LongPressEvent, phase, window, cx| {
+        if !phase.bubble() {
+            return;
+        }
+        let Some(state) = long_press_state.upgrade() else {
+            return;
+        };
+        if event.phase == TouchPhase::Started {
+            if window.default_prevented()
+                || state.read(cx).touch.covers(event.start_position)
+                || !state.update(cx, |state, cx| {
+                    state
+                        .endpoint(event.start_position, Some(window), cx)
+                        .inside_text
+                })
+            {
+                return;
+            }
+            GlobalState::init(cx);
+            GlobalState::reset_text_selection_suppression(cx);
+            let handlers = state.update(cx, |state, cx| state.prepare_for_mouse_down(false, cx));
+            dispatch_clear_handlers(handlers, cx);
+            let selected = state.update(cx, |state, cx| {
+                state.select_at(event.start_position, 2, window, cx);
+                state.anchor.is_some()
+            });
+            if !selected {
+                return;
+            }
+            window.capture_long_press(&state);
+        } else if !window.has_long_press_capture(&state) {
+            return;
+        } else {
+            state.update(cx, |state, cx| match event.phase {
+                TouchPhase::Moved => {
+                    state.is_selecting = true;
+                    state.update_in_window(event.position, window, cx);
+                }
+                TouchPhase::Ended | TouchPhase::Cancelled => {
+                    state.end(cx);
+                    // The finger is up; the selection it made gets its
+                    // handles and the edit menu.
+                    state.keep_touch_selection(cx);
+                }
+                _ => {}
+            });
+        }
+        window.prevent_default();
+        cx.stop_propagation();
+        WindowSelectionState::resolve_content_keys(&state, cx);
+    });
+
+    // A handle drag in progress follows the finger or the pointer wherever
+    // it goes, whether or not the handle it took is laid out this frame.
+    let drag_state = state.downgrade();
+    window.on_mouse_event(move |event: &TouchDragEvent, phase, window, cx| {
+        if !phase.bubble() || event.phase == TouchPhase::Started {
+            return;
+        }
+        let Some(state) = drag_state.upgrade() else {
+            return;
+        };
+        if state.read(cx).touch.drag.is_none() {
+            return;
+        }
+        cx.stop_propagation();
+        state.update(cx, |state, cx| match event.phase {
+            TouchPhase::Moved => state.update_edge_drag(event.position, window, cx),
+            _ => state.end_edge_drag(cx),
+        });
+        WindowSelectionState::resolve_content_keys(&state, cx);
+    });
+    let drag_state = state.downgrade();
+    window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+        if phase.bubble()
+            && event.pressed_button == Some(MouseButton::Left)
+            && let Some(state) = drag_state.upgrade()
+            && state.read(cx).touch.drag.is_some()
+        {
+            state.update(cx, |state, cx| {
+                state.update_edge_drag(event.position, window, cx)
+            });
+            WindowSelectionState::resolve_content_keys(&state, cx);
+        }
+    });
+    let drag_state = state.downgrade();
+    window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+        if phase.bubble()
+            && event.button == MouseButton::Left
+            && let Some(state) = drag_state.upgrade()
+        {
+            state.update(cx, |state, cx| state.end_edge_drag(cx));
         }
     });
 
@@ -1978,6 +2726,11 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
             && let Some(state) = mouse_move_state.upgrade()
         {
             state.update(cx, |state, cx| {
+                // A handle drag maps the pointer through the handle's offset;
+                // the raw pointer must not fight it.
+                if state.touch.drag.is_some() {
+                    return;
+                }
                 state.update_in_window(event.position, window, cx)
             });
             WindowSelectionState::resolve_content_keys(&state, cx);
@@ -1997,12 +2750,29 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
     });
 
     let scroll_state = state.downgrade();
-    window.on_mouse_event(move |_: &ScrollWheelEvent, phase, window, cx| {
-        if phase.bubble()
-            && let Some(state) = scroll_state.upgrade()
-        {
+    window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+        let Some(state) = scroll_state.upgrade() else {
+            return;
+        };
+        // On capture, before a scroll container can stop the event: one
+        // stretched past its end swallows the whole stream, the lift
+        // included, and the menu would never come back.
+        if phase.capture() {
+            state.update(cx, |state, cx| {
+                state.edit_menu_on_scroll(event.touch_phase, cx)
+            });
+            return;
+        }
+        if phase.bubble() {
             let position = window.mouse_position();
-            state.update(cx, |state, cx| state.update_in_window(position, window, cx));
+            state.update(cx, |state, cx| {
+                // A handle drag holds the finger off the text; keep its offset.
+                let position = state
+                    .touch
+                    .drag
+                    .map_or(position, |drag| drag.text_position(position));
+                state.update_in_window(position, window, cx)
+            });
             WindowSelectionState::resolve_content_keys(&state, cx);
         }
     });

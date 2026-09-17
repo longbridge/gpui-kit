@@ -9,6 +9,8 @@ HoverCard component for displaying rich content that appears when the mouse hove
 
 This is most like the [Popover] component, but triggered by hover instead of click, and with timing controls for a smoother user experience.
 
+On iOS and Android, tap the trigger to open or close the card. Tapping outside closes it; tapping inside keeps it open. Hover delays do not apply. Tooltip hints remain disabled; see [Mobile](/docs/mobile).
+
 ## Import
 
 ```rust

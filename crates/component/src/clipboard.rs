@@ -6,7 +6,7 @@ use gpui::{
 };
 
 use crate::{
-    IconName, Sizable as _,
+    IconName, Sizable, Size,
     button::{Button, ButtonVariants as _},
 };
 
@@ -18,6 +18,14 @@ pub struct Clipboard {
     value_fn: Option<Rc<dyn Fn(&mut Window, &mut App) -> SharedString>>,
     on_copied: Option<Rc<dyn Fn(SharedString, &mut Window, &mut App)>>,
     tooltip_text: Option<SharedString>,
+    size: Size,
+}
+
+impl Sizable for Clipboard {
+    fn with_size(mut self, size: impl Into<Size>) -> Self {
+        self.size = size.into();
+        self
+    }
 }
 
 impl Clipboard {
@@ -29,6 +37,7 @@ impl Clipboard {
             value_fn: None,
             on_copied: None,
             tooltip_text: None,
+            size: Size::XSmall,
         }
     }
 
@@ -81,7 +90,7 @@ impl RenderOnce for Clipboard {
                 IconName::Copy
             })
             .ghost()
-            .xsmall()
+            .with_size(self.size)
             .when_some(self.tooltip_text, |this, text| this.tooltip(text))
             .when(!copied, |this| {
                 this.on_click({

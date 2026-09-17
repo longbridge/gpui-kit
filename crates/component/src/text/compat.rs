@@ -4,11 +4,19 @@ use gpui::{
     SharedString, StyleRefinement, Styled, Window,
 };
 
+use std::time::Duration;
+
 use super::{
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, SelectionFormat,
-    TableData, TextViewState, TextViewStyle,
+    TableData, TextViewMotion, TextViewState, TextViewStyle,
 };
-use gpui_base::text::CodeBlock;
+use gpui_base::{Easing, text::CodeBlock};
+
+/// How long each streamed chunk takes to reach full color. Measured from
+/// claude.ai, whose chunks fade as a whole over roughly 300–400 ms on a
+/// near-linear curve; longer than a model's 50–300 ms chunk cadence, so
+/// consecutive chunks overlap into one gradient tail instead of blinking in.
+const STREAM_FADE: Duration = Duration::from_millis(350);
 
 /// The component-level rich text element.
 ///
@@ -21,6 +29,10 @@ pub struct TextView {
     id: ElementId,
     inner: gpui_base::TextView,
     text_style: Option<TextViewStyle>,
+    motion: Option<TextViewMotion>,
+    /// `None` leaves the state's own policy alone; `Some(false)` turns a
+    /// fade off that an earlier frame turned on.
+    stream_fade: Option<bool>,
 }
 
 impl Styled for TextView {
@@ -36,6 +48,8 @@ impl TextView {
             id: ElementId::Name(state.entity_id().to_string().into()),
             inner: gpui_base::TextView::new(state),
             text_style: None,
+            motion: None,
+            stream_fade: None,
         }
     }
     /// Creates a text view that parses `text` as Markdown.
@@ -45,6 +59,8 @@ impl TextView {
             id: id.clone(),
             inner: gpui_base::TextView::markdown(id, text),
             text_style: None,
+            motion: None,
+            stream_fade: None,
         }
     }
     /// Creates a text view that parses `text` as HTML.
@@ -54,6 +70,8 @@ impl TextView {
             id: id.clone(),
             inner: gpui_base::TextView::html(id, text),
             text_style: None,
+            motion: None,
+            stream_fade: None,
         }
     }
     /// Sets the style, folded onto the one derived from the active theme.
@@ -74,6 +92,21 @@ impl TextView {
     /// Sets whether the view scrolls its own content.
     pub fn scrollable(mut self, value: bool) -> Self {
         self.inner = self.inner.scrollable(value);
+        self
+    }
+    /// Fades streamed text in the way Claude reveals a reply: each chunk a
+    /// `set_text` or `push_str` adds starts transparent and reaches full
+    /// color over 350 ms. Text that replaces rather than extends the current
+    /// content shows at once, and reduced motion disables the fade. Use
+    /// [`Self::motion`] for other timing or a word-by-word stagger.
+    pub fn stream_fade(mut self, value: bool) -> Self {
+        self.stream_fade = Some(value);
+        self
+    }
+    /// Sets the motion policy explicitly, overriding [`Self::stream_fade`]'s
+    /// theme timing.
+    pub fn motion(mut self, motion: TextViewMotion) -> Self {
+        self.motion = Some(motion);
         self
     }
     /// Clamps the rendered content to `value` lines.
@@ -205,6 +238,19 @@ impl Element for TextView {
                 crate::ActiveTheme::theme(cx),
                 style,
             ));
+        }
+        let motion = self.motion.clone().or_else(|| {
+            self.stream_fade.map(|fade| {
+                if !fade {
+                    return TextViewMotion::default();
+                }
+                TextViewMotion::default()
+                    .with_stream_fade(STREAM_FADE)
+                    .with_stream_fade_easing(Easing::EaseOut)
+            })
+        });
+        if let Some(motion) = motion {
+            inner = inner.motion(motion);
         }
         let mut element = inner.into_any_element();
         let layout_id = element.request_layout(window, cx);
@@ -424,10 +470,13 @@ mod tests {
         let cx: &mut VisualTestContext = cx;
 
         cx.run_until_parked();
-        assert!(
-            renders.load(Ordering::Relaxed) <= 2,
-            "an unchanged compatibility TextView must settle after its parse, but rendered {} times",
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let renders_after_redraw = renders.load(Ordering::Relaxed);
+        cx.run_until_parked();
+        assert_eq!(
             renders.load(Ordering::Relaxed),
+            renders_after_redraw,
+            "an unchanged compatibility TextView must not schedule another render after its parse",
         );
     }
 }

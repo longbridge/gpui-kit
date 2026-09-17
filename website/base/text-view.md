@@ -204,6 +204,35 @@ TextView::new(&document)
 document.update(cx, |state, cx| state.set_text(updated_source, cx));
 ```
 
+`TextViewMotion` is the view's motion policy. Base plays it but ships no
+timing: every duration defaults to zero, so an unstyled view adopts streamed
+text at once. Give `stream_fade` a duration to fade the text an update
+appends in where it lands, and optionally `stream_fade_stagger` to start
+each further word of one update a little after the one before it:
+
+```rust
+use std::time::Duration;
+
+use gpui_kit::base::{Easing, TextView, TextViewMotion};
+
+TextView::new(&document).motion(
+    TextViewMotion::default()
+        .with_stream_fade(Duration::from_millis(350))
+        .with_stream_fade_stagger(Duration::from_millis(30))
+        .with_stream_fade_easing(Easing::EaseOut),
+)
+```
+
+Without a stagger each update fades as one chunk. With one, appended text is
+split into words with their trailing whitespace, and CJK text into
+characters; a long update compresses its stagger so the last word starts
+within one fade. The tracker compares rendered text rather than source
+bytes, so a `set_text` whose text extends the current one counts as an
+append, and Markdown that completes as it streams (`**bo` becoming bold
+`bold`) fades the changed glyphs rather than the whole paragraph. Only the
+blocks the update reaches are compared, and frames are requested only while
+something is still fading. Reduced motion skips the fade.
+
 Selection can copy rendered text or Markdown source through `SelectionFormat`. Link routing, code-block actions, table actions, images, and custom Markdown plugins use the same builders as the compatibility API documented on the [gpui-component TextView page](../component/text-view.md).
 
 ## Runnable source

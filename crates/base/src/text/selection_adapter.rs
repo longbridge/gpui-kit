@@ -2,7 +2,7 @@ use std::{cell::RefCell, ops::RangeInclusive, rc::Rc};
 
 use crate::{
     TextSelectionContentKey, TextSelectionCoverage, TextSelectionEndpoint, TextSelectionEvent,
-    TextSelectionHandle, TextSelectionRegistration, TextSelectionSnapshot,
+    TextSelectionHandle, TextSelectionRegistration, TextSelectionRun, TextSelectionSnapshot,
 };
 use gpui::{App, Bounds, EntityId, Hitbox, Pixels, Point, WeakEntity, Window};
 
@@ -73,6 +73,10 @@ impl VirtualBlockSelection {
 pub(super) struct TextViewSelectionAdapter {
     selection: TextSelectionHandle,
     text_bounds: Vec<Bounds<Pixels>>,
+    text_runs: Vec<TextSelectionRun>,
+    /// The caret boxes at the first and last selected character painted this
+    /// frame, where the touch handles go.
+    selection_edges: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
     layout_revision: Option<usize>,
 }
 
@@ -110,6 +114,9 @@ impl TextViewSelectionAdapter {
                         });
                     }
                     TextSelectionEvent::Cleared => {}
+                    TextSelectionEvent::TouchSelectionChanged => {
+                        let _ = view_for_events.update(cx, |_, cx| cx.notify());
+                    }
                 },
                 cx,
             )
@@ -169,6 +176,8 @@ impl TextViewSelectionAdapter {
         Self {
             selection,
             text_bounds: Vec::new(),
+            text_runs: Vec::new(),
+            selection_edges: None,
             layout_revision: None,
         }
     }
@@ -185,6 +194,19 @@ impl TextViewSelectionAdapter {
 
     pub(super) fn begin_frame(&mut self) {
         self.text_bounds.clear();
+        self.text_runs.clear();
+        self.selection_edges = None;
+    }
+
+    /// Records one inline's painted selection ends. Inlines paint in document
+    /// order, so the first start and the last end are the view's.
+    pub(super) fn register_selection_edges(&mut self, start: Bounds<Pixels>, end: Bounds<Pixels>) {
+        let first = self.selection_edges.map_or(start, |(first, _)| first);
+        self.selection_edges = Some((first, end));
+    }
+
+    pub(super) fn register_text_run(&mut self, run: TextSelectionRun) {
+        self.text_runs.push(run);
     }
 
     pub(super) fn register_inline(&mut self, bounds: Vec<Bounds<Pixels>>) {
@@ -202,15 +224,40 @@ impl TextViewSelectionAdapter {
         window: &mut Window,
         cx: &mut App,
     ) {
-        self.selection.register(
-            TextSelectionRegistration::new(hitbox, bounds)
-                .with_scroll_offset(scroll_offset)
-                .with_document_order(document_order)
-                .with_text_bounds(self.text_bounds.clone())
-                .with_self_scroll(self_scroll),
-            window,
-            cx,
-        );
+        self.selection.set_hit_test_runs(&self.text_runs, cx);
+        let registration = TextSelectionRegistration::new(hitbox, bounds)
+            .with_scroll_offset(scroll_offset)
+            .with_document_order(document_order)
+            .with_text_bounds(self.text_bounds.clone())
+            .with_self_scroll(self_scroll);
+        let registration = match self.selection_edges {
+            Some((start, end)) => registration.with_selection_edges(start, end),
+            None => registration,
+        };
+        self.selection.register(registration, window, cx);
+    }
+
+    /// Lays out the touch handles this view owns; see
+    /// [`TextSelectionHandle::prepaint_touch_handles`].
+    pub(super) fn prepaint_touch_handles(
+        &self,
+        window: &mut Window,
+        cx: &App,
+    ) -> crate::TouchHandleLayout {
+        self.selection.prepaint_touch_handles(window, cx)
+    }
+
+    /// Paints the touch handles this view owns, after its content for the
+    /// frame; see [`TextSelectionHandle::paint_touch_handles`].
+    pub(super) fn paint_touch_handles(
+        &self,
+        layout: &crate::TouchHandleLayout,
+        color: gpui::Hsla,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.selection
+            .paint_touch_handles(layout, color, window, cx);
     }
 
     pub(super) fn selection_points(&self, cx: &App) -> Option<(Point<Pixels>, Point<Pixels>)> {

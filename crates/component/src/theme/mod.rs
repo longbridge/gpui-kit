@@ -21,6 +21,7 @@ mod mono_font;
 mod motion;
 mod registry;
 mod schema;
+mod system_font;
 mod theme_color;
 
 pub use color::*;
@@ -99,6 +100,11 @@ pub struct Theme {
 
     pub mode: ThemeMode,
     /// The font family for the application, default is `.SystemUIFont`.
+    ///
+    /// When the system font resolves to an installed fallback family instead
+    /// of itself (Linux desktops without the family GPUI maps it to),
+    /// [`Theme::change`] names that family here, so every text lookup hits
+    /// the font cache. A family set explicitly is used as-is.
     pub font_family: SharedString,
     /// The base font size for the application, default is 16px.
     pub font_size: Pixels,
@@ -252,6 +258,7 @@ impl Theme {
                 theme.apply_config(&theme.light_theme.clone());
             }
         }
+        system_font::resolve_default_font(cx);
         mono_font::resolve_default_mono_font(cx);
         let theme = cx.global::<Theme>().clone();
 

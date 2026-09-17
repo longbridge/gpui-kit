@@ -45,20 +45,12 @@ pub(super) fn resolve_default_mono_font(cx: &mut App) {
 }
 
 /// The installed stand-in for the platform default, resolved once per process.
-///
-/// Enumerating fonts costs around a hundred milliseconds on macOS, and the
-/// answer only depends on the system fonts, which do not change while the
-/// process runs.
 fn installed_default_mono_font_family(cx: &App) -> SharedString {
     static RESOLVED: OnceLock<SharedString> = OnceLock::new();
     RESOLVED
         .get_or_init(|| {
             let default = default_mono_font_family();
-            let family = first_installed(
-                &default,
-                MONO_FONT_ALTERNATES,
-                &cx.text_system().all_font_names(),
-            );
+            let family = first_installed(&default, MONO_FONT_ALTERNATES, installed_font_names(cx));
             if family != default {
                 tracing::warn!(
                     "Monospace font {default:?} is not installed, using {family:?} instead."
@@ -67,6 +59,16 @@ fn installed_default_mono_font_family(cx: &App) -> SharedString {
             family
         })
         .clone()
+}
+
+/// The families installed on the machine, listed once per process.
+///
+/// Enumerating fonts costs around a hundred milliseconds on macOS, and the
+/// answer only depends on the system fonts, which do not change while the
+/// process runs.
+pub(super) fn installed_font_names(cx: &App) -> &'static [String] {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    NAMES.get_or_init(|| cx.text_system().all_font_names())
 }
 
 /// `default` when it is installed, else the first installed alternate, else

@@ -48,6 +48,31 @@ pub fn set_theme(dark: bool) {
     });
 }
 
+/// Opens a single-threaded web platform that lets the browser draw the text
+/// the bundled fonts cannot.
+///
+/// The gallery bundles only the glyphs its own source uses, so emoji and
+/// anything a visitor types into an input would otherwise render as tofu.
+/// `gpui_web` measures and rasterizes such graphemes with Canvas 2D using the
+/// visitor's local fonts. Its default policy covers emoji alone; CJK text is
+/// opted in here as well, since the bundled Noto Sans SC subset only holds
+/// the characters the stories mention. Bundled fonts stay preferred wherever
+/// they have the glyph.
+#[cfg(target_family = "wasm")]
+fn web_application() -> Application {
+    use gpui_kit::web::{CanvasFontFallback, WebBackendPreference, WebPlatform};
+    use std::rc::Rc;
+    use std::sync::Arc;
+
+    let platform = Rc::new(WebPlatform::new_with_backend_and_font_fallback(
+        false,
+        WebBackendPreference::Auto,
+        CanvasFontFallback::EmojiAndCjk,
+    ));
+    let http_client = Arc::new(platform.fetch_http_client());
+    Application::with_platform(platform).with_http_client(http_client)
+}
+
 #[wasm_bindgen]
 pub fn run(story: Option<String>, dark: Option<bool>) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
@@ -63,7 +88,7 @@ pub fn run(story: Option<String>, dark: Option<bool>) -> Result<(), JsValue> {
     #[cfg(not(target_family = "wasm"))]
     let app = gpui_kit::application();
     #[cfg(target_family = "wasm")]
-    let app = gpui_kit::platform::single_threaded_web();
+    let app = web_application();
 
     let app = app.with_assets(Assets::new("https://gpui-kit.com/gallery/"));
     let launch = move |cx: &mut App| {
@@ -72,10 +97,11 @@ pub fn run(story: Option<String>, dark: Option<bool>) -> Result<(), JsValue> {
         // Load a compact, offline font stack for WASM, where host system fonts
         // are unavailable. Inter gives the UI a neutral system-font feel, while
         // the other fonts contain only glyphs used by the story application.
+        // Emoji, and any text outside that set, come from the browser through
+        // the Canvas fallback configured in `web_application`.
         let ui_font = Cow::Borrowed(include_bytes!("../fonts/Inter-Regular.ttf").as_slice());
         let cjk_font =
             Cow::Borrowed(include_bytes!("../fonts/NotoSansSC-Regular-subset.ttf").as_slice());
-        let emoji_font = Cow::Borrowed(include_bytes!("../fonts/NotoEmoji-Regular.ttf").as_slice());
         let jetbrains_mono =
             Cow::Borrowed(include_bytes!("../fonts/JetBrainsMono-Regular.ttf").as_slice());
         // The web platform resolves GPUI's `.SystemUIFont` alias to IBM Plex
@@ -86,13 +112,7 @@ pub fn run(story: Option<String>, dark: Option<bool>) -> Result<(), JsValue> {
         let system_font =
             Cow::Borrowed(include_bytes!("../fonts/IBMPlexSans-Regular.ttf").as_slice());
         cx.text_system()
-            .add_fonts(vec![
-                ui_font,
-                cjk_font,
-                emoji_font,
-                jetbrains_mono,
-                system_font,
-            ])
+            .add_fonts(vec![ui_font, cjk_font, jetbrains_mono, system_font])
             .expect("Failed to load fonts");
 
         // Apply the embedding page's appearance before the first frame, so an

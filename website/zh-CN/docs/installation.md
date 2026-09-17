@@ -8,6 +8,8 @@ order: -1
 
 在开始使用 `gpui-component` 构建应用之前，需要先准备对应的开发环境并安装依赖。
 
+实验性的 iOS 支持与 Swift UIView 嵌入方式请参阅[移动端](/zh-CN/docs/mobile)。移动端使用 `gpui-pre-mobile`，应用启动方式与桌面端不同。
+
 ## 系统要求
 
 目前可以在 macOS、Windows 和 Linux 上进行开发。

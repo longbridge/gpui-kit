@@ -70,6 +70,44 @@ than the whole budget keeps the part that fits rather than emptying the box.
 `max_lines` only applies to the fit-content mode and is ignored when
 `scrollable` is set.
 
+### Fade in streamed text
+
+A chat reply arrives in chunks. `stream_fade(true)` fades each chunk in where
+it lands instead of popping it onto the screen, the way Claude reveals a
+response:
+
+```rust
+TextView::new(&self.reply).stream_fade(true)
+```
+
+The fade follows the rendered text. Whatever a `push_str`, or a `set_text`
+whose text extends the current one, adds starts transparent and reaches full
+color over 350 ms on an ease-out curve, the timing measured from Claude:
+longer than the 50–300 ms a model's chunks arrive at, so consecutive chunks
+overlap into one gradient tail rather than the newest chunk blinking in. Code
+in fenced blocks and text in table cells fade the same way. Markdown that
+completes as it streams (`**bo` becoming bold `bold`) fades the changed
+glyphs rather than the whole paragraph. Text that replaces the current
+content shows at once, and so does everything when the system asks for
+reduced motion. Nothing animates unless the view opts in.
+
+Pass a `TextViewMotion` through `.motion(...)` to choose the duration or
+easing yourself, or to reveal each chunk word by word; see
+[GPUI Base TextView](/base/text-view#retained-state-and-streaming-updates).
+
+## Touch Selection
+
+On a touch screen, a long press selects the word under the finger and keeps
+following the finger while it stays down. Lifting it opens an edit menu with
+`Copy` and `Select All` over the selection and puts a grab handle at each end.
+Dragging a handle moves that end while the other stays put; `Select All`
+selects the view that was pressed, and its handles keep working on the result.
+
+The handles and the menu are drawn by [`Root`](/component/root) for the whole
+window selection, so they cover a selection that spans several views. A tap
+elsewhere clears them, and the menu steps aside while the content scrolls
+under a finger.
+
 ## Link Click Handling
 
 Use `on_link_click` when links should be routed by the application instead of
@@ -101,6 +139,38 @@ Installing a handler consumes the link event and disables the default URL
 opening behavior. If no handler is installed, links continue to use
 `App::open_url` as usual. The callback is used for both text links and linked
 images.
+
+## Images
+
+A Markdown `![alt](src)` or HTML `<img src>` renders through GPUI's `img`
+element, and `src` decides where the bytes come from:
+
+- `http://` and `https://` URLs are fetched with the application's HTTP client.
+- `data:` URLs are decoded in place, so a document can embed its own images
+  (`data:image/png;base64,…`, or a percent-encoded `data:image/svg+xml,…`).
+  Any image format GPUI can decode is accepted; a `data:` URL with another
+  media type is left to the loader and reports an error like any other
+  unreachable image.
+- Every other value — a relative path, `file://`, a custom scheme — is passed
+  through as a URI. `TextView` never reads the filesystem or the asset bundle
+  on a document's behalf.
+
+To resolve those other sources, or to change how any image is loaded, wrap the
+`TextView` in an element that installs a GPUI `ImageCache`. Every `img` inside
+it, including the ones the document produces, asks that cache for its
+`Resource` before falling back to the default loader:
+
+```rust
+use gpui_kit::{ImageCache, ImageCacheProvider};
+
+div()
+    .image_cache(app_image_cache.clone())
+    .child(markdown("![diagram](app://diagrams/pipeline.svg)"))
+```
+
+`ImageCache::load` receives the `Resource::Uri` and decides how to turn it into
+a `RenderImage`, so the application owns the loading policy while the document
+stays plain Markdown.
 
 ## Markdown Plugins
 

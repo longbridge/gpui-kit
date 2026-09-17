@@ -68,10 +68,12 @@ tree-sitter-zig = ["component", "gpui-component/tree-sitter-zig"]
 
 [dependencies]
 gpui.workspace = true
-gpui_platform.workspace = true
 gpui-base.workspace = true
 gpui-component = { workspace = true, optional = true }
 gpui-kit-assets = { workspace = true, optional = true }
+
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+gpui_platform.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 gpui_web.workspace = true
@@ -141,3 +143,7 @@ required-features = ["test-support", "component"]
 [[test]]
 name = "search"
 required-features = ["assets", "test-support", "component"]
+
+[[test]]
+name = "touch_selection"
+required-features = ["test-support", "component"]

@@ -50,8 +50,11 @@ def main():
         manifest = "examples/ai_recipes/Cargo.toml"
         for argv in [
             ["cargo", "fmt", "--manifest-path", manifest, "--check"],
+            # The bin alone, without dev-dependencies: proves the recipes compile
+            # against `gpui-kit` before `test-support` unifies in.
             ["cargo", "check", "--locked", "--manifest-path", manifest, "--bin", "gpui-kit-recipes"],
-            ["cargo", "check", "--locked", "--manifest-path", manifest, "--all-targets"],
+            # Builds every target with dev-dependencies, so a separate
+            # `cargo check --all-targets` would only recompile GPUI a second time.
             ["cargo", "test", "--locked", "--manifest-path", manifest],
         ]:
             print("Running: " + " ".join(argv), flush=True)

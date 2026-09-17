@@ -13,7 +13,8 @@ use crate::{StyledExt as _, popover::Popover};
 /// A hover card element that displays content when hovering over a trigger element.
 ///
 /// Similar to Popover but triggered by mouse hover instead of click, with configurable delays
-/// for showing and hiding the content.
+/// for showing and hiding the content. On iOS and Android, tapping the trigger
+/// toggles the card and tapping outside dismisses it; hover delays are ignored.
 #[derive(IntoElement)]
 pub struct HoverCard {
     id: ElementId,

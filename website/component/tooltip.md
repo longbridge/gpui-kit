@@ -7,6 +7,10 @@ description: Display helpful information on hover or focus, with support for key
 
 A versatile tooltip component that displays helpful information when hovering over or focusing on elements. Supports text content, custom elements, keyboard shortcuts, different trigger methods, and positioning options.
 
+## Mobile behavior
+
+On iOS and Android, tooltips managed by the GPUI Base overlay are disabled. Shared components may keep their tooltip configuration, but mobile actions still need visible or accessible labels. Direct GPUI `.tooltip()` calls, including the basic `div()` example below, bypass this overlay and are not disabled by this policy. See [Mobile](/docs/mobile) for integration guidance.
+
 ## Import
 
 ```rust

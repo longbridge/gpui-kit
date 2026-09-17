@@ -15,6 +15,8 @@ not enable the gallery's test-support development dependency.
 | Large text | `cargo run -p example-large-text` |
 | Markdown | `cargo run -p example-markdown` |
 | Streaming Markdown | `cargo run -p example-stream-markdown` |
+| Text selection | `cargo run -p text_selection` |
+| Touch selection | `cargo run -p touch_selection` |
 
 Shared sample documents live in `fixtures/`.
 

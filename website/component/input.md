@@ -232,6 +232,62 @@ Input::new(&input).context_menu(|menu, window, cx| {
 })
 ```
 
+### Touch Selection
+
+On a touch screen, a long press selects the word under the finger and keeps
+following the finger while it stays down. Lifting it opens an edit menu over
+the selection with the commands that apply — `Cut`, `Copy`, `Paste`, and
+`Select All` — and puts a grab handle at each end of the selection. Dragging a
+handle moves that end; the other end stays put, and a multi-line input scrolls
+when the finger reaches its edge. A long press on whitespace or in an empty
+field places the caret and offers `Paste` and `Select All`.
+
+The handles and the menu belong to the selection the gesture made. They
+disappear as soon as anything else moves the selection — a tap, typing, an
+arrow key, `Escape` — and the menu steps aside while the content scrolls under
+a finger. Tapping the selected text brings the menu back.
+
+Cut, Copy, and Paste go through the input's own actions, so a custom key
+binding or an open completion menu sees them the same way. A read-only input
+offers only `Copy` and `Select All`; a masked input keeps its value out of the
+clipboard.
+
+### Paste Hook
+
+`on_paste` intercepts the clipboard before the default text insertion, so
+pasted images and copied files can live in app-owned state instead of being
+silently dropped. It is available on `Input`, `Textarea` and `Editor`.
+
+```rust
+use gpui_kit::ClipboardEntry;
+
+let view = cx.entity().downgrade();
+Textarea::new(&self.composer).on_paste(move |item, _, cx| {
+    let images: Vec<_> = item.entries().iter().filter_map(|entry| match entry {
+        ClipboardEntry::Image(image) => Some(image.clone()),
+        _ => None,
+    }).collect();
+    if images.is_empty() {
+        return false; // fall through to the default text insertion
+    }
+    view.update(cx, |this, cx| {
+        // Store the images beside the input, e.g. as `Attachment`s.
+        this.attachments.extend(images);
+        cx.notify();
+    }).ok();
+    true // consumed, the input inserts nothing
+})
+```
+
+Return `true` when the handler took the paste: the `input::Paste` action
+stops there and the input inserts nothing. Return `false` to let the action
+reach the engine, which inserts `clipboard.text()` as before. Copied files
+arrive as `ClipboardEntry::ExternalPaths` through the same hook.
+
+Known limit: on web `read_from_clipboard()` is `None` (text arrives through
+the platform input handler); image paste there needs async clipboard access
+and permission, and is out of scope.
+
 ## Examples
 
 ### Search Input

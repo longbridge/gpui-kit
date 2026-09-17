@@ -2,7 +2,7 @@
 
 use gpui::{Background, Bounds, Path, PathBuilder, Pixels, Point, Window, px};
 
-use crate::plot::{StrokeStyle, origin_point};
+use crate::plot::{PathCache, ShapeKey, StrokeStyle, origin_point};
 
 #[allow(clippy::type_complexity)]
 pub struct Area<T> {
@@ -175,6 +175,44 @@ impl<T> Area<T> {
         }
 
         (area_builder.build().ok(), line_builder.build().ok())
+    }
+
+    /// Paint the Area, reusing the fill and stroke tessellated by an earlier
+    /// paint while the projected points, baseline and curve style are
+    /// unchanged. `fill` and `line` are the two caches this area keeps
+    /// together; see [`Line::paint_cached`](super::Line::paint_cached).
+    pub fn paint_cached(
+        &self,
+        bounds: &Bounds<Pixels>,
+        fill: &mut PathCache,
+        line: &mut PathCache,
+        window: &mut Window,
+    ) {
+        let mut key = ShapeKey::new((self.stroke_style, self.y0.map(f32::to_bits)));
+        for v in self.data.iter() {
+            if let (Some(x), Some(y)) = ((self.x)(v), (self.y1)(v)) {
+                key.f32(x).f32(y);
+            }
+        }
+        let key = key.finish();
+        let local = Bounds::new(Point::default(), bounds.size);
+        // One miss builds both paths; the second cache takes the stroke from
+        // the stash instead of building again.
+        let mut stroke_path = None;
+        let fill_path = fill.get(key, bounds.origin, || {
+            let (area, stroke) = self.path(&local);
+            stroke_path = Some(stroke);
+            area
+        });
+        let line_path = line.get(key, bounds.origin, || {
+            stroke_path.take().unwrap_or_else(|| self.path(&local).1)
+        });
+        if let Some(area) = fill_path {
+            window.paint_path(area, self.fill);
+        }
+        if let Some(line) = line_path {
+            window.paint_path(line, self.stroke);
+        }
     }
 
     /// Paint the Area.

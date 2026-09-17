@@ -372,6 +372,8 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) selecting: bool,
     /// Anchor point of an in-progress columnar (block) selection.
     pub(super) column_select_start: Option<ColumnarPoint>,
+    /// The selection a long press made, with its handles and edit menu.
+    pub(super) touch_selection: super::touch::TouchSelection,
     pub(crate) disabled: bool,
     pub(crate) readonly: bool,
     pub(crate) text_align: TextAlign,
@@ -695,6 +697,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             ime_marked_range: None,
             input_bounds: Bounds::default(),
             selecting: false,
+            touch_selection: Default::default(),
             disabled: false,
             readonly: false,
             text_align: TextAlign::Left,
@@ -2023,6 +2026,12 @@ impl<M: InputModeKind> InputBaseState<M> {
             return; // Consume the escape, don't propagate
         }
 
+        // The handles and the edit menu are the topmost surface to dismiss.
+        if self.touch_selection().is_some() {
+            self.dismiss_touch_selection(cx);
+            return;
+        }
+
         if self.ime_marked_range.is_some() {
             self.unmark_text(window, cx);
         }
@@ -2224,6 +2233,16 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         // Clear inline completion on any mouse interaction
         M::clear_inline_completion(self, cx);
+        // A tap on the touch selection asks for its menu back. Any other press
+        // places the caret or starts a new drag, and the handles and the menu
+        // no longer belong to what is selected.
+        if event.button == MouseButton::Left
+            && event.click_count == 1
+            && self.reopen_edit_menu_at(event.position, cx)
+        {
+            return;
+        }
+        self.dismiss_touch_selection(cx);
 
         // If there have IME marked range and is empty (Means pressed Esc to abort IME typing)
         // Clear the marked range.
@@ -2250,6 +2269,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         // Double click to select word
         if event.button == MouseButton::Left && event.click_count == 2 {
             self.select_word(offset, window, cx);
+            // A double tap is touch's other way to select a word, and it
+            // gets the handles and the menu like a long press does.
+            if crate::GlobalState::is_touch_press(cx) {
+                self.keep_touch_selection(cx);
+            }
             return;
         }
 
@@ -2372,6 +2396,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         if self.diagnostic_popover.take().is_some() {
             cx.notify();
         }
+        // The handles follow the text; the menu would sit over whatever
+        // scrolls underneath it, so it steps aside until the finger lifts.
+        self.edit_menu_on_scroll(event.touch_phase, cx);
     }
 
     pub(super) fn update_scroll_offset(
@@ -2849,7 +2876,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Only a columnar selection needs the third value; everywhere else a position past
     /// the end of a row means the end of that row, and
     /// [`Self::index_for_mouse_position`] is the call to make.
-    fn resolve_mouse_position(&self, position: Point<Pixels>) -> (usize, bool, usize) {
+    pub(super) fn resolve_mouse_position(&self, position: Point<Pixels>) -> (usize, bool, usize) {
         // If the text is empty, always return 0
         if self.text.len() == 0 {
             return (0, false, 0);
@@ -3159,6 +3186,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         M::clear_hover_state(self, cx);
         self.diagnostic_popover = None;
         M::clear_inline_completion(self, cx);
+        self.dismiss_touch_selection(cx);
         self.blink_cursor.update(cx, |cursor, cx| {
             cursor.stop(cx);
         });
@@ -3580,6 +3608,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         self.ime_marked_range.take();
         self.update_preferred_column();
+        self.dismiss_touch_selection(cx);
         if self.is_multi_line() {
             self.mode.update_auto_grow(&self.display_map);
         }
@@ -3896,6 +3925,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
         }
         self.update_preferred_column();
         self.update_search(cx);
+        self.dismiss_touch_selection(cx);
         if self.is_multi_line() {
             self.mode.update_auto_grow(&self.display_map);
         }

@@ -133,6 +133,57 @@ impl TextInputState {
             .update(cx, |state, _| state.on_context_menu(handler)))
     }
 
+    /// The selection a long press made, laid out for its handles and menu.
+    pub(crate) fn touch_selection(&self, cx: &App) -> Option<gpui_base::TouchSelectionSnapshot> {
+        dispatch!(self, |state| state.read(cx).touch_selection())
+    }
+
+    pub(crate) fn context_menu_capabilities(
+        &self,
+        cx: &App,
+    ) -> gpui_base::input::InputContextMenuCapabilities {
+        dispatch!(self, |state| state.read(cx).context_menu_capabilities())
+    }
+
+    /// Whether every character is already selected, so Select All has nothing
+    /// left to offer.
+    pub(crate) fn is_all_selected(&self, cx: &App) -> bool {
+        dispatch!(self, |state| {
+            let state = state.read(cx);
+            state.selected_range() == (0..state.text().len())
+        })
+    }
+
+    pub(crate) fn begin_edge_drag(
+        &self,
+        edge: gpui_base::SelectionEdge,
+        finger: gpui::Point<gpui::Pixels>,
+        cx: &mut App,
+    ) {
+        dispatch!(self, |state| state
+            .update(cx, |state, cx| state.begin_edge_drag(edge, finger, cx)))
+    }
+
+    pub(crate) fn update_edge_drag(&self, finger: gpui::Point<gpui::Pixels>, cx: &mut App) {
+        dispatch!(self, |state| state
+            .update(cx, |state, cx| state.update_edge_drag(finger, cx)))
+    }
+
+    pub(crate) fn end_edge_drag(&self, cx: &mut App) {
+        dispatch!(self, |state| state
+            .update(cx, |state, cx| state.end_edge_drag(cx)))
+    }
+
+    pub(crate) fn close_edit_menu(&self, cx: &mut App) {
+        dispatch!(self, |state| state
+            .update(cx, |state, cx| state.close_edit_menu(cx)))
+    }
+
+    pub(crate) fn select_all_from_edit_menu(&self, window: &mut Window, cx: &mut App) {
+        dispatch!(self, |state| state.update(cx, |state, cx| state
+            .select_all_from_edit_menu(window, cx)))
+    }
+
     /// Builds and syncs this input's overlays. See [`super::overlay`].
     pub(super) fn render_overlays(
         &self,

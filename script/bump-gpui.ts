@@ -16,7 +16,10 @@
  *    the `[lib]` name so `use gpui::*` keeps working.
  * 4. Drop optional dependencies that come from git without a crates.io
  *    version (crates.io rejects those), together with the features that
- *    enable them. Non-optional ones abort the run.
+ *    enable them. Non-optional ones abort the run. Relax exact `=x.y.z`
+ *    requirements on external crates to `^x.y.z`: an application may pin,
+ *    but a pinned library makes Cargo silently keep consumers on the
+ *    previous snapshot whenever their graph already holds a newer patch.
  * 5. Write a standalone workspace to `target/gpui-pre/workspace`. Every
  *    crate keeps Zed's `license`, copyright notices and `LICENSE-APACHE`,
  *    gets any `NOTICE` Zed ships, and the few files this script rewrites
@@ -398,6 +401,8 @@ interface Crate {
   publishedName: string;
   prunedDeps: string[];
   prunedFeatures: string[];
+  /** External dependencies whose `=x.y.z` requirement was relaxed to `^x.y.z`. */
+  relaxedDeps: string[];
 }
 
 interface Workspace {
@@ -600,6 +605,7 @@ function collectClosure(ws: Workspace): Crate[] {
       publishedName: publishedName(name),
       prunedDeps: [],
       prunedFeatures: [],
+      relaxedDeps: [],
     };
   });
 }
@@ -889,6 +895,36 @@ const withoutSource = (spec: Toml) =>
     Object.entries(spec).filter(([k]) => !SOURCE_KEYS.includes(k)),
   );
 
+const EXACT_VERSION = /^\s*=\s*(\d[^\s,]*)\s*$/;
+
+/**
+ * Relax an exact `=x.y.z` requirement on an external dependency to `^x.y.z`.
+ *
+ * Zed pins the odd crate exactly (`unicode-properties = "=0.1.3"` in
+ * `gpui_web`, added by zed#64110) because it ships an application with its
+ * own lock file. Published as a library, that pin is hostile to resolution:
+ * a consumer whose graph already holds `unicode-properties 0.1.4` through
+ * another dependency makes Cargo back off the new snapshot to the previous
+ * one that carries no pin, with nothing louder than `patch … was not used`
+ * and `(available: v0.3.5)` to show for it. The caret still admits the pinned
+ * version, and a consumer that needs it can pin in its own lock file.
+ *
+ * Only external dependencies are relaxed; the `=<version>` the script sets
+ * between the republished crates is deliberate and never passes through here.
+ * Returns the unchanged spec when no exact requirement is present.
+ */
+function relaxExactVersion(spec: unknown): { spec: unknown; relaxed?: string } {
+  if (typeof spec === "string") {
+    const exact = EXACT_VERSION.exec(spec);
+    return exact === null ? { spec } : { spec: exact[1], relaxed: exact[1] };
+  }
+  if (isPlainObject(spec) && !spec.workspace && spec.path === undefined) {
+    const exact = typeof spec.version === "string" ? EXACT_VERSION.exec(spec.version) : null;
+    if (exact !== null) return { spec: { ...spec, version: exact[1] }, relaxed: exact[1] };
+  }
+  return { spec };
+}
+
 function crateManifest(
   crate: Crate,
   cratesByDir: Map<string, Crate>,
@@ -947,6 +983,13 @@ function crateManifest(
           version: `=${version}`,
           ...withoutSource(spec),
         };
+      } else {
+        const { spec: relaxedSpec, relaxed } = relaxExactVersion(spec);
+        if (relaxed !== undefined) {
+          entry = relaxedSpec;
+          if (!crate.relaxedDeps.includes(name)) crate.relaxedDeps.push(name);
+          logInfo(`${crate.name}: relaxed \`${name} = "=${relaxed}"\` to \`^${relaxed}\``);
+        }
       }
       rewritten[name] = entry;
     }
@@ -1005,7 +1048,10 @@ function workspaceManifest(
         ...withoutSource(spec),
       };
     } else {
-      dependencies[name] = spec;
+      const { spec: relaxedSpec, relaxed } = relaxExactVersion(spec);
+      if (relaxed !== undefined)
+        logInfo(`workspace: relaxed \`${name} = "=${relaxed}"\` to \`^${relaxed}\``);
+      dependencies[name] = relaxedSpec;
     }
   }
 
@@ -1098,6 +1144,7 @@ function stageWorkspace(
       path: c.relDir,
       dropped_dependencies: c.prunedDeps,
       dropped_features: c.prunedFeatures,
+      relaxed_dependencies: c.relaxedDeps,
     })),
   };
   writeFileSync(
@@ -1446,6 +1493,24 @@ fn helper(input: TokenStream) -> TokenStream { input }
   ] as const) {
     if (snapshotRev(description) !== expected)
       throw new BumpError(`self-test read the wrong revision from \`${description}\``);
+  }
+  for (const [input, expected] of [
+    ["=0.1.3", { spec: "0.1.3", relaxed: "0.1.3" }],
+    ["= 1.2.0-beta.1", { spec: "1.2.0-beta.1", relaxed: "1.2.0-beta.1" }],
+    ["0.1.3", { spec: "0.1.3" }],
+    [">=0.1, <0.2", { spec: ">=0.1, <0.2" }],
+    [
+      { version: "=0.1.3", features: ["general-category"] },
+      { spec: { version: "0.1.3", features: ["general-category"] }, relaxed: "0.1.3" },
+    ],
+    // The republished crates keep their exact pins, and workspace inheritance
+    // is resolved at the workspace table.
+    [{ path: "../gpui_util", version: "=0.3.5" }, { spec: { path: "../gpui_util", version: "=0.3.5" } }],
+    [{ workspace: true }, { spec: { workspace: true } }],
+  ] as const) {
+    const actual = relaxExactVersion(input);
+    if (JSON.stringify(actual) !== JSON.stringify(expected))
+      throw new BumpError(`self-test relaxed \`${JSON.stringify(input)}\` to \`${JSON.stringify(actual)}\``);
   }
   logSuccess("Facade-aware gpui_macros transformation self-test passed");
 }
@@ -1923,20 +1988,31 @@ async function verifyKitAgainstStaging(staging: string, crates: Crate[], version
     const metadata = JSON.parse(
       await run(["cargo", "metadata", "--format-version", "1", ...patches], { cwd: REPO_ROOT, capture: true }),
     ) as { packages: { name: string; version: string; manifest_path: string }[] };
-    const foreign = crates
-      .map((crate) => metadata.packages.find((pkg) => pkg.name === crate.publishedName))
-      .filter((pkg): pkg is NonNullable<typeof pkg> => pkg !== undefined && !pkg.manifest_path.startsWith(mirror));
+    // A crate can appear twice when only part of the closure fell back to the
+    // registry (a path dependency of a staged crate next to a registry copy),
+    // so every package of the name is inspected, not the first one found.
+    const published = new Set(crates.map((crate) => crate.publishedName));
+    const foreign = metadata.packages.filter(
+      (pkg) => published.has(pkg.name) && !pkg.manifest_path.startsWith(mirror),
+    );
     if (foreign.length > 0) {
       const detail = foreign.map((pkg) => `${pkg.name} ${pkg.version} from ${pkg.manifest_path}`).join("\n  ");
       throw new BumpError(
-        `the workspace did not resolve to the staged ${version}; its Cargo.toml requirement rejects it:\n  ${detail}`,
+        `the workspace resolved these crates from the registry instead of the staged ${version}:\n  ${detail}\n` +
+          "Either the workspace's Cargo.toml requirement excludes the new version, or a " +
+          "dependency of the staged crates conflicts with what the workspace already " +
+          "resolves (an exact `=x.y.z` pin, a missing feature); Cargo then quietly backs " +
+          "off to the previous registry version. The `patch … was not used` warnings and " +
+          "`(available: v…)` notes above show which crates fell back.",
       );
     }
 
     // The same commands the repository's CI runs.
+    // Staged crates are injected as path dependencies, so keep Clippy scoped
+    // to gpui-kit and do not promote upstream GPUI deprecations to errors.
     const commands = [
       ["cargo", "check", ...patches, "--workspace", "--all-targets"],
-      ["cargo", "clippy", ...patches, "-p", "gpui-component", "-p", "gpui-component-story", "-p", "gpui-kit-assets", "-p", "gpui-kit", "--", "--deny", "warnings"],
+      ["cargo", "clippy", ...patches, "--no-deps", "-p", "gpui-component", "-p", "gpui-component-story", "-p", "gpui-kit-assets", "-p", "gpui-kit", "--", "--deny", "warnings", "--allow", "deprecated"],
       ["cargo", "test", ...patches, "--workspace", "--exclude", "gpui-shell", "--features", "gpui-component-story/test-support"],
     ];
     for (const cmd of commands) {

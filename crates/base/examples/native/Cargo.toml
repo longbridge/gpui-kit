@@ -12,6 +12,9 @@ gpui_platform.workspace = true
 reqwest_client.workspace = true
 syntect.workspace = true
 
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+
 [lints]
 workspace = true
 
