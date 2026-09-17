@@ -609,16 +609,16 @@ tooltip 框跟随光标，靠近边缘时翻向绘图区中心。`AreaChart` 与
 
 ### 自定义 Plot
 
-自定义 [`Plot`] 以同样的方式接入：在 `Plot::id` 返回 id，在 `Plot::tooltip_state` 解析光标所在的数据，在 `Plot::tooltip` 构建覆盖层。要为强调效果加动画，实现 `Plot::hover`——它在每帧的 `tooltip` 与 `paint` 之前运行，收到当前聚焦的 [`TooltipState`]；光标离开后该状态会保留一段时间，`state.focus()` 逐渐回到零，因此在这里采样动效并把结果存到 `self` 供另外两个方法使用：
+自定义 [`Plot`] 以同样的方式接入：在 `Plot::id` 返回 id，在 `Plot::tooltip_state` 解析光标所在的数据，在 `Plot::tooltip` 构建覆盖层。要为强调效果加动画，实现 `Plot::hover`——它在每帧的 `tooltip` 与 `paint` 之前运行，收到当前聚焦的 [`PlotHover`]；它携带 `TooltipState`，光标离开后会保留一段时间，`hover.focus()` 逐渐回到零，因此在这里采样动效并把结果存到 `self` 供另外两个方法使用。`tooltip` 返回的 `Tooltip` 会自动随悬停淡入淡出：
 
 ```rust
-fn hover(&mut self, state: Option<&TooltipState>, window: &mut Window, cx: &mut App) {
-    self.band_center = state.map(|state| {
+fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
+    self.band_center = hover.map(|hover| {
         spring(
             ("my-plot", "band"),
-            state.cross_line.x,
+            hover.state().cross_line.x,
             // 悬停的第一帧直接采用该数据，而不是从上次悬停结束处滑过来。
-            cx.theme().motion_tokens().spring_control.with_travel(!state.is_entering()),
+            cx.theme().motion_tokens().spring_control.with_travel(!hover.is_entering()),
             window,
             cx,
         )
@@ -629,8 +629,6 @@ fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pi
     let center = self.band_center.unwrap_or(state.cross_line.x);
     Some(
         Tooltip::new(cursor, bounds.size)
-            // 十字线、圆点和 tooltip 框随悬停一起淡入淡出。
-            .focus(state.focus())
             .cross_line(CrossLine::new(point(center, state.cross_line.y)).band(px(24.)))
             .title("Title")
             .row(cx.theme().chart_1, "Series", "42")

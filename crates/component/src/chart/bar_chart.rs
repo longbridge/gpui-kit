@@ -15,7 +15,7 @@ use crate::{
         label::{TEXT_GAP, TEXT_SIZE, Text, measure_text_width},
         scale::{Scale, ScaleBand, ScaleLinear, Sealed},
         shape::{Bar, BarAlignment},
-        tooltip::{CrossLine, Tooltip, TooltipState},
+        tooltip::{CrossLine, PlotHover, Tooltip, TooltipState},
     },
 };
 
@@ -733,25 +733,25 @@ where
         Some(TooltipState::new(index, cross_line, vec![]))
     }
 
-    fn hover(&mut self, state: Option<&TooltipState>, window: &mut Window, cx: &mut App) {
-        self.hover = state.map(|state| {
+    fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
+        self.hover = hover.map(|hover| {
             // The band slides to the hovered bar; on the first hovered frame it
             // adopts the bar instead of travelling from where the last hover ended.
             let target = if self.alignment.is_horizontal() {
-                state.cross_line.y
+                hover.state().cross_line.y
             } else {
-                state.cross_line.x
+                hover.state().cross_line.x
             };
             let center = spring(
                 ("bar-chart", "band"),
                 target,
-                pointer_spring(cx).with_travel(!state.is_entering()),
+                pointer_spring(cx).with_travel(!hover.is_entering()),
                 window,
                 cx,
             );
             BarHover {
                 center: center.as_f32(),
-                focus: state.focus(),
+                focus: hover.focus(),
             }
         });
     }
@@ -796,7 +796,6 @@ where
         Some(
             // Follow the cursor; the highlight band stays snapped to the bar.
             Tooltip::new(cursor, bounds.size)
-                .focus(state.focus())
                 .gap(px(8.))
                 .cross_line(cross_line)
                 .title(title)

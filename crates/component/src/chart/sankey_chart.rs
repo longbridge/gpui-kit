@@ -19,7 +19,7 @@ use crate::{
             Sankey, SankeyAlign, SankeyGraph, SankeyLink, SankeyLinkLayout, SankeyValueScale,
             sankey_link_path,
         },
-        tooltip::{Tooltip, TooltipState},
+        tooltip::{PlotHover, Tooltip, TooltipState},
     },
 };
 
@@ -656,10 +656,10 @@ impl<T> Plot for SankeyChart<T> {
         Some(TooltipState::new(node.index, position, vec![]))
     }
 
-    fn hover(&mut self, state: Option<&TooltipState>, _window: &mut Window, _cx: &mut App) {
-        self.hover = state.map(|state| SankeyHover {
-            node: state.index,
-            focus: state.focus(),
+    fn hover(&mut self, hover: Option<&PlotHover>, _window: &mut Window, _cx: &mut App) {
+        self.hover = hover.map(|hover| SankeyHover {
+            node: hover.state().index,
+            focus: hover.focus(),
         });
     }
 
@@ -694,7 +694,6 @@ impl<T> Plot for SankeyChart<T> {
         Some(
             // Follow the cursor; the node's links mark it.
             Tooltip::new(cursor, bounds.size)
-                .focus(state.focus())
                 .gap(px(8.))
                 .when_some(self.node_label.as_ref(), |this, label| {
                     this.title(label(datum))

@@ -7,7 +7,7 @@ use gpui_kit::component::{
         AXIS_GAP, AxisText, Grid, IntoPlot, Plot, PlotAxis,
         scale::{Scale, ScaleBand, ScaleLinear, ScaleOrdinal},
         shape::{Bar, Stack, StackSeries},
-        tooltip::{CrossLine, Tooltip, TooltipState},
+        tooltip::{CrossLine, PlotHover, Tooltip, TooltipState},
     },
 };
 use gpui_kit::*;
@@ -157,18 +157,18 @@ impl Plot for StackedBarChart {
         ))
     }
 
-    fn hover(&mut self, state: Option<&TooltipState>, window: &mut Window, cx: &mut App) {
+    fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
         // The band slides to the hovered column; on the first hovered frame it
         // adopts the column instead of travelling from where the last hover ended.
-        self.band_center = state.map(|state| {
+        self.band_center = hover.map(|hover| {
             spring(
                 ("stacked-bar-chart", "band"),
-                state.cross_line.x,
+                hover.state().cross_line.x,
                 cx.theme()
                     .motion_tokens()
                     .spring_control
                     .with_epsilon(0.1)
-                    .with_travel(!state.is_entering()),
+                    .with_travel(!hover.is_entering()),
                 window,
                 cx,
             )
@@ -207,9 +207,8 @@ impl Plot for StackedBarChart {
         .band_width();
 
         let center = self.band_center.unwrap_or(state.cross_line.x);
+        // The overlay fades in and out with the hover on its own.
         let mut tooltip = Tooltip::new(cursor, bounds.size)
-            // The overlay fades in and out with the hover.
-            .focus(state.focus())
             .gap(px(8.))
             .cross_line(
                 CrossLine::new(point(center, state.cross_line.y))

@@ -14,7 +14,7 @@ use crate::{
         AXIS_GAP, Grid, PathCaches, Plot, PlotAxis, StrokeStyle,
         scale::{Scale, ScaleLinear, ScalePoint, Sealed},
         shape::Area,
-        tooltip::{CrossLine, Dot, Tooltip, TooltipState},
+        tooltip::{CrossLine, Dot, PlotHover, Tooltip, TooltipState},
     },
 };
 
@@ -27,6 +27,8 @@ struct AreaHover {
     x: Pixels,
     /// Where each series' dot has slid to; the dots follow their series.
     dots: Vec<Point<Pixels>>,
+    /// How far the hover has faded in.
+    focus: f32,
 }
 
 #[derive(IntoPlot)]
@@ -291,12 +293,13 @@ where
         ))
     }
 
-    fn hover(&mut self, state: Option<&TooltipState>, window: &mut Window, cx: &mut App) {
-        self.hover = state.map(|state| {
+    fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
+        self.hover = hover.map(|hover| {
             // The crosshair and each series' dot slide to the hovered point; on the
             // first hovered frame they adopt it instead of travelling from where the
             // last hover ended.
-            let policy = pointer_spring(cx).with_travel(!state.is_entering());
+            let state = hover.state();
+            let policy = pointer_spring(cx).with_travel(!hover.is_entering());
             let x = spring(("area-chart", "x"), state.cross_line.x, policy, window, cx);
             let dots = state
                 .dots
@@ -307,7 +310,11 @@ where
                     point(x, spring(id, dot.y, policy, window, cx))
                 })
                 .collect();
-            AreaHover { x, dots }
+            AreaHover {
+                x,
+                dots,
+                focus: hover.focus(),
+            }
         });
     }
 
@@ -327,16 +334,15 @@ where
         let dot_stroke = cx.theme().background;
         let color = |i: usize| *self.strokes.get(i).unwrap_or(&default_color);
 
-        // Where the hover has slid to this frame; the data points themselves before
-        // the first `hover` sample.
-        let (x, dots) = match self.hover.as_ref() {
-            Some(hover) => (hover.x, &hover.dots),
-            None => (state.cross_line.x, &state.dots),
+        // Where the hover has slid to this frame; the data points themselves, in
+        // full focus, before the first `hover` sample.
+        let (x, dots, focus) = match self.hover.as_ref() {
+            Some(hover) => (hover.x, &hover.dots, hover.focus),
+            None => (state.cross_line.x, &state.dots, 1.),
         };
 
         // Follow the cursor; the crosshair and dots stay snapped to the data point.
         let mut tooltip = Tooltip::new(cursor, bounds.size)
-            .focus(state.focus())
             .gap(px(8.))
             // Confine the crosshair to the plot area so it doesn't cross the x-axis.
             .cross_line(
@@ -346,7 +352,7 @@ where
             .dots(dots.iter().enumerate().map(|(i, p)| {
                 Dot::new(*p)
                     .size(HOVER_DOT_SIZE)
-                    .halo(hover_halo_size(state.focus()))
+                    .halo(hover_halo_size(focus))
                     .stroke(dot_stroke)
                     .fill(color(i))
             }))

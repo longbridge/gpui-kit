@@ -117,9 +117,10 @@ pub fn derive_into_plot(input: TokenStream) -> TokenStream {
                 // The datum to show this frame: the one under the cursor, or the last
                 // one while the hover fades out after the cursor leaves it.
                 let hover = #component::plot::tooltip::track_hover(live, cursor, window, cx);
-                <Self as Plot>::hover(self, hover.as_ref().map(|(state, _)| state), window, cx);
+                <Self as Plot>::hover(self, hover.as_ref().map(|(hover, _)| hover), window, cx);
 
-                let overlay = hover.and_then(|(state, cursor)| {
+                let overlay = hover.and_then(|(hover, cursor)| {
+                    let state = hover.state();
                     // Pass the live cursor so the tooltip box can follow it; the crosshair and
                     // dots in `state` stay snapped to the data point by `tooltip_state`.
                     //
@@ -127,7 +128,7 @@ pub fn derive_into_plot(input: TokenStream) -> TokenStream {
                     // below content drawn over the plot. The tooltip box defers itself (see
                     // `plot::tooltip::Tooltip`) to paint above sibling content, since it can
                     // extend past the plot bounds.
-                    let mut overlay = <Self as Plot>::tooltip(self, &state, cursor, bounds, window, cx)?;
+                    let mut overlay = <Self as Plot>::tooltip(self, state, cursor, bounds, window, cx)?;
                     overlay.prepaint_as_root(bounds.origin, bounds.size.into(), window, cx);
                     Some(overlay)
                 });

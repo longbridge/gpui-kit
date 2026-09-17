@@ -266,10 +266,6 @@ pub struct TooltipState {
     pub index: usize,
     pub cross_line: Point<Pixels>,
     pub dots: Vec<Point<Pixels>>,
-    /// How far the hover has faded in, `0..=1`; see [`Self::focus`].
-    focus: f32,
-    /// Whether the cursor is on this datum; see [`Self::is_hovered`].
-    hovered: bool,
 }
 
 impl TooltipState {
@@ -278,23 +274,40 @@ impl TooltipState {
             index,
             cross_line,
             dots,
-            focus: 1.,
-            hovered: true,
         }
+    }
+}
+
+/// The datum a plot has in focus this frame, handed to [`Plot::hover`](super::Plot::hover).
+///
+/// Carries the [`TooltipState`] the cursor resolved to and how far the hover has
+/// faded in. After the cursor leaves, the state lingers here while the focus
+/// eases back to zero, so a hover-driven presentation can fade out over the
+/// last datum instead of vanishing.
+#[derive(Clone)]
+pub struct PlotHover {
+    state: TooltipState,
+    focus: f32,
+    hovered: bool,
+}
+
+impl PlotHover {
+    /// The datum in focus: the one under the cursor, or the last one while the
+    /// hover fades out.
+    pub fn state(&self) -> &TooltipState {
+        &self.state
     }
 
     /// How far the hover has faded in, from `0` to `1`.
     ///
     /// Rises over the styled layer's fast duration when the cursor lands on a
-    /// datum and falls back after it leaves, during which the state lingers in
-    /// [`Plot::hover`](super::Plot::hover) and [`Plot::tooltip`](super::Plot::tooltip)
-    /// with [`Self::is_hovered`] false. A state built by
-    /// [`Plot::tooltip_state`](super::Plot::tooltip_state) starts at `1`.
+    /// datum and falls back after it leaves, during which [`Self::is_hovered`]
+    /// is false.
     pub fn focus(&self) -> f32 {
         self.focus
     }
 
-    /// Whether the cursor is on this datum, as opposed to the state lingering
+    /// Whether the cursor is on the datum, as opposed to the state lingering
     /// while its hover fades out.
     pub fn is_hovered(&self) -> bool {
         self.hovered
@@ -308,13 +321,29 @@ impl TooltipState {
     }
 }
 
-/// The last datum the cursor resolved to and where the cursor was, kept in
-/// element state so the hover can fade out over it after the cursor leaves.
-#[derive(Default)]
+/// The last datum the cursor resolved to, where the cursor was and how far the
+/// hover has faded in, kept in element state so the hover can fade out over it
+/// after the cursor leaves and so [`Tooltip`] can read the fade without being
+/// handed it.
 struct HoverMemory {
     state: Option<TooltipState>,
     cursor: Point<Pixels>,
+    focus: f32,
 }
+
+impl Default for HoverMemory {
+    fn default() -> Self {
+        Self {
+            state: None,
+            cursor: Point::default(),
+            // A tooltip rendered outside the derive's tracking is fully opaque.
+            focus: 1.,
+        }
+    }
+}
+
+/// The element-state key of a plot's [`HoverMemory`], within the plot's scope.
+const HOVER_MEMORY: &str = "__plot-hover";
 
 /// Resolve the datum a plot shows this frame from the `live` state the cursor
 /// resolved to.
@@ -330,15 +359,9 @@ pub fn track_hover(
     cursor: Option<Point<Pixels>>,
     window: &mut Window,
     cx: &mut App,
-) -> Option<(TooltipState, Point<Pixels>)> {
+) -> Option<(PlotHover, Point<Pixels>)> {
     let hovered = live.is_some();
-    let memory = window.use_keyed_state("__plot-hover", cx, |_, _| HoverMemory::default());
-    if let (Some(live), Some(cursor)) = (live, cursor) {
-        memory.update(cx, |memory, _| {
-            memory.state = Some(live);
-            memory.cursor = cursor;
-        });
-    }
+    let memory = window.use_keyed_state(HOVER_MEMORY, cx, |_, _| HoverMemory::default());
 
     let motion = cx.theme().motion_tokens();
     let easing = if hovered {
@@ -347,23 +370,34 @@ pub fn track_hover(
         motion.easing_exit.clone()
     };
     let focus = transition(
-        ("__plot-hover", "focus"),
+        (HOVER_MEMORY, "focus"),
         if hovered { 1. } else { 0. },
         Transition::new(motion.duration_fast).easing(easing),
         window,
         cx,
     );
 
-    if !hovered && focus <= 0. {
-        memory.update(cx, |memory, _| memory.state = None);
-        return None;
-    }
+    memory.update(cx, |memory, _| {
+        if let (Some(live), Some(cursor)) = (live, cursor) {
+            memory.state = Some(live);
+            memory.cursor = cursor;
+        }
+        memory.focus = focus;
+        if !hovered && focus <= 0. {
+            memory.state = None;
+        }
+    });
 
     let memory = memory.read(cx);
-    let mut state = memory.state.clone()?;
-    state.focus = focus;
-    state.hovered = hovered;
-    Some((state, memory.cursor))
+    let state = memory.state.clone()?;
+    Some((
+        PlotHover {
+            state,
+            focus,
+            hovered,
+        },
+        memory.cursor,
+    ))
 }
 
 /// A single labelled row in a [`Tooltip`]: a colored swatch, a muted label, and a value.
@@ -387,8 +421,8 @@ pub struct Tooltip {
     /// Plot size, used to flip the box toward the center near each edge so it never
     /// overflows the near side.
     within: Size<Pixels>,
-    /// Opacity of the whole overlay; see [`Self::focus`].
-    focus: f32,
+    /// Opacity of the whole overlay when set; see [`Self::focus`].
+    focus: Option<f32>,
 }
 
 impl Tooltip {
@@ -404,16 +438,18 @@ impl Tooltip {
             rows: Vec::new(),
             cursor,
             within,
-            focus: 1.,
+            focus: None,
         }
     }
 
     /// Fade the whole overlay — crosshair, dots and box — to `focus` (`0..=1`).
     ///
-    /// Pass [`TooltipState::focus`] so the overlay eases in when the cursor lands
-    /// on a datum and out after it leaves. Defaults to fully opaque.
+    /// A tooltip returned from [`Plot::tooltip`](super::Plot::tooltip) already
+    /// follows the plot's hover, easing in when the cursor lands on a datum and
+    /// out after it leaves ([`PlotHover::focus`]); set this to override that,
+    /// or to fade a tooltip rendered outside a plot.
     pub fn focus(mut self, focus: f32) -> Self {
-        self.focus = focus.clamp(0., 1.);
+        self.focus = Some(focus.clamp(0., 1.));
         self
     }
 
@@ -476,7 +512,13 @@ impl ParentElement for Tooltip {
 }
 
 impl RenderOnce for Tooltip {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // Rendered within the plot's element scope, so this is the fade the
+        // derive tracked for it this frame; fully opaque outside a plot.
+        let tracked_focus = window
+            .use_keyed_state(HOVER_MEMORY, cx, |_, _| HoverMemory::default())
+            .read(cx)
+            .focus;
         let Tooltip {
             base,
             gap,
@@ -489,6 +531,7 @@ impl RenderOnce for Tooltip {
             within,
             focus,
         } = self;
+        let focus = focus.unwrap_or(tracked_focus);
 
         // Structured content (title + rows) takes precedence over freeform `base` children.
         let content = if title.is_some() || !rows.is_empty() {
@@ -578,28 +621,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tooltip_state_starts_hovered_in_focus() {
+    fn test_plot_hover_readers() {
         let state = TooltipState::new(2, point(px(10.), px(20.)), vec![]);
-        assert_eq!(state.index, 2);
-        assert_eq!(state.focus(), 1.);
-        assert!(state.is_hovered());
+        let hover = PlotHover {
+            state,
+            focus: 1.,
+            hovered: true,
+        };
+        assert_eq!(hover.state().index, 2);
+        assert!(hover.is_hovered());
         // Fully in focus: a pointer keeps travelling rather than snapping.
-        assert!(!state.is_entering());
-    }
-
-    #[test]
-    fn test_tooltip_state_entering_and_lingering() {
-        let mut state = TooltipState::new(0, point(px(0.), px(0.)), vec![]);
+        assert!(!hover.is_entering());
 
         // The first hovered frame, before the fade has started.
-        state.focus = 0.;
-        state.hovered = true;
-        assert!(state.is_entering());
+        let entering = PlotHover {
+            focus: 0.,
+            ..hover.clone()
+        };
+        assert!(entering.is_entering());
 
         // Fading out after the cursor left: neither hovered nor entering.
-        state.focus = 0.4;
-        state.hovered = false;
-        assert!(!state.is_hovered());
-        assert!(!state.is_entering());
+        let lingering = PlotHover {
+            focus: 0.4,
+            hovered: false,
+            ..hover
+        };
+        assert!(!lingering.is_hovered());
+        assert!(!lingering.is_entering());
     }
 }

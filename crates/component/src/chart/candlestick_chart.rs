@@ -14,7 +14,7 @@ use crate::{
     plot::{
         AXIS_GAP, Grid, Plot, PlotAxis, origin_point,
         scale::{Scale, ScaleBand, ScaleLinear, Sealed},
-        tooltip::{CrossLine, Tooltip, TooltipState},
+        tooltip::{CrossLine, PlotHover, Tooltip, TooltipState},
     },
 };
 
@@ -335,14 +335,14 @@ where
         ))
     }
 
-    fn hover(&mut self, state: Option<&TooltipState>, window: &mut Window, cx: &mut App) {
-        self.hover = state.map(|state| {
+    fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
+        self.hover = hover.map(|hover| {
             // The band slides to the hovered candle; on the first hovered frame it
             // adopts the candle instead of travelling from where the last hover ended.
             let center = spring(
                 ("candlestick-chart", "band"),
-                state.cross_line.x,
-                pointer_spring(cx).with_travel(!state.is_entering()),
+                hover.state().cross_line.x,
+                pointer_spring(cx).with_travel(!hover.is_entering()),
                 window,
                 cx,
             );
@@ -387,7 +387,6 @@ where
             (t!("Chart.close"), close),
         ];
         let mut tooltip = Tooltip::new(cursor, bounds.size)
-            .focus(state.focus())
             .gap(px(8.))
             .cross_line(cross_line)
             .title(title);

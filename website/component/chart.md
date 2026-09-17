@@ -633,17 +633,17 @@ An identified chart also keeps its heavy geometry across frames, since a chart r
 
 ### Custom Plots
 
-A custom [`Plot`] opts in the same way: return the id from `Plot::id`, resolve the datum under the cursor in `Plot::tooltip_state`, and build the overlay in `Plot::tooltip`. To animate the emphasis, implement `Plot::hover`, which runs each frame before `tooltip` and `paint` with the [`TooltipState`] in focus — it lingers after the cursor leaves while `state.focus()` eases back to zero, so sample the motion there and keep the result on `self` for the other two methods:
+A custom [`Plot`] opts in the same way: return the id from `Plot::id`, resolve the datum under the cursor in `Plot::tooltip_state`, and build the overlay in `Plot::tooltip`. To animate the emphasis, implement `Plot::hover`, which runs each frame before `tooltip` and `paint` with the [`PlotHover`] in focus — it carries the `TooltipState` and lingers after the cursor leaves while `hover.focus()` eases back to zero, so sample the motion there and keep the result on `self` for the other two methods. A `Tooltip` returned from `tooltip` fades with the hover on its own:
 
 ```rust
-fn hover(&mut self, state: Option<&TooltipState>, window: &mut Window, cx: &mut App) {
-    self.band_center = state.map(|state| {
+fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
+    self.band_center = hover.map(|hover| {
         spring(
             ("my-plot", "band"),
-            state.cross_line.x,
+            hover.state().cross_line.x,
             // Adopt the datum on the first hovered frame instead of travelling
             // from where the last hover ended.
-            cx.theme().motion_tokens().spring_control.with_travel(!state.is_entering()),
+            cx.theme().motion_tokens().spring_control.with_travel(!hover.is_entering()),
             window,
             cx,
         )
@@ -654,8 +654,6 @@ fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pi
     let center = self.band_center.unwrap_or(state.cross_line.x);
     Some(
         Tooltip::new(cursor, bounds.size)
-            // Fade the crosshair, dots and box with the hover.
-            .focus(state.focus())
             .cross_line(CrossLine::new(point(center, state.cross_line.y)).band(px(24.)))
             .title("Title")
             .row(cx.theme().chart_1, "Series", "42")

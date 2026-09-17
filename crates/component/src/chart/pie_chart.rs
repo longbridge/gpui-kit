@@ -15,7 +15,7 @@ use crate::{
         label::{PlotLabel, TEXT_HEIGHT, TEXT_SIZE, Text},
         polygon,
         shape::{Arc, ArcData, Pie},
-        tooltip::{Tooltip, TooltipState},
+        tooltip::{PlotHover, Tooltip, TooltipState},
     },
 };
 
@@ -401,8 +401,8 @@ impl<T> Plot for PieChart<T> {
         ))
     }
 
-    fn hover(&mut self, state: Option<&TooltipState>, window: &mut Window, cx: &mut App) {
-        self.hover = state.map(|state| {
+    fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
+        self.hover = hover.map(|hover| {
             // Every slice springs toward lifted or resting, so the one the cursor
             // left settles back while the new one rises. On the first hovered
             // frame the target is rest, so the slice rises from the ring rather
@@ -410,7 +410,8 @@ impl<T> Plot for PieChart<T> {
             let policy = cx.theme().motion_tokens().spring_control;
             let lift = (0..self.data.len())
                 .map(|ix| {
-                    let lifted = state.is_hovered() && !state.is_entering() && ix == state.index;
+                    let lifted =
+                        hover.is_hovered() && !hover.is_entering() && ix == hover.state().index;
                     spring(
                         ElementId::named_usize("pie-slice", ix),
                         if lifted { 1. } else { 0. },
@@ -422,7 +423,7 @@ impl<T> Plot for PieChart<T> {
                 .collect();
             PieHover {
                 lift,
-                focus: state.focus(),
+                focus: hover.focus(),
             }
         });
     }
@@ -445,7 +446,6 @@ impl<T> Plot for PieChart<T> {
         Some(
             // Follow the cursor; the lifted slice marks the datum.
             Tooltip::new(cursor, bounds.size)
-                .focus(state.focus())
                 .gap(px(8.))
                 .when_some(self.label.as_ref(), |this, label| this.title(label(d)))
                 .row(
