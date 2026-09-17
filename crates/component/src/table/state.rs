@@ -2019,11 +2019,7 @@ where
                                                             div()
                                                                 .absolute()
                                                                 .inset_0()
-                                                                .bg(cx.theme().tokens.table_active)
-                                                                .border_1()
-                                                                .border_color(
-                                                                    cx.theme().table_active_border,
-                                                                ),
+                                                                .bg(cx.theme().tokens.table_active),
                                                         )
                                                     })
                                                     .when(
@@ -2135,18 +2131,10 @@ where
                                                         ))
                                                         .when(is_cell_selected, |this| {
                                                             this.child(
-                                                                div()
-                                                                    .absolute()
-                                                                    .inset_0()
-                                                                    .bg(cx
-                                                                        .theme()
-                                                                        .tokens
-                                                                        .table_active)
-                                                                    .border_1()
-                                                                    .border_color(
-                                                                        cx.theme()
-                                                                            .table_active_border,
-                                                                    ),
+                                                                div().absolute().inset_0().bg(cx
+                                                                    .theme()
+                                                                    .tokens
+                                                                    .table_active),
                                                             )
                                                         })
                                                         .when(
@@ -2203,26 +2191,13 @@ where
                 )
                 // Row selected style
                 // Note: Don't show row selection if a cell is selected
-                .when_some(self.selected_row, |this, _| {
-                    this.when(is_selected && self.selection_mode.is_row(), |this| {
-                        this.map(|this| {
-                            if cx.theme().list.active_highlight {
-                                this.border_color(gpui::transparent_white()).child(
-                                    div()
-                                        .top(if row_ix == 0 { px(0.) } else { px(-1.) })
-                                        .left(px(0.))
-                                        .right(px(0.))
-                                        .bottom(px(-1.))
-                                        .absolute()
-                                        .bg(cx.theme().tokens.table_active)
-                                        .border_1()
-                                        .border_color(cx.theme().table_active_border),
-                                )
-                            } else {
-                                this.bg(cx.theme().tokens.accent)
-                            }
-                        })
-                    })
+                .when(is_selected && self.selection_mode.is_row(), |this| {
+                    let bg = if cx.theme().list.active_highlight {
+                        cx.theme().tokens.table_active
+                    } else {
+                        cx.theme().tokens.accent
+                    };
+                    this.bg(bg)
                 })
                 // Row right click row style
                 .when(self.right_clicked_row == Some(row_ix), |this| {

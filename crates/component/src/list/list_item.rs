@@ -177,11 +177,6 @@ impl RenderOnce for ListItem {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let is_active = self.confirmed || self.selected || self.secondary_selected;
 
-        let corner_radii = self.style.corner_radii.clone();
-
-        let mut selected_style = StyleRefinement::default();
-        selected_style.corner_radii = corner_radii;
-
         let is_selectable = !(self.disabled || self.mode.is_separator());
 
         self.base
@@ -245,19 +240,6 @@ impl RenderOnce for ListItem {
                     };
 
                     this.when(!self.secondary_selected, |this| this.bg(bg))
-                        .when(cx.theme().list.active_highlight, |this| {
-                            this.child(
-                                div()
-                                    .absolute()
-                                    .top_0()
-                                    .left_0()
-                                    .right_0()
-                                    .bottom_0()
-                                    .border_1()
-                                    .border_color(cx.theme().list_active_border)
-                                    .refine_style(&selected_style),
-                            )
-                        })
                 } else {
                     this
                 }
