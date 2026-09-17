@@ -1,11 +1,19 @@
+//! A shared frame around one text control and its addons.
+//!
+//! The parts follow shadcn's input group: [`InputGroup`] is the frame,
+//! [`InputGroupInput`] and [`InputGroupTextarea`] are the ordinary [`Input`]
+//! and [`Textarea`] placed in it, [`InputGroupAddon`] holds text, icons and
+//! buttons on one of its four sides, [`InputGroupButton`] is a [`Button`] with
+//! compact input-group presentation and [`InputGroupText`] is muted text. The
+//! caller keeps the `InputState` or `TextareaState`; the group owns only
+//! composition and the frame.
+
 use gpui_base::TestSupportExt as _;
-use std::{rc::Rc, time::Duration};
 
 use gpui::{
-    AccessibleAction, AnyElement, App, ClickEvent, DefiniteLength, Edges, ElementId, Entity,
-    InteractiveElement, Interactivity, IntoElement, MouseButton, ParentElement, RenderOnce, Role,
-    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, TextAlign, ViewElement,
-    Window, canvas, div, prelude::FluentBuilder as _, px, rems,
+    AnyElement, App, ElementId, InteractiveElement, Interactivity, IntoElement, MouseButton,
+    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
+    StyleRefinement, Styled, ViewElement, Window, div, prelude::FluentBuilder as _, px, rems,
 };
 
 use crate::{
@@ -13,24 +21,20 @@ use crate::{
     StyleSized as _, StyledExt as _,
     button::{Button, ButtonCustomVariant, ButtonVariant, ButtonVariants},
     h_flex,
-    input::{InputContentType, InputState, TextareaState, control::InputControl},
-    native_menu::NativeMenu,
+    input::{Input, Textarea},
     v_flex,
 };
 
 /// A shared frame around one text control and any number of explicitly aligned addons.
 ///
 /// The caller retains the `InputState` or `TextareaState`. The group owns only
-/// composition and presentation; it does not wrap a styled `Input` or retain a
-/// second editing state. `input` accepts either text control and replaces the slot.
+/// composition and presentation; the control keeps every `Input` capability
+/// and renders without its own frame. `input` replaces the slot.
 #[derive(IntoElement)]
 pub struct InputGroup {
     id: ElementId,
     style: StyleRefinement,
-    focused_style: StyleRefinement,
-    invalid_style: StyleRefinement,
-    disabled_style: StyleRefinement,
-    control: Option<GroupControl>,
+    control: Option<Input>,
     addons: Vec<InputGroupAddon>,
     size: Size,
     disabled: bool,
@@ -45,9 +49,6 @@ impl InputGroup {
         Self {
             id: id.into(),
             style: StyleRefinement::default(),
-            focused_style: StyleRefinement::default(),
-            invalid_style: StyleRefinement::default(),
-            disabled_style: StyleRefinement::default(),
             control: None,
             addons: Vec::new(),
             size: Size::default(),
@@ -59,7 +60,7 @@ impl InputGroup {
         }
     }
 
-    /// Set a single-line input or textarea, replacing the previous control.
+    /// Set the single-line input or textarea, replacing the previous control.
     pub fn input(mut self, input: impl Into<InputGroupControl>) -> Self {
         self.control = Some(input.into().0);
         self
@@ -94,29 +95,6 @@ impl InputGroup {
         self.aria_label = Some(label.into());
         self
     }
-
-    /// Refine the focused frame after its theme defaults. Invalid styling wins
-    /// when both states apply. The closure runs immediately, once per call.
-    pub fn focused_style(mut self, build: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
-        self.focused_style = build(self.focused_style);
-        self
-    }
-
-    /// Refine the invalid frame after its error border and ring defaults.
-    pub fn invalid_style(mut self, build: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
-        self.invalid_style = build(self.invalid_style);
-        self
-    }
-
-    /// Refine the disabled frame without enabling editing or addon actions.
-    /// Validation styling is applied afterwards when the group is also invalid.
-    pub fn disabled_style(
-        mut self,
-        build: impl FnOnce(StyleRefinement) -> StyleRefinement,
-    ) -> Self {
-        self.disabled_style = build(self.disabled_style);
-        self
-    }
 }
 
 impl Sizable for InputGroup {
@@ -143,6 +121,7 @@ impl Styled for InputGroup {
     }
 }
 
+/// What the addons and the control need to know about the group they sit in.
 #[derive(Clone, Copy, Default)]
 struct GroupPresentation {
     size: Size,
@@ -156,15 +135,12 @@ struct GroupPresentation {
 
 impl RenderOnce for InputGroup {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let state = self
-            .control
-            .as_ref()
-            .map(|control| control.input.state.clone());
+        let state = self.control.as_ref().map(|input| input.state().clone());
         let disabled = self.disabled
             || self
                 .control
                 .as_ref()
-                .is_some_and(|control| control.input.disabled);
+                .is_some_and(|input| input.is_disabled());
         let focused = !disabled
             && state
                 .as_ref()
@@ -197,29 +173,19 @@ impl RenderOnce for InputGroup {
         }
         let control = self
             .control
-            .map(|control| control.render(presentation, window, cx));
+            .map(|input| render_control(input, presentation, multiline));
         let theme = cx.theme();
         let appearance = GroupAppearance::new(theme, focused, disabled, self.invalid);
         let radius = theme.radius;
         let foreground = theme.foreground;
         let show_ring = theme.focus_ring && self.focus_ring;
-        let state_border = if self.invalid {
-            self.invalid_style.border_color
-        } else if focused {
-            self.focused_style.border_color
-        } else {
-            None
-        };
-        let ring = appearance
-            .ring
-            .map(|ring| state_border.map_or(ring, |border| border.opacity(ring.a)));
-        // Nova transitions border and background colors, while its outside ring
-        // changes immediately. Reduced motion is handled by the shared primitive.
+        let motion = theme.motion_tokens();
+        let duration = motion.duration_fast;
+        let easing = motion.easing_move.clone();
+        // The border and background colors transition; the ring outside them
+        // changes immediately, like the standalone input's.
         let (border, background) = window.with_id(self.id.clone(), |window| {
-            let transition = || {
-                gpui_base::Transition::new(Duration::from_millis(150))
-                    .easing(gpui_base::Easing::cubic_bezier(0.4, 0., 0.2, 1.).unwrap())
-            };
+            let transition = || gpui_base::Transition::new(duration).easing(easing.clone());
             (
                 gpui_base::transition("border-color", appearance.border, transition(), window, cx),
                 gpui_base::transition(
@@ -260,17 +226,9 @@ impl RenderOnce for InputGroup {
                     })
             })
             .refine_style(&self.style)
-            .when(disabled, |this| {
-                this.bg(background)
-                    .opacity(0.5)
-                    .refine_style(&self.disabled_style)
-            })
+            .when(disabled, |this| this.bg(background).opacity(0.5))
             .when(appearance.ring.is_some(), |this| this.border_color(border))
-            .when(focused && !self.invalid, |this| {
-                this.refine_style(&self.focused_style)
-            })
-            .when(self.invalid, |this| this.refine_style(&self.invalid_style))
-            .when_some(ring.filter(|_| show_ring), |this, ring| {
+            .when_some(appearance.ring.filter(|_| show_ring), |this, ring| {
                 crate::styled::focus_ring(this, window, ring)
             })
             .when_some(state.filter(|_| !disabled), |this, state| {
@@ -299,6 +257,32 @@ impl RenderOnce for InputGroup {
             )
             .children(block_end)
     }
+}
+
+/// The control rendered without its own frame: the group draws the border,
+/// background and ring. An inline addon takes over part of the control's
+/// horizontal inset, as in shadcn; the caller's own style still wins.
+fn render_control(
+    mut input: Input,
+    presentation: GroupPresentation,
+    multiline: bool,
+) -> AnyElement {
+    let style = std::mem::take(input.style());
+    input
+        .with_size(presentation.size)
+        .appearance(false)
+        .focus_bordered(false)
+        .disabled(presentation.disabled)
+        .readonly(presentation.readonly)
+        .flex_1()
+        .min_w_0()
+        .when(multiline, |this| this.min_h_16())
+        .when(!multiline, |this| {
+            this.when(presentation.inline_start, |this| this.pl_2())
+                .when(presentation.inline_end, |this| this.pr_2())
+        })
+        .refine_style(&style)
+        .into_any_element()
 }
 
 struct GroupAppearance {
@@ -383,18 +367,10 @@ impl InputGroupAddon {
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
-        let mut has_button = false;
-        let mut has_kbd = false;
         for child in &mut self.children {
             if let Some(button) = button_element::InputGroupButtonElement::from_element(child) {
-                has_button = true;
                 button.disable(presentation.disabled);
             }
-            let child = button_element::unwrapped_element(child);
-            has_button |= child.downcast_mut::<ViewElement<Button>>().is_some();
-            has_kbd |= child
-                .downcast_mut::<ViewElement<crate::kbd::Kbd>>()
-                .is_some();
         }
         let border_top = self
             .style
@@ -406,13 +382,11 @@ impl InputGroupAddon {
             .border_widths
             .bottom
             .is_some_and(|width| width.to_pixels(window.rem_size()) > px(0.));
-        let inline_offset = if has_kbd {
-            rems(-0.15)
-        } else if has_button {
-            rems(-0.3)
-        } else {
-            rems(0.)
-        };
+        // An inline addon keeps the same clearance from the frame's edge that
+        // a compact button has from its top and bottom; block addons share the
+        // control's horizontal inset so a leading icon or a trailing button
+        // lines up with the text.
+        let block_px = presentation.size.input_px();
         h_flex()
             .id(self.id)
             .test_support()
@@ -429,18 +403,18 @@ impl InputGroupAddon {
             .text_color(cx.theme().muted_foreground)
             .cursor_text()
             .map(|this| match self.alignment {
-                InputGroupAddonAlignment::InlineStart => this.pl_2().ml(inline_offset),
-                InputGroupAddonAlignment::InlineEnd => this.pr_2().mr(inline_offset),
+                InputGroupAddonAlignment::InlineStart => this.pl_1p5(),
+                InputGroupAddonAlignment::InlineEnd => this.pr_1p5(),
                 InputGroupAddonAlignment::BlockStart => this
                     .w_full()
                     .justify_start()
-                    .px_2p5()
+                    .px(block_px)
                     .pt_2()
                     .when(border_bottom, |this| this.pb_2()),
                 InputGroupAddonAlignment::BlockEnd => this
                     .w_full()
                     .justify_start()
-                    .px_2p5()
+                    .px(block_px)
                     .pb_2()
                     .when(border_top, |this| this.pt_2()),
             })
@@ -468,338 +442,46 @@ impl RenderOnce for InputGroupAddon {
     }
 }
 
-struct GroupControl {
-    input: InputControl,
-    style: StyleRefinement,
-    editor_style: StyleRefinement,
-    height: Option<DefiniteLength>,
-}
+/// The single-line control of a group: an [`Input`] placed in the frame, with
+/// every `Input` capability.
+pub type InputGroupInput = Input;
+
+/// The multi-line control of a group: a [`Textarea`] placed in the frame,
+/// with every `Textarea` capability.
+pub type InputGroupTextarea = Textarea;
 
 /// A single-line input or textarea accepted by [`InputGroup::input`].
-/// Constructed by converting either input part; it owns no editing state.
-pub struct InputGroupControl(GroupControl);
+pub struct InputGroupControl(Input);
 
-impl From<InputGroupInput> for InputGroupControl {
-    fn from(input: InputGroupInput) -> Self {
-        Self(input.0)
+impl From<Input> for InputGroupControl {
+    fn from(input: Input) -> Self {
+        Self(input)
     }
 }
 
-impl From<InputGroupTextarea> for InputGroupControl {
-    fn from(textarea: InputGroupTextarea) -> Self {
-        Self(textarea.0)
+impl From<Textarea> for InputGroupControl {
+    fn from(textarea: Textarea) -> Self {
+        Self(textarea.into_input())
     }
 }
 
-impl GroupControl {
-    fn new(input: InputControl) -> Self {
-        Self {
-            input,
-            style: StyleRefinement::default(),
-            editor_style: StyleRefinement::default(),
-            height: None,
-        }
-    }
-
-    fn render(
-        mut self,
-        presentation: GroupPresentation,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> AnyElement {
-        self.input.disabled |= presentation.disabled;
-        self.input.readonly |= presentation.readonly;
-        let state = self.input.state.clone();
-        let multiline = state.presentation(cx).is_multi_line();
-        let mut editor = div()
-            .relative()
-            .flex()
-            .flex_1()
-            .min_w_0()
-            .px_2p5()
-            .when(multiline, |this| this.h_full().py_2())
-            .when(!multiline, |this| {
-                this.items_center()
-                    .when(
-                        !matches!(presentation.size, Size::XSmall | Size::Small),
-                        |this| this.py_1(),
-                    )
-                    .when(
-                        !presentation.block_start && !presentation.block_end,
-                        |this| this.h_full(),
-                    )
-                    .when(presentation.inline_start, |this| this.pl_1p5())
-                    .when(presentation.inline_end, |this| this.pr_1p5())
-                    .when(presentation.block_start, |this| this.pb_3())
-                    .when(presentation.block_end, |this| this.pt_3())
-            })
-            .refine_style(&self.editor_style);
-        // The multiline engine owns its viewport insets, including scrollbar
-        // placement. Transfer padding to it instead of adding a second inset.
-        // Relative padding follows the measured viewport width and is recomputed
-        // after resize; absolute padding needs no retained layout measurement.
-        let padding = editor.style().padding.clone();
-        let relative_padding = multiline
-            && [padding.top, padding.right, padding.bottom, padding.left]
-                .iter()
-                .any(|value| matches!(value, Some(DefiniteLength::Fraction(_))));
-        let viewport_width = relative_padding.then(|| {
-            window.use_keyed_state(
-                ("input-group-editor-width", state.entity_id()),
-                cx,
-                |_, _| px(0.),
-            )
-        });
-        let width = viewport_width
-            .as_ref()
-            .map_or(px(0.), |width| *width.read(cx));
-        let resolve = |value: Option<DefiniteLength>| {
-            value
-                .unwrap_or_default()
-                .to_pixels(width.into(), window.rem_size())
-        };
-        let paddings = if multiline {
-            Edges {
-                top: resolve(padding.top),
-                right: resolve(padding.right),
-                bottom: resolve(padding.bottom),
-                left: resolve(padding.left),
-            }
-        } else {
-            Edges::default()
-        };
-        let overlays = self.input.prepare(
-            paddings,
-            self.editor_style
-                .text
-                .text_align
-                .or(self.style.text.text_align)
-                .unwrap_or(TextAlign::Left),
-            window,
-            cx,
-        );
-        // Frame and editor need distinct focus identities; the editor owns the
-        // keyboard path, while this handle describes its accessible frame.
-        let frame_focus = window
-            .use_keyed_state(
-                ("input-group-frame-focus", state.entity_id()),
-                cx,
-                |_, cx| cx.focus_handle(),
-            )
-            .read(cx)
-            .clone();
-        let accessibility_state = state.clone();
-        let editor = editor
-            .when(multiline, |this| this.p_0())
-            .child(state.clone().into_any_element())
-            .when_some(viewport_width, |this, width| {
-                this.child(
-                    canvas(
-                        move |bounds, window, cx| {
-                            width.update(cx, |width, cx| {
-                                if *width != bounds.size.width {
-                                    *width = bounds.size.width;
-                                    cx.notify();
-                                    window.refresh();
-                                }
-                            });
-                        },
-                        |_, _, _, _| {},
-                    )
-                    .absolute()
-                    .size_full(),
-                )
-            })
-            .map(|this| {
-                if multiline {
-                    v_flex()
-                        .size_full()
-                        .children(overlays.search)
-                        .child(this)
-                        .into_any_element()
-                } else {
-                    this.into_any_element()
-                }
-            });
-        self.input
-            .frame(("input-group-control", state.entity_id()), window, cx)
-            .track_focus(&frame_focus)
-            .when(!self.input.disabled, |this| {
-                this.on_a11y_action(AccessibleAction::Focus, move |_, window, cx| {
-                    accessibility_state.focus(window, cx);
-                })
-            })
-            .relative()
-            .flex()
-            .flex_1()
-            .min_w_0()
-            .line_height(match presentation.size {
-                Size::XSmall => rems(1.),
-                Size::Large => rems(1.5),
-                _ => rems(1.25),
-            })
-            .input_text_size(presentation.size)
-            .text_color(cx.theme().foreground)
-            .when(!multiline, |this| {
-                this.when(
-                    !presentation.block_start && !presentation.block_end,
-                    |this| this.h_full(),
-                )
-            })
-            .when(multiline, |this| this.h_auto().min_h_16())
-            .when_some(self.height, |this, height| this.h(height))
-            .refine_style(&self.style)
-            .child(editor)
-            .children(overlays.floating)
-            .into_any_element()
-    }
-}
-
-/// An unframed single-line input for the group's `input` slot.
-#[derive(IntoElement)]
-pub struct InputGroupInput(GroupControl);
-
-impl InputGroupInput {
-    pub fn new(state: &Entity<InputState>) -> Self {
-        Self(GroupControl::new(InputControl::new(state.clone().into())))
-    }
-
-    /// Supply the native content-type hint without changing the text or mask.
-    pub fn content_type(mut self, content_type: InputContentType) -> Self {
-        self.0.input.content_type = Some(content_type);
-        self
-    }
-}
-
-/// An unframed textarea for the group's `input` slot.
-#[derive(IntoElement)]
-pub struct InputGroupTextarea(GroupControl);
-
-impl InputGroupTextarea {
-    pub fn new(state: &Entity<TextareaState>) -> Self {
-        Self(GroupControl::new(InputControl::new(state.clone().into())))
-    }
-
-    /// Set the viewport height. Rows and auto-grow remain owned by TextareaState.
-    pub fn h(mut self, height: impl Into<DefiniteLength>) -> Self {
-        self.0.height = Some(height.into());
-        self
-    }
-}
-
-macro_rules! impl_group_control {
-    ($control:ident) => {
-        impl $control {
-            /// Refine the editing viewport after its defaults. Padding affects
-            /// text layout, caret hit testing, selection, IME, and scrolling.
-            /// The closure runs immediately; repeated calls accumulate overrides.
-            pub fn editor_style(
-                mut self,
-                build: impl FnOnce(StyleRefinement) -> StyleRefinement,
-            ) -> Self {
-                self.0.editor_style = build(self.0.editor_style);
-                self
-            }
-
-            pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
-                self.0.input.aria_label = Some(label.into());
-                self
-            }
-
-            pub fn accessibility_id(mut self, id: impl Into<SharedString>) -> Self {
-                self.0.input.accessibility_id = Some(id.into());
-                self
-            }
-
-            pub fn disabled(mut self, disabled: bool) -> Self {
-                self.0.input.disabled = disabled;
-                self
-            }
-
-            pub fn readonly(mut self, readonly: bool) -> Self {
-                self.0.input.readonly = readonly;
-                self
-            }
-
-            /// Replace the built-in native context menu.
-            pub fn context_menu(
-                mut self,
-                build: impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static,
-            ) -> Self {
-                self.0.input.context_menu_builder = Some(Rc::new(build));
-                self
-            }
-        }
-
-        impl Styled for $control {
-            fn style(&mut self) -> &mut StyleRefinement {
-                &mut self.0.style
-            }
-        }
-
-        impl RenderOnce for $control {
-            fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-                self.0.render(GroupPresentation::default(), window, cx)
-            }
-        }
-    };
-}
-
-impl_group_control!(InputGroupInput);
-impl_group_control!(InputGroupTextarea);
-
-/// Compact text and square-icon button sizes used inside input groups.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum InputGroupButtonSize {
-    #[default]
-    XSmall,
-    Small,
-    IconXSmall,
-    IconSmall,
-}
-
-/// A native Button with compact input-group presentation and disabled inheritance.
+/// A [`Button`] with compact input-group presentation and disabled inheritance.
+///
+/// Ghost and extra-small by default, as in shadcn; `xsmall` and `small` are
+/// the two compact sizes, and a button with only an icon is square at either.
 pub struct InputGroupButton {
     button: Button,
-    size: InputGroupButtonSize,
+    size: Size,
     style: StyleRefinement,
-    label_style: StyleRefinement,
-    icon_style: StyleRefinement,
 }
 
 impl InputGroupButton {
     pub fn new(id: impl Into<ElementId>) -> Self {
         Self {
             button: Button::new(id).ghost(),
-            size: InputGroupButtonSize::default(),
+            size: Size::XSmall,
             style: StyleRefinement::default(),
-            label_style: StyleRefinement::default(),
-            icon_style: StyleRefinement::default(),
         }
-    }
-
-    pub fn with_size(mut self, size: InputGroupButtonSize) -> Self {
-        self.size = size;
-        self
-    }
-
-    /// Configure additional native Button capabilities.
-    pub fn with_button(mut self, build: impl FnOnce(Button) -> Button) -> Self {
-        self.button = build(self.button);
-        self
-    }
-
-    /// Refine the visible label, independently of the icon and button frame.
-    /// Repeated calls refine the accumulated override; theme defaults stay live.
-    pub fn label_style(mut self, build: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
-        self.label_style = build(self.label_style);
-        self
-    }
-
-    /// Refine the icon after its compact size defaults, including its loading icon.
-    pub fn icon_style(mut self, build: impl FnOnce(StyleRefinement) -> StyleRefinement) -> Self {
-        self.icon_style = build(self.icon_style);
-        self
     }
 
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
@@ -812,7 +494,7 @@ impl InputGroupButton {
         self
     }
 
-    pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.button = self.button.accessibility_label(label);
         self
     }
@@ -827,14 +509,29 @@ impl InputGroupButton {
         self
     }
 
+    pub fn loading_icon(mut self, icon: impl Into<Icon>) -> Self {
+        self.button = self.button.loading_icon(icon);
+        self
+    }
+
     pub fn outline(mut self) -> Self {
         self.button = self.button.outline();
         self
     }
 
+    pub fn tab_index(mut self, tab_index: isize) -> Self {
+        self.button = self.button.tab_index(tab_index);
+        self
+    }
+
+    pub fn dropdown_caret(mut self, dropdown_caret: bool) -> Self {
+        self.button = self.button.dropdown_caret(dropdown_caret);
+        self
+    }
+
     pub fn on_click(
         mut self,
-        handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+        handler: impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.button = self.button.on_click(handler);
         self
@@ -843,28 +540,36 @@ impl InputGroupButton {
     fn render_in_group(self, disabled: bool, window: &mut Window, cx: &mut App) -> AnyElement {
         let disabled = disabled || self.button.is_disabled();
         let selected = self.button.is_selected();
+        let icon_only = self.button.is_icon_only();
         let ghost =
             matches!(self.button.variant(), ButtonVariant::Ghost) && !self.button.is_outline();
         let muted = cx.theme().muted;
         let hover = muted.opacity(if cx.theme().is_dark() { 0.5 } else { 1. });
+        let compact = matches!(self.size, Size::XSmall | Size::Small);
         let icon_size = match self.size {
-            InputGroupButtonSize::XSmall => Size::Small,
-            _ => Size::Medium,
+            Size::XSmall => Size::Small,
+            Size::Small => Size::Medium,
+            size => size,
         };
         let content_style = div()
             .text_sm()
             .line_height(rems(1.25))
             .map(|this| match self.size {
-                InputGroupButtonSize::XSmall => this.gap_1(),
-                _ => this.gap_2(),
+                Size::XSmall => this.gap_1(),
+                _ => this.gap_1p5(),
             })
             .style()
             .clone();
         self.button
             .when(disabled, |this| this.disabled(true))
-            .with_size(Size::Medium)
-            .content_style(content_style, icon_size)
-            .part_styles(self.label_style, self.icon_style)
+            .map(|this| {
+                if compact {
+                    this.with_size(Size::Medium)
+                        .content_style(content_style, icon_size)
+                } else {
+                    this.with_size(self.size)
+                }
+            })
             .when(ghost, |this| {
                 this.custom(
                     ButtonCustomVariant::new(cx)
@@ -881,23 +586,23 @@ impl InputGroupButton {
             .font_medium()
             .border_1()
             .shadow_none()
-            .map(|this| match self.size {
-                InputGroupButtonSize::XSmall => this
-                    .h_6()
-                    .px_1p5()
-                    .gap_1()
-                    .rounded(cx.theme().radius_tokens().sm),
-                InputGroupButtonSize::Small => {
-                    this.h_8().px_2p5().gap_2().rounded(cx.theme().radius)
-                }
-                InputGroupButtonSize::IconXSmall => {
-                    this.size_6().p_0().rounded(cx.theme().radius_tokens().sm)
-                }
-                InputGroupButtonSize::IconSmall => this.size_8().p_0().rounded(cx.theme().radius),
+            .map(|this| match (self.size, icon_only) {
+                (Size::XSmall, false) => this.h_6().px_2().rounded(cx.theme().radius_tokens().sm),
+                (Size::XSmall, true) => this.size_6().p_0().rounded(cx.theme().radius_tokens().sm),
+                (Size::Small, false) => this.h_8().px_2p5().rounded(cx.theme().radius),
+                (Size::Small, true) => this.size_8().p_0().rounded(cx.theme().radius),
+                _ => this,
             })
             .refine_style(&self.style)
             .render(window, cx)
             .into_any_element()
+    }
+}
+
+impl Sizable for InputGroupButton {
+    fn with_size(mut self, size: impl Into<Size>) -> Self {
+        self.size = size.into();
+        self
     }
 }
 
@@ -1005,8 +710,8 @@ fn addon_child(mut child: AnyElement) -> AnyElement {
         .downcast_mut::<ViewElement<Icon>>()
         .is_some()
     {
-        // Unspecified icon sizes follow Nova's one-rem addon default, while
-        // explicit sizes remain owned by the icon itself.
+        // An icon without an explicit size follows the addon's one-rem
+        // default; an explicit size stays with the icon.
         div()
             .flex_none()
             .text_base()

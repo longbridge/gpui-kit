@@ -50,22 +50,16 @@ export default class FluentContracts extends View {
         .content(new EmptyContent().gap(8).child(div().child('Custom content')))
         .child('Additional content'),
       new InputGroup('typed-search').w(320).size('medium').invalid(false)
-        .focused_style(style => style.border_color('#2563eb'))
-        .invalid_style(style => style.border_color('#dc2626'))
-        .disabled_style(style => style.opacity(0.7))
         .input(new InputGroupInput(this.query).aria_label('Search').value('')
-          .content_type('url').readonly(false)
-          .editor_style(style => style.px(12).text_base())
+          .content_type('url').readonly(false).px(12).text_base()
           .on_change((_value, _cx) => {}))
         .addon(new InputGroupAddon('search-actions').align('inline-end')
           .child(new InputGroupText().child('Results'))
           .child(new InputGroupButton('clear').label('Clear').icon('icons/x.svg').size('xsmall')
-            .label_style(style => style.font_semibold())
-            .icon_style(style => { style.size_4().when(true, s => s.opacity(0.8)); })
             .on_click((_event, _cx) => {}))),
       new InputGroup('typed-message').w(320)
         .input(new InputGroupTextarea(this.message).placeholder('Message').auto_grow(2, 6)
-          .editor_style(style => style.p(12).text_base()))
+          .p(12).text_base())
         .addon(new InputGroupAddon('message-actions').align('block-end')
           .child(new InputGroupButton('send').variant('primary').label('Send'))),
     ]);

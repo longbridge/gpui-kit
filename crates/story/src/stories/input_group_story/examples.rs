@@ -219,11 +219,9 @@ impl InputGroupStory {
                                 .align(Align::InlineEnd)
                                 .child(
                                     InputGroupButton::new(format!("tooltip-button-{id}"))
-                                        .with_size(ButtonSize::IconXSmall)
                                         .icon(IconName::Info)
-                                        .with_button(move |button| {
-                                            button.accessibility_label(label).tooltip(help)
-                                        }),
+                                        .accessibility_label(label)
+                                        .tooltip(help),
                                 ),
                         )
                     }),
@@ -261,7 +259,7 @@ impl InputGroupStory {
                         }))))
                 .child(self.extra_input("dropdown-search", "Scoped search")
                     .addon(InputGroupAddon::new("scope-menu-addon").align(Align::InlineEnd)
-                        .child(compact_trigger("scope-menu", scope).icon(IconName::ChevronDown)
+                        .child(compact_trigger("scope-menu", scope).dropdown_caret(true)
                             .dropdown_menu(move |menu, _, _| {
                                 ["Documentation", "Blog posts", "Changelog"].into_iter().fold(menu, |menu, label| {
                                     let view = scope_view.clone();
@@ -272,7 +270,7 @@ impl InputGroupStory {
                             }))))
                 .child(self.extra_input("phone", "Phone number")
                     .addon(InputGroupAddon::new("country-menu-addon")
-                        .child(compact_trigger("country-menu", country).icon(IconName::ChevronDown)
+                        .child(compact_trigger("country-menu", country).dropdown_caret(true)
                             .dropdown_menu(move |menu, _, _| {
                                 ["+1", "+44", "+46"].into_iter().fold(menu, |menu, label| {
                                     let view = phone_view.clone();
@@ -290,8 +288,7 @@ impl InputGroupStory {
                 .addon(InputGroupAddon::new("address-details-addon")
                     .child(Popover::new("address-details")
                         .trigger(InputGroupButton::new("address-details-trigger")
-                            .with_size(ButtonSize::IconXSmall)
-                            .icon(IconName::Info).aria_label("Address details").tooltip("Address details"))
+                            .icon(IconName::Info).accessibility_label("Address details").tooltip("Address details"))
                         .w(rems(18.)).gap_2().text_sm()
                         .child(div().font_semibold().child("Address details"))
                         .child(format!("https://{address}"))
@@ -316,12 +313,9 @@ impl InputGroupStory {
                             .child(
                                 InputGroupButton::new("label-email-help")
                                     .ml_auto()
-                                    .with_size(ButtonSize::IconXSmall)
                                     .icon(IconName::Info)
-                                    .with_button(|button| {
-                                        button.accessibility_label("Notification email help")
-                            .tooltip("We'll use this address for workspace notifications.")
-                                    }),
+                                    .accessibility_label("Notification email help")
+                                    .tooltip("We'll use this address for workspace notifications."),
                             ),
                     ),
                 ),
@@ -340,7 +334,7 @@ impl InputGroupStory {
                             .align(Align::BlockEnd)
                             .child(
                                 InputGroupButton::new("project-clear")
-                                    .with_size(ButtonSize::Small)
+                                    .small()
                                     .label("Clear")
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.example_inputs["button-actions"]
@@ -351,7 +345,7 @@ impl InputGroupStory {
                             )
                             .child(
                                 InputGroupButton::new("project-reset")
-                                    .with_size(ButtonSize::Small)
+                                    .small()
                                     .secondary()
                                     .label("Reset")
                                     .on_click(cx.listener(|this, _, window, cx| {
@@ -364,13 +358,10 @@ impl InputGroupStory {
                             .child(
                                 InputGroupButton::new("project-copy")
                                     .ml_auto()
-                                    .with_size(ButtonSize::IconSmall)
+                                    .small()
                                     .icon(IconName::Copy)
-                                    .with_button(|button| {
-                                        button
-                                            .accessibility_label("Copy project name")
-                                            .tooltip("Copy project name")
-                                    })
+                                    .accessibility_label("Copy project name")
+                                    .tooltip("Copy project name")
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         cx.write_to_clipboard(ClipboardItem::new_string(
                                             this.example_inputs["button-actions"]
@@ -495,7 +486,7 @@ impl InputGroupStory {
                                 .child(
                                     InputGroupButton::new("comment-cancel")
                                         .ml_auto()
-                                        .with_size(ButtonSize::Small)
+                                        .small()
                                         .label("Cancel")
                                         .disabled(value.is_empty())
                                         .on_click(cx.listener(|this, _, window, cx| {
@@ -504,7 +495,7 @@ impl InputGroupStory {
                                 )
                                 .child(
                                     InputGroupButton::new("comment-post")
-                                        .with_size(ButtonSize::Small)
+                                        .small()
                                         .primary()
                                         .label("Post")
                                         .disabled(value.trim().is_empty())
@@ -533,26 +524,47 @@ impl InputGroupStory {
 
     pub(super) fn render_custom_textarea(&self, cx: &Context<Self>) -> impl IntoElement {
         let state = &self.example_textareas["custom"];
-        section("Auto-growing textarea").description("Editor padding and typography, the focused frame, and the submit label and icon each have their own style overrides.")
-            .child(column()
-                .child(InputGroup::new("custom")
-                    .focused_style(|style| style.border_color(cx.theme().primary))
-                    .input(InputGroupTextarea::new(state).aria_label("Auto-growing draft")
-                        .editor_style(|style| style.p_3().text_base().font_family(cx.theme().mono_font_family.clone())))
-                    .addon(InputGroupAddon::new("custom-footer").align(Align::BlockEnd)
-                        .child(InputGroupText::new().child("Plain text"))
-                        .child(InputGroupButton::new("custom-submit").ml_auto().primary().label("Submit")
-                            .icon(IconName::ArrowUp)
-                            .label_style(|style| style.font_semibold())
-                            .icon_style(|style| style.size_4())
-                            .disabled(state.read(cx).value().trim().is_empty())
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                let state = &this.example_textareas["custom"];
-                                this.submitted_custom = Some(state.read(cx).value());
-                                state.update(cx, |state, cx| state.set_value("", window, cx));
-                                cx.notify();
-                            })))))
-                .when_some(self.submitted_custom.clone(), |this, value| this.child(div().text_sm().child(format!("Submitted: {value}")))))
+        section("Auto-growing textarea")
+            .description(
+                "The textarea keeps its own typography; the footer holds a primary submit action.",
+            )
+            .child(
+                column()
+                    .child(
+                        InputGroup::new("custom")
+                            .input(
+                                InputGroupTextarea::new(state)
+                                    .aria_label("Auto-growing draft")
+                                    .text_base()
+                                    .font_family(cx.theme().mono_font_family.clone()),
+                            )
+                            .addon(
+                                InputGroupAddon::new("custom-footer")
+                                    .align(Align::BlockEnd)
+                                    .child(InputGroupText::new().child("Plain text"))
+                                    .child(
+                                        InputGroupButton::new("custom-submit")
+                                            .ml_auto()
+                                            .primary()
+                                            .label("Submit")
+                                            .icon(IconName::ArrowUp)
+                                            .disabled(state.read(cx).value().trim().is_empty())
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                let state = &this.example_textareas["custom"];
+                                                this.submitted_custom =
+                                                    Some(state.read(cx).value());
+                                                state.update(cx, |state, cx| {
+                                                    state.set_value("", window, cx)
+                                                });
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
+                    )
+                    .when_some(self.submitted_custom.clone(), |this, value| {
+                        this.child(div().text_sm().child(format!("Submitted: {value}")))
+                    }),
+            )
     }
 
     pub(super) fn render_profile(&self, cx: &Context<Self>) -> impl IntoElement {

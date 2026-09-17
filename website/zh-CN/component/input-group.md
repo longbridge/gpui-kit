@@ -96,11 +96,15 @@ cx.notify();
 | 部件 | 用途 |
 | --- | --- |
 | `InputGroup` | 将一个输入控件与多个附加区域组合使用 |
-| `InputGroupInput` | 使用 `InputState` 添加单行输入框 |
-| `InputGroupTextarea` | 使用 `TextareaState` 添加多行文本输入 |
+| `InputGroupInput` | 放入组合中的 [Input](./input.md)，使用 `InputState` |
+| `InputGroupTextarea` | 放入组合中的 [Textarea](./textarea.md)，使用 `TextareaState` |
 | `InputGroupAddon` | 放置文本、图标、按钮或自定义内容 |
-| `InputGroupButton` | 添加紧凑的操作按钮 |
+| `InputGroupButton` | 带有紧凑组合样式的 [Button](./button.md) |
 | `InputGroupText` | 显示辅助文字、前后缀或计数 |
+
+`InputGroupInput` 和 `InputGroupTextarea` 就是普通的 `Input` 和 `Textarea`，只是以组合中的名字出现，
+所以这两个控件的全部 builder——`aria_label`、`content_type`、`on_paste`、`cleanable`、`mask_toggle`
+以及 `Styled` 方法——在组合里都可以使用。组合会去掉控件自身的边框、背景和焦点环，改为绘制在整个外框上。
 
 用 `.input(...)` 设置输入控件，用 `.addon(...)` 添加附加区域，
 在附加区域中通过 `.child(...)` 或 `.children(...)` 放置内容。
@@ -133,34 +137,29 @@ InputGroup::new("website")
 ## 按钮、图标与菜单
 
 用 `.label(...)` 设置按钮文字，用 `.icon(...)` 设置图标。
-纯图标按钮需要提供 `.aria_label(...)`，也可以通过 `.tooltip(...)` 添加提示。
+纯图标按钮需要提供 `.accessibility_label(...)`，也可以通过 `.tooltip(...)` 添加提示。
 
 ```rust
-use gpui_kit::component::input_group::InputGroupButtonSize;
-
 InputGroupButton::new("clear-icon")
-    .with_size(InputGroupButtonSize::IconXSmall)
     .icon(IconName::X)
-    .aria_label("清空搜索")
+    .accessibility_label("清空搜索")
     .tooltip("清空搜索")
     .on_click(cx.listener(Self::clear))
 ```
 
-| `InputGroupButtonSize` | 用途 |
-| --- | --- |
-| `XSmall`（默认） | 紧凑文本按钮 |
-| `Small` | 较大文本按钮 |
-| `IconXSmall` | 紧凑方形图标按钮 |
-| `IconSmall` | 较大方形图标按钮 |
+按钮和其它控件一样通过 `Sizable` 设置尺寸：`.xsmall()` 是默认的紧凑尺寸，`.small()` 稍大；
+只有图标的按钮在这两个尺寸下都是正方形。`.medium()` 和 `.large()` 保留标准按钮尺寸，
+适合放在 block 附加区域里的主要操作。
 
 按钮默认使用 ghost 样式。导入 `button::ButtonVariants` 后，可以使用
 `.primary()`、`.secondary()` 或 `.danger()`。
 用 `.outline()` 添加描边，`.disabled(true)` 禁用操作，
 `.loading(true)` 显示进度并防止重复点击。点击按钮后，焦点不会被自动移回输入框。
 
-操作菜单可以通过 `.dropdown_menu(...)` 配置，具体用法见 [Menu](./menu.md)。
+操作菜单可以通过 `.dropdown_menu(...)` 配置，具体用法见 [Menu](./menu.md)；
+`.dropdown_caret(true)` 会在文字右侧绘制下拉箭头。
 上下文帮助可以将 `InputGroupButton` 传给 [Popover](./popover.md) 的 `.trigger(...)`，
-再把 Popover 放入附加区域。其他 [Button](./button.md) 选项可通过 `.with_button(...)` 配置。
+再把 Popover 放入附加区域。
 
 ## 带字数统计和提交操作的 Textarea
 
@@ -261,24 +260,21 @@ impl Render for MessageComposer {
 通过 `InputState::masked` 配置密码遮罩。两个输入部件都支持用 `.context_menu(...)`
 自定义右键菜单。
 
+在触屏设备上，长按文本可以选择单词，拖动选择手柄可以调整范围，
+编辑菜单提供剪切、复制、粘贴和全选操作。
+
+在 Rust 中，两个输入部件还支持 `.on_paste(...)`，可在插入文本前处理剪贴板中的图片和文件。
+返回 `true` 表示已处理此次粘贴，返回 `false` 则继续默认的文本插入。
+输入控件处于禁用或只读状态时，不会调用该回调。
+附件处理示例及 Web 端限制见 [粘贴回调](./input.md#粘贴钩子)。
+
 ## 尺寸与样式
 
 组合的默认尺寸为 Medium。导入 `Sizable` 后，可以使用 `.xsmall()`、`.small()`、
-`.large()` 或 `.with_size(Size::Medium)`。
-颜色和圆角遵循当前 [Theme](./theme.md)，宽度、间距等外观可通过 `Styled` 方法调整。
+`.large()` 或 `.with_size(Size::Medium)`；尺寸决定外框高度、文字大小，以及附加区域与控件共用的内边距。
+颜色、圆角、焦点环和错误外环遵循当前 [Theme](./theme.md)，宽度、间距等外观可通过 `Styled` 方法调整。
 
-需要修改特定部件或状态时，使用以下方法：
-
-| 组件 | 方法 | 作用位置 |
-| --- | --- | --- |
-| `InputGroupInput`、`InputGroupTextarea` | `editor_style` | 编辑区域的内边距、排版、背景和对齐 |
-| `InputGroupButton` | `label_style` | `.label(...)` 设置的文字 |
-| `InputGroupButton` | `icon_style` | 图标及其加载状态 |
-| `InputGroup` | `focused_style` | 输入控件获得焦点且校验有效时的外框 |
-| `InputGroup` | `invalid_style` | 校验无效时的外框，禁用时也适用 |
-| `InputGroup` | `disabled_style` | 禁用时的外框 |
-
-例如，修改 `SearchField` 中输入框和清空按钮的样式：
+控件本身的 `Styled` 方法作用于它编辑的文字，附加区域、按钮和文字部件也各自用同样的方式设置样式：
 
 ```rust
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _};
@@ -286,27 +282,18 @@ use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _};
 InputGroup::new("styled-search")
     .small()
     .max_w(rems(24.))
-    .focused_style(|style| style.border_color(cx.theme().primary))
-    .invalid_style(|style| style.bg(cx.theme().danger.opacity(0.05)))
-    .disabled_style(|style| style.opacity(0.7))
     .input(InputGroupInput::new(&self.query)
         .aria_label("搜索")
-        .editor_style(|style| style.px_3().text_base()))
+        .px_3()
+        .text_base())
     .addon(InputGroupAddon::new("styled-actions")
         .align(InputGroupAddonAlignment::InlineEnd)
         .child(InputGroupButton::new("styled-clear").label("清空").icon(IconName::X)
-            .label_style(|style| style.font_semibold())
-            .icon_style(|style| style.size_4())
+            .font_semibold()
             .on_click(cx.listener(Self::clear))))
 ```
 
-多次调用样式方法会合并设置，同一属性以后一次设置为准。状态样式覆盖普通外框样式，
-错误边框和外环优先于焦点与禁用样式；修改禁用样式不会启用交互。
-状态样式中的 `border_color` 也会改变外环颜色。
-导入 `FocusableExt` 后，可以用 `.focus_ring(false)` 隐藏默认外环。
-
-`editor_style` 可以修改可编辑文字的样式，占位提示、光标和选区颜色遵循 Theme。
-百分比内边距以编辑区域宽度为基准。附加区域和辅助文字可直接通过各自的 `Styled` 方法调整。
+占位提示、光标和选区颜色遵循 Theme。导入 `FocusableExt` 后，可以用 `.focus_ring(false)` 隐藏默认外环。
 
 ## JavaScript
 
@@ -346,21 +333,13 @@ export default class Search extends View {
 `InputGroupInput` 还支持 `.masked(bool)` 和 `.content_type(...)`，
 后者可使用 `email_address`、`url`、`new_password` 等值。
 
-组合尺寸通过 `.size("small")` 设置，可用值为 `xsmall`、`small`、`medium` 和 `large`。
-按钮尺寸为 `xsmall`、`small`、`icon-xsmall` 和 `icon-small`。
-按钮图标使用资源路径，例如 `.icon("icons/search.svg")`。
-
-上述六个样式方法也可在 JavaScript 中使用：
+组合和按钮的尺寸都通过 `.size("small")` 设置，可用值为 `xsmall`、`small`、`medium` 和 `large`。
+按钮图标使用资源路径，例如 `.icon("icons/search.svg")`。样式方法和 Rust 一样直接作用于各个部件：
 
 ```javascript
-new InputGroupInput(this.input)
-  .editor_style(style => style.px(12).text_base());
+new InputGroupInput(this.input).px(12).text_base();
 
-new InputGroupButton("clear").label("清空").icon("icons/x.svg")
-  .label_style(style => style.font_semibold())
-  .icon_style(style => style.size_4());
+new InputGroupButton("clear").label("清空").icon("icons/x.svg").font_semibold();
 ```
 
-样式回调可以调用样式方法、`when` 和 `map`，可以返回传入的样式对象，也可以不返回值。
-子元素和事件回调应设置在组件上。
 执行 `gpui-component-shell types <应用目录>` 可生成编辑器补全声明。

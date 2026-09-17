@@ -6,7 +6,7 @@ use gpui_kit::component::{
     input::{InputContentType, InputEvent, InputState, TextareaState},
     input_group::{
         InputGroup, InputGroupAddon, InputGroupAddonAlignment as Align, InputGroupButton,
-        InputGroupButtonSize as ButtonSize, InputGroupInput, InputGroupText, InputGroupTextarea,
+        InputGroupInput, InputGroupText, InputGroupTextarea,
     },
     kbd::Kbd,
     spinner::Spinner,
@@ -249,8 +249,8 @@ impl Render for InputGroupStory {
                         .addon(InputGroupAddon::new("url-scheme").child(InputGroupText::new().child("https://")))
                         .addon(InputGroupAddon::new("url-action").align(Align::InlineEnd)
                             .child(InputGroupButton::new("favorite-url")
-                                .with_size(ButtonSize::IconXSmall).icon(IconName::Star)
-                                .with_button(|button| button.accessibility_label("Favorite website").tooltip("Favorite website"))
+                                .icon(IconName::Star)
+                                .accessibility_label("Favorite website").tooltip("Favorite website")
                                 .when(self.starred, |button| button.text_color(cx.theme().primary))
                                 .on_click(cx.listener(|this, _, _, cx| { this.starred = !this.starred; cx.notify(); })))))
                     .child(InputGroup::new("input-group-amount")
@@ -269,9 +269,9 @@ impl Render for InputGroupStory {
                     .child(InputGroup::new("input-group-copy").readonly(true)
                         .input(InputGroupInput::new(&self.readonly).aria_label("Documentation URL"))
                         .addon(InputGroupAddon::new("copy-actions").align(Align::InlineEnd)
-                            .child(InputGroupButton::new("copy-url").with_size(ButtonSize::IconXSmall)
+                            .child(InputGroupButton::new("copy-url")
                                 .icon(if self.copied { IconName::Check } else { IconName::Copy })
-                                .with_button(|button| button.accessibility_label("Copy URL").tooltip("Copy URL"))
+                                .accessibility_label("Copy URL").tooltip("Copy URL")
                                 .on_click(cx.listener(|this, _, window, cx| this.copy_url(window, cx))))
                             .child(InputGroupButton::new("select-url").label("Select all")
                                 .on_click(cx.listener(|this, _, window, cx| {
@@ -280,9 +280,9 @@ impl Render for InputGroupStory {
                     .child(InputGroup::new("input-group-password")
                         .input(InputGroupInput::new(&self.password).aria_label("Password").content_type(InputContentType::Password))
                         .addon(InputGroupAddon::new("password-action").align(Align::InlineEnd)
-                            .child(InputGroupButton::new("toggle-password").with_size(ButtonSize::IconXSmall)
+                            .child(InputGroupButton::new("toggle-password")
                                 .icon(if self.password.read(cx).presentation().is_masked() { IconName::Eye } else { IconName::EyeOff })
-                                .with_button(|button| button.accessibility_label("Toggle password visibility").tooltip("Toggle password visibility"))
+                                .accessibility_label("Toggle password visibility").tooltip("Toggle password visibility")
                                 .on_click(cx.listener(|this, _, window, cx| {
                                     this.password.update(cx, |state, cx| { state.toggle_masked(window, cx); });
                                     cx.notify();
@@ -338,8 +338,8 @@ impl Render for InputGroupStory {
                         .addon(InputGroupAddon::new("notes-header").align(Align::BlockStart)
                             .border_b_1().border_color(cx.theme().border)
                             .child(InputGroupText::new().child(icon(IconName::File)).child("script.js"))
-                            .child(InputGroupButton::new("copy-notes").ml_auto().with_size(ButtonSize::IconXSmall)
-                                .icon(IconName::Copy).with_button(|button| button.accessibility_label("Copy script").tooltip("Copy script"))
+                            .child(InputGroupButton::new("copy-notes").ml_auto()
+                                .icon(IconName::Copy).accessibility_label("Copy script").tooltip("Copy script")
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(this.notes.read(cx).value().to_string()));
                                 }))))
@@ -361,8 +361,8 @@ impl Render for InputGroupStory {
                         .addon(InputGroupAddon::new("message-actions").align(Align::BlockEnd)
                             .child(InputGroupText::new().child(format!("{characters}/280")))
                             .child(InputGroupButton::new("attach-message").ml_auto()
-                                .with_size(ButtonSize::IconXSmall).icon(IconName::Plus)
-                                .with_button(|button| button.accessibility_label("Toggle sample attachment").tooltip("Toggle sample attachment"))
+                                .icon(IconName::Plus)
+                                .accessibility_label("Toggle sample attachment").tooltip("Toggle sample attachment")
                                 .on_click(cx.listener(|this, _, _, cx| { this.attached = !this.attached; cx.notify(); })))
                             .child(InputGroupButton::new("send-message").primary().label("Send")
                                 .disabled(message.trim().is_empty() || characters > 280)

@@ -97,11 +97,18 @@ refresh after a programmatic update.
 | Part | Use |
 | --- | --- |
 | `InputGroup` | Combine one input with any number of addons |
-| `InputGroupInput` | Add a single-line input using `InputState` |
-| `InputGroupTextarea` | Add multiline text using `TextareaState` |
+| `InputGroupInput` | An [Input](./input.md) placed in the group, using `InputState` |
+| `InputGroupTextarea` | A [Textarea](./textarea.md) placed in the group, using `TextareaState` |
 | `InputGroupAddon` | Position text, icons, buttons, or custom content |
-| `InputGroupButton` | Add a compact action button |
+| `InputGroupButton` | A [Button](./button.md) with compact input-group presentation |
 | `InputGroupText` | Display helper text, a prefix, suffix, or counter |
+
+`InputGroupInput` and `InputGroupTextarea` are the ordinary `Input` and
+`Textarea` types under the names the group uses for them, so every builder
+those controls have — `aria_label`, `content_type`, `on_paste`, `cleanable`,
+`mask_toggle`, `Styled` methods — works inside a group. The group removes the
+control's own border, background, and focus ring and draws them around the
+whole frame instead.
 
 Pass the input to `.input(...)` and each addon to `.addon(...)`. Use `.child(...)`
 or `.children(...)` inside an addon. A later `.input(...)` replaces the earlier
@@ -135,25 +142,21 @@ InputGroup::new("website")
 ## Buttons, icons, and menus
 
 Use `.label(...)` for a text button or `.icon(...)` for an icon button. Give
-icon-only buttons an `.aria_label(...)`; `.tooltip(...)` adds a visible hint.
+icon-only buttons an `.accessibility_label(...)`; `.tooltip(...)` adds a
+visible hint.
 
 ```rust
-use gpui_kit::component::input_group::InputGroupButtonSize;
-
 InputGroupButton::new("clear-icon")
-    .with_size(InputGroupButtonSize::IconXSmall)
     .icon(IconName::X)
-    .aria_label("Clear search")
+    .accessibility_label("Clear search")
     .tooltip("Clear search")
     .on_click(cx.listener(Self::clear))
 ```
 
-| `InputGroupButtonSize` | Use |
-| --- | --- |
-| `XSmall` (default) | Compact text button |
-| `Small` | Larger text button |
-| `IconXSmall` | Compact square icon button |
-| `IconSmall` | Larger square icon button |
+Buttons size through `Sizable` like every other control. `.xsmall()` is the
+default compact size and `.small()` the larger one; a button with only an icon
+is square at either size. `.medium()` and `.large()` keep the standard button
+sizes for a prominent action in a block addon.
 
 Buttons default to ghost styling. Import `button::ButtonVariants` to use
 `.primary()`, `.secondary()`, or `.danger()`. Use `.outline()` for an outline,
@@ -161,10 +164,10 @@ Buttons default to ghost styling. Import `button::ButtonVariants` to use
 and prevent repeated clicks. Clicking a button runs its action without moving
 focus back to the input afterwards.
 
-For an action menu, use `.dropdown_menu(...)` with the [menu API](./menu.md).
-For contextual help, pass an `InputGroupButton` to [Popover](./popover.md)'s
-`.trigger(...)`, then add the Popover to an addon. Use `.with_button(...)` to
-configure other [Button](./button.md) options.
+For an action menu, use `.dropdown_menu(...)` with the [menu API](./menu.md);
+`.dropdown_caret(true)` draws the caret after the label. For contextual help,
+pass an `InputGroupButton` to [Popover](./popover.md)'s `.trigger(...)`, then
+add the Popover to an addon.
 
 ## Textarea with a counter and submit action
 
@@ -266,24 +269,25 @@ Use `.content_type(...)` on `InputGroupInput` for hints such as a URL or email
 address. Password masking is configured with `InputState::masked`. Both input
 parts support `.context_menu(...)` for a custom right-click menu.
 
+On touch devices, long-press the text to select a word, drag the selection handles,
+and use the edit menu to cut, copy, paste, or select all.
+
+In Rust, both input parts also support `.on_paste(...)` to handle clipboard images
+and files before text is inserted. Return `true` to consume the paste, or `false`
+to allow the default text insertion. The handler is not called while the input is
+disabled or read-only. See [Paste Hook](./input.md#paste-hook) for an attachment
+example and web limitations.
+
 ## Sizes and custom styles
 
 The default group size is Medium. Import `Sizable` to use `.xsmall()`, `.small()`,
-`.large()`, or `.with_size(Size::Medium)`. Colors and corners follow your [Theme](./theme.md).
-Use `Styled` methods to set the group's width, spacing, and other appearance.
+`.large()`, or `.with_size(Size::Medium)`; the size sets the frame height, the
+text size, and the insets the addons share with the control. Colors, corners,
+the focus ring, and the invalid ring follow your [Theme](./theme.md). Use
+`Styled` methods to set the group's width, spacing, and other appearance.
 
-Use these methods to customize a specific part or state:
-
-| Component | Method | What it styles |
-| --- | --- | --- |
-| `InputGroupInput`, `InputGroupTextarea` | `editor_style` | Text area padding, typography, background, and alignment |
-| `InputGroupButton` | `label_style` | The text supplied by `.label(...)` |
-| `InputGroupButton` | `icon_style` | The icon, including its loading state |
-| `InputGroup` | `focused_style` | The frame while the input is focused and valid |
-| `InputGroup` | `invalid_style` | The frame when invalid, including while disabled |
-| `InputGroup` | `disabled_style` | The disabled frame |
-
-For example, customize the input and its clear button in `SearchField`:
+The control keeps its own `Styled` methods for the text it edits, and each
+addon, button, and text part styles itself the same way:
 
 ```rust
 use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _};
@@ -291,29 +295,19 @@ use gpui_kit::component::{ActiveTheme as _, Sizable as _, StyledExt as _};
 InputGroup::new("styled-search")
     .small()
     .max_w(rems(24.))
-    .focused_style(|style| style.border_color(cx.theme().primary))
-    .invalid_style(|style| style.bg(cx.theme().danger.opacity(0.05)))
-    .disabled_style(|style| style.opacity(0.7))
     .input(InputGroupInput::new(&self.query)
         .aria_label("Search")
-        .editor_style(|style| style.px_3().text_base()))
+        .px_3()
+        .text_base())
     .addon(InputGroupAddon::new("styled-actions")
         .align(InputGroupAddonAlignment::InlineEnd)
         .child(InputGroupButton::new("styled-clear").label("Clear").icon(IconName::X)
-            .label_style(|style| style.font_semibold())
-            .icon_style(|style| style.size_4())
+            .font_semibold()
             .on_click(cx.listener(Self::clear))))
 ```
 
-Repeated style calls combine; the last value for a property wins. State styles
-override the ordinary frame style. Invalid border and ring styling takes priority
-over focus and disabled styling; customizing a disabled style keeps interaction
-disabled. A state's `border_color` also changes its ring color. Import
+Placeholder, caret, and selection colors follow the Theme. Import
 `FocusableExt` and use `.focus_ring(false)` to hide the default ring.
-
-`editor_style` changes editable text, but placeholder, caret, and selection
-colors follow the Theme. Percentage padding is relative to the editing area's
-width. Style an addon or helper text directly with its `Styled` methods.
 
 ## JavaScript
 
@@ -354,21 +348,15 @@ own value, and use `on_change(value, cx)` when you need to react to edits.
 `InputGroupInput` also provides `.masked(bool)` and `.content_type(...)`, with
 values such as `email_address`, `url`, and `new_password`.
 
-Set group size with `.size("small")`; available values are `xsmall`, `small`,
-`medium`, and `large`. Button sizes are `xsmall`, `small`, `icon-xsmall`, and
-`icon-small`. Button icons take an asset path, such as `.icon("icons/search.svg")`.
-
-The six style methods above are also available in JavaScript:
+Set group and button size with `.size("small")`; available values are
+`xsmall`, `small`, `medium`, and `large`. Button icons take an asset path, such
+as `.icon("icons/search.svg")`. Style methods apply to each part directly, as
+in Rust:
 
 ```javascript
-new InputGroupInput(this.input)
-  .editor_style(style => style.px(12).text_base());
+new InputGroupInput(this.input).px(12).text_base();
 
-new InputGroupButton("clear").label("Clear").icon("icons/x.svg")
-  .label_style(style => style.font_semibold())
-  .icon_style(style => style.size_4());
+new InputGroupButton("clear").label("Clear").icon("icons/x.svg").font_semibold();
 ```
 
-A style callback can call style methods, `when`, and `map`. Return the supplied
-style or return nothing; children and event handlers belong on the component.
 Run `gpui-component-shell types <application>` to generate editor completion.

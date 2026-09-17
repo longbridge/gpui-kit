@@ -5,8 +5,8 @@ use gpui_component::{
     button::{ButtonVariant, ButtonVariants as _},
     input::{InputState, TextareaState},
     input_group::{
-        InputGroup, InputGroupAddon, InputGroupAddonAlignment, InputGroupButton,
-        InputGroupButtonSize, InputGroupInput, InputGroupText, InputGroupTextarea,
+        InputGroup, InputGroupAddon, InputGroupAddonAlignment, InputGroupButton, InputGroupInput,
+        InputGroupText, InputGroupTextarea,
     },
 };
 use gpui_shell::{
@@ -40,7 +40,6 @@ enum Op {
     Addon(ComponentArgument),
     Align(InputGroupAddonAlignment),
     Size(Size),
-    ButtonSize(InputGroupButtonSize),
     Variant(ButtonVariant),
     Outline,
     Readonly(bool),
@@ -58,12 +57,6 @@ enum Op {
     ContentType(gpui_component::input::InputContentType),
     Layout(TextareaLayout),
     OnChange(ComponentArgument),
-    FocusedStyle(Box<gpui::StyleRefinement>),
-    InvalidStyle(Box<gpui::StyleRefinement>),
-    DisabledStyle(Box<gpui::StyleRefinement>),
-    EditorStyle(Box<gpui::StyleRefinement>),
-    LabelStyle(Box<gpui::StyleRefinement>),
-    IconStyle(Box<gpui::StyleRefinement>),
 }
 
 struct Materializer;
@@ -180,18 +173,6 @@ impl ComponentMaterializer for Materializer {
                         Op::FocusRing(value) => group.focus_ring(*value),
                         Op::AriaLabel(value) => group.aria_label(value.clone()),
                         Op::Size(value) => group.with_size(*value),
-                        Op::FocusedStyle(value) => group.focused_style(|mut style| {
-                            style.refine(value);
-                            style
-                        }),
-                        Op::InvalidStyle(value) => group.invalid_style(|mut style| {
-                            style.refine(value);
-                            style
-                        }),
-                        Op::DisabledStyle(value) => group.disabled_style(|mut style| {
-                            style.refine(value);
-                            style
-                        }),
                         _ => group,
                     };
                 }
@@ -213,28 +194,16 @@ impl ComponentMaterializer for Materializer {
                 let mut button = InputGroupButton::new(id).disabled(request.disabled());
                 for operation in &operations {
                     button = match operation {
-                        Op::ButtonSize(value) => button.with_size(*value),
+                        Op::Size(value) => button.with_size(*value),
                         Op::Variant(value) => button.with_variant(*value),
                         Op::Label(value) => button.label(value.clone()),
                         Op::Icon(value) => {
                             button.icon(gpui_component::Icon::default().path(value.clone()))
                         }
-                        Op::AriaLabel(value) => {
-                            button.with_button(|button| button.accessibility_label(value.clone()))
-                        }
-                        Op::Tooltip(value) => {
-                            button.with_button(|button| button.tooltip(value.clone()))
-                        }
-                        Op::Loading(value) => button.with_button(|button| button.loading(*value)),
-                        Op::Outline => button.with_button(|button| button.outline()),
-                        Op::LabelStyle(value) => button.label_style(|mut style| {
-                            style.refine(value);
-                            style
-                        }),
-                        Op::IconStyle(value) => button.icon_style(|mut style| {
-                            style.refine(value);
-                            style
-                        }),
+                        Op::AriaLabel(value) => button.accessibility_label(value.clone()),
+                        Op::Tooltip(value) => button.tooltip(value.clone()),
+                        Op::Loading(value) => button.loading(*value),
+                        Op::Outline => button.outline(),
                         _ => button,
                     };
                 }
@@ -258,10 +227,6 @@ impl ComponentMaterializer for Materializer {
                         Op::AccessibilityId(value) => input.accessibility_id(value.clone()),
                         Op::Readonly(value) => input.readonly(*value),
                         Op::ContentType(value) => input.content_type(*value),
-                        Op::EditorStyle(value) => input.editor_style(|mut style| {
-                            style.refine(value);
-                            style
-                        }),
                         _ => input,
                     };
                 }
@@ -288,10 +253,6 @@ impl ComponentMaterializer for Materializer {
                         Op::AriaLabel(value) => textarea.aria_label(value.clone()),
                         Op::AccessibilityId(value) => textarea.accessibility_id(value.clone()),
                         Op::Readonly(value) => textarea.readonly(*value),
-                        Op::EditorStyle(value) => textarea.editor_style(|mut style| {
-                            style.refine(value);
-                            style
-                        }),
                         _ => textarea,
                     };
                 }
@@ -400,29 +361,25 @@ fn callback_method(
     .with_documentation(documentation)
 }
 
-fn style_method(
-    name: &'static str,
-    documentation: &'static str,
-    make: fn(Box<gpui::StyleRefinement>) -> Op,
-) -> MethodDescriptor {
-    MethodDescriptor::new(
-        name,
-        vec![ArgumentDescriptor::new("build", ArgumentSchema::Style)],
-        move |arguments| match arguments {
-            [ComponentArgument::Style(style)] => Ok(ComponentPayload::new(make(style.clone()))),
-            _ => Err(format!("{name} expects one style declaration")),
+fn size_method(documentation: &'static str) -> MethodDescriptor {
+    enum_method(
+        "size",
+        &["xsmall", "small", "medium", "large"],
+        documentation,
+        |value| {
+            Some(Op::Size(match value {
+                "xsmall" => Size::XSmall,
+                "small" => Size::Small,
+                "medium" => Size::Medium,
+                "large" => Size::Large,
+                _ => return None,
+            }))
         },
     )
-    .with_documentation(documentation)
 }
 
 fn control_methods(name: &'static str) -> Vec<MethodDescriptor> {
     vec![
-        style_method(
-            "editor_style",
-            "Refines the editing viewport after its defaults, including text style and padding.",
-            Op::EditorStyle,
-        ),
         disabled_method(name),
         bool_method(
             name,
@@ -480,21 +437,6 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             id_constructor("InputGroup", Part::Root),
             "A shared themed frame. The common input(...) slot accepts InputGroupInput or InputGroupTextarea; addons accumulate in insertion order.",
             vec![
-                style_method(
-                    "focused_style",
-                    "Refines the focused frame; validation styling takes precedence.",
-                    Op::FocusedStyle,
-                ),
-                style_method(
-                    "invalid_style",
-                    "Refines the invalid frame after the default error border and ring.",
-                    Op::InvalidStyle,
-                ),
-                style_method(
-                    "disabled_style",
-                    "Refines the disabled frame without enabling interaction; validation styling follows.",
-                    Op::DisabledStyle,
-                ),
                 part_method(
                     "addon",
                     "Appends an InputGroupAddon at its logical side.",
@@ -525,20 +467,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
                     "Names the group independently of its text control.",
                     Op::AriaLabel,
                 ),
-                enum_method(
-                    "size",
-                    &["xsmall", "small", "medium", "large"],
-                    "Sets the group's semantic control size.",
-                    |value| {
-                        Some(Op::Size(match value {
-                            "xsmall" => Size::XSmall,
-                            "small" => Size::Small,
-                            "medium" => Size::Medium,
-                            "large" => Size::Large,
-                            _ => return None,
-                        }))
-                    },
-                ),
+                size_method("Sets the group's semantic control size."),
             ],
         ),
         (
@@ -563,18 +492,8 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
         (
             "InputGroupButton",
             id_constructor("InputGroupButton", Part::Button),
-            "A compact native Button with group disabled inheritance. Defaults to the ghost variant and xsmall size.",
+            "A native Button with compact input-group presentation and group disabled inheritance. Defaults to the ghost variant and xsmall size; a button with only an icon is square.",
             vec![
-                style_method(
-                    "label_style",
-                    "Refines the visible label independently of the icon and frame.",
-                    Op::LabelStyle,
-                ),
-                style_method(
-                    "icon_style",
-                    "Refines the icon after its compact size, including the loading icon.",
-                    Op::IconStyle,
-                ),
                 disabled_method("InputGroupButton"),
                 on_click_method("InputGroupButton"),
                 string_method(
@@ -611,19 +530,8 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
                     Ok(ComponentPayload::new(Op::Outline))
                 })
                 .with_documentation("Uses the native outlined button treatment."),
-                enum_method(
-                    "size",
-                    &["xsmall", "small", "icon-xsmall", "icon-small"],
-                    "Sets the compact text or square icon-button size.",
-                    |value| {
-                        Some(Op::ButtonSize(match value {
-                            "xsmall" => InputGroupButtonSize::XSmall,
-                            "small" => InputGroupButtonSize::Small,
-                            "icon-xsmall" => InputGroupButtonSize::IconXSmall,
-                            "icon-small" => InputGroupButtonSize::IconSmall,
-                            _ => return None,
-                        }))
-                    },
+                size_method(
+                    "Sets the button size; xsmall and small are the compact input-group sizes.",
                 ),
                 enum_method(
                     "variant",

@@ -1,4 +1,5 @@
 use super::*;
+use crate::input::{InputState, TextareaState};
 use gpui::{AppContext as _, TestAppContext};
 
 #[test]
@@ -37,7 +38,6 @@ fn validation_takes_precedence_over_focus_and_remains_visible_when_disabled() {
 fn test_input_group_builder(cx: &mut TestAppContext) {
     cx.update(crate::init);
     cx.add_window(|window, cx| {
-        let declarations = std::cell::Cell::new(0);
         let input = cx.new(|cx| InputState::new(window, cx));
         let textarea = cx.new(|cx| TextareaState::new(window, cx));
         let group = InputGroup::new("group")
@@ -45,21 +45,10 @@ fn test_input_group_builder(cx: &mut TestAppContext) {
             .input(
                 InputGroupTextarea::new(&textarea)
                     .aria_label("Message")
-                    .editor_style(|style| {
-                        declarations.set(declarations.get() + 1);
-                        style.p_3()
-                    })
-                    .editor_style(|style| {
-                        declarations.set(declarations.get() + 1);
-                        style.font_semibold()
-                    })
                     .readonly(true),
             )
             .disabled(true)
             .invalid(true)
-            .focused_style(|style| style.border_color(gpui::red()))
-            .invalid_style(|style| style.border_color(gpui::blue()))
-            .disabled_style(|style| style.opacity(0.7))
             .small()
             .addon(
                 InputGroupAddon::new("footer")
@@ -68,27 +57,9 @@ fn test_input_group_builder(cx: &mut TestAppContext) {
                     .child(InputGroupButton::new("send").primary().label("Send")),
             );
         assert_eq!(
-            group.control.as_ref().unwrap().input.state.entity_id(),
+            group.control.as_ref().unwrap().state().entity_id(),
             textarea.entity_id()
         );
-        assert!(group.control.as_ref().unwrap().input.readonly);
-        assert_eq!(declarations.get(), 2);
-        let editor = &group.control.as_ref().unwrap().editor_style;
-        assert_eq!(editor.padding.left, Some(rems(0.75).into()));
-        assert_eq!(editor.text.font_weight, Some(gpui::FontWeight::SEMIBOLD));
-        assert_eq!(group.focused_style.border_color, Some(gpui::red()));
-        assert_eq!(group.invalid_style.border_color, Some(gpui::blue()));
-        assert_eq!(group.disabled_style.opacity, Some(0.7));
-        let button = InputGroupButton::new("styled")
-            .label_style(|style| style.font_semibold())
-            .label_style(|style| style.text_color(gpui::red()))
-            .icon_style(|style| style.size_4());
-        assert_eq!(
-            button.label_style.text.font_weight,
-            Some(gpui::FontWeight::SEMIBOLD)
-        );
-        assert_eq!(button.label_style.text.color, Some(gpui::red()));
-        assert_eq!(button.icon_style.size.width, Some(rems(1.).into()));
         assert!(group.disabled && group.invalid);
         assert_eq!(group.size, Size::Small);
         assert_eq!(group.addons[0].children.len(), 2);
@@ -96,6 +67,13 @@ fn test_input_group_builder(cx: &mut TestAppContext) {
             group.addons[0].alignment,
             InputGroupAddonAlignment::BlockEnd
         );
+
+        let button = InputGroupButton::new("icon")
+            .icon(crate::IconName::Copy)
+            .small();
+        assert_eq!(button.size, Size::Small);
+        assert!(button.button.is_icon_only());
+        assert!(matches!(button.button.variant(), ButtonVariant::Ghost));
         gpui::Empty
     });
 }
@@ -105,10 +83,12 @@ mod interaction {
     use super::*;
     use crate::{Root, WindowExt as _};
     use gpui::{
-        Context, EntityInputHandler as _, FocusHandle, Modifiers, Refineable as _, Render,
-        VisualTestContext, point, px, relative,
+        ClipboardEntry, ClipboardItem, Context, Entity, EntityInputHandler as _, FocusHandle,
+        InputEvent as _, LongPressEvent, Modifiers, Render, TouchPhase, VisualTestContext, point,
+        px,
     };
     use gpui_base::test_support::{ElementSnapshot, find};
+    use std::rc::Rc;
 
     struct Probe {
         input: Entity<InputState>,
@@ -119,8 +99,9 @@ mod interaction {
         readonly: bool,
         invalid: bool,
         clicks: usize,
-        editor_style: StyleRefinement,
-        width: DefiniteLength,
+        control_style: StyleRefinement,
+        width: gpui::DefiniteLength,
+        paste_handler: Option<Rc<dyn Fn(&ClipboardItem, &mut Window, &mut App) -> bool>>,
     }
 
     impl Render for Probe {
@@ -136,19 +117,23 @@ mod interaction {
                             group.input(
                                 InputGroupTextarea::new(&self.textarea)
                                     .aria_label("Message")
-                                    .editor_style(|mut style| {
-                                        style.refine(&self.editor_style);
-                                        style
-                                    }),
+                                    .when_some(self.paste_handler.clone(), |input, handler| {
+                                        input.on_paste(move |item, window, cx| {
+                                            handler(item, window, cx)
+                                        })
+                                    })
+                                    .refine_style(&self.control_style),
                             )
                         } else {
                             group.input(
                                 InputGroupInput::new(&self.input)
                                     .aria_label("Address")
-                                    .editor_style(|mut style| {
-                                        style.refine(&self.editor_style);
-                                        style
-                                    }),
+                                    .when_some(self.paste_handler.clone(), |input, handler| {
+                                        input.on_paste(move |item, window, cx| {
+                                            handler(item, window, cx)
+                                        })
+                                    })
+                                    .refine_style(&self.control_style),
                             )
                         }
                     })
@@ -199,8 +184,9 @@ mod interaction {
                 readonly: false,
                 invalid: false,
                 clicks: 0,
-                editor_style: StyleRefinement::default(),
+                control_style: StyleRefinement::default(),
                 width: rems(20.).into(),
+                paste_handler: None,
             });
             *capture.borrow_mut() = Some(probe.clone());
             Root::new(probe, window, cx)
@@ -228,17 +214,160 @@ mod interaction {
     }
 
     #[gpui::test]
+    fn paste_hooks_receive_payloads_and_respect_editability(cx: &mut TestAppContext) {
+        for multiline in [false, true] {
+            let (probe, mut cx) = mount(cx, multiline);
+            let state: crate::input::state::TextInputState = probe.read_with(&cx, |probe, _| {
+                if multiline {
+                    probe.textarea.clone().into()
+                } else {
+                    probe.input.clone().into()
+                }
+            });
+            let received = Rc::new(std::cell::RefCell::new(Vec::new()));
+            probe.update(&mut cx, |probe, cx| {
+                let received = received.clone();
+                probe.paste_handler = Some(Rc::new(move |item, _, _| {
+                    received.borrow_mut().push(item.clone());
+                    item.entries().iter().any(|entry| {
+                        matches!(
+                            entry,
+                            ClipboardEntry::Image(_) | ClipboardEntry::ExternalPaths(_)
+                        )
+                    })
+                }));
+                cx.notify();
+            });
+            draw(&mut cx);
+            cx.update(|window, cx| state.focus(window, cx));
+            draw(&mut cx);
+            let payloads = [
+                ClipboardItem {
+                    entries: vec![
+                        ClipboardEntry::Image(gpui::Image::empty()),
+                        ClipboardEntry::String(gpui::ClipboardString::new("image caption".into())),
+                    ],
+                },
+                ClipboardItem {
+                    entries: vec![ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
+                        vec!["attachment.png".into()].into(),
+                    ))],
+                },
+                ClipboardItem::new_string("text".into()),
+            ];
+            for (ix, payload) in payloads.iter().enumerate() {
+                cx.update(|window, cx| {
+                    cx.write_to_clipboard(payload.clone());
+                    window.dispatch_action(Box::new(crate::input::Paste), cx);
+                });
+                draw(&mut cx);
+                assert_eq!(&*received.borrow(), &payloads[..=ix]);
+                assert_eq!(
+                    cx.update(|_, cx| state.text(cx).to_string()),
+                    if ix < 2 { "" } else { "text" }
+                );
+            }
+            for (disabled, readonly) in [(true, false), (false, true)] {
+                probe.update(&mut cx, |probe, cx| {
+                    probe.disabled = disabled;
+                    probe.readonly = readonly;
+                    cx.notify();
+                });
+                draw(&mut cx);
+                cx.update(|window, cx| window.dispatch_action(Box::new(crate::input::Paste), cx));
+                draw(&mut cx);
+                assert_eq!(received.borrow().len(), 3);
+                assert_eq!(cx.update(|_, cx| state.text(cx).to_string()), "text");
+            }
+            probe.update(&mut cx, |probe, cx| {
+                probe.readonly = false;
+                probe.paste_handler = None;
+                cx.notify();
+            });
+            draw(&mut cx);
+            cx.update(|window, cx| window.dispatch_action(Box::new(crate::input::Paste), cx));
+            draw(&mut cx);
+            assert_eq!(received.borrow().len(), 3);
+            assert_eq!(cx.update(|_, cx| state.text(cx).to_string()), "texttext");
+        }
+    }
+
+    #[gpui::test]
+    fn long_press_shows_edit_menu_and_copy_keeps_the_text(cx: &mut TestAppContext) {
+        for multiline in [false, true] {
+            let (probe, mut cx) = mount(cx, multiline);
+            cx.update(|window, cx| {
+                if multiline {
+                    let state = probe.read(cx).textarea.clone();
+                    state.update(cx, |state, cx| {
+                        state.set_value("quick select value", window, cx)
+                    });
+                } else {
+                    let state = probe.read(cx).input.clone();
+                    state.update(cx, |state, cx| {
+                        state.set_value("quick select value", window, cx)
+                    });
+                }
+            });
+            draw(&mut cx);
+            let bounds = probe
+                .read_with(&cx, |probe, cx| {
+                    if multiline {
+                        probe.textarea.read(cx).range_to_bounds(&(0..1))
+                    } else {
+                        probe.input.read(cx).range_to_bounds(&(0..1))
+                    }
+                })
+                .unwrap();
+            let position = bounds.center();
+            for phase in [TouchPhase::Started, TouchPhase::Ended] {
+                cx.update(|window, cx| {
+                    window.dispatch_event(
+                        LongPressEvent {
+                            phase,
+                            start_position: position,
+                            position,
+                        }
+                        .to_platform_input(),
+                        cx,
+                    );
+                });
+                draw(&mut cx);
+            }
+            for command in ["Cut", "Copy", "Paste", "Select All"] {
+                assert!(snapshot(&mut cx, command).visible());
+            }
+            click(&mut cx, "Copy");
+            assert_eq!(
+                cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())),
+                Some("quick".into())
+            );
+            assert!(cx.update(|window, _| find(window, &[], &"Copy".into()).is_none()));
+            assert_eq!(
+                probe.read_with(&cx, |probe, cx| {
+                    if multiline {
+                        probe.textarea.read(cx).value()
+                    } else {
+                        probe.input.read(cx).value()
+                    }
+                }),
+                "quick select value"
+            );
+        }
+    }
+
+    #[gpui::test]
     fn editor_overrides_preserve_caret_selection_and_ime_geometry(cx: &mut TestAppContext) {
         let (probe, mut cx) = mount(cx, false);
         let state = probe.read_with(&cx, |probe, _| probe.input.clone());
         click(&mut cx, "start");
         cx.simulate_input("Ada 中文");
         probe.update(&mut cx, |probe, cx| {
-            probe.editor_style = StyleRefinement::default().px(px(24.)).py_0().text_lg();
+            probe.control_style = StyleRefinement::default().px(px(24.)).py_0().text_lg();
             cx.notify();
         });
         draw(&mut cx);
-        let frame = snapshot(&mut cx, ("input-group-control", state.entity_id())).bounds();
+        let frame = snapshot(&mut cx, ("input", state.entity_id())).bounds();
         let text = state.read_with(&cx, |state, _| state.text_bounds().unwrap());
         assert!((text.left() - frame.left() - px(24.)).abs() <= px(1.));
         cx.simulate_click(
@@ -264,28 +393,9 @@ mod interaction {
     }
 
     #[gpui::test]
-    fn textarea_padding_reflows_with_resize_and_keeps_scrolling_native(cx: &mut TestAppContext) {
+    fn textarea_keeps_scrolling_native_between_block_addons(cx: &mut TestAppContext) {
         let (probe, mut cx) = mount(cx, true);
         let state = probe.read_with(&cx, |probe, _| probe.textarea.clone());
-        probe.update(&mut cx, |probe, cx| {
-            probe.editor_style = StyleRefinement::default().p(px(20.)).px(relative(0.1));
-            cx.notify();
-        });
-        draw(&mut cx);
-        draw(&mut cx);
-        let check_inset = |cx: &mut VisualTestContext| {
-            let frame = snapshot(cx, ("input-group-control", state.entity_id())).bounds();
-            let text = state.read_with(cx, |state, _| state.text_bounds().unwrap());
-            assert!((text.left() - frame.left() - frame.size.width * 0.1).abs() <= px(1.));
-        };
-        check_inset(&mut cx);
-        probe.update(&mut cx, |probe, cx| {
-            probe.width = px(440.).into();
-            cx.notify();
-        });
-        draw(&mut cx);
-        draw(&mut cx);
-        check_inset(&mut cx);
         click(&mut cx, "header");
         cx.simulate_input("One\nTwo\nThree\nFour\nFive\nSix\nSeven\nEight");
         draw(&mut cx);
@@ -319,7 +429,7 @@ mod interaction {
         cx.simulate_input("Ada 中文");
         draw(&mut cx);
         assert_eq!(state.read_with(&cx, |state, _| state.value()), "Ada 中文");
-        let control = snapshot(&mut cx, ("input-group-control", state.entity_id()));
+        let control = snapshot(&mut cx, ("input", state.entity_id()));
         assert_eq!(control.role(), Some(Role::TextInput));
         assert_eq!(control.label(), Some("Address"));
         assert_eq!(control.value(), Some("Ada 中文"));
@@ -412,7 +522,7 @@ mod interaction {
         click(&mut cx, "header");
         cx.simulate_input("One\nTwo\nThree\nFour\nFive");
         draw(&mut cx);
-        let control = snapshot(&mut cx, ("input-group-control", state.entity_id()));
+        let control = snapshot(&mut cx, ("input", state.entity_id()));
         let header = snapshot(&mut cx, "header").bounds();
         let footer = snapshot(&mut cx, "footer").bounds();
         assert_eq!(control.role(), Some(Role::MultilineTextInput));
@@ -433,7 +543,7 @@ mod interaction {
             window.set_rem_size(px(20.));
             window.draw(cx).clear(cx);
         });
-        let bounds = snapshot(&mut cx, ("input-group-control", state.entity_id())).bounds();
+        let bounds = snapshot(&mut cx, ("input", state.entity_id())).bounds();
         assert!(bounds.size.width > px(0.));
         assert!(bounds.bottom() <= snapshot(&mut cx, "footer").bounds().top());
     }

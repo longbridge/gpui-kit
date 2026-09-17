@@ -21,6 +21,7 @@ pub struct Textarea {
     readonly: bool,
     tab_index: isize,
     role: RoleOverride,
+    accessibility_id: Option<SharedString>,
     aria_label: Option<SharedString>,
 
     /// An optional context menu builder to allow a custom context menu.
@@ -43,6 +44,7 @@ impl Textarea {
             readonly: false,
             tab_index: 0,
             role: RoleOverride::default(),
+            accessibility_id: None,
             aria_label: None,
             context_menu_builder: None,
             paste_handler: None,
@@ -89,6 +91,12 @@ impl Textarea {
         self
     }
 
+    /// Set the developer-assigned accessibility identifier.
+    pub fn accessibility_id(mut self, id: impl Into<SharedString>) -> Self {
+        self.accessibility_id = Some(id.into());
+        self
+    }
+
     pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
         self.aria_label = Some(label.into());
         self
@@ -127,8 +135,10 @@ impl Styled for Textarea {
     }
 }
 
-impl RenderOnce for Textarea {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+impl Textarea {
+    /// The [`Input`] this textarea renders, for a compound control that frames
+    /// it.
+    pub(crate) fn into_input(self) -> Input {
         Input::from_state(self.state.clone())
             .appearance(self.appearance)
             .bordered(self.bordered)
@@ -137,6 +147,7 @@ impl RenderOnce for Textarea {
             .tab_index(self.tab_index)
             .role(self.role)
             .when_some(self.height, |this, height| this.h(height))
+            .when_some(self.accessibility_id, |this, id| this.accessibility_id(id))
             .when_some(self.aria_label, |this, label| this.aria_label(label))
             .when_some(self.context_menu_builder, |this, build| {
                 this.context_menu(move |menu, window, cx| build(menu, window, cx))
@@ -145,6 +156,12 @@ impl RenderOnce for Textarea {
                 this.on_paste(move |item, window, cx| handler(item, window, cx))
             })
             .refine_style(&self.style)
+    }
+}
+
+impl RenderOnce for Textarea {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        self.into_input()
     }
 }
 

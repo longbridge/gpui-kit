@@ -1,6 +1,5 @@
 mod clear_button;
 mod content_type;
-pub(crate) mod control;
 mod input;
 pub mod language_config;
 mod number_input;

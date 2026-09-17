@@ -205,8 +205,6 @@ pub struct Button {
     hover_group_held: bool,
     size: Size,
     content_style: StyleRefinement,
-    label_style: Option<Box<StyleRefinement>>,
-    icon_style: Option<Box<StyleRefinement>>,
     icon_size: Option<Size>,
     compact: bool,
     tooltip: Option<(
@@ -257,8 +255,6 @@ impl Button {
             border_edges: Edges::all(true),
             size: Size::Medium,
             content_style: StyleRefinement::default(),
-            label_style: None,
-            icon_style: None,
             icon_size: None,
             tooltip: None,
             tooltip_placement: None,
@@ -296,12 +292,6 @@ impl Button {
         self
     }
 
-    pub(crate) fn part_styles(mut self, label: StyleRefinement, icon: StyleRefinement) -> Self {
-        self.label_style = (label != StyleRefinement::default()).then(|| Box::new(label));
-        self.icon_style = (icon != StyleRefinement::default()).then(|| Box::new(icon));
-        self
-    }
-
     pub(super) fn button_size(&self) -> Size {
         self.size
     }
@@ -312,6 +302,11 @@ impl Button {
 
     pub(crate) fn is_outline(&self) -> bool {
         self.outline
+    }
+
+    /// Whether the button shows only its icon.
+    pub(crate) fn is_icon_only(&self) -> bool {
+        self.icon.is_some() && self.label.is_none() && self.children.is_empty()
     }
 
     pub fn role(mut self, role: impl Into<RoleOverride>) -> Self {
@@ -719,8 +714,7 @@ impl RenderOnce for Button {
                 this.child(
                     icon.loading_icon(self.loading_icon)
                         .loading(self.loading)
-                        .with_size(icon_size)
-                        .when_some(self.icon_style, |this, style| this.refine_icon_style(style)),
+                        .with_size(icon_size),
                 )
             })
             .when_some(self.label, |this, label| {
@@ -729,7 +723,6 @@ impl RenderOnce for Button {
                         .min_w_0()
                         .whitespace_nowrap()
                         .text_ellipsis()
-                        .when_some(self.label_style, |this, style| this.refine_style(&style))
                         .child(label),
                 )
             })

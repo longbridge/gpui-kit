@@ -358,7 +358,7 @@ function expandedInputGroupExamples(cx) {
         ["tooltip-email", "Email help", "Used for notifications about this workspace."],
       ].map(([id, label, help]) => input(id, label)
         .addon(addon(id, "inline-end").child(new InputGroupButton(`ig-extra-${id}-help`)
-          .size("icon-xsmall").aria_label(label).tooltip(help).child(icon("info")))))),
+          .aria_label(label).tooltip(help).child(icon("info")))))),
     },
     {
       label: "Dropdown menus",
@@ -400,7 +400,7 @@ function expandedInputGroupExamples(cx) {
           .addon(addon("label-username").child(new Label("@")))))
         .child(input("label-email", "Notification email")
           .addon(addon("label-email", "block-start").child(new Label("Email").text_color(colors.foreground))
-            .child(new InputGroupButton("ig-extra-label-email-help").ml_auto().size("icon-xsmall")
+            .child(new InputGroupButton("ig-extra-label-email-help").ml_auto()
               .aria_label("Notification email help").tooltip("We'll use this address for workspace notifications.")
               .child(icon("info"))))),
     },
@@ -457,20 +457,16 @@ function expandedInputGroupExamples(cx) {
     },
     {
       label: "Auto-growing textarea",
-      description: "Customize editor padding and typography, the focused frame, and the submit label and icon.",
+      description: "The textarea keeps its own typography; the footer holds a primary submit action.",
       element: column()
         .child(new InputGroup("ig-extra-custom")
-          .focused_style(style => style.border_color(colors.primary))
           .input(new InputGroupTextarea(retained(key("custom"), () => TextareaState()))
             .aria_label("Auto-growing draft").placeholder(spec("custom")?.[1] ?? "")
-            .auto_grow(1, 8).value(value("custom"))
-            .editor_style(style => style.p_3().text_base())
+            .auto_grow(1, 8).value(value("custom")).text_base()
             .on_change((value, cx) => update("custom", value, cx)))
           .addon(addon("custom", "block-end").child(text("Plain text"))
             .child(new InputGroupButton("ig-extra-custom-submit").ml_auto().variant("primary").label("Submit")
               .icon("icons/arrow-up.svg")
-              .label_style(style => style.font_semibold())
-              .icon_style(style => style.size_4())
               .disabled(value("custom").trim().length === 0).on_click((_event, cx) => {
                 setState("ig-extra-custom-submitted", value("custom"), cx);
                 update("custom", "", cx);
@@ -1158,7 +1154,7 @@ export function registeredExamples(surface, cx) {
               .on_change((value, cx) => setState("input-group-url-value", value, cx)))
             .addon(new InputGroupAddon("ig-scheme").child(new InputGroupText().child("https://")))
             .addon(new InputGroupAddon("ig-url-actions").align("inline-end")
-              .child(new InputGroupButton("ig-favorite").size("icon-xsmall")
+              .child(new InputGroupButton("ig-favorite")
                 .aria_label("Favorite website").tooltip("Favorite website")
                 .variant(state("input-group-starred", false) ? "secondary" : "ghost")
                 .icon("icons/star.svg")
