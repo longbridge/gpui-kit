@@ -212,8 +212,8 @@ where
         }
 
         // Draw area
-        let default_fill: Background = cx.theme().chart[1].opacity(0.4).into();
-        let default_stroke = cx.theme().chart[1];
+        let default_fill: Background = cx.theme().chart_2.opacity(0.4).into();
+        let default_stroke = cx.theme().chart_2;
         let areas = self.y.iter().enumerate().map(|(i, y_fn)| {
             let x = x.clone();
             let y = y.clone();
@@ -323,7 +323,7 @@ where
         let d = self.data.get(state.index)?;
         let title: SharedString = x_fn(d).into();
 
-        let default_color = cx.theme().chart[1];
+        let default_color = cx.theme().chart_2;
         let dot_stroke = cx.theme().background;
         let color = |i: usize| *self.strokes.get(i).unwrap_or(&default_color);
 

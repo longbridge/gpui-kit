@@ -129,9 +129,16 @@ pub struct ThemeColor {
     pub group_box_foreground: Hsla,
     /// Input caret color (Blinking cursor).
     pub caret: Hsla,
-    /// The chart palette, one color per series in order: `chart[0]` for the
-    /// first series, `chart[4]` for the fifth.
-    pub chart: [Hsla; 5],
+    /// Chart 1 color: the first entry of the theme file's `chart` palette.
+    pub chart_1: Hsla,
+    /// Chart 2 color: the second entry of the theme file's `chart` palette.
+    pub chart_2: Hsla,
+    /// Chart 3 color: the third entry of the theme file's `chart` palette.
+    pub chart_3: Hsla,
+    /// Chart 4 color: the fourth entry of the theme file's `chart` palette.
+    pub chart_4: Hsla,
+    /// Chart 5 color: the fifth entry of the theme file's `chart` palette.
+    pub chart_5: Hsla,
     /// Bullish color for candlestick charts (upward price movement).
     pub chart_bullish: Hsla,
     /// Bearish color for candlestick charts (downward price movement).
@@ -334,7 +341,7 @@ pub struct ThemeColor {
 }
 
 macro_rules! define_theme_tokens {
-    ($($field:ident),+ $(,)? ; $($array:ident: [$len:literal]),* $(,)?) => {
+    ($($field:ident),+ $(,)?) => {
         /// Legacy resolved tokens retained for compatibility with existing
         /// `gpui-component` themes and components.
         ///
@@ -346,14 +353,12 @@ macro_rules! define_theme_tokens {
         #[derive(Debug, Default, Clone, Copy, Serialize, Deserialize, JsonSchema)]
         pub struct ThemeTokens {
             $(pub $field: ThemeToken,)+
-            $(pub $array: [ThemeToken; $len],)*
         }
 
         impl From<ThemeColor> for ThemeTokens {
             fn from(colors: ThemeColor) -> Self {
                 Self {
                     $($field: colors.$field.into(),)+
-                    $($array: colors.$array.map(Into::into),)*
                 }
             }
         }
@@ -403,6 +408,11 @@ define_theme_tokens! {
     group_box,
     group_box_foreground,
     caret,
+    chart_1,
+    chart_2,
+    chart_3,
+    chart_4,
+    chart_5,
     chart_bullish,
     chart_bearish,
     danger,
@@ -499,8 +509,7 @@ define_theme_tokens! {
     magenta,
     magenta_light,
     cyan,
-    cyan_light;
-    chart: [5],
+    cyan_light,
 }
 
 impl ThemeColor {

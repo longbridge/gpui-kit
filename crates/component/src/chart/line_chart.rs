@@ -207,7 +207,7 @@ where
         }
 
         // Draw line
-        let stroke = self.stroke.unwrap_or(cx.theme().chart[1]);
+        let stroke = self.stroke.unwrap_or(cx.theme().chart_2);
         let x_fn = x_fn.clone();
         let y_fn = y_fn.clone();
         let mut line = Line::new()
@@ -292,7 +292,7 @@ where
         let d = self.data.get(state.index)?;
         let title: SharedString = x_fn(d).into();
         let value = y_fn(d).to_f64()?;
-        let stroke = self.stroke.unwrap_or(cx.theme().chart[1]);
+        let stroke = self.stroke.unwrap_or(cx.theme().chart_2);
         let name = self.name.clone().unwrap_or_default();
 
         // Where the hover has slid to this frame; the data point itself before the

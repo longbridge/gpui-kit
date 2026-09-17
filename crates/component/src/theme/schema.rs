@@ -362,8 +362,9 @@ pub struct ThemeConfigColors {
     /// Input caret color (Blinking cursor).
     #[serde(rename = "caret")]
     pub caret: Option<SharedString>,
-    /// The chart palette, one color per series in order. Up to five entries;
-    /// missing or unparsable ones fall back to a ramp of the base blue.
+    /// The chart palette, one color per series in order: the entries fill
+    /// `chart_1` to `chart_5`, and missing or unparsable ones fall back to a
+    /// ramp of the base blue.
     #[serde(rename = "chart")]
     pub chart: Option<Vec<SharedString>>,
     /// Bullish color for candlestick charts (upward price movement).
@@ -904,22 +905,25 @@ impl ThemeColor {
         );
         apply_color!(group_box_foreground, fallback = self.foreground);
         apply_color!(caret, fallback = self.primary);
-        let chart_fallback = [
-            self.blue.lighten(0.4),
-            self.blue.lighten(0.2),
-            self.blue,
-            self.blue.darken(0.2),
-            self.blue.darken(0.4),
-        ];
-        for (ix, fallback) in chart_fallback.into_iter().enumerate() {
-            self.chart[ix] = colors
-                .chart
-                .as_ref()
-                .and_then(|chart| chart.get(ix))
-                .and_then(|value| try_parse_color(value).ok())
-                .unwrap_or(fallback);
-            tokens.chart[ix] = self.chart[ix].into();
+        // The theme file lists the palette as one `chart` array; entry `ix`
+        // lands in `chart_{ix + 1}`, and a missing or unparsable one keeps the
+        // ramp of the base blue.
+        macro_rules! apply_chart_color {
+            ($field:ident, $ix:literal, fallback = $fallback:expr) => {
+                self.$field = colors
+                    .chart
+                    .as_ref()
+                    .and_then(|chart| chart.get($ix))
+                    .and_then(|value| try_parse_color(value).ok())
+                    .unwrap_or($fallback);
+                tokens.$field = self.$field.into();
+            };
         }
+        apply_chart_color!(chart_1, 0, fallback = self.blue.lighten(0.4));
+        apply_chart_color!(chart_2, 1, fallback = self.blue.lighten(0.2));
+        apply_chart_color!(chart_3, 2, fallback = self.blue);
+        apply_chart_color!(chart_4, 3, fallback = self.blue.darken(0.2));
+        apply_chart_color!(chart_5, 4, fallback = self.blue.darken(0.4));
         apply_color!(chart_bullish, fallback = self.green);
         apply_color!(chart_bearish, fallback = self.red);
         apply_background_color!(danger, fallback = self.red);
@@ -1205,12 +1209,12 @@ mod tests {
 
         // Listed entries are read in order; the unparsable one and the two
         // missing ones fall back to the ramp of the base blue.
-        assert_eq!(theme.chart[0], try_parse_color("#111111").unwrap());
-        assert_eq!(theme.chart[1], theme.blue.lighten(0.2));
-        assert_eq!(theme.chart[2], try_parse_color("#333333").unwrap());
-        assert_eq!(theme.chart[3], theme.blue.darken(0.2));
-        assert_eq!(theme.chart[4], theme.blue.darken(0.4));
-        assert_eq!(theme.tokens.chart[2].color, theme.chart[2]);
+        assert_eq!(theme.chart_1, try_parse_color("#111111").unwrap());
+        assert_eq!(theme.chart_2, theme.blue.lighten(0.2));
+        assert_eq!(theme.chart_3, try_parse_color("#333333").unwrap());
+        assert_eq!(theme.chart_4, theme.blue.darken(0.2));
+        assert_eq!(theme.chart_5, theme.blue.darken(0.4));
+        assert_eq!(theme.tokens.chart_3.color, theme.chart_3);
         assert_eq!(theme.chart_bullish, try_parse_color("#00ff00").unwrap());
         assert_eq!(theme.chart_bearish, try_parse_color("#ff0000").unwrap());
     }

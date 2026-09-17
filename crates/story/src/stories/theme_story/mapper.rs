@@ -34,19 +34,6 @@ pub struct ParsedKey {
 
 /// Parses a theme key (either snake_case or dot-notation) into a logical category and name.
 pub fn parse_theme_key(key: &str) -> ParsedKey {
-    // The chart palette is one `chart` array in the config; its entries arrive
-    // here as `chart.<index>`.
-    if let Some(index) = key
-        .strip_prefix("chart.")
-        .and_then(|index| index.parse::<usize>().ok())
-    {
-        return ParsedKey {
-            category: "Chart".to_string(),
-            name: format!("Series {}", index + 1),
-            canonical_key: "chart".to_string(),
-        };
-    }
-
     // 1. Check for dot-notation (e.g., "accent.background")
     if key.contains('.') {
         let parts: Vec<&str> = key.splitn(2, '.').collect();
@@ -149,7 +136,12 @@ pub fn parse_theme_key(key: &str) -> ParsedKey {
         "muted_foreground" => ("Muted", "Foreground", "muted.foreground"),
         "skeleton" => ("Skeleton", "Background", "skeleton.background"),
 
-        // Charts
+        // Charts: the palette is one `chart` array in the config.
+        "chart_1" => ("Chart", "Color 1", "chart"),
+        "chart_2" => ("Chart", "Color 2", "chart"),
+        "chart_3" => ("Chart", "Color 3", "chart"),
+        "chart_4" => ("Chart", "Color 4", "chart"),
+        "chart_5" => ("Chart", "Color 5", "chart"),
         "chart_bullish" => ("Chart", "Bullish", "chart.bullish"),
         "chart_bearish" => ("Chart", "Bearish", "chart.bearish"),
 

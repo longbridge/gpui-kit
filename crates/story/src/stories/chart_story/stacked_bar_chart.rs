@@ -87,10 +87,10 @@ impl Plot for StackedBarChart {
         // 4. Setup color scale
         let keys = self.series.iter().map(|s| s.key.clone()).collect();
         let colors = vec![
-            cx.theme().chart[3],
-            cx.theme().chart[2],
-            cx.theme().chart[1],
-            cx.theme().chart[0],
+            cx.theme().chart_4,
+            cx.theme().chart_3,
+            cx.theme().chart_2,
+            cx.theme().chart_1,
         ];
         let ordinal = ScaleOrdinal::new(keys, colors);
 
@@ -108,7 +108,7 @@ impl Plot for StackedBarChart {
             let y1 = y.clone();
 
             let key = &series.key;
-            let fill = ordinal.map(&key).unwrap_or(cx.theme().chart[3]);
+            let fill = ordinal.map(&key).unwrap_or(cx.theme().chart_4);
 
             Bar::new()
                 .data(&series.points)
@@ -189,10 +189,10 @@ impl Plot for StackedBarChart {
         let ordinal = ScaleOrdinal::new(
             self.series.iter().map(|s| s.key.clone()).collect(),
             vec![
-                cx.theme().chart[3],
-                cx.theme().chart[2],
-                cx.theme().chart[1],
-                cx.theme().chart[0],
+                cx.theme().chart_4,
+                cx.theme().chart_3,
+                cx.theme().chart_2,
+                cx.theme().chart_1,
             ],
         );
 
@@ -220,7 +220,7 @@ impl Plot for StackedBarChart {
 
         // One row per stacked series (its segment value at this band).
         for series in self.series.iter() {
-            let color = ordinal.map(&series.key).unwrap_or(cx.theme().chart[3]);
+            let color = ordinal.map(&series.key).unwrap_or(cx.theme().chart_4);
             let value = series
                 .points
                 .get(state.index)

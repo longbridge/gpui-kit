@@ -590,16 +590,7 @@ fn format_colors(
     });
 
     if let serde_json::Value::Object(map) = json_theme {
-        // A palette array (`chart`) lists one entry per color, keyed by index.
-        let entries = map.into_iter().flat_map(|(key, value)| match value {
-            serde_json::Value::Array(values) => values
-                .into_iter()
-                .enumerate()
-                .map(|(ix, value)| (format!("{key}.{ix}"), value))
-                .collect::<Vec<_>>(),
-            value => vec![(key, value)],
-        });
-        for (key, value) in entries {
+        for (key, value) in map {
             if let Ok(color) = serde_json::from_value::<Hsla>(value) {
                 let parsed = super::mapper::parse_theme_key(&key);
                 let category = parsed.category;

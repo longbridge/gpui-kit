@@ -598,7 +598,7 @@ where
         // Draw bars.
         let band_fn_cloned = band_fn.clone();
         let value_fn_cloned = value_fn.clone();
-        let default_fill: Background = cx.theme().chart[1].into();
+        let default_fill: Background = cx.theme().chart_2.into();
         let fill = self.fill.clone();
         let fill_gradient = self.fill_gradient.clone();
         let label_color = cx.theme().foreground;
@@ -800,7 +800,7 @@ where
                 .gap(px(8.))
                 .cross_line(cross_line)
                 .title(title)
-                .row(cx.theme().chart[1], name, format!("{}", value))
+                .row(cx.theme().chart_2, name, format!("{}", value))
                 .into_any_element(),
         )
     }

@@ -216,7 +216,7 @@ impl<T> PieChart<T> {
     fn slice_color(&self, datum: &T, cx: &App) -> Hsla {
         match self.color.as_ref() {
             Some(color_fn) => color_fn(datum),
-            None => cx.theme().chart[1],
+            None => cx.theme().chart_2,
         }
     }
 
