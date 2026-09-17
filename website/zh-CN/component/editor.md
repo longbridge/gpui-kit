@@ -151,6 +151,57 @@ editor.update(cx, |state, cx| {
 
 只读编辑器仍可搜索——替换界面会自动隐藏。
 
+### 自定义搜索界面
+
+搜索引擎不依赖内置面板，应用可以在编辑器的匹配、高亮、滚动和替换之上绘制自己的搜索栏。
+`set_search_query` 开始一次搜索，编辑器会一直高亮匹配项，直到调用 `close_search`。
+未启用 `searchable` 的编辑器不会打开内置面板，也不拦截 `Ctrl-F` / `Cmd-F`，快捷键会冒泡到上层视图，
+应用可以把它绑定到自己的搜索框。
+
+```rust
+let editor = cx.new(|cx| EditorState::new(window, cx).searchable(false));
+
+// 从应用自己的搜索框发起搜索
+editor.update(cx, |state, cx| {
+    state.set_search_query("needle", true, cx);
+});
+
+// 在匹配项之间移动，每次调用都会把匹配项滚动到可见区域
+editor.update(cx, |state, cx| {
+    state.next_search_match(cx);
+    state.previous_search_match(cx);
+});
+
+// 读取匹配情况："2/5"
+let matcher = &editor.read(cx).search_session().matcher;
+let label = matcher.label();
+let count = matcher.len();
+let current = matcher.current(); // 没有匹配时为 None
+
+// 替换（编辑器可编辑时）
+editor.update(cx, |state, cx| {
+    state.replace_current_search_match("replacement", window, cx);
+    state.replace_all_search_matches("replacement", window, cx);
+});
+
+// 结束搜索并清除高亮
+editor.update(cx, |state, cx| {
+    state.close_search(cx);
+});
+```
+
+在拥有搜索框的视图上接管快捷键：
+
+```rust
+use gpui_kit::component::input::Search;
+
+div()
+    .on_action(cx.listener(|this: &mut Self, _: &Search, window, cx| {
+        this.search.update(cx, |search, cx| search.focus(window, cx));
+    }))
+    .child(Editor::new(&this.editor))
+```
+
 ## 文本装饰
 
 ```rust

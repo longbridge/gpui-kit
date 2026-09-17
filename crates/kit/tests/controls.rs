@@ -6,7 +6,9 @@ use gpui_kit::component::{
     tab::{Tab, TabBar},
 };
 use gpui_kit::test::{TestAppContextExt, TestWindowExt};
-use gpui_kit::{AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size};
+use gpui_kit::{
+    AnyWindowHandle, AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size,
+};
 use std::time::Duration;
 
 struct Form {
@@ -230,4 +232,96 @@ fn checkbox_click_cannot_fabricate_a_successful_state_change(cx: &mut TestAppCon
         assert_eq!(window.find("agree").checked(), Some(false));
     })
     .unwrap();
+}
+
+struct SearchableLanguageForm {
+    language: Entity<SelectState<SearchableVec<&'static str>>>,
+}
+impl Render for SearchableLanguageForm {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(Select::new(&self.language).id("language").w(px(240.)))
+    }
+}
+
+fn open_searchable_language(cx: &mut TestAppContext) -> AnyWindowHandle {
+    cx.update(gpui_kit::init);
+    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
+        let items = SearchableVec::new(vec!["Dutch", "English", "French", "Hungarian"]);
+        SearchableLanguageForm {
+            language: cx.new(|cx| {
+                SelectState::new(items, Some(IndexPath::new(1)), window, cx).searchable(true)
+            }),
+        }
+    });
+    handle.into()
+}
+
+async fn wait_select_closed(cx: &mut TestAppContext, handle: AnyWindowHandle) {
+    cx.wait_for(handle, Duration::from_millis(500), |window, _| {
+        window.find("language").expanded() == Some(false)
+    })
+    .await;
+}
+
+fn select_value(cx: &mut TestAppContext, handle: AnyWindowHandle) -> Option<String> {
+    cx.update_window(handle, |_, window, _| {
+        window.find("language").value().map(str::to_owned)
+    })
+    .unwrap()
+}
+
+/// Opens the menu and types the query. The list filters in a task.
+fn search_language(cx: &mut TestAppContext, handle: AnyWindowHandle, query: &str) {
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.within("language").click("input", cx);
+        if !query.is_empty() {
+            window.input(query, cx);
+        }
+    })
+    .unwrap();
+    cx.run_until_parked();
+}
+
+fn press_language_keys(cx: &mut TestAppContext, handle: AnyWindowHandle, keys: &[&str]) {
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        for key in keys {
+            window.press(key, cx);
+        }
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+async fn searchable_select_next_open_after_cancel_shows_all_items(cx: &mut TestAppContext) {
+    let handle = open_searchable_language(cx);
+
+    search_language(cx, handle, "hun");
+    press_language_keys(cx, handle, &["escape"]);
+    wait_select_closed(cx, handle).await;
+
+    // With an empty query, Down moves from English to French.
+    search_language(cx, handle, "");
+    press_language_keys(cx, handle, &["down", "enter"]);
+    wait_select_closed(cx, handle).await;
+    assert_eq!(select_value(cx, handle).as_deref(), Some("French"));
+}
+
+#[gpui_kit::test]
+async fn searchable_select_next_open_after_confirm_shows_all_items(cx: &mut TestAppContext) {
+    let handle = open_searchable_language(cx);
+
+    search_language(cx, handle, "hun");
+    press_language_keys(cx, handle, &["enter"]);
+    wait_select_closed(cx, handle).await;
+    assert_eq!(select_value(cx, handle).as_deref(), Some("Hungarian"));
+
+    // With an empty query, Up moves from Hungarian to French.
+    search_language(cx, handle, "");
+    press_language_keys(cx, handle, &["up", "enter"]);
+    wait_select_closed(cx, handle).await;
+    assert_eq!(select_value(cx, handle).as_deref(), Some("French"));
 }

@@ -2,9 +2,9 @@ use gpui_base::TestSupportExt as _;
 use std::{rc::Rc, sync::LazyLock, time::Duration};
 
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, BoxShadow, ClickEvent, Edges, FocusHandle, Hsla,
-    InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString,
-    StyleRefinement, Styled, Window, WindowControlArea, anchored, div, hsla, point,
+    Action, Animation, AnimationExt as _, AnyElement, App, BoxShadow, ClickEvent, Edges,
+    FocusHandle, Hsla, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce,
+    SharedString, StyleRefinement, Styled, Window, WindowControlArea, anchored, div, hsla, point,
     prelude::FluentBuilder, px,
 };
 use gpui_base::{ElementExt as _, TextSelectionScopeId};
@@ -14,7 +14,7 @@ use crate::{
     ActiveTheme as _, IconName, Root, Sizable as _, StyledExt, TITLE_BAR_HEIGHT, WindowExt as _,
     animation::cubic_bezier,
     button::{Button, ButtonVariant, ButtonVariants as _},
-    dialog::{DialogContent, DialogTitle},
+    dialog::{DialogContent, DialogDispatchAnchor, DialogTitle},
     scroll::ScrollableElement as _,
     v_flex,
 };
@@ -108,15 +108,15 @@ impl DialogButtonProps {
             .ok_text
             .clone()
             .unwrap_or_else(|| t!("Dialog.ok").into());
-        let ok_variant = self.ok_variant;
 
-        Button::new("ok")
-            .label(ok_text)
-            .with_variant(ok_variant)
-            .on_click(|_, window, cx| {
-                window.dispatch_action(Box::new(Confirm { secondary: false }), cx)
-            })
-            .into_any_element()
+        DialogButton {
+            anchor_key: "dialog-ok-anchor",
+            button: Button::new("ok")
+                .label(ok_text)
+                .with_variant(self.ok_variant),
+            action: Rc::new(Confirm { secondary: false }),
+        }
+        .into_any_element()
     }
 
     pub(crate) fn render_cancel(&self, _: &mut Window, _: &mut App) -> AnyElement {
@@ -124,13 +124,34 @@ impl DialogButtonProps {
             .cancel_text
             .clone()
             .unwrap_or_else(|| t!("Dialog.cancel").into());
-        let cancel_variant = self.cancel_variant;
 
-        Button::new("cancel")
-            .label(cancel_text)
-            .with_variant(cancel_variant)
-            .on_click(|_, window, cx| window.dispatch_action(Box::new(Cancel), cx))
-            .into_any_element()
+        DialogButton {
+            anchor_key: "dialog-cancel-anchor",
+            button: Button::new("cancel")
+                .label(cancel_text)
+                .with_variant(self.cancel_variant),
+            action: Rc::new(Cancel),
+        }
+        .into_any_element()
+    }
+}
+
+/// A default dialog button: activating it dispatches `action` on the dialog
+/// it sits in, whatever holds focus at that moment.
+#[derive(IntoElement)]
+struct DialogButton {
+    /// Distinct per button: OK and Cancel render as siblings in one scope.
+    anchor_key: &'static str,
+    button: Button,
+    action: Rc<dyn Action>,
+}
+
+impl RenderOnce for DialogButton {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let anchor = DialogDispatchAnchor::new(self.anchor_key, window, cx);
+        self.button
+            .child(anchor.element())
+            .on_click(move |_, window, cx| anchor.dispatch(&*self.action, window, cx))
     }
 }
 
@@ -378,6 +399,8 @@ impl Dialog {
 
     /// Sets the width of the dialog, defaults to 448px.
     ///
+    /// The dialog is never wider than the viewport minus a margin on each side.
+    ///
     /// See also [`Self::width`]
     pub fn w(mut self, width: impl Into<Pixels>) -> Self {
         self.props.width = width.into();
@@ -385,6 +408,8 @@ impl Dialog {
     }
 
     /// Sets the width of the dialog, defaults to 448px.
+    ///
+    /// The dialog is never wider than the viewport minus a margin on each side.
     pub fn width(mut self, width: impl Into<Pixels>) -> Self {
         self.props.width = width.into();
         self
@@ -496,8 +521,18 @@ impl RenderOnce for Dialog {
                 window_paddings.left + window_paddings.right,
                 window_paddings.top + window_paddings.bottom,
             );
+        // The dialog keeps this much of the viewport clear on the sides and
+        // below it, so a small window shrinks the surface instead of the
+        // surface running off the window. The top keeps `margin_top` (a tenth
+        // of the viewport by default) plus the 16px step of each stacked layer.
+        let margin = cx.theme().spacing_tokens().lg;
         let y = self.props.margin_top.unwrap_or(view_size.height / 10.) + px(layer_ix as f32 * 16.);
-        let x = view_size.width / 2. - self.props.width / 2.;
+        let width = self
+            .props
+            .width
+            .min((view_size.width - margin * 2.).max(px(0.)));
+        let x = (view_size.width - width) / 2.;
+        let max_height = (view_size.height - y - margin).max(px(0.));
 
         let base_size = window.text_style().font_size;
         let rem_size = window.rem_size();
@@ -574,6 +609,7 @@ impl RenderOnce for Dialog {
                                 v_flex()
                                     .id(layer_ix)
                                     .test_support()
+                                    .debug_selector(move || format!("dialog-{layer_ix}"))
                                     .bg(cx.theme().tokens.background)
                                     .border_1()
                                     .border_color(cx.theme().border)
@@ -590,8 +626,9 @@ impl RenderOnce for Dialog {
                                     .relative()
                                     .left(x)
                                     .top(y)
-                                    .w(self.props.width)
+                                    .w(width)
                                     .when_some(self.props.max_width, |this, w| this.max_w(w))
+                                    .max_h(max_height)
                                     .child(
                                         v_flex()
                                             .flex_1()
@@ -691,5 +728,121 @@ impl RenderOnce for Dialog {
                     .with_animation("fade-in", animation, move |this, delta| this.opacity(delta)),
             )
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{AppContext as _, Bounds, Context, Render, TestAppContext, VisualTestContext, size};
+
+    struct DialogHost;
+
+    impl Render for DialogHost {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .children(Root::render_dialog_layer(window, cx))
+        }
+    }
+
+    /// A window of `window_size` whose root renders the dialog layer, with
+    /// motion reduced so the entrance animation settles on its first frame.
+    fn window(cx: &mut TestAppContext, window_size: gpui::Size<Pixels>) -> &mut VisualTestContext {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|_| DialogHost);
+            Root::new(view, window, cx)
+        });
+        cx.simulate_resize(window_size);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx
+    }
+
+    fn open(
+        cx: &mut VisualTestContext,
+        build: impl Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static,
+    ) {
+        cx.update(|window, cx| window.open_dialog(cx, build));
+        cx.run_until_parked();
+        // One frame mounts the layer, the next paints it at rest.
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn surface(cx: &mut VisualTestContext, layer_ix: usize) -> Bounds<Pixels> {
+        let selector = ["dialog-0", "dialog-1"][layer_ix];
+        cx.debug_bounds(selector)
+            .unwrap_or_else(|| panic!("dialog layer {layer_ix} was not painted"))
+    }
+
+    /// The clamp must not touch a dialog that already fits: the default width
+    /// and the tenth-of-the-viewport top offset are the documented contract.
+    #[gpui::test]
+    fn a_dialog_that_fits_keeps_its_default_width_and_top_offset(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(1000.), px(800.)));
+        open(cx, |dialog, _, _| dialog.title("Fits").child("body"));
+
+        let bounds = surface(cx, 0);
+        assert_eq!(bounds.size.width, px(448.));
+        assert_eq!(bounds.origin.x, px(276.));
+        assert_eq!(bounds.origin.y, px(80.));
+    }
+
+    /// A dialog wider and taller than the window must shrink to the viewport
+    /// instead of running off both edges, and its footer must still be inside
+    /// the surface rather than clipped below it.
+    #[gpui::test]
+    fn a_dialog_larger_than_the_window_stays_inside_it(cx: &mut TestAppContext) {
+        let viewport = size(px(400.), px(300.));
+        let cx = window(cx, viewport);
+        open(cx, |dialog, _, _| {
+            dialog
+                .w(px(800.))
+                .title("Too big")
+                .child(div().h(px(1000.)).child("tall body"))
+                .footer(div().h(px(32.)).debug_selector(|| "footer-probe".into()))
+        });
+
+        let bounds = surface(cx, 0);
+        let footer = cx.debug_bounds("footer-probe").unwrap();
+        let margin = px(16.);
+        assert!(
+            bounds.origin.x >= margin && bounds.right() <= viewport.width - margin,
+            "the dialog ran off the sides: {bounds:?}"
+        );
+        assert!(
+            bounds.bottom() <= viewport.height - margin,
+            "the dialog ran off the bottom: {bounds:?}"
+        );
+        assert_eq!(bounds.origin.y, viewport.height / 10.);
+        assert!(
+            footer.bottom() <= bounds.bottom(),
+            "the footer was clipped below the dialog: footer {footer:?}, dialog {bounds:?}"
+        );
+    }
+
+    /// Each stacked dialog steps down 16px; the deepest one must still end
+    /// above the bottom margin.
+    #[gpui::test]
+    fn stacked_dialogs_each_fit_the_window(cx: &mut TestAppContext) {
+        let viewport = size(px(400.), px(300.));
+        let cx = window(cx, viewport);
+        open(cx, |dialog, _, _| {
+            dialog.title("First").child(div().h(px(1000.)))
+        });
+        open(cx, |dialog, _, _| {
+            dialog.title("Second").child(div().h(px(1000.)))
+        });
+
+        let first = surface(cx, 0);
+        let second = surface(cx, 1);
+        assert_eq!(second.origin.y, first.origin.y + px(16.));
+        assert!(first.bottom() <= viewport.height - px(16.), "{first:?}");
+        assert!(second.bottom() <= viewport.height - px(16.), "{second:?}");
+        assert!(second.size.height < first.size.height);
     }
 }

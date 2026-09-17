@@ -46,7 +46,7 @@ use rquickjs::{
 use serde_json::Value as Json;
 
 use crate::{
-    capability::{Access, Capabilities, CapabilityError, Grant},
+    capability::{Access, Capabilities, CapabilityError, Grant, is_openable_url},
     policy::Policy,
     scope,
     storage::{Storage, persist},
@@ -108,14 +108,10 @@ pub fn install(_ctx: &Ctx<'_>, module: &Object<'_>) -> JsResult<()> {
 /// imperative half of a pair whose declarative half is ungated, which reads as
 /// protection without being any.
 ///
-/// The scheme check is the part that matters. Without it this becomes a way to
-/// hand an arbitrary URI to whatever handler the desktop has registered for
-/// its scheme, which is a considerably larger thing than opening a page.
+/// The rule itself is [`is_openable_url`], shared with `href` and the
+/// `TextView` default link handler.
 fn open_url(ctx: Ctx<'_>, url: String) -> JsResult<()> {
-    let valid = reqwest::Url::parse(&url).is_ok_and(|parsed| {
-        matches!(parsed.scheme(), "http" | "https") && parsed.host_str().is_some()
-    });
-    if !valid {
+    if !is_openable_url(&url) {
         return Err(Exception::throw_type(
             &ctx,
             "cx.open_url(url) expects an absolute HTTP(S) URL with a host",

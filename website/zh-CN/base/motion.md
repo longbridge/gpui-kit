@@ -27,6 +27,7 @@ cargo run -p gpui-base-examples --bin motion
 | Keyframes | `Keyframes`、`Timing`、`animate_keyframes` | 持续循环的多段活动信号 |
 | Stagger | `Stagger` | 无分配地为列表计算错峰时间 |
 | Presence | `Presence` | 退出动画完成前继续挂载内容 |
+| Sequence | `Sequence` | 三个串联步骤——滑入、填满、停留后淡出——每一步在前一步结束时开始 |
 
 此外还提供 `Easing`、`Discrete`、`MotionTransform` 和 `MotionReveal`，它们与同一套 primitive 组合，不需要额外动画 runtime。
 
@@ -80,6 +81,29 @@ offset 必须从 `0` 开始、以 `1` 结束并保持单调。不可插值属性
 
 `Stagger` 可以从首项、末项、中心或指定位置开始，为每个 index 计算 delay；它不分配时间表，也不接管列表 identity。
 
+## Sequence
+
+`Sequence` 把多个 transition 串成链，每一步在前一步结束时开始。它在首次采样的那一帧从 `from` 出发，每个 ID 只播放一次；采样结果包含当前值、正在播放的 step 序号，以及一个只在最后一步完成后才为 `Finished` 的 `MotionStatus`。
+
+```rust,ignore
+let opacity = Sequence::new(("toast", "opacity"), 0.0)
+    .with_step(1.0, Transition::new(Duration::from_millis(160)))
+    .with_step(0.0, Transition::new(Duration::from_millis(200)).delay(Duration::from_secs(3)))
+    .sample(window, cx);
+
+div().opacity(*opacity.value())
+```
+
+每一步在绝对时刻结束，下一步从该时刻开始，而不是从发现它结束的那一帧开始，因此掉帧不会让后续步骤延后。零时长的步骤会在同一帧内完成。改变正在播放那一步的目标值，会让 sequence 从当时的采样值重新开始第一步；尚未到达的步骤会在到达时读取。需要重播时，把应用持有的 generation 放进 ID。Reduced motion 会直接采用最后一步的目标值，并且不留下待处理 frame。
+
+`Stagger` 可以作为第一步的 delay 与 sequence 组合：
+
+```rust,ignore
+Sequence::new(("row", index), px(12.))
+    .with_step(px(0.), Transition::new(Duration::from_millis(120)).delay(stagger.delay(index, count)))
+    .sample(window, cx)
+```
+
 ## 测量式展开
 
 `MotionReveal` 按 child 的自然尺寸测量，再根据 progress 裁剪可见高度。`Collapsible::motion_id(...)` 是控件层的便捷入口；没有 motion ID 时仍保持即时挂载/卸载。
@@ -88,13 +112,15 @@ offset 必须从 `0` 开始、以 `1` 结束并保持单调。不可插值属性
 
 Transition、spring、keyframes、presence 和 reveal 控件都遵守 GPUI 的 reduced-motion 偏好。有限动画会直接同步目标、更新 retained state，并且不留下待处理 frame。动画不能成为表达状态的唯一方式。
 
+这个偏好来自操作系统。`gpui_base::init`（因此 `gpui_component::init` 也一样）会把系统设置读入 `App::set_reduce_motion`：macOS 的「减弱动态效果」（`NSWorkspace.accessibilityDisplayShouldReduceMotion`）、Windows 的「动画效果」（`SPI_GETCLIENTAREAANIMATION`，关闭即为减弱动效），以及 Linux 上 XDG desktop portal `org.freedesktop.appearance` 命名空间的 `reduced-motion` 键——它经 D-Bus 在 `init` 返回后片刻送达，之后持续跟随其变化。其他目标（包括 wasm）不改动这个标志。应用一旦自己调用 `cx.set_reduce_motion(...)`，就接管了这个标志：Base 只在标志仍是自己上次写入的值时才会写入。macOS 和 Windows 只在 `init` 时读取一次；需要重新读取时调用 `gpui_base::apply_system_reduce_motion(cx)`。
+
 benchmark 覆盖的纯稳定采样路径——timing/easing、关键帧查找、解析式 spring 积分和 stagger delay 计算——均为零分配。Keyed transition、spring、presence 和 reveal 生命周期由 GPUI retained state 与 frame-request 测试覆盖，因为这些更新属于框架生命周期，而不是纯采样器。采样使用绝对时间，关键帧查找使用二分搜索。运行 release benchmark：
 
 ```bash
 cargo bench -p gpui-base --bench motion
 ```
 
-选择最小且合适的 primitive：固定时长目标使用 `transition`，频繁变化的空间目标使用 `spring`，编排序列使用 keyframes，卸载前退出使用 `Presence`，列表错峰使用 `Stagger`。
+选择最小且合适的 primitive：固定时长目标使用 `transition`，频繁变化的空间目标使用 `spring`，编排序列使用 keyframes，卸载前退出使用 `Presence`，前后相继的步骤使用 `Sequence`，列表错峰使用 `Stagger`。
 
 ## Benchmark 结果
 

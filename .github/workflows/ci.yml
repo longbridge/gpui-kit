@@ -11,7 +11,77 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}-${{ github.ref_name == 'main' && github.sha || 'anysha' }}
   cancel-in-progress: true
 
+env:
+  # Debug info is most of a build's disk footprint and a large share of its
+  # link time, and nothing in CI reads it. Dropping it keeps every job's
+  # dependency cache small enough to stay under the repository's 10 GB cache
+  # limit instead of being evicted before the next run can use it.
+  CARGO_PROFILE_DEV_DEBUG: 0
+
+# Every job that compiles Rust relies on the dependency cache that
+# `actions-rust-lang/setup-rust-toolchain` installs (Swatinem/rust-cache).
+# Only `main` saves caches; pull requests restore the closest `main` cache
+# through rust-cache's prefix fallback, so PR runs never crowd `main`'s
+# caches out of the 10 GB limit. Keep each job on one feature set: a second
+# `cargo` invocation with different features recompiles GPUI from scratch,
+# which is what made the old single macOS job take half an hour.
 jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Typo check
+        uses: crate-ci/typos@v1.40.0
+      - name: Skill guides are in sync
+        run: |
+          for pair in "coding-guides skills/gpui-kit" "design-guides skills/gpui-kit-design-guides"; do
+            set -- $pair
+            if ! diff -u "website/docs/$1.md" "$2/references/$1.md"; then
+              echo "::error::$2/references/$1.md is stale."
+              echo "Run: cp website/docs/$1.md $2/references/$1.md"
+              exit 1
+            fi
+          done
+      - name: Verify published recipe fragments
+        run: python3 script/check-ai docs
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete@0.9.1
+      - name: Machete
+        run: cargo machete
+
+  lint:
+    name: Lint
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          components: clippy
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Lints every member and, as a side effect, type-checks the example
+      # crates that the `test` job leaves out.
+      - name: Lint
+        run: cargo clippy --workspace --exclude gpui-shell --locked -- --deny warnings
+
+  recipes:
+    name: Recipes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Replaces the system `ld` on Linux and is a no-op elsewhere.
+      - uses: rui314/setup-mold@v1
+      - name: Install system dependencies
+        run: script/bootstrap
+      - name: Check without default features (tree-sitter disabled)
+        run: cargo check -p gpui-component --no-default-features --locked
+      - name: Verify executable application recipes
+        run: python3 script/check-ai rust
+
   test:
     name: Test
     strategy:
@@ -25,74 +95,56 @@ jobs:
           - target: x86_64-windows-msvc
             run_on: windows-latest
     runs-on: ${{ matrix.run_on }}
+    defaults:
+      run:
+        # `$TEST_EXCLUDES` must word-split, which PowerShell does not do.
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          components: clippy
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Replaces the system `ld` on Linux and is a no-op elsewhere.
+      - uses: rui314/setup-mold@v1
       - name: Install system dependencies
         if: ${{ matrix.run_on != 'windows-latest' }}
         run: script/bootstrap
-      - name: Headless UI integration tests
-        run: cargo test -p gpui-kit --features test-support --locked
+      # Compiling and linking a test binary for every `examples/` crate was
+      # most of the warm-cache build time; the `lint` job type-checks them
+      # instead. Leaving them out changes no crate's feature set.
+      # `jq -j` writes the list as one line with no newline at all: on Windows
+      # `jq` emits CRLF, and a `\r` left on a name breaks `--exclude`.
+      - name: Leave the example crates to the lint job
+        run: |
+          excludes=$(cargo metadata --no-deps --format-version 1 | jq -j '
+            ((.workspace_root | gsub("\\\\"; "/")) + "/examples/") as $examples
+            | .packages[]
+            | select((.manifest_path | gsub("\\\\"; "/")) | startswith($examples))
+            | "--exclude \(.name) "')
+          echo "TEST_EXCLUDES=$excludes" >> "$GITHUB_ENV"
+      # `gpui-component-story/test-support` turns on `gpui-kit/test-support`, so
+      # this single run also covers the headless UI integration tests in
+      # `crates/kit/tests`.
+      - name: Test
+        run: >-
+          cargo test --workspace --exclude gpui-shell
+          --features gpui-component-story/test-support --locked
+          $TEST_EXCLUDES
+      - name: Doc tests
+        if: ${{ matrix.run_on == 'macos-latest' }}
+        run: >-
+          cargo test --workspace --exclude gpui-shell
+          --features gpui-component-story/test-support --locked
+          $TEST_EXCLUDES --doc
+      # `crates/kit/tests/rendering.rs` needs a real Metal device and is opted
+      # out of the default test set; select it with the same feature set so it
+      # reuses the build above.
       - name: Metal UI rendering tests
         if: ${{ matrix.run_on == 'macos-latest' }}
-        run: cargo test -p gpui-kit --features test-support --test rendering --locked
-      - name: Machete
-        if: ${{ matrix.run_on == 'macos-latest' }}
-        uses: bnjbvr/cargo-machete@v0.9.1
-      - name: Setup | Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: test-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
-      - name: Typo check
-        if: ${{ matrix.run_on == 'macos-latest' }}
-        run: |
-          command -v typos >/dev/null || cargo install typos-cli
-          typos
-      - name: Skill guides are in sync
-        if: ${{ matrix.run_on == 'macos-latest' }}
-        run: |
-          for pair in "coding-guides skills/gpui-kit" "design-guides skills/gpui-kit-design-guides"; do
-            set -- $pair
-            if ! diff -u "website/docs/$1.md" "$2/references/$1.md"; then
-              echo "::error::$2/references/$1.md is stale."
-              echo "Run: cp website/docs/$1.md $2/references/$1.md"
-              exit 1
-            fi
-          done
-      - name: Verify executable application recipes
-        if: ${{ matrix.run_on == 'macos-latest' }}
-        run: |
-          python3 script/check-ai docs
-          python3 script/check-ai rust
-      - name: Lint
-        if: ${{ matrix.run_on == 'macos-latest' }}
-        run: |
-          cargo clippy -p gpui-component -p gpui-component-story -p gpui-kit-assets -- --deny warnings
-      - name: Check without default features (tree-sitter disabled)
-        if: ${{ matrix.run_on == 'ubuntu-latest' }}
-        run: |
-          cargo check -p gpui-component --no-default-features
-      - name: Test Linux
-        if: ${{ matrix.run_on == 'ubuntu-latest' }}
-        run: |
-          cargo test --workspace --exclude gpui-shell --features gpui-component-story/test-support
-      - name: Test Windows
-        if: ${{ matrix.run_on == 'windows-latest' }}
-        run: |
-          cargo test --workspace --exclude gpui-shell --features gpui-component-story/test-support
-      - name: Test MacOS
-        if: ${{ matrix.run_on == 'macos-latest' }}
-        run: |
-          cargo test --workspace --exclude gpui-shell --features gpui-component-story/test-support
-          cargo test -p gpui-component --doc
+        run: >-
+          cargo test --workspace --exclude gpui-shell
+          --features gpui-component-story/test-support --locked
+          $TEST_EXCLUDES --test rendering
 
   gpui-shell-core:
     name: GPUI Shell Core
@@ -102,18 +154,12 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-shared-key: gpui-shell-release
+      # Replaces the system `ld` on Linux and is a no-op elsewhere.
+      - uses: rui314/setup-mold@v1
       - name: Install system dependencies
         run: script/bootstrap
-      - name: Setup | Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: shell-core-cargo-x86_64-linux-gnu-${{ hashFiles('**/Cargo.lock') }}
       - name: Test runtime core without standard-library integration cases
         run: |
           cargo test -p gpui-shell --release --lib -- \
@@ -123,7 +169,7 @@ jobs:
             --skip tests::process \
             --skip tests::benchmark
           cargo test -p gpui-shell --release tests::benchmark
-          cargo test -p gpui-shell --doc
+          cargo test -p gpui-shell --release --doc
       - name: Lint GPUI Shell
         run: cargo clippy -p gpui-shell --all-targets -- -D warnings
 
@@ -135,21 +181,14 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           components: clippy
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Replaces the system `ld` on Linux and is a no-op elsewhere.
+      - uses: rui314/setup-mold@v1
       - name: Install system dependencies
         run: script/bootstrap
-      - name: Setup | Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: component-shell-cargo-x86_64-linux-gnu-${{ hashFiles('**/Cargo.lock') }}
       - name: Test component bindings
         run: cargo test -p gpui-component-shell --all-targets
       - name: Verify generated TypeScript contracts
@@ -180,19 +219,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-shared-key: gpui-shell-release
+      # Replaces the system `ld` on Linux and is a no-op elsewhere.
+      - uses: rui314/setup-mold@v1
       - name: Install system dependencies
         if: ${{ matrix.run_on != 'windows-latest' }}
         run: script/bootstrap
-      - name: Setup | Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: shell-standard-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
       - name: Test LLRT module integration
         run: |
           cargo test -p gpui-shell --release tests::standard_runtime

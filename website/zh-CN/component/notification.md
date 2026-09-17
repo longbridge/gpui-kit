@@ -102,6 +102,23 @@ Notification::new()
 
 指针悬停在通知上或某条通知获得键盘焦点时倒计时暂停，指针移开或焦点离开后继续。窗口未激活时倒计时照常进行，不能错过的消息应关闭自动隐藏或使用系统通知投递。
 
+### 通知位置
+
+通知默认出现在窗口右上角。可以为所有通知设置全局默认值，也可以为单条通知覆盖。每个位置分别维护自己的堆叠。
+
+```rust
+use gpui_kit::Anchor;
+
+// 全局默认值（默认：`Anchor::TopRight`）
+Theme::global_mut(cx).notification.placement = Anchor::BottomRight;
+
+// 单条通知覆盖
+Notification::info("Download complete.")
+    .placement(Anchor::BottomLeft)
+```
+
+支持的值有 `Anchor::TopLeft`、`Anchor::TopCenter`、`Anchor::TopRight`、`Anchor::LeftCenter`、`Anchor::RightCenter`、`Anchor::BottomLeft`、`Anchor::BottomCenter` 和 `Anchor::BottomRight`。
+
 ### 操作按钮
 
 ```rust

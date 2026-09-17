@@ -391,23 +391,53 @@ impl Render for MenuStory {
                         Button::new("dropdown-menu-scrollable-1")
                             .outline()
                             .label("Scrollable Menu (100 items)")
-                            .dropdown_menu_with_anchor(Anchor::TopRight, move |this, _, _| {
-                                let mut this = this
-                                    .scrollable(true)
-                                    .max_h(px(300.))
-                                    .label(format!("Total {} items", 100));
-                                for i in 0..100 {
-                                    if i % 5 == 0 {
-                                        this = this.separator();
-                                    }
+                            .dropdown_menu_with_anchor(
+                                Anchor::TopRight,
+                                move |this, window, cx| {
+                                    let mut this = this
+                                        .scrollable(true)
+                                        .max_h(px(300.))
+                                        .label(format!("Total {} items", 100));
+                                    for i in 0..100 {
+                                        if i % 5 == 0 {
+                                            this = this.separator();
+                                        }
 
-                                    this = this.menu(
-                                        SharedString::from(format!("Item {}", i)),
-                                        Box::new(Info(i)),
-                                    )
-                                }
-                                this.min_w(px(100.))
-                            }),
+                                        // Every tenth item is a submenu, so the
+                                        // scrolled list exercises submenus at
+                                        // every scroll position.
+                                        this = if i % 10 == 9 {
+                                            this.submenu(
+                                                SharedString::from(format!("More {}", i)),
+                                                window,
+                                                cx,
+                                                move |menu, _, _| {
+                                                    menu.menu(
+                                                        SharedString::from(format!(
+                                                            "Item {} copy",
+                                                            i
+                                                        )),
+                                                        Box::new(Info(i)),
+                                                    )
+                                                    .menu(
+                                                        SharedString::from(format!(
+                                                            "Item {} duplicate",
+                                                            i
+                                                        )),
+                                                        Box::new(Info(i)),
+                                                    )
+                                                },
+                                            )
+                                        } else {
+                                            this.menu(
+                                                SharedString::from(format!("Item {}", i)),
+                                                Box::new(Info(i)),
+                                            )
+                                        }
+                                    }
+                                    this.min_w(px(100.))
+                                },
+                            ),
                     )
                     .child(
                         Button::new("dropdown-menu-scrollable-2")

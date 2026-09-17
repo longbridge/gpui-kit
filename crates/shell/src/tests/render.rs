@@ -241,6 +241,124 @@ export default class RichText extends View {
     assert!(tree.contains(":on_link_click(fn)"), "{tree}");
 }
 
+fn mount_text_view_link(
+    cx: &mut TestAppContext,
+    source: &str,
+) -> (gpui::Entity<ScriptView>, VisualTestContext) {
+    cx.update(crate::init);
+    let runtime = ShellRuntime::new_isolated().expect("runtime");
+    cx.update(|cx| runtime.set_global(cx));
+    let view_type = runtime
+        .load_source("text-view-link.js", source)
+        .expect("load");
+    let window = cx.add_window(move |window, cx| {
+        let view = runtime
+            .instantiate_view_with_policy(&view_type, Rc::new(Policy::new()), window, cx)
+            .expect("instantiate");
+        RootedScriptView(view)
+    });
+    let mut context = VisualTestContext::from_window(*window.deref(), cx);
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    context.run_until_parked();
+    context.update(|window, cx| window.draw(cx).clear(cx));
+    let view = window
+        .root(&mut context)
+        .expect("root")
+        .read_with(&context, |root, _| root.0.clone());
+    (view, context)
+}
+
+#[gpui::test]
+fn text_view_default_links_follow_shell_url_rules(cx: &mut TestAppContext) {
+    use gpui::MouseButton;
+
+    for format in ["markdown", "html"] {
+        for (url, allowed) in [
+            ("file:///tmp/text-view-link", false),
+            ("test:example", false),
+            ("/docs", false),
+            ("https://", false),
+            ("http://example.com/docs", true),
+            ("https://example.com/docs", true),
+        ] {
+            for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
+                let text = match format {
+                    "html" => format!(r#"<a href="{url}">example</a>"#),
+                    _ => format!("[example]({url})"),
+                };
+                let text = serde_json::to_string(&text).expect("text");
+                let source = format!(
+                    r#"
+import {{ View }} from "gpui-kit";
+import {{ TextView }} from "gpui-base";
+export default class RichText extends View {{
+  render() {{ return TextView.{format}("link", {text}); }}
+}}
+"#
+                );
+                // opened_url is app-wide; each case must start without an earlier open.
+                let mut app = cx.new_app();
+                let (_view, mut context) = mount_text_view_link(&mut app, &source);
+                context.simulate_mouse_down(point(px(10.), px(10.)), button, Modifiers::default());
+                context.simulate_mouse_up(point(px(10.), px(10.)), button, Modifiers::default());
+                let expected = (allowed && button != MouseButton::Right).then(|| url.to_owned());
+                assert_eq!(
+                    context.opened_url(),
+                    expected,
+                    "{format}: {url}, {button:?}"
+                );
+                app.quit();
+            }
+        }
+    }
+}
+
+#[gpui::test]
+fn text_view_link_callback_still_replaces_default_opening(cx: &mut TestAppContext) {
+    use gpui::MouseButton;
+
+    for format in ["markdown", "html"] {
+        for url in ["file:///tmp/text-view-link", "https://example.com/docs"] {
+            for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
+                let text = match format {
+                    "html" => format!(r#"<a href="{url}">example</a>"#),
+                    _ => format!("[example]({url})"),
+                };
+                let text = serde_json::to_string(&text).expect("text");
+                let source = format!(
+                    r#"
+import {{ View }} from "gpui-kit";
+import {{ TextView }} from "gpui-base";
+export default class RichText extends View {{
+  render() {{
+    if (this.clicked) return "callback:" + this.clicked;
+    return TextView.{format}("link", {text}).on_link_click((url, cx) => {{
+      this.clicked = url;
+      cx.notify();
+    }});
+  }}
+}}
+"#
+                );
+                let mut app = cx.new_app();
+                let (view, mut context) = mount_text_view_link(&mut app, &source);
+                context.simulate_mouse_down(point(px(10.), px(10.)), button, Modifiers::default());
+                context.simulate_mouse_up(point(px(10.), px(10.)), button, Modifiers::default());
+                context.run_until_parked();
+                context.update(|window, cx| window.draw(cx).clear(cx));
+                let tree = context
+                    .update(|_, cx| view.read(cx).snapshot().expect("snapshot").debug_tree());
+                assert!(
+                    tree.contains(&format!("callback:{url}")),
+                    "{format}: {url}, {button:?}: {tree}"
+                );
+                assert_eq!(context.opened_url(), None, "{format}: {url}, {button:?}");
+                app.quit();
+            }
+        }
+    }
+}
+
 #[gpui::test]
 fn a_script_view_produces_an_element_description(cx: &mut TestAppContext) {
     cx.update(|cx| crate::init(cx));

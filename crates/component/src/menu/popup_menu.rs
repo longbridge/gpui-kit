@@ -56,8 +56,6 @@ pub enum PopupMenuItem {
         handler: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     },
     /// A submenu item that opens another popup menu.
-    ///
-    /// NOTE: This is only supported when the parent menu is not `scrollable`.
     Submenu {
         icon: Option<Icon>,
         label: SharedString,
@@ -290,6 +288,11 @@ pub struct PopupMenu {
     /// change where actions are dispatched: they still bubble from the menu's
     /// own focus path (through the trigger element's ancestors).
     pub(crate) previous_focus_handle: Option<FocusHandle>,
+    /// A focus handle on the trigger's dispatch path, so shortcut hints can
+    /// resolve against the key contexts the menu's actions bubble through on
+    /// the very frame the menu opens. GPUI looks a handle up in the previously
+    /// rendered frame, and the trigger was in it when the menu was not yet.
+    pub(crate) trigger_focus_handle: Option<FocusHandle>,
     selected_index: Option<usize>,
     min_width: Option<Pixels>,
     max_width: Option<Pixels>,
@@ -317,6 +320,11 @@ pub struct PopupMenu {
     /// in `render_item` with `priority + 1`. Keeping a single deferred layer
     /// per level matters because GPUI caps nested deferred depth (see
     /// `prepaint_deferred_draws`).
+    ///
+    /// Deferring is also what lets a submenu open from a `scrollable` menu:
+    /// GPUI paints a deferred draw at the window level with no inherited
+    /// content mask, so the items container's `overflow_y_scroll` clip never
+    /// reaches it, while the scroll offset is still baked into its anchor.
     priority: usize,
 
     _subscriptions: Vec<Subscription>,
@@ -328,6 +336,7 @@ impl PopupMenu {
             focus_handle: cx.focus_handle(),
             action_context: None,
             previous_focus_handle: None,
+            trigger_focus_handle: None,
             parent_menu: None,
             menu_items: Vec::new(),
             selected_index: None,
@@ -398,6 +407,24 @@ impl PopupMenu {
         }
     }
 
+    /// Set the focus handle on the trigger's dispatch path that shortcut hints
+    /// resolve against, without changing focus or where actions are dispatched.
+    pub(crate) fn set_trigger_focus(
+        &mut self,
+        handle: Option<FocusHandle>,
+        cx: &mut Context<Self>,
+    ) {
+        self.trigger_focus_handle = handle.clone();
+
+        for item in &self.menu_items {
+            if let PopupMenuItem::Submenu { menu, .. } = item {
+                menu.update(cx, |menu, cx| {
+                    menu.set_trigger_focus(handle.clone(), cx);
+                });
+            }
+        }
+    }
+
     /// Set min width of the popup menu, default is 120px
     pub fn min_w(mut self, width: impl Into<Pixels>) -> Self {
         self.min_width = Some(width.into());
@@ -417,8 +444,6 @@ impl PopupMenu {
     }
 
     /// Set the menu to be scrollable to show vertical scrollbar.
-    ///
-    /// NOTE: If this is true, the sub-menus will cannot be support.
     pub fn scrollable(mut self, scrollable: bool) -> Self {
         self.scrollable = scrollable;
         self
@@ -1099,16 +1124,24 @@ impl PopupMenu {
     ) -> Option<Kbd> {
         let action = action?;
 
-        match self
-            .action_context
-            .as_ref()
-            .or(self.previous_focus_handle.as_ref())
-            .and_then(|handle| Kbd::binding_for_action_in(action.as_ref(), handle, window))
-        {
-            Some(kbd) => Some(kbd),
-            // Fallback to App level key binding
-            None => Kbd::binding_for_action(action.as_ref(), None, window),
-        }
+        // Each handle names a dispatch path GPUI can resolve in the previously
+        // rendered frame: the explicit action target, the trigger the menu
+        // opened from (already rendered when the menu first draws), the focus
+        // the menu interrupted, then the menu's own path once it has been
+        // rendered. A binding registered without a key context applies on
+        // every path, so it is the last resort rather than the window's
+        // leftover context stack, which only holds the path of whatever
+        // element happened to paint last.
+        [
+            self.action_context.as_ref(),
+            self.trigger_focus_handle.as_ref(),
+            self.previous_focus_handle.as_ref(),
+            Some(&self.focus_handle),
+        ]
+        .into_iter()
+        .flatten()
+        .find_map(|handle| Kbd::binding_for_action_in(action.as_ref(), handle, window))
+        .or_else(|| Kbd::global_binding_for_action(action.as_ref(), window))
         .map(|this| {
             this.p_0()
                 .flex_nowrap()
@@ -1468,7 +1501,6 @@ impl Render for PopupMenu {
                     .on_prepaint(move |bounds, _, cx| view.update(cx, |r, _| r.bounds = bounds)),
             )
             .when(self.scrollable, |this| {
-                // TODO: When the menu is limited by `overflow_y_scroll`, the sub-menu will cannot be displayed.
                 this.vertical_scrollbar(&self.scroll_handle)
             })
     }

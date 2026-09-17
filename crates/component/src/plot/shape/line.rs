@@ -5,7 +5,7 @@ use gpui::{
     quad, size,
 };
 
-use crate::plot::{StrokeStyle, origin_point};
+use crate::plot::{PathCache, ShapeKey, StrokeStyle, origin_point};
 
 #[allow(clippy::type_complexity)]
 pub struct Line<T> {
@@ -124,9 +124,8 @@ impl<T> Line<T> {
         )
     }
 
-    fn path(&self, bounds: &Bounds<Pixels>) -> (Option<Path<Pixels>>, Vec<PaintQuad>) {
-        let origin = bounds.origin;
-        let mut builder = PathBuilder::stroke(self.stroke_width);
+    /// The projected points relative to `origin`, and the dot quads to paint.
+    fn dots(&self, origin: Point<Pixels>) -> (Vec<Point<Pixels>>, Vec<PaintQuad>) {
         let mut dots = vec![];
         let mut paint_dots = vec![];
 
@@ -147,13 +146,20 @@ impl<T> Line<T> {
             }
         }
 
+        (dots, paint_dots)
+    }
+
+    /// The stroke through `dots`.
+    fn build_path(&self, dots: &[Point<Pixels>]) -> Option<Path<Pixels>> {
+        let mut builder = PathBuilder::stroke(self.stroke_width);
+
         if dots.is_empty() {
-            return (None, paint_dots);
+            return None;
         }
 
         if dots.len() == 1 {
             builder.move_to(dots[0]);
-            return (builder.build().ok(), paint_dots);
+            return builder.build().ok();
         }
 
         match self.stroke_style {
@@ -191,7 +197,40 @@ impl<T> Line<T> {
             }
         }
 
-        (builder.build().ok(), paint_dots)
+        builder.build().ok()
+    }
+
+    fn path(&self, bounds: &Bounds<Pixels>) -> (Option<Path<Pixels>>, Vec<PaintQuad>) {
+        let (dots, paint_dots) = self.dots(bounds.origin);
+        (self.build_path(&dots), paint_dots)
+    }
+
+    /// Paint the Line, reusing the stroke tessellated by an earlier paint
+    /// while the projected points, stroke width and curve style are unchanged.
+    ///
+    /// Use this from a [`Plot`](crate::plot::Plot) that keeps a
+    /// [`PathCache`] per line: the plot repaints on every frame it is on
+    /// screen, and tessellating the stroke is most of what a line costs.
+    pub fn paint_cached(
+        &self,
+        bounds: &Bounds<Pixels>,
+        cache: &mut PathCache,
+        window: &mut Window,
+    ) {
+        let (dots, paint_dots) = self.dots(Point::default());
+        let mut key = ShapeKey::new((self.stroke_style, self.stroke_width.as_f32().to_bits()));
+        for dot in &dots {
+            key.point(*dot);
+        }
+        if let Some(path) = cache.get(key.finish(), bounds.origin, || self.build_path(&dots)) {
+            window.paint_path(path, self.stroke);
+        }
+        // Dots are quads: cheap, and positioned at this frame's origin.
+        for dot in paint_dots {
+            let mut dot = dot;
+            dot.bounds.origin = dot.bounds.origin + bounds.origin;
+            window.paint_quad(dot);
+        }
     }
 
     /// Paint the Line.

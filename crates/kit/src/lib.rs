@@ -8,12 +8,13 @@
 //! | Path            | Crate             | Feature          |
 //! | --------------- | ----------------- | ---------------- |
 //! | `gpui_kit::*`   | `gpui`            | always           |
-//! | [`platform`]    | `gpui_platform`   | always           |
+//! | `platform`      | `gpui_platform`   | desktop / web    |
 //! | [`base`]        | `gpui-base`       | always           |
 //! | [`component`]   | `gpui-component`  | `component` (on) |
 //! | [`assets`]      | `gpui-kit-assets` | `assets` (on)    |
 //!
-//! [`application`] opens the platform and [`init`] initializes the enabled
+//! On desktop and web, `application` opens the platform. Mobile applications
+//! supply their backend to `Application::with_platform`. [`init`] initializes the enabled
 //! layers:
 //!
 //! ```no_run
@@ -103,9 +104,11 @@ pub use ::gpui;
 pub mod test;
 
 pub use ::gpui_base as base;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub use ::gpui_platform as platform;
 #[cfg(target_family = "wasm")]
 pub use ::gpui_web as web;
+pub use gpui_base::is_mobile;
 
 /// The styled component library.
 ///
@@ -141,6 +144,8 @@ pub use ::gpui_component as component;
 #[cfg(feature = "assets")]
 pub use ::gpui_kit_assets as assets;
 
+// Mobile applications provide their platform with `Application::with_platform`.
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub use ::gpui_platform::application;
 
 /// Initializes every enabled layer. Call it once, before using anything else.

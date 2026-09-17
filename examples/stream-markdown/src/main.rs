@@ -2,6 +2,7 @@ use gpui_kit::assets::Assets;
 use gpui_kit::component::{
     button::Button,
     h_flex,
+    switch::Switch,
     text::{TextView, TextViewState},
     v_flex,
 };
@@ -12,6 +13,7 @@ pub struct Example {
     tx: smol::channel::Sender<(usize, String)>,
     scroll_handle: ScrollHandle,
     replay_id: usize,
+    stream_fade: bool,
     _task: Task<()>,
     _update_task: Task<()>,
 }
@@ -49,6 +51,7 @@ impl Example {
             scroll_handle,
             tx,
             replay_id: 0,
+            stream_fade: true,
             _task,
             _update_task: Task::ready(()),
         }
@@ -93,12 +96,22 @@ impl Render for Example {
             .child(
                 h_flex()
                     .w_full()
+                    .gap_4()
                     .child(
                         Button::new("replay")
                             .outline()
                             .label("Replay")
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 this.replay(window, cx);
+                            })),
+                    )
+                    .child(
+                        Switch::new("stream-fade")
+                            .checked(self.stream_fade)
+                            .label("Fade in streamed text")
+                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                this.stream_fade = *checked;
+                                cx.notify();
                             })),
                     ),
             )
@@ -110,7 +123,11 @@ impl Render for Example {
                     .track_scroll(&self.scroll_handle)
                     .overflow_y_scroll()
                     .size_full()
-                    .child(TextView::new(&self.markdown_state).selectable(true)),
+                    .child(
+                        TextView::new(&self.markdown_state)
+                            .selectable(true)
+                            .stream_fade(self.stream_fade),
+                    ),
             )
     }
 }

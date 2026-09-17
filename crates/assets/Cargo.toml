@@ -14,13 +14,13 @@ version = "0.6.1"
 # Retain Cargo icon-directory metadata for existing build-script consumers.
 links = "gpui-kit-default-icons"
 
-[lib]
-doctest = false
-
 [dependencies]
 anyhow.workspace = true
 gpui.workspace = true
 log.workspace = true
+
+[dev-dependencies]
+gpui_platform.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 rust-embed = { version = "8.7.2", features = ["interpolate-folder-path", "include-exclude"] }

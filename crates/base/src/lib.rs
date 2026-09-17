@@ -48,7 +48,9 @@ mod positioner;
 mod progress;
 mod radio;
 mod radio_group;
+mod reduce_motion;
 mod resizable;
+mod scroll_bounce;
 mod scrollable_mask;
 mod scrollbar;
 mod select;
@@ -69,6 +71,7 @@ mod toast;
 mod toggle;
 mod toggle_group;
 mod tooltip;
+mod touch_selection;
 mod tree;
 mod undo_history;
 mod virtual_list;
@@ -120,9 +123,10 @@ pub use measure::{Measure, measure, measure_if};
 pub use motion::{
     Discrete, DiscreteError, Easing, EasingError, Interpolate, IterationCount, Keyframe,
     KeyframeError, Keyframes, LinearStop, MotionPhase, MotionReveal, MotionStatus, MotionTransform,
-    MotionValue, PlaybackDirection, Presence, PresencePhase, PresenceSample, SignedDuration,
-    Spring, SpringError, Stagger, StaggerOrigin, StepPosition, Timing, TimingSample, Transition,
-    TransitionId, animate_keyframes, spring, transition, transition_with_status,
+    MotionValue, PlaybackDirection, Presence, PresencePhase, PresenceSample, Sequence,
+    SequenceSample, SequenceStep, SignedDuration, Spring, SpringError, Stagger, StaggerOrigin,
+    StepPosition, Timing, TimingSample, Transition, TransitionId, animate_keyframes, spring,
+    transition, transition_with_status,
 };
 pub use nav_stack::{NavMotion, NavOperation, NavPage, NavStack, NavStackEvent, NavStackState};
 pub use number_input::{
@@ -138,12 +142,14 @@ pub use positioner::{Align, Positioner, ResolvedPosition};
 pub use progress::{Progress, ProgressIndicator, ProgressTrack};
 pub use radio::{Radio, RadioStyles};
 pub use radio_group::RadioGroup;
+pub use reduce_motion::apply_system_reduce_motion;
 #[doc(hidden)]
 pub use resizable::{PANEL_MIN_SIZE, resize_handle};
 pub use resizable::{
     ResizablePanel, ResizablePanelEvent, ResizablePanelGroup, ResizableState, ResizeHandleContext,
     ResizeHandleRenderer, h_resizable, resizable_panel, v_resizable,
 };
+pub use scroll_bounce::{ScrollBounce, ScrollBounceMotion};
 pub use scrollable_mask::ScrollableMask;
 pub use scrollbar::{
     Scrollbar, ScrollbarAxis, ScrollbarEntrance, ScrollbarHandle, ScrollbarMode, ScrollbarMotion,
@@ -164,14 +170,14 @@ pub use table::{Table, TableBody, TableCaption, TableCell, TableHead, TableHeade
 pub use tabs::{Tab, TabStyles, Tabs};
 pub use text::{
     InlineElement, InlineRenderContext, MarkdownExtensions, MarkdownNode, MarkdownParseContext,
-    MarkdownPlugin, SelectionFormat, TableData, Text, TextView, TextViewDefaults, TextViewPlugin,
-    TextViewState, TextViewStyle, html, markdown, markdown_ast,
+    MarkdownPlugin, SelectionFormat, TableData, Text, TextView, TextViewDefaults, TextViewMotion,
+    TextViewPlugin, TextViewState, TextViewStyle, html, markdown, markdown_ast,
 };
 pub use text_selection::{
     TextSelection, TextSelectionContentKey, TextSelectionCoverage, TextSelectionEndpoint,
     TextSelectionEvent, TextSelectionHandle, TextSelectionLayer, TextSelectionProjection,
     TextSelectionRegistration, TextSelectionRun, TextSelectionScopeId, TextSelectionSnapshot,
-    TextSelectionWindowPoints,
+    TextSelectionWindowPoints, TouchHandleLayout,
 };
 pub use theme::{ResizableTheme, ScrollbarTheme, Theme, ThemeAppearance};
 pub use theme_tokens::{
@@ -185,6 +191,7 @@ pub use toast::{
 pub use toggle::{Toggle, ToggleStyles};
 pub use toggle_group::ToggleGroup;
 pub use tooltip::{Tooltip, TooltipOverlay, TooltipPositioner, TooltipRequest, TooltipTransition};
+pub use touch_selection::{SelectionEdge, TouchHandle, TouchSelectionSnapshot};
 pub use tree::{Tree, TreeEntry, TreeEntryState, TreeEvent, TreeItem, TreeState};
 #[doc(hidden)]
 pub use tree::{init as init_tree, key_context as tree_key_context};
@@ -195,10 +202,19 @@ pub use virtual_list::{VirtualList, VirtualListScrollHandle, h_virtual_list, v_v
 
 use gpui::App;
 
+/// Returns whether the application is compiled for iOS or Android.
+///
+/// This is a compile-time platform check, not a screen-size or input-device check.
+#[inline]
+pub const fn is_mobile() -> bool {
+    cfg!(any(target_os = "ios", target_os = "android"))
+}
+
 /// Initializes global infrastructure owned by the base layer.
 pub fn init(cx: &mut App) {
     let _ = Theme::global_mut(cx);
     GlobalState::init(cx);
+    reduce_motion::init(cx);
     dialog::init(cx);
     focus_trap::init(cx);
     popover::init(cx);

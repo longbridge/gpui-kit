@@ -237,6 +237,10 @@ menu.action_context(focus_handle) // Set context for shortcuts
     .menu("Cut", Box::new(Cut))       // Will show "Ctrl+X"
 ```
 
+A shortcut is shown where the item's action will be dispatched: the
+`action_context` when one is set, otherwise the key contexts the menu's
+trigger sits in. The hints appear on the same frame as the menu items.
+
 ### Submenus
 
 Create nested menus with submenu support:
@@ -273,11 +277,8 @@ menu.submenu_with_icon(
 
 ### Scrollable Menus
 
-:::warning
-When you have enabled `scrollable()` on a menu, avoid using submenus within it, as this can lead to usability issues.
-:::
-
-For menus with many items, enable scrolling:
+For menus with many items, enable scrolling. Submenus open from a scrollable
+menu the same way as from any other menu:
 
 ```rust
 Button::new("large-menu")

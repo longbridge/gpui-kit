@@ -3,11 +3,7 @@ name: "Release GPUI"
 # See script/bump-gpui.ts for the publishing and validation pipeline.
 on:
   schedule:
-    # Monday 00:00 US Pacific, where Zed's week starts: 08:09 UTC, a few
-    # minutes off the hour because GitHub delays schedules that begin one,
-    # and an hour later in Pacific daylight time. The run stops without
-    # publishing when Zed did not change any of the republished crates.
-    - cron: "9 8 * * 1"
+    - cron: "0 0 * * 1"
   workflow_dispatch:
     inputs:
       rev:

@@ -215,6 +215,9 @@ menu.action_context(focus_handle)
     .menu("Cut", Box::new(Cut))
 ```
 
+快捷键按菜单项 action 实际派发的位置来解析：设置了 `action_context` 时按它解析，
+否则按菜单触发元素所在的 key context 解析。快捷键提示与菜单项在同一帧显示。
+
 ### 子菜单
 
 ```rust
@@ -247,9 +250,7 @@ menu.submenu_with_icon(
 
 ### 可滚动菜单
 
-:::warning
-启用 `scrollable()` 后，尽量不要在同一个菜单里再使用子菜单，否则容易影响可用性。
-:::
+菜单项很多时可以启用滚动。可滚动菜单中的子菜单与普通菜单一样正常打开：
 
 ```rust
 Button::new("large-menu")

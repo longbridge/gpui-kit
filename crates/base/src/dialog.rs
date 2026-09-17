@@ -332,6 +332,9 @@ pub struct DialogClose {
     style: StyleRefinement,
     children: SmallVec<[AnyElement; 1]>,
     trigger: Option<AnyElement>,
+    /// The focus node activation dispatches from, filled at render and read
+    /// when clicked, so the trigger built earlier reaches it too.
+    anchor: Rc<RefCell<Option<FocusHandle>>>,
 }
 
 impl DialogClose {
@@ -340,6 +343,7 @@ impl DialogClose {
             style: StyleRefinement::default(),
             children: SmallVec::new(),
             trigger: None,
+            anchor: Rc::default(),
         }
     }
 
@@ -349,15 +353,26 @@ impl DialogClose {
     /// activation. The builder only needs to supply presentation.
     /// The wrapper does not also handle clicks when a trigger is supplied.
     pub fn trigger<E: IntoElement>(mut self, build: impl FnOnce(crate::Button) -> E) -> Self {
+        let anchor = self.anchor.clone();
         let button = crate::Button::new("close")
             .accessibility_label("Close")
-            .on_click(Self::activate);
+            .on_click(move |_, window, cx| Self::activate(&anchor, window, cx));
         self.trigger = Some(build(button).into_any_element());
         self
     }
 
-    fn activate(_: &ClickEvent, window: &mut Window, cx: &mut App) {
-        window.dispatch_action(Box::new(Cancel), cx);
+    /// Dispatches [`Cancel`] from the control's own focus node, so it reaches
+    /// the dialog the control sits in whatever holds focus at that moment: a
+    /// surface that keeps taking focus back (a native web view, an
+    /// always-on-top window) would otherwise leave the control inert.
+    fn activate(anchor: &RefCell<Option<FocusHandle>>, window: &mut Window, cx: &mut App) {
+        // Clone out before dispatching so the dialog's handlers never run
+        // while the cell is borrowed.
+        let anchor = anchor.borrow().clone();
+        match anchor {
+            Some(anchor) => anchor.dispatch_action(&Cancel, window, cx),
+            None => window.dispatch_action(Box::new(Cancel), cx),
+        }
     }
 }
 impl Default for DialogClose {
@@ -376,10 +391,22 @@ impl Styled for DialogClose {
     }
 }
 impl RenderOnce for DialogClose {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let anchor = window
+            .use_keyed_state("dialog-close-anchor", cx, |_, cx| cx.focus_handle())
+            .read(cx)
+            .clone();
+        *self.anchor.borrow_mut() = Some(anchor.clone());
+        let cell = self.anchor;
         div()
             .id("dialog-close")
-            .when(self.trigger.is_none(), |this| this.on_click(Self::activate))
+            // A zero-size, out-of-flow node that tracks the anchor: it is never
+            // hovered, so it takes no focus on its own and does not enter the
+            // Tab order, but it sits inside this dialog's dispatch path.
+            .child(div().absolute().size_0().track_focus(&anchor))
+            .when(self.trigger.is_none(), |this| {
+                this.on_click(move |_, window, cx| Self::activate(&cell, window, cx))
+            })
             .children(self.trigger)
             .children(self.children)
             .refine_style(&self.style)

@@ -85,6 +85,15 @@ Settings::new("app-settings")
     ])
 ```
 
+### Selection While Searching
+
+Search keeps the current page selected while it contains matching settings.
+If it no longer matches, the first matching page is selected. A matching
+selected group is preserved; otherwise selection falls back to its page.
+Clearing the search keeps the current page rather than restoring an earlier
+selection. When no settings match, no page content is shown and the selection
+is retained for when results return.
+
 ### Group Variants
 
 ```rust
