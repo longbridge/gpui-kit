@@ -266,6 +266,15 @@ Use `.content_type(...)` on `InputGroupInput` for hints such as a URL or email
 address. Password masking is configured with `InputState::masked`. Both input
 parts support `.context_menu(...)` for a custom right-click menu.
 
+On touch devices, long-press the text to select a word, drag the selection handles,
+and use the edit menu to cut, copy, paste, or select all.
+
+In Rust, both input parts also support `.on_paste(...)` to handle clipboard images
+and files before text is inserted. Return `true` to consume the paste, or `false`
+to allow the default text insertion. The handler is not called while the input is
+disabled or read-only. See [Paste Hook](./input.md#paste-hook) for an attachment
+example and web limitations.
+
 ## Sizes and custom styles
 
 The default group size is Medium. Import `Sizable` to use `.xsmall()`, `.small()`,

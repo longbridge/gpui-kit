@@ -9,11 +9,12 @@ use super::state::{TextInputState, sync_focused_input_registry};
 use super::{InputContentType, sync_native_content_type};
 use crate::button::{Button, ButtonRounded, ButtonVariants as _};
 use crate::native_menu::NativeMenu;
+use crate::touch_selection::{EditMenuItem, TouchSelectionOverlay};
 use crate::{ActiveTheme as _, IconName, RoleOverride, Selectable as _, Sizable as _};
 use gpui::{
-    AccessibleAction, App, Edges, ElementId, IntoElement as _, Pixels, Role, SharedString,
-    StatefulInteractiveElement as _, Styled as _, TextAlign, Window, prelude::FluentBuilder as _,
-    px,
+    AccessibleAction, AnyElement, App, Edges, ElementId, InteractiveElement as _, IntoElement as _,
+    Pixels, Role, SharedString, StatefulInteractiveElement as _, Styled as _, TextAlign,
+    TouchPhase, Window, prelude::FluentBuilder as _, px,
 };
 use gpui_base::InputBase;
 use rust_i18n::t;
@@ -30,6 +31,8 @@ pub(crate) struct InputControl {
     pub(crate) aria_label: Option<SharedString>,
     pub(crate) context_menu_builder:
         Option<Rc<dyn Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu>>,
+    pub(crate) paste_handler:
+        Option<Rc<dyn Fn(&gpui::ClipboardItem, &mut Window, &mut App) -> bool>>,
 }
 
 impl InputControl {
@@ -43,6 +46,7 @@ impl InputControl {
             accessibility_id: None,
             aria_label: None,
             context_menu_builder: None,
+            paste_handler: None,
         }
     }
 
@@ -147,7 +151,85 @@ impl InputControl {
             }),
             cx,
         );
-        state.render_overlays(window, cx)
+        let mut overlays = state.render_overlays(window, cx);
+        overlays
+            .floating
+            .extend(Self::render_touch_selection(state, window, cx));
+        overlays
+    }
+
+    /// The handles and the edit menu of the selection a long press made.
+    ///
+    /// The menu offers what the native context menu would: Cut, Copy, Paste
+    /// and Select All, leaving out what cannot apply right now rather than
+    /// disabling it. Cut, Copy and Paste go through the input's actions, so a
+    /// custom key binding or an open completion menu sees them the same way.
+    fn render_touch_selection(
+        state: &TextInputState,
+        window: &Window,
+        cx: &App,
+    ) -> Vec<AnyElement> {
+        if state.touch_selection(cx).is_none() {
+            return Vec::new();
+        }
+        let capabilities = state.context_menu_capabilities(cx);
+        let editable = capabilities.is_editable();
+        let copyable = capabilities.is_copyable();
+        // Offered whenever the text can change, without peeking at the
+        // clipboard: on iOS every read of it shows the system's paste banner,
+        // and an empty clipboard pastes nothing.
+        let pasteable = editable;
+        let selectable = state.text(cx).len() > 0 && !state.is_all_selected(cx);
+        let focus_handle = state.presentation(cx).focus_handle().clone();
+
+        let dispatch = {
+            let focus_handle = focus_handle.clone();
+            move |action: &dyn gpui::Action, window: &mut Window, cx: &mut App| {
+                focus_handle.dispatch_action(action, window, cx);
+            }
+        };
+        let mut items = Vec::with_capacity(4);
+        if editable && copyable {
+            let dispatch = dispatch.clone();
+            items.push(EditMenuItem::new(t!("Input.Cut"), move |window, cx| {
+                dispatch(&gpui_base::input::Cut, window, cx);
+            }));
+        }
+        if copyable {
+            let dispatch = dispatch.clone();
+            let state = state.clone();
+            items.push(EditMenuItem::new(t!("Input.Copy"), move |window, cx| {
+                dispatch(&gpui_base::input::Copy, window, cx);
+                state.close_edit_menu(cx);
+            }));
+        }
+        if pasteable {
+            let dispatch = dispatch.clone();
+            items.push(EditMenuItem::new(t!("Input.Paste"), move |window, cx| {
+                dispatch(&gpui_base::input::Paste, window, cx);
+            }));
+        }
+        if selectable {
+            let state = state.clone();
+            items.push(EditMenuItem::new(
+                t!("Input.Select All"),
+                move |window, cx| state.select_all_from_edit_menu(window, cx),
+            ));
+        }
+
+        let drag_state = state.clone();
+        let source_state = state.clone();
+        TouchSelectionOverlay::new(
+            ("input-touch-selection", state.entity_id()),
+            move |_, cx| source_state.touch_selection(cx),
+        )
+        .handles(move |edge, phase, position, _, cx| match phase {
+            TouchPhase::Started => drag_state.begin_edge_drag(edge, position, cx),
+            TouchPhase::Moved => drag_state.update_edge_drag(position, cx),
+            TouchPhase::Ended | TouchPhase::Cancelled => drag_state.end_edge_drag(cx),
+        })
+        .items(items)
+        .into_elements(window, cx)
     }
 
     pub(crate) fn frame(
@@ -183,6 +265,11 @@ impl InputControl {
             None if placeholder_is_mask => None,
             None => placeholder.clone(),
         };
+        // Match the editing engine: disabled and read-only controls never invoke the hook.
+        let paste_handler = self
+            .paste_handler
+            .clone()
+            .filter(|_| presentation.is_editable());
         InputBase::new(id)
             .disabled(disabled)
             .role(accessibility_role)
@@ -197,6 +284,15 @@ impl InputControl {
             .when(!disabled, |this| {
                 this.on_a11y_action(AccessibleAction::SetValue, move |data, window, cx| {
                     handle_accessibility_set_value(&accessibility_state, data, window, cx);
+                })
+            })
+            .when_some(paste_handler, |this, handler| {
+                this.capture_action(move |_: &gpui_base::input::Paste, window, cx| {
+                    if let Some(clipboard) = cx.read_from_clipboard() {
+                        if handler(&clipboard, window, cx) {
+                            cx.stop_propagation();
+                        }
+                    }
                 })
             })
     }

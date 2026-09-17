@@ -721,6 +721,19 @@ macro_rules! impl_group_control {
                 self
             }
 
+            /// Intercept clipboard images or files before the default text insertion.
+            ///
+            /// Return `true` to consume the paste, or `false` to insert clipboard text.
+            /// Disabled and read-only inputs do not call the handler. On web,
+            /// synchronous clipboard reads are unavailable; see [`crate::input::Input::on_paste`].
+            pub fn on_paste(
+                mut self,
+                handler: impl Fn(&gpui::ClipboardItem, &mut Window, &mut App) -> bool + 'static,
+            ) -> Self {
+                self.0.input.paste_handler = Some(Rc::new(handler));
+                self
+            }
+
             /// Replace the built-in native context menu.
             pub fn context_menu(
                 mut self,

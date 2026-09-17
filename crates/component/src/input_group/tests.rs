@@ -105,7 +105,8 @@ mod interaction {
     use super::*;
     use crate::{Root, WindowExt as _};
     use gpui::{
-        Context, EntityInputHandler as _, FocusHandle, Modifiers, Refineable as _, Render,
+        ClipboardEntry, ClipboardItem, Context, EntityInputHandler as _, FocusHandle,
+        InputEvent as _, LongPressEvent, Modifiers, Refineable as _, Render, TouchPhase,
         VisualTestContext, point, px, relative,
     };
     use gpui_base::test_support::{ElementSnapshot, find};
@@ -121,6 +122,7 @@ mod interaction {
         clicks: usize,
         editor_style: StyleRefinement,
         width: DefiniteLength,
+        paste_handler: Option<Rc<dyn Fn(&ClipboardItem, &mut Window, &mut App) -> bool>>,
     }
 
     impl Render for Probe {
@@ -136,6 +138,11 @@ mod interaction {
                             group.input(
                                 InputGroupTextarea::new(&self.textarea)
                                     .aria_label("Message")
+                                    .when_some(self.paste_handler.clone(), |input, handler| {
+                                        input.on_paste(move |item, window, cx| {
+                                            handler(item, window, cx)
+                                        })
+                                    })
                                     .editor_style(|mut style| {
                                         style.refine(&self.editor_style);
                                         style
@@ -145,6 +152,11 @@ mod interaction {
                             group.input(
                                 InputGroupInput::new(&self.input)
                                     .aria_label("Address")
+                                    .when_some(self.paste_handler.clone(), |input, handler| {
+                                        input.on_paste(move |item, window, cx| {
+                                            handler(item, window, cx)
+                                        })
+                                    })
                                     .editor_style(|mut style| {
                                         style.refine(&self.editor_style);
                                         style
@@ -201,6 +213,7 @@ mod interaction {
                 clicks: 0,
                 editor_style: StyleRefinement::default(),
                 width: rems(20.).into(),
+                paste_handler: None,
             });
             *capture.borrow_mut() = Some(probe.clone());
             Root::new(probe, window, cx)
@@ -225,6 +238,149 @@ mod interaction {
         let bounds = snapshot(cx, id).bounds();
         cx.simulate_click(bounds.center(), Modifiers::default());
         draw(cx);
+    }
+
+    #[gpui::test]
+    fn paste_hooks_receive_payloads_and_respect_editability(cx: &mut TestAppContext) {
+        for multiline in [false, true] {
+            let (probe, mut cx) = mount(cx, multiline);
+            let state: crate::input::state::TextInputState = probe.read_with(&cx, |probe, _| {
+                if multiline {
+                    probe.textarea.clone().into()
+                } else {
+                    probe.input.clone().into()
+                }
+            });
+            let received = Rc::new(std::cell::RefCell::new(Vec::new()));
+            probe.update(&mut cx, |probe, cx| {
+                let received = received.clone();
+                probe.paste_handler = Some(Rc::new(move |item, _, _| {
+                    received.borrow_mut().push(item.clone());
+                    item.entries().iter().any(|entry| {
+                        matches!(
+                            entry,
+                            ClipboardEntry::Image(_) | ClipboardEntry::ExternalPaths(_)
+                        )
+                    })
+                }));
+                cx.notify();
+            });
+            draw(&mut cx);
+            cx.update(|window, cx| state.focus(window, cx));
+            draw(&mut cx);
+            let payloads = [
+                ClipboardItem {
+                    entries: vec![
+                        ClipboardEntry::Image(gpui::Image::empty()),
+                        ClipboardEntry::String(gpui::ClipboardString::new("image caption".into())),
+                    ],
+                },
+                ClipboardItem {
+                    entries: vec![ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
+                        vec!["attachment.png".into()].into(),
+                    ))],
+                },
+                ClipboardItem::new_string("text".into()),
+            ];
+            for (ix, payload) in payloads.iter().enumerate() {
+                cx.update(|window, cx| {
+                    cx.write_to_clipboard(payload.clone());
+                    window.dispatch_action(Box::new(crate::input::Paste), cx);
+                });
+                draw(&mut cx);
+                assert_eq!(&*received.borrow(), &payloads[..=ix]);
+                assert_eq!(
+                    cx.update(|_, cx| state.text(cx).to_string()),
+                    if ix < 2 { "" } else { "text" }
+                );
+            }
+            for (disabled, readonly) in [(true, false), (false, true)] {
+                probe.update(&mut cx, |probe, cx| {
+                    probe.disabled = disabled;
+                    probe.readonly = readonly;
+                    cx.notify();
+                });
+                draw(&mut cx);
+                cx.update(|window, cx| window.dispatch_action(Box::new(crate::input::Paste), cx));
+                draw(&mut cx);
+                assert_eq!(received.borrow().len(), 3);
+                assert_eq!(cx.update(|_, cx| state.text(cx).to_string()), "text");
+            }
+            probe.update(&mut cx, |probe, cx| {
+                probe.readonly = false;
+                probe.paste_handler = None;
+                cx.notify();
+            });
+            draw(&mut cx);
+            cx.update(|window, cx| window.dispatch_action(Box::new(crate::input::Paste), cx));
+            draw(&mut cx);
+            assert_eq!(received.borrow().len(), 3);
+            assert_eq!(cx.update(|_, cx| state.text(cx).to_string()), "texttext");
+        }
+    }
+
+    #[gpui::test]
+    fn long_press_shows_edit_menu_and_copy_keeps_the_text(cx: &mut TestAppContext) {
+        for multiline in [false, true] {
+            let (probe, mut cx) = mount(cx, multiline);
+            cx.update(|window, cx| {
+                if multiline {
+                    let state = probe.read(cx).textarea.clone();
+                    state.update(cx, |state, cx| {
+                        state.set_value("quick select value", window, cx)
+                    });
+                } else {
+                    let state = probe.read(cx).input.clone();
+                    state.update(cx, |state, cx| {
+                        state.set_value("quick select value", window, cx)
+                    });
+                }
+            });
+            draw(&mut cx);
+            let bounds = probe
+                .read_with(&cx, |probe, cx| {
+                    if multiline {
+                        probe.textarea.read(cx).range_to_bounds(&(0..1))
+                    } else {
+                        probe.input.read(cx).range_to_bounds(&(0..1))
+                    }
+                })
+                .unwrap();
+            let position = bounds.center();
+            for phase in [TouchPhase::Started, TouchPhase::Ended] {
+                cx.update(|window, cx| {
+                    window.dispatch_event(
+                        LongPressEvent {
+                            phase,
+                            start_position: position,
+                            position,
+                        }
+                        .to_platform_input(),
+                        cx,
+                    );
+                });
+                draw(&mut cx);
+            }
+            for command in ["Cut", "Copy", "Paste", "Select All"] {
+                assert!(snapshot(&mut cx, command).visible());
+            }
+            click(&mut cx, "Copy");
+            assert_eq!(
+                cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())),
+                Some("quick".into())
+            );
+            assert!(cx.update(|window, _| find(window, &[], &"Copy".into()).is_none()));
+            assert_eq!(
+                probe.read_with(&cx, |probe, cx| {
+                    if multiline {
+                        probe.textarea.read(cx).value()
+                    } else {
+                        probe.input.read(cx).value()
+                    }
+                }),
+                "quick select value"
+            );
+        }
     }
 
     #[gpui::test]
