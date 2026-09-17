@@ -497,9 +497,9 @@ fn rounded_tip() -> Corners<Pixels> {
 
 impl ChartCard {
     fn render(self, data: &ChartData, cx: &App) -> AnyElement {
-        let accent = cx.theme().chart_2;
-        let mid = cx.theme().chart_3;
-        let deep = cx.theme().chart_4;
+        let accent = cx.theme().chart[1];
+        let mid = cx.theme().chart[2];
+        let deep = cx.theme().chart[3];
         let card = match self {
             Self::AreaStacked => Card::new("Visitors", "April – June 2025")
                 .legend(accent, "Desktop")
@@ -834,10 +834,10 @@ impl ChartCard {
                     .map(|d| d.desktop + d.mobile + d.tablet + d.watch)
                     .sum();
                 Card::new("Visitors by Device", "First week of April")
-                    .legend(cx.theme().chart_4, "Desktop")
-                    .legend(cx.theme().chart_3, "Mobile")
-                    .legend(cx.theme().chart_2, "Tablet")
-                    .legend(cx.theme().chart_1, "Watch")
+                    .legend(cx.theme().chart[3], "Desktop")
+                    .legend(cx.theme().chart[2], "Mobile")
+                    .legend(cx.theme().chart[1], "Tablet")
+                    .legend(cx.theme().chart[0], "Watch")
                     .chart(StackedBarChart::new(days))
                     .headline(format!("{} visitors in eight days", compact(total)))
                     .note("Stacked by device, a custom Plot")
@@ -1026,8 +1026,8 @@ impl ChartCard {
                 )
                 .note("Fully rounded bars keep their shading"),
             Self::BarGradientDiagonal => {
-                let c1 = cx.theme().chart_1;
-                let c2 = cx.theme().chart_5;
+                let c1 = cx.theme().chart[0];
+                let c2 = cx.theme().chart[4];
                 Card::new("Orders", "2025")
                     .chart(
                         BarChart::new(data.metrics.clone())
@@ -1121,7 +1121,7 @@ impl ChartCard {
                         .x(|d| d.month.clone())
                         .y(|d| d.deploys)
                         .dot()
-                        .stroke(cx.theme().chart_5)
+                        .stroke(cx.theme().chart[4])
                         .name("Deploys")
                         .id("line-chart-dots"),
                 )
@@ -1183,13 +1183,13 @@ impl ChartCard {
                 .note("Capacity is added in steps"),
             Self::AreaGradient => Card::new("Revenue vs Last Year", "2025")
                 .legend(accent, "2025")
-                .legend(cx.theme().chart_1, "2024")
+                .legend(cx.theme().chart[0], "2024")
                 .chart(
                     AreaChart::new(data.metrics.clone())
                         .x(|d| d.month.clone())
                         .y(|d| d.last_year)
-                        .stroke(cx.theme().chart_1)
-                        .fill(area_gradient(cx.theme().chart_1))
+                        .stroke(cx.theme().chart[0])
+                        .fill(area_gradient(cx.theme().chart[0]))
                         .name("2024")
                         .y(|d| d.revenue)
                         .stroke(accent)

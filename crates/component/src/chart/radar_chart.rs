@@ -253,13 +253,7 @@ where
     ///
     /// Defaults to the theme chart colors, cycled per series.
     fn series_stroke(&self, ix: usize, cx: &App) -> Hsla {
-        let colors = [
-            cx.theme().chart_1,
-            cx.theme().chart_2,
-            cx.theme().chart_3,
-            cx.theme().chart_4,
-            cx.theme().chart_5,
-        ];
+        let colors = cx.theme().chart;
 
         self.strokes
             .get(ix)

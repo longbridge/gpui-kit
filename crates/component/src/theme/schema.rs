@@ -362,26 +362,15 @@ pub struct ThemeConfigColors {
     /// Input caret color (Blinking cursor).
     #[serde(rename = "caret")]
     pub caret: Option<SharedString>,
-    /// Chart 1 color.
-    #[serde(rename = "chart.1")]
-    pub chart_1: Option<SharedString>,
-    /// Chart 2 color.
-    #[serde(rename = "chart.2")]
-    pub chart_2: Option<SharedString>,
-    /// Chart 3 color.
-    #[serde(rename = "chart.3")]
-    pub chart_3: Option<SharedString>,
-    /// Chart 4 color.
-    #[serde(rename = "chart.4")]
-    pub chart_4: Option<SharedString>,
-    /// Chart 5 color.
-    #[serde(rename = "chart.5")]
-    pub chart_5: Option<SharedString>,
+    /// The chart palette, one color per series in order. Up to five entries;
+    /// missing or unparsable ones fall back to a ramp of the base blue.
+    #[serde(rename = "chart")]
+    pub chart: Option<Vec<SharedString>>,
     /// Bullish color for candlestick charts (upward price movement).
-    #[serde(rename = "chart_bullish")]
+    #[serde(rename = "chart.bullish")]
     pub chart_bullish: Option<SharedString>,
     /// Bearish color for candlestick charts (downward price movement).
-    #[serde(rename = "chart_bearish")]
+    #[serde(rename = "chart.bearish")]
     pub chart_bearish: Option<SharedString>,
     /// Danger background color.
     #[serde(rename = "danger.background")]
@@ -915,11 +904,22 @@ impl ThemeColor {
         );
         apply_color!(group_box_foreground, fallback = self.foreground);
         apply_color!(caret, fallback = self.primary);
-        apply_color!(chart_1, fallback = self.blue.lighten(0.4));
-        apply_color!(chart_2, fallback = self.blue.lighten(0.2));
-        apply_color!(chart_3, fallback = self.blue);
-        apply_color!(chart_4, fallback = self.blue.darken(0.2));
-        apply_color!(chart_5, fallback = self.blue.darken(0.4));
+        let chart_fallback = [
+            self.blue.lighten(0.4),
+            self.blue.lighten(0.2),
+            self.blue,
+            self.blue.darken(0.2),
+            self.blue.darken(0.4),
+        ];
+        for (ix, fallback) in chart_fallback.into_iter().enumerate() {
+            self.chart[ix] = colors
+                .chart
+                .as_ref()
+                .and_then(|chart| chart.get(ix))
+                .and_then(|value| try_parse_color(value).ok())
+                .unwrap_or(fallback);
+            tokens.chart[ix] = self.chart[ix].into();
+        }
         apply_color!(chart_bullish, fallback = self.green);
         apply_color!(chart_bearish, fallback = self.red);
         apply_background_color!(danger, fallback = self.red);
@@ -1109,7 +1109,7 @@ impl Theme {
 mod tests {
     use gpui::{linear_color_stop, linear_gradient, px};
 
-    use crate::{Theme, ThemeConfig, ThemeMode, ThemeSet, try_parse_color};
+    use crate::{Colorize as _, Theme, ThemeConfig, ThemeMode, ThemeSet, try_parse_color};
 
     #[test]
     fn test_semantic_theme_config_parses_and_roundtrips() {
@@ -1185,6 +1185,34 @@ mod tests {
         assert_eq!(theme.primary, try_parse_color("#7c3aed").unwrap());
         assert_eq!(theme.radius, px(7.));
         assert_eq!(theme.semantic_tokens().spacing, Default::default());
+    }
+
+    #[test]
+    fn test_apply_config_reads_the_chart_palette_array() {
+        let config = serde_json::from_value::<ThemeConfig>(serde_json::json!({
+            "name": "Palette",
+            "mode": "light",
+            "colors": {
+                "chart": ["#111111", "not a color", "#333333"],
+                "chart.bullish": "#00ff00",
+                "chart.bearish": "#ff0000"
+            }
+        }))
+        .unwrap();
+
+        let mut theme = Theme::default();
+        theme.apply_config(&std::rc::Rc::new(config));
+
+        // Listed entries are read in order; the unparsable one and the two
+        // missing ones fall back to the ramp of the base blue.
+        assert_eq!(theme.chart[0], try_parse_color("#111111").unwrap());
+        assert_eq!(theme.chart[1], theme.blue.lighten(0.2));
+        assert_eq!(theme.chart[2], try_parse_color("#333333").unwrap());
+        assert_eq!(theme.chart[3], theme.blue.darken(0.2));
+        assert_eq!(theme.chart[4], theme.blue.darken(0.4));
+        assert_eq!(theme.tokens.chart[2].color, theme.chart[2]);
+        assert_eq!(theme.chart_bullish, try_parse_color("#00ff00").unwrap());
+        assert_eq!(theme.chart_bearish, try_parse_color("#ff0000").unwrap());
     }
 
     #[test]

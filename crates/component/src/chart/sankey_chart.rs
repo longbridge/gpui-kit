@@ -518,13 +518,7 @@ impl<T> Plot for SankeyChart<T> {
         let width = bounds.size.width.as_f32();
         let height = bounds.size.height.as_f32();
 
-        let palette = [
-            cx.theme().chart_1,
-            cx.theme().chart_2,
-            cx.theme().chart_3,
-            cx.theme().chart_4,
-            cx.theme().chart_5,
-        ];
+        let palette = cx.theme().chart;
         let colors: Vec<Hsla> = self
             .nodes
             .iter()
@@ -676,13 +670,7 @@ impl<T> Plot for SankeyChart<T> {
         let color = match &self.node_color {
             Some(color) => color(datum),
             None => {
-                let palette = [
-                    cx.theme().chart_1,
-                    cx.theme().chart_2,
-                    cx.theme().chart_3,
-                    cx.theme().chart_4,
-                    cx.theme().chart_5,
-                ];
+                let palette = cx.theme().chart;
                 palette[state.index % palette.len()]
             }
         };

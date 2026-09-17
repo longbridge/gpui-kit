@@ -44,6 +44,8 @@ where
     body_width_ratio: f32,
     x_axis: bool,
     grid: bool,
+    bullish: Option<Hsla>,
+    bearish: Option<Hsla>,
     id: Option<ElementId>,
     hover: Option<CandlestickHover>,
 }
@@ -68,6 +70,8 @@ where
             body_width_ratio: 0.8,
             x_axis: true,
             grid: true,
+            bullish: None,
+            bearish: None,
             id: None,
             hover: None,
         }
@@ -129,6 +133,31 @@ where
     pub fn grid(mut self, grid: bool) -> Self {
         self.grid = grid;
         self
+    }
+
+    /// Set the color of a candle that closed above its open.
+    ///
+    /// Defaults to the theme's `chart.bullish` color. Markets that read a rise
+    /// as red set this and [`Self::bearish`] the other way round.
+    pub fn bullish(mut self, color: impl Into<Hsla>) -> Self {
+        self.bullish = Some(color.into());
+        self
+    }
+
+    /// Set the color of a candle that closed at or below its open.
+    ///
+    /// Defaults to the theme's `chart.bearish` color.
+    pub fn bearish(mut self, color: impl Into<Hsla>) -> Self {
+        self.bearish = Some(color.into());
+        self
+    }
+
+    /// The candle colors, `(bullish, bearish)`, set or from the theme.
+    fn candle_colors(&self, cx: &App) -> (Hsla, Hsla) {
+        (
+            self.bullish.unwrap_or(cx.theme().chart_bullish),
+            self.bearish.unwrap_or(cx.theme().chart_bearish),
+        )
     }
 
     /// The band scale along the x axis. Shared by `paint` and `tooltip_state` so
@@ -208,6 +237,7 @@ where
         }
 
         // Draw candlesticks
+        let (bullish, bearish) = self.candle_colors(cx);
         let origin = bounds.origin;
         let x_fn = x_fn.clone();
         let open_fn = open_fn.clone();
@@ -241,11 +271,7 @@ where
 
             // Determine if bullish (close > open) or bearish (close < open)
             let is_bullish = close > open;
-            let color: Hsla = if is_bullish {
-                cx.theme().chart_bullish
-            } else {
-                cx.theme().chart_bearish
-            };
+            let color = if is_bullish { bullish } else { bearish };
 
             // Calculate candlestick body dimensions
             let center_x = x_tick + band_width / 2.;
@@ -342,11 +368,8 @@ where
         let d = self.data.get(state.index)?;
         let title: SharedString = x_fn(d).into();
         let (open, close) = (open_fn(d), close_fn(d));
-        let color = if close > open {
-            cx.theme().chart_bullish
-        } else {
-            cx.theme().chart_bearish
-        };
+        let (bullish, bearish) = self.candle_colors(cx);
+        let color = if close > open { bullish } else { bearish };
 
         // Highlight the hovered candle with a translucent band the width of its
         // slot, centered where the band spring has reached rather than snapped to

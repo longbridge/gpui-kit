@@ -153,24 +153,20 @@
           "description": "Input caret color (Blinking cursor).",
           "type": ["string", "null"]
         },
-        "chart.1": {
-          "description": "Chart 1 color.",
+        "chart": {
+          "description": "The chart palette, one color per series in order. Up to five entries; missing ones fall back to a ramp of the base blue.",
+          "type": ["array", "null"],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5
+        },
+        "chart.bullish": {
+          "description": "Bullish color for candlestick charts (upward price movement).",
           "type": ["string", "null"]
         },
-        "chart.2": {
-          "description": "Chart 2 color.",
-          "type": ["string", "null"]
-        },
-        "chart.3": {
-          "description": "Chart 3 color.",
-          "type": ["string", "null"]
-        },
-        "chart.4": {
-          "description": "Chart 4 color.",
-          "type": ["string", "null"]
-        },
-        "chart.5": {
-          "description": "Chart 5 color.",
+        "chart.bearish": {
+          "description": "Bearish color for candlestick charts (downward price movement).",
           "type": ["string", "null"]
         },
         "danger.background": {

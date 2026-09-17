@@ -90,7 +90,7 @@ Line::new()
     .data(data)
     .x(|d| x_scale.tick(&d.date))
     .y(|d| y_scale.tick(&d.value))
-    .stroke(cx.theme().chart_1)
+    .stroke(cx.theme().chart[0])
     .stroke_width(px(2.))
     .paint(&bounds, window);
 ```
@@ -115,8 +115,8 @@ Area::new()
     .x(|d| x_scale.tick(&d.date))
     .y0(height)
     .y1(|d| y_scale.tick(&d.value))
-    .fill(cx.theme().chart_1.opacity(0.5))
-    .stroke(cx.theme().chart_1)
+    .fill(cx.theme().chart[0].opacity(0.5))
+    .stroke(cx.theme().chart[0])
     .paint(&bounds, window);
 ```
 
@@ -216,7 +216,7 @@ impl Plot for StackedBarChart {
             .stack_data(&self.series)
             .band_width(x.band_width())
             .x(move |d| x.tick(&d.data.date))
-            .fill(move |_| cx.theme().chart_1);
+            .fill(move |_| cx.theme().chart[0]);
 
         bar.paint(&bounds, window, cx);
     }

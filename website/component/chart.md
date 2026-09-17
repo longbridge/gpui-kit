@@ -289,11 +289,11 @@ AreaChart::new(data)
 AreaChart::new(data)
     .x(|d| d.date.clone())
     .y(|d| d.desktop)  // First series
-    .stroke(cx.theme().chart_1)
-    .fill(cx.theme().chart_1.opacity(0.4))
+    .stroke(cx.theme().chart[0])
+    .fill(cx.theme().chart[0].opacity(0.4))
     .y(|d| d.mobile)   // Second series
-    .stroke(cx.theme().chart_2)
-    .fill(cx.theme().chart_2.opacity(0.4))
+    .stroke(cx.theme().chart[1])
+    .fill(cx.theme().chart[1].opacity(0.4))
 ```
 
 #### Area Chart Styling
@@ -307,7 +307,7 @@ AreaChart::new(data)
     .y(|d| d.value)
     .fill(linear_gradient(
         0.,
-        linear_color_stop(cx.theme().chart_1.opacity(0.4), 1.),
+        linear_color_stop(cx.theme().chart[0].opacity(0.4), 1.),
         linear_color_stop(cx.theme().background.opacity(0.3), 0.),
     ))
 
@@ -377,9 +377,9 @@ RadarChart::new(data)
 RadarChart::new(data)
     .label(|d| d.month.clone())
     .value(|d| d.desktop)
-    .stroke(cx.theme().chart_1)
+    .stroke(cx.theme().chart[0])
     .value(|d| d.mobile)
-    .stroke(cx.theme().chart_2)
+    .stroke(cx.theme().chart[1])
 ```
 
 #### Element Labels
@@ -426,8 +426,8 @@ chart's height, so a label much taller than a line of text needs a smaller
 RadarChart::new(data)
     .label(|d| d.month.clone())
     .value(|d| d.desktop)
-    .stroke(cx.theme().chart_2)
-    .fill(cx.theme().chart_2.opacity(0.2))
+    .stroke(cx.theme().chart[1])
+    .fill(cx.theme().chart[1].opacity(0.2))
     .dot()
 
 // Fixed outer ring value and grid rings
@@ -493,10 +493,18 @@ CandlestickChart::new(data)
 
 #### Candlestick Chart Colors
 
-The candlestick chart automatically uses theme colors:
+A candle that closed above its open is drawn in the theme's `chart.bullish` color and one that closed at or below it in `chart.bearish`. Markets that read a rise as red swap them:
 
-- **Bullish** (close > open): `bullish` color (green)
-- **Bearish** (close < open): `bearish` color (red)
+```rust
+CandlestickChart::new(data)
+    .x(|d| d.date.clone())
+    .open(|d| d.open)
+    .high(|d| d.high)
+    .low(|d| d.low)
+    .close(|d| d.close)
+    .bullish(cx.theme().danger)
+    .bearish(cx.theme().success)
+```
 
 ### SankeyChart
 
@@ -650,7 +658,7 @@ fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pi
             .focus(state.focus())
             .cross_line(CrossLine::new(point(center, state.cross_line.y)).band(px(24.)))
             .title("Title")
-            .row(cx.theme().chart_1, "Series", "42")
+            .row(cx.theme().chart[0], "Series", "42")
             .into_any_element(),
     )
 }
@@ -760,13 +768,10 @@ fn chart_container(
 let chart = LineChart::new(data)
     .x(|d| d.date.clone())
     .y(|d| d.value)
-    .stroke(cx.theme().chart_1); // Uses theme chart colors
+    .stroke(cx.theme().chart[0]); // Uses theme chart colors
 
-// Available theme chart colors:
-// cx.theme().chart_1
-// cx.theme().chart_2
-// cx.theme().chart_3
-// ... up to chart_5
+// The theme's chart palette is an array, one color per series:
+// cx.theme().chart[0] … cx.theme().chart[4]
 ```
 
 ## API Reference
@@ -804,7 +809,7 @@ fn sales_dashboard(data: Vec<SalesData>, cx: &mut Context<Self>) -> impl IntoEle
                         LineChart::new(data.clone())
                             .x(|d| d.month.clone())
                             .y(|d| d.revenue)
-                            .stroke(cx.theme().chart_1)
+                            .stroke(cx.theme().chart[0])
                             .dot(),
                         false,
                         cx,
@@ -817,11 +822,11 @@ fn sales_dashboard(data: Vec<SalesData>, cx: &mut Context<Self>) -> impl IntoEle
                             .value(|d| d.profit as f32)
                             .outer_radius(80.)
                             .color(|d| match d.region.as_str() {
-                                "North" => cx.theme().chart_1,
-                                "South" => cx.theme().chart_2,
-                                "East" => cx.theme().chart_3,
-                                "West" => cx.theme().chart_4,
-                                _ => cx.theme().chart_5,
+                                "North" => cx.theme().chart[0],
+                                "South" => cx.theme().chart[1],
+                                "East" => cx.theme().chart[2],
+                                "West" => cx.theme().chart[3],
+                                _ => cx.theme().chart[4],
                             }),
                         true,
                         cx,
@@ -835,11 +840,11 @@ fn sales_dashboard(data: Vec<SalesData>, cx: &mut Context<Self>) -> impl IntoEle
                     .band(|d| d.region.clone())
                     .value(|d| d.revenue)
                     .fill(|d, _, _, _| match d.region.as_str() {
-                        "North" => cx.theme().chart_1,
-                        "South" => cx.theme().chart_2,
-                        "East" => cx.theme().chart_3,
-                        "West" => cx.theme().chart_4,
-                        _ => cx.theme().chart_5,
+                        "North" => cx.theme().chart[0],
+                        "South" => cx.theme().chart[1],
+                        "East" => cx.theme().chart[2],
+                        "West" => cx.theme().chart[3],
+                        _ => cx.theme().chart[4],
                     })
                     .label(|d| format!("${:.0}k", d.revenue / 1000.)),
                 false,
@@ -866,24 +871,24 @@ fn device_usage_chart(data: Vec<DeviceUsage>, cx: &mut Context<Self>) -> impl In
         AreaChart::new(data)
             .x(|d| d.date.clone())
             .y(|d| d.desktop)
-            .stroke(cx.theme().chart_1)
+            .stroke(cx.theme().chart[0])
             .fill(linear_gradient(
                 0.,
-                linear_color_stop(cx.theme().chart_1.opacity(0.4), 1.),
+                linear_color_stop(cx.theme().chart[0].opacity(0.4), 1.),
                 linear_color_stop(cx.theme().background.opacity(0.3), 0.),
             ))
             .y(|d| d.mobile)
-            .stroke(cx.theme().chart_2)
+            .stroke(cx.theme().chart[1])
             .fill(linear_gradient(
                 0.,
-                linear_color_stop(cx.theme().chart_2.opacity(0.4), 1.),
+                linear_color_stop(cx.theme().chart[1].opacity(0.4), 1.),
                 linear_color_stop(cx.theme().background.opacity(0.3), 0.),
             ))
             .y(|d| d.tablet)
-            .stroke(cx.theme().chart_3)
+            .stroke(cx.theme().chart[2])
             .fill(linear_gradient(
                 0.,
-                linear_color_stop(cx.theme().chart_3.opacity(0.4), 1.),
+                linear_color_stop(cx.theme().chart[2].opacity(0.4), 1.),
                 linear_color_stop(cx.theme().background.opacity(0.3), 0.),
             ))
             .tick_margin(3),
@@ -935,7 +940,7 @@ fn stock_chart(ohlc_data: Vec<StockOHLC>, price_data: Vec<StockData>, cx: &mut C
                 LineChart::new(price_data.clone())
                     .x(|d| d.date.clone())
                     .y(|d| d.price)
-                    .stroke(cx.theme().chart_1)
+                    .stroke(cx.theme().chart[0])
                     .linear()
                     .tick_margin(5),
                 false,
@@ -950,7 +955,7 @@ fn stock_chart(ohlc_data: Vec<StockOHLC>, price_data: Vec<StockData>, cx: &mut C
                     .value(|d| d.volume as f64)
                     .fill(|d, _, _, _| {
                         if d.volume > 1000000 {
-                            cx.theme().chart_1
+                            cx.theme().chart[0]
                         } else {
                             cx.theme().muted_foreground.opacity(0.6)
                         }
@@ -972,7 +977,7 @@ fn stock_chart(ohlc_data: Vec<StockOHLC>, price_data: Vec<StockData>, cx: &mut C
 LineChart::new(data)
     .x(|d| d.x.clone())
     .y(|d| d.y)
-    .stroke(cx.theme().chart_1)
+    .stroke(cx.theme().chart[0])
 
 // Custom color palette
 let colors = [
@@ -980,7 +985,7 @@ let colors = [
     cx.theme().warning,
     cx.theme().destructive,
     cx.theme().info,
-    cx.theme().chart_1,
+    cx.theme().chart[0],
 ];
 
 BarChart::new(data)

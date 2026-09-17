@@ -43,8 +43,8 @@ site and the documented components share one palette.
 | `--sidebar`          | `#fafafa`             | `#0f0f0f`                      | `sidebar.background`                            |
 | `--titlebar`         | `#f8f8f8`             | `#171717`                      | `title_bar.background`                          |
 | `--brand`            | `#171717`             | `#fafafa`                      | `primary.background`                            |
-| `--data-1…5`         | `#93c5fd` → `#1e40af` | blue scale, keyed by `#419cff` | `chart_1…chart_5`                               |
-| logo accent          | `#3b82f6`             | `#419cff`                      | light `chart_2` / dark syntax link and tag blue |
+| `--data-1…5`         | `#93c5fd` → `#1e40af` | blue scale, keyed by `#419cff` | `chart[0]…chart[4]`                               |
+| logo accent          | `#3b82f6`             | `#419cff`                      | light `chart[1]` / dark syntax link and tag blue |
 | `--selection`        | `#55a0fc`             | same                           | `selection.background`                          |
 | `--success`          | `#22c55e`             | same                           | `success.background`                            |
 | `--code-*`           | macos-classic-light   | macos-classic-dark             | `src/*.theme.json`                              |
@@ -61,7 +61,7 @@ Rules that follow from this:
 - **Saturated colour is reserved for data**, exactly as the theme reserves
   `chart_*`. The capability diagrams and charts may use `--data-*`; marketing
   surfaces may not.
-- **The logo accent is per-theme**: `#3b82f6` (`chart_2`) on light and
+- **The logo accent is per-theme**: `#3b82f6` (`chart[1]`) on light and
   `#419cff` (the dark syntax theme’s link and tag blue) on dark, so the mark follows
   the code palette shown on the same background. The
   mark is split into two paths — an open `C`, and the bar-and-stem that turns it
