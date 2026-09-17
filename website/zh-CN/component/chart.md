@@ -740,7 +740,7 @@ let chart = LineChart::new(data)
     .stroke(cx.theme().chart_1);
 ```
 
-主题文件把图表调色板写成一个 `chart` 数组，代码里通过 `cx.theme().chart_1` 到 `cx.theme().chart_5` 访问。
+可用主题色为 `cx.theme().chart_1` 到 `cx.theme().chart_5`（主题文件中的 `chart.1` 到 `chart.5`）。
 
 ## API 参考
 

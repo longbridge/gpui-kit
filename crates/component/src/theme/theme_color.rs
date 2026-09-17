@@ -129,15 +129,15 @@ pub struct ThemeColor {
     pub group_box_foreground: Hsla,
     /// Input caret color (Blinking cursor).
     pub caret: Hsla,
-    /// Chart 1 color: the first entry of the theme file's `chart` palette.
+    /// Chart 1 color (`chart.1` in the theme file).
     pub chart_1: Hsla,
-    /// Chart 2 color: the second entry of the theme file's `chart` palette.
+    /// Chart 2 color (`chart.2` in the theme file).
     pub chart_2: Hsla,
-    /// Chart 3 color: the third entry of the theme file's `chart` palette.
+    /// Chart 3 color (`chart.3` in the theme file).
     pub chart_3: Hsla,
-    /// Chart 4 color: the fourth entry of the theme file's `chart` palette.
+    /// Chart 4 color (`chart.4` in the theme file).
     pub chart_4: Hsla,
-    /// Chart 5 color: the fifth entry of the theme file's `chart` palette.
+    /// Chart 5 color (`chart.5` in the theme file).
     pub chart_5: Hsla,
     /// Bullish color for candlestick charts (upward price movement).
     pub chart_bullish: Hsla,

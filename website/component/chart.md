@@ -770,7 +770,7 @@ let chart = LineChart::new(data)
     .y(|d| d.value)
     .stroke(cx.theme().chart_1); // Uses theme chart colors
 
-// The theme file lists the palette as one `chart` array; in code it is
+// Available theme chart colors (`chart.1` … `chart.5` in the theme file):
 // cx.theme().chart_1 … cx.theme().chart_5
 ```
 

@@ -136,12 +136,12 @@ pub fn parse_theme_key(key: &str) -> ParsedKey {
         "muted_foreground" => ("Muted", "Foreground", "muted.foreground"),
         "skeleton" => ("Skeleton", "Background", "skeleton.background"),
 
-        // Charts: the palette is one `chart` array in the config.
-        "chart_1" => ("Chart", "Color 1", "chart"),
-        "chart_2" => ("Chart", "Color 2", "chart"),
-        "chart_3" => ("Chart", "Color 3", "chart"),
-        "chart_4" => ("Chart", "Color 4", "chart"),
-        "chart_5" => ("Chart", "Color 5", "chart"),
+        // Charts
+        "chart_1" => ("Chart", "Color 1", "chart.1"),
+        "chart_2" => ("Chart", "Color 2", "chart.2"),
+        "chart_3" => ("Chart", "Color 3", "chart.3"),
+        "chart_4" => ("Chart", "Color 4", "chart.4"),
+        "chart_5" => ("Chart", "Color 5", "chart.5"),
         "chart_bullish" => ("Chart", "Bullish", "chart.bullish"),
         "chart_bearish" => ("Chart", "Bearish", "chart.bearish"),
 
