@@ -2,7 +2,10 @@ use crate::{
     highlighter::HighlightTheme, list::ListSettings, notification::NotificationSettings,
     scroll::ScrollbarMode, sheet::SheetSettings,
 };
-use gpui::{App, Global, Hsla, IsZero as _, Pixels, SharedString, Window, WindowAppearance, px};
+use gpui::{
+    App, Global, Hsla, IsZero as _, Pixels, SharedString, Window, WindowAppearance,
+    prelude::FluentBuilder as _, px,
+};
 pub use gpui_base::{
     ColorTokens, RadiusTokens, SemanticThemeTokens, ShadowTokens, SpacingTokens, TextStyleToken,
     TypographyTokens,
@@ -66,6 +69,16 @@ const SCROLLBAR_ENTER: Duration = Duration::from_millis(300);
 const SCROLLBAR_EXIT: Duration = Duration::from_millis(500);
 /// How long the thumb takes to reach its hovered or resting width.
 const SCROLLBAR_EXPAND: Duration = Duration::from_millis(300);
+
+/// The resting thumb width on iOS and Android, matching the 3pt indicator
+/// those platforms draw. Hover and drag keep Base's desktop widths, so a
+/// grabbed thumb still grows under the finger.
+const MOBILE_SCROLLBAR_THUMB_WIDTH: Pixels = px(3.);
+/// Base's resting thumb width, restated so the hovered thumb keeps it when
+/// the mobile resting width would otherwise cascade into it.
+const SCROLLBAR_THUMB_HOVER_WIDTH: Pixels = px(6.);
+/// Base's dragged thumb width, restated for the same reason.
+const SCROLLBAR_THUMB_ACTIVE_WIDTH: Pixels = px(8.);
 
 /// The scrollbar motion this design system projects onto Base.
 ///
@@ -289,16 +302,31 @@ impl Theme {
                         .track(|style| style.bg(self.scrollbar))
                         .track_hover(|style| style.bg(self.scrollbar))
                         .track_active(|style| style.bg(self.scrollbar).border_color(self.border))
-                        .thumb(|style| style.bg(self.tokens.scrollbar_thumb).radius(self.radius))
+                        .thumb(|style| {
+                            style
+                                .bg(self.tokens.scrollbar_thumb)
+                                .radius(self.radius)
+                                .when(gpui_base::is_mobile(), |style| {
+                                    style
+                                        .width(MOBILE_SCROLLBAR_THUMB_WIDTH)
+                                        .radius(RADIUS_FULL)
+                                })
+                        })
                         .thumb_hover(|style| {
                             style
                                 .bg(self.tokens.scrollbar_thumb_hover)
                                 .radius(self.radius)
+                                .when(gpui_base::is_mobile(), |style| {
+                                    style.width(SCROLLBAR_THUMB_HOVER_WIDTH)
+                                })
                         })
                         .thumb_active(|style| {
                             style
                                 .bg(self.tokens.scrollbar_thumb_hover)
                                 .radius(self.radius)
+                                .when(gpui_base::is_mobile(), |style| {
+                                    style.width(SCROLLBAR_THUMB_ACTIVE_WIDTH)
+                                })
                         }),
                 ),
             resizable: gpui_base::ResizableTheme {
