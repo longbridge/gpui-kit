@@ -65,10 +65,18 @@ fn installed_default_mono_font_family(cx: &App) -> SharedString {
 ///
 /// Enumerating fonts costs around a hundred milliseconds on macOS, and the
 /// answer only depends on the system fonts, which do not change while the
-/// process runs.
+/// process runs. An empty answer is not kept: the web has no system fonts
+/// and only sees the ones the application adds, usually after `init`.
 pub(super) fn installed_font_names(cx: &App) -> &'static [String] {
     static NAMES: OnceLock<Vec<String>> = OnceLock::new();
-    NAMES.get_or_init(|| cx.text_system().all_font_names())
+    if let Some(names) = NAMES.get() {
+        return names;
+    }
+    let names = cx.text_system().all_font_names();
+    if names.is_empty() {
+        return &[];
+    }
+    NAMES.get_or_init(|| names)
 }
 
 /// `default` when it is installed, else the first installed alternate, else
