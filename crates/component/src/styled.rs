@@ -1,8 +1,8 @@
 pub use crate::component_traits::{Collapsible, Disableable, Selectable};
 pub use crate::sizing::{Sizable, Size, StyleSized};
 use gpui::{
-    App, BoxShadow, Corners, Edges, Hsla, ParentElement, Pixels, StyleRefinement, Styled, Window,
-    div, hsla, px,
+    App, BoxShadow, Corners, Edges, Hsla, InteractiveElement as _, ParentElement, Pixels,
+    StyleRefinement, Styled, Window, div, hsla, prelude::FluentBuilder as _, px,
 };
 pub use gpui_base::{FocusableExt, RoleOverride, StyledExt, box_shadow, h_flex, v_flex};
 
@@ -263,6 +263,9 @@ pub(crate) fn focus_ring<T: Styled + ParentElement>(
 
     element.child(
         div()
+            .when(cfg!(test), |this| {
+                this.debug_selector(|| "focus-ring".into())
+            })
             .flex_none()
             .absolute()
             .top(-(inset + border_widths.top))
