@@ -1,9 +1,8 @@
 use super::InlineTokenContext;
-use crate::{ActiveTheme as _, Icon, StyledExt as _, tooltip::Tooltip};
+use crate::{ActiveTheme as _, Icon, StyledExt as _};
 use gpui::{
-    App, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, SharedString,
-    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
-    prelude::FluentBuilder as _,
+    App, InteractiveElement as _, IntoElement, ParentElement as _, RenderOnce, StyleRefinement,
+    Styled, Window, div, prelude::FluentBuilder as _,
 };
 
 /// The default tag an [`InlineToken`](super::InlineToken) renders as. Editing
@@ -12,7 +11,6 @@ use gpui::{
 pub struct InlineTokenTag {
     context: InlineTokenContext,
     icon: Option<Icon>,
-    tooltip: Option<SharedString>,
     style: StyleRefinement,
 }
 impl InlineTokenTag {
@@ -20,16 +18,11 @@ impl InlineTokenTag {
         Self {
             context: context.clone(),
             icon: None,
-            tooltip: None,
             style: Default::default(),
         }
     }
     pub fn with_icon(mut self, icon: impl Into<Icon>) -> Self {
         self.icon = Some(icon.into());
-        self
-    }
-    pub fn with_tooltip(mut self, tooltip: impl Into<SharedString>) -> Self {
-        self.tooltip = Some(tooltip.into());
         self
     }
 }
@@ -65,9 +58,6 @@ impl RenderOnce for InlineTokenTag {
                     .text_ellipsis()
                     .child(self.context.token().label().clone()),
             )
-            .when_some(self.tooltip, |this, tooltip| {
-                this.tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-            })
             .refine_style(&self.style)
     }
 }

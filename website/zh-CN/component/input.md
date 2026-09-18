@@ -312,7 +312,7 @@ ID 标识被引用的资源，同一个人被提及两次时两个 token 使用�
 
 ### 自定义外观与打开引用
 
-token 默认渲染为 `InlineTokenTag`。需要图标或 tooltip 时，让 `render_token` 返回自定义的 tag，并通过 `on_token_click` 打开引用：
+token 默认渲染为 `InlineTokenTag`。需要图标时，让 `render_token` 返回自定义的 tag，并通过 `on_token_click` 打开引用：
 
 ```rust
 use gpui_kit::component::{
@@ -322,9 +322,7 @@ use gpui_kit::component::{
 
 Input::new(&input)
     .render_token(|token, _, _| {
-        InlineTokenTag::new(token)
-            .with_icon(IconName::File)
-            .with_tooltip("打开引用")
+        InlineTokenTag::new(token).with_icon(IconName::File)
     })
     .on_token_click(|event: &InlineTokenClickEvent, _, _| {
         // 根据 event.token().id() 查找并打开资源。

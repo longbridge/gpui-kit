@@ -219,7 +219,6 @@ impl TokenExample {
         let reference = Reference::of(token.token());
         InlineTokenTag::new(token)
             .when_some(reference, |tag, reference| tag.with_icon(reference.icon()))
-            .with_tooltip(token.token().text().clone())
             .border_1()
             .border_color(cx.theme().border)
     }

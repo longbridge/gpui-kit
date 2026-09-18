@@ -374,8 +374,8 @@ Pasting inserts plain text.
 
 ### Customize appearance and opening a reference
 
-Tokens render as an `InlineTokenTag` by default. To add an icon or tooltip,
-return one from `render_token`, and use `on_token_click` to open the reference:
+Tokens render as an `InlineTokenTag` by default. To add an icon, return one from
+`render_token`, and use `on_token_click` to open the reference:
 
 ```rust
 use gpui_kit::component::{
@@ -385,9 +385,7 @@ use gpui_kit::component::{
 
 Input::new(&input)
     .render_token(|token, _, _| {
-        InlineTokenTag::new(token)
-            .with_icon(IconName::File)
-            .with_tooltip("Open reference")
+        InlineTokenTag::new(token).with_icon(IconName::File)
     })
     .on_token_click(|event: &InlineTokenClickEvent, _, _| {
         // Look up event.token().id() and open its resource.

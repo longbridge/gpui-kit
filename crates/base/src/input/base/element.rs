@@ -936,8 +936,32 @@ impl<M: InputModeKind> TextElement<M> {
                 continue;
             }
 
-            if let Some(path) = Self::layout_match_range(range, last_layout, bounds) {
-                paths.push(path);
+            // A selected token shows its own selected state, so the text
+            // highlight stops at its edges instead of painting behind it.
+            let mut start = range.start;
+            if state.tokens_visible() {
+                let spans = state.token_spans();
+                let first = spans.partition_point(|s| s.range().end <= range.start);
+                for span in spans[first..]
+                    .iter()
+                    .take_while(|s| s.range().start < range.end)
+                {
+                    if start < span.range().start {
+                        paths.extend(Self::layout_match_range(
+                            start..span.range().start,
+                            last_layout,
+                            bounds,
+                        ));
+                    }
+                    start = span.range().end.max(start);
+                }
+            }
+            if start < range.end {
+                paths.extend(Self::layout_match_range(
+                    start..range.end,
+                    last_layout,
+                    bounds,
+                ));
             }
         }
 
