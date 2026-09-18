@@ -3895,6 +3895,8 @@ mod tests {
         "controls_right",
         "when",
         "on_click",
+        "render_token",
+        "on_token_click",
         "on_mouse_move",
         "on_hover",
         "on_key_down",
