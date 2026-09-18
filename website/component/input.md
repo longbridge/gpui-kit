@@ -367,9 +367,10 @@ The ID names the referenced resource, so two mentions of the same person carry
 the same ID. Use `text` for the value to copy or submit and `with_label` for its
 displayed name. Omit `with_label` to display the text itself.
 
-Users can move the caret to either side of a token, select it, or delete it with
-Backspace/Delete. A selection that crosses part of a token includes the whole
-token. Undo/Redo restores both its text and reference. Pasting inserts plain text.
+Users can move the caret to either side of a token, click it to select it, or
+delete it with Backspace/Delete. A selection that crosses part of a token
+includes the whole token. Undo/Redo restores both its text and reference.
+Pasting inserts plain text.
 
 ### Customize appearance and opening a reference
 
@@ -400,7 +401,8 @@ the renderer; event callbacks may update it. Keep hover and selection styles the
 same size. Tokens are measured whenever they render, so a tag that grows once
 its data arrives reflows on the next frame.
 
-Dragging or Shift-selecting a token does not open it. Read-only inputs allow
+A click selects the token and then opens it; dragging or Shift-selecting a token
+does not open it. Read-only inputs allow
 opening references; disabled inputs do not. To offer a keyboard shortcut for
 opening an exactly selected token, bind `ActivateToken` to a key of your choice;
 assistive technology reaches the same listener through the token's click action.
@@ -419,29 +421,31 @@ Use `content()` to keep the text and references together when saving a draft:
 ```rust
 let draft = input.read(cx).content();
 
-// Restore the saved draft later.
+// Restore the saved draft later: `set_value` takes plain text or content.
 input.update(cx, |state, cx| {
-    state.set_content(draft, window, cx).expect("valid draft");
+    state.set_value(draft, window, cx);
 });
 ```
 
-To restore data from your own storage, build an `InputContent` with matching text
-and token ranges:
+To restore data from your own storage, build an `InputContent` from the text and
+attach each token to its byte range. `with_token` validates the range against the
+text as you go, so a content value is always consistent by the time it is set:
 
 ```rust
 use gpui_kit::component::input::InputContent;
 
 let draft = InputContent::new("Ask @alice")
-    .with_token(4..10, InlineToken::new("person-1", "@alice").with_label("Alice"));
+    .with_token(4..10, InlineToken::new("person-1", "@alice").with_label("Alice"))?;
 ```
 
 At submission time, read a fresh `content()`: `text()` is the message, and
 `tokens()` contains the references still present in it. Use each token's ID to
 look up its resource and handle missing resources before sending.
 
-`set_content` clears undo history and does not emit `InputEvent::Change`.
-Use `set_value` to reset to plain text; it removes tokens even if the text is
-unchanged. Use `replace_all` for an undoable plain-text replacement. Token edits,
+`set_value` clears undo history and does not emit `InputEvent::Change`. Passing
+plain text removes every token, even if the text is unchanged; passing content
+restores its tokens, except in modes that cannot show them. Use `replace_all` for
+an undoable plain-text replacement. Token edits,
 including adding a reference to existing text, emit `InputEvent::Change`.
 Programmatic setters can update read-only or disabled inputs, so check these
 states in application commands that should be unavailable to users.
@@ -469,7 +473,7 @@ import { Input, InputState } from "gpui-component";
 
 // In init():
 this.input = InputState();
-this.input.set_content({
+this.input.set_value({
   text: "🙂 @alice",
   tokens: [{
     range: { start: 3, end: 9 },
@@ -485,8 +489,8 @@ new Input(this.input)
 ```
 
 Use `replace_with_token` or `replace_range_with_token` to insert references,
-`content()` and `set_content()` to save and restore drafts, and `tokens()` to read
-the current references. To remove a reference, pass its current range to
+`content()` and `set_value(content)` to save and restore drafts, and `tokens()` to
+read the current references. To remove a reference, pass its current range to
 `set_selected_range`, then call `replace("")`. Returned snapshots are independent
 objects; changing one does not update the input. Make edits from initialization,
 event or task callbacks, not from renderers.

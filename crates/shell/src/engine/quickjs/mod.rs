@@ -6014,14 +6014,19 @@ globalThis.__gpui = (() => {
   // Retained state is held by handle; the methods close over it so nothing has
   // to read it back off `this`.
   const tokenStateMethods = (handle, invoke) => Object.fromEntries([
-    "content", "tokens", "set_content", "replace_with_token", "replace_range_with_token",
+    "content", "tokens", "replace_with_token", "replace_range_with_token",
     "refresh", "set_selected_range", "replace"
   ].map(name => [name, (...args) => invoke(handle, name, args)]));
+  // A value is plain text or a content snapshot with tokens.
+  const setValue = (handle, setText, invoke) => (next) =>
+    next !== null && typeof next === "object"
+      ? invoke(handle, "set_value", [next])
+      : setText(handle, String(next ?? ""));
   const inputState = (handle) => ({
     ...tokenStateMethods(handle, __input_token_call),
     __handle: handle,
     value: () => __input_value(handle),
-    set_value: (next) => __input_set_value(handle, String(next ?? "")),
+    set_value: setValue(handle, __input_set_value, __input_token_call),
     on: (event, handler) => __input_on(handle, String(event), handler),
     // What makes a text state a number state. There is no `NumberInputState`:
     // the step, the bounds and the mask are fields on this one, so a plain
@@ -6040,7 +6045,7 @@ globalThis.__gpui = (() => {
     ...tokenStateMethods(handle, __textarea_token_call),
     __handle: handle,
     value: () => __textarea_value(handle),
-    set_value: (next) => __textarea_set_value(handle, String(next ?? "")),
+    set_value: setValue(handle, __textarea_set_value, __textarea_token_call),
     on: (event, handler) => __textarea_on(handle, String(event), handler),
     set_rows: (rows) => __textarea_set_rows(handle, oneBased(rows, "set_rows(rows)")),
     set_auto_grow: (min_rows, max_rows) =>

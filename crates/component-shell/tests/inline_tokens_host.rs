@@ -46,10 +46,10 @@ function exercise(state) {
   assert(JSON.stringify(state.content()) === JSON.stringify(saved), "failure must be atomic");
   state.set_selected_range({start: 4, end: 5}); state.replace("");
   assert(state.value() === "🙂 !" && state.tokens().length === 0, "partial token deletion");
-  state.set_content(saved);
+  state.set_value(saved);
   state.set_value(state.value());
   assert(state.tokens().length === 0, "explicit same value clears identity");
-  state.set_content(saved);
+  state.set_value(saved);
   return state;
 }
 export default class TokenHost extends View {

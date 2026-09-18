@@ -2999,14 +2999,14 @@ const BASE: &str = r#"  /** A row. */
   export interface InputState {
     content(): InputContent;
     tokens(): InlineTokenSpan[];
-    set_content(content: InputContent): void;
     replace_with_token(token: InlineToken): void;
     replace_range_with_token(range: InputRange, token: InlineToken): void;
     refresh(): void;
     set_selected_range(range: InputRange): void;
     replace(text: string): void;
     value(): string;
-    set_value(next: string): void;
+    /** Plain text, or a content snapshot to restore its tokens as well. */
+    set_value(next: string | InputContent): void;
     /** `change`, `submit`, `focus` or `blur`. */
     on(event: "change" | "submit" | "focus" | "blur", handler: (event: InputEvent, cx: Context) => void): boolean;
     /**
@@ -3067,14 +3067,14 @@ const BASE: &str = r#"  /** A row. */
   export interface TextareaState {
     content(): InputContent;
     tokens(): InlineTokenSpan[];
-    set_content(content: InputContent): void;
     replace_with_token(token: InlineToken): void;
     replace_range_with_token(range: InputRange, token: InlineToken): void;
     refresh(): void;
     set_selected_range(range: InputRange): void;
     replace(text: string): void;
     value(): string;
-    set_value(next: string): void;
+    /** Plain text, or a content snapshot to restore its tokens as well. */
+    set_value(next: string | InputContent): void;
     /** `change`, `submit`, `focus` or `blur`. */
     on(event: "change" | "submit" | "focus" | "blur", handler: (event: InputEvent, cx: Context) => void): boolean;
     /** Shows this many rows. */

@@ -76,7 +76,7 @@ Textarea::new(&notes)
 
 ## 原子行内 token
 
-在多行消息中加入人员提及、文件引用或命令时，可以使用 token。通过 `TextareaState::replace_with_token` 插入，或用 `set_content` 恢复已有草稿。默认标签可以直接使用，需要图标等自定义内容时再设置 renderer：
+在多行消息中加入人员提及、文件引用或命令时，可以使用 token。通过 `TextareaState::replace_with_token` 插入，或用 `set_value` 恢复已有草稿。默认标签可以直接使用，需要图标等自定义内容时再设置 renderer：
 
 ```rust
 Textarea::new(&state)

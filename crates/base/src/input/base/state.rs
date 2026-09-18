@@ -908,7 +908,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         (0, 0, None)
     }
 
-    /// Set the text of the input field.
+    /// Set the value of the input field: plain text, or [`InputContent`] to
+    /// restore text together with its inline tokens. Editing history is
+    /// cleared and no [`InputEvent::Change`] is emitted.
     ///
     /// For single-line inputs the caret is placed at the end of the text while
     /// the view is scrolled back to the start, so a long value shows its
@@ -916,14 +918,16 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// inputs reset the selection to `0..0`.
     pub fn set_value(
         &mut self,
-        value: impl Into<SharedString>,
+        value: impl Into<super::InputContent>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let content = value.into();
         self.inline_tokens = None;
         self.undo_manager.set_ignoring(true);
         self.emit_events = false;
-        self.replace_text(value, window, cx);
+        self.replace_text(content.text().clone(), window, cx);
+        self.install_tokens(content);
         self.undo_manager.set_ignoring(false);
         self.emit_events = true;
 
@@ -4491,6 +4495,38 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_inline_token_click_selects_it(cx: &mut TestAppContext) {
+        use crate::input::InlineToken;
+        cx.update(crate::init);
+        let view = InputView::build(cx, |state| state.default_value("before @alice after"));
+        view.window_handle
+            .update(cx, |_, window, cx| {
+                view.input.update(cx, |state, cx| {
+                    state
+                        .replace_range_with_token(
+                            7..13,
+                            InlineToken::new("a", "@alice"),
+                            window,
+                            cx,
+                        )
+                        .unwrap();
+                    state.set_selected_range(0..0, cx);
+                });
+            })
+            .unwrap();
+        let mut visual = VisualTestContext::from_window(view.window_handle.into(), cx);
+        visual.update(|window, cx| window.draw(cx).clear(cx));
+        let bounds = view
+            .input
+            .read_with(&visual, |state, _| state.range_to_bounds(&(7..13)).unwrap());
+        visual.simulate_click(bounds.center(), gpui::Modifiers::default());
+        visual.run_until_parked();
+        view.input.read_with(&visual, |state, _| {
+            assert_eq!(state.selected_range(), 7..13, "a click selects the token");
+        });
+    }
+
+    #[gpui::test]
     fn test_inline_token_edit_history_and_validation(cx: &mut TestAppContext) {
         let view = InputView::build(cx, |state| state.default_value("问 @alice!"));
         view.window_handle
@@ -4551,8 +4587,10 @@ mod tests {
                 view.input.update(cx, |state, cx| {
                     let content = InputContent::new("@a@b\n后面")
                         .with_token(0..2, InlineToken::new("a", "@a"))
-                        .with_token(2..4, InlineToken::new("b", "@b"));
-                    state.set_content(content.clone(), window, cx).unwrap();
+                        .unwrap()
+                        .with_token(2..4, InlineToken::new("b", "@b"))
+                        .unwrap();
+                    state.set_value(content.clone(), window, cx);
                     state.set_selected_range(2..2, cx);
                     assert_eq!(state.previous_boundary(2), 0);
                     assert_eq!(state.next_boundary(2), 4);
@@ -4580,11 +4618,19 @@ mod tests {
         view.window_handle
             .update(cx, |_, window, cx| {
                 view.input.update(cx, |state, cx| {
-                    let content = InputContent::new("a\u{301}")
-                        .with_token(0..1, InlineToken::new("bad", "a"));
                     assert_eq!(
-                        state.set_content(content, window, cx),
-                        Err(InlineTokenError::InvalidBoundary)
+                        InputContent::new("a\u{301}")
+                            .with_token(0..1, InlineToken::new("bad", "a"))
+                            .err(),
+                        Some(InlineTokenError::InvalidBoundary)
+                    );
+                    assert_eq!(
+                        InputContent::new("@a@a")
+                            .with_token(0..2, InlineToken::new("a", "@a"))
+                            .unwrap()
+                            .with_token(1..3, InlineToken::new("x", "a@"))
+                            .err(),
+                        Some(InlineTokenError::OverlappingTokens)
                     );
                     state
                         .replace_with_token(InlineToken::new("a", "@a"), window, cx)

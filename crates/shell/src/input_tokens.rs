@@ -86,7 +86,7 @@ fn decode_content(value: &Data) -> Result<InputContent> {
         content = content.with_token(
             range(text, field(span, "range")?)?,
             token(field(span, "token")?)?,
-        );
+        )?;
     }
     Ok(content)
 }
@@ -191,10 +191,9 @@ pub fn inline_token_click_data(event: &InlineTokenClickEvent, text: &Rope) -> Da
 
 pub(crate) const METHODS: &[(&str, &str, bool)] = &[
     ("value", "(): string", true),
-    ("set_value", "(text: string): void", false),
+    ("set_value", "(value: string | InputContent): void", false),
     ("content", "(): InputContent", true),
     ("tokens", "(): InlineTokenSpan[]", true),
-    ("set_content", "(content: InputContent): void", false),
     ("replace_with_token", "(token: InlineToken): void", false),
     (
         "replace_range_with_token",
@@ -221,14 +220,12 @@ macro_rules! state_binding {
                 ("tokens", []) => {
                     Ok(field(&content_data(&entity.read(cx).content()), "tokens")?.clone())
                 }
-                ("set_value", [text]) => {
-                    let text = string(text)?.to_owned();
-                    entity.update(cx, |state, cx| state.set_value(text, window, cx));
-                    Ok(Data::Null)
-                }
-                ("set_content", [content]) => {
-                    let content = decode_content(content)?;
-                    entity.update(cx, |state, cx| state.set_content(content, window, cx))?;
+                ("set_value", [value]) => {
+                    let content = match value {
+                        Data::String(text) => InputContent::new(text.to_owned()),
+                        value => decode_content(value)?,
+                    };
+                    entity.update(cx, |state, cx| state.set_value(content, window, cx));
                     Ok(Data::Null)
                 }
                 ("replace_with_token", [value]) => {

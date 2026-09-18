@@ -1400,6 +1400,8 @@ impl<M: InputModeKind> TextElement<M> {
             .h(token.line_height())
             .max_w(token.available_width())
             .overflow_hidden()
+            // A token is an object, not text: the arrow, never the I-beam.
+            .cursor_default()
             .when(accessible, |this| {
                 this.role(gpui::Role::Button)
                     .aria_label(token.token().label().clone())
@@ -1478,7 +1480,7 @@ impl<M: InputModeKind> TextElement<M> {
                 });
             })
             .on_click(move |event, window, cx| {
-                let activation = click_state.update(cx, |state, _| {
+                let activation = click_state.update(cx, |state, cx| {
                     let (pressed, revision, _) = state.pressed_token.take()?;
                     if pressed != start || revision != state.document_revision {
                         return None;
@@ -1489,7 +1491,11 @@ impl<M: InputModeKind> TextElement<M> {
                     let span = state
                         .token_spans()
                         .iter()
-                        .find(|s| s.range().start == start)?;
+                        .find(|s| s.range().start == start)?
+                        .clone();
+                    // A click selects the whole token; opening it is the
+                    // listener's decision.
+                    state.set_selected_range(span.range(), cx);
                     let bounds = state.range_to_bounds(&span.range())?;
                     state.token_activation(start, bounds, event.clone())
                 });

@@ -80,6 +80,6 @@ input.update(cx, |state, cx| {
 });
 ```
 
-token 默认显示为无装饰标签。使用 `render_token` 提供自己的单行元素，通过 `on_token_click` 打开引用。复制和 `value()` 返回 `@alice` 这样的真实文本。用 `content()` 保存草稿、`set_content()` 恢复草稿，可以保留其中的引用。
+token 默认显示为无装饰标签。使用 `render_token` 提供自己的单行元素，通过 `on_token_click` 打开引用。复制和 `value()` 返回 `@alice` 这样的真实文本。用 `content()` 保存草稿、`set_value(content)` 恢复草稿，可以保留其中的引用。
 
 自定义展示、草稿恢复和范围单位见 [Input 的 token 示例](../../component/input.md#原子行内-token)。数据类型从 `gpui_kit::base::input` 导入。JavaScript 使用 `gpui-base` 中的 `InputState.new()`，它提供相同的 token 方法。

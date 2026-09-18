@@ -376,5 +376,5 @@ InputGroup::new("composer")
 ```
 
 The JavaScript group controls also expose `render_token` and `on_token_click`.
-Retain the same input state across redraws; call `set_content` explicitly to
-restore a draft. See [atomic inline tokens](./input.md#atomic-inline-tokens).
+Retain the same input state across redraws; call `set_value` with saved content
+to restore a draft. See [atomic inline tokens](./input.md#atomic-inline-tokens).

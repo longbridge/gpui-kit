@@ -235,8 +235,8 @@ const tokenDraft = {
 };
 
 export function initializeRegisteredExamples() {
-  retained("token-input", () => { const input = InputState(); input.set_content(tokenDraft); return input; });
-  retained("token-textarea", () => { const input = TextareaState(); input.set_content(tokenDraft); return input; });
+  retained("token-input", () => { const input = InputState(); input.set_value(tokenDraft); return input; });
+  retained("token-textarea", () => { const input = TextareaState(); input.set_value(tokenDraft); return input; });
   for (const [id, placeholder, value] of inputGroupFields) {
     retained(`input-group-extra:${id}`, () => InputState(placeholder, value));
   }
@@ -528,7 +528,7 @@ function tokenExample(multiline, cx) {
           setState(`${key}-saved`, input.content(), cx);
         }))
         .child(new Button(`${key}-restore`).label("Restore draft").on_click((_event, cx) => {
-          input.set_content(/** @type {import("gpui-component").InputContent} */ (state(`${key}-saved`, tokenDraft)));
+          input.set_value(/** @type {import("gpui-component").InputContent} */ (state(`${key}-saved`, tokenDraft)));
           cx.notify();
         }))
         .child(new Button(`${key}-submit`).label("Submit").on_click((_event, cx) => {

@@ -82,7 +82,10 @@ impl InlineTokenSpan {
     }
 }
 
-/// An owned, coherent text-and-token snapshot, suitable for saving a draft.
+/// An owned, coherent text-and-token snapshot: what `content()` returns and
+/// what `set_value` accepts. Plain text converts into content without tokens,
+/// and every token is validated against the text as it is attached, so a
+/// content value is always consistent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InputContent {
     text: SharedString,
@@ -95,9 +98,34 @@ impl InputContent {
             tokens: vec![],
         }
     }
-    pub fn with_token(mut self, range: Range<usize>, token: InlineToken) -> Self {
-        self.tokens.push(InlineTokenSpan { range, token });
-        self
+    /// Attach a token to a half-open UTF-8 byte range of the text. The range
+    /// must be nonempty, sit on grapheme boundaries, contain exactly the
+    /// token's text and not overlap another token.
+    pub fn with_token(
+        mut self,
+        range: Range<usize>,
+        token: InlineToken,
+    ) -> Result<Self, InlineTokenError> {
+        token.validate()?;
+        validate_range(&self.text, &range)?;
+        if range.is_empty() {
+            return Err(InlineTokenError::InvalidRange);
+        }
+        if &self.text[range.clone()] != token.text.as_ref() {
+            return Err(InlineTokenError::TextMismatch);
+        }
+        let ix = self
+            .tokens
+            .partition_point(|span| span.range.end <= range.start);
+        if self
+            .tokens
+            .get(ix)
+            .is_some_and(|span| span.range.start < range.end)
+        {
+            return Err(InlineTokenError::OverlappingTokens);
+        }
+        self.tokens.insert(ix, InlineTokenSpan { range, token });
+        Ok(self)
     }
     pub fn text(&self) -> &SharedString {
         &self.text
@@ -105,27 +133,31 @@ impl InputContent {
     pub fn tokens(&self) -> &[InlineTokenSpan] {
         &self.tokens
     }
-
-    fn validate(&mut self) -> Result<(), InlineTokenError> {
-        self.tokens.sort_by_key(|span| span.range.start);
-        let mut end = 0;
-        for span in &self.tokens {
-            span.token.validate()?;
-            validate_range(&self.text, &span.range)?;
-            if span.range.is_empty() {
-                return Err(InlineTokenError::InvalidRange);
-            }
-            if span.range.start < end {
-                return Err(InlineTokenError::OverlappingTokens);
-            }
-            if &self.text[span.range.clone()] != span.token.text.as_ref() {
-                return Err(InlineTokenError::TextMismatch);
-            }
-            end = span.range.end;
-        }
-        Ok(())
-    }
 }
+
+macro_rules! content_from_text {
+    ($($text:ty),* $(,)?) => {
+        $(impl From<$text> for InputContent {
+            fn from(text: $text) -> Self {
+                Self::new(text)
+            }
+        })*
+    };
+}
+// Every text type `set_value` accepted before it took content.
+content_from_text!(
+    &str,
+    &mut str,
+    &String,
+    String,
+    char,
+    Box<str>,
+    std::sync::Arc<str>,
+    &std::sync::Arc<str>,
+    std::borrow::Cow<'_, str>,
+    &SharedString,
+    SharedString,
+);
 
 /// A rejected token operation never partially changes the document.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -340,30 +372,18 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.pending_token = None;
         Ok(())
     }
-    fn restore_content(
-        &mut self,
-        mut content: InputContent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Result<(), InlineTokenError> {
-        self.check_token_mode()?;
-        content.validate()?;
-        if self.normalize_input(&content.text) != content.text.as_ref() {
-            return Err(InlineTokenError::TextMismatch);
-        }
-        if !self.is_valid_input(&content.text, cx) {
-            return Err(InlineTokenError::ValidationRejected);
-        }
-        self.validated_token_edit = true;
-        self.set_value(content.text, window, cx);
-        self.validated_token_edit = false;
-        self.inline_tokens = (!content.tokens.is_empty()).then(|| {
+    /// Adopt the tokens of content whose text was just installed by
+    /// `set_value`. Tokens are dropped when this mode cannot show them or when
+    /// normalization changed the text, since their ranges would no longer
+    /// describe it.
+    pub(super) fn install_tokens(&mut self, content: InputContent) {
+        let supported = !M::CODE_EDITOR && self.mask_pattern.is_none();
+        let text_kept = self.text == content.text.as_ref();
+        self.inline_tokens = (supported && text_kept && !content.tokens.is_empty()).then(|| {
             Box::new(InlineTokenStore {
                 spans: content.tokens,
             })
         });
-        self.refresh(cx);
-        Ok(())
     }
 }
 
@@ -392,20 +412,12 @@ macro_rules! token_api {
             pub fn tokens(&self) -> &[InlineTokenSpan] {
                 self.token_spans()
             }
+            /// The text with its tokens, as `set_value` accepts it.
             pub fn content(&self) -> InputContent {
                 InputContent {
                     text: self.value(),
                     tokens: self.token_spans().to_vec(),
                 }
-            }
-            /// Restore a draft silently, clearing editing history like `set_value`.
-            pub fn set_content(
-                &mut self,
-                content: InputContent,
-                window: &mut Window,
-                cx: &mut Context<Self>,
-            ) -> Result<(), InlineTokenError> {
-                self.restore_content(content, window, cx)
             }
         }
     };

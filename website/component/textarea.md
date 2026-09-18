@@ -84,7 +84,7 @@ textarea.
 
 Use tokens to include mentions, file references or commands in a multi-line
 message. Insert a token with `TextareaState::replace_with_token`, or restore a
-saved draft with `set_content`. The default label is ready to use; add a renderer
+saved draft with `set_value`. The default label is ready to use; add a renderer
 when you want an icon or other custom content:
 
 ```rust
