@@ -68,7 +68,7 @@ pub fn init(cx: &mut App) {
             .get(&theme_name)
             .cloned()
         {
-            Theme::global_mut(cx).apply_config(&theme);
+            Theme::update(cx, |current| current.apply_config(&theme));
         }
     }) {
         tracing::error!("Failed to watch themes directory: {}", err);

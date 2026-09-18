@@ -124,7 +124,7 @@ Notifications are stacked separately for each placement.
 use gpui_kit::Anchor;
 
 // Global default (default: Anchor::TopRight)
-Theme::global_mut(cx).notification.placement = Anchor::BottomRight;
+Theme::update(cx, |theme| theme.notification.placement = Anchor::BottomRight);
 
 // Per-notification override
 Notification::info("Download complete.")
@@ -236,7 +236,9 @@ Notification::info("Your download is ready.")
     .system()
 
 // Or set a global default for all notifications
-Theme::global_mut(cx).notification.delivery = NotificationDelivery::InAppAndSystem;
+Theme::update(cx, |theme| {
+    theme.notification.delivery = NotificationDelivery::InAppAndSystem
+});
 ```
 
 The notification's title and message become the system notification's title

@@ -110,7 +110,7 @@ Notification::new()
 use gpui_kit::Anchor;
 
 // 全局默认值（默认：`Anchor::TopRight`）
-Theme::global_mut(cx).notification.placement = Anchor::BottomRight;
+Theme::update(cx, |theme| theme.notification.placement = Anchor::BottomRight);
 
 // 单条通知覆盖
 Notification::info("Download complete.")
@@ -208,7 +208,9 @@ Notification::info("Your download is ready.")
     .system()
 
 // 或为所有通知设置全局默认值
-Theme::global_mut(cx).notification.delivery = NotificationDelivery::InAppAndSystem;
+Theme::update(cx, |theme| {
+    theme.notification.delivery = NotificationDelivery::InAppAndSystem
+});
 ```
 
 通知的标题和消息分别成为系统通知的标题和正文；两者都缺失时不会投递。用相同的 `.id::<T>()` 再次推送会替换之前的系统通知，`window.remove_notification::<T>(cx)` / `window.clear_notifications(cx)` 会将其撤回。toast 自动隐藏时，系统通知会保留在通知中心。

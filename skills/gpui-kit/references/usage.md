@@ -342,15 +342,18 @@ div()
 ### Switch Theme
 
 ```rust
-use gpui_kit::component::Theme;
+use gpui_kit::component::{Theme, ThemeMode};
 
-// Toggle light/dark
-cx.update_global::<Theme, _>(|theme, cx| {
-    theme.toggle_mode(cx);
-});
+// Switch light/dark: loads that mode's registered theme
+Theme::change(ThemeMode::Dark, None, cx);
+// or, as one edit among others
+Theme::update(cx, |theme| theme.mode = ThemeMode::Dark);
 
 // Load a named theme
-Theme::global_mut(cx).apply_config(&theme_config);
+Theme::update(cx, |theme| theme.apply_config(&theme_config));
+
+// Edit fields; `update` keeps colors, tokens and the Base projection in step
+Theme::update(cx, |theme| theme.radius = px(8.));
 ```
 
 ---
