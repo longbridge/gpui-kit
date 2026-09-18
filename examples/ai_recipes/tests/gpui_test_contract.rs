@@ -1,7 +1,7 @@
 // Preserve the published #[gpui_kit::test] API.
-// This package has its own workspace and depends only on gpui-kit. Running the
-// same contract here prevents Kit's direct GPUI dependency from hiding a broken
-// re-export or macro expansion in consumers.
+// This package depends only on gpui-kit, without a direct GPUI dependency.
+// Running the same contract here prevents Kit's own GPUI dependency from hiding
+// a broken re-export or macro expansion in consumers.
 #[path = "../../../crates/kit/tests/test_macro.rs"]
 mod test_macro;
 

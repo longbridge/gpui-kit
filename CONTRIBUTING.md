@@ -47,6 +47,20 @@ Before opening a pull request, please make sure that:
   When using AI, ask it to avoid unrelated refactors, cleanup, or formatting.
   **Less is better.**
 
+### Describe public API changes
+
+A pull request that adds, changes or removes anything public — a type, a
+function, a builder method, an action, a re-export, a JavaScript method or a
+TypeScript declaration — lists it in the description under a `## Public API`
+section, grouped by crate, with the signature as a reviewer would read it in
+the docs. Say what each item is for in one line; a name alone is not enough.
+The reviewer should be able to judge the API from the description without
+reading the diff.
+
+Changes to existing public items go under `## Breaking Changes` with a `diff`
+block showing the old and the new usage, even when the old form still
+compiles. Additive changes are not breaking, but they are still listed.
+
 Well-prepared pull requests are easier for us to review and may be merged very
 quickly. If a contribution is already in good shape, maintainers may directly
 help polish small details and move it forward.

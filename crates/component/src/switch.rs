@@ -1,5 +1,6 @@
 use crate::{
-    ActiveTheme, Disableable, Side, Sizable, Size, StyledExt, text::Text, tooltip::ComponentTooltip,
+    ActiveTheme, Disableable, FocusableExt, Side, Sizable, Size, StyledExt, ThemeStyled as _,
+    text::Text, tooltip::ComponentTooltip,
 };
 use gpui::{
     App, Background, ElementId, Hsla, InteractiveElement, IntoElement, ParentElement as _,
@@ -24,6 +25,9 @@ pub struct Switch {
     size: Size,
     color: Option<Hsla>,
     tooltip: ComponentTooltip,
+    tab_stop: bool,
+    tab_index: isize,
+    focus_ring_enabled: bool,
 }
 
 impl Switch {
@@ -42,6 +46,9 @@ impl Switch {
             size: Size::Medium,
             color: None,
             tooltip: ComponentTooltip::default(),
+            tab_stop: true,
+            tab_index: 0,
+            focus_ring_enabled: true,
         }
     }
 
@@ -102,6 +109,19 @@ impl Switch {
         self.tooltip.text = Some((tooltip.into(), None));
         self
     }
+
+    /// Set whether the switch participates in keyboard focus traversal,
+    /// default is true.
+    pub fn tab_stop(mut self, tab_stop: bool) -> Self {
+        self.tab_stop = tab_stop;
+        self
+    }
+
+    /// Set the focus traversal index within a GPUI tab group, default is 0.
+    pub fn tab_index(mut self, tab_index: isize) -> Self {
+        self.tab_index = tab_index;
+        self
+    }
 }
 
 impl Styled for Switch {
@@ -124,6 +144,17 @@ impl Disableable for Switch {
     }
 }
 
+impl FocusableExt for Switch {
+    fn focus_ring(mut self, enabled: bool) -> Self {
+        self.focus_ring_enabled = enabled;
+        self
+    }
+
+    fn is_focus_ring_enabled(&self) -> bool {
+        self.focus_ring_enabled
+    }
+}
+
 impl RenderOnce for Switch {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let checked = self.checked;
@@ -132,6 +163,11 @@ impl RenderOnce for Switch {
             .accessibility_label
             .clone()
             .or_else(|| self.label.as_ref().map(|label| label.get_text(cx)));
+        let focus_handle = window
+            .use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle())
+            .read(cx)
+            .clone();
+        let is_focused = focus_handle.is_focused(window);
 
         let checked_bg = self
             .color
@@ -193,6 +229,9 @@ impl RenderOnce for Switch {
                 .when_some(on_click, |this, on_click| {
                     this.on_change(move |next, _, window, cx| on_click(&next, window, cx))
                 })
+                .tab_stop(self.tab_stop)
+                .tab_index(self.tab_index)
+                .track_focus(&focus_handle)
                 .h_flex()
                 .gap_2()
                 .items_start()
@@ -210,13 +249,25 @@ impl RenderOnce for Switch {
                         .rounded(radius)
                         .flex()
                         .items_center()
-                        .border(inset)
+                        // The thumb inset is a 1px border plus 1px padding,
+                        // not a 2px border: the focus ring tints the border
+                        // solid, and that 1px line is what keeps the ring
+                        // visible on an unchecked track. Its 50% halo alone
+                        // lands within a few values of `switch.background`
+                        // in both default modes.
+                        .border_1()
                         .border_color(cx.theme().transparent)
+                        .p(inset - px(1.))
                         .when(!checked, |this| this.bg(unchecked_bg))
                         .styles(|styles| {
                             styles
                                 .checked(|style| style.bg(checked_bg))
                                 .disabled(|style| style.bg(disabled_bg))
+                        })
+                        // The ring hugs the track, not the row, so the label
+                        // stays outside it.
+                        .when(is_focused && self.focus_ring_enabled, |this| {
+                            this.focus_ring_style(window, cx)
                         })
                         .map(|this| self.tooltip.apply(this))
                         .child(
@@ -366,6 +417,89 @@ mod tests {
         assert_eq!(toggles.get(), 0);
         assert_eq!(parent_clicks.get(), 0);
         cx.update(|window, cx| assert!(window.focused(cx).is_none()));
+    }
+
+    struct FocusRingHarness {
+        disabled: bool,
+        focus_ring: bool,
+    }
+
+    impl Render for FocusRingHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().id("switch-parent").tab_group().size(px(100.)).child(
+                Switch::new("switch")
+                    .label("Airplane mode")
+                    .disabled(self.disabled)
+                    .focus_ring(self.focus_ring),
+            )
+        }
+    }
+
+    fn focus_ring_harness(
+        cx: &mut TestAppContext,
+        disabled: bool,
+        focus_ring: bool,
+    ) -> &mut VisualTestContext {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(move |_, _| FocusRingHarness {
+            disabled,
+            focus_ring,
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx
+    }
+
+    #[gpui::test]
+    fn focus_ring_hugs_the_track_when_the_switch_is_focused(cx: &mut TestAppContext) {
+        let cx = focus_ring_harness(cx, false, true);
+        assert!(
+            cx.debug_bounds("focus-ring").is_none(),
+            "an unfocused switch draws no ring"
+        );
+
+        cx.update(|window, cx| window.focus_next(cx));
+        cx.update(|window, cx| {
+            assert!(window.focused(cx).is_some());
+            window.draw(cx).clear(cx);
+        });
+
+        let ring = cx
+            .debug_bounds("focus-ring")
+            .expect("a focused switch must draw its focus ring");
+        let bar = cx.debug_bounds("switch-bar").unwrap();
+        let label = cx.debug_bounds("switch-label").unwrap();
+        assert!(ring.contains(&bar.origin), "the ring surrounds the track");
+        assert!(
+            ring.right() < label.origin.x,
+            "the ring hugs the track and leaves the label outside"
+        );
+    }
+
+    #[gpui::test]
+    fn focus_ring_can_be_turned_off(cx: &mut TestAppContext) {
+        let cx = focus_ring_harness(cx, false, false);
+        cx.update(|window, cx| window.focus_next(cx));
+        cx.update(|window, cx| {
+            assert!(window.focused(cx).is_some());
+            window.draw(cx).clear(cx);
+        });
+
+        assert!(
+            cx.debug_bounds("focus-ring").is_none(),
+            "`focus_ring(false)` must not draw a ring"
+        );
+    }
+
+    #[gpui::test]
+    fn disabled_switch_takes_no_focus_and_draws_no_ring(cx: &mut TestAppContext) {
+        let cx = focus_ring_harness(cx, true, true);
+        cx.update(|window, cx| window.focus_next(cx));
+        cx.update(|window, cx| {
+            assert!(window.focused(cx).is_none());
+            window.draw(cx).clear(cx);
+        });
+
+        assert!(cx.debug_bounds("focus-ring").is_none());
     }
 
     #[gpui::test]

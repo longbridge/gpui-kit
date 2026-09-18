@@ -225,7 +225,18 @@ const retained = (key, create) => {
  * GPUI input state cannot be created from render, and every descriptor here
  * needs a stable identity so interaction survives subsequent frames.
  */
+/** @type {import("gpui-component").InputContent} */
+const tokenDraft = {
+  text: "🙂 Ask @alice@bob to review",
+  tokens: [
+    { range: { start: 7, end: 13 }, token: { id: "alice", text: "@alice", label: "Alice" } },
+    { range: { start: 13, end: 17 }, token: { id: "bob", text: "@bob", label: "Bob" } },
+  ],
+};
+
 export function initializeRegisteredExamples() {
+  retained("token-input", () => { const input = InputState(); input.set_value(tokenDraft); return input; });
+  retained("token-textarea", () => { const input = TextareaState(); input.set_value(tokenDraft); return input; });
   for (const [id, placeholder, value] of inputGroupFields) {
     retained(`input-group-extra:${id}`, () => InputState(placeholder, value));
   }
@@ -490,6 +501,45 @@ function expandedInputGroupExamples(cx) {
   return result;
 }
 
+
+/** @param {boolean} multiline @param {import("gpui-kit").Context} cx */
+function tokenExample(multiline, cx) {
+  const key = multiline ? "token-textarea" : "token-input";
+  const input = /** @type {import("gpui-component").InputState | import("gpui-component").TextareaState} */ (demo.get(key));
+  const content = input.content();
+  const control = multiline
+    ? new Textarea(/** @type {import("gpui-component").TextareaState} */ (input)).w_full().h(100)
+        .token(token => h_flex().gap(4).px(4).h(token.line_height)
+          .child("◆").child(token.token.label ?? token.token.text))
+    : new Input(/** @type {import("gpui-component").InputState} */ (input)).w_full();
+  return {
+    label: "Atomic inline references",
+    description: "Delete a reference and undo. Drafts preserve identity; copied text stays plain.",
+    element: v_flex().w(520).max_w_full().gap(8)
+      .child(control.on_token_click((event, cx) => setState(`${key}-status`, `Opened ${event.token.label}`, cx))
+        .on_change((_text, cx) => cx.notify()))
+      .child(h_flex().gap(8)
+        .child(new Button(`${key}-insert`).label("Insert reference").on_click((_event, cx) => {
+          // The ID names the resource, so inserting it twice reuses it.
+          input.replace_with_token({ id: "reference", text: "@reference", label: "Reference" });
+          cx.notify();
+        }))
+        .child(new Button(`${key}-save`).label("Save draft").on_click((_event, cx) => {
+          setState(`${key}-saved`, input.content(), cx);
+        }))
+        .child(new Button(`${key}-restore`).label("Restore draft").on_click((_event, cx) => {
+          input.set_value(/** @type {import("gpui-component").InputContent} */ (state(`${key}-saved`, tokenDraft)));
+          cx.notify();
+        }))
+        .child(new Button(`${key}-submit`).label("Submit").on_click((_event, cx) => {
+          const current = input.content();
+          setState(`${key}-status`, `Submitted ${current.tokens.length} references: ${current.text}`, cx);
+        })))
+      .child(div().text_sm().child(`Text: ${content.text}`))
+      .child(div().text_sm().child(`Tokens: ${content.tokens.map(span => `${span.token.id} [${span.range.start}, ${span.range.end})`).join(", ")}`))
+      .child(div().text_sm().child(String(state(`${key}-status`, "")))),
+  };
+}
 
 /**
  * The cases shown for one registered surface.
@@ -1241,6 +1291,7 @@ export function registeredExamples(surface, cx) {
               ),
             ),
         },
+        tokenExample(false, cx),
       ];
     case "NumberInput":
       return [
@@ -1283,6 +1334,7 @@ export function registeredExamples(surface, cx) {
               .h(120),
           ),
         },
+        tokenExample(true, cx),
       ];
     case "Checkbox":
       return [

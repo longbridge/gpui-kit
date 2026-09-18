@@ -1,3 +1,7 @@
+#[allow(dead_code)] // This isolated layout host only uses the textarea half.
+#[path = "../src/shell/input_tokens.rs"]
+mod input_tokens;
+
 #[path = "../src/shell/support.rs"]
 mod support;
 

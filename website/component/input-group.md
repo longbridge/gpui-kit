@@ -358,3 +358,23 @@ new InputGroupButton("clear").label("Clear").icon("icons/x.svg").font_semibold()
 ```
 
 Run `gpui-component-shell types <application>` to generate editor completion.
+
+## Inline references
+
+To combine inline references with attachments or send buttons, pass an Input or
+Textarea containing tokens to `InputGroup`. You can customize its labels as usual:
+
+```rust
+use gpui_kit::component::{
+    IconName,
+    input::{InputToken, InputGroup, Textarea},
+};
+
+InputGroup::new("composer")
+    .input(Textarea::new(&state)
+        .token(|token, _, _| InputToken::new(token).icon(IconName::File)))
+```
+
+The JavaScript group controls also expose `token` and `on_token_click`.
+Retain the same input state across redraws; call `set_value` with saved content
+to restore a draft. See [atomic inline tokens](./input.md#atomic-inline-tokens).

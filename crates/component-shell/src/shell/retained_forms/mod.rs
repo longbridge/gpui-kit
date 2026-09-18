@@ -252,7 +252,11 @@ struct InputMaterializer;
 impl ComponentMaterializer for InputMaterializer {
     fn materialize(&self, mut request: MaterializeRequest<'_>) -> anyhow::Result<gpui::AnyElement> {
         let state = state_entity!(request, InputState);
-        let mut input = Input::new(&state);
+        let binding = super::input_tokens::prepare(
+            &request,
+            super::input_tokens::State::Input(state.clone()),
+        )?;
+        let mut input = binding.input(Input::new(&state));
         for op in request
             .methods()
             .filter_map(|method| method.payload().downcast_ref::<FormOp>())
@@ -263,7 +267,7 @@ impl ComponentMaterializer for InputMaterializer {
                 _ => input,
             };
         }
-        finish_leaf(&mut request, input)
+        Ok(binding.wrap(finish_leaf(&mut request, input)?))
     }
 }
 
@@ -463,6 +467,7 @@ pub fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryError> {
                 })))
             },
         )
+        .with_methods(gpui_shell::input_token_state_methods())
         .with_documentation(
             "Retained editable text state shared by Input and NumberInput, with optional placeholder and initial value.",
         ),
@@ -535,7 +540,11 @@ pub fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryError> {
     registry.register(component(
         "Input",
         "InputState",
-        vec![aria_label_method("Input"), disabled_method("Input")],
+        [
+            vec![aria_label_method("Input"), disabled_method("Input")],
+            super::input_tokens::methods(true),
+        ]
+        .concat(),
         "A retained single-line text field.",
         InputMaterializer,
     ))?;

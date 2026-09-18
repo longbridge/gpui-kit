@@ -47,14 +47,14 @@ verify the exact family name on each target platform.
 
 ## Changing fonts via Theme
 
-Set the app-wide fonts on the `Theme` global, then sync to the base layer:
+Set the app-wide fonts through `Theme::update`, which syncs the base layer and refreshes every window:
 
 ```rust
-Theme::global_mut(cx).font_family = "Inter".into();
-Theme::global_mut(cx).mono_font_family = "JetBrains Mono".into();
-Theme::global_mut(cx).font_size = px(18.);
-Theme::sync_base(cx);
-window.refresh();
+Theme::update(cx, |theme| {
+    theme.font_family = "Inter".into();
+    theme.mono_font_family = "JetBrains Mono".into();
+    theme.font_size = px(18.);
+});
 ```
 
 `font_size` doubles as the application zoom control — `Root` calls
@@ -91,8 +91,7 @@ cx.text_system()
 Then reference them by family name as usual:
 
 ```rust
-Theme::global_mut(cx).font_family = "MyFont".into();
-Theme::sync_base(cx);
+Theme::update(cx, |theme| theme.font_family = "MyFont".into());
 ```
 
 The gallery's web build bundles `Inter`, `JetBrains Mono`, `Noto Sans SC` and
@@ -116,7 +115,7 @@ Load it with `ThemeRegistry`:
 ```rust
 ThemeRegistry::watch_dir(PathBuf::from("./themes"), cx, move |cx| {
     if let Some(theme) = ThemeRegistry::global(cx).themes().get(&theme_name).cloned() {
-        Theme::global_mut(cx).apply_config(&theme);
+        Theme::update(cx, |current| current.apply_config(&theme));
     }
 });
 ```

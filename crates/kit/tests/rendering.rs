@@ -132,8 +132,8 @@ mod macos {
         assert!(empty != populated, "typing must change the rendered input");
         cx.update_window(handle.into(), |_, window, cx| {
             // Inject a production styling defect without changing the editor value.
-            Theme::global_mut(cx).foreground = cx.theme().transparent;
-            Theme::sync_base(cx);
+            let transparent = cx.theme().transparent;
+            Theme::update(cx, |theme| theme.foreground = transparent);
             window.render_frame(cx);
             assert_eq!(window.find("name").value(), Some("Ada"));
         })

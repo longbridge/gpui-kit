@@ -175,9 +175,9 @@ where a component needs a tighter or looser curve than the base.
 
 The Base layer keeps its own copy of the theme, because it paints the scrollbar
 and the resize handles without going through `gpui-component`. `Theme::change`
-refreshes that copy; writing to the theme's public fields does not. After
-mutating the theme directly, call `Theme::sync_base(cx)` or the scrollbar thumb
-keeps the radius it was last given.
+and `Theme::update` refresh that copy; writing to the theme's public fields
+through `Theme::global_mut` does not, and the scrollbar thumb keeps the radius
+it was last given until `Theme::sync_base` runs. Prefer `update`.
 
 Two deliberate exceptions:
 

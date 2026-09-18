@@ -162,7 +162,8 @@ impl AppMenu {
         })
     }
 
-    fn is_selected(&self, cx: &App) -> bool {
+    /// Whether this menu's popup is the one the menu bar currently has open.
+    fn is_open(&self, cx: &App) -> bool {
         self.menu_bar.read(cx).selected_index == Some(self.ix)
     }
 
@@ -231,9 +232,9 @@ impl AppMenu {
     }
 
     fn toggle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let is_selected = self.is_selected(cx);
+        let is_open = self.is_open(cx);
         _ = self.menu_bar.update(cx, |state, cx| {
-            let new_ix = if is_selected { None } else { Some(self.ix) };
+            let new_ix = if is_open { None } else { Some(self.ix) };
             state.set_selected_index(new_ix, window, cx);
         });
     }
@@ -256,7 +257,7 @@ impl AppMenu {
 
 impl Render for AppMenu {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let is_selected = self.is_selected(cx);
+        let is_open = self.is_open(cx);
 
         div()
             .id(self.ix)
@@ -268,7 +269,7 @@ impl Render for AppMenu {
                     .compact()
                     .ghost()
                     .label(self.name.clone())
-                    .selected(is_selected)
+                    .open(is_open)
                     .on_mouse_down(
                         MouseButton::Left,
                         window.listener_for(&cx.entity(), move |this, _, window, cx| {
@@ -281,7 +282,7 @@ impl Render for AppMenu {
                     .on_click(cx.listener(Self::handle_trigger_click)),
             )
             .on_hover(cx.listener(Self::handle_hover))
-            .when(is_selected, |this| {
+            .when(is_open, |this| {
                 this.child(deferred(
                     anchored()
                         .anchor(gpui::Anchor::TopLeft)

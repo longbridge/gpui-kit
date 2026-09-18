@@ -12,6 +12,8 @@ use crate::{RoleOverride, StyledExt as _};
 /// A styled ordinary multi-line text field.
 #[derive(IntoElement)]
 pub struct Textarea {
+    token_renderer: Option<gpui_base::input::InlineTokenRenderer>,
+    token_click_listener: Option<gpui_base::input::InlineTokenClickListener>,
     state: Entity<TextareaState>,
     style: StyleRefinement,
     height: Option<DefiniteLength>,
@@ -33,6 +35,27 @@ pub struct Textarea {
 }
 
 impl Textarea {
+    /// The element each atomic inline token renders as, in place of the default
+    /// [`InputToken`](super::InputToken); editing and history stay
+    /// with the input.
+    pub fn token<R: IntoElement>(
+        mut self,
+        render: impl Fn(&super::InlineTokenContext, &mut Window, &mut App) -> R + 'static,
+    ) -> Self {
+        self.token_renderer = Some(Rc::new(move |token, window, cx| {
+            render(token, window, cx).into_any_element()
+        }));
+        self
+    }
+    /// Open a reference after a completed, unconsumed token click.
+    pub fn on_token_click(
+        mut self,
+        listener: impl Fn(&super::InlineTokenClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.token_click_listener = Some(Rc::new(listener));
+        self
+    }
+
     pub fn new(state: &Entity<TextareaState>) -> Self {
         Self {
             state: state.clone(),
@@ -48,6 +71,8 @@ impl Textarea {
             aria_label: None,
             context_menu_builder: None,
             paste_handler: None,
+            token_renderer: None,
+            token_click_listener: None,
         }
     }
 
@@ -140,6 +165,12 @@ impl Textarea {
     /// it.
     pub(crate) fn into_input(self) -> Input {
         Input::from_state(self.state.clone())
+            .when_some(self.token_renderer, |this, render| {
+                this.token(move |token, window, cx| render(token, window, cx))
+            })
+            .when_some(self.token_click_listener, |this, listener| {
+                this.on_token_click(move |event, window, cx| listener(event, window, cx))
+            })
             .appearance(self.appearance)
             .bordered(self.bordered)
             .disabled(self.disabled)

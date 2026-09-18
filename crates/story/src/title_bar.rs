@@ -121,32 +121,20 @@ impl FontSizeSelector {
         }
     }
 
-    fn on_select_font(
-        &mut self,
-        font_size: &SelectFont,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        Theme::global_mut(cx).font_size = px(font_size.0 as f32);
-        Theme::sync_base(cx);
-        window.refresh();
+    fn on_select_font(&mut self, font_size: &SelectFont, _: &mut Window, cx: &mut Context<Self>) {
+        Theme::update(cx, |theme| theme.font_size = px(font_size.0 as f32));
     }
 
-    fn on_select_radius(
-        &mut self,
-        radius: &SelectRadius,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        Theme::global_mut(cx).radius = px(radius.0 as f32);
-        Theme::global_mut(cx).radius_lg = if cx.theme().radius > px(0.) {
-            cx.theme().radius + px(2.)
-        } else {
-            px(0.)
-        };
-        // The scrollbar paints from the Base layer's own copy of the theme.
-        Theme::sync_base(cx);
-        window.refresh();
+    fn on_select_radius(&mut self, radius: &SelectRadius, _: &mut Window, cx: &mut Context<Self>) {
+        let radius = px(radius.0 as f32);
+        Theme::update(cx, |theme| {
+            theme.radius = radius;
+            theme.radius_lg = if radius > px(0.) {
+                radius + px(2.)
+            } else {
+                px(0.)
+            };
+        });
     }
 
     fn on_select_scrollbar_mode(
@@ -162,12 +150,12 @@ impl FontSizeSelector {
     fn on_toggle_list_active_highlight(
         &mut self,
         _: &ToggleListActiveHighlight,
-        window: &mut Window,
+        _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let theme = Theme::global_mut(cx);
-        theme.list.active_highlight = !theme.list.active_highlight;
-        window.refresh();
+        Theme::update(cx, |theme| {
+            theme.list.active_highlight = !theme.list.active_highlight
+        });
     }
 
     fn on_toggle_fps_monitor(

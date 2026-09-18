@@ -36,6 +36,7 @@ members = [
     "examples/root_borderless",
     "examples/table_in_scrollable",
     "examples/markdown_table",
+    "examples/ai_recipes",
     "crates/shell",
     "crates/shell/rquickjs-compat",
     "crates/component-shell",

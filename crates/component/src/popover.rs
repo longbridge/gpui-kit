@@ -171,8 +171,8 @@ impl Popover {
         T: Selectable + IntoElement + 'static,
     {
         self.trigger = Some(Box::new(|is_open, _, _| {
-            let selected = trigger.is_selected();
-            trigger.selected(selected || is_open).into_any_element()
+            let open = trigger.is_open();
+            trigger.open(open || is_open).into_any_element()
         }));
         self
     }
