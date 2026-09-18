@@ -289,6 +289,33 @@ impl InlineState {
 }
 
 impl Inline {
+    /// Hands the shaped text to the next frame (see [`RetainedLayout`]).
+    /// Called after prepaint, so an element that is laid out but never
+    /// painted (scrolled out of view) keeps its layout too; paint takes it
+    /// back for the duration of painting.
+    fn retain_styled_text(&mut self) {
+        if let Some((runs, text_style)) = self.retained_key.take() {
+            retain_layout(
+                &self.state,
+                RetainedLayout {
+                    state: Arc::downgrade(&self.state),
+                    styled_text: mem::replace(&mut self.styled_text, StyledText::new("")),
+                    text: self.text.clone(),
+                    runs,
+                    text_style,
+                },
+            );
+        }
+    }
+
+    /// Takes the shaped text back from the table for painting.
+    fn reclaim_styled_text(&mut self) {
+        if let Some(retained) = take_retained_layout(&self.state) {
+            self.styled_text = retained.styled_text;
+            self.retained_key = Some((retained.runs, retained.text_style));
+        }
+    }
+
     pub(super) fn new(
         state: Arc<Mutex<InlineState>>,
         links: Vec<(Range<usize>, LinkMark)>,
@@ -739,6 +766,7 @@ impl Element for Inline {
         }
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        self.retain_styled_text();
         hitbox
     }
 
@@ -755,6 +783,7 @@ impl Element for Inline {
         let bounds = Bounds::new(self.paint_origin.unwrap_or(bounds.origin), bounds.size);
         let current_view = window.current_view();
         let hitbox = prepaint;
+        self.reclaim_styled_text();
         let text_layout = self.styled_text.layout().clone();
         self.styled_text
             .paint(global_id, None, bounds, &mut (), &mut (), window, cx);
@@ -962,19 +991,8 @@ impl Element for Inline {
             });
         }
 
-        // Hand the shaped text to the next frame (see `RetainedLayout`).
-        if let Some((runs, text_style)) = self.retained_key.take() {
-            retain_layout(
-                &self.state,
-                RetainedLayout {
-                    state: Arc::downgrade(&self.state),
-                    styled_text: mem::replace(&mut self.styled_text, StyledText::new("")),
-                    text: self.text.clone(),
-                    runs,
-                    text_style,
-                },
-            );
-        }
+        drop(state);
+        self.retain_styled_text();
     }
 }
 
