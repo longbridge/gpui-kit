@@ -232,6 +232,49 @@ Popover::new("default-open-popover")
     .child("This popover is open by default when first rendered.")
 ```
 
+### Custom Trigger
+
+A trigger is any element that implements [Selectable]. While the popover is
+open, it calls `open(true)` on the trigger — not `selected(true)` — so a
+trigger can tell "my popover is showing" apart from "I am the selected item".
+
+`open` and `is_open` default to `selected` and `is_selected`, so a trigger that
+only implements the selected state keeps working unchanged, and a [Button]
+trigger looks the same open as it does selected. Override them when your
+element already uses `selected` for something else, such as a sidebar row that
+is selected when it is the current view:
+
+```rust
+use gpui_kit::component::Selectable;
+
+struct SidebarRow {
+    /// This row is the current view.
+    selected: bool,
+    /// This row's account popover is showing.
+    open: bool,
+}
+
+impl Selectable for SidebarRow {
+    fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+
+    fn open(mut self, open: bool) -> Self {
+        self.open = open;
+        self
+    }
+
+    fn is_open(&self) -> bool {
+        self.open
+    }
+}
+```
+
 [Button]: https://docs.rs/gpui-component/latest/gpui_component/button/struct.Button.html
 [Selectable]: https://docs.rs/gpui-component/latest/gpui_component/trait.Selectable.html
 [Render]: https://docs.rs/gpui/latest/gpui/trait.Render.html

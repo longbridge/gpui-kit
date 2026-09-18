@@ -184,6 +184,47 @@ Popover::new("default-open-popover")
     .child("This popover is open by default when first rendered.")
 ```
 
+### 自定义触发器
+
+触发器是任意实现了 [Selectable] 的元素。Popover 打开期间会对触发器调用
+`open(true)`，而不是 `selected(true)`，这样触发器可以区分「我的 Popover 正开着」
+和「我是当前选中项」这两件事。
+
+`open` 与 `is_open` 默认落到 `selected` 和 `is_selected`，因此只实现了选中态的
+触发器行为不变，[Button] 触发器打开时的外观也与选中态一致。如果你的元素已经
+用 `selected` 表达别的含义（例如侧栏行选中表示当前视图），就覆盖这两个方法：
+
+```rust
+use gpui_kit::component::Selectable;
+
+struct SidebarRow {
+    /// 这一行是当前视图。
+    selected: bool,
+    /// 这一行的账户 Popover 正开着。
+    open: bool,
+}
+
+impl Selectable for SidebarRow {
+    fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+
+    fn open(mut self, open: bool) -> Self {
+        self.open = open;
+        self
+    }
+
+    fn is_open(&self) -> bool {
+        self.open
+    }
+}
+```
+
 [Button]: https://docs.rs/gpui-component/latest/gpui_component/button/struct.Button.html
 [Selectable]: https://docs.rs/gpui-component/latest/gpui_component/trait.Selectable.html
 [Render]: https://docs.rs/gpui/latest/gpui/trait.Render.html
