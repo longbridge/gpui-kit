@@ -173,7 +173,7 @@ impl crate::FocusableExt for Input {
 
 impl Input {
     /// The element each atomic inline token renders as, in place of the default
-    /// [`InlineTokenTag`](super::InlineTokenTag); editing and history stay
+    /// [`InputToken`](super::InputToken); editing and history stay
     /// with the input.
     pub fn token<R: IntoElement>(
         mut self,
@@ -516,7 +516,7 @@ impl RenderOnce for Input {
         let state = self.state.clone();
         state.install_token_presentation(
             Some(self.token_renderer.unwrap_or_else(|| {
-                Rc::new(|token, _, _| super::InlineTokenTag::new(token).into_any_element())
+                Rc::new(|token, _, _| super::InputToken::new(token).into_any_element())
             })),
             self.token_click_listener,
             matches!(

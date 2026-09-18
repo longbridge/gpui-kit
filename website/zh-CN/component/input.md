@@ -312,24 +312,24 @@ ID 标识被引用的资源，同一个人被提及两次时两个 token 使用�
 
 ### 自定义外观与打开引用
 
-token 默认渲染为 `InlineTokenTag`。`token` 槽位提供每个 token 的元素；需要图标时在其中返回带图标的 tag，并通过 `on_token_click` 打开引用：
+token 默认渲染为 `InputToken`。`token` 槽位提供每个 token 的元素；需要图标时在其中返回带图标的 `InputToken`，并通过 `on_token_click` 打开引用：
 
 ```rust
 use gpui_kit::component::{
     IconName,
-    input::{InlineTokenTag, InlineTokenClickEvent},
+    input::{InputToken, InlineTokenClickEvent},
 };
 
 Input::new(&input)
     .token(|token, _, _| {
-        InlineTokenTag::new(token).with_icon(IconName::File)
+        InputToken::new(token).with_icon(IconName::File)
     })
     .on_token_click(|event: &InlineTokenClickEvent, _, _| {
         // 根据 event.token().id() 查找并打开资源。
     });
 ```
 
-也可以返回自己的单行元素。元素应保持在输入框行高内，超出可用行宽的内容会被裁切。通过 renderer 的上下文读取选中、只读和禁用状态。在事件回调中修改输入，不要在 renderer 中修改。悬停和选中样式应保持尺寸稳定。token 每次渲染时都会重新测量，因此数据到达后变宽的 tag 会在下一帧重新排版。
+也可以返回自己的单行元素。元素应保持在输入框行高内，超出可用行宽的内容会被裁切。通过 renderer 的上下文读取选中、只读和禁用状态。在事件回调中修改输入，不要在 renderer 中修改。悬停和选中样式应保持尺寸稳定。token 每次渲染时都会重新测量，因此数据到达后变宽的元素会在下一帧重新排版。
 
 单击会先选中 token 再打开引用；拖选或 Shift 扩选不会打开引用。只读输入允许打开引用，禁用输入不允许。若要为打开选中的整块 token 提供快捷键，可以将 `ActivateToken` 绑定到自己选择的按键；辅助技术通过 token 的 click 操作触发同一个监听器。当应用能为引用给出明确名称（例如“打开文件”）时，可以通过 `context_menu` 自行添加菜单项。
 

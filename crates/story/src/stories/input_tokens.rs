@@ -8,9 +8,10 @@ use gpui_kit::component::{
     checkbox::Checkbox,
     h_flex,
     input::{
-        InlineToken, InlineTokenClickEvent, InlineTokenContext, InlineTokenError, InlineTokenTag,
-        InputContent, InputEvent, InputGroup, InputGroupAddon, InputGroupAddonAlignment as Align,
-        InputGroupButton, InputGroupInput, InputGroupTextarea, InputState, TextareaState,
+        InlineToken, InlineTokenClickEvent, InlineTokenContext, InlineTokenError, InputContent,
+        InputEvent, InputGroup, InputGroupAddon, InputGroupAddonAlignment as Align,
+        InputGroupButton, InputGroupInput, InputGroupTextarea, InputState, InputToken,
+        TextareaState,
     },
     v_flex,
 };
@@ -215,10 +216,11 @@ impl TokenExample {
         cx.notify();
     }
 
-    fn tag(token: &InlineTokenContext) -> InlineTokenTag {
+    fn token(token: &InlineTokenContext) -> InputToken {
         let reference = Reference::of(token.token());
-        InlineTokenTag::new(token)
-            .when_some(reference, |tag, reference| tag.with_icon(reference.icon()))
+        InputToken::new(token).when_some(reference, |element, reference| {
+            element.with_icon(reference.icon())
+        })
     }
 
     fn insert_button(&self, reference: Reference, cx: &Context<Self>) -> InputGroupButton {
@@ -248,7 +250,7 @@ impl TokenExample {
                 .input(
                     InputGroupInput::new(input)
                         .aria_label("Message")
-                        .token(|token, _, _| Self::tag(token))
+                        .token(|token, _, _| Self::token(token))
                         .on_token_click(open),
                 )
                 .addon(
@@ -261,7 +263,7 @@ impl TokenExample {
                 .input(
                     InputGroupTextarea::new(input)
                         .aria_label("Message")
-                        .token(|token, _, _| Self::tag(token))
+                        .token(|token, _, _| Self::token(token))
                         .on_token_click(open),
                 )
                 .addon(

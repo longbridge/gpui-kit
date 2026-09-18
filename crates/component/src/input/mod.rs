@@ -1,12 +1,12 @@
 mod clear_button;
 mod content_type;
-mod inline_token_tag;
 mod input;
+mod token;
 pub use gpui_base::input::{
     ActivateToken, InlineToken, InlineTokenClickEvent, InlineTokenContext, InlineTokenError,
     InlineTokenSpan, InputContent,
 };
-pub use inline_token_tag::InlineTokenTag;
+pub use token::InputToken;
 pub mod language_config;
 mod number_input;
 mod otp_input;

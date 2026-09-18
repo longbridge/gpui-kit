@@ -349,12 +349,12 @@ new InputGroupButton("clear").label("清空").icon("icons/x.svg").font_semibold(
 ```rust
 use gpui_kit::component::{
     IconName,
-    input::{InlineTokenTag, InputGroup, Textarea},
+    input::{InputToken, InputGroup, Textarea},
 };
 
 InputGroup::new("composer")
     .input(Textarea::new(&state)
-        .token(|token, _, _| InlineTokenTag::new(token).with_icon(IconName::File)))
+        .token(|token, _, _| InputToken::new(token).with_icon(IconName::File)))
 ```
 
 JavaScript 的分组输入也提供 `token` 和 `on_token_click`。重绘时保留原输入状态，需要恢复草稿时用保存的 content 调用 `set_value`。详见[原子行内 token](./input.md#原子行内-token)。

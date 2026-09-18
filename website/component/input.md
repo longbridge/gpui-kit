@@ -374,19 +374,19 @@ Pasting inserts plain text.
 
 ### Customize appearance and opening a reference
 
-Tokens render as an `InlineTokenTag` by default. The `token` slot supplies the
-element for each token; return a tag with an icon from it, and use
+Tokens render as an `InputToken` by default. The `token` slot supplies the
+element for each token; return one with an icon from it, and use
 `on_token_click` to open the reference:
 
 ```rust
 use gpui_kit::component::{
     IconName,
-    input::{InlineTokenTag, InlineTokenClickEvent},
+    input::{InputToken, InlineTokenClickEvent},
 };
 
 Input::new(&input)
     .token(|token, _, _| {
-        InlineTokenTag::new(token).with_icon(IconName::File)
+        InputToken::new(token).with_icon(IconName::File)
     })
     .on_token_click(|event: &InlineTokenClickEvent, _, _| {
         // Look up event.token().id() and open its resource.
@@ -397,7 +397,7 @@ You can also return your own single-row element. Keep it within the input's line
 height; content wider than the available row is clipped. Read selection and
 read-only/disabled state from the renderer's context. Do not edit the input from
 the renderer; event callbacks may update it. Keep hover and selection styles the
-same size. Tokens are measured whenever they render, so a tag that grows once
+same size. Tokens are measured whenever they render, so an element that grows once
 its data arrives reflows on the next frame.
 
 A click selects the token and then opens it; dragging or Shift-selecting a token

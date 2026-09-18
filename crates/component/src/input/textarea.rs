@@ -36,7 +36,7 @@ pub struct Textarea {
 
 impl Textarea {
     /// The element each atomic inline token renders as, in place of the default
-    /// [`InlineTokenTag`](super::InlineTokenTag); editing and history stay
+    /// [`InputToken`](super::InputToken); editing and history stay
     /// with the input.
     pub fn token<R: IntoElement>(
         mut self,

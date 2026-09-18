@@ -5,15 +5,15 @@ use gpui::{
     Styled, Window, div, prelude::FluentBuilder as _,
 };
 
-/// The default tag an [`InlineToken`](super::InlineToken) renders as. Editing
+/// The element an [`InlineToken`](super::InlineToken) renders as by default. Editing
 /// and activation belong to the input.
 #[derive(IntoElement)]
-pub struct InlineTokenTag {
+pub struct InputToken {
     context: InlineTokenContext,
     icon: Option<Icon>,
     style: StyleRefinement,
 }
-impl InlineTokenTag {
+impl InputToken {
     pub fn new(context: &InlineTokenContext) -> Self {
         Self {
             context: context.clone(),
@@ -26,15 +26,15 @@ impl InlineTokenTag {
         self
     }
 }
-impl Styled for InlineTokenTag {
+impl Styled for InputToken {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
     }
 }
-impl RenderOnce for InlineTokenTag {
+impl RenderOnce for InputToken {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         div()
-            .id("inline-token-tag")
+            .id("input-token")
             .flex()
             .items_center()
             .gap_1()
