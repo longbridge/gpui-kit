@@ -268,7 +268,7 @@ div()
 
 当前有一个必须明确的 ownership 边界：`Theme::spacing_tokens()` 投射固定默认 scale，`Theme::apply_semantic_tokens(...)` 不保存 custom spacing/elevation scale。应用如需自定义，必须自行持有 `SemanticThemeTokens`（或更窄的 design-system state）并提供给 component。不能把 custom spacing snapshot 写入 global theme 后，期待下次`cx.theme().semantic_tokens()` 仍返回它。
 
-通过 `Theme::update(cx, |theme| ...)` 修改 GPUI Component 的 global theme。theme 里同一份颜色存了两次（`colors` 是纯色，`tokens` 是可带渐变的可绘制背景），Base 层还持有一份给 scrollbar 与 resize handle 的 projection；`update` 在闭包结束后把三份重新对齐并刷新所有窗口。没有别的公开写入口：绕过它用 `cx.global_mut::<Theme>()` 只会改到你碰的那个字段——侧栏可能用新 colors 画文字、用旧 tokens 画背景。完整的 `Theme::change(...)` 会自行同步。
+通过 `Theme::update(cx, |theme| ...)` 修改 GPUI Component 的 global theme。theme 里同一份颜色存了两次（`colors` 是纯色，`tokens` 是可带渐变的可绘制背景），Base 层还持有一份给 scrollbar 与 resize handle 的 projection；`update` 在闭包结束后把三份重新对齐并刷新所有窗口。通过 `Theme::global_mut(cx)` 修改只会改到你碰的那个字段——侧栏可能用新 colors 画文字、用旧 tokens 画背景——剩下的要自己做：从 `colors` 重新推导 `tokens`、调用 `Theme::sync_base(cx)`、刷新窗口。完整的 `Theme::change(...)` 会自行同步。
 
 向外绘制的 focus ring 需要空间，ancestor `overflow_hidden()` 会裁掉它。优先让布局留出空间；产品确实需要大量 clipping 时，通过 theme focus-ring policy 保留 focused border，不能悄悄消除键盘焦点。
 

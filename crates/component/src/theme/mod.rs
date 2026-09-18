@@ -201,12 +201,13 @@ impl Theme {
 
     /// Returns the global theme mutable reference.
     ///
-    /// Crate-private on purpose: an edit made through this reference reaches
-    /// `tokens` and the Base layer only once the caller re-derives them, which
-    /// is what [`Theme::update`] exists to do. Applications edit the theme
-    /// through `update`.
+    /// An edit made through this reference reaches nothing but the field it
+    /// touches: [`Theme::tokens`] keeps the colors it had, and so does the
+    /// Base projection until [`Theme::sync_base`] rebuilds it. Prefer
+    /// [`Theme::update`], which does both after the edit and refreshes every
+    /// window. Keep this for an edit that must not trigger any of that.
     #[inline(always)]
-    pub(crate) fn global_mut(cx: &mut App) -> &mut Theme {
+    pub fn global_mut(cx: &mut App) -> &mut Theme {
         cx.global_mut::<Theme>()
     }
 
@@ -215,10 +216,10 @@ impl Theme {
     /// The theme holds the same colors twice — [`Theme::colors`] as solid
     /// colors and [`Theme::tokens`] as renderable backgrounds that may carry a
     /// gradient — and the Base layer keeps a projection of its own for the
-    /// scrollbar and resize handles. Editing one of them through a raw
-    /// `cx.global_mut::<Theme>()` leaves the others where they were, so a
-    /// sidebar can paint its text from the new colors and its background
-    /// from the old tokens. This is the one write path that cannot drift:
+    /// scrollbar and resize handles. Editing one of them through
+    /// [`Theme::global_mut`] leaves the others where they were, so a sidebar
+    /// can paint its text from the new colors and its background from the old
+    /// tokens. This is the write path that cannot drift:
     ///
     /// ```ignore
     /// Theme::update(cx, |theme| {
@@ -422,10 +423,12 @@ impl Theme {
     /// scrollbar keeps painting with the radius and colors it was last given.
     ///
     /// [`Theme::update`] and [`Theme::change`] call this after their edits.
+    /// After editing through [`Theme::global_mut`], call it yourself, then
+    /// refresh the windows.
     ///
     /// It rebuilds the Base theme from scratch, so any style written straight
     /// onto the Base global is replaced. It does not touch [`Theme::tokens`].
-    pub(crate) fn sync_base(cx: &mut App) {
+    pub fn sync_base(cx: &mut App) {
         let theme = Theme::global(cx).clone();
         let base_theme = theme.base_theme();
         cx.set_global(base_theme);

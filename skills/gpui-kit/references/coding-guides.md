@@ -397,11 +397,12 @@ Edit the global GPUI Component theme through `Theme::update(cx, |theme| ...)`.
 The theme keeps the same colors twice (`colors` as solid colors, `tokens` as
 renderable backgrounds that may carry a gradient) and the Base layer holds a
 projection for its scrollbars and resize handles; `update` brings all three
-back in step after the closure and refreshes every window. There is no other
-public write path: a raw `cx.global_mut::<Theme>()` updates only the field you
-touched — a sidebar can then paint its text from the new colors and its
-background from the old tokens. `Theme::change(...)` performs the projection
-as part of a complete theme change.
+back in step after the closure and refreshes every window. An edit through
+`Theme::global_mut(cx)` updates only the field you touched — a sidebar can then
+paint its text from the new colors and its background from the old tokens —
+so it owns the rest: derive `tokens` from `colors`, call `Theme::sync_base(cx)`,
+refresh the windows. `Theme::change(...)` performs the projection as part of a
+complete theme change.
 
 An outward focus ring needs physical room. An ancestor with
 `overflow_hidden()` clips it. Prefer layouts that leave room; if a product must
