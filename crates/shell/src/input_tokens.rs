@@ -278,7 +278,7 @@ state_binding!(InputState, invoke_input, input_token_state_methods);
 state_binding!(TextareaState, invoke_textarea, textarea_token_state_methods);
 
 /// Script callbacks for one input's tokens, adapted to the native
-/// `render_token` / `on_token_click` builders of any Input or Textarea element.
+/// `token` / `on_token_click` builders of any Input or Textarea element.
 pub struct InlineTokenCallbacks {
     renderer: Option<gpui_base::input::InlineTokenRenderer>,
     listener: Option<gpui_base::input::InlineTokenClickListener>,
@@ -328,11 +328,11 @@ impl InlineTokenCallbacks {
     pub fn apply<E>(
         &self,
         element: E,
-        render_token: impl FnOnce(E, gpui_base::input::InlineTokenRenderer) -> E,
+        token: impl FnOnce(E, gpui_base::input::InlineTokenRenderer) -> E,
         on_token_click: impl FnOnce(E, gpui_base::input::InlineTokenClickListener) -> E,
     ) -> E {
         let element = match &self.renderer {
-            Some(renderer) => render_token(element, renderer.clone()),
+            Some(renderer) => token(element, renderer.clone()),
             None => element,
         };
         match &self.listener {

@@ -30,7 +30,7 @@ macro_rules! dispatch {
 pub(super) fn methods(include_change: bool) -> Vec<MethodDescriptor> {
     let mut methods = vec![
         MethodDescriptor::new(
-            "render_token",
+            "token",
             vec![ArgumentDescriptor::new(
                 "render",
                 ArgumentSchema::Callback(
@@ -41,7 +41,7 @@ pub(super) fn methods(include_change: bool) -> Vec<MethodDescriptor> {
                 [arg @ ComponentArgument::Callback(_)] => {
                     Ok(ComponentPayload::new(Op::Render(arg.clone())))
                 }
-                _ => Err("render_token expects a renderer".into()),
+                _ => Err("token expects a renderer".into()),
             },
         )
         .with_documentation(
@@ -104,7 +104,7 @@ impl Binding {
     pub(super) fn input(&self, input: Input) -> Input {
         self.callbacks.apply(
             input,
-            |input, render| input.render_token(move |token, window, cx| render(token, window, cx)),
+            |input, render| input.token(move |token, window, cx| render(token, window, cx)),
             |input, listen| {
                 input.on_token_click(move |event, window, cx| listen(event, window, cx))
             },
@@ -113,7 +113,7 @@ impl Binding {
     pub(super) fn textarea(&self, input: Textarea) -> Textarea {
         self.callbacks.apply(
             input,
-            |input, render| input.render_token(move |token, window, cx| render(token, window, cx)),
+            |input, render| input.token(move |token, window, cx| render(token, window, cx)),
             |input, listen| {
                 input.on_token_click(move |event, window, cx| listen(event, window, cx))
             },

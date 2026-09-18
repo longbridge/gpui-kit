@@ -334,7 +334,7 @@ struct Behavior {
     href: Option<SharedString>,
     on_click: Option<CallbackId>,
     on_change: Option<CallbackId>,
-    render_token: Option<CallbackId>,
+    token: Option<CallbackId>,
     on_token_click: Option<CallbackId>,
     on_mouse_move: Option<CallbackId>,
     on_hover: Option<CallbackId>,
@@ -1504,7 +1504,7 @@ fn materialize_component(
             let callbacks = crate::InlineTokenCallbacks::new(
                 &state,
                 behavior
-                    .render_token
+                    .token
                     .map(|id| crate::ComponentElementCallback::from_runtime(runtime, id)),
                 behavior
                     .on_token_click
@@ -1512,9 +1512,7 @@ fn materialize_component(
             );
             let input = callbacks.apply(
                 Input::new(&state),
-                |input, render| {
-                    input.render_token(move |token, window, cx| render(token, window, cx))
-                },
+                |input, render| input.token(move |token, window, cx| render(token, window, cx)),
                 |input, listen| {
                     input.on_token_click(move |event, window, cx| listen(event, window, cx))
                 },
@@ -2514,7 +2512,7 @@ pub(in crate::materialize) fn resolve_ops(
                 "on_scroll_wheel" => behavior.on_scroll_wheel = Some(*id),
                 "on_resize" => behavior.on_resize = Some(*id),
                 "on_change" => behavior.on_change = Some(*id),
-                "render_token" => behavior.render_token = Some(*id),
+                "token" => behavior.token = Some(*id),
                 "on_token_click" => behavior.on_token_click = Some(*id),
                 "on_step" => behavior.on_step = Some(*id),
                 "on_open_change" => behavior.on_open_change = Some(*id),

@@ -215,7 +215,7 @@ impl TokenExample {
         cx.notify();
     }
 
-    fn render_token(token: &InlineTokenContext) -> InlineTokenTag {
+    fn tag(token: &InlineTokenContext) -> InlineTokenTag {
         let reference = Reference::of(token.token());
         InlineTokenTag::new(token)
             .when_some(reference, |tag, reference| tag.with_icon(reference.icon()))
@@ -248,7 +248,7 @@ impl TokenExample {
                 .input(
                     InputGroupInput::new(input)
                         .aria_label("Message")
-                        .render_token(|token, _, _| Self::render_token(token))
+                        .token(|token, _, _| Self::tag(token))
                         .on_token_click(open),
                 )
                 .addon(
@@ -261,7 +261,7 @@ impl TokenExample {
                 .input(
                     InputGroupTextarea::new(input)
                         .aria_label("Message")
-                        .render_token(|token, _, _| Self::render_token(token))
+                        .token(|token, _, _| Self::tag(token))
                         .on_token_click(open),
                 )
                 .addon(

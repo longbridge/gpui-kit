@@ -4422,7 +4422,7 @@ mod tests {
                         .unwrap();
                     state.set_token_presentation(
                         InlineTokenPresentation::default()
-                            .render_token(move |_, _, _| div().w(px(render_width.get()))),
+                            .token(move |_, _, _| div().w(px(render_width.get()))),
                     );
                 });
             })
@@ -4465,7 +4465,7 @@ mod tests {
                         .unwrap();
                     state.set_token_presentation(
                         InlineTokenPresentation::default()
-                            .render_token(|_, _, _| div().w(px(100.)).h(px(20.)))
+                            .token(|_, _, _| div().w(px(100.)).h(px(20.)))
                             .on_token_click(move |_, window, cx| {
                                 target.update(cx, |state, cx| {
                                     state.set_value("activated", window, cx)

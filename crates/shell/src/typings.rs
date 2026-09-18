@@ -215,7 +215,7 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
     out.push_str("  /** The fluent builder returned by native and Base element factories. */\n");
     out.push_str("  export interface NativeElement {\n");
     out.push_str(ELEMENT_METHODS);
-    out.push_str("    render_token(render: (token: import(\"gpui-base\").InlineTokenContext, cx: Context) => Element | null): this;\n    on_token_click(listener: (event: import(\"gpui-base\").InlineTokenClickEvent, cx: Context) => void): this;\n");
+    out.push_str("    token(render: (token: import(\"gpui-base\").InlineTokenContext, cx: Context) => Element | null): this;\n    on_token_click(listener: (event: import(\"gpui-base\").InlineTokenClickEvent, cx: Context) => void): this;\n");
     out.push_str(&parametric_styles(&parametric));
     out.push_str(&nullary_styles(&nullary));
     out.push_str("  }\n");
@@ -3893,7 +3893,7 @@ mod tests {
         "controls_right",
         "when",
         "on_click",
-        "render_token",
+        "token",
         "on_token_click",
         "on_mouse_move",
         "on_hover",

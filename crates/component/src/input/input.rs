@@ -172,10 +172,10 @@ impl crate::FocusableExt for Input {
 }
 
 impl Input {
-    /// Render each atomic inline token in place of the default
+    /// The element each atomic inline token renders as, in place of the default
     /// [`InlineTokenTag`](super::InlineTokenTag); editing and history stay
     /// with the input.
-    pub fn render_token<R: IntoElement>(
+    pub fn token<R: IntoElement>(
         mut self,
         render: impl Fn(&super::InlineTokenContext, &mut Window, &mut App) -> R + 'static,
     ) -> Self {

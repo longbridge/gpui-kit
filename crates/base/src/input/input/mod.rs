@@ -26,12 +26,12 @@ impl Input {
             presentation: Default::default(),
         }
     }
-    /// Render each atomic token; the input keeps editing and history.
-    pub fn render_token<R: IntoElement>(
+    /// The element each atomic token renders as; the input keeps editing and history.
+    pub fn token<R: IntoElement>(
         mut self,
         render: impl Fn(&super::InlineTokenContext, &mut Window, &mut App) -> R + 'static,
     ) -> Self {
-        self.presentation = self.presentation.render_token(render);
+        self.presentation = self.presentation.token(render);
         self
     }
     /// Open a reference after a completed, unconsumed token click.

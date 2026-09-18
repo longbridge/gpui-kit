@@ -7046,7 +7046,7 @@ impl ShellRuntime {
                 "on_item_click",
                 "on_item_secondary_click",
                 "on_change",
-                "render_token",
+                "token",
                 "on_token_click",
                 "on_open_change",
                 "on_confirm",
@@ -8021,7 +8021,7 @@ impl ShellRuntime {
             | "on_link_click"
             | "on_resize"
             | "on_change"
-            | "render_token"
+            | "token"
             | "on_token_click"
             | "on_open_change"
             | "on_confirm"
@@ -9969,7 +9969,7 @@ fn callback_op_name(method: &str) -> Option<&'static str> {
         "drop_indicator" => "drop_indicator",
         "dock" => "dock",
         "on_change" => "on_change",
-        "render_token" => "render_token",
+        "token" => "token",
         "on_token_click" => "on_token_click",
         "on_confirm" => "on_confirm",
         "on_dismiss" => "on_dismiss",

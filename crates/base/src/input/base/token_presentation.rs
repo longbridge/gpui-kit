@@ -74,7 +74,7 @@ pub(crate) struct InlineTokenPresentation {
     secret: bool,
 }
 impl InlineTokenPresentation {
-    pub(crate) fn render_token<R: IntoElement>(
+    pub(crate) fn token<R: IntoElement>(
         mut self,
         render: impl Fn(&InlineTokenContext, &mut Window, &mut App) -> R + 'static,
     ) -> Self {

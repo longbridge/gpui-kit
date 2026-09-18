@@ -372,9 +372,9 @@ use gpui_kit::component::{
 
 InputGroup::new("composer")
     .input(Textarea::new(&state)
-        .render_token(|token, _, _| InlineTokenTag::new(token).with_icon(IconName::File)))
+        .token(|token, _, _| InlineTokenTag::new(token).with_icon(IconName::File)))
 ```
 
-The JavaScript group controls also expose `render_token` and `on_token_click`.
+The JavaScript group controls also expose `token` and `on_token_click`.
 Retain the same input state across redraws; call `set_value` with saved content
 to restore a draft. See [atomic inline tokens](./input.md#atomic-inline-tokens).

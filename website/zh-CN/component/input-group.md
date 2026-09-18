@@ -354,7 +354,7 @@ use gpui_kit::component::{
 
 InputGroup::new("composer")
     .input(Textarea::new(&state)
-        .render_token(|token, _, _| InlineTokenTag::new(token).with_icon(IconName::File)))
+        .token(|token, _, _| InlineTokenTag::new(token).with_icon(IconName::File)))
 ```
 
-JavaScript 的分组输入也提供 `render_token` 和 `on_token_click`。重绘时保留原输入状态，需要恢复草稿时用保存的 content 调用 `set_value`。详见[原子行内 token](./input.md#原子行内-token)。
+JavaScript 的分组输入也提供 `token` 和 `on_token_click`。重绘时保留原输入状态，需要恢复草稿时用保存的 content 调用 `set_value`。详见[原子行内 token](./input.md#原子行内-token)。

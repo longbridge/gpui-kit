@@ -61,7 +61,7 @@ pub(in crate::materialize) fn textarea(
     let callbacks = crate::InlineTokenCallbacks::new(
         &state,
         behavior
-            .render_token
+            .token
             .map(|id| crate::ComponentElementCallback::from_runtime(runtime, id)),
         behavior
             .on_token_click
@@ -69,7 +69,7 @@ pub(in crate::materialize) fn textarea(
     );
     let textarea = callbacks.apply(
         Textarea::new(&state),
-        |input, render| input.render_token(move |token, window, cx| render(token, window, cx)),
+        |input, render| input.token(move |token, window, cx| render(token, window, cx)),
         |input, listen| input.on_token_click(move |event, window, cx| listen(event, window, cx)),
     );
     frame.child(textarea).into_any_element()

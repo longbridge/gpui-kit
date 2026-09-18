@@ -509,7 +509,7 @@ function tokenExample(multiline, cx) {
   const content = input.content();
   const control = multiline
     ? new Textarea(/** @type {import("gpui-component").TextareaState} */ (input)).w_full().h(100)
-        .render_token(token => h_flex().gap(4).px(4).h(token.line_height)
+        .token(token => h_flex().gap(4).px(4).h(token.line_height)
           .child("◆").child(token.token.label ?? token.token.text))
     : new Input(/** @type {import("gpui-component").InputState} */ (input)).w_full();
   return {

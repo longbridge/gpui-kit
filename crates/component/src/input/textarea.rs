@@ -35,10 +35,10 @@ pub struct Textarea {
 }
 
 impl Textarea {
-    /// Render each atomic inline token in place of the default
+    /// The element each atomic inline token renders as, in place of the default
     /// [`InlineTokenTag`](super::InlineTokenTag); editing and history stay
     /// with the input.
-    pub fn render_token<R: IntoElement>(
+    pub fn token<R: IntoElement>(
         mut self,
         render: impl Fn(&super::InlineTokenContext, &mut Window, &mut App) -> R + 'static,
     ) -> Self {
@@ -166,7 +166,7 @@ impl Textarea {
     pub(crate) fn into_input(self) -> Input {
         Input::from_state(self.state.clone())
             .when_some(self.token_renderer, |this, render| {
-                this.render_token(move |token, window, cx| render(token, window, cx))
+                this.token(move |token, window, cx| render(token, window, cx))
             })
             .when_some(self.token_click_listener, |this, listener| {
                 this.on_token_click(move |event, window, cx| listener(event, window, cx))

@@ -104,7 +104,7 @@ input.update(cx, |state, cx| {
 });
 ```
 
-Tokens display as unstyled labels. Use `render_token` to supply your own single-row
+Tokens display as unstyled labels. Use the `token` slot to supply your own single-row
 element and `on_token_click` to open a reference. Copy and `value()` return the
 real text, such as `@alice`. Save drafts with `content()` and restore them with
 `set_value(content)` to keep their references.

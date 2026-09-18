@@ -64,14 +64,14 @@ export default class TokenHost extends View {
   render() {
     return div().relative().w(400).h(260)
       .child(new Input(this.input).w(350).aria_label("Token input")
-        .render_token(token => div().w(80).h(20).child(token.token.label))
+        .token(token => div().w(80).h(20).child(token.token.label))
         .on_token_click((event, cx) => {
           assert(event.token.id === "a", "current identity");
           this.input.set_value("opened"); this.status = "clicked"; cx.notify();
         }))
       .child(new Textarea(this.textarea).w(350).h(60))
       .child(new Input(this.child).absolute().top(140).left(0).w(350)
-        .render_token(token => div().flex().w(100).h(20).child(div().w(70).child(token.token.label))
+        .token(token => div().flex().w(100).h(20).child(div().w(70).child(token.token.label))
           .child(BaseButton.new("remove-token-child").w(30).h(20).child("×")
             .on_mouse_down("left", (_event, cx) => cx.stop_propagation())
             .on_click((_event, cx) => { this.child.set_value("removed"); this.status = "child"; cx.stop_propagation(); cx.notify(); })))
