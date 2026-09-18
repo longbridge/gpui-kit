@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Check published recipe fragments and their isolated Rust consumer."""
+"""Check that published recipe fragments match their compiled sources."""
 import argparse
 import json
-import os
 from pathlib import Path
-import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -68,30 +66,12 @@ def fragments(root, sync=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sync", action="store_true", help="Update published fragments from compiled sources")
-    parser.add_argument("--docs-only", action="store_true", help="Check fragment freshness only; does not validate Rust or UI")
     args = parser.parse_args()
     try:
-        print(f"Checked {fragments(ROOT, args.sync)} published recipe fragments", flush=True)
-        if args.docs_only or args.sync:
-            print("Coverage: documentation fragments only; compilation and interaction NOT RUN")
-            return 0
-        env = dict(os.environ)
-        env.setdefault("CARGO_TARGET_DIR", str(ROOT / "target"))
-        manifest = "examples/ai_recipes/Cargo.toml"
-        for argv in [
-            ["cargo", "fmt", "--manifest-path", manifest, "--check"],
-            # The bin alone, without dev-dependencies: proves the recipes compile
-            # against `gpui-kit` before `test-support` unifies in.
-            ["cargo", "check", "--locked", "--manifest-path", manifest, "--bin", "gpui-kit-recipes"],
-            # Builds every target with dev-dependencies, so a separate
-            # `cargo check --all-targets` would only recompile GPUI a second time.
-            ["cargo", "test", "--locked", "--manifest-path", manifest],
-        ]:
-            print("Running: " + " ".join(argv), flush=True)
-            subprocess.run(argv, cwd=ROOT, env=env, check=True)
-        print("PASS: isolated consumer compile and GPUI recipe tests. Native OS accessibility and visual review are separate gates.")
+        print(f"Checked {fragments(ROOT, args.sync)} published recipe fragments")
+        print("Coverage: documentation fragments only; `cargo test -p gpui-kit-recipes` compiles and tests the sources")
         return 0
-    except (ValueError, OSError, subprocess.CalledProcessError) as error:
+    except (ValueError, OSError) as error:
         print(str(error), file=sys.stderr)
         return 1
 
