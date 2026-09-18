@@ -962,6 +962,44 @@ pub(crate) struct Paragraph {
     pub(super) link_refs: HashMap<SharedString, SharedString>,
 
     pub(crate) state: Arc<Mutex<InlineState>>,
+    /// What the plain (text-only) render path derives from `children`, kept
+    /// between frames; see [`ParagraphRender`].
+    pub(super) render_cache: ParagraphRenderCache,
+}
+
+/// Derived state: a clone starts empty and rebuilds, and it is invisible to
+/// `Debug` and equality.
+#[derive(Default)]
+pub(super) struct ParagraphRenderCache(Mutex<Option<ParagraphRender>>);
+
+impl Clone for ParagraphRenderCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl std::fmt::Debug for ParagraphRenderCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ParagraphRenderCache")
+    }
+}
+
+/// The text, highlights and links a text-only paragraph renders with.
+///
+/// They are a pure function of the paragraph's children and the style they
+/// are rendered under, yet every frame rebuilt them: the paragraph's text was
+/// re-concatenated and copied into a fresh `SharedString`, and its marks
+/// merged into highlights through `combine_highlights` once per child. On a
+/// scroll that was ~8% of the frame for nothing. Streamed fades change every
+/// frame and are layered on afterwards; reference links are resolved
+/// afterwards too, since a definition can arrive later in the document.
+struct ParagraphRender {
+    style: Arc<TextViewStyle>,
+    mono_font: SharedString,
+    text: SharedString,
+    highlights: Vec<(Range<usize>, InlineHighlight)>,
+    /// Links as written, before reference resolution.
+    links: Vec<(Range<usize>, LinkMark)>,
 }
 
 impl PartialEq for Paragraph {
@@ -979,7 +1017,69 @@ impl Paragraph {
             children: vec![InlineNode::new(&text)],
             link_refs: HashMap::new(),
             state: Arc::new(Mutex::new(InlineState::default())),
+            render_cache: ParagraphRenderCache::default(),
         }
+    }
+
+    /// The text, highlights and (unresolved) links of a text-only paragraph,
+    /// from the cache when the style has not changed since they were built.
+    fn plain_render(
+        &self,
+        node_cx: &NodeContext,
+        cx: &App,
+    ) -> (
+        SharedString,
+        Vec<(Range<usize>, InlineHighlight)>,
+        Vec<(Range<usize>, LinkMark)>,
+    ) {
+        let mono_font = cx.theme().tokens.typography.mono.clone();
+        if let Ok(cache) = self.render_cache.0.lock()
+            && let Some(cached) = cache.as_ref()
+            && (Arc::ptr_eq(&cached.style, &node_cx.style) || *cached.style == *node_cx.style)
+            && cached.mono_font == mono_font
+        {
+            return (
+                cached.text.clone(),
+                cached.highlights.clone(),
+                cached.links.clone(),
+            );
+        }
+
+        let mut text = String::new();
+        let mut highlights: Vec<(Range<usize>, InlineHighlight)> = vec![];
+        let mut links: Vec<(Range<usize>, LinkMark)> = vec![];
+        let mut offset = 0;
+        for inline_node in &self.children {
+            let text_len = inline_node.text.len();
+            text.push_str(&inline_node.text);
+            let mut node_highlights = vec![];
+            for (range, style) in &inline_node.marks {
+                let inner_range = (offset + range.start)..(offset + range.end);
+                let mut highlight = mark_highlight(style, node_cx, cx);
+                if let Some(link_mark) = style.link.clone() {
+                    highlight.style.color = Some(node_cx.style.link());
+                    highlight.style.underline = Some(gpui::UnderlineStyle {
+                        thickness: gpui::px(1.),
+                        ..Default::default()
+                    });
+                    links.push((inner_range.clone(), link_mark));
+                }
+                node_highlights.push((inner_range, highlight));
+            }
+            highlights = combine_highlights(highlights, node_highlights);
+            offset += text_len;
+        }
+        let text = SharedString::from(text);
+        if let Ok(mut cache) = self.render_cache.0.lock() {
+            *cache = Some(ParagraphRender {
+                style: node_cx.style.clone(),
+                mono_font,
+                text: text.clone(),
+                highlights: highlights.clone(),
+                links: links.clone(),
+            });
+        }
+        (text, highlights, links)
     }
 
     pub(super) fn selected_text(&self) -> String {
@@ -1254,6 +1354,7 @@ impl Paragraph {
                 children: vec![],
                 link_refs: Default::default(),
                 state: Arc::new(Mutex::new(InlineState::default())),
+                render_cache: ParagraphRenderCache::default(),
             },
         )
     }
@@ -1270,14 +1371,22 @@ impl Paragraph {
         self.children.push(
             InlineNode::new(text.to_string()).marks(vec![(0..text.len(), TextMark::default())]),
         );
+        self.invalidate_render_cache();
     }
 
     pub(crate) fn push(&mut self, text: InlineNode) {
         self.children.push(text);
+        self.invalidate_render_cache();
     }
 
     pub(crate) fn push_image(&mut self, image: ImageNode) {
         self.children.push(InlineNode::image(image));
+        self.invalidate_render_cache();
+    }
+
+    /// The children changed, so what was derived from them is stale.
+    fn invalidate_render_cache(&mut self) {
+        self.render_cache = ParagraphRenderCache::default();
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -1298,6 +1407,7 @@ impl Paragraph {
 
     pub(crate) fn merge(&mut self, other: Self) {
         self.children.extend(other.children);
+        self.invalidate_render_cache();
     }
 }
 
@@ -1635,8 +1745,35 @@ impl Paragraph {
             .into_any_element();
         }
 
-        let mut child_nodes: Vec<AnyElement> = vec![];
         let has_image = children.iter().any(|child| child.image.is_some());
+        // Text alone is one `Inline`, which needs no box of its own, and its
+        // text, highlights and links are cached across frames.
+        if !has_image {
+            let (text, highlights, mut links) = self.plain_render(node_cx, cx);
+            if text.is_empty() {
+                return div().into_any_element();
+            }
+            for (_, link_mark) in &mut links {
+                if let Some(identifier) = link_mark.identifier.as_ref()
+                    && let Some(mark) = node_cx.link_refs.get(identifier)
+                {
+                    *link_mark = mark.clone();
+                }
+            }
+            let highlights = fade_highlights(highlights, &slice_fades(fades, 0, text.len()));
+            if let Ok(mut state) = self.state.lock() {
+                state.set_text(text);
+            }
+            return Inline::new(
+                self.state.clone(),
+                links,
+                highlights,
+                node_cx.link_click_handler.clone(),
+            )
+            .into_any_element();
+        }
+
+        let mut child_nodes: Vec<AnyElement> = vec![];
 
         let mut text = String::new();
         let mut highlights: Vec<(Range<usize>, InlineHighlight)> = vec![];
@@ -3204,6 +3341,7 @@ mod tests {
             children,
             link_refs: HashMap::new(),
             state: Arc::new(Mutex::new(InlineState::default())),
+            render_cache: ParagraphRenderCache::default(),
         };
         if let Ok(mut state) = paragraph.state.lock() {
             state.set_text(combined.into());
@@ -3593,6 +3731,7 @@ mod tests {
             children: vec![InlineNode::image(image)],
             link_refs: HashMap::new(),
             state: Arc::new(Mutex::new(InlineState::default())),
+            render_cache: ParagraphRenderCache::default(),
         }
     }
 
