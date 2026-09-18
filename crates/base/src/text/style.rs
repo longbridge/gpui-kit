@@ -19,6 +19,7 @@ pub struct TextViewStyle {
     code_background: Hsla,
     border: Hsla,
     paragraph_gap: Rems,
+    heading_gap: Rems,
     heading_base_font_size: Pixels,
     heading_font_size: Option<Arc<dyn Fn(u8, Pixels) -> Pixels + Send + Sync + 'static>>,
     code_block: StyleRefinement,
@@ -32,6 +33,7 @@ pub struct TextViewStyle {
 impl PartialEq for TextViewStyle {
     fn eq(&self, other: &Self) -> bool {
         self.paragraph_gap == other.paragraph_gap
+            && self.heading_gap == other.heading_gap
             && self.foreground == other.foreground
             && self.muted_foreground == other.muted_foreground
             && self.link == other.link
@@ -85,6 +87,7 @@ impl TextViewStyle {
             code_background: colors.accent,
             border: colors.border,
             paragraph_gap: rems(1.),
+            heading_gap: rems(0.3),
             heading_base_font_size: px(14.),
             heading_font_size: None,
             code_block: StyleRefinement::default(),
@@ -141,6 +144,12 @@ impl TextViewStyle {
     /// Sets the gap between paragraphs. Defaults to 1 rem.
     pub fn with_paragraph_gap(mut self, gap: Rems) -> Self {
         self.paragraph_gap = gap;
+        self
+    }
+
+    /// Sets the gap below a heading. Defaults to 0.3 rem.
+    pub fn with_heading_gap(mut self, gap: Rems) -> Self {
+        self.heading_gap = gap;
         self
     }
 
@@ -245,6 +254,11 @@ impl TextViewStyle {
     /// The gap between paragraphs.
     pub fn paragraph_gap(&self) -> Rems {
         self.paragraph_gap
+    }
+
+    /// The gap below a heading.
+    pub fn heading_gap(&self) -> Rems {
+        self.heading_gap
     }
 
     /// The base font size headings are derived from.
