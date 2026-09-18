@@ -21,9 +21,10 @@ thread_local! {
 /// are put back afterwards.
 fn apply_theme(mode: ThemeMode, cx: &mut App) {
     Theme::change(mode, None, cx);
-    let theme = cx.global_mut::<Theme>();
-    theme.font_family = "Inter Variable".into();
-    theme.mono_font_family = "JetBrains Mono".into();
+    Theme::update(cx, |theme| {
+        theme.font_family = "Inter Variable".into();
+        theme.mono_font_family = "JetBrains Mono".into();
+    });
 }
 
 /// Switches the gallery between light and dark after it is running.

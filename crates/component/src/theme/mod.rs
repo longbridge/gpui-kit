@@ -233,9 +233,16 @@ impl Theme {
     /// untouched field keeps the gradient a theme file gave it, the Base
     /// projection is rebuilt, and every window is refreshed.
     ///
+    /// A field the closure sets to the value it already had counts as
+    /// untouched: assigning a whole palette keeps the gradient of any field
+    /// whose color did not change. Edit the token to replace one.
+    ///
     /// Setting [`Theme::mode`] loads that mode's registered theme, the same
     /// as [`Theme::change`]; that load replaces the colors, so edit colors in
     /// a second `update` after switching mode rather than in the same closure.
+    /// [`Theme::apply_config`] installs a theme file and switches to its mode
+    /// in one step, and the closure may go on editing after it — nothing is
+    /// loaded over its edits.
     pub fn update<R>(cx: &mut App, edit: impl FnOnce(&mut Theme) -> R) -> R {
         Self::edit(cx, false, edit)
     }
@@ -251,6 +258,8 @@ impl Theme {
         let colors_before = theme.colors;
         let tokens_before = theme.tokens;
         let mode_before = theme.mode;
+        let light_before = theme.light_theme.clone();
+        let dark_before = theme.dark_theme.clone();
         let fonts_before = (theme.font_family.clone(), theme.mono_font_family.clone());
 
         let result = edit(theme);
@@ -259,12 +268,18 @@ impl Theme {
             .tokens
             .reconcile(&mut theme.colors, &colors_before, &tokens_before);
         let mode_changed = theme.mode != mode_before;
-        if mode_changed || reload_mode {
-            let config = if theme.mode.is_dark() {
-                theme.dark_theme.clone()
-            } else {
-                theme.light_theme.clone()
-            };
+        let (config, config_before) = if theme.mode.is_dark() {
+            (&theme.dark_theme, &dark_before)
+        } else {
+            (&theme.light_theme, &light_before)
+        };
+        // `apply_config` registers the file it applies and switches to its
+        // mode, so a mode change that arrives with a newly registered config
+        // has already loaded it. Loading it again would put the file's radius,
+        // fonts and colors back over whatever the closure edited after it.
+        let installed_by_edit = mode_changed && !Rc::ptr_eq(config, config_before);
+        if (mode_changed || reload_mode) && !installed_by_edit {
+            let config = config.clone();
             theme.apply_config(&config);
         }
         let fonts_changed =
@@ -315,15 +330,10 @@ impl Theme {
         Self::set_scrollbar_mode(mode, cx);
     }
 
-    /// Changes the scrollbar display mode and synchronizes the Base projection.
+    /// Changes the scrollbar display mode through [`Theme::update`], which
+    /// projects it onto the Base scrollbar and refreshes every window.
     pub fn set_scrollbar_mode(mode: ScrollbarMode, cx: &mut App) {
-        Theme::global_mut(cx).scrollbar_mode = mode;
-        let base_theme = gpui_base::Theme::global_mut(cx);
-        base_theme.scrollbar = base_theme
-            .scrollbar
-            .clone()
-            .with_mode(mode)
-            .with_motion(scrollbar_motion(mode));
+        Self::update(cx, |theme| theme.scrollbar_mode = mode);
     }
 
     /// Change the theme mode.
@@ -333,8 +343,8 @@ impl Theme {
     /// [`Theme::dark_theme`] sees the new theme — through [`Theme::update`],
     /// which keeps every copy of the theme in step and refreshes every
     /// window. `window` is accepted for compatibility; every window is
-    /// refreshed either way.
-    pub fn change(mode: impl Into<ThemeMode>, window: Option<&mut Window>, cx: &mut App) {
+    /// refreshed either way, so it is not read.
+    pub fn change(mode: impl Into<ThemeMode>, _window: Option<&mut Window>, cx: &mut App) {
         let mode = mode.into();
         if !cx.has_global::<Theme>() {
             let mut theme = Theme::default();
@@ -344,10 +354,6 @@ impl Theme {
         }
 
         Self::edit(cx, true, |theme| theme.mode = mode);
-
-        if let Some(window) = window {
-            window.refresh();
-        }
     }
 
     /// This theme projected onto the Base layer, which owns the scrollbar and
@@ -908,6 +914,40 @@ mod update_tests {
                 theme.primary.into(),
                 "the gradient must survive the reconcile"
             );
+        });
+    }
+
+    /// `apply_config` switches to the file's mode itself, so `edit` must not
+    /// load that mode's theme a second time over what the closure went on to
+    /// set — the same closure has to land the same result from either mode.
+    #[gpui::test]
+    fn edits_after_applying_a_config_of_the_other_mode_survive(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            init(cx);
+            let config: ThemeConfig = serde_json::from_value(serde_json::json!({
+                "name": "Rounded Dark",
+                "mode": "dark",
+                "radius": 12,
+                "colors": { "primary": "#4F46E5" }
+            }))
+            .unwrap();
+            let config = Rc::new(config);
+            assert!(!Theme::global(cx).is_dark());
+
+            let red = gpui::red();
+            Theme::update(cx, |theme| {
+                theme.apply_config(&config);
+                theme.radius = px(0.);
+                theme.colors.primary = red;
+            });
+
+            let theme = Theme::global(cx);
+            assert!(theme.is_dark());
+            assert!(Rc::ptr_eq(&theme.dark_theme, &config));
+            assert_eq!(theme.radius, px(0.), "the file's radius must not reload");
+            assert_eq!(theme.primary, red);
+            assert_eq!(theme.tokens.primary, red.into());
+            assert_eq!(gpui_base::Theme::global(cx).tokens.colors.primary, red);
         });
     }
 
