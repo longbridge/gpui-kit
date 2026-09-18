@@ -42,10 +42,16 @@ impl RenderOnce for InlineTokenTag {
             .h(self.context.line_height())
             .max_w(self.context.available_width())
             .rounded(cx.theme().radius)
-            .bg(if self.context.is_selected() {
-                cx.theme().selection
-            } else {
-                cx.theme().muted
+            .border_1()
+            .map(|this| {
+                // The selection color is translucent as a fill; its opaque form
+                // is the matching border.
+                if self.context.is_selected() {
+                    this.bg(cx.theme().selection)
+                        .border_color(cx.theme().selection.alpha(1.))
+                } else {
+                    this.bg(cx.theme().muted).border_color(cx.theme().border)
+                }
             })
             .text_color(cx.theme().foreground)
             .when(self.context.is_disabled(), |this| this.opacity(0.5))

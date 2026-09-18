@@ -215,12 +215,10 @@ impl TokenExample {
         cx.notify();
     }
 
-    fn render_token(token: &InlineTokenContext, cx: &App) -> InlineTokenTag {
+    fn render_token(token: &InlineTokenContext) -> InlineTokenTag {
         let reference = Reference::of(token.token());
         InlineTokenTag::new(token)
             .when_some(reference, |tag, reference| tag.with_icon(reference.icon()))
-            .border_1()
-            .border_color(cx.theme().border)
     }
 
     fn insert_button(&self, reference: Reference, cx: &Context<Self>) -> InputGroupButton {
@@ -250,7 +248,7 @@ impl TokenExample {
                 .input(
                     InputGroupInput::new(input)
                         .aria_label("Message")
-                        .render_token(|token, _, cx| Self::render_token(token, cx))
+                        .render_token(|token, _, _| Self::render_token(token))
                         .on_token_click(open),
                 )
                 .addon(
@@ -263,7 +261,7 @@ impl TokenExample {
                 .input(
                     InputGroupTextarea::new(input)
                         .aria_label("Message")
-                        .render_token(|token, _, cx| Self::render_token(token, cx))
+                        .render_token(|token, _, _| Self::render_token(token))
                         .on_token_click(open),
                 )
                 .addon(
