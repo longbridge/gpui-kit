@@ -138,6 +138,13 @@ window.open_dialog(cx, |dialog, _, _| {
 })
 ```
 
+### Action Buttons
+
+A `Dialog` puts its own buttons in the [`footer`](#dialogfooter) and has them
+dispatch `Confirm` or `Cancel`; `on_ok` and `on_cancel` decide what Enter and
+Esc do. For a confirmation with default buttons, use
+[AlertDialog](./alert-dialog.md).
+
 ### Nested Dialogs
 
 ```rust

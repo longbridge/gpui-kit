@@ -135,6 +135,10 @@ window.open_dialog(cx, |dialog, _, _| {
 })
 ```
 
+### 操作按钮
+
+`Dialog` 自己的按钮放在 [`footer`](#dialogfooter) 里并派发 `Confirm` / `Cancel`；`on_ok`、`on_cancel` 决定 Enter 与 Esc 的行为。需要默认按钮的确认框请用 [AlertDialog](./alert-dialog.md)。
+
 ### 嵌套对话框
 
 ```rust

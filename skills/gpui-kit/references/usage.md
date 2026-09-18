@@ -230,20 +230,22 @@ object in the title and the result on the confirming button; see the Design
 Guides for the copy rules.
 
 ```rust
-use gpui_kit::component::{button::ButtonVariant, dialog::DialogButtonProps};
+use gpui_kit::component::button::ButtonVariant;
 
 window.open_alert_dialog(cx, |alert, _, _| {
     alert
         .title("Remove “Roadmap”?")
         .description("Files on disk aren’t deleted.")
-        .button_props(
-            DialogButtonProps::default()
-                .ok_text("Remove")
-                .ok_variant(ButtonVariant::Danger)
-                .on_ok(|_, _, _| true),
-        )
+        .confirm()
+        .ok_text("Remove")
+        .ok_variant(ButtonVariant::Danger)
+        .on_ok(|_, _, _| true)
 });
 ```
+
+`button_props(DialogButtonProps)` takes the same properties as one value; it
+overrides only the fields that value sets, so `confirm` and earlier callbacks
+survive it.
 
 ### Notification
 

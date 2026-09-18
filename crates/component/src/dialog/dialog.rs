@@ -22,32 +22,35 @@ use crate::{
 pub static ANIMATION_DURATION: LazyLock<Duration> = LazyLock::new(|| Duration::from_secs_f64(0.25));
 pub use gpui_base::actions::{Cancel, Confirm};
 
-/// Dialog button props.
-#[derive(Clone)]
-pub struct DialogButtonProps {
-    pub(crate) ok_text: Option<SharedString>,
-    pub(crate) ok_variant: ButtonVariant,
-    pub(crate) cancel_text: Option<SharedString>,
-    pub(crate) cancel_variant: ButtonVariant,
-    pub(crate) show_cancel: bool,
-    pub(crate) on_ok: Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) -> bool + 'static>,
-    pub(crate) on_cancel: Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) -> bool + 'static>,
-    pub(crate) on_close: Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>,
+type OkHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) -> bool + 'static>;
+type CancelHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) -> bool + 'static>;
+type CloseHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+
+/// Overwrite `slot` only when `value` was explicitly set.
+fn merge_field<T>(slot: &mut Option<T>, value: Option<T>) {
+    if value.is_some() {
+        *slot = value;
+    }
 }
 
-impl Default for DialogButtonProps {
-    fn default() -> Self {
-        Self {
-            ok_text: None,
-            ok_variant: ButtonVariant::Primary,
-            cancel_text: None,
-            cancel_variant: ButtonVariant::default(),
-            show_cancel: false,
-            on_ok: Rc::new(|_, _, _| true),
-            on_cancel: Rc::new(|_, _, _| true),
-            on_close: Rc::new(|_, _, _| {}),
-        }
-    }
+/// Dialog button props.
+///
+/// Every field is unset until a builder sets it, and an unset field falls back
+/// to its documented default when the dialog renders. Handing a value to
+/// [`Dialog::button_props`] or [`crate::dialog::AlertDialog::button_props`]
+/// therefore overrides only the fields that value sets: whatever the dialog
+/// already carries — the Cancel button `AlertDialog::confirm` asked for, a
+/// callback an earlier `on_ok` installed — survives.
+#[derive(Clone, Default)]
+pub struct DialogButtonProps {
+    pub(crate) ok_text: Option<SharedString>,
+    pub(crate) ok_variant: Option<ButtonVariant>,
+    pub(crate) cancel_text: Option<SharedString>,
+    pub(crate) cancel_variant: Option<ButtonVariant>,
+    pub(crate) show_cancel: Option<bool>,
+    pub(crate) on_ok: Option<OkHandler>,
+    pub(crate) on_cancel: Option<CancelHandler>,
+    pub(crate) on_close: Option<CloseHandler>,
 }
 
 impl DialogButtonProps {
@@ -59,7 +62,7 @@ impl DialogButtonProps {
 
     /// Sets the variant of the OK button. Default is `ButtonVariant::Primary`.
     pub fn ok_variant(mut self, ok_variant: ButtonVariant) -> Self {
-        self.ok_variant = ok_variant;
+        self.ok_variant = Some(ok_variant);
         self
     }
 
@@ -71,13 +74,13 @@ impl DialogButtonProps {
 
     /// Sets the variant of the Cancel button. Default is `ButtonVariant::default()`.
     pub fn cancel_variant(mut self, cancel_variant: ButtonVariant) -> Self {
-        self.cancel_variant = cancel_variant;
+        self.cancel_variant = Some(cancel_variant);
         self
     }
 
     /// Sets whether to show the Cancel button. Default is `false`.
     pub fn show_cancel(mut self, show_cancel: bool) -> Self {
-        self.show_cancel = show_cancel;
+        self.show_cancel = Some(show_cancel);
         self
     }
 
@@ -88,7 +91,7 @@ impl DialogButtonProps {
         mut self,
         on_ok: impl Fn(&ClickEvent, &mut Window, &mut App) -> bool + 'static,
     ) -> Self {
-        self.on_ok = Rc::new(on_ok);
+        self.on_ok = Some(Rc::new(on_ok));
         self
     }
 
@@ -99,8 +102,46 @@ impl DialogButtonProps {
         mut self,
         on_cancel: impl Fn(&ClickEvent, &mut Window, &mut App) -> bool + 'static,
     ) -> Self {
-        self.on_cancel = Rc::new(on_cancel);
+        self.on_cancel = Some(Rc::new(on_cancel));
         self
+    }
+
+    /// Takes over every field `other` sets and keeps the rest.
+    pub(crate) fn merge(&mut self, other: Self) {
+        merge_field(&mut self.ok_text, other.ok_text);
+        merge_field(&mut self.ok_variant, other.ok_variant);
+        merge_field(&mut self.cancel_text, other.cancel_text);
+        merge_field(&mut self.cancel_variant, other.cancel_variant);
+        merge_field(&mut self.show_cancel, other.show_cancel);
+        merge_field(&mut self.on_ok, other.on_ok);
+        merge_field(&mut self.on_cancel, other.on_cancel);
+        merge_field(&mut self.on_close, other.on_close);
+    }
+
+    /// Whether the default footer renders a Cancel button. Default is `false`.
+    pub(crate) fn is_cancel_shown(&self) -> bool {
+        self.show_cancel.unwrap_or(false)
+    }
+
+    /// The confirm callback, defaulting to one that closes the dialog.
+    pub(crate) fn ok_handler(&self) -> OkHandler {
+        self.on_ok
+            .clone()
+            .unwrap_or_else(|| Rc::new(|_, _, _| true))
+    }
+
+    /// The cancel callback, defaulting to one that closes the dialog.
+    pub(crate) fn cancel_handler(&self) -> CancelHandler {
+        self.on_cancel
+            .clone()
+            .unwrap_or_else(|| Rc::new(|_, _, _| true))
+    }
+
+    /// The close callback, defaulting to one that does nothing.
+    pub(crate) fn close_handler(&self) -> CloseHandler {
+        self.on_close
+            .clone()
+            .unwrap_or_else(|| Rc::new(|_, _, _| {}))
     }
 
     pub(crate) fn render_ok(&self, _: &mut Window, _: &mut App) -> AnyElement {
@@ -113,7 +154,7 @@ impl DialogButtonProps {
             anchor_key: "dialog-ok-anchor",
             button: Button::new("ok")
                 .label(ok_text)
-                .with_variant(self.ok_variant),
+                .with_variant(self.ok_variant.unwrap_or(ButtonVariant::Primary)),
             action: Rc::new(Confirm { secondary: false }),
         }
         .into_any_element()
@@ -129,7 +170,7 @@ impl DialogButtonProps {
             anchor_key: "dialog-cancel-anchor",
             button: Button::new("cancel")
                 .label(cancel_text)
-                .with_variant(self.cancel_variant),
+                .with_variant(self.cancel_variant.unwrap_or_default()),
             action: Rc::new(Cancel),
         }
         .into_any_element()
@@ -342,10 +383,15 @@ impl Dialog {
     }
 
     /// Set the button props of the dialog.
+    ///
+    /// This overrides only the fields `button_props` sets; the rest of the
+    /// dialog's button configuration is kept, so the call order does not
+    /// matter.
     pub fn button_props(mut self, button_props: DialogButtonProps) -> Self {
-        self.button_props = button_props;
+        self.button_props.merge(button_props);
         self
     }
+
     pub(crate) fn with_base_alert_dialog(mut self, base: gpui_base::AlertDialog) -> Self {
         self.base = Some(BaseDialogRoot::AlertDialog(base));
         self.props.overlay_closable = false;
@@ -359,7 +405,7 @@ impl Dialog {
         mut self,
         on_close: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
-        self.button_props.on_close = Rc::new(on_close);
+        self.button_props.on_close = Some(Rc::new(on_close));
         self
     }
 
@@ -511,9 +557,9 @@ impl RenderOnce for Dialog {
 
         let layer_ix = self.layer_ix;
         let selection_scope = self.selection_scope;
-        let on_close = self.button_props.on_close.clone();
-        let on_ok = self.button_props.on_ok.clone();
-        let on_cancel = self.button_props.on_cancel.clone();
+        let on_close = self.button_props.close_handler();
+        let on_ok = self.button_props.ok_handler();
+        let on_cancel = self.button_props.cancel_handler();
 
         let window_paddings = crate::window_border::window_paddings(window);
         let view_size = window.viewport_size()
@@ -732,7 +778,7 @@ impl RenderOnce for Dialog {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use gpui::{AppContext as _, Bounds, Context, Render, TestAppContext, VisualTestContext, size};
 
@@ -748,7 +794,10 @@ mod tests {
 
     /// A window of `window_size` whose root renders the dialog layer, with
     /// motion reduced so the entrance animation settles on its first frame.
-    fn window(cx: &mut TestAppContext, window_size: gpui::Size<Pixels>) -> &mut VisualTestContext {
+    pub(crate) fn window(
+        cx: &mut TestAppContext,
+        window_size: gpui::Size<Pixels>,
+    ) -> &mut VisualTestContext {
         cx.update(|cx| {
             crate::init(cx);
             cx.set_reduce_motion(true);
@@ -823,6 +872,22 @@ mod tests {
             footer.bottom() <= bounds.bottom(),
             "the footer was clipped below the dialog: footer {footer:?}, dialog {bounds:?}"
         );
+    }
+
+    /// `Dialog::button_props` overrides only the fields it sets.
+    #[gpui::test]
+    fn dialog_button_props_merge_with_what_the_dialog_already_carries(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(400.), px(300.)));
+        cx.update(|_, cx| {
+            let dialog = Dialog::new(cx)
+                .button_props(DialogButtonProps::default().cancel_text("Keep"))
+                .button_props(DialogButtonProps::default().ok_text("Delete"))
+                .button_props(DialogButtonProps::default().ok_variant(ButtonVariant::Danger));
+
+            assert_eq!(dialog.button_props.ok_text.as_deref(), Some("Delete"));
+            assert_eq!(dialog.button_props.cancel_text.as_deref(), Some("Keep"));
+            assert_eq!(dialog.button_props.ok_variant, Some(ButtonVariant::Danger));
+        });
     }
 
     /// Each stacked dialog steps down 16px; the deepest one must still end
