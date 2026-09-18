@@ -237,48 +237,46 @@ impl RenderOnce for Switch {
                 .items_start()
                 .when(self.label_side.is_left(), |this| this.flex_row_reverse())
                 .child(
-                    // The focus ring hugs the track, not the row, so the
-                    // label stays outside it. The track's own border is the
-                    // thumb's inset, which the ring must not tint, so the ring
-                    // is drawn on a frame that takes the track's geometry and
-                    // has no border of its own.
-                    div()
-                        .relative()
-                        .flex_none()
+                    // Switch Bar
+                    SwitchTrack::new((self.id.clone(), "track"))
+                        .checked(checked)
+                        .disabled(self.disabled)
+                        .when(cfg!(test), |this| {
+                            this.debug_selector(|| "switch-bar".into())
+                        })
+                        .w(bg_width)
+                        .h(bg_height)
                         .rounded(radius)
+                        .flex()
+                        .items_center()
+                        // The thumb inset is a 1px border plus 1px padding,
+                        // not a 2px border: the focus ring tints the border
+                        // solid, and that 1px line is what keeps the ring
+                        // visible on an unchecked track. Its 50% halo alone
+                        // lands within a few values of `switch.background`
+                        // in both default modes.
+                        .border_1()
+                        .border_color(cx.theme().transparent)
+                        .p(inset - px(1.))
+                        .when(!checked, |this| this.bg(unchecked_bg))
+                        .styles(|styles| {
+                            styles
+                                .checked(|style| style.bg(checked_bg))
+                                .disabled(|style| style.bg(disabled_bg))
+                        })
+                        // The ring hugs the track, not the row, so the label
+                        // stays outside it.
                         .when(is_focused && self.focus_ring_enabled, |this| {
                             this.focus_ring_style(window, cx)
                         })
+                        .map(|this| self.tooltip.apply(this))
                         .child(
-                            // Switch Bar
-                            SwitchTrack::new((self.id.clone(), "track"))
-                                .checked(checked)
-                                .disabled(self.disabled)
-                                .when(cfg!(test), |this| {
-                                    this.debug_selector(|| "switch-bar".into())
-                                })
-                                .w(bg_width)
-                                .h(bg_height)
+                            // Switch Toggle
+                            SwitchThumb::new(checked)
                                 .rounded(radius)
-                                .flex()
-                                .items_center()
-                                .border(inset)
-                                .border_color(cx.theme().transparent)
-                                .when(!checked, |this| this.bg(unchecked_bg))
-                                .styles(|styles| {
-                                    styles
-                                        .checked(|style| style.bg(checked_bg))
-                                        .disabled(|style| style.bg(disabled_bg))
-                                })
-                                .map(|this| self.tooltip.apply(this))
-                                .child(
-                                    // Switch Toggle
-                                    SwitchThumb::new(checked)
-                                        .rounded(radius)
-                                        .size(bar_width)
-                                        .left(thumb_x)
-                                        .bg(toggle_bg),
-                                ),
+                                .size(bar_width)
+                                .left(thumb_x)
+                                .bg(toggle_bg),
                         ),
                 )
                 .when_some(self.label, |this, label| {
