@@ -1,6 +1,6 @@
 # Tested application recipe
 
-This complete view comes from `examples/ai_recipes/src/lib.rs`. Its standalone consumer depends only on `gpui-kit`; the same source is compiled and tested by `script/check-ai-recipes`. Pair it with that example's `src/main.rs`, which installs assets, initializes the library, and wraps the window in `Root`.
+This complete view comes from `examples/ai_recipes/src/settings.rs`. That consumer crate depends only on `gpui-kit`; the same source is compiled and tested by `cargo test -p gpui-kit-recipes`, and `script/check-ai-recipes` keeps this copy identical to it. Pair it with that example's `src/bootstrap.rs`, which installs assets, initializes the library, and wraps the window in `Root`.
 
 The view owns both input state and subscriptions. Rendering creates only elements. Application content renders each overlay layer once; `Root` alone does not render dialog, sheet, or notification content.
 
@@ -131,4 +131,4 @@ impl Render for Settings {
 ```
 <!-- recipe:settings:end -->
 
-For changes in this repository, run `script/check-ai docs`, `script/check-ai rust`, or `script/check-ai shell` for the relevant verification profile (or `script/check-ai all` for all three). For a downstream app, compile and test your own consumer, then verify keyboard/focus and visuals in a real window. Automated recipe tests do not establish a model success rate.
+For changes in this repository, run `script/check-ai docs`, `script/check-ai rust`, or `script/check-ai shell` for the relevant verification profile (or `script/check-ai all` for all three), and `cargo test -p gpui-kit-recipes` when a recipe source changes. For a downstream app, compile and test your own consumer, then verify keyboard/focus and visuals in a real window. Automated recipe tests do not establish a model success rate.

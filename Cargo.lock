@@ -3960,6 +3960,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-kit-recipes"
+version = "0.6.2"
+dependencies = [
+ "gpui-kit",
+]
+
+[[package]]
 name = "gpui-pre"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
