@@ -58,6 +58,11 @@ pub(crate) mod assets;
 pub(crate) mod capability;
 mod component;
 mod component_registry;
+mod input_tokens;
+pub use input_tokens::{
+    InlineTokenCallbacks, inline_token_click_data, inline_token_context_data,
+    input_token_state_methods, textarea_token_state_methods,
+};
 pub(crate) mod dependencies;
 pub mod dock;
 pub(crate) mod engine;
@@ -100,7 +105,7 @@ pub use component_registry::{
     ComponentDelegateSnapshot, ComponentDescriptor, ComponentElementCallback,
     ComponentElementFactory, ComponentMaterializer, ComponentPayload, ComponentRegistry,
     ConstructorDescriptor, DEFAULT_COMPONENT_MODULE, FrozenComponentRegistry, MaterializeRequest,
-    MethodDescriptor, RegistryError, StateDescriptor,
+    MethodDescriptor, RegistryError, StateDescriptor, StateMethodDescriptor,
 };
 pub(crate) use component_registry::{ComponentCallbackValue, ComponentId, RecordedComponentMethod};
 pub use engine::{LoadedApplication, ShellRuntime};

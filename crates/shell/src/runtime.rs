@@ -303,6 +303,10 @@ impl<T> Default for CallbackArena<T> {
 }
 
 impl<T: Clone> CallbackArena<T> {
+    pub(crate) fn is_building(&self) -> bool {
+        self.building.is_some()
+    }
+
     pub(crate) fn checkpoint(&self) -> usize {
         self.building
             .as_ref()

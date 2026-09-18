@@ -215,6 +215,7 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
     out.push_str("  /** The fluent builder returned by native and Base element factories. */\n");
     out.push_str("  export interface NativeElement {\n");
     out.push_str(ELEMENT_METHODS);
+    out.push_str("    token(render: (token: import(\"gpui-base\").InlineTokenContext, cx: Context) => Element | null): this;\n    on_token_click(listener: (event: import(\"gpui-base\").InlineTokenClickEvent, cx: Context) => void): this;\n");
     out.push_str(&parametric_styles(&parametric));
     out.push_str(&nullary_styles(&nullary));
     out.push_str("  }\n");
@@ -228,15 +229,23 @@ pub(crate) fn declarations_with_components(components: &crate::FrozenComponentRe
     out.push_str(BASE_IMPORTS);
     out.push_str(&base_color_token_type());
     out.push_str(BASE_SHARED_TYPES);
+    out.push_str(INLINE_TOKEN_TYPES);
     out.push_str(BASE);
     out.push_str("}\n\n");
     out.push_str("declare module \"gpui-component\" {\n");
     out.push_str("  import { ClickEvent, Context, Element, NativeElement } from \"gpui-kit\";\n");
+    out.push_str(INLINE_TOKEN_TYPES);
     for state in components.states() {
         push_jsdoc(&mut out, state.documentation(), None, "  ");
         out.push_str("  export interface ");
         out.push_str(state.kind());
-        out.push_str(" { readonly __gpuiComponentState: unique symbol }\n");
+        out.push_str(" { readonly __gpuiComponentState: unique symbol");
+        for method in state.methods() {
+            out.push_str(";\n    ");
+            out.push_str(method.name());
+            out.push_str(method.signature());
+        }
+        out.push_str(" }\n");
         push_jsdoc(&mut out, state.documentation(), None, "  ");
         out.push_str("  export function ");
         out.push_str(state.export());
@@ -2328,6 +2337,22 @@ const WINDOW: &str = r#"
 /// Everything `gpui-base` provides: its layout helpers, its components and its
 /// theme. Emitted into `declare module "gpui-base"`, so an import says which
 /// layer a script is reaching for.
+const INLINE_TOKEN_TYPES: &str = r#"
+  /** Half-open JavaScript UTF-16 string offsets, as used by slice(). */
+  export interface InputRange { start: number; end: number }
+  export interface InlineToken { id: string; text: string; label?: string }
+  export interface InlineTokenSpan { range: InputRange; token: InlineToken }
+  export interface InputContent { text: string; tokens: InlineTokenSpan[] }
+  export interface InlineTokenContext extends InlineTokenSpan {
+    selected: boolean; disabled: boolean; readonly: boolean;
+    line_height: number; available_width: number;
+  }
+  export interface InlineTokenClickEvent extends InlineTokenSpan {
+    bounds: { x: number; y: number; width: number; height: number };
+    modifiers: { shift: boolean; alt: boolean; control: boolean; platform: boolean };
+  }
+"#;
+
 const BASE: &str = r#"  /** A row. */
   export function h_flex(): NativeElement;
   /** A column. */
@@ -2972,8 +2997,15 @@ const BASE: &str = r#"  /** A row. */
    * an event handler — never in `render`.
    */
   export interface InputState {
+    content(): InputContent;
+    tokens(): InlineTokenSpan[];
+    replace_with_token(token: InlineToken): void;
+    replace_range_with_token(range: InputRange, token: InlineToken): void;
+    set_selected_range(range: InputRange): void;
+    replace(text: string): void;
     value(): string;
-    set_value(next: string): void;
+    /** Plain text, or a content snapshot to restore its tokens as well. */
+    set_value(next: string | InputContent): void;
     /** `change`, `submit`, `focus` or `blur`. */
     on(event: "change" | "submit" | "focus" | "blur", handler: (event: InputEvent, cx: Context) => void): boolean;
     /**
@@ -3032,8 +3064,15 @@ const BASE: &str = r#"  /** A row. */
    * call `set_auto_grow(...)`, or size the element with `.h(...)`.
    */
   export interface TextareaState {
+    content(): InputContent;
+    tokens(): InlineTokenSpan[];
+    replace_with_token(token: InlineToken): void;
+    replace_range_with_token(range: InputRange, token: InlineToken): void;
+    set_selected_range(range: InputRange): void;
+    replace(text: string): void;
     value(): string;
-    set_value(next: string): void;
+    /** Plain text, or a content snapshot to restore its tokens as well. */
+    set_value(next: string | InputContent): void;
     /** `change`, `submit`, `focus` or `blur`. */
     on(event: "change" | "submit" | "focus" | "blur", handler: (event: InputEvent, cx: Context) => void): boolean;
     /** Shows this many rows. */
@@ -3852,6 +3891,8 @@ mod tests {
         "controls_right",
         "when",
         "on_click",
+        "token",
+        "on_token_click",
         "on_mouse_move",
         "on_hover",
         "on_key_down",

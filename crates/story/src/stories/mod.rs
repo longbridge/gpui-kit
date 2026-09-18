@@ -34,6 +34,7 @@ mod icon_story;
 mod image_story;
 mod input_group_story;
 mod input_story;
+mod input_tokens;
 mod kbd_story;
 mod label_story;
 mod list_story;

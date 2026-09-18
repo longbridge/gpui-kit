@@ -936,8 +936,32 @@ impl<M: InputModeKind> TextElement<M> {
                 continue;
             }
 
-            if let Some(path) = Self::layout_match_range(range, last_layout, bounds) {
-                paths.push(path);
+            // A selected token shows its own selected state, so the text
+            // highlight stops at its edges instead of painting behind it.
+            let mut start = range.start;
+            if state.tokens_visible() {
+                let spans = state.token_spans();
+                let first = spans.partition_point(|s| s.range().end <= range.start);
+                for span in spans[first..]
+                    .iter()
+                    .take_while(|s| s.range().start < range.end)
+                {
+                    if start < span.range().start {
+                        paths.extend(Self::layout_match_range(
+                            start..span.range().start,
+                            last_layout,
+                            bounds,
+                        ));
+                    }
+                    start = span.range().end.max(start);
+                }
+            }
+            if start < range.end {
+                paths.extend(Self::layout_match_range(
+                    start..range.end,
+                    last_layout,
+                    bounds,
+                ));
             }
         }
 
@@ -1374,6 +1398,464 @@ impl<M: InputModeKind> TextElement<M> {
         }
     }
 
+    fn token_element(
+        &self,
+        token: &super::InlineTokenContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> AnyElement {
+        use gpui::{StatefulInteractiveElement as _, prelude::FluentBuilder as _};
+        let presentation = self.state.read(cx).token_presentation.clone();
+        let child = presentation.render(token, window, cx);
+        // A token is addressed by where it starts: the same reference may occur
+        // more than once, and the document revision guards a press against
+        // edits that move it.
+        let start = token.range().start;
+        let down_state = self.state.clone();
+        let click_state = self.state.clone();
+        let move_state = self.state.clone();
+        let disabled = token.is_disabled();
+        let accessible = presentation.has_listener() && !disabled;
+        let accessible_state = self.state.clone();
+        gpui::div()
+            .id(("inline-token", start))
+            .flex()
+            .items_center()
+            .h(token.line_height())
+            .max_w(token.available_width())
+            .overflow_hidden()
+            // A token is an object, not text: the arrow, never the I-beam.
+            .cursor_default()
+            .when(accessible, |this| {
+                this.role(gpui::Role::Button)
+                    .aria_label(token.token().label().clone())
+                    .on_a11y_action(gpui::AccessibleAction::Click, move |_, window, cx| {
+                        let state = accessible_state.read(cx);
+                        let activation = state
+                            .token_spans()
+                            .iter()
+                            .find(|s| s.range().start == start)
+                            .and_then(|span| {
+                                state.range_to_bounds(&span.range()).and_then(|bounds| {
+                                    state.token_activation(
+                                        start,
+                                        bounds,
+                                        gpui::ClickEvent::Keyboard(gpui::KeyboardClickEvent {
+                                            bounds,
+                                            ..Default::default()
+                                        }),
+                                    )
+                                })
+                            });
+                        if let Some((listener, event)) = activation {
+                            listener(&event, window, cx);
+                        }
+                    })
+            })
+            .capture_any_mouse_down(move |_, window, cx| {
+                if disabled {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            })
+            .capture_any_mouse_up(move |_, window, cx| {
+                if disabled {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            })
+            .capture_key_down(move |_, _, cx| {
+                if disabled {
+                    cx.stop_propagation();
+                }
+            })
+            .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                if window.default_prevented() {
+                    return;
+                }
+                down_state.update(cx, |state, cx| {
+                    state.pressed_token = None;
+                    if event.click_count == 2 {
+                        if let Some(span) = state
+                            .token_spans()
+                            .iter()
+                            .find(|s| s.range().start == start)
+                        {
+                            state.set_selected_range(span.range(), cx);
+                            state.focus(window, cx);
+                            window.prevent_default();
+                        }
+                    } else if event.click_count == 1
+                        && !event.modifiers.shift
+                        && !event.modifiers.alt
+                    {
+                        state.pressed_token =
+                            Some((start, state.document_revision, event.position));
+                    }
+                });
+            })
+            .on_mouse_move(move |event, _, cx| {
+                move_state.update(cx, |state, _| {
+                    if state.pressed_token.as_ref().is_some_and(|(_, _, p)| {
+                        (event.position.x - p.x).abs() + (event.position.y - p.y).abs() > px(4.)
+                    }) {
+                        state.pressed_token = None;
+                    }
+                });
+            })
+            .on_click(move |event, window, cx| {
+                let activation = click_state.update(cx, |state, cx| {
+                    let (pressed, revision, _) = state.pressed_token.take()?;
+                    if pressed != start || revision != state.document_revision {
+                        return None;
+                    }
+                    if event.modifiers().shift || event.modifiers().alt {
+                        return None;
+                    }
+                    let span = state
+                        .token_spans()
+                        .iter()
+                        .find(|s| s.range().start == start)?
+                        .clone();
+                    // A click selects the whole token; opening it is the
+                    // listener's decision.
+                    state.set_selected_range(span.range(), cx);
+                    let bounds = state.range_to_bounds(&span.range())?;
+                    state.token_activation(start, bounds, event.clone())
+                });
+                if let Some((listener, event)) = activation {
+                    listener(&event, window, cx);
+                }
+            })
+            .child(child)
+            .into_any_element()
+    }
+
+    fn measure_tokens(
+        &self,
+        width: Pixels,
+        line_height: Pixels,
+        viewport: Pixels,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> std::collections::HashMap<usize, AnyElement> {
+        let style = window.text_style();
+        let state = self.state.read(cx);
+        let key = (
+            style.font(),
+            style.font_size.to_pixels(window.rem_size()),
+            width,
+            line_height,
+            state.is_single_line() || !state.soft_wrap,
+        );
+        if !state.tokens_visible() {
+            if state.token_layout_cache.is_none() {
+                return Default::default();
+            }
+            self.state.update(cx, |state, cx| {
+                state.display_map.set_inline_metrics(Rc::from([]), cx)
+            });
+            return Default::default();
+        }
+        let revision = state.document_revision;
+        let cache = state.token_layout_cache.as_ref();
+        let all = cache.is_none_or(|cache| {
+            cache.key.as_ref() != Some(&key)
+                || cache.revision != revision
+                || state
+                    .token_spans()
+                    .iter()
+                    .any(|span| !cache.widths.contains_key(span.token()))
+        });
+        let (visible, _, _) = self.calculate_visible_range(state, line_height, viewport);
+        let start = state.text.line_start_offset(visible.start);
+        let end = state.text.line_end_offset(visible.end.saturating_sub(1));
+        let spans = state.token_spans();
+        let first = if all {
+            0
+        } else {
+            spans.partition_point(|s| s.range().end <= start)
+        };
+        let contexts: Vec<_> = spans[first..]
+            .iter()
+            .take_while(|s| all || s.range().start <= end)
+            .filter(|span| {
+                let range = span.range();
+                (range.start <= end && range.end >= start)
+                    || cache.is_none_or(|cache| {
+                        cache.key.as_ref() != Some(&key) || !cache.widths.contains_key(span.token())
+                    })
+            })
+            .map(|span| state.token_context(span, line_height, width))
+            .collect();
+        let mut elements = std::collections::HashMap::new();
+        let mut measured = Vec::new();
+        for token in contexts {
+            let mut element = self.token_element(&token, window, cx);
+            let size = element.layout_as_root(
+                size(
+                    gpui::AvailableSpace::MaxContent,
+                    gpui::AvailableSpace::Definite(line_height),
+                ),
+                window,
+                cx,
+            );
+            measured.push((token.token().clone(), size.width.min(width).max(px(1.))));
+            elements.insert(token.range().start, element);
+        }
+        self.state.update(cx, |state, cx| {
+            let mut cache = state.token_layout_cache.take().unwrap_or_default();
+            let mut changed = cache.key.as_ref() != Some(&key) || cache.revision != revision;
+            if cache.key.as_ref() != Some(&key) {
+                cache.widths.clear();
+            }
+            for (token, width) in measured {
+                changed |= cache.widths.get(&token) != Some(&width);
+                cache.widths.insert(token, width);
+            }
+            cache.key = Some(key);
+            if changed {
+                let spans = state.token_spans();
+                let tokens: std::collections::HashSet<_> =
+                    spans.iter().map(|s| s.token()).collect();
+                cache.widths.retain(|token, _| tokens.contains(token));
+                cache.metrics = spans
+                    .iter()
+                    .filter_map(|span| {
+                        cache
+                            .widths
+                            .get(span.token())
+                            .map(|width| (span.range(), *width))
+                    })
+                    .collect();
+                cache.revision = revision;
+                if state.is_single_line() || !state.soft_wrap {
+                    let mut rows: Vec<_> = spans
+                        .iter()
+                        .map(|s| state.text.offset_to_point(s.range().start).row)
+                        .collect();
+                    rows.push(state.display_map.longest_row());
+                    rows.sort_unstable();
+                    rows.dedup();
+                    cache.unwrapped_width = rows
+                        .into_iter()
+                        .map(|row| {
+                            let start = state.text.line_start_offset(row);
+                            let text = state.text.slice_line(row).to_string();
+                            let mut offset = 0;
+                            let mut width = px(0.);
+                            let first = spans.partition_point(|s| s.range().end <= start);
+                            for span in spans[first..]
+                                .iter()
+                                .take_while(|s| s.range().start < start + text.len())
+                            {
+                                let local = span.range().start - start..span.range().end - start;
+                                let part = &text[offset..local.start];
+                                width += window
+                                    .text_system()
+                                    .shape_line(
+                                        part.to_owned().into(),
+                                        style.font_size.to_pixels(window.rem_size()),
+                                        &[style.to_run(part.len())],
+                                        None,
+                                    )
+                                    .width;
+                                width +=
+                                    cache.widths.get(span.token()).copied().unwrap_or_default();
+                                offset = local.end;
+                            }
+                            let part = &text[offset..];
+                            width
+                                + window
+                                    .text_system()
+                                    .shape_line(
+                                        part.to_owned().into(),
+                                        style.font_size.to_pixels(window.rem_size()),
+                                        &[style.to_run(part.len())],
+                                        None,
+                                    )
+                                    .width
+                        })
+                        .max()
+                        .unwrap_or_default();
+                }
+            }
+            let metrics = cache.metrics.clone();
+            state.token_layout_cache = Some(cache);
+            state.display_map.set_inline_metrics(metrics, cx);
+            if state.mode.is_auto_grow() {
+                let rows = state.mode.rows();
+                state.mode.update_auto_grow(&state.display_map);
+                if state.mode.rows() != rows {
+                    cx.notify();
+                }
+            }
+        });
+        elements
+    }
+
+    fn layout_token_lines(
+        state: &InputBaseState<M>,
+        last_layout: &LastLayout,
+        font_size: Pixels,
+        runs: &[TextRun],
+        window: &mut Window,
+    ) -> Vec<LineLayout> {
+        use crate::input::display_map::{InlineFragment, InputLine};
+        let spans = state.token_spans();
+        let cache = state
+            .token_layout_cache
+            .as_ref()
+            .expect("tokens measured before shaping");
+        let mut run_offset = 0;
+        last_layout
+            .visible_buffer_lines
+            .iter()
+            .map(|&row| {
+                let line_start = state.text.line_start_offset(row);
+                let text: String = state.text.slice_line(row).into();
+                let ranges = if state.is_single_line() {
+                    smallvec::smallvec![0..text.len()]
+                } else {
+                    state
+                        .display_map
+                        .line(row)
+                        .expect("prepared line")
+                        .wrapped_lines
+                        .clone()
+                };
+                let mut lines: SmallVec<[InputLine; 1]> = SmallVec::new();
+                for range in ranges {
+                    let mut fragments = Vec::new();
+                    let mut offset = range.start;
+                    let mut x = px(0.);
+                    let first =
+                        spans.partition_point(|s| s.range().end <= line_start + range.start);
+                    for span in spans[first..]
+                        .iter()
+                        .take_while(|s| s.range().start < line_start + range.end)
+                    {
+                        let local = span.range().start - line_start..span.range().end - line_start;
+                        if offset < local.start {
+                            let part = offset..local.start;
+                            let shaped = window.text_system().shape_line(
+                                text[part.clone()].to_owned().into(),
+                                font_size,
+                                &runs_for_range(runs, run_offset, &part),
+                                None,
+                            );
+                            let width = shaped.width;
+                            fragments.push(InlineFragment {
+                                range: part.start - range.start..part.end - range.start,
+                                x,
+                                width,
+                                text: Some(shaped),
+                            });
+                            x += width;
+                        }
+                        let width = cache.widths.get(span.token()).copied().unwrap_or_default();
+                        fragments.push(InlineFragment {
+                            range: local.start - range.start..local.end - range.start,
+                            x,
+                            width,
+                            text: None,
+                        });
+                        x += width;
+                        offset = local.end;
+                    }
+                    if offset < range.end {
+                        let part = offset..range.end;
+                        let shaped = window.text_system().shape_line(
+                            text[part.clone()].to_owned().into(),
+                            font_size,
+                            &runs_for_range(runs, run_offset, &part),
+                            None,
+                        );
+                        let width = shaped.width;
+                        fragments.push(InlineFragment {
+                            range: part.start - range.start..part.end - range.start,
+                            x,
+                            width,
+                            text: Some(shaped),
+                        });
+                    }
+                    lines.push(InputLine::inline(text[range].to_owned().into(), fragments));
+                }
+                let indent = state.display_map.line(row).map_or(0, |line| line.indent);
+                let wrap_indent = if indent > 0 && lines.len() > 1 {
+                    let bytes = text
+                        .char_indices()
+                        .nth(indent as usize)
+                        .map_or(text.len(), |(ix, _)| ix);
+                    lines[0].x_for_index(bytes)
+                } else {
+                    px(0.)
+                };
+                run_offset += text.len() + 1;
+                LineLayout::new()
+                    .inline_lines(lines)
+                    .wrap_indent(wrap_indent)
+            })
+            .collect()
+    }
+
+    fn prepaint_tokens(
+        &self,
+        layout: &LastLayout,
+        bounds: Bounds<Pixels>,
+        mut measured: std::collections::HashMap<usize, AnyElement>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Vec<AnyElement> {
+        let state = self.state.read(cx);
+        if !state.tokens_visible() {
+            return vec![];
+        }
+        let width = state
+            .token_layout_cache
+            .as_ref()
+            .and_then(|c| c.key.as_ref())
+            .map_or(bounds.size.width, |k| k.2);
+        let mut placements = Vec::new();
+        let mut y = layout.visible_top;
+        for (ix, &row) in layout.visible_buffer_lines.iter().enumerate() {
+            let start = state.text.line_start_offset(row);
+            let end = state.text.line_end_offset(row);
+            let spans = state.token_spans();
+            let first = spans.partition_point(|s| s.range().end <= start);
+            for span in spans[first..].iter().take_while(|s| s.range().start < end) {
+                if let Some(position) =
+                    layout.lines[ix].position_for_index(span.range().start - start, layout, false)
+                {
+                    placements.push((
+                        state.token_context(span, layout.line_height, width),
+                        bounds.origin + position + point(layout.line_number_width, y),
+                    ));
+                }
+            }
+            y += layout.lines[ix].size(layout.line_height).height;
+        }
+        placements
+            .into_iter()
+            .map(|(token, origin)| {
+                let mut element = measured.remove(&token.range().start).unwrap_or_else(|| {
+                    let mut element = self.token_element(&token, window, cx);
+                    element.layout_as_root(
+                        size(
+                            gpui::AvailableSpace::MaxContent,
+                            gpui::AvailableSpace::Definite(layout.line_height),
+                        ),
+                        window,
+                        cx,
+                    );
+                    element
+                });
+                element.prepaint_at(origin, window, cx);
+                element
+            })
+            .collect()
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn layout_lines(
         state: &InputBaseState<M>,
@@ -1386,6 +1868,9 @@ impl<M: InputModeKind> TextElement<M> {
         window: &mut Window,
     ) -> Vec<LineLayout> {
         let is_single_line = state.is_single_line();
+        if state.tokens_visible() {
+            return Self::layout_token_lines(state, last_layout, font_size, runs, window);
+        }
 
         if is_single_line {
             let text: SharedString = display_text.to_string().into();
@@ -1657,6 +2142,7 @@ struct CursorRenderInfo {
 pub(super) struct PrepaintState {
     /// The lines of entire lines.
     last_layout: LastLayout,
+    token_elements: Vec<AnyElement>,
     /// The lines only contains the visible lines in the viewport, based on `visible_range`.
     ///
     /// The child is the soft lines.
@@ -1864,8 +2350,15 @@ impl<M: InputModeKind> Element for TextElement<M> {
             });
         }
 
-        let state = self.state.read(cx);
         let line_height = window.line_height();
+        let token_elements = self.measure_tokens(
+            (bounds.size.width - line_number_width - RIGHT_MARGIN).max(px(1.)),
+            line_height,
+            bounds.size.height,
+            window,
+            cx,
+        );
+        let state = self.state.read(cx);
 
         let (visible_range, visible_buffer_lines, visible_top) =
             self.calculate_visible_range(&state, line_height, bounds.size.height);
@@ -2017,6 +2510,16 @@ impl<M: InputModeKind> Element for TextElement<M> {
                     wrap_width,
                 )
                 .width;
+        }
+        if state.tokens_visible() {
+            longest_line_width = if let Some(width) = wrap_width {
+                width
+            } else {
+                state
+                    .token_layout_cache
+                    .as_ref()
+                    .map_or(px(0.), |cache| cache.unwrapped_width)
+            };
         }
         last_layout.lines = Rc::new(lines);
 
@@ -2176,7 +2679,9 @@ impl<M: InputModeKind> Element for TextElement<M> {
             self.layout_fold_icons(original_x, &bounds, &last_layout, window, cx);
         let hitbox = window.insert_hitbox(input_bounds, HitboxBehavior::Normal);
 
+        let token_elements = self.prepaint_tokens(&last_layout, bounds, token_elements, window, cx);
         PrepaintState {
+            token_elements,
             hitbox,
             bounds,
             last_layout,
@@ -2414,6 +2919,10 @@ impl<M: InputModeKind> Element for TextElement<M> {
                     offset_y += line_height;
                 }
             }
+        }
+
+        for element in &mut prepaint.token_elements {
+            element.paint(window, cx);
         }
 
         // Paint blinking cursors (shared blink state for all carets)

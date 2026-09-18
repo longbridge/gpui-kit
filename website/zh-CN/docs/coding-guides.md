@@ -302,6 +302,8 @@ Pointer-specific 行为使用 pointer callback；需要 key binding、menu 或�
 
 只有 nested interaction 确实必须阻止 parent 处理同一 event 时才 stop propagation。无差别阻止会破坏 menu、selection、drag 与 window command。
 
+先绑键，再建菜单栏。`cx.set_menus` 在调用那一刻读取 keymap，把每个菜单项的快捷键固化进原生菜单；之后再注册的 binding 不会出现在菜单项旁，菜单项也不响应该按键。先 `cx.bind_keys`，再 `cx.set_menus`；keymap 之后又变了（用户 keymap 文件、切换语言重建菜单），就再调一次 `cx.set_menus`。
+
 Focus owner 必须明确：
 
 - 拥有 keyboard interaction 的 Entity 保存 `FocusHandle`；
@@ -309,6 +311,8 @@ Focus owner 必须明确：
 - overlay 打开时转移 focus，关闭后恢复；
 - 绘制清楚的 `focus_visible` state；
 - 禁止在 `render` 中无条件 request focus。
+
+被 track 的 handle 只有自己声明了才是 Tab stop：用 `cx.focus_handle().tab_stop(true)`（或 `.tab_index(n)`）建它，元素自身的 `tab_index`/`tab_stop` 不会作用到传给 `track_focus` 的 handle 上。Stateless component 可以在 `render` 里通过 `window.use_keyed_state(id, cx, |_, cx| cx.focus_handle().tab_stop(true))` 建这个 handle；keyed state 跨帧保留，Tab 顺序因此稳定——`Button` 就是这么做的。
 
 `key_context` 与 `on_action` 应附着于同一个 focused region。注册了 Action 但没有正确 focus path，不算实现键盘交互。Composite widget 应完成整个 navigation model：方向键、适用时的 Home/End/Page、confirm、cancel 与 Tab，而不是几个孤立 shortcut。
 
@@ -449,7 +453,7 @@ Boolean builder 可叫 `disabled(bool)`，reader 叫 `is_disabled()`。含 non-b
 
 - **selected** 是持久 membership/active item；**focused** 是 keyboard target；**hovered** 是 pointer presence；**confirmed** 是 activation result，不能混用。
 - **open/close** 描述 overlay/disclosure state；**show/hide** 表示 transient presentation request；**expand/collapse** 描述结构。
-- **disabled** 禁止交互；**read-only** 允许导航/选择但禁止编辑；**loading** 表示操作中并应防止重复提交。
+- **disabled** 禁止交互；**readonly** 允许导航/选择但禁止编辑；**loading** 表示操作中并应防止重复提交。这个状态一律拼作 `readonly`——一个词，与 `readonly(bool)` builder 和 `is_readonly()` reader 一致——标识符、界面标签和文档中都如此，不写 `read-only` 或 `read only`。
 - **index** 是当前位置；**id** 是稳定 identity；`IndexPath` 是层级位置。重排数据不能用 index 持久化或作为 key。
 - **value** 是 controlled domain data；**presentation** 是 render 用 read-only snapshot；**state** 是 retained behavior。
 - **placement** 是 side/anchor policy；**position** 是 resolved geometry。

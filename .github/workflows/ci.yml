@@ -65,8 +65,8 @@ jobs:
       - name: Lint
         run: cargo clippy --workspace --exclude gpui-shell --locked -- --deny warnings
 
-  recipes:
-    name: Recipes
+  no-default-features:
+    name: No default features
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,7 +79,9 @@ jobs:
         run: script/bootstrap
       - name: Check without default features (tree-sitter disabled)
         run: cargo check -p gpui-component --no-default-features --locked
-      - name: Verify executable application recipes
+      # Control callback, legacy alias, and Form contract tests on the same
+      # feature set, so they reuse the build above.
+      - name: Test without default features
         run: python3 script/check-ai rust
 
   test:
@@ -111,7 +113,8 @@ jobs:
         run: script/bootstrap
       # Compiling and linking a test binary for every `examples/` crate was
       # most of the warm-cache build time; the `lint` job type-checks them
-      # instead. Leaving them out changes no crate's feature set.
+      # instead. Leaving them out changes no crate's feature set. The recipes
+      # crate stays in: its tests are what certify the documentation's code.
       # `jq -j` writes the list as one line with no newline at all: on Windows
       # `jq` emits CRLF, and a `\r` left on a name breaks `--exclude`.
       - name: Leave the example crates to the lint job
@@ -120,6 +123,7 @@ jobs:
             ((.workspace_root | gsub("\\\\"; "/")) + "/examples/") as $examples
             | .packages[]
             | select((.manifest_path | gsub("\\\\"; "/")) | startswith($examples))
+            | select(.name != "gpui-kit-recipes")
             | "--exclude \(.name) "')
           echo "TEST_EXCLUDES=$excludes" >> "$GITHUB_ENV"
       # `gpui-component-story/test-support` turns on `gpui-kit/test-support`, so
