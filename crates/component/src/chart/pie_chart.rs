@@ -134,11 +134,14 @@ impl<T> PieChart<T> {
         self
     }
 
-    fn get_outer_radius(&self, arc: &ArcData<T>) -> f32 {
+    /// The outer radius of `arc`'s slice: the per-slice one, or `default`.
+    /// `self.outer_radius` is zero until a caller sets it, so the radius the
+    /// ring is laid out with comes from [`Self::resolve_outer_radius`].
+    fn get_outer_radius(&self, arc: &ArcData<T>, default: f32) -> f32 {
         if let Some(outer_radius_fn) = self.outer_radius_fn.as_ref() {
             outer_radius_fn(arc)
         } else {
-            self.outer_radius
+            default
         }
     }
 
@@ -254,7 +257,7 @@ impl<T> Plot for PieChart<T> {
             let inner_radius = self.get_inner_radius(a);
             // The hovered slice lifts out of the ring while the others fade behind it.
             let (lift, opacity) = self.slice_emphasis(a.index);
-            let outer_radius = self.get_outer_radius(a) + HOVER_LIFT * lift;
+            let slice_radius = self.get_outer_radius(a, outer_radius) + HOVER_LIFT * lift;
             let color = self.slice_color(a.data, cx).opacity(opacity);
             match caches.as_ref() {
                 Some(caches) => caches.update(cx, |caches, _| {
@@ -262,7 +265,7 @@ impl<T> Plot for PieChart<T> {
                         a,
                         color,
                         Some(inner_radius),
-                        Some(outer_radius),
+                        Some(slice_radius),
                         &bounds,
                         caches.slot(ix),
                         window,
@@ -272,7 +275,7 @@ impl<T> Plot for PieChart<T> {
                     a,
                     color,
                     Some(inner_radius),
-                    Some(outer_radius),
+                    Some(slice_radius),
                     &bounds,
                     window,
                 ),
@@ -388,7 +391,7 @@ impl<T> Plot for PieChart<T> {
                 &a,
                 position,
                 Some(self.get_inner_radius(&a)),
-                Some(self.get_outer_radius(&a)),
+                Some(self.get_outer_radius(&a, outer_radius)),
                 &bounds,
             )
             .then_some(a.index)
@@ -508,5 +511,45 @@ fn spread_labels(items: &mut [LabelLayout], top: f32, bottom: f32) {
     // Keep the top-most label within bounds.
     if items[0].y < top {
         items[0].y = top;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::size;
+
+    use super::*;
+
+    /// A chart left without an `outer_radius` lays its ring out at 40% of the
+    /// height. Slices and hit-testing have to use that radius: reading the
+    /// unset `outer_radius` field instead leaves every slice at zero, which
+    /// paints nothing and matches no cursor.
+    #[test]
+    fn test_pie_chart_slice_radius_falls_back_to_the_ring() {
+        let bounds = Bounds {
+            origin: point(px(0.), px(0.)),
+            size: size(px(200.), px(200.)),
+        };
+
+        let chart = PieChart::new(vec![1f32, 3.]).value(|d| *d);
+        let ring = chart.resolve_outer_radius(&bounds);
+        assert_eq!(ring, 80.);
+        assert_eq!(chart.get_outer_radius(&chart.arcs()[0], ring), ring);
+
+        // An explicit radius, and a per-slice one, still win.
+        let chart = PieChart::new(vec![1f32, 3.])
+            .value(|d| *d)
+            .outer_radius(50.);
+        let ring = chart.resolve_outer_radius(&bounds);
+        assert_eq!(ring, 50.);
+        assert_eq!(chart.get_outer_radius(&chart.arcs()[0], ring), 50.);
+
+        let chart = PieChart::new(vec![1f32, 3.])
+            .value(|d| *d)
+            .outer_radius_fn(|a| 10. + a.index as f32);
+        let ring = chart.resolve_outer_radius(&bounds);
+        let arcs = chart.arcs();
+        assert_eq!(chart.get_outer_radius(&arcs[0], ring), 10.);
+        assert_eq!(chart.get_outer_radius(&arcs[1], ring), 11.);
     }
 }
