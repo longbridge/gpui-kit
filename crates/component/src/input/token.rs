@@ -21,7 +21,7 @@ impl InputToken {
             style: Default::default(),
         }
     }
-    pub fn with_icon(mut self, icon: impl Into<Icon>) -> Self {
+    pub fn icon(mut self, icon: impl Into<Icon>) -> Self {
         self.icon = Some(icon.into());
         self
     }

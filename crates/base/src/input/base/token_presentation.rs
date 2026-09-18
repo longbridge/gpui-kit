@@ -54,7 +54,9 @@ impl InlineTokenClickEvent {
     pub fn bounds(&self) -> Bounds<Pixels> {
         self.bounds
     }
-    pub fn event(&self) -> &ClickEvent {
+    /// The click that opened the token; keyboard activation reports a
+    /// keyboard click.
+    pub fn click(&self) -> &ClickEvent {
         &self.event
     }
 }

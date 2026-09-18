@@ -163,7 +163,7 @@ pub fn inline_token_context_data(token: &InlineTokenContext, text: &Rope) -> Dat
 }
 /// Plain JS activation event, with current token identity and pointer modifiers.
 pub fn inline_token_click_data(event: &InlineTokenClickEvent, text: &Rope) -> Data {
-    let modifiers = event.event().modifiers();
+    let modifiers = event.click().modifiers();
     let bounds = event.bounds();
     object([
         ("token", token_data(event.token())),
@@ -200,7 +200,6 @@ pub(crate) const METHODS: &[(&str, &str, bool)] = &[
         "(range: InputRange, token: InlineToken): void",
         false,
     ),
-    ("refresh", "(): void", false),
     ("set_selected_range", "(range: InputRange): void", false),
     ("replace", "(text: string): void", false),
 ];
@@ -239,10 +238,6 @@ macro_rules! state_binding {
                     entity.update(cx, |state, cx| {
                         state.replace_range_with_token(range, token, window, cx)
                     })?;
-                    Ok(Data::Null)
-                }
-                ("refresh", []) => {
-                    entity.update(cx, |state, cx| state.refresh(cx));
                     Ok(Data::Null)
                 }
                 ("set_selected_range", [value]) => {

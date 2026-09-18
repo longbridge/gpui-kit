@@ -219,7 +219,7 @@ impl TokenExample {
     fn token(token: &InlineTokenContext) -> InputToken {
         let reference = Reference::of(token.token());
         InputToken::new(token).when_some(reference, |element, reference| {
-            element.with_icon(reference.icon())
+            element.icon(reference.icon())
         })
     }
 

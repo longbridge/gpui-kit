@@ -80,7 +80,7 @@ Textarea::new(&notes)
 
 ```rust
 Textarea::new(&state)
-    .token(|token, _, _| InputToken::new(token).with_icon(IconName::File))
+    .token(|token, _, _| InputToken::new(token).icon(IconName::File))
 ```
 
 从 `gpui_kit::component::input` 导入 `InputToken`，从 `gpui_kit::component` 导入 `IconName`。token 会整块换到下一行，自动增高会相应调整输入框高度。换行符应放在 token 之间的普通文本中。编辑、激活、草稿保存、模式限制和 JavaScript API 见 [Input：原子行内 token](./input.md#原子行内-token)。

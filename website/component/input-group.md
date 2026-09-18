@@ -372,7 +372,7 @@ use gpui_kit::component::{
 
 InputGroup::new("composer")
     .input(Textarea::new(&state)
-        .token(|token, _, _| InputToken::new(token).with_icon(IconName::File)))
+        .token(|token, _, _| InputToken::new(token).icon(IconName::File)))
 ```
 
 The JavaScript group controls also expose `token` and `on_token_click`.

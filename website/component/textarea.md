@@ -89,7 +89,7 @@ when you want an icon or other custom content:
 
 ```rust
 Textarea::new(&state)
-    .token(|token, _, _| InputToken::new(token).with_icon(IconName::File))
+    .token(|token, _, _| InputToken::new(token).icon(IconName::File))
 ```
 
 Import `InputToken` from `gpui_kit::component::input` and `IconName` from

@@ -386,7 +386,7 @@ use gpui_kit::component::{
 
 Input::new(&input)
     .token(|token, _, _| {
-        InputToken::new(token).with_icon(IconName::File)
+        InputToken::new(token).icon(IconName::File)
     })
     .on_token_click(|event: &InlineTokenClickEvent, _, _| {
         // Look up event.token().id() and open its resource.
