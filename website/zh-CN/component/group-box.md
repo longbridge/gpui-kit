@@ -57,6 +57,23 @@ GroupBox::new()
     .child(Button::new("save").primary().label("Save Changes"))
 ```
 
+### 卡片外的底部说明
+
+用 `footer` 在填充背景或边框下方放置辅助内容，而不是将其放进内容区域。
+它沿用当前变体默认的水平内容缩进：`Fill` 和 `Outline` 有缩进，`Normal` 没有。
+`content_style` 只影响主体内容；底部说明的字体和颜色由传入的元素控制。
+
+```rust
+GroupBox::new()
+    .fill()
+    .child("Update preferences")
+    .footer(
+        Label::new("Changes apply to this device only.")
+            .text_sm()
+            .text_color(cx.theme().muted_foreground)
+    )
+```
+
 ### 自定义 ID
 
 ```rust

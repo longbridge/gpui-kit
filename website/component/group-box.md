@@ -60,6 +60,24 @@ GroupBox::new()
     .child(Button::new("save").primary().label("Save Changes"))
 ```
 
+### Footer outside the surface
+
+Use `footer` for supporting content below the filled background or outline, not
+inside the content area. It uses the variant's default horizontal content inset
+(`Fill` and `Outline` are inset; `Normal` is not). `content_style` only changes
+the body. Style the footer element itself to choose its typography and color.
+
+```rust
+GroupBox::new()
+    .fill()
+    .child("Update preferences")
+    .footer(
+        Label::new("Changes apply to this device only.")
+            .text_sm()
+            .text_color(cx.theme().muted_foreground)
+    )
+```
+
 ### Custom ID
 
 ```rust

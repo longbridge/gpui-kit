@@ -67,6 +67,7 @@ pub struct GroupBox {
     title: Option<AnyElement>,
     content_style: StyleRefinement,
     children: SmallVec<[AnyElement; 1]>,
+    footer: Option<AnyElement>,
 }
 
 impl GroupBox {
@@ -80,6 +81,7 @@ impl GroupBox {
             content_style: StyleRefinement::default(),
             title: None,
             children: SmallVec::new(),
+            footer: None,
         }
     }
 
@@ -104,6 +106,15 @@ impl GroupBox {
     /// Set the style of the content of the group box to override the default style, default is None.
     pub fn content_style(mut self, style: StyleRefinement) -> Self {
         self.content_style = style;
+        self
+    }
+
+    /// Set content below the group's filled or outlined surface.
+    ///
+    /// The footer participates in normal layout and uses the variant's default
+    /// horizontal content inset. Typography and colors belong to the caller.
+    pub fn footer(mut self, footer: impl IntoElement) -> Self {
+        self.footer = Some(footer.into_any_element());
         self
     }
 }
@@ -161,6 +172,9 @@ impl RenderOnce for GroupBox {
                     .refine_style(&self.content_style)
                     .children(self.children),
             )
+            .when_some(self.footer, |this, footer| {
+                this.child(div().when(has_paddings, |this| this.px_4()).child(footer))
+            })
     }
 }
 

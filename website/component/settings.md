@@ -199,6 +199,26 @@ SettingGroup::new()
     .items(vec![...])
 ```
 
+### Footer outside the group surface
+
+Use `footer` to render supporting content below the group's background or
+border. The callback receives the current window and application context, so
+the footer can use the active theme. It scrolls and is filtered with the group;
+it is not an independently searchable setting or a sidebar entry.
+
+```rust
+SettingGroup::new()
+    .item(SettingItem::new(
+        "Update source",
+        SettingField::render(|_, _, _| "GitHub Releases"),
+    ))
+    .footer(|_, cx| {
+        Label::new("Changes apply to this device only.")
+            .text_sm()
+            .text_color(cx.theme().muted_foreground)
+    })
+```
+
 ## Setting Item
 
 ### Basic Item

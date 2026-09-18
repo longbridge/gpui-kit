@@ -193,6 +193,25 @@ SettingGroup::new()
     .items(vec![...])
 ```
 
+### 分组卡片外的底部说明
+
+用 `footer` 在分组的背景或边框下方渲染辅助内容。闭包接收当前窗口和应用上下文，
+因此说明内容可以使用当前主题。它随分组一起滚动和过滤，不会成为独立的可搜索设置项，
+也不会新增侧栏入口。
+
+```rust
+SettingGroup::new()
+    .item(SettingItem::new(
+        "Update source",
+        SettingField::render(|_, _, _| "GitHub Releases"),
+    ))
+    .footer(|_, cx| {
+        Label::new("Changes apply to this device only.")
+            .text_sm()
+            .text_color(cx.theme().muted_foreground)
+    })
+```
+
 ## Setting Item
 
 ### 基础设置项
