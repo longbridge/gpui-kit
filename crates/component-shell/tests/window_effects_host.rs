@@ -247,7 +247,9 @@ export default class App extends View {
     context.update(|window, cx| window.draw(cx).clear(cx));
     let tree = context.update(|_, cx| view.read(cx).snapshot().unwrap().debug_tree());
     assert!(tree.contains("Errors:1"), "{tree}");
-    assert!(tree.contains("Closed:4"), "{tree}");
+    // Dialog: on_cancel + on_close; Sheet: on_close; AlertDialog: on_cancel +
+    // on_close, the same pair a cancelled Dialog reports.
+    assert!(tree.contains("Closed:5"), "{tree}");
 
     context.update(|window, cx| window.close_dialog(cx));
     context.simulate_click(point(px(80.), px(152.)), Modifiers::default());
