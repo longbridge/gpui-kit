@@ -11,7 +11,13 @@ Please keep **1 PR to solve 1 problem**, and keep **Small improvements should be
 | ---------------------------- | --------------------------- |
 | [Put Before Screenshot here] | [Put After Screenshot here] |
 
-## Break Changes
+## Public API
+
+List every public item this pull request adds, changes or removes, grouped by crate, with its signature and one line on what it is for. Include JavaScript methods and TypeScript declarations. If none, remove this section.
+
+- `gpui_component::input::Example::builder(value: bool) -> Self` — what it does.
+
+## Breaking Changes
 
 Describe any breaking changes introduced by this pull request. If none, remove this section.
 

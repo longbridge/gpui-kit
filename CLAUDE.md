@@ -244,9 +244,12 @@ Text input system based on Rope data structure:
 - When creating a PR, inspect previous PR titles in the repository and match
   that style. Do not blindly use conventional prefixes like `fix:` or `feat:`
   unless the existing PR title style uses them.
-- When a PR changes the public API of `crates/component`, add a `## Breaking Changes`
-  section with `diff` blocks showing the old and new usage. See PR #2691 and
-  `.claude/skills/gpui-component-dev/references/pr-description.md`.
+- When a PR adds, changes or removes public API in any crate, list every item
+  under a `## Public API` section of the description, grouped by crate, with its
+  signature and one line on its purpose (JavaScript methods and TypeScript
+  declarations included). Changes to existing items also go under
+  `## Breaking Changes` with `diff` blocks showing the old and new usage. See
+  PR #2691 and the "Describe public API changes" section of `CONTRIBUTING.md`.
 - Avoid `Kind` as a type-name suffix. It says an enum classifies something
   without saying what it classifies, and carries no meaning a reader could not
   already infer from `enum`. Name the type after what its variants _are_
