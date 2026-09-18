@@ -349,7 +349,7 @@ impl Render for TokenExample {
                             .child(
                                 Checkbox::new("tokens-readonly")
                                     .small()
-                                    .label("Read-only")
+                                    .label("Readonly")
                                     .checked(self.readonly)
                                     .on_click(cx.listener(|this, value, _, cx| {
                                         this.readonly = *value;

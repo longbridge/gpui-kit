@@ -726,9 +726,11 @@ could only hint at.
   activation result. Never use them interchangeably.
 - **open/close** describes an overlay or disclosure state; **show/hide** is for
   transient presentation requests; **expand/collapse** describes structure.
-- **disabled** prevents interaction; **read-only** permits navigation and
+- **disabled** prevents interaction; **readonly** permits navigation and
   selection but prevents editing; **loading** prevents duplicate work while an
-  operation is pending.
+  operation is pending. Spell the state `readonly` — one word, as the
+  `readonly(bool)` builder and `is_readonly()` reader do — in identifiers,
+  interface labels, and documentation alike; never `read-only` or `read only`.
 - **index** is a current positional coordinate; **id** is stable identity;
   `IndexPath` represents hierarchical position. Do not persist or key
   reorderable data by index.

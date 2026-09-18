@@ -449,7 +449,7 @@ Boolean builder 可叫 `disabled(bool)`，reader 叫 `is_disabled()`。含 non-b
 
 - **selected** 是持久 membership/active item；**focused** 是 keyboard target；**hovered** 是 pointer presence；**confirmed** 是 activation result，不能混用。
 - **open/close** 描述 overlay/disclosure state；**show/hide** 表示 transient presentation request；**expand/collapse** 描述结构。
-- **disabled** 禁止交互；**read-only** 允许导航/选择但禁止编辑；**loading** 表示操作中并应防止重复提交。
+- **disabled** 禁止交互；**readonly** 允许导航/选择但禁止编辑；**loading** 表示操作中并应防止重复提交。这个状态一律拼作 `readonly`——一个词，与 `readonly(bool)` builder 和 `is_readonly()` reader 一致——标识符、界面标签和文档中都如此，不写 `read-only` 或 `read only`。
 - **index** 是当前位置；**id** 是稳定 identity；`IndexPath` 是层级位置。重排数据不能用 index 持久化或作为 key。
 - **value** 是 controlled domain data；**presentation** 是 render 用 read-only snapshot；**state** 是 retained behavior。
 - **placement** 是 side/anchor policy；**position** 是 resolved geometry。

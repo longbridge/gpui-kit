@@ -395,13 +395,13 @@ Input::new(&input)
 
 You can also return your own single-row element. Keep it within the input's line
 height; content wider than the available row is clipped. Read selection and
-read-only/disabled state from the renderer's context. Do not edit the input from
+readonly/disabled state from the renderer's context. Do not edit the input from
 the renderer; event callbacks may update it. Keep hover and selection styles the
 same size. Tokens are measured whenever they render, so an element that grows once
 its data arrives reflows on the next frame.
 
 A click selects the token and then opens it; dragging or Shift-selecting a token
-does not open it. Read-only inputs allow
+does not open it. Readonly inputs allow
 opening references; disabled inputs do not. To offer a keyboard shortcut for
 opening an exactly selected token, bind `ActivateToken` to a key of your choice;
 assistive technology reaches the same listener through the token's click action.
@@ -446,7 +446,7 @@ plain text removes every token, even if the text is unchanged; passing content
 restores its tokens, except in modes that cannot show them. Use `replace_all` for
 an undoable plain-text replacement. Token edits,
 including adding a reference to existing text, emit `InputEvent::Change`.
-Programmatic setters can update read-only or disabled inputs, so check these
+Programmatic setters can update readonly or disabled inputs, so check these
 states in application commands that should be unavailable to users.
 
 ### Validation and supported inputs
