@@ -455,10 +455,10 @@ fn shade(base: Hsla, index: usize) -> Hsla {
 /// shade across the cards that show it.
 fn color_index(name: &str) -> usize {
     match name {
-        "Direct" | "Chrome" | "Free" | "North America" => 0,
+        "Direct" | "Chrome" | "Free" | "N. America" => 0,
         "Organic Search" | "Safari" | "Starter" | "Europe" => 1,
-        "Social" | "Edge" | "Pro" | "Asia Pacific" => 2,
-        "Referral" | "Firefox" | "Enterprise" | "Latin America" => 3,
+        "Social" | "Edge" | "Pro" | "APAC" => 2,
+        "Referral" | "Firefox" | "Enterprise" | "LatAm" => 3,
         _ => 4,
     }
 }
