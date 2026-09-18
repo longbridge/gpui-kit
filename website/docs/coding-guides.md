@@ -470,6 +470,13 @@ Only stop propagation when a nested interaction must prevent its parent from
 handling the same event. Blanket propagation stops break menus, selection,
 dragging, and window-level commands in ways that are difficult to diagnose.
 
+Bind keys before building the menu bar. `cx.set_menus` reads the keymap at
+the moment it is called and bakes each item's shortcut into the native menu,
+so a binding registered afterwards never shows next to its menu item and the
+item does not react to the key. Call `cx.bind_keys` first, then
+`cx.set_menus`; if the keymap changes later (a user keymap file, a locale
+switch that rebuilds the menus), call `cx.set_menus` again.
+
 Make focus ownership explicit:
 
 - retain a `FocusHandle` in the entity that owns keyboard interaction;
@@ -477,6 +484,14 @@ Make focus ownership explicit:
 - transfer focus when opening an overlay and restore it on dismissal;
 - render a visible `focus_visible` state;
 - do not request focus unconditionally from `render`.
+
+A tracked handle is a Tab stop only when it says so: build it with
+`cx.focus_handle().tab_stop(true)` (or `.tab_index(n)`), because the element's
+own `tab_index`/`tab_stop` settings do not apply to a handle passed to
+`track_focus`. A stateless component may create that handle in `render`
+through `window.use_keyed_state(id, cx, |_, cx| cx.focus_handle().tab_stop(true))`;
+the keyed state survives re-renders, so the Tab order is stable — this is
+what `Button` does.
 
 Attach a `key_context` and its `on_action` handlers to the same focused region.
 Bindings are contextual: a registered Action without the intended focus path
