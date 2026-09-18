@@ -290,9 +290,6 @@ impl<T> Plot for PieChart<T> {
         let label_arc = Arc::new()
             .inner_radius(label_radius)
             .outer_radius(label_radius);
-        let edge_arc = Arc::new()
-            .inner_radius(outer_radius)
-            .outer_radius(outer_radius);
 
         let label_color = self.label_color.unwrap_or(cx.theme().foreground);
         let default_line_color = cx.theme().border;
@@ -309,7 +306,15 @@ impl<T> Plot for PieChart<T> {
             }
 
             let centroid = label_arc.centroid(a);
-            let edge = edge_arc.centroid(a);
+            // Anchor the line on the edge the slice reaches this frame, so a
+            // lifted slice never paints over its own leader line. The label
+            // anchor stays put, so the line may not start past it.
+            let (lift, _) = self.slice_emphasis(a.index);
+            let edge_radius = (outer_radius + HOVER_LIFT * lift).min(label_radius);
+            let edge = Arc::new()
+                .inner_radius(edge_radius)
+                .outer_radius(edge_radius)
+                .centroid(a);
             let is_right = centroid.x > 0.;
             let line_color = self
                 .label_line_color
