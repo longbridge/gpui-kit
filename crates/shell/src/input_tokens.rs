@@ -6,6 +6,7 @@ use gpui_base::input::{
     InlineToken, InlineTokenClickEvent, InlineTokenContext, InlineTokenError, InputContent,
     InputState, Rope, RopeExt as _, TextareaState,
 };
+use std::rc::Rc;
 
 fn object(fields: impl IntoIterator<Item = (&'static str, Data)>) -> Data {
     Data::Object(
@@ -200,7 +201,6 @@ pub(crate) const METHODS: &[(&str, &str, bool)] = &[
         "(range: InputRange, token: InlineToken): void",
         false,
     ),
-    ("refresh_token", "(id: string): boolean", false),
     ("refresh", "(): void", false),
     ("set_selected_range", "(range: InputRange): void", false),
     ("replace", "(text: string): void", false),
@@ -244,12 +244,6 @@ macro_rules! state_binding {
                     })?;
                     Ok(Data::Null)
                 }
-                ("refresh_token", [id]) => {
-                    let id = string(id)?;
-                    Ok(Data::Boolean(
-                        entity.update(cx, |state, cx| state.refresh_token(id, cx)),
-                    ))
-                }
                 ("refresh", []) => {
                     entity.update(cx, |state, cx| state.refresh(cx));
                     Ok(Data::Null)
@@ -286,19 +280,25 @@ macro_rules! state_binding {
 state_binding!(InputState, invoke_input, input_token_state_methods);
 state_binding!(TextareaState, invoke_textarea, textarea_token_state_methods);
 
-macro_rules! presentation_binding {
-    ($state:ty, $name:ident) => {
-        /// Build a native presentation adapter with generation-bound script callbacks.
-        pub fn $name(
-            state: &Entity<$state>,
-            renderer: Option<crate::ComponentElementCallback>,
-            listener: Option<crate::ComponentCallback>,
-        ) -> gpui_base::input::InlineTokenPresentation {
-            use gpui::{IntoElement as _, ParentElement as _};
-            let mut presentation = gpui_base::input::InlineTokenPresentation::new();
-            if let Some(renderer) = renderer {
-                let state = state.clone();
-                presentation = presentation.render_token(move |token, window, cx| {
+/// Script callbacks for one input's tokens, adapted to the native
+/// `render_token` / `on_token_click` builders of any Input or Textarea element.
+pub struct InlineTokenCallbacks {
+    renderer: Option<gpui_base::input::InlineTokenRenderer>,
+    listener: Option<gpui_base::input::InlineTokenClickListener>,
+}
+impl InlineTokenCallbacks {
+    /// Bind generation-scoped script callbacks to the text of `state`, whose
+    /// UTF-16 offsets the payloads carry.
+    pub fn new<M: gpui_base::input::InputModeKind>(
+        state: &Entity<gpui_base::input::InputBaseState<M>>,
+        renderer: Option<crate::ComponentElementCallback>,
+        listener: Option<crate::ComponentCallback>,
+    ) -> Self {
+        use gpui::{IntoElement as _, ParentElement as _};
+        let renderer = renderer.map(|renderer| {
+            let state = state.clone();
+            let render: gpui_base::input::InlineTokenRenderer =
+                Rc::new(move |token, window, cx| {
                     let data = inline_token_context_data(token, state.read(cx).text());
                     match renderer.build_interactive_data_with(&[data], window, cx) {
                         Ok(Some(element)) => element,
@@ -312,19 +312,35 @@ macro_rules! presentation_binding {
                         }
                     }
                 });
-            }
-            if let Some(listener) = listener {
-                let state = state.clone();
-                presentation = presentation.on_token_click(move |event, window, cx| {
+            render
+        });
+        let listener = listener.map(|listener| {
+            let state = state.clone();
+            let listen: gpui_base::input::InlineTokenClickListener =
+                Rc::new(move |event, window, cx| {
                     let data = inline_token_click_data(event, state.read(cx).text());
                     if let Err(error) = listener.invoke_data_with(&[data], window, cx) {
                         tracing::error!("inline token activation failed: {error:#}");
                     }
                 });
-            }
-            presentation
+            listen
+        });
+        Self { renderer, listener }
+    }
+    /// Install the callbacks on an element through its own builders.
+    pub fn apply<E>(
+        &self,
+        element: E,
+        render_token: impl FnOnce(E, gpui_base::input::InlineTokenRenderer) -> E,
+        on_token_click: impl FnOnce(E, gpui_base::input::InlineTokenClickListener) -> E,
+    ) -> E {
+        let element = match &self.renderer {
+            Some(renderer) => render_token(element, renderer.clone()),
+            None => element,
+        };
+        match &self.listener {
+            Some(listener) => on_token_click(element, listener.clone()),
+            None => element,
         }
-    };
+    }
 }
-presentation_binding!(InputState, input_token_presentation);
-presentation_binding!(TextareaState, textarea_token_presentation);

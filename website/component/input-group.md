@@ -367,12 +367,12 @@ Textarea containing tokens to `InputGroup`. You can customize its labels as usua
 ```rust
 use gpui_kit::component::{
     IconName,
-    input::{InputGroup, InputToken, Textarea},
+    input::{InlineTokenTag, InputGroup, Textarea},
 };
 
 InputGroup::new("composer")
     .input(Textarea::new(&state)
-        .render_token(|token, _, _| InputToken::new(token).with_icon(IconName::File)))
+        .render_token(|token, _, _| InlineTokenTag::new(token).with_icon(IconName::File)))
 ```
 
 The JavaScript group controls also expose `render_token` and `on_token_click`.

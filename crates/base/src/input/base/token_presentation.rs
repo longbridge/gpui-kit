@@ -59,23 +59,22 @@ impl InlineTokenClickEvent {
     }
 }
 
-type Renderer = Rc<dyn Fn(&InlineTokenContext, &mut Window, &mut App) -> AnyElement>;
-type Listener = Rc<dyn Fn(&InlineTokenClickEvent, &mut Window, &mut App)>;
-type Fallback = fn(&InlineTokenContext, &mut Window, &mut App) -> AnyElement;
+/// A renderer installed by a styled control. Not part of the supported API.
+#[doc(hidden)]
+pub type InlineTokenRenderer = Rc<dyn Fn(&InlineTokenContext, &mut Window, &mut App) -> AnyElement>;
+/// A click listener installed by a styled control. Not part of the supported API.
+#[doc(hidden)]
+pub type InlineTokenClickListener = Rc<dyn Fn(&InlineTokenClickEvent, &mut Window, &mut App)>;
 
-/// Presentation adapter shared by Base and styled controls. It owns no content.
+/// Presentation shared by Base and styled controls. It owns no content.
 #[derive(Clone, Default)]
-pub struct InlineTokenPresentation {
-    renderer: Option<Renderer>,
-    listener: Option<Listener>,
-    fallback: Option<Fallback>,
+pub(crate) struct InlineTokenPresentation {
+    renderer: Option<InlineTokenRenderer>,
+    listener: Option<InlineTokenClickListener>,
     secret: bool,
 }
 impl InlineTokenPresentation {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn render_token<R: IntoElement>(
+    pub(crate) fn render_token<R: IntoElement>(
         mut self,
         render: impl Fn(&InlineTokenContext, &mut Window, &mut App) -> R + 'static,
     ) -> Self {
@@ -84,21 +83,11 @@ impl InlineTokenPresentation {
         }));
         self
     }
-    pub fn on_token_click(
+    pub(crate) fn on_token_click(
         mut self,
         listener: impl Fn(&InlineTokenClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.listener = Some(Rc::new(listener));
-        self
-    }
-    /// Set a default skin without allocating a callback on every plain-text render.
-    pub fn with_fallback(mut self, fallback: Fallback) -> Self {
-        self.fallback = Some(fallback);
-        self
-    }
-    /// Suppress token labels and actions when the host is a secret field.
-    pub fn secret(mut self, secret: bool) -> Self {
-        self.secret = secret;
         self
     }
     pub(super) fn has_listener(&self) -> bool {
@@ -111,8 +100,6 @@ impl InlineTokenPresentation {
         cx: &mut App,
     ) -> AnyElement {
         if let Some(render) = &self.renderer {
-            render(token, window, cx)
-        } else if let Some(render) = self.fallback {
             render(token, window, cx)
         } else {
             gpui::div()
@@ -129,14 +116,28 @@ pub(super) struct TokenLayoutCache {
     pub(super) revision: u64,
     pub(super) unwrapped_width: Pixels,
     pub(super) metrics: Rc<[(Range<usize>, Pixels)]>,
-    pub(super) widths: HashMap<gpui::SharedString, (InlineToken, Pixels)>,
+    pub(super) widths: HashMap<InlineToken, Pixels>,
 }
 
 impl<M: InputModeKind> InputBaseState<M> {
     /// Inject presentation from a view without editing or notifying the document.
-    #[doc(hidden)]
-    pub fn set_token_presentation(&mut self, presentation: InlineTokenPresentation) {
+    pub(crate) fn set_token_presentation(&mut self, presentation: InlineTokenPresentation) {
         self.token_presentation = presentation;
+    }
+    /// Install a styled control's renderer, click listener and secrecy without
+    /// editing or notifying the document. Not part of the supported API.
+    #[doc(hidden)]
+    pub fn install_token_presentation(
+        &mut self,
+        renderer: Option<InlineTokenRenderer>,
+        listener: Option<InlineTokenClickListener>,
+        secret: bool,
+    ) {
+        self.token_presentation = InlineTokenPresentation {
+            renderer,
+            listener,
+            secret,
+        };
     }
     pub(super) fn tokens_visible(&self) -> bool {
         !self.masked
@@ -161,19 +162,20 @@ impl<M: InputModeKind> InputBaseState<M> {
             available_width: width,
         }
     }
+    /// The token starting at `start`, paired with the listener that opens it.
     pub(super) fn token_activation(
         &self,
-        id: &str,
+        start: usize,
         bounds: Bounds<Pixels>,
         event: ClickEvent,
-    ) -> Option<(Listener, InlineTokenClickEvent)> {
+    ) -> Option<(InlineTokenClickListener, InlineTokenClickEvent)> {
         if self.disabled || !self.tokens_visible() {
             return None;
         }
         let span = self
             .token_spans()
             .iter()
-            .find(|span| span.token().id().as_ref() == id)?
+            .find(|span| span.range().start == start)?
             .clone();
         Some((
             self.token_presentation.listener.clone()?,

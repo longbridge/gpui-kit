@@ -50,7 +50,6 @@ function exercise(state) {
   state.set_value(state.value());
   assert(state.tokens().length === 0, "explicit same value clears identity");
   state.set_content(saved);
-  assert(state.refresh_token("a") && !state.refresh_token("missing"), "refresh identity");
   return state;
 }
 export default class TokenHost extends View {

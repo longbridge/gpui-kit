@@ -89,10 +89,10 @@ when you want an icon or other custom content:
 
 ```rust
 Textarea::new(&state)
-    .render_token(|token, _, _| InputToken::new(token).with_icon(IconName::File))
+    .render_token(|token, _, _| InlineTokenTag::new(token).with_icon(IconName::File))
 ```
 
-Import `InputToken` from `gpui_kit::component::input` and `IconName` from
+Import `InlineTokenTag` from `gpui_kit::component::input` and `IconName` from
 `gpui_kit::component`. A token wraps onto the next line as a whole, and auto-grow adjusts the textarea
 height to fit. Put line breaks in the text between tokens. See
 [Input: atomic inline tokens](./input.md#atomic-inline-tokens) for editing,

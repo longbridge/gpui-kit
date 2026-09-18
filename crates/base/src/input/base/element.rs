@@ -1383,17 +1383,18 @@ impl<M: InputModeKind> TextElement<M> {
         use gpui::{StatefulInteractiveElement as _, prelude::FluentBuilder as _};
         let presentation = self.state.read(cx).token_presentation.clone();
         let child = presentation.render(token, window, cx);
-        let id = token.token().id().clone();
-        let down_id = id.clone();
+        // A token is addressed by where it starts: the same reference may occur
+        // more than once, and the document revision guards a press against
+        // edits that move it.
+        let start = token.range().start;
         let down_state = self.state.clone();
         let click_state = self.state.clone();
         let move_state = self.state.clone();
         let disabled = token.is_disabled();
         let accessible = presentation.has_listener() && !disabled;
         let accessible_state = self.state.clone();
-        let accessible_id = id.clone();
         gpui::div()
-            .id((ElementId::Name("inline-token".into()), id.clone()))
+            .id(("inline-token", start))
             .flex()
             .items_center()
             .h(token.line_height())
@@ -1407,11 +1408,11 @@ impl<M: InputModeKind> TextElement<M> {
                         let activation = state
                             .token_spans()
                             .iter()
-                            .find(|s| s.token().id() == &accessible_id)
+                            .find(|s| s.range().start == start)
                             .and_then(|span| {
                                 state.range_to_bounds(&span.range()).and_then(|bounds| {
                                     state.token_activation(
-                                        &accessible_id,
+                                        start,
                                         bounds,
                                         gpui::ClickEvent::Keyboard(gpui::KeyboardClickEvent {
                                             bounds,
@@ -1452,7 +1453,7 @@ impl<M: InputModeKind> TextElement<M> {
                         if let Some(span) = state
                             .token_spans()
                             .iter()
-                            .find(|s| s.token().id() == &down_id)
+                            .find(|s| s.range().start == start)
                         {
                             state.set_selected_range(span.range(), cx);
                             state.focus(window, cx);
@@ -1463,7 +1464,7 @@ impl<M: InputModeKind> TextElement<M> {
                         && !event.modifiers.alt
                     {
                         state.pressed_token =
-                            Some((down_id.clone(), state.document_revision, event.position));
+                            Some((start, state.document_revision, event.position));
                     }
                 });
             })
@@ -1479,15 +1480,18 @@ impl<M: InputModeKind> TextElement<M> {
             .on_click(move |event, window, cx| {
                 let activation = click_state.update(cx, |state, _| {
                     let (pressed, revision, _) = state.pressed_token.take()?;
-                    if pressed != id || revision != state.document_revision {
+                    if pressed != start || revision != state.document_revision {
                         return None;
                     }
                     if event.modifiers().shift || event.modifiers().alt {
                         return None;
                     }
-                    let span = state.token_spans().iter().find(|s| s.token().id() == &id)?;
+                    let span = state
+                        .token_spans()
+                        .iter()
+                        .find(|s| s.range().start == start)?;
                     let bounds = state.range_to_bounds(&span.range())?;
-                    state.token_activation(&id, bounds, event.clone())
+                    state.token_activation(start, bounds, event.clone())
                 });
                 if let Some((listener, event)) = activation {
                     listener(&event, window, cx);
@@ -1504,7 +1508,7 @@ impl<M: InputModeKind> TextElement<M> {
         viewport: Pixels,
         window: &mut Window,
         cx: &mut App,
-    ) -> std::collections::HashMap<SharedString, AnyElement> {
+    ) -> std::collections::HashMap<usize, AnyElement> {
         let style = window.text_style();
         let state = self.state.read(cx);
         let key = (
@@ -1528,7 +1532,10 @@ impl<M: InputModeKind> TextElement<M> {
         let all = cache.is_none_or(|cache| {
             cache.key.as_ref() != Some(&key)
                 || cache.revision != revision
-                || cache.widths.len() != state.token_spans().len()
+                || state
+                    .token_spans()
+                    .iter()
+                    .any(|span| !cache.widths.contains_key(span.token()))
         });
         let (visible, _, _) = self.calculate_visible_range(state, line_height, viewport);
         let start = state.text.line_start_offset(visible.start);
@@ -1546,11 +1553,7 @@ impl<M: InputModeKind> TextElement<M> {
                 let range = span.range();
                 (range.start <= end && range.end >= start)
                     || cache.is_none_or(|cache| {
-                        cache.key.as_ref() != Some(&key)
-                            || cache
-                                .widths
-                                .get(span.token().id())
-                                .is_none_or(|(t, _)| t != span.token())
+                        cache.key.as_ref() != Some(&key) || !cache.widths.contains_key(span.token())
                     })
             })
             .map(|span| state.token_context(span, line_height, width))
@@ -1568,7 +1571,7 @@ impl<M: InputModeKind> TextElement<M> {
                 cx,
             );
             measured.push((token.token().clone(), size.width.min(width).max(px(1.))));
-            elements.insert(token.token().id().clone(), element);
+            elements.insert(token.range().start, element);
         }
         self.state.update(cx, |state, cx| {
             let mut cache = state.token_layout_cache.take().unwrap_or_default();
@@ -1577,25 +1580,22 @@ impl<M: InputModeKind> TextElement<M> {
                 cache.widths.clear();
             }
             for (token, width) in measured {
-                changed |= cache
-                    .widths
-                    .get(token.id())
-                    .is_none_or(|(old, w)| old != &token || *w != width);
-                cache.widths.insert(token.id().clone(), (token, width));
+                changed |= cache.widths.get(&token) != Some(&width);
+                cache.widths.insert(token, width);
             }
             cache.key = Some(key);
             if changed {
                 let spans = state.token_spans();
-                let ids: std::collections::HashSet<_> =
-                    spans.iter().map(|s| s.token().id()).collect();
-                cache.widths.retain(|id, _| ids.contains(id));
+                let tokens: std::collections::HashSet<_> =
+                    spans.iter().map(|s| s.token()).collect();
+                cache.widths.retain(|token, _| tokens.contains(token));
                 cache.metrics = spans
                     .iter()
                     .filter_map(|span| {
                         cache
                             .widths
-                            .get(span.token().id())
-                            .map(|(_, width)| (span.range(), *width))
+                            .get(span.token())
+                            .map(|width| (span.range(), *width))
                     })
                     .collect();
                 cache.revision = revision;
@@ -1630,10 +1630,8 @@ impl<M: InputModeKind> TextElement<M> {
                                         None,
                                     )
                                     .width;
-                                width += cache
-                                    .widths
-                                    .get(span.token().id())
-                                    .map_or(px(0.), |(_, w)| *w);
+                                width +=
+                                    cache.widths.get(span.token()).copied().unwrap_or_default();
                                 offset = local.end;
                             }
                             let part = &text[offset..];
@@ -1725,10 +1723,7 @@ impl<M: InputModeKind> TextElement<M> {
                             });
                             x += width;
                         }
-                        let width = cache
-                            .widths
-                            .get(span.token().id())
-                            .map_or(px(0.), |(_, width)| *width);
+                        let width = cache.widths.get(span.token()).copied().unwrap_or_default();
                         fragments.push(InlineFragment {
                             range: local.start - range.start..local.end - range.start,
                             x,
@@ -1778,7 +1773,7 @@ impl<M: InputModeKind> TextElement<M> {
         &self,
         layout: &LastLayout,
         bounds: Bounds<Pixels>,
-        mut measured: std::collections::HashMap<SharedString, AnyElement>,
+        mut measured: std::collections::HashMap<usize, AnyElement>,
         window: &mut Window,
         cx: &mut App,
     ) -> Vec<AnyElement> {
@@ -1813,7 +1808,7 @@ impl<M: InputModeKind> TextElement<M> {
         placements
             .into_iter()
             .map(|(token, origin)| {
-                let mut element = measured.remove(token.token().id()).unwrap_or_else(|| {
+                let mut element = measured.remove(&token.range().start).unwrap_or_else(|| {
                     let mut element = self.token_element(&token, window, cx);
                     element.layout_as_root(
                         size(

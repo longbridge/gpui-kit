@@ -6,15 +6,16 @@ use gpui::{
     prelude::FluentBuilder as _,
 };
 
-/// Default inline token skin. Editing and activation belong to the input.
+/// The default tag an [`InlineToken`](super::InlineToken) renders as. Editing
+/// and activation belong to the input.
 #[derive(IntoElement)]
-pub struct InputToken {
+pub struct InlineTokenTag {
     context: InlineTokenContext,
     icon: Option<Icon>,
     tooltip: Option<SharedString>,
     style: StyleRefinement,
 }
-impl InputToken {
+impl InlineTokenTag {
     pub fn new(context: &InlineTokenContext) -> Self {
         Self {
             context: context.clone(),
@@ -32,15 +33,15 @@ impl InputToken {
         self
     }
 }
-impl Styled for InputToken {
+impl Styled for InlineTokenTag {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
     }
 }
-impl RenderOnce for InputToken {
+impl RenderOnce for InlineTokenTag {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         div()
-            .id("input-token-skin")
+            .id("inline-token-tag")
             .flex()
             .items_center()
             .gap_1()

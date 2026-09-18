@@ -275,10 +275,6 @@ Input:
     zh-CN: 全部替换
     zh-HK: 全部替換
     zh-TW: 全部取代
-  Activate token:
-    en: Activate token
-    zh-CN: 打开引用
-    zh-HK: 開啟參照
   Cut:
     en: Cut
     zh-CN: 剪切

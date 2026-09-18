@@ -1,13 +1,14 @@
 //! Document annotations for atomic inline objects. Coordinates are always source bytes.
-use std::{collections::HashSet, ops::Range};
+use std::ops::Range;
 
 use gpui::{Context, EntityInputHandler as _, SharedString, Window};
 use unicode_segmentation::UnicodeSegmentation as _;
 
 use super::{InputBaseState, InputModeKind, undo_manager::EditIntent};
 
-/// An application-defined occurrence rendered as one inline editing unit.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// An application-defined reference rendered as one inline editing unit. The
+/// ID names the referenced resource; the same ID may occur more than once.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct InlineToken {
     id: SharedString,
     text: SharedString,
@@ -108,7 +109,6 @@ impl InputContent {
     fn validate(&mut self) -> Result<(), InlineTokenError> {
         self.tokens.sort_by_key(|span| span.range.start);
         let mut end = 0;
-        let mut ids = HashSet::new();
         for span in &self.tokens {
             span.token.validate()?;
             validate_range(&self.text, &span.range)?;
@@ -117,9 +117,6 @@ impl InputContent {
             }
             if span.range.start < end {
                 return Err(InlineTokenError::OverlappingTokens);
-            }
-            if !ids.insert(span.token.id()) {
-                return Err(InlineTokenError::DuplicateId);
             }
             if &self.text[span.range.clone()] != span.token.text.as_ref() {
                 return Err(InlineTokenError::TextMismatch);
@@ -138,7 +135,6 @@ pub enum InlineTokenError {
     InvalidBoundary,
     InvalidToken,
     OverlappingTokens,
-    DuplicateId,
     TextMismatch,
     UnsupportedMode,
     ValidationRejected,
@@ -155,7 +151,6 @@ impl std::fmt::Display for InlineTokenError {
                 "token requires a nonempty ID, text and label without control characters"
             }
             Self::OverlappingTokens => "token ranges overlap",
-            Self::DuplicateId => "token occurrence ID is already in use",
             Self::TextMismatch => "token text does not match its range or input normalization",
             Self::UnsupportedMode => "tokens are not supported by this input mode",
             Self::ValidationRejected => "input validation rejected the content",
@@ -316,11 +311,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         let text = self.text.to_string();
         validate_range(&text, &range)?;
         let range = self.normalize_token_range(range);
-        if self.token_spans().iter().any(|s| {
-            s.token.id == token.id && !(s.range.start < range.end && range.start < s.range.end)
-        }) {
-            return Err(InlineTokenError::DuplicateId);
-        }
         let mut next = text;
         next.replace_range(range.clone(), &token.text);
         validate_range(&next, &(range.start..range.start + token.text.len()))?;
@@ -416,17 +406,6 @@ macro_rules! token_api {
                 cx: &mut Context<Self>,
             ) -> Result<(), InlineTokenError> {
                 self.restore_content(content, window, cx)
-            }
-            /// Invalidate the geometry of a token whose external presentation changed.
-            pub fn refresh_token(&mut self, id: &str, cx: &mut Context<Self>) -> bool {
-                if !self.token_spans().iter().any(|s| s.token.id.as_ref() == id) {
-                    return false;
-                }
-                if let Some(cache) = self.token_layout_cache.as_mut() {
-                    cache.widths.remove(id);
-                }
-                cx.notify();
-                true
             }
         }
     };

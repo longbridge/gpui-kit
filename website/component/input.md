@@ -363,9 +363,9 @@ add a space. To replace a completion query such as `@ali`, use
 `replace_range_with_token(range, token, window, cx)`. Rust ranges are half-open
 UTF-8 byte ranges; use byte offsets such as those returned by `str::find`.
 
-Give each occurrence a unique ID, even when two tokens refer to the same resource.
-Use `text` for the value to copy or submit and `with_label` for its displayed name.
-Omit `with_label` to display the text itself.
+The ID names the referenced resource, so two mentions of the same person carry
+the same ID. Use `text` for the value to copy or submit and `with_label` for its
+displayed name. Omit `with_label` to display the text itself.
 
 Users can move the caret to either side of a token, select it, or delete it with
 Backspace/Delete. A selection that crosses part of a token includes the whole
@@ -373,18 +373,18 @@ token. Undo/Redo restores both its text and reference. Pasting inserts plain tex
 
 ### Customize appearance and opening a reference
 
-The default label needs no renderer. To add an icon or tooltip, return an
-`InputToken` from `render_token`, and use `on_token_click` to open the reference:
+Tokens render as an `InlineTokenTag` by default. To add an icon or tooltip,
+return one from `render_token`, and use `on_token_click` to open the reference:
 
 ```rust
 use gpui_kit::component::{
     IconName,
-    input::{InlineTokenClickEvent, InputToken},
+    input::{InlineTokenTag, InlineTokenClickEvent},
 };
 
 Input::new(&input)
     .render_token(|token, _, _| {
-        InputToken::new(token)
+        InlineTokenTag::new(token)
             .with_icon(IconName::File)
             .with_tooltip("Open reference")
     })
@@ -397,13 +397,15 @@ You can also return your own single-row element. Keep it within the input's line
 height; content wider than the available row is clipped. Read selection and
 read-only/disabled state from the renderer's context. Do not edit the input from
 the renderer; event callbacks may update it. Keep hover and selection styles the
-same size. If external data changes a token's size, call `refresh_token(id, cx)`;
-use `refresh(cx)` when the size of all tokens may have changed.
+same size. Tokens are measured whenever they render, so a tag that grows once
+its data arrives reflows on the next frame.
 
 Dragging or Shift-selecting a token does not open it. Read-only inputs allow
 opening references; disabled inputs do not. To offer a keyboard shortcut for
-opening an exactly selected token, bind `ActivateToken` to a key of your choice.
-The action is also available in the input's context menu and through accessibility.
+opening an exactly selected token, bind `ActivateToken` to a key of your choice;
+assistive technology reaches the same listener through the token's click action.
+Add a menu item for it through `context_menu` when your application has a name
+for the reference, such as "Open file".
 
 If your token includes a button, consume its mouse-down and click events so that
 it does not also open the reference. Apply `token.is_disabled()` to every child
@@ -489,7 +491,7 @@ the current references. To remove a reference, pass its current range to
 objects; changing one does not update the input. Make edits from initialization,
 event or task callbacks, not from renderers.
 
-Token validation errors expose an `error.code`, such as `DuplicateId` or
+Token validation errors expose an `error.code`, such as `InvalidBoundary` or
 `CompositionActive`; invalid argument shapes also throw. Textarea offers the same
 methods on `TextareaState()`. If you use `gpui-base`, construct these states with
 `InputState.new()` or `TextareaState.new()` instead.

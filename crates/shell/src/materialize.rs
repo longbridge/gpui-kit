@@ -1501,7 +1501,7 @@ fn materialize_component(
             frame.extend(children);
             let frame = with_hover(frame, &states);
             let frame = with_active_and_focus(frame, &states);
-            let presentation = crate::input_token_presentation(
+            let callbacks = crate::InlineTokenCallbacks::new(
                 &state,
                 behavior
                     .render_token
@@ -1510,9 +1510,16 @@ fn materialize_component(
                     .on_token_click
                     .map(|id| crate::ComponentCallback::from_runtime(runtime, id)),
             );
-            frame
-                .child(Input::new(&state).token_presentation(presentation))
-                .into_any_element()
+            let input = callbacks.apply(
+                Input::new(&state),
+                |input, render| {
+                    input.render_token(move |token, window, cx| render(token, window, cx))
+                },
+                |input, listen| {
+                    input.on_token_click(move |event, window, cx| listen(event, window, cx))
+                },
+            );
+            frame.child(input).into_any_element()
         }
         Component::OtpInput(handle) => components::otp_input::otp_input(
             runtime, handle, refinement, behavior, states, children, window, cx,

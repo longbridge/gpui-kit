@@ -52,13 +52,15 @@ macro_rules! dispatch {
 }
 
 impl TextInputState {
-    pub(crate) fn set_token_presentation(
+    pub(crate) fn install_token_presentation(
         &self,
-        presentation: super::InlineTokenPresentation,
+        renderer: Option<gpui_base::input::InlineTokenRenderer>,
+        listener: Option<gpui_base::input::InlineTokenClickListener>,
+        secret: bool,
         cx: &mut App,
     ) {
-        dispatch!(self, |state| state
-            .update(cx, |state, _| state.set_token_presentation(presentation)))
+        dispatch!(self, |state| state.update(cx, |state, _| state
+            .install_token_presentation(renderer, listener, secret)))
     }
 
     pub(crate) fn entity_id(&self) -> gpui::EntityId {

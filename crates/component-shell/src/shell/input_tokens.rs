@@ -1,10 +1,8 @@
 //! Inline presentation and change subscriptions shared by Input and Textarea.
-use gpui_component::input::{
-    InlineTokenPresentation, Input, InputEvent, InputState, InputToken, Textarea, TextareaState,
-};
+use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_shell::{
     ArgumentDescriptor, ArgumentSchema, ComponentArgument, ComponentCallback, ComponentPayload,
-    MaterializeRequest, MethodDescriptor, anyhow,
+    InlineTokenCallbacks, MaterializeRequest, MethodDescriptor, anyhow,
     gpui::{self, App, Entity, IntoElement as _, RenderOnce, Window},
 };
 use std::{cell::RefCell, rc::Rc};
@@ -76,7 +74,7 @@ pub(super) fn methods(include_change: bool) -> Vec<MethodDescriptor> {
 
 pub(super) struct Binding {
     state: State,
-    presentation: InlineTokenPresentation,
+    callbacks: InlineTokenCallbacks,
     change: Option<ComponentCallback>,
 }
 pub(super) fn prepare(request: &MaterializeRequest<'_>, state: State) -> anyhow::Result<Binding> {
@@ -93,25 +91,33 @@ pub(super) fn prepare(request: &MaterializeRequest<'_>, state: State) -> anyhow:
             Op::Change(arg) => change = Some(request.resolve_callback(arg)?),
         }
     }
-    let presentation = match &state {
-        State::Input(state) => gpui_shell::input_token_presentation(state, renderer, listener),
-        State::Textarea(state) => {
-            gpui_shell::textarea_token_presentation(state, renderer, listener)
-        }
-    }
-    .with_fallback(|token, _, _| InputToken::new(token).into_any_element());
+    let callbacks = dispatch!(&state, |state| InlineTokenCallbacks::new(
+        state, renderer, listener
+    ));
     Ok(Binding {
         state,
-        presentation,
+        callbacks,
         change,
     })
 }
 impl Binding {
     pub(super) fn input(&self, input: Input) -> Input {
-        input.token_presentation(self.presentation.clone())
+        self.callbacks.apply(
+            input,
+            |input, render| input.render_token(move |token, window, cx| render(token, window, cx)),
+            |input, listen| {
+                input.on_token_click(move |event, window, cx| listen(event, window, cx))
+            },
+        )
     }
     pub(super) fn textarea(&self, input: Textarea) -> Textarea {
-        input.token_presentation(self.presentation.clone())
+        self.callbacks.apply(
+            input,
+            |input, render| input.render_token(move |token, window, cx| render(token, window, cx)),
+            |input, listen| {
+                input.on_token_click(move |event, window, cx| listen(event, window, cx))
+            },
+        )
     }
     pub(super) fn wrap(self, element: gpui::AnyElement) -> gpui::AnyElement {
         Bound {

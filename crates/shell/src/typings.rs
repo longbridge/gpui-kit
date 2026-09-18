@@ -3002,7 +3002,6 @@ const BASE: &str = r#"  /** A row. */
     set_content(content: InputContent): void;
     replace_with_token(token: InlineToken): void;
     replace_range_with_token(range: InputRange, token: InlineToken): void;
-    refresh_token(id: string): boolean;
     refresh(): void;
     set_selected_range(range: InputRange): void;
     replace(text: string): void;
@@ -3071,7 +3070,6 @@ const BASE: &str = r#"  /** A row. */
     set_content(content: InputContent): void;
     replace_with_token(token: InlineToken): void;
     replace_range_with_token(range: InputRange, token: InlineToken): void;
-    refresh_token(id: string): boolean;
     refresh(): void;
     set_selected_range(range: InputRange): void;
     replace(text: string): void;

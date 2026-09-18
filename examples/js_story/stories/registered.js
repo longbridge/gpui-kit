@@ -520,9 +520,8 @@ function tokenExample(multiline, cx) {
         .on_change((_text, cx) => cx.notify()))
       .child(h_flex().gap(8)
         .child(new Button(`${key}-insert`).label("Insert reference").on_click((_event, cx) => {
-          const serial = Number(state(`${key}-serial`, 0)) + 1;
-          setState(`${key}-serial`, serial, cx);
-          input.replace_with_token({ id: `ref-${serial}`, text: "@reference", label: "Reference" });
+          // The ID names the resource, so inserting it twice reuses it.
+          input.replace_with_token({ id: "reference", text: "@reference", label: "Reference" });
           cx.notify();
         }))
         .child(new Button(`${key}-save`).label("Save draft").on_click((_event, cx) => {

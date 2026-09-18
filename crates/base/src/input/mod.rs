@@ -38,7 +38,10 @@ mod input;
 #[path = "base/token_presentation.rs"]
 mod token_presentation;
 pub use inline_tokens::{InlineToken, InlineTokenError, InlineTokenSpan, InputContent};
-pub use token_presentation::{InlineTokenClickEvent, InlineTokenContext, InlineTokenPresentation};
+pub(crate) use token_presentation::InlineTokenPresentation;
+pub use token_presentation::{
+    InlineTokenClickEvent, InlineTokenClickListener, InlineTokenContext, InlineTokenRenderer,
+};
 #[path = "base/kind.rs"]
 mod kind;
 #[path = "editor/language.rs"]

@@ -5,8 +5,8 @@ use gpui_kit::component::{
     checkbox::Checkbox,
     h_flex,
     input::{
-        InlineToken, Input, InputContent, InputEvent, InputGroup, InputState, InputToken, Textarea,
-        TextareaState,
+        InlineToken, InlineTokenTag, Input, InputContent, InputEvent, InputGroup, InputState,
+        Textarea, TextareaState,
     },
     v_flex,
 };
@@ -18,7 +18,6 @@ use gpui_kit::{
 pub(super) struct TokenExample {
     state: State,
     saved: InputContent,
-    next_id: usize,
     readonly: bool,
     disabled: bool,
     result: String,
@@ -57,7 +56,7 @@ impl TokenExample {
             let subscription = dispatch!(&state, |input| cx.subscribe(input, |_, _, event: &InputEvent, cx| {
                 if matches!(event, InputEvent::Change) { cx.notify(); }
             }));
-            Self { state, saved, next_id: 1, readonly: false, disabled: false, result: String::new(), _subscription: subscription }
+            Self { state, saved, readonly: false, disabled: false, result: String::new(), _subscription: subscription }
         })
     }
 }
@@ -83,7 +82,7 @@ impl Render for TokenExample {
                         .readonly(self.readonly)
                         .disabled(self.disabled)
                         .render_token(|token, _, _| {
-                            InputToken::new(token)
+                            InlineTokenTag::new(token)
                                 .with_icon(IconName::File)
                                 .with_tooltip("Open reference")
                         })
@@ -112,12 +111,13 @@ impl Render for TokenExample {
                             .label("Insert reference")
                             .disabled(self.readonly || self.disabled)
                             .on_click(cx.listener(|this, _, window, cx| {
-                                let id = format!("reference-{}", this.next_id);
-                                this.next_id += 1;
+                                // The ID names the resource, so inserting the same
+                                // reference twice reuses it.
                                 let result = dispatch!(&this.state, |input| input.update(
                                     cx,
                                     |input, cx| input.replace_with_token(
-                                        InlineToken::new(id, "@reference").with_label("Reference"),
+                                        InlineToken::new("reference", "@reference")
+                                            .with_label("Reference"),
                                         window,
                                         cx
                                     )
@@ -264,7 +264,7 @@ mod tests {
             let range = inserted
                 .tokens()
                 .iter()
-                .find(|span| span.token().id().as_ref() == "reference-1")
+                .find(|span| span.token().id().as_ref() == "reference")
                 .unwrap()
                 .range();
             visual.update(|window, cx| {

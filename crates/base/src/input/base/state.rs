@@ -350,7 +350,9 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) document_revision: u64,
     pub(super) token_presentation: super::InlineTokenPresentation,
     pub(super) token_layout_cache: Option<Box<super::token_presentation::TokenLayoutCache>>,
-    pub(super) pressed_token: Option<(SharedString, u64, Point<Pixels>)>,
+    /// The start offset of a pressed token, with the document revision and
+    /// pointer position at the press.
+    pub(super) pressed_token: Option<(usize, u64, Point<Pixels>)>,
     pub(super) search_session: super::SearchSession,
     /// Advances every time search is explicitly invoked. See
     /// [`InputBaseState::search_activation_revision`].
@@ -619,14 +621,6 @@ impl<M: InputModeKind> InputBaseState<M> {
             .masked(self.masked)
             .go_to_definition(go_to_definition)
             .code_actions(code_actions)
-            .token_activation(
-                self.tokens_visible()
-                    && self.token_presentation.has_listener()
-                    && self
-                        .token_spans()
-                        .iter()
-                        .any(|s| s.range() == self.selected_range()),
-            )
     }
 
     pub fn set_text_align(&mut self, text_align: TextAlign, cx: &mut Context<Self>) {
@@ -2255,7 +2249,9 @@ impl<M: InputModeKind> InputBaseState<M> {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.disabled || window.default_prevented() {
+        // A token that consumed the press (a double click selecting it) must
+        // not also place the caret.
+        if window.default_prevented() {
             return;
         }
         self.undo_manager.break_transaction_coalescing();
@@ -2787,7 +2783,11 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.restore_selections(replay.selections);
         self.mode
             .restore_auto_closed_pairs(replay.auto_closed_pairs.unwrap_or_default());
-        self.ime_marked_range = None;
+        if token_aware {
+            // Token replay bypasses IME normalization; a stale marked range
+            // would otherwise describe text that no longer exists.
+            self.ime_marked_range = None;
+        }
         self.undo_manager.set_ignoring(false);
         self.replaying_history = false;
         self.emit_events = emit_events;
@@ -4332,7 +4332,7 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
                         .and_then(|span| {
                             state.range_to_bounds(&span.range()).and_then(|bounds| {
                                 state.token_activation(
-                                    span.token().id(),
+                                    span.range().start,
                                     bounds,
                                     gpui::ClickEvent::Keyboard(gpui::KeyboardClickEvent {
                                         bounds,
@@ -4417,7 +4417,7 @@ mod tests {
                         .replace_range_with_token(2..4, InlineToken::new("b", "@b"), window, cx)
                         .unwrap();
                     state.set_token_presentation(
-                        InlineTokenPresentation::new()
+                        InlineTokenPresentation::default()
                             .render_token(move |_, _, _| div().w(px(render_width.get()))),
                     );
                 });
@@ -4436,9 +4436,7 @@ mod tests {
             );
         });
         width.set(100.);
-        view.input.update(&mut visual, |state, cx| {
-            assert!(state.refresh_token("a", cx));
-        });
+        view.input.update(&mut visual, |_, cx| cx.notify());
         visual.update(|window, cx| window.draw(cx).clear(cx));
         view.input.read_with(&visual, |state, _| {
             assert_eq!(state.display_map.wrap_row_count(), 1)
@@ -4462,7 +4460,7 @@ mod tests {
                         )
                         .unwrap();
                     state.set_token_presentation(
-                        InlineTokenPresentation::new()
+                        InlineTokenPresentation::default()
                             .render_token(|_, _, _| div().w(px(100.)).h(px(20.)))
                             .on_token_click(move |_, window, cx| {
                                 target.update(cx, |state, cx| {
@@ -4528,13 +4526,14 @@ mod tests {
                     state.undo(&Undo, window, cx);
                     assert_eq!(state.tokens()[0].range(), 4..10);
                     let before = state.content();
-                    let selected = state.selected_range();
-                    assert_eq!(
-                        state.replace_range_with_token(0..0, token, window, cx),
-                        Err(crate::input::InlineTokenError::DuplicateId)
-                    );
+                    state
+                        .replace_range_with_token(0..0, token.clone(), window, cx)
+                        .expect("the same reference may occur twice");
+                    assert_eq!(state.value().as_ref(), "@alice问 @alice!");
+                    assert_eq!(state.tokens().len(), 2);
+                    assert_eq!(state.tokens()[1].token(), &token);
+                    state.undo(&Undo, window, cx);
                     assert_eq!(state.content(), before);
-                    assert_eq!(state.selected_range(), selected);
                     state.set_value(before.text().clone(), window, cx);
                     assert!(state.tokens().is_empty());
                     assert!(!state.undo_manager.has_undos());

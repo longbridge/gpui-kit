@@ -58,7 +58,7 @@ pub(in crate::materialize) fn textarea(
     frame.extend(children);
     let frame = with_hover(frame, &states);
     let frame = with_active_and_focus(frame, &states);
-    let presentation = crate::textarea_token_presentation(
+    let callbacks = crate::InlineTokenCallbacks::new(
         &state,
         behavior
             .render_token
@@ -67,7 +67,10 @@ pub(in crate::materialize) fn textarea(
             .on_token_click
             .map(|id| crate::ComponentCallback::from_runtime(runtime, id)),
     );
-    frame
-        .child(Textarea::new(&state).token_presentation(presentation))
-        .into_any_element()
+    let textarea = callbacks.apply(
+        Textarea::new(&state),
+        |input, render| input.render_token(move |token, window, cx| render(token, window, cx)),
+        |input, listen| input.on_token_click(move |event, window, cx| listen(event, window, cx)),
+    );
+    frame.child(textarea).into_any_element()
 }

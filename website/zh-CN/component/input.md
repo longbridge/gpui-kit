@@ -306,23 +306,23 @@ Input::new(&input)
 
 `replace_with_token` 替换当前选区，空选区则在光标处插入，不自动添加空格。要替换 `@ali` 这样的补全查询，使用 `replace_range_with_token(range, token, window, cx)`。Rust 范围是 UTF-8 字节半开区间，可以使用 `str::find` 等方法返回的字节偏移。
 
-每次出现的 token 都需要唯一 ID，即使它们指向同一资源。`text` 用于复制和提交，`with_label` 指定显示名称；省略 `with_label` 时直接显示真实文本。
+ID 标识被引用的资源，同一个人被提及两次时两个 token 使用同一个 ID。`text` 用于复制和提交，`with_label` 指定显示名称；省略 `with_label` 时直接显示真实文本。
 
 用户可以将光标移到 token 两侧，选中它，或用 Backspace／Delete 删除它。选区覆盖部分 token 时会包含整块 token。Undo／Redo 同时恢复文本和引用。粘贴得到普通文本。
 
 ### 自定义外观与打开引用
 
-使用默认标签时无需设置 renderer。需要图标或 tooltip 时，让 `render_token` 返回 `InputToken`，并通过 `on_token_click` 打开引用：
+token 默认渲染为 `InlineTokenTag`。需要图标或 tooltip 时，让 `render_token` 返回自定义的 tag，并通过 `on_token_click` 打开引用：
 
 ```rust
 use gpui_kit::component::{
     IconName,
-    input::{InlineTokenClickEvent, InputToken},
+    input::{InlineTokenTag, InlineTokenClickEvent},
 };
 
 Input::new(&input)
     .render_token(|token, _, _| {
-        InputToken::new(token)
+        InlineTokenTag::new(token)
             .with_icon(IconName::File)
             .with_tooltip("打开引用")
     })
@@ -331,9 +331,9 @@ Input::new(&input)
     });
 ```
 
-也可以返回自己的单行元素。元素应保持在输入框行高内，超出可用行宽的内容会被裁切。通过 renderer 的上下文读取选中、只读和禁用状态。在事件回调中修改输入，不要在 renderer 中修改。悬停和选中样式应保持尺寸稳定。外部数据改变某个 token 的尺寸时调用 `refresh_token(id, cx)`；所有 token 的尺寸都可能变化时调用 `refresh(cx)`。
+也可以返回自己的单行元素。元素应保持在输入框行高内，超出可用行宽的内容会被裁切。通过 renderer 的上下文读取选中、只读和禁用状态。在事件回调中修改输入，不要在 renderer 中修改。悬停和选中样式应保持尺寸稳定。token 每次渲染时都会重新测量，因此数据到达后变宽的 tag 会在下一帧重新排版。
 
-拖选或 Shift 扩选不会打开引用。只读输入允许打开引用，禁用输入不允许。若要为打开选中的整块 token 提供快捷键，可以将 `ActivateToken` 绑定到自己选择的按键。输入框的上下文菜单和无障碍操作也提供此功能。
+拖选或 Shift 扩选不会打开引用。只读输入允许打开引用，禁用输入不允许。若要为打开选中的整块 token 提供快捷键，可以将 `ActivateToken` 绑定到自己选择的按键；辅助技术通过 token 的 click 操作触发同一个监听器。当应用能为引用给出明确名称（例如“打开文件”）时，可以通过 `context_menu` 自行添加菜单项。
 
 如果 token 内含按钮，应消费按钮的 mouse-down 和 click 事件，避免同时打开引用。所有子操作（包括无障碍操作）都应遵守 `token.is_disabled()`；会修改内容的操作还应遵守 `token.is_readonly()`。
 
@@ -395,4 +395,4 @@ new Input(this.input)
 
 用 `replace_with_token` 或 `replace_range_with_token` 插入引用，用 `content()` 和 `set_content()` 保存、恢复草稿，用 `tokens()` 读取当前引用。要删除引用，将它的当前范围传给 `set_selected_range`，再调用 `replace("")`。返回的快照是独立对象，修改快照不会更新输入。应在初始化、事件或任务回调中编辑，不要在 renderer 中编辑。
 
-token 校验异常提供 `error.code`，例如 `DuplicateId` 或 `CompositionActive`；参数形状无效时也会抛出异常。Textarea 的 `TextareaState()` 提供相同方法。使用 `gpui-base` 时，改用 `InputState.new()` 或 `TextareaState.new()` 构造状态。
+token 校验异常提供 `error.code`，例如 `InvalidBoundary` 或 `CompositionActive`；参数形状无效时也会抛出异常。Textarea 的 `TextareaState()` 提供相同方法。使用 `gpui-base` 时，改用 `InputState.new()` 或 `TextareaState.new()` 构造状态。
