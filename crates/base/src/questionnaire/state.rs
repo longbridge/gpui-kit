@@ -224,6 +224,24 @@ impl QuestionnaireState {
         ))
     }
 
+    /// One-based position of a choice among its item's enabled choices, with
+    /// the enabled total. Assistive technology announces the pair.
+    pub fn choice_position(&self, item: &str, value: &str) -> Option<(usize, usize)> {
+        let definition = self.item_definition(item)?;
+        let enabled: Vec<_> = definition
+            .choices()
+            .iter()
+            .filter(|choice| {
+                self.choice_state(item, choice.value())
+                    .is_some_and(|choice| !choice.is_disabled())
+            })
+            .collect();
+        enabled
+            .iter()
+            .position(|choice| choice.value().as_ref() == value)
+            .map(|position| (position + 1, enabled.len()))
+    }
+
     pub fn navigation_state(&self) -> QuestionnaireNavigationState {
         let Some(ix) = self.current_ix() else {
             return QuestionnaireNavigationState::default();

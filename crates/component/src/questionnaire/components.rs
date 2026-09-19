@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, ElementId, Entity, InteractiveElement, IntoElement, KeyDownEvent,
-    ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement,
-    Styled, Window, div, prelude::FluentBuilder as _, svg,
+    AnyElement, App, ElementId, Entity, InteractiveElement, IntoElement, ParentElement, RenderOnce,
+    Role, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div,
+    prelude::FluentBuilder as _, svg,
 };
-use gpui_base::{Checkbox, CheckboxState, Radio, RadioGroup};
+use gpui_base::RadioGroup;
 use rust_i18n::t;
 
 use crate::{
@@ -17,7 +17,8 @@ use crate::{
 };
 
 use gpui_base::questionnaire::{
-    QuestionnaireChoiceState, QuestionnaireState, QuestionnaireValidationError,
+    QuestionnaireChoiceControl, QuestionnaireChoiceState, QuestionnaireState,
+    QuestionnaireValidationError,
 };
 
 type ChoiceRenderer =
@@ -160,111 +161,6 @@ impl Questionnaire {
             children: Vec::new(),
         }
     }
-
-    fn on_key_down(
-        state: &Entity<QuestionnaireState>,
-        event: &KeyDownEvent,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        if window.default_prevented()
-            || event.is_held
-            || event.prefer_character_input
-            || event.keystroke.is_ime_in_progress()
-        {
-            return;
-        }
-
-        let modifiers = event.keystroke.modifiers;
-        let key = event.keystroke.key.as_str();
-        let input_focused = state.read(cx).is_current_input_focused(window);
-        let input_has_text = input_focused && state.read(cx).current_input_has_text(cx);
-        let single_radio_focused = {
-            let state = state.read(cx);
-            state
-                .current_item()
-                .and_then(|item| state.item_state(item))
-                .is_some_and(|item| !item.is_multiple())
-                && state.focused_current_choice(window).is_some()
-        };
-
-        let handled = if key == "enter"
-            && modifiers.secondary()
-            && modifiers.number_of_modifiers() == 1
-        {
-            state.update(cx, |state, cx| state.confirm_current(window, cx))
-        } else if modifiers.number_of_modifiers() != 0 {
-            false
-        } else if input_focused {
-            match key {
-                "enter" if Self::focused_answer_is_filled(state, window, cx) => {
-                    state.update(cx, |state, cx| state.confirm_current(window, cx))
-                }
-                "up" if !input_has_text => {
-                    state.update(cx, |state, cx| state.focus_previous_answer(window, cx))
-                }
-                "down" if !input_has_text => {
-                    state.update(cx, |state, cx| state.focus_next_answer(window, cx))
-                }
-                _ => false,
-            }
-        } else {
-            match key {
-                "up" => {
-                    state.update(cx, |state, cx| state.focus_previous_answer(window, cx))
-                        || (single_radio_focused
-                            && state
-                                .update(cx, |state, cx| state.move_current_radio(-1, window, cx)))
-                }
-                "down" => {
-                    state.update(cx, |state, cx| state.focus_next_answer(window, cx))
-                        || (single_radio_focused
-                            && state
-                                .update(cx, |state, cx| state.move_current_radio(1, window, cx)))
-                }
-                "left" if single_radio_focused => {
-                    state.update(cx, |state, cx| state.move_current_radio(-1, window, cx))
-                }
-                "right" if single_radio_focused => {
-                    state.update(cx, |state, cx| state.move_current_radio(1, window, cx))
-                }
-                "left" => state.update(cx, |state, cx| state.go_previous(window, cx)),
-                "right" if state.read(cx).navigation_state().is_confirmable() => {
-                    state.update(cx, |state, cx| state.go_next(window, cx))
-                }
-                "right" => false,
-                "enter" if Self::focused_answer_is_filled(state, window, cx) => {
-                    state.update(cx, |state, cx| state.confirm_current(window, cx))
-                }
-                "enter" => false,
-                _ => state.update(cx, |state, cx| state.activate_shortcut(key, window, cx)),
-            }
-        };
-
-        if handled {
-            window.prevent_default();
-        }
-    }
-
-    fn focused_answer_is_filled(
-        state: &Entity<QuestionnaireState>,
-        window: &Window,
-        cx: &App,
-    ) -> bool {
-        let state = state.read(cx);
-        let Some(item) = state.current_item() else {
-            return false;
-        };
-        if state.is_current_input_focused(window) {
-            return state
-                .answer(item)
-                .is_some_and(|answer| answer.freeform().is_some());
-        }
-        state
-            .focused_current_choice(window)
-            .and_then(|value| state.choice_state(item, value))
-            .is_some_and(|choice| choice.is_selected())
-    }
 }
 
 impl Styled for Questionnaire {
@@ -292,7 +188,9 @@ impl RenderOnce for Questionnaire {
             .role(Role::Form)
             .key_context("Questionnaire")
             .track_focus(&focus_handle)
-            .capture_key_down(move |event, window, cx| Self::on_key_down(&state, event, window, cx))
+            .capture_key_down(move |event, window, cx| {
+                gpui_base::questionnaire::handle_key_down(&state, event, window, cx)
+            })
             .flex()
             .flex_col()
             .min_w_0()
@@ -737,21 +635,6 @@ impl RenderOnce for QuestionnaireChoice {
         let multiple = item.is_multiple();
         let label = definition.accessibility_label().clone();
         let description = definition.description().cloned();
-        let position = state.item_definition(&self.item).and_then(|item| {
-            let enabled: Vec<_> = item
-                .choices()
-                .iter()
-                .filter(|choice| {
-                    state
-                        .choice_state(&self.item, choice.value())
-                        .is_some_and(|choice| !choice.is_disabled())
-                })
-                .collect();
-            enabled
-                .iter()
-                .position(|choice| choice.value() == &self.value)
-                .map(|position| (position + 1, enabled.len()))
-        });
         let selected = choice_state.is_selected();
         let disabled = choice_state.is_disabled();
         let invalid = choice_state.is_invalid();
@@ -869,51 +752,16 @@ impl RenderOnce for QuestionnaireChoice {
 
         let id = element_id(&self.state, format!("choice-{}-{}", self.item, self.value));
         let instance_style = self.style.clone();
-        let state = self.state.clone();
         let item_name = self.item.clone();
         let choice_value = self.value.clone();
 
-        if multiple {
-            let callback_state = state.clone();
-            let callback_item = item_name.clone();
-            let callback_value = choice_value.clone();
-            let confirm_state = state.clone();
-            let base = Checkbox::new(id)
-                .state(if selected {
-                    CheckboxState::Checked
-                } else {
-                    CheckboxState::Unchecked
-                })
-                .disabled(disabled)
-                .accessibility_label(label)
-                .when_some(description.clone(), |this, description| {
-                    this.aria_description(description)
-                })
-                .when_some(position, |this, (position, total)| {
-                    this.aria_position_in_set(position).aria_size_of_set(total)
-                })
-                .when_some(focus_handle, |this, focus_handle| {
-                    this.track_focus(&focus_handle)
-                })
-                .capture_key_down(move |event, window, cx| {
-                    if selected
-                        && !window.default_prevented()
-                        && !event.is_held
-                        && event.keystroke.key == "enter"
-                        && event.keystroke.modifiers.number_of_modifiers() == 0
-                        && confirm_state.update(cx, |state, cx| state.confirm_current(window, cx))
-                    {
-                        window.prevent_default();
-                    }
-                })
-                .on_change(move |_, _, window, cx| {
-                    let _ = callback_state.update(cx, |state, cx| {
-                        let result = state.activate_choice(&callback_item, &callback_value, cx);
-                        state.focus_choice(&callback_item, &callback_value, window, cx);
-                        result
-                    });
-                });
-            style_choice_card(
+        let Some(control) =
+            QuestionnaireChoiceControl::new(&self.state, item_name, choice_value, id, cx)
+        else {
+            return gpui::Empty.into_any_element();
+        };
+        match control {
+            QuestionnaireChoiceControl::Checkbox(base) => style_choice_card(
                 base,
                 indicator,
                 content.into_any_element(),
@@ -927,41 +775,8 @@ impl RenderOnce for QuestionnaireChoice {
                 window,
                 cx,
             )
-            .into_any_element()
-        } else {
-            let confirm_state = state.clone();
-            let base = Radio::new(id)
-                .checked(selected)
-                .disabled(disabled)
-                .accessibility_label(label)
-                .when_some(description, |this, description| {
-                    this.aria_description(description)
-                })
-                .when_some(position, |this, (position, total)| {
-                    this.set_position(position, total)
-                })
-                .when_some(focus_handle, |this, focus_handle| {
-                    this.track_focus(&focus_handle)
-                })
-                .capture_key_down(move |event, window, cx| {
-                    if selected
-                        && !window.default_prevented()
-                        && !event.is_held
-                        && event.keystroke.key == "enter"
-                        && event.keystroke.modifiers.number_of_modifiers() == 0
-                        && confirm_state.update(cx, |state, cx| state.confirm_current(window, cx))
-                    {
-                        window.prevent_default();
-                    }
-                })
-                .on_change(move |_, _, window, cx| {
-                    let _ = state.update(cx, |state, cx| {
-                        let result = state.activate_choice(&item_name, &choice_value, cx);
-                        state.focus_choice(&item_name, &choice_value, window, cx);
-                        result
-                    });
-                });
-            style_choice_card(
+            .into_any_element(),
+            QuestionnaireChoiceControl::Radio(base) => style_choice_card(
                 base,
                 indicator,
                 content.into_any_element(),
@@ -975,7 +790,7 @@ impl RenderOnce for QuestionnaireChoice {
                 window,
                 cx,
             )
-            .into_any_element()
+            .into_any_element(),
         }
     }
 }
@@ -1320,8 +1135,8 @@ questionnaire_action_part!(
 mod tests {
     use super::*;
     use gpui::{
-        AppContext as _, Context, Element as _, Focusable as _, Keystroke, Render, TestAppContext,
-        VisualTestContext, accesskit, px,
+        AppContext as _, Context, Element as _, Focusable as _, KeyDownEvent, Keystroke, Render,
+        TestAppContext, VisualTestContext, accesskit, px,
     };
 
     use gpui_base::questionnaire::{
