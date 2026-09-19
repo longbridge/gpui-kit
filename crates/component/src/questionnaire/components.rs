@@ -226,6 +226,25 @@ fn title_text_style<T: Styled>(element: T, size: Size, cx: &App) -> T {
     .font_weight(gpui::FontWeight::MEDIUM)
 }
 
+/// The line box the answer label occupies. An indicator or a shortcut badge
+/// centers on that first line, so a two-line answer keeps them beside the
+/// label rather than drifting toward the description.
+fn answer_line_height(size: Size, cx: &App) -> gpui::Pixels {
+    let typography = cx.theme().semantic_tokens().typography;
+    match size {
+        Size::XSmall => typography.xs.line_height,
+        Size::Small => typography.sm.line_height,
+        Size::Large => typography.lg.line_height,
+        Size::Size(value) => value * 1.5,
+        Size::Medium => typography.md.line_height,
+    }
+}
+
+/// How far to push an adornment of `height` down so it centers on that line.
+fn center_on_answer_line(height: gpui::Pixels, size: Size, cx: &App) -> gpui::Pixels {
+    ((answer_line_height(size, cx) - height) * 0.5).max(gpui::Pixels::ZERO)
+}
+
 fn apply_text_token<T: Styled>(element: T, token: gpui_base::TextStyleToken) -> T {
     element
         .text_size(token.size)
@@ -838,7 +857,8 @@ impl RenderOnce for QuestionnaireChoice {
         let mono_font = cx.theme().semantic_tokens().typography.mono.clone();
         let size = resolve_size(self.size, &self.state, cx);
         let metrics = QuestionnaireMetrics::new(size, cx);
-        let answer_alignment_offset = metrics.content_gap;
+        let indicator_offset = center_on_answer_line(metrics.indicator_size, size, cx);
+        let shortcut_offset = center_on_answer_line(metrics.shortcut_size, size, cx);
         let focused = focus_handle
             .as_ref()
             .is_some_and(|focus_handle| focus_handle.is_focused(window));
@@ -865,7 +885,6 @@ impl RenderOnce for QuestionnaireChoice {
                 })
                 .when(multiple, |this| this.rounded(radius.sm))
                 .when(!multiple, |this| this.rounded(radius.full))
-                .mt(answer_alignment_offset)
                 .refine_style(&self.indicator_style)
                 .when(selected && multiple, |this| {
                     this.child(
@@ -886,11 +905,18 @@ impl RenderOnce for QuestionnaireChoice {
                 .into_any_element()
         };
 
-        let indicator = self
-            .indicator_renderer
-            .as_ref()
-            .map(|renderer| renderer(&choice_state, window, cx))
-            .unwrap_or_else(default_indicator);
+        // The slot, not the element, owns the vertical alignment, so a custom
+        // indicator lands on the label's line without having to know the metrics.
+        let indicator = div()
+            .flex_shrink_0()
+            .mt(indicator_offset)
+            .child(
+                self.indicator_renderer
+                    .as_ref()
+                    .map(|renderer| renderer(&choice_state, window, cx))
+                    .unwrap_or_else(default_indicator),
+            )
+            .into_any_element();
 
         let content = div()
             .flex()
@@ -935,15 +961,19 @@ impl RenderOnce for QuestionnaireChoice {
                 .text_size(metrics.shortcut_text_size)
                 .font_weight(gpui::FontWeight::MEDIUM)
                 .rounded(metrics.shortcut_radius)
-                .mt(answer_alignment_offset)
                 .refine_style(&self.shortcut_style)
                 .into_any_element()
         };
-        let shortcut_element = self
-            .shortcut_renderer
-            .as_ref()
-            .map(|renderer| renderer(&choice_state, window, cx))
-            .unwrap_or_else(default_shortcut);
+        let shortcut_element = div()
+            .flex_shrink_0()
+            .mt(shortcut_offset)
+            .child(
+                self.shortcut_renderer
+                    .as_ref()
+                    .map(|renderer| renderer(&choice_state, window, cx))
+                    .unwrap_or_else(default_shortcut),
+            )
+            .into_any_element();
 
         let id = element_id(&self.state, format!("choice-{}-{}", self.item, self.value));
         let instance_style = self.style.clone();
