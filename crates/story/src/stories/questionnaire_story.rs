@@ -230,7 +230,7 @@ impl QuestionnaireStory {
         }
 
         // Keep the freeform answer in the same answer group as fixed choices,
-        // matching shadcn/ui's Questionnaire composition and spacing.
+        // matching the ReUI questionnaire composition and spacing.
         choice_parts = choice_parts.child(QuestionnaireInput::new(state, item).with_size(size));
 
         result
@@ -1260,7 +1260,7 @@ impl Render for QuestionnaireStory {
             )
             .child(
                 section("All sizes")
-                    .description("Medium is the base-nova default; the same composition scales through all four Size values.")
+                    .description("Medium matches the ReUI skin; the same composition scales through all four Size values.")
                     .w(px(600.))
                     .child(
                         h_flex()

@@ -541,7 +541,7 @@ Stepper::new("questionnaire-steps")
 ## Sizes and theming
 
 Questionnaire parts implement the same `Sizable` contract as the rest of the
-library. `Medium` is the default and follows the shadcn/ui `base-nova` docs
+library. `Medium` is the default and follows the ReUI `base-nova` questionnaire
 appearance. The supported named sizes are `XSmall`, `Small`, `Medium`, and
 `Large`; `Size::Size(value)` is available for a custom scale.
 

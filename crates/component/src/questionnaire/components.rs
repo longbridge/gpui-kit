@@ -25,14 +25,13 @@ type ChoiceRenderer =
 struct QuestionnaireMetrics {
     root_gap: gpui::Pixels,
     item_gap: gpui::Pixels,
+    choices_gap: gpui::Pixels,
     choice_gap: gpui::Pixels,
     content_gap: gpui::Pixels,
     choice_padding_x: gpui::Pixels,
     choice_padding_y: gpui::Pixels,
     choice_min_height: gpui::Pixels,
     choice_radius: gpui::Pixels,
-    input_padding_y: gpui::Pixels,
-    input_radius: gpui::Pixels,
     indicator_size: gpui::Pixels,
     indicator_mark_size: gpui::Pixels,
     indicator_check_size: gpui::Pixels,
@@ -50,14 +49,13 @@ impl QuestionnaireMetrics {
             Size::XSmall => Self {
                 root_gap: spacing.sm,
                 item_gap: spacing.sm,
+                choices_gap: spacing.xs,
                 choice_gap: spacing.xs,
                 content_gap: spacing.xxs,
                 choice_padding_x: spacing.sm,
                 choice_padding_y: spacing.xs,
                 choice_min_height: spacing.xl + spacing.xs,
                 choice_radius: radius.md,
-                input_padding_y: gpui::Pixels::ZERO,
-                input_radius: radius.md,
                 indicator_size: spacing.md,
                 indicator_mark_size: spacing.xs,
                 indicator_check_size: spacing.sm,
@@ -68,14 +66,13 @@ impl QuestionnaireMetrics {
             Size::Small => Self {
                 root_gap: spacing.md,
                 item_gap: spacing.md,
-                choice_gap: spacing.xs,
+                choices_gap: spacing.xs,
+                choice_gap: spacing.xs + spacing.xxs,
                 content_gap: spacing.xxs,
                 choice_padding_x: spacing.sm,
                 choice_padding_y: spacing.xs,
                 choice_min_height: spacing.xxl,
                 choice_radius: radius.lg,
-                input_padding_y: spacing.xxs,
-                input_radius: radius.lg,
                 indicator_size: spacing.md + spacing.xxs,
                 indicator_mark_size: spacing.xs + spacing.xxs,
                 indicator_check_size: spacing.sm + spacing.xxs,
@@ -86,56 +83,53 @@ impl QuestionnaireMetrics {
             Size::Large => Self {
                 root_gap: spacing.xl,
                 item_gap: spacing.xl,
+                choices_gap: spacing.sm + spacing.xxs,
                 choice_gap: spacing.md,
                 content_gap: spacing.xs,
                 choice_padding_x: spacing.lg,
                 choice_padding_y: spacing.md,
                 choice_min_height: spacing.xxl + spacing.lg,
                 choice_radius: radius.xl,
-                input_padding_y: spacing.sm,
-                input_radius: radius.xl,
                 indicator_size: spacing.lg + spacing.xxs,
                 indicator_mark_size: spacing.sm + spacing.xxs,
                 indicator_check_size: spacing.lg,
                 shortcut_size: spacing.xl,
                 shortcut_text_size: spacing.md,
-                shortcut_radius: radius.xl,
+                shortcut_radius: radius.lg,
             },
             Size::Size(value) => Self {
                 root_gap: value,
                 item_gap: value,
+                choices_gap: value * 0.5,
                 choice_gap: value * 0.625,
                 content_gap: value * 0.25,
                 choice_padding_x: value * 0.75,
                 choice_padding_y: value * 0.625,
                 choice_min_height: value * 2.75,
-                choice_radius: (radius.lg + radius.xl) * 0.5,
-                input_padding_y: value * 0.25,
-                input_radius: (radius.lg + radius.xl) * 0.5,
+                choice_radius: radius.lg,
                 indicator_size: value,
                 indicator_mark_size: value * 0.5,
                 indicator_check_size: value * 0.875,
                 shortcut_size: value * 1.25,
                 shortcut_text_size: value * 0.625,
-                shortcut_radius: radius.lg,
+                shortcut_radius: radius.md,
             },
             Size::Medium => Self {
                 root_gap: spacing.lg,
                 item_gap: spacing.lg,
+                choices_gap: spacing.sm,
                 choice_gap: spacing.sm + spacing.xxs,
                 content_gap: spacing.xxs,
                 choice_padding_x: spacing.md,
                 choice_padding_y: spacing.sm + spacing.xxs,
                 choice_min_height: spacing.xxl + spacing.md,
-                choice_radius: (radius.lg + radius.xl) * 0.5,
-                input_padding_y: spacing.xs,
-                input_radius: (radius.lg + radius.xl) * 0.5,
+                choice_radius: radius.lg,
                 indicator_size: spacing.lg,
                 indicator_mark_size: spacing.sm,
                 indicator_check_size: spacing.md + spacing.xxs,
                 shortcut_size: spacing.lg + spacing.xs,
                 shortcut_text_size: spacing.sm + spacing.xxs,
-                shortcut_radius: radius.lg,
+                shortcut_radius: radius.md,
             },
         }
     }
@@ -173,11 +167,7 @@ fn progress_text_style<T: Styled>(element: T, size: Size, cx: &App) -> T {
 }
 
 fn description_text_style<T: Styled>(element: T, size: Size, cx: &App) -> T {
-    let metrics = QuestionnaireMetrics::new(size, cx);
-
-    // A native fieldset excludes its legend from the flex gap before the
-    // description. Recreate that base-nova relationship for GPUI's group.
-    text_style(element, size, cx).mt(-metrics.item_gap)
+    text_style(element, size, cx)
 }
 
 fn title_text_style<T: Styled>(element: T, size: Size, cx: &App) -> T {
@@ -376,7 +366,7 @@ impl RenderOnce for Questionnaire {
     }
 }
 
-/// Textual progress matching shadcn/ui's base-nova default presentation.
+/// Textual progress, following the ReUI `base-nova` questionnaire skin.
 #[derive(IntoElement)]
 pub struct QuestionnaireProgress {
     state: Entity<QuestionnaireState>,
@@ -445,7 +435,7 @@ impl RenderOnce for QuestionnaireProgress {
 }
 
 macro_rules! questionnaire_item_part {
-    ($name:ident, $fallback:ident, $style:ident, $color:ident) => {
+    ($name:ident, $fallback:ident, $style:ident, $color:ident, $closes_item_gap:expr) => {
         #[derive(IntoElement)]
         pub struct $name {
             state: Entity<QuestionnaireState>,
@@ -497,7 +487,14 @@ macro_rules! questionnaire_item_part {
                     return gpui::Empty.into_any_element();
                 }
                 let colors = cx.theme().semantic_tokens().colors;
+                // The item stacks its parts on one gap. A title with no
+                // description of its own closes the gap the description would
+                // have filled, so answers never crowd the question.
+                let closes_item_gap = $closes_item_gap && item_description(definition).is_none();
                 $style(div().w_full().text_color(colors.$color), self.size, cx)
+                    .when(closes_item_gap, |this| {
+                        this.mb(QuestionnaireMetrics::new(self.size, cx).item_gap)
+                    })
                     .refine_style(&self.style)
                     .when(!has_children, |this| {
                         this.when_some(fallback, |this, fallback| this.child(fallback))
@@ -509,12 +506,19 @@ macro_rules! questionnaire_item_part {
     };
 }
 
-questionnaire_item_part!(QuestionnaireTitle, item_label, title_text_style, foreground);
+questionnaire_item_part!(
+    QuestionnaireTitle,
+    item_label,
+    title_text_style,
+    foreground,
+    true
+);
 questionnaire_item_part!(
     QuestionnaireDescription,
     item_description,
     description_text_style,
-    muted_foreground
+    muted_foreground,
+    false
 );
 
 /// The active question group. Inactive or disabled items do not enter layout,
@@ -656,7 +660,7 @@ impl RenderOnce for QuestionnaireChoices {
                 .role(Role::Group)
                 .flex()
                 .flex_col()
-                .gap(metrics.choice_gap)
+                .gap(metrics.choices_gap)
                 .w_full()
                 .refine_style(&self.style)
                 .children(self.children)
@@ -665,7 +669,7 @@ impl RenderOnce for QuestionnaireChoices {
             RadioGroup::new(element_id(&self.state, format!("choices-{}", self.item)))
                 .flex()
                 .flex_col()
-                .gap(metrics.choice_gap)
+                .gap(metrics.choices_gap)
                 .w_full()
                 .refine_style(&self.style)
                 .children(self.children)
@@ -674,7 +678,7 @@ impl RenderOnce for QuestionnaireChoices {
     }
 }
 
-/// A selectable base-nova choice card.
+/// A selectable choice card, following the ReUI `base-nova` questionnaire skin.
 #[derive(IntoElement)]
 pub struct QuestionnaireChoice {
     state: Entity<QuestionnaireState>,
@@ -798,6 +802,8 @@ where
         })
         .bg(if selected {
             tokens.colors.muted
+        } else if cx.theme().is_dark() {
+            tokens.colors.input.opacity(0.2)
         } else {
             tokens.colors.background.opacity(0.)
         })
@@ -854,6 +860,7 @@ impl RenderOnce for QuestionnaireChoice {
         let focus_handle = state.choice_focus_handle(&self.item, &self.value).cloned();
         let colors = cx.theme().semantic_tokens().colors;
         let radius = cx.theme().semantic_tokens().radius;
+        let indicator_background = cx.theme().input_background();
         let mono_font = cx.theme().semantic_tokens().typography.mono.clone();
         let metrics = QuestionnaireMetrics::new(self.size, cx);
         let answer_alignment_offset = metrics.content_gap;
@@ -879,7 +886,7 @@ impl RenderOnce for QuestionnaireChoice {
                 .bg(if selected {
                     colors.primary
                 } else {
-                    colors.background
+                    indicator_background
                 })
                 .when(multiple, |this| this.rounded(radius.sm))
                 .when(!multiple, |this| this.rounded(radius.full))
@@ -1181,14 +1188,11 @@ impl RenderOnce for QuestionnaireInput {
         if !active {
             return gpui::Empty.into_any_element();
         }
-        let metrics = QuestionnaireMetrics::new(self.size, cx);
 
         Input::new(input_definition.state())
             .aria_label(input_definition.accessibility_label().clone())
             .disabled(item_state.is_disabled() || input_definition.is_disabled())
             .with_size(self.size)
-            .py(metrics.input_padding_y)
-            .rounded(metrics.input_radius)
             .when(item_state.is_invalid(), |this| {
                 this.border_color(cx.theme().semantic_tokens().colors.destructive)
             })
@@ -1322,7 +1326,7 @@ impl RenderOnce for QuestionnaireActions {
             .min_w_0()
             .items_center()
             .justify_start()
-            .gap(metrics.choice_gap)
+            .gap(metrics.choices_gap)
             .w_full()
             .refine_style(&self.style)
             .children(self.children)

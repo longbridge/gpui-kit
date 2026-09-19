@@ -511,8 +511,8 @@ Stepper::new("questionnaire-steps")
 
 ## 尺寸与主题
 
-Questionnaire 部件实现与其他组件相同的 `Sizable` 契约。默认尺寸为 `Medium`，并
-遵循 shadcn/ui `base-nova` docs 外观。支持的命名尺寸为 `XSmall`、`Small`、
+Questionnaire 部件实现与其他组件相同的 `Sizable` 契约。默认尺寸为 `Medium`，其
+外观对齐 ReUI 的 `base-nova` questionnaire。支持的命名尺寸为 `XSmall`、`Small`、
 `Medium` 和 `Large`；也可以使用 `Size::Size(value)` 自定义比例。
 
 组合部件不会自动继承 root 的 size。需要保持同一比例时，应将相同 size 传给 root、
