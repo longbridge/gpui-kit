@@ -1104,10 +1104,9 @@ impl RenderOnce for QuestionnaireInput {
             .aria_label(input_definition.accessibility_label().clone())
             .disabled(item_state.is_disabled() || input_definition.is_disabled())
             .with_size(size)
-            // The freeform answer is one of the answers, so its text starts
-            // where a choice's label does: past the card padding, the
-            // indicator, and the gap between them.
-            .pl(metrics.choice_padding_x + metrics.indicator_size + metrics.choice_gap)
+            // The freeform answer is one of the answers, so its text starts on
+            // the same edge a choice's indicator does — the card padding.
+            .pl(metrics.choice_padding_x)
             .rounded(metrics.choice_radius)
             .when(item_state.is_invalid(), |this| {
                 this.border_color(cx.theme().semantic_tokens().colors.destructive)
