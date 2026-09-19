@@ -50,6 +50,7 @@ collapsed: false
 - [Scrollable](scrollable) - 可滚动容器
 - [Sidebar](sidebar) - 侧边栏导航
 - [StatusBar](status-bar) - 底部状态栏，含左/中/右三区
+- [Toolbar](toolbar) - 顶部工具栏，含左/右区域与尺寸
 - [Chart](chart) - 图表组件
 - [Carousel](carousel) - 浏览一组相关内容
 - [DataTable](data-table) - 高性能数据表格

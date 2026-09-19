@@ -99,6 +99,7 @@ const RUST_STORY_ORDER = [
   "TagStory",
   "TextareaStory",
   "ToggleStory",
+  "ToolbarStory",
   "TooltipStory",
   "TreeStory",
   "VirtualListStory",

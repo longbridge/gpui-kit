@@ -614,6 +614,12 @@ pub struct ThemeConfigColors {
     /// StatusBar border color.
     #[serde(rename = "status_bar.border")]
     pub status_bar_border: Option<SharedString>,
+    /// Toolbar background color, use for the top toolbar.
+    #[serde(rename = "toolbar.background")]
+    pub toolbar: Option<SharedString>,
+    /// Toolbar border color.
+    #[serde(rename = "toolbar.border")]
+    pub toolbar_border: Option<SharedString>,
     /// Warning background color.
     #[serde(rename = "warning.background")]
     pub warning: Option<SharedString>,
@@ -1013,6 +1019,8 @@ impl ThemeColor {
         apply_color!(title_bar_border, fallback = self.border);
         apply_background_color!(status_bar, fallback = tokens.title_bar);
         apply_color!(status_bar_border, fallback = self.title_bar_border);
+        apply_background_color!(toolbar, fallback = tokens.title_bar);
+        apply_color!(toolbar_border, fallback = self.title_bar_border);
         apply_background_color!(overlay);
         apply_color!(window_border, fallback = self.border);
 

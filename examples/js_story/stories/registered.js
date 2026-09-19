@@ -145,6 +145,7 @@ import {
   StepperItem,
   SuccessAlert,
   Toggle,
+  Toolbar,
   Tooltip,
   Tree,
   WarningAlert,
@@ -1850,6 +1851,24 @@ export function registeredExamples(surface, cx) {
               .right_content(asElement(new Button("status-position").ghost().size("xsmall").label("Ln 12, Col 34")))
               .right_content(asElement(new VerticalSeparator().h(14)))
               .right_content(asElement(new Button("status-language").ghost().size("xsmall").label("JavaScript"))),
+          ),
+        },
+      ];
+    case "Toolbar":
+      return [
+        {
+          label: "Document toolbar",
+          description: "Leading actions pin to the start, trailing actions to the end, and the title sits between them.",
+          element: asElement(
+            new Toolbar("story-toolbar")
+              .w_full()
+              .left_content(asElement(new Button("toolbar-new").ghost().size("xsmall").label("New")))
+              .left_content(asElement(new VerticalSeparator().h(14)))
+              .left_content(asElement(new Button("toolbar-open").ghost().size("xsmall").label("Open")))
+              .child(asElement(new Text("Quarterly report")))
+              .right_content(asElement(new Button("toolbar-share").ghost().size("xsmall").label("Share")))
+              .right_content(asElement(new VerticalSeparator().h(14)))
+              .right_content(asElement(new Button("toolbar-settings").ghost().size("xsmall").label("Settings"))),
           ),
         },
       ];

@@ -9,6 +9,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
     group_box::register(registry)?;
     rating::register(registry)?;
     status_bar::register(registry)?;
+    toolbar::register(registry)?;
     Ok(())
 }
 
@@ -19,6 +20,7 @@ mod common;
 mod group_box;
 mod rating;
 mod status_bar;
+mod toolbar;
 
 #[cfg(test)]
 mod tests {
@@ -47,7 +49,8 @@ mod tests {
                 "Clipboard",
                 "GroupBox",
                 "Rating",
-                "StatusBar"
+                "StatusBar",
+                "Toolbar"
             ]
         );
         assert!(

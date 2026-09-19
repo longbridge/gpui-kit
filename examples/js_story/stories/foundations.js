@@ -70,4 +70,14 @@ export const stories = [
     availability: "pending",
     api: "StatusBar",
   }),
+  pendingStory({
+    id: "toolbar",
+    title: "Toolbar",
+    group: "Foundations",
+    rustStory: "ToolbarStory",
+    description: "Top toolbar with leading and trailing action regions.",
+    states: ["normal", "disabled"],
+    availability: "pending",
+    api: "Toolbar",
+  }),
 ];
