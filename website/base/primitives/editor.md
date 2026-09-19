@@ -78,7 +78,14 @@ let decorations = editor.update(cx, |state, cx| {
 ```
 
 Decoration collections track ranges as the text changes. Keep the returned
-collection alive for as long as its decorations should remain active.
+handle to update or clear its entries; dropping it does not remove decorations.
+
+`create_range_decorations_collection` creates an independent collection of
+paint-only `RangeDecoration` fills or frames. Text and geometric collections
+share UTF-8 normalization and edit tracking. See
+[Geometric range decorations](../../component/editor.md#geometric-range-decorations)
+for ownership, boundary affinity, deletion, undo/redo, folding, layering, and
+indexing semantics; import the same types from `gpui_kit::base::input`.
 
 ## Highlighting and language features
 

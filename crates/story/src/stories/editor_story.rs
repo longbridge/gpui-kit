@@ -15,6 +15,7 @@ pub struct EditorStory {
     editor_state: Entity<EditorState>,
     decorations_state: Entity<EditorState>,
     _decorations: TextDecorationCollection,
+    _range_decorations: RangeDecorationCollection,
     active_tab: usize,
     readonly: bool,
     font_family: Option<SharedString>,
@@ -131,10 +132,24 @@ impl EditorStory {
             )
         });
 
+        // Geometry is a separate owner from text styling. Both follow edits,
+        // including newlines inserted before these ranges.
+        let range_decorations = decorations_state.update(cx, |state, cx| {
+            state.create_range_decorations_collection(
+                vec![
+                    RangeDecoration::new(color_start..italic_start + italic_range.len())
+                        .with_style(RangeDecorationStyle::Fill),
+                    RangeDecoration::new(underline_start..decoration_text.len()),
+                ],
+                cx,
+            )
+        });
+
         Self {
             editor_state,
             decorations_state,
             _decorations: decorations,
+            _range_decorations: range_decorations,
             active_tab: 0,
             readonly: false,
             font_family: None,
