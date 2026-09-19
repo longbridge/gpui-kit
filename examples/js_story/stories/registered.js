@@ -1725,7 +1725,7 @@ export function registeredExamples(surface, cx) {
         {
           label: "Guided setup",
           description:
-            "One question at a time, with letter shortcuts, a freeform answer, an optional question, and validation on Next.",
+            "One question at a time, with letter shortcuts, a freeform answer, and validation on Next.",
           element: asElement(
             new Questionnaire("registered-questionnaire")
               .shortcuts("letters")
@@ -1733,13 +1733,8 @@ export function registeredExamples(surface, cx) {
                 new QuestionnaireItem("direction", "What should we prototype next?")
                   .required(true)
                   .description("Choose a direction or write your own.")
-                  .child(
-                    new QuestionnaireChoice("delegation", "Delegation").description(
-                      "Show how work moves to a specialist.",
-                    ),
-                  )
+                  .child(new QuestionnaireChoice("delegation", "Delegation"))
                   .child(new QuestionnaireChoice("questions", "Question prompts"))
-                  .child(new QuestionnaireChoice("both", "Both together"))
                   .child(
                     new QuestionnaireInput(
                       retained("questionnaire-direction", () =>
@@ -1748,13 +1743,6 @@ export function registeredExamples(surface, cx) {
                       "Another direction",
                     ),
                   ),
-              )
-              .child(
-                new QuestionnaireItem("tools", "Which tools do you use?")
-                  .multiple(true)
-                  .child(new QuestionnaireChoice("editor", "Editor").default_selected(true))
-                  .child(new QuestionnaireChoice("terminal", "Terminal"))
-                  .child(new QuestionnaireChoice("browser", "Browser").disabled(true)),
               )
               .child(
                 new QuestionnaireItem("tone", "What tone should the interface use?")

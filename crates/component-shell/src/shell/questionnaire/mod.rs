@@ -69,35 +69,13 @@ enum RootOp {
     Shortcuts(QuestionnaireShortcutMode),
 }
 
-/// What the retained state was built from. A question or choice that changed
-/// means a different questionnaire, and `QuestionnaireState` fixes its schema
-/// at construction, so the state is rebuilt rather than patched.
-#[derive(Clone, PartialEq, Eq)]
-struct Fingerprint {
-    shortcuts: Option<&'static str>,
-    items: Vec<ItemFingerprint>,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-struct ItemFingerprint {
-    name: String,
-    label: String,
-    description: Option<String>,
-    required: bool,
-    multiple: bool,
-    disabled: bool,
-    input: Option<(u64, String)>,
-    choices: Vec<ChoiceFingerprint>,
-}
-
-#[derive(Clone, PartialEq, Eq)]
-struct ChoiceFingerprint {
-    value: String,
-    label: String,
-    description: Option<String>,
-    disabled: bool,
-    default_selected: bool,
-}
+/// What the retained state was built from, as one hash. A question or choice
+/// that changed means a different questionnaire, and `QuestionnaireState` fixes
+/// its schema at construction, so the state is rebuilt rather than patched.
+///
+/// This runs on every frame of every questionnaire on screen, so it hashes the
+/// schema in place instead of copying it into comparable values.
+type Fingerprint = u64;
 
 struct RetainedQuestionnaire {
     native: gpui::Entity<QuestionnaireState>,
@@ -254,12 +232,11 @@ impl ComponentMaterializer for RootMaterializer {
         let (state, error) = request.with_window_app(|window, cx| {
             let retained =
                 window.use_keyed_state(format!("shell-questionnaire:{id}"), cx, |_, cx| {
-                    build_retained(definitions.clone(), shortcuts, fingerprint.clone(), cx)
+                    build_retained(definitions.clone(), shortcuts, fingerprint, cx)
                 });
             retained.update(cx, |retained, cx| {
                 if retained.fingerprint != fingerprint {
-                    *retained =
-                        build_retained(definitions.clone(), shortcuts, fingerprint.clone(), cx);
+                    *retained = build_retained(definitions.clone(), shortcuts, fingerprint, cx);
                 }
             });
             let retained = retained.read(cx);
@@ -324,40 +301,39 @@ fn fingerprint(
     definitions: &[QuestionnaireItemDefinition],
     shortcuts: Option<QuestionnaireShortcutMode>,
 ) -> Fingerprint {
-    Fingerprint {
-        shortcuts: shortcuts.map(|mode| match mode {
-            QuestionnaireShortcutMode::Letters => "letters",
-            QuestionnaireShortcutMode::Numbers => "numbers",
-        }),
-        items: definitions
-            .iter()
-            .map(|item| ItemFingerprint {
-                name: item.name().to_string(),
-                label: item.accessibility_label().to_string(),
-                description: item.description().map(ToString::to_string),
-                required: item.is_required(),
-                multiple: item.is_multiple(),
-                disabled: item.is_disabled(),
-                input: item.input().map(|input| {
-                    (
-                        input.state().entity_id().as_u64(),
-                        input.accessibility_label().to_string(),
-                    )
-                }),
-                choices: item
-                    .choices()
-                    .iter()
-                    .map(|choice| ChoiceFingerprint {
-                        value: choice.value().to_string(),
-                        label: choice.accessibility_label().to_string(),
-                        description: choice.description().map(ToString::to_string),
-                        disabled: choice.is_disabled(),
-                        default_selected: choice.is_default_selected(),
-                    })
-                    .collect(),
-            })
-            .collect(),
+    use std::hash::{Hash as _, Hasher as _};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    shortcuts
+        .map(|mode| match mode {
+            QuestionnaireShortcutMode::Letters => 1u8,
+            QuestionnaireShortcutMode::Numbers => 2,
+        })
+        .hash(&mut hasher);
+    for item in definitions {
+        item.name().as_ref().hash(&mut hasher);
+        item.accessibility_label().as_ref().hash(&mut hasher);
+        item.description().map(AsRef::as_ref).hash(&mut hasher);
+        (
+            item.is_required(),
+            item.is_multiple(),
+            item.is_disabled(),
+            item.choices().len(),
+        )
+            .hash(&mut hasher);
+        if let Some(input) = item.input() {
+            input.state().entity_id().as_u64().hash(&mut hasher);
+            input.accessibility_label().as_ref().hash(&mut hasher);
+            input.is_disabled().hash(&mut hasher);
+        }
+        for choice in item.choices() {
+            choice.value().as_ref().hash(&mut hasher);
+            choice.accessibility_label().as_ref().hash(&mut hasher);
+            choice.description().map(AsRef::as_ref).hash(&mut hasher);
+            (choice.is_disabled(), choice.is_default_selected()).hash(&mut hasher);
+        }
     }
+    hasher.finish()
 }
 
 pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryError> {
