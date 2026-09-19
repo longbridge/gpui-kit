@@ -2904,7 +2904,7 @@ impl BlockNode {
                 }
 
                 div()
-                    .pb(rems(0.3))
+                    .pb(node_cx.style.heading_gap())
                     .whitespace_normal()
                     .text_size(text_size)
                     .font_weight(font_weight)
