@@ -11,6 +11,7 @@ use lsp_types::CompletionItem;
 const MAX_MENU_HEIGHT: Pixels = px(240.);
 const POPOVER_GAP: Pixels = px(4.);
 
+use crate::FocusableExt as _;
 use crate::{
     ActiveTheme, IndexPath, Selectable, actions, h_flex,
     input::{
@@ -401,7 +402,11 @@ impl Render for CompletionMenu {
                     editor_popover("completion-menu", cx)
                         .max_w(max_width)
                         .min_w(px(120.))
-                        .child(List::new(&self.list).max_h(MAX_MENU_HEIGHT)),
+                        .child(
+                            List::new(&self.list)
+                                .focus_ring(false)
+                                .max_h(MAX_MENU_HEIGHT),
+                        ),
                 )
                 .when_some(selected_documentation, |this, documentation| {
                     let mut doc = match documentation {

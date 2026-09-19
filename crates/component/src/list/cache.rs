@@ -137,8 +137,15 @@ impl RowsCache {
     ///
     /// Empty rows section are skipped.
     pub(crate) fn next(&self, path: Option<IndexPath>) -> IndexPath {
+        // Nothing selected yet: start at the first row that exists, which is
+        // not row 0 of section 0 when that section is empty.
         let Some(mut path) = path else {
-            return IndexPath::default();
+            return self
+                .entities
+                .iter()
+                .find(|entry| entry.is_entry())
+                .map(|entry| entry.index())
+                .unwrap_or_default();
         };
 
         let Some(pos) = self.position_of(&path) else {

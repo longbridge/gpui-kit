@@ -10,6 +10,7 @@ use rust_i18n::t;
 
 pub use crate::select::Caret;
 
+use crate::FocusableExt as _;
 use crate::ThemeStyled as _;
 use crate::{
     ActiveTheme, Disableable, ElementExt as _, Icon, IconName, IndexPath, Sizable, Size,
@@ -1054,7 +1055,11 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
             })
             .popover_style(cx)
             .child(
+                // The popup is the keyboard's only target here, and the
+                // trigger already wears the ring: a second one inside would be
+                // noise.
                 List::new(list)
+                    .focus_ring(false)
                     .when_some(search_placeholder, |this, placeholder| {
                         this.search_placeholder(placeholder)
                     })

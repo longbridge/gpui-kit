@@ -7,6 +7,7 @@ use gpui::{
 use gpui_base::TestSupportExt as _;
 use rust_i18n::t;
 
+use crate::FocusableExt as _;
 use crate::ThemeStyled as _;
 use crate::{
     ActiveTheme, Disableable, ElementExt as _, Icon, IconName, IndexPath, Sizable, Size,
@@ -611,7 +612,11 @@ where
                                 })
                                 .popover_style(cx)
                                 .child(
+                                    // The popup is the keyboard's only target
+                                    // here, and the trigger already wears the
+                                    // ring: a second one inside would be noise.
                                     List::new(&self.state.list)
+                                        .focus_ring(false)
                                         .when_some(
                                             self.state.search_placeholder.clone(),
                                             |this, placeholder| {

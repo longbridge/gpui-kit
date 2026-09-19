@@ -11,6 +11,7 @@ pub(crate) use gpui_base::input::CodeActionItem;
 const MAX_MENU_WIDTH: Pixels = px(320.);
 const MAX_MENU_HEIGHT: Pixels = px(480.);
 
+use crate::FocusableExt as _;
 use crate::{
     ActiveTheme, IndexPath, Selectable, actions, h_flex,
     input::{self, EditorState, popovers::editor_popover},
@@ -320,7 +321,11 @@ impl Render for CodeActionMenu {
                 .top(pos.y)
                 .max_w(max_width)
                 .min_w(px(120.))
-                .child(List::new(&self.list).max_h(MAX_MENU_HEIGHT))
+                .child(
+                    List::new(&self.list)
+                        .focus_ring(false)
+                        .max_h(MAX_MENU_HEIGHT),
+                )
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                     this.hide(cx);
                 })),

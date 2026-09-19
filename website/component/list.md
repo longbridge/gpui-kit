@@ -366,6 +366,32 @@ impl ListDelegate for MyListDelegate {
 }
 ```
 
+## Keyboard Access
+
+The list is a tab stop, so `Tab` moves focus to it and the arrow keys then drive its selection.
+
+| Key | Action |
+| --- | --- |
+| `Tab` / `Shift+Tab` | Move focus to the list, or away from it |
+| `Up` / `Down` | Move the selection; the first press starts at the first row |
+| `Enter` | Confirm the selected row |
+| `Esc` | Clear the selection |
+
+While the list holds keyboard focus it draws a focus ring on the selected row, or on itself when nothing is selected, so focus stays visible next to the row the keys will act on. Clicking a row focuses the list as well — the arrow keys continue from the row the pointer chose — but a pointer click draws no ring.
+
+A searchable list is reached through its search input instead: `Tab` lands on the input, which keeps typing and arrow keys in one place, and the list is not a second stop.
+
+```rust
+// Take the list out of the tab order.
+List::new(&state).tab_stop(false)
+
+// Give the list an explicit place in the tab order.
+List::new(&state).tab_index(2)
+
+// Leave the focus ring to a surrounding control (requires `FocusableExt`).
+List::new(&state).focus_ring(false)
+```
+
 ## Configuration Options
 
 ### List Configuration

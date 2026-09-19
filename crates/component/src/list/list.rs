@@ -4,6 +4,7 @@ use std::ops::Range;
 use crate::actions::{Cancel, Confirm, SelectDown, SelectUp};
 use crate::input::InputState;
 use crate::list::cache::{MeasuredEntrySize, RowEntry, RowsCache};
+use crate::styled::inset_focus_ring;
 use crate::{
     ActiveTheme, IconName, Size,
     input::{Input, InputEvent},
@@ -50,6 +51,9 @@ struct ListOptions {
     search_placeholder: Option<SharedString>,
     max_height: Option<Length>,
     paddings: EdgesRefinement<DefiniteLength>,
+    tab_index: isize,
+    tab_stop: bool,
+    focus_ring_enabled: bool,
 }
 
 impl Default for ListOptions {
@@ -60,6 +64,9 @@ impl Default for ListOptions {
             max_height: None,
             search_placeholder: None,
             paddings: EdgesRefinement::default(),
+            tab_index: 0,
+            tab_stop: true,
+            focus_ring_enabled: true,
         }
     }
 }
@@ -99,7 +106,10 @@ where
             cx.subscribe_in(&query_input, window, Self::on_query_input_event);
 
         Self {
-            focus_handle: cx.focus_handle(),
+            // The list owns a keyboard model — SelectUp, SelectDown, Confirm,
+            // Cancel — so Tab must be able to reach it. A searchable list hands
+            // that stop to its search input instead, see `render`.
+            focus_handle: cx.focus_handle().tab_stop(true),
             options: ListOptions::default(),
             delegate,
             rows_cache: RowsCache::default(),
@@ -160,6 +170,18 @@ where
     /// Return true if either the list or the search input is focused.
     pub(crate) fn is_focused(&self, window: &Window, cx: &App) -> bool {
         self.focus_handle.is_focused(window) || self.query_input.focus_handle(cx).is_focused(window)
+    }
+
+    /// Whether the list should show where the keyboard is acting.
+    ///
+    /// Clicking a row focuses the list, so that the arrow keys continue from
+    /// the row the pointer chose. That focus is not worth a ring: like
+    /// [`crate::Button`], the list draws one only once the keyboard is the
+    /// input in use. The search input owns the ring on a searchable list.
+    fn focus_visible(&self, window: &Window) -> bool {
+        self.options.focus_ring_enabled
+            && self.focus_handle.is_focused(window)
+            && window.last_input_was_keyboard()
     }
 
     /// Set the selected index of the list,
@@ -486,6 +508,7 @@ where
         let id = SharedString::from(format!("list-item-{}", ix));
 
         let total_items = self.rows_cache.items_count();
+        let focus_visible = selected && self.focus_visible(window);
 
         div()
             .id(id)
@@ -497,9 +520,20 @@ where
             .relative()
             .overflow_hidden()
             .children(self.delegate.render_item(ix, window, cx).map(|item| {
+                // Only set what this list knows about. `secondary_selected(false)`
+                // would clear a state the delegate set for its own reasons, such
+                // as a row whose overflow menu is open.
                 item.selected(selected)
-                    .secondary_selected(mouse_right_clicked)
+                    .when(mouse_right_clicked, |item| item.secondary_selected(true))
             }))
+            // The row clips its own overflow and the virtual list clips the
+            // viewport, so an outward ring would be cropped away: draw it on the
+            // inside edge instead. Added last, so it paints over the row.
+            .when(focus_visible, |this| {
+                this.child(
+                    inset_focus_ring(cx).debug_selector(|| "list-item-focus-ring".to_string()),
+                )
+            })
             .when(selectable, |this| {
                 this.on_click(cx.listener(move |this, e: &ClickEvent, window, cx| {
                     this.set_right_clicked_index(None, window, cx);
@@ -662,11 +696,25 @@ where
         let items_count = self.rows_cache.items_count();
         let entities_count = self.rows_cache.len();
         let mouse_right_clicked_index = self.mouse_right_clicked_index;
+        // A searchable list hands its tab stop to the search input, which
+        // `Focusable::focus_handle` already points Tab at; a second stop on the
+        // container would make one list two landing places. `FocusHandle`'s tab
+        // state is per handle instance, so set it on the one being tracked.
+        let tab_stop = self.options.tab_stop && !self.searchable;
+        let focus_handle = self
+            .focus_handle
+            .clone()
+            .tab_index(self.options.tab_index)
+            .tab_stop(tab_stop);
+        // With a row selected the ring goes on that row, which says both where
+        // the keyboard is and what it will act on. With nothing selected there
+        // is no row to mark, so the list itself carries it.
+        let focus_visible = self.focus_visible(window) && self.selected_index.is_none();
 
         v_flex()
             .key_context("List")
             .id("list-state")
-            .track_focus(&self.focus_handle)
+            .track_focus(&focus_handle)
             .size_full()
             .relative()
             .overflow_hidden()
@@ -713,6 +761,9 @@ where
                     })
             })
             .children(loading_view)
+            .when(focus_visible, |this| {
+                this.child(inset_focus_ring(cx).debug_selector(|| "list-focus-ring".to_string()))
+            })
     }
 }
 
@@ -747,6 +798,39 @@ where
     pub fn search_placeholder(mut self, placeholder: impl Into<SharedString>) -> Self {
         self.options.search_placeholder = Some(placeholder.into());
         self
+    }
+
+    /// Set the tab index of the list, it will be used to focus the list by tab key.
+    ///
+    /// Default is 0.
+    pub fn tab_index(mut self, tab_index: isize) -> Self {
+        self.options.tab_index = tab_index;
+        self
+    }
+
+    /// Set the tab stop of the list, if true, the list will be focusable by tab key.
+    ///
+    /// Default is true.
+    ///
+    /// A searchable list is always reached through its search input, so this
+    /// has no effect there.
+    pub fn tab_stop(mut self, tab_stop: bool) -> Self {
+        self.options.tab_stop = tab_stop;
+        self
+    }
+}
+
+impl<D> crate::FocusableExt for List<D>
+where
+    D: ListDelegate + 'static,
+{
+    fn focus_ring(mut self, enabled: bool) -> Self {
+        self.options.focus_ring_enabled = enabled;
+        self
+    }
+
+    fn is_focus_ring_enabled(&self) -> bool {
+        self.options.focus_ring_enabled
     }
 }
 
@@ -884,6 +968,273 @@ mod measurement_tests {
                 });
                 div()
             },
+        );
+    }
+}
+
+#[cfg(test)]
+mod keyboard_tests {
+    use super::*;
+    use crate::{button::Button, list::ListItem};
+    use gpui::{TestAppContext, VisualTestContext};
+    use std::{cell::Cell, rc::Rc};
+
+    struct Delegate {
+        confirmed: Rc<Cell<usize>>,
+    }
+
+    impl ListDelegate for Delegate {
+        type Item = ListItem;
+
+        fn items_count(&self, _: usize, _: &App) -> usize {
+            3
+        }
+
+        fn render_item(
+            &mut self,
+            ix: IndexPath,
+            _: &mut Window,
+            _: &mut Context<ListState<Self>>,
+        ) -> Option<ListItem> {
+            Some(ListItem::new(ix.row).h(px(24.)).child("Row"))
+        }
+
+        fn set_selected_index(
+            &mut self,
+            _: Option<IndexPath>,
+            _: &mut Window,
+            _: &mut Context<ListState<Self>>,
+        ) {
+        }
+
+        fn confirm(&mut self, _: bool, _: &mut Window, _: &mut Context<ListState<Self>>) {
+            self.confirmed.set(self.confirmed.get() + 1);
+        }
+    }
+
+    struct Harness {
+        state: Entity<ListState<Delegate>>,
+        tab_stop: bool,
+    }
+
+    impl Render for Harness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            v_flex()
+                .size_full()
+                .child(List::new(&self.state).tab_stop(self.tab_stop).h(px(200.)))
+                // A second stop, so a skipped list can be seen to be skipped.
+                .child(Button::new("after").label("After"))
+        }
+    }
+
+    fn harness(
+        cx: &mut TestAppContext,
+        searchable: bool,
+        tab_stop: bool,
+    ) -> (
+        Entity<ListState<Delegate>>,
+        Rc<Cell<usize>>,
+        &mut VisualTestContext,
+    ) {
+        cx.update(crate::init);
+        let confirmed = Rc::new(Cell::new(0));
+        let (view, cx) = cx.add_window_view({
+            let confirmed = confirmed.clone();
+            move |window, cx| {
+                let state = cx.new(|cx| {
+                    ListState::new(Delegate { confirmed }, window, cx).searchable(searchable)
+                });
+                Harness { state, tab_stop }
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let state = cx.update(|_, cx| view.read(cx).state.clone());
+        (state, confirmed, cx)
+    }
+
+    fn is_list_focused(state: &Entity<ListState<Delegate>>, cx: &mut VisualTestContext) -> bool {
+        cx.update(|window, cx| state.read(cx).focus_handle.is_focused(window))
+    }
+
+    fn selected_index(
+        state: &Entity<ListState<Delegate>>,
+        cx: &mut VisualTestContext,
+    ) -> Option<IndexPath> {
+        cx.update(|_, cx| state.read(cx).selected_index())
+    }
+
+    #[gpui::test]
+    fn tab_reaches_the_list_and_the_keyboard_drives_it(cx: &mut TestAppContext) {
+        let (state, confirmed, cx) = harness(cx, false, true);
+
+        cx.update(|window, cx| window.focus_next(cx));
+        assert!(is_list_focused(&state, cx));
+
+        // Nothing is selected yet, so the first press starts at the first row.
+        cx.simulate_keystrokes("down");
+        assert_eq!(selected_index(&state, cx), Some(IndexPath::default()));
+        cx.simulate_keystrokes("down");
+        assert_eq!(selected_index(&state, cx), Some(IndexPath::new(1)));
+        cx.simulate_keystrokes("up");
+        assert_eq!(selected_index(&state, cx), Some(IndexPath::default()));
+
+        cx.simulate_keystrokes("enter");
+        assert_eq!(confirmed.get(), 1);
+
+        cx.simulate_keystrokes("escape");
+        assert_eq!(selected_index(&state, cx), None);
+    }
+
+    #[gpui::test]
+    fn the_keyboard_focus_ring_follows_the_selected_row(cx: &mut TestAppContext) {
+        let (state, _, cx) = harness(cx, false, true);
+
+        cx.update(|window, cx| window.focus_next(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(
+            cx.debug_bounds("list-item-focus-ring").is_none(),
+            "a list the keyboard has not touched must not show a ring"
+        );
+
+        cx.simulate_keystrokes("down");
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let ring = cx
+            .debug_bounds("list-item-focus-ring")
+            .expect("the selected row must carry the ring once the keyboard is in use");
+        assert_eq!(ring.size.height, px(24.));
+        assert!(
+            cx.debug_bounds("list-focus-ring").is_none(),
+            "the ring belongs to the selected row, not to both"
+        );
+
+        // Cancel drops the selection, so the ring falls back to the list itself.
+        cx.simulate_keystrokes("escape");
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(selected_index(&state, cx), None);
+        assert!(cx.debug_bounds("list-item-focus-ring").is_none());
+        let ring = cx
+            .debug_bounds("list-focus-ring")
+            .expect("a focused list with no selection must show where the keyboard is");
+        assert!(ring.size.height > px(24.));
+    }
+
+    #[gpui::test]
+    fn a_list_that_is_not_a_tab_stop_is_skipped(cx: &mut TestAppContext) {
+        let (state, _, cx) = harness(cx, false, false);
+
+        cx.update(|window, cx| window.focus_next(cx));
+
+        assert!(!is_list_focused(&state, cx));
+        assert!(cx.update(|window, cx| window.focused(cx).is_some()));
+    }
+
+    #[gpui::test]
+    fn a_searchable_list_puts_its_tab_stop_on_the_search_input(cx: &mut TestAppContext) {
+        let (state, _, cx) = harness(cx, true, true);
+
+        cx.update(|window, cx| window.focus_next(cx));
+
+        assert!(
+            cx.update(|window, cx| state
+                .read(cx)
+                .query_input
+                .focus_handle(cx)
+                .is_focused(window)),
+            "Tab must land on the search input"
+        );
+        assert!(
+            !is_list_focused(&state, cx),
+            "one list must not offer two landing places"
+        );
+    }
+
+    #[gpui::test]
+    fn the_list_leaves_a_row_the_delegate_marked_secondary_selected(cx: &mut TestAppContext) {
+        #[derive(IntoElement)]
+        struct ProbeItem {
+            secondary: Rc<Cell<bool>>,
+        }
+
+        impl Selectable for ProbeItem {
+            fn selected(self, _: bool) -> Self {
+                self
+            }
+
+            fn is_selected(&self) -> bool {
+                false
+            }
+
+            fn secondary_selected(self, selected: bool) -> Self {
+                self.secondary.set(selected);
+                self
+            }
+        }
+
+        impl RenderOnce for ProbeItem {
+            fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+                div().h(px(24.))
+            }
+        }
+
+        struct ProbeDelegate {
+            secondary: Rc<Cell<bool>>,
+        }
+
+        impl ListDelegate for ProbeDelegate {
+            type Item = ProbeItem;
+
+            fn items_count(&self, _: usize, _: &App) -> usize {
+                1
+            }
+
+            fn render_item(
+                &mut self,
+                _: IndexPath,
+                _: &mut Window,
+                _: &mut Context<ListState<Self>>,
+            ) -> Option<ProbeItem> {
+                // The delegate owns this state: say, the row's own menu is open.
+                self.secondary.set(true);
+                Some(ProbeItem {
+                    secondary: self.secondary.clone(),
+                })
+            }
+
+            fn set_selected_index(
+                &mut self,
+                _: Option<IndexPath>,
+                _: &mut Window,
+                _: &mut Context<ListState<Self>>,
+            ) {
+            }
+        }
+
+        cx.update(crate::init);
+        let secondary = Rc::new(Cell::new(false));
+        let window = cx.add_empty_window();
+        window.draw(
+            gpui::point(px(0.), px(0.)),
+            size(px(300.), px(300.)),
+            |window, cx| {
+                let state = cx.new(|cx| {
+                    ListState::new(
+                        ProbeDelegate {
+                            secondary: secondary.clone(),
+                        },
+                        window,
+                        cx,
+                    )
+                });
+                state.update(cx, |state, cx| {
+                    _ = state.render_list_item(IndexPath::default(), window, cx);
+                });
+                div()
+            },
+        );
+
+        assert!(
+            secondary.get(),
+            "the list must not clear a state it did not set"
         );
     }
 }

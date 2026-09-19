@@ -201,6 +201,27 @@ impl<T: Styled + Sized> ThemeStyled for T {
     }
 }
 
+/// The focus ring drawn *inside* an element's own box.
+///
+/// [`ThemeStyled::focus_ring_style`] spends its band outside the border, so a
+/// clipping ancestor — a virtualized row, a scroll viewport — cuts it off. A
+/// region that must clip draws this instead: the same width and ink, spent on
+/// the inside edge, where nothing can crop it.
+///
+/// The element is absolutely positioned and carries no size of its own. Give
+/// its parent `relative()` and add it after the content, so it paints on top.
+pub(crate) fn inset_focus_ring(cx: &App) -> gpui::Div {
+    // Same policy as `focus_ring_style`: a theme that turns the ring off keeps
+    // only the tinted edge, which is a hairline rather than a band.
+    let (width, color) = if cx.theme().focus_ring {
+        (FOCUS_RING_WIDTH, cx.theme().ring.alpha(FOCUS_RING_OPACITY))
+    } else {
+        (px(1.), cx.theme().ring)
+    };
+
+    div().absolute().inset_0().border(width).border_color(color)
+}
+
 /// Paint only the outside band, preserving translucent control backgrounds.
 pub(crate) fn focus_ring<T: Styled + ParentElement>(
     mut element: T,
