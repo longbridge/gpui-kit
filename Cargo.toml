@@ -48,15 +48,15 @@ publish = false
 edition = "2024"
 
 [workspace.dependencies]
-gpui-kit = { path = "crates/kit", version = "0.6.2" }
-gpui-component = { path = "crates/component", version = "0.6.2" }
-gpui-base = { path = "crates/base", version = "0.6.2" }
-gpui-component-macros = { path = "crates/component-macros", version = "0.6.2" }
-gpui-kit-assets = { path = "crates/assets", version = "0.6.2" }
-gpui-fps = { path = "crates/fps", version = "0.6.2" }
-gpui-shell = { path = "crates/shell", version = "0.6.2" }
-gpui-wry = { path = "crates/webview", version = "0.6.2" }
-gpui-component-shell = { path = "crates/component-shell", version = "0.6.2" }
+gpui-kit = { path = "crates/kit", version = "0.6.4" }
+gpui-component = { path = "crates/component", version = "0.6.4" }
+gpui-base = { path = "crates/base", version = "0.6.4" }
+gpui-component-macros = { path = "crates/component-macros", version = "0.6.4" }
+gpui-kit-assets = { path = "crates/assets", version = "0.6.4" }
+gpui-fps = { path = "crates/fps", version = "0.6.4" }
+gpui-shell = { path = "crates/shell", version = "0.6.4" }
+gpui-wry = { path = "crates/webview", version = "0.6.4" }
+gpui-component-shell = { path = "crates/component-shell", version = "0.6.4" }
 story = { path = "crates/story" }
 
 gpui = { package = "gpui-pre", version = "0.3.5" }

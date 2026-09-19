@@ -9,7 +9,7 @@ repository = "https://github.com/longbridge/gpui-kit/tree/main/crates/fps"
 readme = "README.md"
 edition.workspace = true
 publish = true
-version = "0.6.2"
+version = "0.6.4"
 
 [lib]
 doctest = false
