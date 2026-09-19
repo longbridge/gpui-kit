@@ -274,9 +274,7 @@ state.update(cx, |state, cx| {
 ```
 
 `reset` clears internal validation attempts and errors, but preserves
-owner-managed external errors. Questionnaire semantic validation and
-synchronous validators are supported; native HTML constraint validation is
-not part of this GPUI component.
+owner-managed external errors.
 
 ## Navigation and submission
 

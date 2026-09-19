@@ -260,9 +260,7 @@ state.update(cx, |state, cx| {
 });
 ```
 
-`reset` 会清除内部校验尝试和错误，但保留 owner 管理的 external error。组件支持
-Questionnaire 语义校验和同步 validator；原生 HTML constraint validation 不属于此
-GPUI 组件。
+`reset` 会清除内部校验尝试和错误，但保留 owner 管理的 external error。
 
 ## 导航与提交
 
