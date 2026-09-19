@@ -6,7 +6,6 @@ use gpui_kit::component::{
     h_flex,
     input::InputState,
     kbd::Kbd,
-    progress::Progress,
     questionnaire::{
         Questionnaire, QuestionnaireActions, QuestionnaireAnswer, QuestionnaireChoice,
         QuestionnaireChoiceDefinition, QuestionnaireChoiceDescription, QuestionnaireChoices,
@@ -16,7 +15,6 @@ use gpui_kit::component::{
         QuestionnaireSkip, QuestionnaireState, QuestionnaireSubmission, QuestionnaireSubmit,
         QuestionnaireTitle,
     },
-    stepper::{Stepper, StepperItem},
     v_flex,
 };
 use gpui_kit::prelude::FluentBuilder as _;
@@ -514,13 +512,6 @@ impl Render for QuestionnaireStory {
             self.size,
             &[("server", &["personal", "team"])],
         );
-        let progress = self.state.read(cx).progress();
-        let progress_value = if progress.total() == 0 {
-            0.
-        } else {
-            progress.current() as f32 / progress.total() as f32 * 100.
-        };
-        let current_step = progress.current().saturating_sub(1);
         let event_log = self.event_log.clone();
         let state_snapshot = self.state.read(cx);
         let navigation = state_snapshot.navigation_state();
@@ -547,9 +538,6 @@ impl Render for QuestionnaireStory {
             .map(|(name, answer)| format!("{}={:?}", name, answer))
             .collect::<Vec<_>>()
             .join(" · ");
-        let advanced_disabled = state_snapshot
-            .item_state("advanced")
-            .is_some_and(|item| item.is_disabled());
         let letters = Self::questionnaire_view(
             &self.letters_state,
             self.size,
@@ -980,33 +968,6 @@ impl Render for QuestionnaireStory {
                             .text_color(cx.theme().muted_foreground)
                             .child(event)
                     })),
-            )
-            .child(
-                section("Custom Progress and Stepper")
-                    .description("Compose the state snapshot with existing progress components.")
-                    .w(px(600.))
-                    .child(
-                        v_flex()
-                            .w_full()
-                            .gap_2()
-                            .child(Progress::new("questionnaire-progress-custom").value(progress_value))
-                            .child(
-                                Stepper::new("questionnaire-stepper")
-                                    .w_full()
-                                    .selected_index(current_step)
-                                    .items({
-                                        let mut items = vec![
-                                            StepperItem::new().child("Direction"),
-                                            StepperItem::new().child("Tools"),
-                                            StepperItem::new().child("Tone"),
-                                        ];
-                                        if !advanced_disabled {
-                                            items.push(StepperItem::new().child("Advanced"));
-                                        }
-                                        items
-                                    }),
-                            ),
-                    ),
             )
             .child(
                 section("Controlled current, conditional items, and custom actions")

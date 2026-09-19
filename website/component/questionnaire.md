@@ -459,8 +459,7 @@ enabled-choice order (`A`–`Z` or `1`–`9`), and disabled choices receive no l
 ## Progress
 
 `QuestionnaireProgress` follows the default presentation: “Question 2 of 4”.
-Its state can also be used to compose a custom indicator from the existing
-`Progress` or `Stepper` components.
+The same snapshot can drive an existing indicator instead.
 
 ```rust
 QuestionnaireProgress::new(&state);
@@ -471,12 +470,13 @@ let percent = if progress.total() == 0 {
 } else {
     progress.current() as f32 / progress.total() as f32 * 100.
 };
-Progress::new("questionnaire-progress")
-    .value(percent);
-
-Stepper::new("questionnaire-steps")
-    .selected_index(progress.current().saturating_sub(1));
+Progress::new("questionnaire-progress").value(percent);
 ```
+
+`current` and `total` count only the enabled items, and both move when the host
+disables or re-enables a question. An indicator with one fixed label per step —
+a `Stepper`, for example — has to derive its steps from the same enabled set,
+or its labels and its selected step drift apart from the questionnaire.
 
 ## Sizes and theming
 

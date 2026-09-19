@@ -429,8 +429,8 @@ Enter 确认已填写的答案。Command/Ctrl+Enter 确认当前 item。空答�
 
 ## 进度
 
-`QuestionnaireProgress` 使用默认的 “Question 2 of 4” 样式。也可以读取 progress
-state，使用现有 `Progress` 或 `Stepper` 组合自定义指示器。
+`QuestionnaireProgress` 使用默认的 “Question 2 of 4” 样式。同一份快照也可以用来
+驱动现有的指示器。
 
 ```rust
 QuestionnaireProgress::new(&state);
@@ -441,12 +441,12 @@ let percent = if progress.total() == 0 {
 } else {
     progress.current() as f32 / progress.total() as f32 * 100.
 };
-Progress::new("questionnaire-progress")
-    .value(percent);
-
-Stepper::new("questionnaire-steps")
-    .selected_index(progress.current().saturating_sub(1));
+Progress::new("questionnaire-progress").value(percent);
 ```
+
+`current` 和 `total` 只统计启用的 item，宿主禁用或重新启用某一题时两者都会变化。
+如果指示器为每一步固定一个标签（例如 `Stepper`），它的步骤必须从同一份启用集合
+推导出来，否则标签和选中步骤会与问卷错位。
 
 ## 尺寸与主题
 
