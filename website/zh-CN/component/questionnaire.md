@@ -173,142 +173,47 @@ let _rendered_choice = QuestionnaireChoice::new(&state, "direction", "delegation
 状态快照提供 `is_selected`、`is_disabled`、`is_invalid` 和 `shortcut`，可用于自定义
 渲染。
 
-## 单选
+## 选项
 
-item 默认使用单选模式。激活某个选项后 item 即有答案，`Next` 可以继续。单选
-item 也可以提供自由输入；固定选项和自由答案互斥，但用户切换选择时会保留输入
-草稿。
+item 默认单选：激活某个选项后即有答案，`Next` 可以继续；`with_multiple` 则保留
+所有已选项。答案 reader 按 schema 顺序返回结果，后续被禁用的 choice 会从
+effective answer 中排除。
 
-```rust
-let plan_input = cx.new(|cx| InputState::new(window, cx));
-let item = QuestionnaireItemDefinition::new("plan", "Which plan fits your team?")
-    .with_choices([
-        QuestionnaireChoiceDefinition::new("plus", "Plus"),
-        QuestionnaireChoiceDefinition::new("pro", "Pro"),
-    ])
-    .with_input(QuestionnaireInputDefinition::new(plan_input, "Another plan"));
-```
-
-## 多选
-
-当一个 item 可以接受多个固定答案时设置 `multiple`。非空自由输入可以和已选
-固定选项一起提交。
+definition builder 承载初始快照：choice 可以初始选中，item、choice 和 input 都
+可以初始禁用，单选 item 最多只能有一个默认选中项。
 
 ```rust
 let tools_input = cx.new(|cx| InputState::new(window, cx));
-let item = QuestionnaireItemDefinition::new("tools", "Which tools do you use?")
-    .with_multiple(true)
-    .with_choices([
-        QuestionnaireChoiceDefinition::new("editor", "Editor"),
-        QuestionnaireChoiceDefinition::new("terminal", "Terminal"),
-        QuestionnaireChoiceDefinition::new("browser", "Browser"),
-    ])
-    .with_input(QuestionnaireInputDefinition::new(tools_input, "Something else"));
+let items = vec![
+    QuestionnaireItemDefinition::new("plan", "Which plan fits your team?")
+        .with_required(true)
+        .with_choices([
+            QuestionnaireChoiceDefinition::new("plus", "Plus").with_default_selected(true),
+            QuestionnaireChoiceDefinition::new("pro", "Pro"),
+        ]),
+    QuestionnaireItemDefinition::new("tools", "Which tools do you use?")
+        .with_multiple(true)
+        .with_choices([
+            QuestionnaireChoiceDefinition::new("editor", "Editor"),
+            QuestionnaireChoiceDefinition::new("terminal", "Terminal"),
+            QuestionnaireChoiceDefinition::new("browser", "Browser").with_disabled(true),
+        ])
+        .with_input(QuestionnaireInputDefinition::new(tools_input, "Something else")),
+    QuestionnaireItemDefinition::new("advanced", "Advanced preferences").with_disabled(true),
+];
 ```
 
-答案 reader 按 schema 顺序保留结果。如果已选 choice 后续被禁用，它会从 effective
-answer 中排除。
+`QuestionnaireState::new` 会拒绝重复的 item name、同一 item 内重复的 choice
+value，以及单选 item 上的多个默认值。对未知 item 或 choice 调用 setter 返回
+`QuestionnaireSchemaError`。
 
 ## 自由输入
 
 加入 `QuestionnaireInputDefinition`，允许用户输入固定选项之外的答案。请为输入
 提供可访问名称；placeholder 不能替代 label。
 
-```rust
-let feedback_input = cx.new(|cx| {
-    InputState::new(window, cx).placeholder("Tell us what would help…")
-});
-let item = QuestionnaireItemDefinition::new("feedback", "What should we improve?")
-    .with_input(QuestionnaireInputDefinition::new(
-        feedback_input,
-        "Your suggestion",
-    ));
-```
-
 只有空白的输入视为未回答。选择固定选项时会保留输入草稿，但只有自由输入成为
 当前答案时才会提交它。多选 item 可以同时提交固定选项和非空自由输入。
-
-## 显式跳过
-
-可选 item 可以显示 `QuestionnaireSkip`。跳过是一个明确且有效的状态，会清除该
-item 的答案并允许 `Next` 继续。必填 item 不允许跳过。重新进入 item 并选择答案
-后，skipped 状态会被清除。跳过最后一个 enabled item 后，会在记录跳过状态后请求
-提交。
-
-```rust
-let optional = QuestionnaireItemDefinition::new("tone", "What tone should we use?")
-    .with_required(false)
-    .with_choices([
-        QuestionnaireChoiceDefinition::new("direct", "Direct"),
-        QuestionnaireChoiceDefinition::new("warm", "Warm"),
-    ]);
-```
-
-## 默认值与禁用控件
-
-使用 definition builder 设置初始快照。choice 可以初始选中，item 或 choice 可以
-初始禁用，input 也可以初始禁用。单选 item 最多只能有一个默认选中的 choice。
-
-```rust
-let saved_input = cx.new(|cx| InputState::new(window, cx).default_value("Saved draft"));
-let item = QuestionnaireItemDefinition::new("workspace", "Which workspaces?")
-    .with_multiple(true)
-    .with_choices([
-        QuestionnaireChoiceDefinition::new("personal", "Personal")
-            .with_default_selected(true),
-        QuestionnaireChoiceDefinition::new("team", "Team")
-            .with_disabled(true),
-    ])
-    .with_input(
-        QuestionnaireInputDefinition::new(saved_input, "Another workspace")
-            .with_disabled(false),
-    );
-let disabled_item = QuestionnaireItemDefinition::new(
-    "advanced",
-    "Advanced preferences",
-)
-    .with_disabled(true);
-let disabled_input = cx.new(|cx| InputState::new(window, cx));
-let disabled_input_definition = QuestionnaireInputDefinition::new(
-    disabled_input,
-    "Disabled answer",
-)
-    .with_disabled(true);
-```
-
-`with_default_selected` 属于 `QuestionnaireChoiceDefinition`；item 使用
-`with_disabled`，input 使用 `QuestionnaireInputDefinition::with_disabled`。如果要
-让 item 初始禁用，使用 `QuestionnaireItemDefinition::with_disabled(true)`。
-
-`QuestionnaireState::new` 会拒绝重复 item name、同一 item 中重复的 choice value，
-以及单选 item 的多个默认值。针对未知 item 或 choice 的 setter 会返回
-`QuestionnaireSchemaError`。
-
-## 导航与状态
-
-`QuestionnaireState` 暴露当前 item、有序 item 状态和导航状态，可用于自定义操作
-布局。
-
-```rust
-let current = state.read(cx).current_item();
-let current_ix = state.read(cx).current_ix();
-let progress = state.read(cx).progress();
-let status = state
-    .read(cx)
-    .item_state("direction")
-    .map(|item| item.status());
-let navigation = state.read(cx).navigation_state();
-let can_confirm = navigation.is_confirmable();
-let show_previous = navigation.is_previous_visible();
-let show_next = navigation.is_next_visible();
-let show_skip = navigation.is_skip_visible();
-let show_submit = navigation.is_submit_visible();
-```
-
-默认操作布局在开头显示 `Previous`，在 item 之间显示 `Next`，当前 item 可选时
-显示 `Skip`，最后显示 `Submit`。隐藏的操作不会渲染，也不会进入键盘导航。
-disabled item 会从导航和进度总数中排除。item 有三种状态：`Unanswered`、
-`Answered` 和 `Skipped`。
 
 ## 校验
 
@@ -359,7 +264,70 @@ state.update(cx, |state, cx| {
 Questionnaire 语义校验和同步 validator；原生 HTML constraint validation 不属于此
 GPUI 组件。
 
-## 受控状态
+## 导航与提交
+
+`QuestionnaireState` 暴露当前 item、有序 item 状态和导航状态，可用于自定义操作
+布局。
+
+```rust
+let state = state.read(cx);
+let progress = state.progress();
+let status = state.item_state("direction").map(|item| item.status());
+let navigation = state.navigation_state();
+let show_skip = navigation.is_skip_visible();
+```
+
+`QuestionnaireNavigationState` 对 `Previous`、`Next`、`Submit` 和
+`is_confirmable` 给出同样的判断；`current_item` 与 `current_ix` 定位当前 item。
+
+默认操作布局在开头显示 `Previous`，在 item 之间显示 `Next`，当前 item 可选时
+显示 `Skip`，最后显示 `Submit`。隐藏的操作不会渲染，也不会进入键盘导航。
+disabled item 会从导航和进度总数中排除。item 有三种状态：`Unanswered`、
+`Answered` 和 `Skipped`。
+
+### 跳过
+
+可选 item 可以显示 `QuestionnaireSkip`。跳过是一个明确且有效的状态，会清除该
+item 的答案并允许 `Next` 继续。必填 item 不允许跳过。重新进入 item 并选择答案
+后，skipped 状态会被清除。跳过最后一个 enabled item 后，会在记录跳过状态后请求
+提交。
+
+### Event 与提交
+
+订阅 `QuestionnaireEvent`，即可监听当前 item 变化、答案变化、完成和成功提交。
+`Completed` 只在状态转入 complete 时发出；每次成功执行显式 submit 都会发出
+`Submit`。
+首次成功提交时，事件顺序为 `Completed`，随后是 `Submit`。
+答案或 enabled 条件变化会清除 complete 状态，因此下次成功提交可以再次发出
+`Completed`。
+
+```rust
+use gpui_kit::component::questionnaire::QuestionnaireEvent;
+
+cx.subscribe(&state, |_, _, event, _| match event {
+    QuestionnaireEvent::CurrentItemChanged { current, .. } => {
+        println!("Current item: {:?}", current);
+    }
+    QuestionnaireEvent::AnswerChanged(change) => {
+        println!("Changed: {:?} ({:?})", change.item(), change.status());
+    }
+    QuestionnaireEvent::Completed(submission)
+    | QuestionnaireEvent::Submit(submission) => {
+        println!("Answers: {:?}", submission.items());
+    }
+    _ => {}
+})
+.detach();
+```
+
+`detach` 会让 callback 持续有效，直到订阅涉及的 entity 被销毁。如果宿主需要提前
+取消监听，请改为保存返回的 `Subscription`。
+
+提交结果按 item schema 顺序排列，并且只包含 enabled item。每个 item 包含 name、
+`Unanswered`/`Answered`/`Skipped` 状态和 effective answer。它表示本地已校验的
+提交请求；远程保存仍由宿主应用负责。
+
+## 状态控制
 
 当页面需要控制当前 item，或需要在 state 创建后应用已保存答案时，使用静默 setter。
 它们会按需更新 UI 和焦点，但不会发出用户交互事件。
@@ -390,38 +358,7 @@ state.update(cx, |state, cx| {
 可以使用 `set_item_disabled` 和 `set_choice_disabled`；禁用当前 item 后，焦点会
 移动到下一个 enabled item；没有下一个时移动到前一个。
 
-## 恢复
-
-如果希望 `reset` 回到保存的草稿，应在构造 `QuestionnaireState` 之前建立保存的
-草稿作为初始快照。使用 `InputState::default_value`、`with_default_selected` 和
-`with_current_item`，分别设置 input、choice 和当前 item 的初始基线。
-
-```rust
-let saved_input = cx.new(|cx| {
-    InputState::new(window, cx).default_value("Saved description")
-});
-let saved_items = vec![
-    QuestionnaireItemDefinition::new("plan", "Which plan?")
-        .with_choices([
-            QuestionnaireChoiceDefinition::new("plus", "Plus")
-                .with_default_selected(true),
-            QuestionnaireChoiceDefinition::new("pro", "Pro"),
-        ]),
-    QuestionnaireItemDefinition::new("detail", "How much detail?")
-        .with_input(QuestionnaireInputDefinition::new(saved_input, "More detail")),
-];
-let state = cx.new(|cx| {
-    QuestionnaireState::new(saved_items, cx)
-        .expect("valid saved questionnaire")
-        .with_current_item("detail")
-        .expect("known enabled questionnaire item")
-});
-```
-
-如果保存值在构造之后才到达，则使用 `set_answer`、`set_input_value` 和
-`set_current_item`。这些 setter 只改变当前状态，不会替换 reset 基线。
-
-## 重置
+### 重置
 
 Reset 会恢复初始 choices 和 input 草稿，清除显式 skip、校验尝试和完成状态，回到
 初始当前 item，并将焦点移到恢复后的当前 item。
@@ -435,7 +372,12 @@ state.update(cx, |state, cx| {
 External error 在 reset 后仍由 owner 管理。如果 reset 也应该移除服务器错误，请
 使用 `clear_external_error` 显式清除。
 
-## 条件 item
+`reset` 回到 schema 构造时的快照，因此「已保存的草稿」属于 definition：用
+`InputState::default_value`、`with_default_selected` 和 `with_current_item`
+建立这个基线。构造之后用 `set_answer`、`set_input_value`、`set_current_item`
+写入的值只改变当前状态，不会移动 reset 的基线。
+
+### 条件 item
 
 Questionnaire 不包含 branching engine。宿主可以根据前一个答案推导 item 的禁用
 状态，并通过 `set_item_disabled` 同步。这让条件策略留在页面中，同时由
@@ -487,7 +429,7 @@ Enter 确认已填写的答案。Command/Ctrl+Enter 确认当前 item。空答�
 快捷键标签按 enabled choice 顺序分配（`A`–`Z` 或 `1`–`9`），disabled choice
 不会分配标签。
 
-## 进度和自定义渲染
+## 进度
 
 `QuestionnaireProgress` 使用默认的 “Question 2 of 4” 样式。也可以读取 progress
 state，使用现有 `Progress` 或 `Stepper` 组合自定义指示器。
@@ -530,66 +472,25 @@ QuestionnaireActions::new(&state)
 
 ## Card 和 Dialog 组合
 
-Questionnaire 负责完整的问题流程；卡片或 dialog 负责容器布局以及关闭、取消行为。
-下面两个示例都包含集合中的每个 item，导航到第二个问题时仍会正常显示。
+问卷负责题目流程，容器负责自己的外观与关闭/取消行为。把完整组合 —— progress、
+全部 item 和 actions —— 都放进容器，这样切换到下一题时仍然可见。
 
 ```rust
-use gpui_kit::{Entity, IntoElement, ParentElement as _};
-use gpui_kit::component::{
-    button::{Button, ButtonVariants as _},
-    dialog::{Dialog, DialogClose, DialogFooter, DialogHeader, DialogTitle},
-    group_box::{GroupBox, GroupBoxVariants as _},
-};
-
-fn questionnaire_content(
-    state: &Entity<QuestionnaireState>,
-    actions: impl IntoElement,
-) -> Questionnaire {
-    Questionnaire::new(state)
-        .child(QuestionnaireProgress::new(state))
-        .child(
-            QuestionnaireItem::new(state, "direction")
-                .child(QuestionnaireTitle::new(state, "direction"))
-                .child(QuestionnaireDescription::new(state, "direction"))
-                .child(
-                    QuestionnaireChoices::new(state, "direction")
-                        .child(QuestionnaireChoice::new(state, "direction", "delegation"))
-                        .child(QuestionnaireChoice::new(state, "direction", "questions"))
-                        .child(QuestionnaireChoice::new(state, "direction", "both"))
-                        .child(QuestionnaireInput::new(state, "direction")),
-                )
-                .child(QuestionnaireError::new(state, "direction")),
-        )
-        .child(
-            QuestionnaireItem::new(state, "detail")
-                .child(QuestionnaireTitle::new(state, "detail"))
-                .child(QuestionnaireDescription::new(state, "detail"))
-                .child(
-                    QuestionnaireChoices::new(state, "detail")
-                        .child(QuestionnaireChoice::new(state, "detail", "focused"))
-                        .child(QuestionnaireChoice::new(state, "detail", "complete")),
-                )
-                .child(QuestionnaireError::new(state, "detail")),
-        )
-        .child(actions)
-}
+use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants as _};
 
 GroupBox::new()
     .outline()
     .title("Set up your workspace")
-    .child(questionnaire_content(
-        &state,
-        QuestionnaireActions::new(&state)
-            .child(QuestionnairePrevious::new(&state))
-            .child(QuestionnaireSkip::new(&state))
-            .child(QuestionnaireNext::new(&state))
-            .child(QuestionnaireSubmit::new(&state)),
-    ));
+    .child(questionnaire);
 ```
 
-对于 dialog，将同一个完整组合放在 dialog content 中，并由宿主处理关闭和取消。
+放进 Dialog 时，footer 里容器自己的 `Cancel` 与问卷的导航按钮并排，宿主在问卷报告
+提交成功后关闭 Dialog。
 
 ```rust
+use gpui_kit::component::dialog::{
+    Dialog, DialogClose, DialogFooter, DialogHeader, DialogTitle,
+};
 use gpui_kit::component::{WindowExt as _, questionnaire::QuestionnaireEvent};
 
 let dialog_state = state.clone();
@@ -605,72 +506,31 @@ cx.subscribe_in(
 .detach();
 
 Dialog::new(cx)
-    .trigger(
-        Button::new("open-questionnaire")
-            .outline()
-            .label("Open questionnaire"),
-    )
+    .trigger(Button::new("open-questionnaire").outline().label("Open questionnaire"))
     .content(move |content, _, _| {
         content
             .child(DialogHeader::new().child(DialogTitle::new().child("Workspace setup")))
-            .child(questionnaire_content(
-                &dialog_state,
-                DialogFooter::new()
+            .child(
+                Questionnaire::new(&dialog_state)
+                    // …progress 和每个 item，同上面的「用法」
                     .child(
-                        DialogClose::new().child(
-                            Button::new("cancel-questionnaire")
-                                .outline()
-                                .label("Cancel"),
-                        ),
-                    )
-                    .child(
-                        QuestionnaireActions::new(&dialog_state)
-                            .child(QuestionnairePrevious::new(&dialog_state))
-                            .child(QuestionnaireNext::new(&dialog_state))
-                            .child(QuestionnaireSubmit::new(&dialog_state)),
+                        DialogFooter::new()
+                            .child(DialogClose::new().child(
+                                Button::new("cancel-questionnaire").outline().label("Cancel"),
+                            ))
+                            .child(
+                                QuestionnaireActions::new(&dialog_state)
+                                    .child(QuestionnairePrevious::new(&dialog_state))
+                                    .child(QuestionnaireNext::new(&dialog_state))
+                                    .child(QuestionnaireSubmit::new(&dialog_state)),
+                            ),
                     ),
-            ))
+            )
     });
 ```
 
-宿主 subscription 只在成功的 `Submit` 之后关闭 Dialog。同一个 event 也适合将
-已校验的 `QuestionnaireSubmission` 交给应用传输层。持久化和网络成功仍由
-Questionnaire 外部负责。
-
-## Event 与提交
-
-订阅 `QuestionnaireEvent`，即可监听当前 item 变化、答案变化、完成和成功提交。
-`Completed` 只在状态转入 complete 时发出；每次成功执行显式 submit 都会发出
-`Submit`。
-首次成功提交时，事件顺序为 `Completed`，随后是 `Submit`。
-答案或 enabled 条件变化会清除 complete 状态，因此下次成功提交可以再次发出
-`Completed`。
-
-```rust
-use gpui_kit::component::questionnaire::QuestionnaireEvent;
-
-cx.subscribe(&state, |_, _, event, _| match event {
-    QuestionnaireEvent::CurrentItemChanged { current, .. } => {
-        println!("Current item: {:?}", current);
-    }
-    QuestionnaireEvent::AnswerChanged(change) => {
-        println!("Changed: {:?} ({:?})", change.item(), change.status());
-    }
-    QuestionnaireEvent::Completed(submission)
-    | QuestionnaireEvent::Submit(submission) => {
-        println!("Answers: {:?}", submission.items());
-    }
-    _ => {}
-})
-.detach();
-```
-
-`detach` 会让 callback 持续有效，直到订阅涉及的 entity 被销毁。如果宿主需要提前
-取消监听，请改为保存返回的 `Subscription`。
-
-提交结果按 item schema 顺序排列，并且只包含 enabled item。每个 item 包含 name、
-`Unanswered`/`Answered`/`Skipped` 状态和 effective answer。它表示本地已校验的
-提交请求；远程保存仍由宿主应用负责。
+`Cancel` 始终关闭。`Submit` 只有在问卷校验通过全部启用 item 之后才关闭，同一个
+event 也把校验后的 `QuestionnaireSubmission` 交给应用层传输。
 
 ## 可访问性
 

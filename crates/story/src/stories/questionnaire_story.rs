@@ -31,14 +31,11 @@ pub struct QuestionnaireStory {
     validation_state: Entity<QuestionnaireState>,
     external_state: Entity<QuestionnaireState>,
     control_state: Entity<QuestionnaireState>,
-    resume_state: Entity<QuestionnaireState>,
     letters_state: Entity<QuestionnaireState>,
     numbers_state: Entity<QuestionnaireState>,
     card_state: Entity<QuestionnaireState>,
     custom_choice_state: Entity<QuestionnaireState>,
-    edge_state: Entity<QuestionnaireState>,
     dialog_state: Entity<QuestionnaireState>,
-    size_states: Vec<(Size, Entity<QuestionnaireState>)>,
     event_log: Vec<SharedString>,
     keyboard_event_log: Vec<SharedString>,
     _subscriptions: Vec<Subscription>,
@@ -373,36 +370,6 @@ impl QuestionnaireStory {
         ];
         let control_state = Self::state(control_items, cx);
 
-        let resume_scope_input = Self::input(window, cx, "Saved alternative workspace…", None);
-        let resume_tools_input = Self::input(window, cx, "Another saved tool…", None);
-        let resume_state = Self::state(
-            vec![
-                QuestionnaireItemDefinition::new("resume_scope", "Which workspace should resume?")
-                    .with_choices([
-                        QuestionnaireChoiceDefinition::new("personal", "Personal")
-                            .with_default_selected(true),
-                        QuestionnaireChoiceDefinition::new("team", "Team"),
-                    ])
-                    .with_input(QuestionnaireInputDefinition::new(
-                        resume_scope_input,
-                        "Alternative workspace",
-                    )),
-                QuestionnaireItemDefinition::new("resume_tools", "Which tools were restored?")
-                    .with_multiple(true)
-                    .with_choices([
-                        QuestionnaireChoiceDefinition::new("editor", "Editor")
-                            .with_default_selected(true),
-                        QuestionnaireChoiceDefinition::new("terminal", "Terminal"),
-                        QuestionnaireChoiceDefinition::new("browser", "Browser"),
-                    ])
-                    .with_input(QuestionnaireInputDefinition::new(
-                        resume_tools_input,
-                        "Another restored tool",
-                    )),
-            ],
-            cx,
-        );
-
         let letters_state = Self::shortcut_state(
             Self::keyboard_items(window, cx),
             QuestionnaireShortcutMode::Letters,
@@ -442,18 +409,6 @@ impl QuestionnaireStory {
             cx,
         );
 
-        let edge_state = Self::state(
-            vec![
-                QuestionnaireItemDefinition::new("edge", "No description and disabled choice")
-                    .with_required(true)
-                    .with_choices([
-                        QuestionnaireChoiceDefinition::new("first", "Available choice"),
-                        QuestionnaireChoiceDefinition::new("second", "Disabled choice")
-                            .with_disabled(true),
-                    ]),
-            ],
-            cx,
-        );
         let dialog_state = Self::state(
             vec![
                 QuestionnaireItemDefinition::new("dialog", "Which workspace should we open?")
@@ -474,19 +429,6 @@ impl QuestionnaireStory {
             ],
             cx,
         );
-
-        let mut size_states = Vec::new();
-        for size in [Size::XSmall, Size::Small, Size::Medium, Size::Large] {
-            let state = Self::state(
-                vec![
-                    QuestionnaireItemDefinition::new("size", "Choose a size").with_choices([
-                        QuestionnaireChoiceDefinition::new("first", "Example choice"),
-                    ]),
-                ],
-                cx,
-            );
-            size_states.push((size, state));
-        }
 
         let subscriptions = vec![
             cx.subscribe(&main_state, |this, _, event: &QuestionnaireEvent, cx| {
@@ -532,14 +474,11 @@ impl QuestionnaireStory {
             validation_state,
             external_state,
             control_state,
-            resume_state,
             letters_state,
             numbers_state,
             card_state,
             custom_choice_state,
-            edge_state,
             dialog_state,
-            size_states,
             event_log: Vec::new(),
             keyboard_event_log: Vec::new(),
             _subscriptions: subscriptions,
@@ -624,12 +563,6 @@ impl Render for QuestionnaireStory {
             self.size,
             &[("shortcut", &["first", "second", "third"])],
         );
-        let edge = Self::questionnaire_view(
-            &self.edge_state,
-            self.size,
-            &[("edge", &["first", "second"])],
-        );
-
         let letters_snapshot = self.letters_state.read(cx);
         let keyboard_focus = if letters_snapshot.is_current_input_focused(window) {
             "freeform input".to_string()
@@ -644,29 +577,6 @@ impl Render for QuestionnaireStory {
             .map(|input| input.read(cx).value())
             .unwrap_or_default();
         let keyboard_event_log = self.keyboard_event_log.clone();
-
-        let resume = Self::questionnaire_view(
-            &self.resume_state,
-            self.size,
-            &[
-                ("resume_scope", &["personal", "team"]),
-                ("resume_tools", &["editor", "terminal", "browser"]),
-            ],
-        );
-        let resume_snapshot = self.resume_state.read(cx);
-        let resume_summary = format!(
-            "Current: {} · scope={:?} · tools={:?}",
-            resume_snapshot
-                .current_item()
-                .map(SharedString::as_ref)
-                .unwrap_or("none"),
-            resume_snapshot.answer("resume_scope").unwrap_or_default(),
-            resume_snapshot.answer("resume_tools").unwrap_or_default(),
-        );
-        let resume_scope_draft = resume_snapshot
-            .input_state("resume_scope")
-            .map(|input| input.read(cx).value())
-            .unwrap_or_default();
 
         let external_error = self
             .external_state
@@ -908,8 +818,6 @@ impl Render for QuestionnaireStory {
                     )
             });
         let control_state_for_jump = self.control_state.clone();
-        let resume_state_for_restore = self.resume_state.clone();
-        let resume_state_for_reset = self.resume_state.clone();
         let external_state_for_error = self.external_state.clone();
         let external_state_for_clear = self.external_state.clone();
         let external_state_for_fix = self.external_state.clone();
@@ -1038,80 +946,6 @@ impl Render for QuestionnaireStory {
                     })),
             )
             .child(
-                section("Resume and reset")
-                    .description("Restore current item, single and multiple answers, freeform values, and an unselected single-choice draft.")
-                    .w(px(600.))
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .child(
-                                Button::new("questionnaire-resume")
-                                    .primary()
-                                    .label("Restore saved response")
-                                    .on_click(move |_, window, cx| {
-                                        resume_state_for_restore.update(cx, |state, cx| {
-                                            state
-                                                .set_input_value(
-                                                    "resume_scope",
-                                                    "Saved private workspace",
-                                                    window,
-                                                    cx,
-                                                )
-                                                .expect("resume Story input exists");
-                                            state
-                                                .set_answer(
-                                                    "resume_scope",
-                                                    QuestionnaireAnswer::new()
-                                                        .with_choices(["team"]),
-                                                    window,
-                                                    cx,
-                                                )
-                                                .expect("resume Story answer is valid");
-                                            state
-                                                .set_answer(
-                                                    "resume_tools",
-                                                    QuestionnaireAnswer::new()
-                                                        .with_choices(["editor", "terminal"])
-                                                        .with_freeform("CLI"),
-                                                    window,
-                                                    cx,
-                                                )
-                                                .expect("resume Story answer is valid");
-                                            state
-                                                .set_current_item("resume_tools", window, cx)
-                                                .expect("resume Story item exists");
-                                        });
-                                    }),
-                            )
-                            .child(
-                                Button::new("questionnaire-resume-reset")
-                                    .outline()
-                                    .label("Reset to defaults")
-                                    .on_click(move |_, window, cx| {
-                                        resume_state_for_reset.update(cx, |state, cx| {
-                                            state.reset(window, cx);
-                                        });
-                                    }),
-                            ),
-                    )
-                    .child(resume)
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(resume_summary),
-                    )
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(format!(
-                                "Single-choice input draft: {:?} (kept when Team is selected)",
-                                resume_scope_draft
-                            )),
-                    ),
-            )
-            .child(
                 section("Shortcuts and keyboard")
                     .description("The fixture exposes focus, answers, drafts, and events while testing the full keyboard contract.")
                     .w(px(600.))
@@ -1207,47 +1041,17 @@ impl Render for QuestionnaireStory {
                     .child(custom_control)
             )
             .child(
-                section("Card-like composition")
-                    .description("GroupBox owns the card surface while a complete Questionnaire keeps progress, items, and actions together.")
+                section("Card and Dialog composition")
+                    .description("GroupBox or Dialog owns the surface and its close behavior; the questionnaire keeps progress, items, and actions together.")
                     .w(px(600.))
-                    .child(card),
+                    .child(card)
+                    .child(dialog),
             )
             .child(
                 section("Custom choice composition")
                     .description("Customize indicator, content, shortcut renderers, and style seams while preserving Questionnaire state and behavior.")
                     .w(px(600.))
                     .child(custom_choice),
-            )
-            .child(
-                section("No description, disabled, invalid, and Dialog")
-                    .description("Dialog Cancel always closes; the host closes after Questionnaire emits a successful Submit.")
-                    .w(px(600.))
-                    .child(edge)
-                    .child(dialog),
-            )
-            .child(
-                section("Navigation button sizes")
-                    .description("The questionnaire skin has one fixed scale; Sizable only reaches the navigation buttons.")
-                    .w(px(600.))
-                    .child(
-                        h_flex()
-                            .flex_wrap()
-                            .gap_3()
-                            .children(self.size_states.iter().map(|(size, state)| {
-                                let label = match size {
-                                    Size::XSmall => "XSmall",
-                                    Size::Small => "Small",
-                                    Size::Medium => "Medium",
-                                    Size::Large => "Large",
-                                    Size::Size(_) => "Custom",
-                                };
-                                v_flex()
-                                    .w(px(135.))
-                                    .gap_2()
-                                    .child(div().font_medium().child(label))
-                                    .child(Self::questionnaire_view(state, *size, &[("size", &["first"])]))
-                            })),
-                    ),
             )
     }
 }

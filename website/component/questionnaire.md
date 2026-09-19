@@ -178,42 +178,41 @@ style seam is not applied; style the custom renderer directly. The state
 snapshot exposes `is_selected`, `is_disabled`, `is_invalid`, and `shortcut` for
 custom rendering.
 
-## Single selection
+## Choices
 
-An item uses single selection by default. Activating a choice answers the item
-and makes `Next` available. A single-choice item may also provide a freeform
-input. The fixed choice and freeform answer are mutually exclusive, while the
-input draft remains available when the user changes their mind.
+An item is single-selection by default: activating a choice answers it and
+makes `Next` available. `with_multiple` keeps every selected choice instead.
+The answer reader preserves schema order, and a choice disabled later leaves
+the effective answer.
 
-```rust
-let plan_input = cx.new(|cx| InputState::new(window, cx));
-let item = QuestionnaireItemDefinition::new("plan", "Which plan fits your team?")
-    .with_choices([
-        QuestionnaireChoiceDefinition::new("plus", "Plus"),
-        QuestionnaireChoiceDefinition::new("pro", "Pro"),
-    ])
-    .with_input(QuestionnaireInputDefinition::new(plan_input, "Another plan"));
-```
-
-## Multiple selection
-
-Set `multiple` on an item when more than one fixed answer is valid. A non-empty
-freeform input can be included with the selected fixed choices.
+Definition builders carry the initial snapshot: a choice can start selected, an
+item, a choice, or an input can start disabled, and a single-choice item may
+carry at most one default.
 
 ```rust
 let tools_input = cx.new(|cx| InputState::new(window, cx));
-let item = QuestionnaireItemDefinition::new("tools", "Which tools do you use?")
-    .with_multiple(true)
-    .with_choices([
-        QuestionnaireChoiceDefinition::new("editor", "Editor"),
-        QuestionnaireChoiceDefinition::new("terminal", "Terminal"),
-        QuestionnaireChoiceDefinition::new("browser", "Browser"),
-    ])
-    .with_input(QuestionnaireInputDefinition::new(tools_input, "Something else"));
+let items = vec![
+    QuestionnaireItemDefinition::new("plan", "Which plan fits your team?")
+        .with_required(true)
+        .with_choices([
+            QuestionnaireChoiceDefinition::new("plus", "Plus").with_default_selected(true),
+            QuestionnaireChoiceDefinition::new("pro", "Pro"),
+        ]),
+    QuestionnaireItemDefinition::new("tools", "Which tools do you use?")
+        .with_multiple(true)
+        .with_choices([
+            QuestionnaireChoiceDefinition::new("editor", "Editor"),
+            QuestionnaireChoiceDefinition::new("terminal", "Terminal"),
+            QuestionnaireChoiceDefinition::new("browser", "Browser").with_disabled(true),
+        ])
+        .with_input(QuestionnaireInputDefinition::new(tools_input, "Something else")),
+    QuestionnaireItemDefinition::new("advanced", "Advanced preferences").with_disabled(true),
+];
 ```
 
-The answer reader preserves schema order. If a selected choice is disabled
-later, it is excluded from the effective answer.
+`QuestionnaireState::new` rejects duplicate item names, duplicate choice values
+within an item, and multiple defaults on a single-choice item. Setters for
+unknown items or choices return `QuestionnaireSchemaError`.
 
 ## Freeform answer
 
@@ -221,107 +220,10 @@ Add `QuestionnaireInputDefinition` to allow a user to enter an answer that is
 not in the fixed choices. Give the input an accessible label; a placeholder is
 not a label.
 
-```rust
-let feedback_input = cx.new(|cx| {
-    InputState::new(window, cx).placeholder("Tell us what would help…")
-});
-let item = QuestionnaireItemDefinition::new("feedback", "What should we improve?")
-    .with_input(QuestionnaireInputDefinition::new(
-        feedback_input,
-        "Your suggestion",
-    ));
-```
-
 Whitespace-only input is unanswered. The input draft is kept when a fixed
 choice is selected, but it is submitted only when the freeform answer is
 active. In a multiple item, a non-empty freeform answer can accompany fixed
 choices.
-
-## Explicit skip
-
-Optional items can expose `QuestionnaireSkip`. A skip is an intentional valid
-state, clears the item answer, and allows `Next` to continue. Required items do
-not allow skipping. Re-entering an item and choosing an answer clears its
-skipped state. Skipping the final enabled item requests submission after the
-skip has been recorded.
-
-```rust
-let optional = QuestionnaireItemDefinition::new("tone", "What tone should we use?")
-    .with_required(false)
-    .with_choices([
-        QuestionnaireChoiceDefinition::new("direct", "Direct"),
-        QuestionnaireChoiceDefinition::new("warm", "Warm"),
-    ]);
-```
-
-## Defaults and disabled controls
-
-Use definition builders for the initial snapshot. A choice can start selected,
-an item or choice can start disabled, and an input can start disabled. A
-single-choice item may contain at most one default selected choice.
-
-```rust
-let saved_input = cx.new(|cx| InputState::new(window, cx).default_value("Saved draft"));
-let item = QuestionnaireItemDefinition::new("workspace", "Which workspaces?")
-    .with_multiple(true)
-    .with_choices([
-        QuestionnaireChoiceDefinition::new("personal", "Personal")
-            .with_default_selected(true),
-        QuestionnaireChoiceDefinition::new("team", "Team")
-            .with_disabled(true),
-    ])
-    .with_input(
-        QuestionnaireInputDefinition::new(saved_input, "Another workspace")
-            .with_disabled(false),
-    );
-let disabled_item = QuestionnaireItemDefinition::new(
-    "advanced",
-    "Advanced preferences",
-)
-    .with_disabled(true);
-let disabled_input = cx.new(|cx| InputState::new(window, cx));
-let disabled_input_definition = QuestionnaireInputDefinition::new(
-    disabled_input,
-    "Disabled answer",
-)
-    .with_disabled(true);
-```
-
-`with_default_selected` belongs to `QuestionnaireChoiceDefinition`; an item
-uses `with_disabled`, and an input uses
-`QuestionnaireInputDefinition::with_disabled`. For an initially disabled item,
-use `QuestionnaireItemDefinition::with_disabled(true)`.
-
-`QuestionnaireState::new` rejects duplicate item names, duplicate choice
-values within an item, and multiple defaults on a single-choice item. Setters
-for unknown items or choices return `QuestionnaireSchemaError`.
-
-## Navigation and status
-
-`QuestionnaireState` exposes the current item, ordered item states, and
-navigation state for custom action layouts.
-
-```rust
-let current = state.read(cx).current_item();
-let current_ix = state.read(cx).current_ix();
-let progress = state.read(cx).progress();
-let status = state
-    .read(cx)
-    .item_state("direction")
-    .map(|item| item.status());
-let navigation = state.read(cx).navigation_state();
-let can_confirm = navigation.is_confirmable();
-let show_previous = navigation.is_previous_visible();
-let show_next = navigation.is_next_visible();
-let show_skip = navigation.is_skip_visible();
-let show_submit = navigation.is_submit_visible();
-```
-
-The default action layout shows `Previous` at the beginning, `Next` between
-items, `Skip` only for the active optional item, and `Submit` at the end.
-Hidden actions are not rendered and do not enter keyboard navigation. Disabled
-items are removed from the navigation and progress totals. The three item
-statuses are `Unanswered`, `Answered`, and `Skipped`.
 
 ## Validation
 
@@ -376,7 +278,75 @@ owner-managed external errors. Questionnaire semantic validation and
 synchronous validators are supported; native HTML constraint validation is
 not part of this GPUI component.
 
-## Controlled state
+## Navigation and submission
+
+`QuestionnaireState` exposes the current item, ordered item states, and
+navigation state for custom action layouts.
+
+```rust
+let state = state.read(cx);
+let progress = state.progress();
+let status = state.item_state("direction").map(|item| item.status());
+let navigation = state.navigation_state();
+let show_skip = navigation.is_skip_visible();
+```
+
+`QuestionnaireNavigationState` answers the same question for `Previous`,
+`Next`, `Submit`, and `is_confirmable`; `current_item` and `current_ix` locate
+the active item.
+
+The default action layout shows `Previous` at the beginning, `Next` between
+items, `Skip` only for the active optional item, and `Submit` at the end.
+Hidden actions are not rendered and do not enter keyboard navigation. Disabled
+items are removed from the navigation and progress totals. The three item
+statuses are `Unanswered`, `Answered`, and `Skipped`.
+
+### Skipping
+
+Optional items can expose `QuestionnaireSkip`. A skip is an intentional valid
+state, clears the item answer, and allows `Next` to continue. Required items do
+not allow skipping. Re-entering an item and choosing an answer clears its
+skipped state. Skipping the final enabled item requests submission after the
+skip has been recorded.
+
+### Events and submission
+
+Subscribe to `QuestionnaireEvent` for active-item changes, answer changes,
+completion, and successful submit. `Completed` is emitted on the transition
+into a complete state; `Submit` is emitted for each successful explicit submit.
+On the first successful submit, the order is `Completed` followed by `Submit`.
+Changing answers or enabled conditions clears completion, so the next successful
+submit can emit `Completed` again.
+
+```rust
+use gpui_kit::component::questionnaire::QuestionnaireEvent;
+
+cx.subscribe(&state, |_, _, event, _| match event {
+    QuestionnaireEvent::CurrentItemChanged { current, .. } => {
+        println!("Current item: {:?}", current);
+    }
+    QuestionnaireEvent::AnswerChanged(change) => {
+        println!("Changed: {:?} ({:?})", change.item(), change.status());
+    }
+    QuestionnaireEvent::Completed(submission)
+    | QuestionnaireEvent::Submit(submission) => {
+        println!("Answers: {:?}", submission.items());
+    }
+    _ => {}
+})
+.detach();
+```
+
+Detaching keeps the callback alive until the subscribed entities are dropped.
+Store the returned `Subscription` in the host instead when it needs to cancel
+the listener earlier.
+
+The submission is ordered by the item schema and contains only enabled items.
+Each item includes its name, `Unanswered`/`Answered`/`Skipped` status, and
+effective answer. It represents a validated local submission request; saving
+it remotely remains the host application's responsibility.
+
+## Controlling the state
 
 When a page owns the active item or needs to apply a saved answer after state
 creation, use the silent setters. They update the UI and focus as needed but do
@@ -409,40 +379,7 @@ Use `activate_choice`, `confirm_current`, `go_previous`, `go_next`,
 `set_choice_disabled`; disabling the current item moves focus to the next
 enabled item, or to the previous one when there is no next item.
 
-## Resume
-
-To make `reset` return to a saved draft, establish the saved draft as the
-initial snapshot before constructing `QuestionnaireState`. Use
-`InputState::default_value`, `with_default_selected`, and
-`with_current_item` for the input, choice, and current-item baselines.
-
-```rust
-let saved_input = cx.new(|cx| {
-    InputState::new(window, cx).default_value("Saved description")
-});
-let saved_items = vec![
-    QuestionnaireItemDefinition::new("plan", "Which plan?")
-        .with_choices([
-            QuestionnaireChoiceDefinition::new("plus", "Plus")
-                .with_default_selected(true),
-            QuestionnaireChoiceDefinition::new("pro", "Pro"),
-        ]),
-    QuestionnaireItemDefinition::new("detail", "How much detail?")
-        .with_input(QuestionnaireInputDefinition::new(saved_input, "More detail")),
-];
-let state = cx.new(|cx| {
-    QuestionnaireState::new(saved_items, cx)
-        .expect("valid saved questionnaire")
-        .with_current_item("detail")
-        .expect("known enabled questionnaire item")
-});
-```
-
-If the saved values arrive after construction, apply
-`set_answer`, `set_input_value`, and `set_current_item` instead. Those setters
-change the current state; they do not replace the reset baseline.
-
-## Reset
+### Reset
 
 Reset restores the initial choices and input drafts, clears intentional skips,
 validation attempts, and completion, and returns to the initial current item.
@@ -457,7 +394,13 @@ state.update(cx, |state, cx| {
 External errors remain owner-managed across reset. If a reset should also
 remove a server error, clear it explicitly with `clear_external_error`.
 
-## Conditional items
+`reset` returns to the snapshot the schema was built with, so a saved draft
+belongs in the definitions: `InputState::default_value`,
+`with_default_selected`, and `with_current_item` establish that baseline.
+Values applied later with `set_answer`, `set_input_value`, or
+`set_current_item` change the current state without moving the reset baseline.
+
+### Conditional items
 
 Questionnaire does not contain a branching engine. The host can derive an
 item's disabled state from an earlier answer and synchronize it with
@@ -515,7 +458,7 @@ Enter confirms a filled answer. Command/Ctrl+Enter confirms the current item.
 An empty answer does not implicitly submit. Shortcut labels are assigned in
 enabled-choice order (`A`–`Z` or `1`–`9`), and disabled choices receive no label.
 
-## Progress and custom rendering
+## Progress
 
 `QuestionnaireProgress` follows the default presentation: “Question 2 of 4”.
 Its state can also be used to compose a custom indicator from the existing
@@ -563,68 +506,28 @@ refinement is applied after the component defaults.
 
 ## Card and Dialog composition
 
-The questionnaire owns the complete question flow. A card or dialog owns its
-container layout and close/cancel behavior. Both examples below include every
-item in the collection, so moving to the second question remains visible.
+The questionnaire owns the question flow; the container owns its surface and
+its close or cancel behavior. Put the whole composition — progress, every item,
+and the actions — inside the container, so moving to the next question stays
+visible.
 
 ```rust
-use gpui_kit::{Entity, IntoElement, ParentElement as _};
-use gpui_kit::component::{
-    button::{Button, ButtonVariants as _},
-    dialog::{Dialog, DialogClose, DialogFooter, DialogHeader, DialogTitle},
-    group_box::{GroupBox, GroupBoxVariants as _},
-};
-
-fn questionnaire_content(
-    state: &Entity<QuestionnaireState>,
-    actions: impl IntoElement,
-) -> Questionnaire {
-    Questionnaire::new(state)
-        .child(QuestionnaireProgress::new(state))
-        .child(
-            QuestionnaireItem::new(state, "direction")
-                .child(QuestionnaireTitle::new(state, "direction"))
-                .child(QuestionnaireDescription::new(state, "direction"))
-                .child(
-                    QuestionnaireChoices::new(state, "direction")
-                        .child(QuestionnaireChoice::new(state, "direction", "delegation"))
-                        .child(QuestionnaireChoice::new(state, "direction", "questions"))
-                        .child(QuestionnaireChoice::new(state, "direction", "both"))
-                        .child(QuestionnaireInput::new(state, "direction")),
-                )
-                .child(QuestionnaireError::new(state, "direction")),
-        )
-        .child(
-            QuestionnaireItem::new(state, "detail")
-                .child(QuestionnaireTitle::new(state, "detail"))
-                .child(QuestionnaireDescription::new(state, "detail"))
-                .child(
-                    QuestionnaireChoices::new(state, "detail")
-                        .child(QuestionnaireChoice::new(state, "detail", "focused"))
-                        .child(QuestionnaireChoice::new(state, "detail", "complete")),
-                )
-                .child(QuestionnaireError::new(state, "detail")),
-        )
-        .child(actions)
-}
+use gpui_kit::component::group_box::{GroupBox, GroupBoxVariants as _};
 
 GroupBox::new()
     .outline()
     .title("Set up your workspace")
-    .child(questionnaire_content(
-        &state,
-        QuestionnaireActions::new(&state)
-            .child(QuestionnairePrevious::new(&state))
-            .child(QuestionnaireSkip::new(&state))
-            .child(QuestionnaireNext::new(&state))
-            .child(QuestionnaireSubmit::new(&state)),
-    ));
+    .child(questionnaire);
 ```
 
-For a dialog, put the same complete composition inside the dialog content and
-let the host handle dismissal and cancellation.
+In a dialog, the footer carries the container's own `Cancel` next to the
+questionnaire's actions, and the host closes the dialog when the questionnaire
+reports a successful submit.
 
 ```rust
+use gpui_kit::component::dialog::{
+    Dialog, DialogClose, DialogFooter, DialogHeader, DialogTitle,
+};
 use gpui_kit::component::{WindowExt as _, questionnaire::QuestionnaireEvent};
 
 let dialog_state = state.clone();
@@ -640,75 +543,32 @@ cx.subscribe_in(
 .detach();
 
 Dialog::new(cx)
-    .trigger(
-        Button::new("open-questionnaire")
-            .outline()
-            .label("Open questionnaire"),
-    )
+    .trigger(Button::new("open-questionnaire").outline().label("Open questionnaire"))
     .content(move |content, _, _| {
         content
             .child(DialogHeader::new().child(DialogTitle::new().child("Workspace setup")))
-            .child(questionnaire_content(
-                &dialog_state,
-                DialogFooter::new()
+            .child(
+                Questionnaire::new(&dialog_state)
+                    // …progress and every item, as in Usage above
                     .child(
-                        DialogClose::new().child(
-                            Button::new("cancel-questionnaire")
-                                .outline()
-                                .label("Cancel"),
-                        ),
-                    )
-                    .child(
-                        QuestionnaireActions::new(&dialog_state)
-                            .child(QuestionnairePrevious::new(&dialog_state))
-                            .child(QuestionnaireNext::new(&dialog_state))
-                            .child(QuestionnaireSubmit::new(&dialog_state)),
+                        DialogFooter::new()
+                            .child(DialogClose::new().child(
+                                Button::new("cancel-questionnaire").outline().label("Cancel"),
+                            ))
+                            .child(
+                                QuestionnaireActions::new(&dialog_state)
+                                    .child(QuestionnairePrevious::new(&dialog_state))
+                                    .child(QuestionnaireNext::new(&dialog_state))
+                                    .child(QuestionnaireSubmit::new(&dialog_state)),
+                            ),
                     ),
-            ))
+            )
     });
 ```
 
-The host subscription closes the Dialog only after a successful `Submit`.
-The same event is the place to hand a validated `QuestionnaireSubmission` to
-application transport. Persistence and network success remain outside
-Questionnaire.
-
-## Events and submission
-
-Subscribe to `QuestionnaireEvent` for active-item changes, answer changes,
-completion, and successful submit. `Completed` is emitted on the transition
-into a complete state; `Submit` is emitted for each successful explicit submit.
-On the first successful submit, the order is `Completed` followed by `Submit`.
-Changing answers or enabled conditions clears completion, so the next successful
-submit can emit `Completed` again.
-
-```rust
-use gpui_kit::component::questionnaire::QuestionnaireEvent;
-
-cx.subscribe(&state, |_, _, event, _| match event {
-    QuestionnaireEvent::CurrentItemChanged { current, .. } => {
-        println!("Current item: {:?}", current);
-    }
-    QuestionnaireEvent::AnswerChanged(change) => {
-        println!("Changed: {:?} ({:?})", change.item(), change.status());
-    }
-    QuestionnaireEvent::Completed(submission)
-    | QuestionnaireEvent::Submit(submission) => {
-        println!("Answers: {:?}", submission.items());
-    }
-    _ => {}
-})
-.detach();
-```
-
-Detaching keeps the callback alive until the subscribed entities are dropped.
-Store the returned `Subscription` in the host instead when it needs to cancel
-the listener earlier.
-
-The submission is ordered by the item schema and contains only enabled items.
-Each item includes its name, `Unanswered`/`Answered`/`Skipped` status, and
-effective answer. It represents a validated local submission request; saving
-it remotely remains the host application's responsibility.
+`Cancel` always closes. `Submit` closes only after the questionnaire has
+validated every enabled item, and the same event hands the validated
+`QuestionnaireSubmission` to application transport.
 
 ## Accessibility
 
