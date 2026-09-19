@@ -12,7 +12,7 @@ description: 支持单选、多选、自由输入、校验和导航的可组合�
 ## 引入
 
 ```rust
-use gpui_component::questionnaire::{
+use gpui_kit::component::questionnaire::{
     Questionnaire, QuestionnaireActions, QuestionnaireChoice,
     QuestionnaireChoiceDescription, QuestionnaireChoices, QuestionnaireDescription,
     QuestionnaireError, QuestionnaireInput, QuestionnaireItem, QuestionnaireNext,
@@ -27,8 +27,8 @@ use gpui_component::questionnaire::{
 状态源。
 
 ```rust
-use gpui_component::input::InputState;
-use gpui_component::questionnaire::{
+use gpui_kit::component::input::InputState;
+use gpui_kit::component::questionnaire::{
     QuestionnaireChoiceDefinition, QuestionnaireInputDefinition,
     QuestionnaireItemDefinition, QuestionnaireState,
 };
@@ -135,9 +135,9 @@ entity 传给每个部件。自定义部件应读取对应 state 并调用 state
 辅助文字。下面这些 seam 只定制对应区域：
 
 ```rust
-use gpui::{IntoElement as _, ParentElement as _, StyleRefinement, Styled as _, div};
-use gpui_component::{ActiveTheme as _, StyledExt as _};
-use gpui_component::questionnaire::{
+use gpui_kit::{IntoElement as _, ParentElement as _, StyleRefinement, Styled as _, div};
+use gpui_kit::component::{ActiveTheme as _, StyledExt as _};
+use gpui_kit::component::questionnaire::{
     QuestionnaireChoice, QuestionnaireChoiceDescription,
 };
 
@@ -365,7 +365,7 @@ GPUI 组件。
 它们会按需更新 UI 和焦点，但不会发出用户交互事件。
 
 ```rust
-use gpui_component::questionnaire::QuestionnaireAnswer;
+use gpui_kit::component::questionnaire::QuestionnaireAnswer;
 
 state.update(cx, |state, cx| {
     state
@@ -469,7 +469,7 @@ fn sync_advanced_item(
 重复 key event、文本输入、IME 组合以及带修饰键的按键都会保持原有行为。
 
 ```rust
-use gpui_component::questionnaire::QuestionnaireShortcutMode;
+use gpui_kit::component::questionnaire::QuestionnaireShortcutMode;
 
 let state = cx.new(|cx| {
     QuestionnaireState::new(items, cx)
@@ -520,7 +520,7 @@ progress、item、title、description、choices、choice、choice description、
 error、actions 和 navigation 部件。
 
 ```rust
-use gpui_component::{Sizable as _, Size};
+use gpui_kit::component::{Sizable as _, Size};
 
 let size = Size::Small;
 Questionnaire::new(&state)
@@ -559,8 +559,8 @@ Questionnaire 负责完整的问题流程；卡片或 dialog 负责容器布局�
 下面两个示例都包含集合中的每个 item，导航到第二个问题时仍会正常显示。
 
 ```rust
-use gpui::{Entity, IntoElement, ParentElement as _};
-use gpui_component::{
+use gpui_kit::{Entity, IntoElement, ParentElement as _};
+use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     dialog::{Dialog, DialogClose, DialogFooter, DialogHeader, DialogTitle},
     group_box::{GroupBox, GroupBoxVariants as _},
@@ -615,7 +615,7 @@ GroupBox::new()
 对于 dialog，将同一个完整组合放在 dialog content 中，并由宿主处理关闭和取消。
 
 ```rust
-use gpui_component::{WindowExt as _, questionnaire::QuestionnaireEvent};
+use gpui_kit::component::{WindowExt as _, questionnaire::QuestionnaireEvent};
 
 let dialog_state = state.clone();
 cx.subscribe_in(
@@ -672,7 +672,7 @@ Questionnaire 外部负责。
 `Completed`。
 
 ```rust
-use gpui_component::questionnaire::QuestionnaireEvent;
+use gpui_kit::component::questionnaire::QuestionnaireEvent;
 
 cx.subscribe(&state, |_, _, event, _| match event {
     QuestionnaireEvent::CurrentItemChanged { current, .. } => {

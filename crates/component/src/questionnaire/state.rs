@@ -435,6 +435,7 @@ impl QuestionnaireState {
                 self.items[item_ix].name().clone(),
             ));
         };
+        let value: SharedString = value.into();
         input.update(cx, |input, cx| input.set_value(value, window, cx));
         self.sync_input_answer(item_ix, false, cx);
         Ok(())

@@ -1,9 +1,4 @@
-use gpui::{
-    App, AppContext, Context, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StyleRefinement, Styled, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
-};
-use gpui_component::{
+use gpui_kit::component::{
     ActiveTheme as _, Sizable, Size, StyledExt as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     dialog::{Dialog, DialogClose, DialogDescription, DialogFooter, DialogHeader, DialogTitle},
@@ -24,6 +19,8 @@ use gpui_component::{
     stepper::{Stepper, StepperItem},
     v_flex,
 };
+use gpui_kit::prelude::FluentBuilder as _;
+use gpui_kit::*;
 
 use crate::{ChangeStorySize, section, story_toolbar};
 
@@ -832,7 +829,7 @@ impl Render for QuestionnaireStory {
                                             return div().into_any_element();
                                         };
                                         let Ok(keystroke) =
-                                            gpui::Keystroke::parse(&shortcut.to_lowercase())
+                                            Keystroke::parse(&shortcut.to_lowercase())
                                         else {
                                             return div().into_any_element();
                                         };

@@ -13,7 +13,7 @@ cancelling, persistence, transport, and application-specific branching.
 ## Import
 
 ```rust
-use gpui_component::questionnaire::{
+use gpui_kit::component::questionnaire::{
     Questionnaire, QuestionnaireActions, QuestionnaireChoice,
     QuestionnaireChoiceDescription, QuestionnaireChoices, QuestionnaireDescription,
     QuestionnaireError, QuestionnaireInput, QuestionnaireItem, QuestionnaireNext,
@@ -28,8 +28,8 @@ Create the item collection once and use one `QuestionnaireState` entity as the
 source of truth for all parts.
 
 ```rust
-use gpui_component::input::InputState;
-use gpui_component::questionnaire::{
+use gpui_kit::component::input::InputState;
+use gpui_kit::component::questionnaire::{
     QuestionnaireChoiceDefinition, QuestionnaireInputDefinition,
     QuestionnaireItemDefinition, QuestionnaireState,
 };
@@ -139,9 +139,9 @@ choice activation, focus, state, and accessibility behavior. Use
 body. The following seams customize only the corresponding region:
 
 ```rust
-use gpui::{IntoElement as _, ParentElement as _, StyleRefinement, Styled as _, div};
-use gpui_component::{ActiveTheme as _, StyledExt as _};
-use gpui_component::questionnaire::{
+use gpui_kit::{IntoElement as _, ParentElement as _, StyleRefinement, Styled as _, div};
+use gpui_kit::component::{ActiveTheme as _, StyledExt as _};
+use gpui_kit::component::questionnaire::{
     QuestionnaireChoice, QuestionnaireChoiceDescription,
 };
 
@@ -383,7 +383,7 @@ creation, use the silent setters. They update the UI and focus as needed but do
 not emit user-interaction events.
 
 ```rust
-use gpui_component::questionnaire::QuestionnaireAnswer;
+use gpui_kit::component::questionnaire::QuestionnaireAnswer;
 
 state.update(cx, |state, cx| {
     state
@@ -495,7 +495,7 @@ active item's enabled choices. Repeated key events, text input, IME composition,
 and modified key presses are left untouched.
 
 ```rust
-use gpui_component::questionnaire::QuestionnaireShortcutMode;
+use gpui_kit::component::questionnaire::QuestionnaireShortcutMode;
 
 let state = cx.new(|cx| {
     QuestionnaireState::new(items, cx)
@@ -551,7 +551,7 @@ description, input, error, actions, and navigation parts that should share one
 scale.
 
 ```rust
-use gpui_component::{Sizable as _, Size};
+use gpui_kit::component::{Sizable as _, Size};
 
 let size = Size::Small;
 Questionnaire::new(&state)
@@ -592,8 +592,8 @@ container layout and close/cancel behavior. Both examples below include every
 item in the collection, so moving to the second question remains visible.
 
 ```rust
-use gpui::{Entity, IntoElement, ParentElement as _};
-use gpui_component::{
+use gpui_kit::{Entity, IntoElement, ParentElement as _};
+use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     dialog::{Dialog, DialogClose, DialogFooter, DialogHeader, DialogTitle},
     group_box::{GroupBox, GroupBoxVariants as _},
@@ -649,7 +649,7 @@ For a dialog, put the same complete composition inside the dialog content and
 let the host handle dismissal and cancellation.
 
 ```rust
-use gpui_component::{WindowExt as _, questionnaire::QuestionnaireEvent};
+use gpui_kit::component::{WindowExt as _, questionnaire::QuestionnaireEvent};
 
 let dialog_state = state.clone();
 cx.subscribe_in(
@@ -707,7 +707,7 @@ Changing answers or enabled conditions clears completion, so the next successful
 submit can emit `Completed` again.
 
 ```rust
-use gpui_component::questionnaire::QuestionnaireEvent;
+use gpui_kit::component::questionnaire::QuestionnaireEvent;
 
 cx.subscribe(&state, |_, _, event, _| match event {
     QuestionnaireEvent::CurrentItemChanged { current, .. } => {
