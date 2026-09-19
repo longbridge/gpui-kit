@@ -582,7 +582,7 @@ impl Render for QuestionnaireStory {
             .external_state
             .read(cx)
             .error("server")
-            .map(ToString::to_string)
+            .and_then(|error| error.message().map(ToString::to_string))
             .unwrap_or_else(|| "none".to_string());
 
         let control_state = self.control_state.clone();

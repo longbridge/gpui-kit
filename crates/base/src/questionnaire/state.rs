@@ -1,12 +1,10 @@
 use std::collections::HashSet;
 
+use crate::input::{InputEvent, InputState};
 use gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable as _, SharedString, Subscription,
     Window,
 };
-use rust_i18n::t;
-
-use crate::input::{InputEvent, InputState};
 
 use super::types::*;
 
@@ -19,8 +17,8 @@ struct ItemRuntime {
     initial_input_value: Option<SharedString>,
     skipped: bool,
     validation_attempted: bool,
-    internal_error: Option<SharedString>,
-    external_error: Option<SharedString>,
+    internal_error: Option<QuestionnaireValidationError>,
+    external_error: Option<QuestionnaireValidationError>,
     focus_handle: FocusHandle,
     choice_focus_handles: Vec<FocusHandle>,
     input_focus_handle: Option<FocusHandle>,
@@ -256,7 +254,9 @@ impl QuestionnaireState {
         )
     }
 
-    pub fn error(&self, name: &str) -> Option<&SharedString> {
+    /// The active validation failure for an item, if any. Base reports the
+    /// reason; the presentation layer turns a built-in reason into text.
+    pub fn error(&self, name: &str) -> Option<&QuestionnaireValidationError> {
         self.item_ix_opt(name).and_then(|ix| self.error_at(ix))
     }
 
@@ -293,7 +293,9 @@ impl QuestionnaireState {
             .is_some_and(|handle| handle.is_focused(window))
     }
 
-    pub(crate) fn current_input_has_text(&self, cx: &App) -> bool {
+    /// Whether the active item's freeform input currently holds text. The skin
+    /// needs it to decide whether an arrow key moves focus or edits the draft.
+    pub fn current_input_has_text(&self, cx: &App) -> bool {
         let Some(item_ix) = self.current else {
             return false;
         };
@@ -503,7 +505,7 @@ impl QuestionnaireState {
         cx: &mut Context<Self>,
     ) -> Result<(), QuestionnaireSchemaError> {
         let ix = self.item_ix(item)?;
-        self.runtime[ix].external_error = Some(error.into());
+        self.runtime[ix].external_error = Some(QuestionnaireValidationError::Message(error.into()));
         self.complete = false;
         cx.notify();
         Ok(())
@@ -971,9 +973,9 @@ impl QuestionnaireState {
         let answer = self.effective_answer(item_ix);
         let error = if answer.is_empty() {
             Some(if self.items[item_ix].is_required() {
-                t!("Questionnaire.error.required").into()
+                QuestionnaireValidationError::Required
             } else {
-                t!("Questionnaire.error.optional").into()
+                QuestionnaireValidationError::Unanswered
             })
         } else if let Some(validator) = self.items[item_ix].validator().cloned() {
             validator(&QuestionnaireValidationContext::new(
@@ -982,6 +984,7 @@ impl QuestionnaireState {
                 self.answers(),
             ))
             .err()
+            .map(QuestionnaireValidationError::Message)
         } else {
             None
         };
@@ -1036,7 +1039,7 @@ impl QuestionnaireState {
         }
     }
 
-    fn error_at(&self, item_ix: usize) -> Option<&SharedString> {
+    fn error_at(&self, item_ix: usize) -> Option<&QuestionnaireValidationError> {
         if self.runtime[item_ix].skipped || self.runtime[item_ix].disabled {
             return None;
         }
@@ -1291,7 +1294,7 @@ mod tests {
         assert!(cx.read(|cx| state.read(cx).error("first").is_some()));
         assert_eq!(
             cx.read(|cx| state.read(cx).error("second").unwrap().clone()),
-            "Use the valid answer"
+            QuestionnaireValidationError::Message("Use the valid answer".into())
         );
 
         cx.update(|window, cx| {
@@ -1452,7 +1455,7 @@ mod tests {
         );
         assert_eq!(
             cx.read(|cx| state.read(cx).error("second").unwrap().clone()),
-            "Use the valid answer"
+            QuestionnaireValidationError::Message("Use the valid answer".into())
         );
 
         state.update(cx, |state, cx| {

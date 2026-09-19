@@ -16,7 +16,9 @@ use crate::{
     kbd::Kbd,
 };
 
-use super::{QuestionnaireChoiceState, QuestionnaireState};
+use gpui_base::questionnaire::{
+    QuestionnaireChoiceState, QuestionnaireState, QuestionnaireValidationError,
+};
 
 type ChoiceRenderer =
     Rc<dyn Fn(&QuestionnaireChoiceState, &mut Window, &mut App) -> AnyElement + 'static>;
@@ -99,11 +101,15 @@ fn apply_text_token<T: Styled>(element: T, token: gpui_base::TextStyleToken) -> 
         .font_weight(token.weight)
 }
 
-fn item_label(definition: &super::QuestionnaireItemDefinition) -> Option<SharedString> {
+fn item_label(
+    definition: &gpui_base::questionnaire::QuestionnaireItemDefinition,
+) -> Option<SharedString> {
     Some(definition.accessibility_label().clone())
 }
 
-fn item_description(definition: &super::QuestionnaireItemDefinition) -> Option<SharedString> {
+fn item_description(
+    definition: &gpui_base::questionnaire::QuestionnaireItemDefinition,
+) -> Option<SharedString> {
     definition.description().cloned()
 }
 
@@ -1106,6 +1112,16 @@ fn questionnaire_error_root(id: ElementId) -> gpui::Stateful<gpui::Div> {
     div().id(id).role(Role::Alert)
 }
 
+/// Base reports why an item failed; the skin owns the sentence a person reads.
+fn error_text(error: &QuestionnaireValidationError) -> SharedString {
+    match error {
+        QuestionnaireValidationError::Required => t!("Questionnaire.error.required").into(),
+        QuestionnaireValidationError::Unanswered => t!("Questionnaire.error.optional").into(),
+        QuestionnaireValidationError::Message(message) => message.clone(),
+        _ => SharedString::default(),
+    }
+}
+
 impl RenderOnce for QuestionnaireError {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = self.state.read(cx);
@@ -1129,7 +1145,7 @@ impl RenderOnce for QuestionnaireError {
         )
         .refine_style(&self.style)
         .when(!has_children, |this| {
-            this.when_some(error, |this, error| this.child(error))
+            this.when_some(error, |this, error| this.child(error_text(&error)))
         })
         .children(self.children)
         .into_any_element()
@@ -1308,7 +1324,7 @@ mod tests {
         VisualTestContext, accesskit, px,
     };
 
-    use super::super::{
+    use gpui_base::questionnaire::{
         QuestionnaireChoiceDefinition, QuestionnaireInputDefinition, QuestionnaireItemDefinition,
         QuestionnaireShortcutMode,
     };

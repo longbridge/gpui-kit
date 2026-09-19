@@ -630,6 +630,32 @@ pub enum QuestionnaireEvent {
     Submit(QuestionnaireSubmission),
 }
 
+/// Why an item currently fails validation.
+///
+/// `Required` and `Unanswered` carry no text: base does not own product copy,
+/// so the presentation layer supplies the localized sentence. `Message` is the
+/// text a validator or the host already wrote.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum QuestionnaireValidationError {
+    /// A required item has no answer.
+    Required,
+    /// An optional item has no answer and has not been skipped.
+    Unanswered,
+    /// A validator or the host supplied this text.
+    Message(SharedString),
+}
+
+impl QuestionnaireValidationError {
+    /// The text the host or a validator wrote, if this is not a built-in reason.
+    pub fn message(&self) -> Option<&SharedString> {
+        match self {
+            Self::Message(message) => Some(message),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum QuestionnaireSchemaError {
