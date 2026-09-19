@@ -147,6 +147,36 @@ impl BlockNode {
         })
     }
 
+    pub(super) fn selected_source_range(&self) -> SourceRangeSelection {
+        let mut selected = SourceRangeSelection::Unselected;
+        match self {
+            BlockNode::Root { children, .. }
+            | BlockNode::Blockquote { children, .. }
+            | BlockNode::List { children, .. }
+            | BlockNode::ListItem { children, .. } => {
+                for child in children {
+                    selected.merge(child.selected_source_range());
+                }
+            }
+            BlockNode::Paragraph(paragraph) => selected = paragraph.selected_source_range(),
+            BlockNode::Heading { children, .. } => selected = children.selected_source_range(),
+            BlockNode::Table(table) => {
+                for row in &table.children {
+                    for cell in &row.children {
+                        selected.merge(cell.children.selected_source_range());
+                    }
+                }
+            }
+            BlockNode::CodeBlock(code_block) => selected = code_block.selected_source_range(),
+            BlockNode::Custom(_)
+            | BlockNode::Definition { .. }
+            | BlockNode::Break { .. }
+            | BlockNode::HorizontalRule { .. }
+            | BlockNode::Unknown => {}
+        }
+        selected
+    }
+
     fn text_by_kind(&self, kind: BlockTextKind) -> String {
         let mut text = String::new();
         match self {
@@ -501,6 +531,68 @@ impl PartialEq for ImageNode {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SourceSegment {
+    pub(crate) rendered: Range<usize>,
+    pub(crate) source: Range<usize>,
+}
+
+pub(crate) enum SourceRangeSelection {
+    Unselected,
+    Mapped(Range<usize>),
+    Unmapped,
+}
+
+impl SourceRangeSelection {
+    pub(crate) fn merge(&mut self, other: Self) {
+        match (&mut *self, other) {
+            (_, Self::Unselected) => {}
+            (_, Self::Unmapped) => *self = Self::Unmapped,
+            (Self::Unselected, mapped @ Self::Mapped(_)) => *self = mapped,
+            (Self::Mapped(selected), Self::Mapped(range)) => {
+                selected.start = selected.start.min(range.start);
+                selected.end = selected.end.max(range.end);
+            }
+            (Self::Unmapped, Self::Mapped(_)) => {}
+        }
+    }
+
+    pub(crate) fn into_range(self) -> Option<Range<usize>> {
+        match self {
+            Self::Mapped(range) => Some(range),
+            Self::Unselected | Self::Unmapped => None,
+        }
+    }
+}
+
+fn source_range_for_segments(
+    segments: &[SourceSegment],
+    selection: Range<usize>,
+) -> Option<Range<usize>> {
+    if selection.start >= selection.end {
+        return None;
+    }
+
+    let mut overlapping = segments.iter().filter(|segment| {
+        segment.rendered.start < selection.end && segment.rendered.end > selection.start
+    });
+    let first = overlapping.next()?;
+    if first.rendered.start > selection.start {
+        return None;
+    }
+    let mut rendered_end = first.rendered.end;
+    let source_start = first.source.start;
+    let mut source_end = first.source.end;
+    for segment in overlapping {
+        if segment.rendered.start > rendered_end {
+            return None;
+        }
+        rendered_end = rendered_end.max(segment.rendered.end);
+        source_end = segment.source.end;
+    }
+    (rendered_end >= selection.end).then_some(source_start..source_end)
+}
+
 #[derive(Default, Clone, Debug)]
 pub(crate) struct InlineNode {
     /// The text content.
@@ -510,6 +602,8 @@ pub(crate) struct InlineNode {
     custom_selection: Arc<Mutex<bool>>,
     /// The text styles, each tuple contains the range of the text and the style.
     pub(crate) marks: Vec<(Range<usize>, TextMark)>,
+    /// Rendered UTF-8 byte spans paired with their exact Markdown source spans.
+    pub(crate) source_segments: Vec<SourceSegment>,
 
     state: Arc<Mutex<InlineState>>,
 }
@@ -520,6 +614,7 @@ impl PartialEq for InlineNode {
             && self.image == other.image
             && self.custom == other.custom
             && self.marks == other.marks
+            && self.source_segments == other.source_segments
     }
 }
 
@@ -926,6 +1021,7 @@ impl InlineNode {
             custom: None,
             custom_selection: Arc::default(),
             marks: vec![],
+            source_segments: vec![],
             state: Arc::new(Mutex::new(InlineState::default())),
         }
     }
@@ -945,6 +1041,15 @@ impl InlineNode {
     pub(crate) fn marks(mut self, marks: Vec<(Range<usize>, TextMark)>) -> Self {
         self.marks = marks;
         self
+    }
+
+    pub(crate) fn source_segments(mut self, source_segments: Vec<SourceSegment>) -> Self {
+        self.source_segments = source_segments;
+        self
+    }
+
+    fn selected_source_range(&self, selection: Range<usize>) -> Option<Range<usize>> {
+        source_range_for_segments(&self.source_segments, selection)
     }
 }
 
@@ -1127,6 +1232,76 @@ impl Paragraph {
     /// starting at the beginning of the run after it. A paragraph that begins
     /// or ends with an image has no run on that side, which counts as reaching
     /// it.
+    pub(super) fn selected_source_range(&self) -> SourceRangeSelection {
+        let mut selected = SourceRangeSelection::Unselected;
+        let mut run: Vec<(usize, &InlineNode)> = Vec::new();
+        let mut offset = 0;
+
+        let include_run = |state: &Arc<Mutex<InlineState>>,
+                           run: &[(usize, &InlineNode)]|
+         -> SourceRangeSelection {
+            let Ok(state) = state.lock() else {
+                return SourceRangeSelection::Unmapped;
+            };
+            let Some(selection) = state.selection else {
+                return SourceRangeSelection::Unselected;
+            };
+            if selection.start >= selection.end {
+                return SourceRangeSelection::Unselected;
+            }
+
+            let mut mapped = SourceRangeSelection::Unselected;
+            let mut rendered_end = selection.start;
+            for (start, child) in run {
+                let end = start + child.text.len();
+                let lo = selection.start.max(*start);
+                let hi = selection.end.min(end);
+                if lo >= hi {
+                    continue;
+                }
+                if lo > rendered_end {
+                    return SourceRangeSelection::Unmapped;
+                }
+                let Some(range) = child.selected_source_range((lo - start)..(hi - start)) else {
+                    return SourceRangeSelection::Unmapped;
+                };
+                mapped.merge(SourceRangeSelection::Mapped(range));
+                rendered_end = rendered_end.max(hi);
+            }
+            if rendered_end < selection.end {
+                SourceRangeSelection::Unmapped
+            } else {
+                mapped
+            }
+        };
+
+        for child in &self.children {
+            if child.custom.is_some() || child.image.is_some() {
+                selected.merge(include_run(&child.state, &run));
+                match child.custom_selection.lock() {
+                    Ok(value) if *value => selected.merge(
+                        child
+                            .custom
+                            .as_ref()
+                            .and_then(MarkdownNode::source_range)
+                            .map(SourceRangeSelection::Mapped)
+                            .unwrap_or(SourceRangeSelection::Unmapped),
+                    ),
+                    Ok(_) => {}
+                    Err(_) => selected.merge(SourceRangeSelection::Unmapped),
+                }
+                run.clear();
+                offset = 0;
+                continue;
+            }
+            run.push((offset, child));
+            offset += child.text.len();
+        }
+
+        selected.merge(include_run(&self.state, &run));
+        selected
+    }
+
     pub(super) fn selected_source(&self) -> String {
         let mut source = MarkdownSource::default();
         let mut pending_images: Vec<String> = Vec::new();
@@ -1416,6 +1591,7 @@ pub struct CodeBlock {
     lang: Option<SharedString>,
     state: Arc<Mutex<InlineState>>,
     highlight_cache: Arc<Mutex<Option<CachedCodeBlockHighlights>>>,
+    source_segments: Vec<SourceSegment>,
     pub span: Option<Span>,
 }
 
@@ -1475,8 +1651,36 @@ impl CodeBlock {
             lang,
             state,
             highlight_cache: Arc::new(Mutex::new(None)),
+            source_segments: vec![],
             span: span.map(|s| s.into()),
         }
+    }
+
+    pub(crate) fn source_segments(mut self, source_segments: Vec<SourceSegment>) -> Self {
+        self.source_segments = source_segments;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_selection(&self, selection: Range<usize>) {
+        if let Ok(mut state) = self.state.lock() {
+            state.selection = Some(selection.into());
+        }
+    }
+
+    pub(super) fn selected_source_range(&self) -> SourceRangeSelection {
+        let Ok(state) = self.state.lock() else {
+            return SourceRangeSelection::Unmapped;
+        };
+        let Some(selection) = state.selection else {
+            return SourceRangeSelection::Unselected;
+        };
+        if selection.start >= selection.end {
+            return SourceRangeSelection::Unselected;
+        }
+        source_range_for_segments(&self.source_segments, selection.start..selection.end)
+            .map(SourceRangeSelection::Mapped)
+            .unwrap_or(SourceRangeSelection::Unmapped)
     }
 
     fn highlighted_styles(

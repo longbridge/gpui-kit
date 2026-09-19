@@ -7,8 +7,8 @@ use crate::text::{
     document::ParsedDocument,
     markdown_ext::MarkdownParseContext,
     node::{
-        self, BlockNode, CodeBlock, ImageNode, InlineNode, LinkMark, NodeContext, Paragraph, Span,
-        Table, TableRow, TextMark,
+        self, BlockNode, CodeBlock, ImageNode, InlineNode, LinkMark, NodeContext, Paragraph,
+        SourceSegment, Span, Table, TableRow, TextMark,
     },
 };
 
@@ -59,13 +59,16 @@ fn push_merged(
     paragraph: &mut Paragraph,
     text: String,
     marks: Vec<(Range<usize>, TextMark)>,
+    source_segments: Vec<SourceSegment>,
     new_mark: TextMark,
 ) {
     if text.is_empty() {
         return;
     }
 
-    let mut node = InlineNode::new(text).marks(marks);
+    let mut node = InlineNode::new(text)
+        .marks(marks)
+        .source_segments(source_segments);
     let len = node.text.len();
     if let Some(last) = node.marks.last_mut()
         && last.0.start == 0
@@ -95,6 +98,7 @@ fn merge_children_with_mark(
     let mut text = String::new();
     let mut merged_text = String::new();
     let mut merged_marks = Vec::new();
+    let mut merged_source_segments = Vec::new();
 
     for child in children {
         let mut child_paragraph = Paragraph::default();
@@ -107,6 +111,7 @@ fn merge_children_with_mark(
                     paragraph,
                     std::mem::take(&mut merged_text),
                     std::mem::take(&mut merged_marks),
+                    std::mem::take(&mut merged_source_segments),
                     mark.clone(),
                 );
                 if let Some((_, existing)) = node.marks.first_mut() {
@@ -119,6 +124,11 @@ fn merge_children_with_mark(
             }
             let merged_offset = merged_text.len();
             merged_text.push_str(&node.text);
+            merged_source_segments.extend(node.source_segments.drain(..).map(|mut segment| {
+                segment.rendered.start += merged_offset;
+                segment.rendered.end += merged_offset;
+                segment
+            }));
 
             for (range, child_mark) in node.marks {
                 merged_marks.push((
@@ -139,6 +149,7 @@ fn merge_children_with_mark(
                     paragraph,
                     std::mem::take(&mut merged_text),
                     std::mem::take(&mut merged_marks),
+                    std::mem::take(&mut merged_source_segments),
                     mark.clone(),
                 );
                 paragraph.push(InlineNode::image(image));
@@ -146,8 +157,143 @@ fn merge_children_with_mark(
         }
     }
 
-    push_merged(paragraph, merged_text, merged_marks, mark);
+    push_merged(
+        paragraph,
+        merged_text,
+        merged_marks,
+        merged_source_segments,
+        mark,
+    );
     text
+}
+
+fn source_segments(
+    source: &str,
+    rendered: &str,
+    span: Option<Span>,
+    source_offset: usize,
+) -> Vec<SourceSegment> {
+    let Some(span) = span else {
+        return Vec::new();
+    };
+    let local_start = span.start.saturating_sub(source_offset);
+    let local_end = span.end.saturating_sub(source_offset);
+    let Some(raw) = source.get(local_start..local_end) else {
+        return Vec::new();
+    };
+
+    let mut segments = Vec::new();
+    let mut raw_cursor = 0;
+    for (rendered_start, rendered_char) in rendered.char_indices() {
+        let rendered_end = rendered_start + rendered_char.len_utf8();
+        let remainder = &raw[raw_cursor..];
+        let source_len = if rendered_char == ' ' && remainder.starts_with("\r\n") {
+            2
+        } else if rendered_char == ' ' && remainder.starts_with(['\n', '\r']) {
+            1
+        } else if rendered_char == '\n' && remainder.ends_with('\n') {
+            remainder.len()
+        } else if remainder.starts_with(rendered_char) {
+            rendered_char.len_utf8()
+        } else if let Some(escaped) = remainder.strip_prefix('\\')
+            && escaped.starts_with(rendered_char)
+        {
+            1 + rendered_char.len_utf8()
+        } else {
+            return Vec::new();
+        };
+        let source_start = raw_cursor;
+        let source_end = source_start + source_len;
+        segments.push(SourceSegment {
+            rendered: rendered_start..rendered_end,
+            source: (span.start + source_start)..(span.start + source_end),
+        });
+        raw_cursor = source_end;
+    }
+
+    if raw_cursor != raw.len() {
+        return Vec::new();
+    }
+    if let Some(previous) = local_start.checked_sub(1)
+        && source.as_bytes().get(previous) == Some(&b'\\')
+        && let Some(first) = segments.first_mut()
+    {
+        first.source.start -= 1;
+    }
+    segments
+}
+
+fn code_source_segments(
+    source: &str,
+    code: &str,
+    span: Option<Span>,
+    source_offset: usize,
+) -> Vec<SourceSegment> {
+    let Some(span) = span else {
+        return Vec::new();
+    };
+    let Some(raw) = source
+        .get(span.start.saturating_sub(source_offset)..span.end.saturating_sub(source_offset))
+    else {
+        return Vec::new();
+    };
+    let trimmed = raw.trim_start();
+    let fence = trimmed
+        .chars()
+        .next()
+        .filter(|character| matches!(character, '`' | '~'))
+        .map(|character| {
+            let len = trimmed
+                .chars()
+                .take_while(|candidate| candidate == &character)
+                .count();
+            (character, len)
+        })
+        .filter(|(_, len)| *len >= 3);
+    let (search_start, search_end) = if let Some((fence, fence_len)) = fence {
+        let start = raw.find('\n').map_or(raw.len(), |newline| newline + 1);
+        let last_line = raw.rfind('\n').map_or(start, |newline| newline + 1);
+        let closing = raw[last_line..].trim();
+        let is_closing = closing.chars().count() >= fence_len
+            && closing.chars().all(|character| character == fence);
+        (start, if is_closing { last_line } else { raw.len() })
+    } else {
+        (0, raw.len())
+    };
+    let mut matches = raw[search_start..search_end].match_indices(code);
+    let Some((relative_start, _)) = matches.next() else {
+        return Vec::new();
+    };
+    if matches.next().is_some() {
+        return Vec::new();
+    }
+    let source_start = search_start + relative_start;
+
+    code.char_indices()
+        .map(|(rendered_start, character)| {
+            let len = character.len_utf8();
+            SourceSegment {
+                rendered: rendered_start..rendered_start + len,
+                source: (span.start + source_start + rendered_start)
+                    ..(span.start + source_start + rendered_start + len),
+            }
+        })
+        .collect()
+}
+
+fn mapped_inline(
+    source: &str,
+    text: impl Into<SharedString>,
+    node: &mdast::Node,
+    cx: &NodeContext,
+) -> InlineNode {
+    let text = text.into();
+    let span = node.position().map(|position| Span {
+        start: cx.offset + position.start.offset,
+        end: cx.offset + position.end.offset,
+    });
+    let segments = source_segments(source, &text, span, cx.offset);
+    InlineNode::new(text).source_segments(segments)
 }
 
 fn append_inline_html_blocks(paragraph: &mut Paragraph, blocks: Vec<BlockNode>) -> Option<String> {
@@ -219,7 +365,7 @@ fn parse_paragraph(
             // the CR with the newline: dropping only the newline would strand
             // the CR in the middle of the reflowed line.
             text = val.value.replace("\r\n", " ").replace(['\n', '\r'], " ");
-            paragraph.push_str(&text)
+            paragraph.push(mapped_inline(source, text.clone(), node, cx))
         }
         Node::Emphasis(val) => {
             text = merge_children_with_mark(
@@ -251,7 +397,8 @@ fn parse_paragraph(
         Node::InlineCode(val) => {
             text = val.value.clone();
             paragraph.push(
-                InlineNode::new(&text).marks(vec![(0..text.len(), TextMark::default().code())]),
+                mapped_inline(source, text.clone(), node, cx)
+                    .marks(vec![(0..text.len(), TextMark::default().code())]),
             );
         }
         Node::Link(val) => {
@@ -285,7 +432,7 @@ fn parse_paragraph(
             // inline-HTML <br> path: emit a newline inline node so the break
             // renders instead of silently concatenating adjacent lines.
             text.push('\n');
-            paragraph.push(InlineNode::new("\n"));
+            paragraph.push(mapped_inline(source, "\n", node, cx));
         }
         Node::InlineMath(raw) => {
             // Math parsing is on by default, so ordinary prose that merely
@@ -298,12 +445,14 @@ fn parse_paragraph(
                 .node_source(node)
                 .map(str::to_string)
                 .unwrap_or_else(|| raw.value.clone());
-            paragraph.push_str(&text);
+            paragraph.push(mapped_inline(source, text.clone(), node, cx));
         }
         Node::MdxTextExpression(raw) => {
             text = raw.value.clone();
-            paragraph
-                .push(InlineNode::new(&text).marks(vec![(0..text.len(), TextMark::default())]));
+            paragraph.push(
+                mapped_inline(source, text.clone(), node, cx)
+                    .marks(vec![(0..text.len(), TextMark::default())]),
+            );
         }
         Node::Html(val) => match super::html::parse(&val.value, cx) {
             Ok(el) => {
@@ -327,7 +476,7 @@ fn parse_paragraph(
         },
         Node::FootnoteReference(foot) => {
             let prefix = format!("[{}]", foot.identifier);
-            paragraph.push(InlineNode::new(&prefix).marks(vec![(
+            paragraph.push(mapped_inline(source, prefix.clone(), node, cx).marks(vec![(
                 0..prefix.len(),
                 TextMark {
                     italic: true,
@@ -447,11 +596,14 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
             html: false,
             span: new_span(val.position, cx),
         },
-        Node::Code(raw) => BlockNode::CodeBlock(CodeBlock::new(
-            raw.value.into(),
-            raw.lang.map(|s| s.into()),
-            new_span(raw.position, cx),
-        )),
+        Node::Code(raw) => {
+            let span = new_span(raw.position, cx);
+            let segments = code_source_segments(source, &raw.value, span, cx.offset);
+            BlockNode::CodeBlock(
+                CodeBlock::new(raw.value.into(), raw.lang.map(Into::into), span)
+                    .source_segments(segments),
+            )
+        }
         Node::Heading(val) => {
             let mut paragraph = Paragraph::default();
             val.children.iter().for_each(|c| {
@@ -464,11 +616,13 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
                 span: new_span(val.position, cx),
             }
         }
-        Node::Math(val) => BlockNode::CodeBlock(CodeBlock::new(
-            val.value.into(),
-            None,
-            new_span(val.position, cx),
-        )),
+        Node::Math(val) => {
+            let span = new_span(val.position, cx);
+            let segments = source_segments(source, &val.value, span, cx.offset);
+            BlockNode::CodeBlock(
+                CodeBlock::new(val.value.into(), None, span).source_segments(segments),
+            )
+        }
         Node::Html(val) => match super::html::parse(&val.value, cx) {
             Ok(el) => BlockNode::Root {
                 children: Arc::unwrap_or_clone(el.blocks),
@@ -582,6 +736,124 @@ mod tests {
     use gpui::ParentElement;
 
     use crate::text::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
+
+    fn selected_rendered_range(source: &str, selection: Range<usize>) -> Option<Range<usize>> {
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let rendered = paragraph.text();
+        let mut state = paragraph.state.lock().unwrap();
+        state.set_text(rendered.into());
+        state.selection = Some(selection.into());
+        drop(state);
+        document.selected_source_range()
+    }
+
+    fn select_rendered_range(source: &str, selection: Range<usize>) -> Range<usize> {
+        selected_rendered_range(source, selection).expect("source range")
+    }
+
+    #[test]
+    fn selected_source_range_uses_the_selected_identical_styled_occurrence() {
+        let source = "**same** then **same**";
+        assert_eq!(select_rendered_range(source, 10..14), 16..20);
+    }
+
+    #[test]
+    fn selected_source_range_maps_partial_styled_text() {
+        let source = "**same** then **same**";
+        assert_eq!(select_rendered_range(source, 11..13), 17..19);
+    }
+
+    #[test]
+    fn selected_source_range_crosses_style_boundaries() {
+        let source = "left **bold** right";
+        assert_eq!(select_rendered_range(source, 2..12), 2..16);
+    }
+
+    #[test]
+    fn selected_source_range_rejects_unmapped_gap_in_merged_styled_node() {
+        let source = "**left `code` right**";
+        assert_eq!(selected_rendered_range(source, 5..9), None);
+    }
+
+    #[test]
+    fn selected_source_range_rejects_mapped_block_plus_unmappable_entity() {
+        let source = "mapped\n\nA &amp; B";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let [BlockNode::Paragraph(mapped), BlockNode::Paragraph(entity)] =
+            document.blocks.as_slice()
+        else {
+            panic!("expected two paragraphs");
+        };
+        mapped.state.lock().unwrap().selection = Some((0..6).into());
+
+        entity.state.lock().unwrap().selection = Some((2..2).into());
+        assert_eq!(document.selected_source_range(), Some(0..6));
+
+        entity.state.lock().unwrap().selection = Some((2..3).into());
+        assert_eq!(document.selected_source_range(), None);
+    }
+
+    #[test]
+    fn selected_source_range_maps_fenced_code_body_after_matching_info_string() {
+        let source = "```rust\nrust\n```";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::CodeBlock(code) = &document.blocks[0] else {
+            panic!("expected code block");
+        };
+        code.set_selection(0..4);
+
+        assert_eq!(document.selected_source_range(), Some(8..12));
+    }
+
+    #[test]
+    fn selected_source_range_excludes_closing_fence_candidate() {
+        let source = "````text\n```\n````";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::CodeBlock(code) = &document.blocks[0] else {
+            panic!("expected code block");
+        };
+        code.set_selection(0..3);
+
+        assert_eq!(document.selected_source_range(), Some(9..12));
+    }
+
+    #[test]
+    fn selected_source_range_maps_indented_code_content() {
+        let source = "    rust";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::CodeBlock(code) = &document.blocks[0] else {
+            panic!("expected code block");
+        };
+        code.set_selection(0..4);
+
+        assert_eq!(document.selected_source_range(), Some(4..8));
+    }
+
+    #[test]
+    fn selected_source_range_maps_the_whole_markdown_escape() {
+        assert_eq!(selected_rendered_range(r"\*", 0..1), Some(0..2));
+    }
+
+    #[test]
+    fn selected_source_range_rejects_decoded_entity_without_exact_mapping() {
+        let source = "A &amp; B";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        assert_eq!(paragraph.text(), "A & B");
+
+        assert_eq!(selected_rendered_range(source, 2..3), None);
+    }
 
     #[test]
     fn test_nested_emphasis_merges_text_marks() {
