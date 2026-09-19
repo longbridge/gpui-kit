@@ -450,23 +450,37 @@ Progress::new("questionnaire-progress").value(percent);
 
 ## 尺寸与主题
 
-Questionnaire 皮肤只有一套比例。spacing、typography、radius、border、input、
-primary、muted、destructive 和 focus ring 全部取自当前主题的 semantic tokens，
-应用通过调整主题来改变问卷的密度与形状，而不是给每个部件传 size。答案文字与
-Checkbox、Radio 家族的 medium label 一致，因此选项卡片会比上游皮肤略高；卡片仍
-保留最小高度，使内容很短的选项也是完整的一行。
-
-`Sizable` 只作用于导航按钮，它们会把 size 透传给 `Button`：
+`Questionnaire` 接受整份问卷的比例，该问卷的所有部件都会跟随 —— root 会把 size
+记录在它的 state 上，因此组合部件不需要被逐个告知。部件自己声明的 size 优先。
 
 ```rust
 use gpui_kit::component::{Sizable as _, Size};
 
-QuestionnaireActions::new(&state)
-    .child(QuestionnairePrevious::new(&state).with_size(Size::Small))
-    .child(QuestionnaireNext::new(&state).with_size(Size::Small));
+Questionnaire::new(&state)
+    .with_size(Size::Small)
+    .child(QuestionnaireProgress::new(&state))
+    .child(
+        QuestionnaireItem::new(&state, "direction")
+            .child(QuestionnaireTitle::new(&state, "direction"))
+            .child(
+                QuestionnaireChoices::new(&state, "direction")
+                    // 跟随 root；只有需要不同比例时才在这里写 with_size。
+                    .child(QuestionnaireChoice::new(&state, "direction", "delegation")),
+            ),
+    );
 ```
 
+支持的尺寸为 `XSmall`、`Small`、`Medium`（默认）和 `Large`，也可以使用
+`Size::Size(value)` 自定义比例。答案文字与同尺寸下 Checkbox、Radio 家族的 label
+一致。
+
+spacing、typography、radius、border、input、primary、muted、destructive 和
+focus ring 全部取自当前主题的 semantic tokens，应用通过调整主题改变问卷的形状。
 局部微调使用 `Styled` 方法或 `StyleRefinement`，实例样式在组件默认样式之后应用。
+
+`QuestionnaireChoiceDescription` 是唯一没有自己 state 的部件 —— 它只是自定义
+选项内容里的一个文本槽 —— 因此默认 `Medium`，需要其它比例时通过 `with_size`
+指定。
 
 ## Card 和 Dialog 组合
 

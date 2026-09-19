@@ -480,27 +480,41 @@ or its labels and its selected step drift apart from the questionnaire.
 
 ## Sizes and theming
 
-The questionnaire skin has one scale. Spacing, typography, radius, border,
-input, primary, muted, destructive, and focus-ring values all come from the
-active theme's semantic tokens, so an application changes the questionnaire's
-density and shape by changing the theme rather than by passing a size to every
-part. Answer text matches the Checkbox and Radio family's medium label, which
-makes a choice card slightly taller than the upstream skin's; the card keeps a
-minimum height so a short answer still reads as a full row.
-
-`Sizable` reaches only the navigation buttons, which pass the size through to
-`Button`:
+`Questionnaire` takes the scale for the whole questionnaire, and every part of
+that questionnaire follows it — the root publishes the size under its state, so
+the compound parts do not have to be told individually. A part that names its
+own size keeps it.
 
 ```rust
 use gpui_kit::component::{Sizable as _, Size};
 
-QuestionnaireActions::new(&state)
-    .child(QuestionnairePrevious::new(&state).with_size(Size::Small))
-    .child(QuestionnaireNext::new(&state).with_size(Size::Small));
+Questionnaire::new(&state)
+    .with_size(Size::Small)
+    .child(QuestionnaireProgress::new(&state))
+    .child(
+        QuestionnaireItem::new(&state, "direction")
+            .child(QuestionnaireTitle::new(&state, "direction"))
+            .child(
+                QuestionnaireChoices::new(&state, "direction")
+                    // Follows the root; pass `with_size` here only to differ.
+                    .child(QuestionnaireChoice::new(&state, "direction", "delegation")),
+            ),
+    );
 ```
 
-Use `Styled` methods or `StyleRefinement` for local adjustments; local style
+The supported sizes are `XSmall`, `Small`, `Medium` (the default) and `Large`,
+plus `Size::Size(value)` for a custom scale. Answer text matches the Checkbox
+and Radio family's label at the same size.
+
+Spacing, typography, radius, border, input, primary, muted, destructive, and
+focus-ring values all come from the active theme's semantic tokens, so an
+application changes the questionnaire's shape by changing the theme. Use
+`Styled` methods or `StyleRefinement` for local adjustments; local style
 refinement is applied after the component defaults.
+
+`QuestionnaireChoiceDescription` is the one part with no state of its own — it
+is a plain text slot for a custom choice body — so it defaults to `Medium` and
+takes `with_size` when a custom composition needs another scale.
 
 ## Card and Dialog composition
 

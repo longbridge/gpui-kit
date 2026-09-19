@@ -236,17 +236,20 @@ impl QuestionnaireStory {
         size: Size,
         items: &[(&'static str, &'static [&'static str])],
     ) -> Questionnaire {
-        let mut questionnaire = Questionnaire::new(state).child(QuestionnaireProgress::new(state));
+        // The root is the only place the scale is named; every part follows it.
+        let mut questionnaire = Questionnaire::new(state)
+            .with_size(size)
+            .child(QuestionnaireProgress::new(state));
         for (name, choices) in items {
             questionnaire =
                 questionnaire.child(Self::item_view(state, name, choices.iter().copied()));
         }
         questionnaire.child(
             QuestionnaireActions::new(state)
-                .child(QuestionnairePrevious::new(state).with_size(size))
-                .child(QuestionnaireSkip::new(state).with_size(size))
-                .child(QuestionnaireNext::new(state).with_size(size))
-                .child(QuestionnaireSubmit::new(state).with_size(size)),
+                .child(QuestionnairePrevious::new(state))
+                .child(QuestionnaireSkip::new(state))
+                .child(QuestionnaireNext::new(state))
+                .child(QuestionnaireSubmit::new(state)),
         )
     }
 
@@ -584,6 +587,7 @@ impl Render for QuestionnaireStory {
             .item_state("environment")
             .is_some_and(|item| !item.is_disabled());
         let custom_control = Questionnaire::new(&control_state)
+            .with_size(self.size)
             .child(QuestionnaireProgress::new(&control_state))
             .child(Self::item_view(
                 &control_state,
@@ -606,7 +610,6 @@ impl Render for QuestionnaireStory {
                         actions.child(
                             Button::new("questionnaire-custom-previous")
                                 .outline()
-                                .with_size(self.size)
                                 .label("Back")
                                 .on_click({
                                     let state = control_state.clone();
@@ -622,7 +625,6 @@ impl Render for QuestionnaireStory {
                         actions.child(
                             Button::new("questionnaire-custom-skip")
                                 .outline()
-                                .with_size(self.size)
                                 .ml_auto()
                                 .label("Not now")
                                 .on_click({
@@ -639,7 +641,6 @@ impl Render for QuestionnaireStory {
                         actions.child(
                             Button::new("questionnaire-custom-next")
                                 .primary()
-                                .with_size(self.size)
                                 .when(!control_skip_visible, |button| button.ml_auto())
                                 .label("Continue")
                                 .on_click({
@@ -656,7 +657,6 @@ impl Render for QuestionnaireStory {
                         actions.child(
                             Button::new("questionnaire-custom-submit")
                                 .primary()
-                                .with_size(self.size)
                                 .when(!control_skip_visible, |button| button.ml_auto())
                                 .label("Finish")
                                 .on_click({
@@ -686,6 +686,7 @@ impl Render for QuestionnaireStory {
 
         let custom_choice_state = self.custom_choice_state.clone();
         let custom_choice = Questionnaire::new(&custom_choice_state)
+            .with_size(self.size)
             .child(
                 QuestionnaireItem::new(&custom_choice_state, "custom")
                     .child(QuestionnaireTitle::new(&custom_choice_state, "custom"))
@@ -739,7 +740,7 @@ impl Render for QuestionnaireStory {
             )
             .child(
                 QuestionnaireActions::new(&custom_choice_state)
-                    .child(QuestionnaireSubmit::new(&custom_choice_state).with_size(self.size)),
+                    .child(QuestionnaireSubmit::new(&custom_choice_state)),
             );
 
         let dialog_content_state = self.dialog_state.clone();
@@ -762,6 +763,7 @@ impl Render for QuestionnaireStory {
                     )
                     .child(
                         Questionnaire::new(&dialog_content_state)
+                            .with_size(Size::Small)
                             .child(
                                 QuestionnaireProgress::new(&dialog_content_state),
                             )
@@ -781,7 +783,6 @@ impl Render for QuestionnaireStory {
                                         DialogClose::new().child(
                                             Button::new("questionnaire-dialog-cancel")
                                                 .outline()
-                                                .with_size(Size::Small)
                                                 .label("Cancel"),
                                         ),
                                     )
@@ -789,15 +790,12 @@ impl Render for QuestionnaireStory {
                                         QuestionnaireActions::new(&dialog_content_state)
                                             .child(
                                                 QuestionnairePrevious::new(&dialog_content_state)
-                                                    .with_size(Size::Small),
                                             )
                                             .child(
                                                 QuestionnaireNext::new(&dialog_content_state)
-                                                    .with_size(Size::Small),
                                             )
                                             .child(
                                                 QuestionnaireSubmit::new(&dialog_content_state)
-                                                    .with_size(Size::Small),
                                             ),
                                     ),
                             )
