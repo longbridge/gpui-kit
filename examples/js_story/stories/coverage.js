@@ -49,6 +49,7 @@ export const coveredBy = [
   { route: "pagination", registrations: ["Pagination"] },
   { route: "popover", registrations: ["Popover"] },
   { route: "progress", registrations: ["Progress"] },
+  { route: "questionnaire", registrations: ["Questionnaire"] },
   { route: "radio", registrations: ["Radio"] },
   { route: "rating", registrations: ["Rating"] },
   { route: "resizable", registrations: ["Resizable"] },

@@ -77,6 +77,7 @@ const RUST_STORY_ORDER = [
   "PaginationStory",
   "PopoverStory",
   "ProgressStory",
+  "QuestionnaireStory",
   "RadioStory",
   "RatingStory",
   "ResizableStory",

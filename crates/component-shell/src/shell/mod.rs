@@ -32,6 +32,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
     basic::register(registry)?;
     chart::register(registry)?;
     carousel::register(registry)?;
+    questionnaire::register(registry)?;
     Ok(())
 }
 
@@ -59,6 +60,7 @@ mod lifecycle;
 mod media;
 mod navigation;
 mod overlays;
+mod questionnaire;
 mod retained_forms;
 mod scroll;
 mod separator;

@@ -48,6 +48,7 @@ export const REGISTERED_SURFACES = [
   "Pagination",
   "Popover",
   "Progress",
+  "Questionnaire",
   "Radio",
   "Rating",
   "Resizable",

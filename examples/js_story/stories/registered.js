@@ -93,6 +93,10 @@ import {
   PieChart,
   Popover,
   Progress,
+  Questionnaire,
+  QuestionnaireChoice,
+  QuestionnaireInput,
+  QuestionnaireItem,
   RadarChart,
   Radio,
   RadioGroup,
@@ -236,6 +240,7 @@ const tokenDraft = {
 
 export function initializeRegisteredExamples() {
   retained("token-input", () => { const input = InputState(); input.set_value(tokenDraft); return input; });
+  retained("questionnaire-direction", () => InputState("Type another direction…"));
   retained("token-textarea", () => { const input = TextareaState(); input.set_value(tokenDraft); return input; });
   for (const [id, placeholder, value] of inputGroupFields) {
     retained(`input-group-extra:${id}`, () => InputState(placeholder, value));
@@ -1713,6 +1718,51 @@ export function registeredExamples(surface, cx) {
                   .banner(),
               ),
             ),
+        },
+      ];
+    case "Questionnaire":
+      return [
+        {
+          label: "Guided setup",
+          description:
+            "One question at a time, with letter shortcuts, a freeform answer, an optional question, and validation on Next.",
+          element: asElement(
+            new Questionnaire("registered-questionnaire")
+              .shortcuts("letters")
+              .child(
+                new QuestionnaireItem("direction", "What should we prototype next?")
+                  .required(true)
+                  .description("Choose a direction or write your own.")
+                  .child(
+                    new QuestionnaireChoice("delegation", "Delegation").description(
+                      "Show how work moves to a specialist.",
+                    ),
+                  )
+                  .child(new QuestionnaireChoice("questions", "Question prompts"))
+                  .child(new QuestionnaireChoice("both", "Both together"))
+                  .child(
+                    new QuestionnaireInput(
+                      retained("questionnaire-direction", () =>
+                        InputState("Type another direction…"),
+                      ),
+                      "Another direction",
+                    ),
+                  ),
+              )
+              .child(
+                new QuestionnaireItem("tools", "Which tools do you use?")
+                  .multiple(true)
+                  .child(new QuestionnaireChoice("editor", "Editor").default_selected(true))
+                  .child(new QuestionnaireChoice("terminal", "Terminal"))
+                  .child(new QuestionnaireChoice("browser", "Browser").disabled(true)),
+              )
+              .child(
+                new QuestionnaireItem("tone", "What tone should the interface use?")
+                  .description("This optional question can be skipped.")
+                  .child(new QuestionnaireChoice("direct", "Direct"))
+                  .child(new QuestionnaireChoice("warm", "Warm")),
+              ),
+          ),
         },
       ];
     case "Progress":
