@@ -42,7 +42,7 @@ impl QuestionnaireState {
     pub fn new(
         items: Vec<QuestionnaireItemDefinition>,
         cx: &mut Context<Self>,
-    ) -> Result<Self, QuestionnaireStateError> {
+    ) -> Result<Self, QuestionnaireSchemaError> {
         Self::validate_schema(&items)?;
 
         let mut runtime = Vec::with_capacity(items.len());
@@ -121,18 +121,18 @@ impl QuestionnaireState {
 
     fn validate_schema(
         items: &[QuestionnaireItemDefinition],
-    ) -> Result<(), QuestionnaireStateError> {
+    ) -> Result<(), QuestionnaireSchemaError> {
         let mut item_names = HashSet::new();
         for item in items {
             if !item_names.insert(item.name().to_string()) {
-                return Err(QuestionnaireStateError::DuplicateItem(item.name().clone()));
+                return Err(QuestionnaireSchemaError::DuplicateItem(item.name().clone()));
             }
 
             let mut choices = HashSet::new();
             let mut defaults = 0;
             for choice in item.choices() {
                 if !choices.insert(choice.value().to_string()) {
-                    return Err(QuestionnaireStateError::DuplicateChoice {
+                    return Err(QuestionnaireSchemaError::DuplicateChoice {
                         item: item.name().clone(),
                         choice: choice.value().clone(),
                     });
@@ -140,7 +140,7 @@ impl QuestionnaireState {
                 defaults += usize::from(choice.is_default_selected());
             }
             if !item.is_multiple() && defaults > 1 {
-                return Err(QuestionnaireStateError::MultipleDefaultsForSingleItem(
+                return Err(QuestionnaireSchemaError::MultipleDefaultsForSingleItem(
                     item.name().clone(),
                 ));
             }
@@ -151,7 +151,7 @@ impl QuestionnaireState {
     pub fn with_current_item(
         mut self,
         name: impl Into<SharedString>,
-    ) -> Result<Self, QuestionnaireStateError> {
+    ) -> Result<Self, QuestionnaireSchemaError> {
         let name = name.into();
         let ix = self.item_ix(&name)?;
         if !self.runtime[ix].disabled {
@@ -370,7 +370,7 @@ impl QuestionnaireState {
         name: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<(), QuestionnaireStateError> {
+    ) -> Result<(), QuestionnaireSchemaError> {
         let ix = self.item_ix(name)?;
         if !self.runtime[ix].disabled {
             self.current = Some(ix);
@@ -386,7 +386,7 @@ impl QuestionnaireState {
         mut answer: QuestionnaireAnswer,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<(), QuestionnaireStateError> {
+    ) -> Result<(), QuestionnaireSchemaError> {
         let item_ix = self.item_ix(item)?;
         let before = self.effective_answer(item_ix);
         let before_status = self.status(item_ix);
@@ -425,13 +425,13 @@ impl QuestionnaireState {
         value: impl Into<SharedString>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<(), QuestionnaireStateError> {
+    ) -> Result<(), QuestionnaireSchemaError> {
         let item_ix = self.item_ix(item)?;
         let Some(input) = self.items[item_ix]
             .input()
             .map(|input| input.state().clone())
         else {
-            return Err(QuestionnaireStateError::AnswerDoesNotMatchItem(
+            return Err(QuestionnaireSchemaError::AnswerDoesNotMatchItem(
                 self.items[item_ix].name().clone(),
             ));
         };
@@ -447,7 +447,7 @@ impl QuestionnaireState {
         disabled: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Result<(), QuestionnaireStateError> {
+    ) -> Result<(), QuestionnaireSchemaError> {
         let ix = self.item_ix(name)?;
         if self.runtime[ix].disabled == disabled {
             return Ok(());
@@ -485,7 +485,7 @@ impl QuestionnaireState {
         value: &str,
         disabled: bool,
         cx: &mut Context<Self>,
-    ) -> Result<(), QuestionnaireStateError> {
+    ) -> Result<(), QuestionnaireSchemaError> {
         let item_ix = self.item_ix(item)?;
         let choice_ix = self.choice_ix(item_ix, value)?;
         if self.runtime[item_ix].choice_disabled[choice_ix] == disabled {
@@ -501,7 +501,7 @@ impl QuestionnaireState {
         item: &str,
         error: impl Into<SharedString>,
         cx: &mut Context<Self>,
-    ) -> Result<(), QuestionnaireStateError> {
+    ) -> Result<(), QuestionnaireSchemaError> {
         let ix = self.item_ix(item)?;
         self.runtime[ix].external_error = Some(error.into());
         self.complete = false;
@@ -513,7 +513,7 @@ impl QuestionnaireState {
         &mut self,
         item: &str,
         cx: &mut Context<Self>,
-    ) -> Result<(), QuestionnaireStateError> {
+    ) -> Result<(), QuestionnaireSchemaError> {
         let ix = self.item_ix(item)?;
         self.runtime[ix].external_error = None;
         cx.notify();
@@ -556,7 +556,7 @@ impl QuestionnaireState {
         item: &str,
         value: &str,
         cx: &mut Context<Self>,
-    ) -> Result<(), QuestionnaireStateError> {
+    ) -> Result<(), QuestionnaireSchemaError> {
         let item_ix = self.item_ix(item)?;
         let choice_ix = self.choice_ix(item_ix, value)?;
         if self.runtime[item_ix].disabled || self.runtime[item_ix].choice_disabled[choice_ix] {
@@ -1052,20 +1052,20 @@ impl QuestionnaireState {
         &self,
         item_ix: usize,
         answer: &QuestionnaireAnswer,
-    ) -> Result<(), QuestionnaireStateError> {
+    ) -> Result<(), QuestionnaireSchemaError> {
         let item = &self.items[item_ix];
         let sources = answer.choices.len() + usize::from(answer.freeform.is_some());
         if (!item.is_multiple() && sources > 1)
             || (answer.freeform.is_some() && item.input().is_none())
         {
-            return Err(QuestionnaireStateError::AnswerDoesNotMatchItem(
+            return Err(QuestionnaireSchemaError::AnswerDoesNotMatchItem(
                 item.name().clone(),
             ));
         }
         for choice in &answer.choices {
             let choice_ix = self.choice_ix(item_ix, choice)?;
             if self.runtime[item_ix].choice_disabled[choice_ix] {
-                return Err(QuestionnaireStateError::AnswerDoesNotMatchItem(
+                return Err(QuestionnaireSchemaError::AnswerDoesNotMatchItem(
                     item.name().clone(),
                 ));
             }
@@ -1102,9 +1102,9 @@ impl QuestionnaireState {
             .filter_map(|(ix, runtime)| (!runtime.disabled).then_some(ix))
     }
 
-    fn item_ix(&self, name: &str) -> Result<usize, QuestionnaireStateError> {
+    fn item_ix(&self, name: &str) -> Result<usize, QuestionnaireSchemaError> {
         self.item_ix_opt(name)
-            .ok_or_else(|| QuestionnaireStateError::UnknownItem(name.into()))
+            .ok_or_else(|| QuestionnaireSchemaError::UnknownItem(name.into()))
     }
 
     fn item_ix_opt(&self, name: &str) -> Option<usize> {
@@ -1113,9 +1113,9 @@ impl QuestionnaireState {
             .position(|item| item.name().as_ref() == name)
     }
 
-    fn choice_ix(&self, item_ix: usize, value: &str) -> Result<usize, QuestionnaireStateError> {
+    fn choice_ix(&self, item_ix: usize, value: &str) -> Result<usize, QuestionnaireSchemaError> {
         self.choice_ix_opt(item_ix, value)
-            .ok_or_else(|| QuestionnaireStateError::UnknownChoice {
+            .ok_or_else(|| QuestionnaireSchemaError::UnknownChoice {
                 item: self.items[item_ix].name().clone(),
                 choice: value.into(),
             })
@@ -1246,7 +1246,7 @@ mod tests {
         ];
         assert_eq!(
             QuestionnaireState::validate_schema(&duplicate_items),
-            Err(QuestionnaireStateError::DuplicateItem("same".into()))
+            Err(QuestionnaireSchemaError::DuplicateItem("same".into()))
         );
 
         let invalid_default = vec![
@@ -1257,7 +1257,7 @@ mod tests {
         ];
         assert_eq!(
             QuestionnaireState::validate_schema(&invalid_default),
-            Err(QuestionnaireStateError::MultipleDefaultsForSingleItem(
+            Err(QuestionnaireSchemaError::MultipleDefaultsForSingleItem(
                 "single".into()
             ))
         );
@@ -1270,7 +1270,7 @@ mod tests {
         ];
         assert_eq!(
             QuestionnaireState::validate_schema(&duplicate_choice),
-            Err(QuestionnaireStateError::DuplicateChoice {
+            Err(QuestionnaireSchemaError::DuplicateChoice {
                 item: "item".into(),
                 choice: "same".into(),
             })
@@ -1546,7 +1546,7 @@ mod tests {
         });
         assert_eq!(
             error,
-            Err(QuestionnaireStateError::UnknownChoice {
+            Err(QuestionnaireSchemaError::UnknownChoice {
                 item: "second".into(),
                 choice: "unknown".into(),
             })

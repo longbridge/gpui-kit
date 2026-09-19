@@ -387,40 +387,33 @@ Questionnaire:
     zh-CN: 第 %{current} 题，共 %{total} 题
     zh-HK: 第 %{current} 題，共 %{total} 題
     zh-TW: 第 %{current} 題，共 %{total} 題
-    it: Domanda %{current} di %{total}
   previous:
     en: Previous
     zh-CN: 上一题
     zh-HK: 上一題
     zh-TW: 上一題
-    it: Indietro
   next:
     en: Next
     zh-CN: 下一题
     zh-HK: 下一題
     zh-TW: 下一題
-    it: Avanti
   skip:
     en: Skip
     zh-CN: 跳过
     zh-HK: 跳過
     zh-TW: 跳過
-    it: Salta
   submit:
     en: Submit
     zh-CN: 提交
     zh-HK: 提交
     zh-TW: 提交
-    it: Invia
   error.required:
     en: Choose an answer to continue.
     zh-CN: 请选择一个答案后继续。
     zh-HK: 請選擇一個答案後繼續。
     zh-TW: 請選擇一個答案後繼續。
-    it: Scegli una risposta per continuare.
   error.optional:
     en: Choose an answer or skip this question.
     zh-CN: 请选择一个答案，或跳过此题。
     zh-HK: 請選擇一個答案，或跳過此題。
     zh-TW: 請選擇一個答案，或跳過此題。
-    it: Scegli una risposta o salta questa domanda.

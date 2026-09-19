@@ -6,8 +6,6 @@ extend-ignore-re = ['\\u\{[0-9A-Fa-f]+\}']
 astroid = "astroid"
 # Correct Italian singular of "command".
 comando = "comando"
-# Correct Italian infinitive for "to continue".
-continuare = "continuare"
 # A deliberately misspelled manifest key: `crates/shell/src/plugin.rs` refuses
 # it by name, and the test that proves it has to contain the misspelling.
 capabilites = "capabilites"

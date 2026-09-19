@@ -294,7 +294,7 @@ use `QuestionnaireItemDefinition::with_disabled(true)`.
 
 `QuestionnaireState::new` rejects duplicate item names, duplicate choice
 values within an item, and multiple defaults on a single-choice item. Setters
-for unknown items or choices return `QuestionnaireStateError`.
+for unknown items or choices return `QuestionnaireSchemaError`.
 
 ## Navigation and status
 
@@ -522,8 +522,7 @@ Its state can also be used to compose a custom indicator from the existing
 `Progress` or `Stepper` components.
 
 ```rust
-QuestionnaireProgress::new(&state)
-    .with_size(Size::Small);
+QuestionnaireProgress::new(&state);
 
 let progress = state.read(cx).progress();
 let percent = if progress.total() == 0 {
@@ -540,50 +539,27 @@ Stepper::new("questionnaire-steps")
 
 ## Sizes and theming
 
-Questionnaire parts implement the same `Sizable` contract as the rest of the
-library. `Medium` is the default and follows the ReUI `base-nova` questionnaire
-appearance. The supported named sizes are `XSmall`, `Small`, `Medium`, and
-`Large`; `Size::Size(value)` is available for a custom scale.
+The questionnaire skin has one scale. Spacing, typography, radius, border,
+input, primary, muted, destructive, and focus-ring values all come from the
+active theme's semantic tokens, so an application changes the questionnaire's
+density and shape by changing the theme rather than by passing a size to every
+part. Answer text matches the Checkbox and Radio family's medium label, which
+makes a choice card slightly taller than the upstream skin's; the card keeps a
+minimum height so a short answer still reads as a full row.
 
-Compound parts do not inherit the root's size automatically. Pass the same
-size to the root, progress, item, title, description, choices, choice, choice
-description, input, error, actions, and navigation parts that should share one
-scale.
+`Sizable` reaches only the navigation buttons, which pass the size through to
+`Button`:
 
 ```rust
 use gpui_kit::component::{Sizable as _, Size};
 
-let size = Size::Small;
-Questionnaire::new(&state)
-    .with_size(size)
-    .child(QuestionnaireProgress::new(&state).with_size(size))
-    .child(
-        QuestionnaireItem::new(&state, "direction")
-            .with_size(size)
-            .child(QuestionnaireTitle::new(&state, "direction").with_size(size))
-            .child(QuestionnaireDescription::new(&state, "direction").with_size(size))
-            .child(
-                QuestionnaireChoices::new(&state, "direction")
-                    .with_size(size)
-                    .child(QuestionnaireChoice::new(&state, "direction", "delegation").with_size(size))
-                    .child(QuestionnaireInput::new(&state, "direction").with_size(size)),
-            )
-            .child(QuestionnaireError::new(&state, "direction").with_size(size)),
-    )
-    .child(
-        QuestionnaireActions::new(&state)
-            .with_size(size)
-            .child(QuestionnairePrevious::new(&state).with_size(size))
-            .child(QuestionnaireSkip::new(&state).with_size(size))
-            .child(QuestionnaireNext::new(&state).with_size(size))
-            .child(QuestionnaireSubmit::new(&state).with_size(size)),
-    );
+QuestionnaireActions::new(&state)
+    .child(QuestionnairePrevious::new(&state).with_size(Size::Small))
+    .child(QuestionnaireNext::new(&state).with_size(Size::Small));
 ```
 
-The default skin derives spacing, typography, radius, border, input, primary,
-muted, destructive, and focus-ring values from the active theme's semantic
-tokens. Use `Styled` methods or `StyleRefinement` for local adjustments; local
-style refinement is applied after the component defaults.
+Use `Styled` methods or `StyleRefinement` for local adjustments; local style
+refinement is applied after the component defaults.
 
 ## Card and Dialog composition
 
@@ -757,12 +733,13 @@ error alert, semantic group state, focus behavior, and destructive styling.
 
 ## Current scope
 
-This GPUI port covers state, navigation, validation, focus, accessibility,
-compound rendering, and local submission events. The following web-specific or
-future behaviors are not currently provided: SSR/hydration collection
-diagnostics, `FormData`, native HTML validation, DOM mutation registration,
-async validation, runtime insertion/reordering of definitions, and built-in
-animation or persistence/transport.
+The questionnaire asks one question at a time: parts belonging to any question
+other than the current one render nothing, so a single page of several
+questions is not what this component builds. The schema is fixed at
+construction — questions and choices cannot be inserted or reordered at
+runtime, though any of them can be disabled — and validators run synchronously.
+Persistence, transport, and submission side effects belong to the containing
+page, which subscribes to `QuestionnaireEvent`.
 
 ## API reference
 
@@ -804,7 +781,7 @@ animation or persistence/transport.
 - [QuestionnaireSubmission]
 - [QuestionnaireSubmissionItem]
 - [QuestionnaireEvent]
-- [QuestionnaireStateError]
+- [QuestionnaireSchemaError]
 - [Sizable]
 
 [Questionnaire]: https://docs.rs/gpui-component/latest/gpui_component/questionnaire/struct.Questionnaire.html
@@ -840,5 +817,5 @@ animation or persistence/transport.
 [QuestionnaireSubmission]: https://docs.rs/gpui-component/latest/gpui_component/questionnaire/struct.QuestionnaireSubmission.html
 [QuestionnaireSubmissionItem]: https://docs.rs/gpui-component/latest/gpui_component/questionnaire/struct.QuestionnaireSubmissionItem.html
 [QuestionnaireEvent]: https://docs.rs/gpui-component/latest/gpui_component/questionnaire/enum.QuestionnaireEvent.html
-[QuestionnaireStateError]: https://docs.rs/gpui-component/latest/gpui_component/questionnaire/enum.QuestionnaireStateError.html
+[QuestionnaireSchemaError]: https://docs.rs/gpui-component/latest/gpui_component/questionnaire/enum.QuestionnaireSchemaError.html
 [Sizable]: https://docs.rs/gpui-component/latest/gpui_component/trait.Sizable.html

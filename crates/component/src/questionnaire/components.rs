@@ -21,6 +21,9 @@ use super::{QuestionnaireChoiceState, QuestionnaireState};
 type ChoiceRenderer =
     Rc<dyn Fn(&QuestionnaireChoiceState, &mut Window, &mut App) -> AnyElement + 'static>;
 
+/// The questionnaire skin's fixed geometry, following the ReUI `base-nova`
+/// questionnaire. Sizing is a theme concern here: the numbers come from the
+/// semantic spacing and radius tokens rather than a per-part size scale.
 #[derive(Clone, Copy)]
 struct QuestionnaireMetrics {
     root_gap: gpui::Pixels,
@@ -41,148 +44,59 @@ struct QuestionnaireMetrics {
 }
 
 impl QuestionnaireMetrics {
-    fn new(size: Size, cx: &App) -> Self {
+    fn new(cx: &App) -> Self {
         let tokens = cx.theme().semantic_tokens();
         let spacing = tokens.spacing;
         let radius = tokens.radius;
-        match size {
-            Size::XSmall => Self {
-                root_gap: spacing.sm,
-                item_gap: spacing.sm,
-                choices_gap: spacing.xs,
-                choice_gap: spacing.xs,
-                content_gap: spacing.xxs,
-                choice_padding_x: spacing.sm,
-                choice_padding_y: spacing.xs,
-                choice_min_height: spacing.xl + spacing.xs,
-                choice_radius: radius.md,
-                indicator_size: spacing.md,
-                indicator_mark_size: spacing.xs,
-                indicator_check_size: spacing.sm,
-                shortcut_size: spacing.lg,
-                shortcut_text_size: spacing.sm,
-                shortcut_radius: radius.sm,
-            },
-            Size::Small => Self {
-                root_gap: spacing.md,
-                item_gap: spacing.md,
-                choices_gap: spacing.xs,
-                choice_gap: spacing.xs + spacing.xxs,
-                content_gap: spacing.xxs,
-                choice_padding_x: spacing.sm,
-                choice_padding_y: spacing.xs,
-                choice_min_height: spacing.xxl,
-                choice_radius: radius.lg,
-                indicator_size: spacing.md + spacing.xxs,
-                indicator_mark_size: spacing.xs + spacing.xxs,
-                indicator_check_size: spacing.sm + spacing.xxs,
-                shortcut_size: spacing.lg + spacing.xxs,
-                shortcut_text_size: spacing.sm + spacing.xxs * 0.5,
-                shortcut_radius: radius.md,
-            },
-            Size::Large => Self {
-                root_gap: spacing.xl,
-                item_gap: spacing.xl,
-                choices_gap: spacing.sm + spacing.xxs,
-                choice_gap: spacing.md,
-                content_gap: spacing.xs,
-                choice_padding_x: spacing.lg,
-                choice_padding_y: spacing.md,
-                choice_min_height: spacing.xxl + spacing.lg,
-                choice_radius: radius.xl,
-                indicator_size: spacing.lg + spacing.xxs,
-                indicator_mark_size: spacing.sm + spacing.xxs,
-                indicator_check_size: spacing.lg,
-                shortcut_size: spacing.xl,
-                shortcut_text_size: spacing.md,
-                shortcut_radius: radius.lg,
-            },
-            Size::Size(value) => Self {
-                root_gap: value,
-                item_gap: value,
-                choices_gap: value * 0.5,
-                choice_gap: value * 0.625,
-                content_gap: value * 0.25,
-                choice_padding_x: value * 0.75,
-                choice_padding_y: value * 0.625,
-                choice_min_height: value * 2.75,
-                choice_radius: radius.lg,
-                indicator_size: value,
-                indicator_mark_size: value * 0.5,
-                indicator_check_size: value * 0.875,
-                shortcut_size: value * 1.25,
-                shortcut_text_size: value * 0.625,
-                shortcut_radius: radius.md,
-            },
-            Size::Medium => Self {
-                root_gap: spacing.lg,
-                item_gap: spacing.lg,
-                choices_gap: spacing.sm,
-                choice_gap: spacing.sm + spacing.xxs,
-                content_gap: spacing.xxs,
-                choice_padding_x: spacing.md,
-                choice_padding_y: spacing.sm + spacing.xxs,
-                choice_min_height: spacing.xxl + spacing.md,
-                choice_radius: radius.lg,
-                indicator_size: spacing.lg,
-                indicator_mark_size: spacing.sm,
-                indicator_check_size: spacing.md + spacing.xxs,
-                shortcut_size: spacing.lg + spacing.xs,
-                shortcut_text_size: spacing.sm + spacing.xxs,
-                shortcut_radius: radius.md,
-            },
+        Self {
+            root_gap: spacing.lg,
+            item_gap: spacing.lg,
+            choices_gap: spacing.sm,
+            choice_gap: spacing.sm + spacing.xxs,
+            content_gap: spacing.xxs,
+            choice_padding_x: spacing.md,
+            choice_padding_y: spacing.sm + spacing.xxs,
+            choice_min_height: spacing.xxl + spacing.md,
+            choice_radius: radius.lg,
+            indicator_size: spacing.lg,
+            indicator_mark_size: spacing.sm,
+            indicator_check_size: spacing.md + spacing.xxs,
+            shortcut_size: spacing.lg + spacing.xs,
+            shortcut_text_size: spacing.sm + spacing.xxs,
+            shortcut_radius: radius.md,
         }
     }
 }
 
-fn text_style<T: Styled>(element: T, size: Size, cx: &App) -> T {
-    let typography = cx.theme().semantic_tokens().typography;
-    let token = match size {
-        Size::XSmall => typography.xs,
-        Size::Small => typography.sm,
-        Size::Medium => typography.sm,
-        Size::Large => typography.md,
-        Size::Size(value) => return element.text_size(value),
-    };
-    element
-        .text_size(token.size)
-        .line_height(token.line_height)
-        .font_weight(token.weight)
+/// Answer text matches the Checkbox and Radio family's medium label.
+fn text_style<T: Styled>(element: T, cx: &App) -> T {
+    apply_text_token(element, cx.theme().semantic_tokens().typography.md)
 }
 
-fn progress_text_style<T: Styled>(element: T, size: Size, cx: &App) -> T {
-    let typography = cx.theme().semantic_tokens().typography;
-    let token = match size {
-        Size::XSmall | Size::Small | Size::Medium => typography.xs,
-        Size::Large => typography.sm,
-        Size::Size(value) => {
-            return element.text_size(value * 0.75).line_height(value);
-        }
-    };
-
-    element
-        .text_size(token.size)
-        .line_height(token.line_height)
-        .font_weight(token.weight)
+/// Secondary text sits one step below the answer text.
+fn secondary_text_style<T: Styled>(element: T, cx: &App) -> T {
+    apply_text_token(element, cx.theme().semantic_tokens().typography.sm)
 }
 
-fn description_text_style<T: Styled>(element: T, size: Size, cx: &App) -> T {
-    text_style(element, size, cx)
-}
-
-fn title_text_style<T: Styled>(element: T, size: Size, cx: &App) -> T {
-    let typography = cx.theme().semantic_tokens().typography;
-    let token = match size {
-        Size::XSmall => typography.sm,
-        Size::Small => typography.sm,
-        Size::Medium => typography.md,
-        Size::Large => typography.lg,
-        Size::Size(value) => return element.text_size(value),
-    };
-    element
-        .text_size(token.size)
-        .line_height(token.line_height)
+fn progress_text_style<T: Styled>(element: T, cx: &App) -> T {
+    apply_text_token(element, cx.theme().semantic_tokens().typography.xs)
         .font_weight(gpui::FontWeight::MEDIUM)
+}
+
+fn description_text_style<T: Styled>(element: T, cx: &App) -> T {
+    secondary_text_style(element, cx)
+}
+
+fn title_text_style<T: Styled>(element: T, cx: &App) -> T {
+    apply_text_token(element, cx.theme().semantic_tokens().typography.lg)
+        .font_weight(gpui::FontWeight::MEDIUM)
+}
+
+fn apply_text_token<T: Styled>(element: T, token: gpui_base::TextStyleToken) -> T {
+    element
+        .text_size(token.size)
+        .line_height(token.line_height)
+        .font_weight(token.weight)
 }
 
 fn item_label(definition: &super::QuestionnaireItemDefinition) -> Option<SharedString> {
@@ -192,6 +106,32 @@ fn item_label(definition: &super::QuestionnaireItemDefinition) -> Option<SharedS
 fn item_description(definition: &super::QuestionnaireItemDefinition) -> Option<SharedString> {
     definition.description().cloned()
 }
+
+/// A part addresses its question by name. A name the schema does not define
+/// renders nothing, which is silent enough to hide a typo, so a debug build
+/// names what went missing. It is a warning rather than an assertion because
+/// one view may legitimately render the parts of several questionnaires and
+/// hand each a state that defines only some of them.
+#[cfg(debug_assertions)]
+#[track_caller]
+fn report_unknown_item(item: &SharedString) {
+    tracing::warn!("questionnaire has no item named `{item}`; the part renders nothing");
+}
+
+/// The same for a choice value inside a question that does exist.
+#[cfg(debug_assertions)]
+#[track_caller]
+fn report_unknown_choice(item: &SharedString, value: &SharedString) {
+    tracing::warn!(
+        "questionnaire item `{item}` has no choice named `{value}`; the part renders nothing"
+    );
+}
+
+#[cfg(not(debug_assertions))]
+fn report_unknown_item(_: &SharedString) {}
+
+#[cfg(not(debug_assertions))]
+fn report_unknown_choice(_: &SharedString, _: &SharedString) {}
 
 fn element_id(state: &Entity<QuestionnaireState>, suffix: impl std::fmt::Display) -> ElementId {
     ElementId::Name(format!("questionnaire-{}-{suffix}", state.entity_id()).into())
@@ -203,7 +143,6 @@ fn element_id(state: &Entity<QuestionnaireState>, suffix: impl std::fmt::Display
 pub struct Questionnaire {
     state: Entity<QuestionnaireState>,
     style: StyleRefinement,
-    size: Size,
     children: Vec<AnyElement>,
 }
 
@@ -212,7 +151,6 @@ impl Questionnaire {
         Self {
             state: state.clone(),
             style: StyleRefinement::default(),
-            size: Size::Medium,
             children: Vec::new(),
         }
     }
@@ -329,13 +267,6 @@ impl Styled for Questionnaire {
     }
 }
 
-impl Sizable for Questionnaire {
-    fn with_size(mut self, size: impl Into<Size>) -> Self {
-        self.size = size.into();
-        self
-    }
-}
-
 impl ParentElement for Questionnaire {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
         self.children.extend(elements);
@@ -344,7 +275,7 @@ impl ParentElement for Questionnaire {
 
 impl RenderOnce for Questionnaire {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let metrics = QuestionnaireMetrics::new(self.size, cx);
+        let metrics = QuestionnaireMetrics::new(cx);
         let focus_handle = self.state.read(cx).focus_handle().clone();
         let state = self.state.clone();
         let debug_selector = format!("questionnaire-{}-root", self.state.entity_id());
@@ -371,7 +302,6 @@ impl RenderOnce for Questionnaire {
 pub struct QuestionnaireProgress {
     state: Entity<QuestionnaireState>,
     style: StyleRefinement,
-    size: Size,
     children: Vec<AnyElement>,
 }
 
@@ -380,7 +310,6 @@ impl QuestionnaireProgress {
         Self {
             state: state.clone(),
             style: StyleRefinement::default(),
-            size: Size::Medium,
             children: Vec::new(),
         }
     }
@@ -389,13 +318,6 @@ impl QuestionnaireProgress {
 impl Styled for QuestionnaireProgress {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
-    }
-}
-
-impl Sizable for QuestionnaireProgress {
-    fn with_size(mut self, size: impl Into<Size>) -> Self {
-        self.size = size.into();
-        self
     }
 }
 
@@ -424,10 +346,8 @@ impl RenderOnce for QuestionnaireProgress {
                 .aria_max_numeric_value(total as f64)
                 .aria_numeric_value(current as f64)
                 .text_color(colors.muted_foreground),
-            self.size,
             cx,
         )
-        .font_weight(gpui::FontWeight::MEDIUM)
         .refine_style(&self.style)
         .when(!has_children, |this| this.child(label))
         .children(self.children)
@@ -441,7 +361,6 @@ macro_rules! questionnaire_item_part {
             state: Entity<QuestionnaireState>,
             item: SharedString,
             style: StyleRefinement,
-            size: Size,
             children: Vec<AnyElement>,
         }
 
@@ -451,7 +370,6 @@ macro_rules! questionnaire_item_part {
                     state: state.clone(),
                     item: item.into(),
                     style: StyleRefinement::default(),
-                    size: Size::Medium,
                     children: Vec::new(),
                 }
             }
@@ -460,13 +378,6 @@ macro_rules! questionnaire_item_part {
         impl Styled for $name {
             fn style(&mut self) -> &mut StyleRefinement {
                 &mut self.style
-            }
-        }
-
-        impl Sizable for $name {
-            fn with_size(mut self, size: impl Into<Size>) -> Self {
-                self.size = size.into();
-                self
             }
         }
 
@@ -479,6 +390,7 @@ macro_rules! questionnaire_item_part {
         impl RenderOnce for $name {
             fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
                 let Some(definition) = self.state.read(cx).item_definition(&self.item) else {
+                    report_unknown_item(&self.item);
                     return gpui::Empty.into_any_element();
                 };
                 let fallback = $fallback(definition);
@@ -491,9 +403,9 @@ macro_rules! questionnaire_item_part {
                 // description of its own closes the gap the description would
                 // have filled, so answers never crowd the question.
                 let closes_item_gap = $closes_item_gap && item_description(definition).is_none();
-                $style(div().w_full().text_color(colors.$color), self.size, cx)
+                $style(div().w_full().text_color(colors.$color), cx)
                     .when(closes_item_gap, |this| {
-                        this.mb(QuestionnaireMetrics::new(self.size, cx).item_gap)
+                        this.mb(QuestionnaireMetrics::new(cx).item_gap)
                     })
                     .refine_style(&self.style)
                     .when(!has_children, |this| {
@@ -528,7 +440,6 @@ pub struct QuestionnaireItem {
     state: Entity<QuestionnaireState>,
     item: SharedString,
     style: StyleRefinement,
-    size: Size,
     children: Vec<AnyElement>,
 }
 
@@ -538,7 +449,6 @@ impl QuestionnaireItem {
             state: state.clone(),
             item: item.into(),
             style: StyleRefinement::default(),
-            size: Size::Medium,
             children: Vec::new(),
         }
     }
@@ -547,13 +457,6 @@ impl QuestionnaireItem {
 impl Styled for QuestionnaireItem {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
-    }
-}
-
-impl Sizable for QuestionnaireItem {
-    fn with_size(mut self, size: impl Into<Size>) -> Self {
-        self.size = size.into();
-        self
     }
 }
 
@@ -568,6 +471,7 @@ impl RenderOnce for QuestionnaireItem {
         let state = self.state.read(cx);
         let active = state.current_item().is_some_and(|name| name == &self.item);
         let Some(item_state) = state.item_state(&self.item) else {
+            report_unknown_item(&self.item);
             return gpui::Empty.into_any_element();
         };
         if !active || item_state.is_disabled() {
@@ -579,7 +483,7 @@ impl RenderOnce for QuestionnaireItem {
         let focus_handle = state.item_focus_handle(&self.item).cloned();
         let label = definition.accessibility_label().clone();
         let description = definition.description().cloned();
-        let metrics = QuestionnaireMetrics::new(self.size, cx);
+        let metrics = QuestionnaireMetrics::new(cx);
 
         div()
             .id(element_id(&self.state, format!("item-{}", self.item)))
@@ -607,7 +511,6 @@ pub struct QuestionnaireChoices {
     state: Entity<QuestionnaireState>,
     item: SharedString,
     style: StyleRefinement,
-    size: Size,
     children: Vec<AnyElement>,
 }
 
@@ -617,7 +520,6 @@ impl QuestionnaireChoices {
             state: state.clone(),
             item: item.into(),
             style: StyleRefinement::default(),
-            size: Size::Medium,
             children: Vec::new(),
         }
     }
@@ -626,13 +528,6 @@ impl QuestionnaireChoices {
 impl Styled for QuestionnaireChoices {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
-    }
-}
-
-impl Sizable for QuestionnaireChoices {
-    fn with_size(mut self, size: impl Into<Size>) -> Self {
-        self.size = size.into();
-        self
     }
 }
 
@@ -647,12 +542,13 @@ impl RenderOnce for QuestionnaireChoices {
         let state = self.state.read(cx);
         let active = state.current_item().is_some_and(|name| name == &self.item);
         let Some(item) = state.item_state(&self.item) else {
+            report_unknown_item(&self.item);
             return gpui::Empty.into_any_element();
         };
         if !active || item.is_disabled() {
             return gpui::Empty.into_any_element();
         }
-        let metrics = QuestionnaireMetrics::new(self.size, cx);
+        let metrics = QuestionnaireMetrics::new(cx);
 
         if item.is_multiple() {
             div()
@@ -688,7 +584,6 @@ pub struct QuestionnaireChoice {
     indicator_style: StyleRefinement,
     content_style: StyleRefinement,
     shortcut_style: StyleRefinement,
-    size: Size,
     children: Vec<AnyElement>,
     indicator_renderer: Option<ChoiceRenderer>,
     shortcut_renderer: Option<ChoiceRenderer>,
@@ -708,7 +603,6 @@ impl QuestionnaireChoice {
             indicator_style: StyleRefinement::default(),
             content_style: StyleRefinement::default(),
             shortcut_style: StyleRefinement::default(),
-            size: Size::Medium,
             children: Vec::new(),
             indicator_renderer: None,
             shortcut_renderer: None,
@@ -750,13 +644,6 @@ impl QuestionnaireChoice {
 impl Styled for QuestionnaireChoice {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
-    }
-}
-
-impl Sizable for QuestionnaireChoice {
-    fn with_size(mut self, size: impl Into<Size>) -> Self {
-        self.size = size.into();
-        self
     }
 }
 
@@ -824,12 +711,18 @@ impl RenderOnce for QuestionnaireChoice {
         let state = self.state.read(cx);
         let active = state.current_item().is_some_and(|name| name == &self.item);
         let Some(choice_state) = state.choice_state(&self.item, &self.value) else {
+            if state.item_state(&self.item).is_none() {
+                report_unknown_item(&self.item);
+            } else {
+                report_unknown_choice(&self.item, &self.value);
+            }
             return gpui::Empty.into_any_element();
         };
         if !active {
             return gpui::Empty.into_any_element();
         }
         let Some(item) = state.item_state(&self.item) else {
+            report_unknown_item(&self.item);
             return gpui::Empty.into_any_element();
         };
         let Some(definition) = state.choice_definition(&self.item, &self.value) else {
@@ -862,7 +755,7 @@ impl RenderOnce for QuestionnaireChoice {
         let radius = cx.theme().semantic_tokens().radius;
         let indicator_background = cx.theme().input_background();
         let mono_font = cx.theme().semantic_tokens().typography.mono.clone();
-        let metrics = QuestionnaireMetrics::new(self.size, cx);
+        let metrics = QuestionnaireMetrics::new(cx);
         let answer_alignment_offset = metrics.content_gap;
         let focused = focus_handle
             .as_ref()
@@ -926,13 +819,11 @@ impl RenderOnce for QuestionnaireChoice {
             .when(!has_children, |this| {
                 this.child(text_style(
                     div().text_color(colors.foreground).child(label.clone()),
-                    self.size,
                     cx,
                 ))
                 .when_some(description.clone(), |this, description| {
-                    this.child(text_style(
+                    this.child(secondary_text_style(
                         div().text_color(colors.muted_foreground).child(description),
-                        self.size.smaller(),
                         cx,
                     ))
                 })
@@ -1087,7 +978,6 @@ impl RenderOnce for QuestionnaireChoice {
 #[derive(IntoElement)]
 pub struct QuestionnaireChoiceDescription {
     style: StyleRefinement,
-    size: Size,
     children: Vec<AnyElement>,
 }
 
@@ -1095,7 +985,6 @@ impl QuestionnaireChoiceDescription {
     pub fn new() -> Self {
         Self {
             style: StyleRefinement::default(),
-            size: Size::Medium,
             children: Vec::new(),
         }
     }
@@ -1113,13 +1002,6 @@ impl Styled for QuestionnaireChoiceDescription {
     }
 }
 
-impl Sizable for QuestionnaireChoiceDescription {
-    fn with_size(mut self, size: impl Into<Size>) -> Self {
-        self.size = size.into();
-        self
-    }
-}
-
 impl ParentElement for QuestionnaireChoiceDescription {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
         self.children.extend(elements);
@@ -1129,13 +1011,9 @@ impl ParentElement for QuestionnaireChoiceDescription {
 impl RenderOnce for QuestionnaireChoiceDescription {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let colors = cx.theme().semantic_tokens().colors;
-        text_style(
-            div().text_color(colors.muted_foreground),
-            self.size.smaller(),
-            cx,
-        )
-        .refine_style(&self.style)
-        .children(self.children)
+        secondary_text_style(div().text_color(colors.muted_foreground), cx)
+            .refine_style(&self.style)
+            .children(self.children)
     }
 }
 
@@ -1145,7 +1023,6 @@ pub struct QuestionnaireInput {
     state: Entity<QuestionnaireState>,
     item: SharedString,
     style: StyleRefinement,
-    size: Size,
 }
 
 impl QuestionnaireInput {
@@ -1154,7 +1031,6 @@ impl QuestionnaireInput {
             state: state.clone(),
             item: item.into(),
             style: StyleRefinement::default(),
-            size: Size::Medium,
         }
     }
 }
@@ -1165,18 +1041,12 @@ impl Styled for QuestionnaireInput {
     }
 }
 
-impl Sizable for QuestionnaireInput {
-    fn with_size(mut self, size: impl Into<Size>) -> Self {
-        self.size = size.into();
-        self
-    }
-}
-
 impl RenderOnce for QuestionnaireInput {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = self.state.read(cx);
         let active = state.current_item().is_some_and(|name| name == &self.item);
         let Some(item_state) = state.item_state(&self.item) else {
+            report_unknown_item(&self.item);
             return gpui::Empty.into_any_element();
         };
         let Some(definition) = state.item_definition(&self.item) else {
@@ -1192,7 +1062,6 @@ impl RenderOnce for QuestionnaireInput {
         Input::new(input_definition.state())
             .aria_label(input_definition.accessibility_label().clone())
             .disabled(item_state.is_disabled() || input_definition.is_disabled())
-            .with_size(self.size)
             .when(item_state.is_invalid(), |this| {
                 this.border_color(cx.theme().semantic_tokens().colors.destructive)
             })
@@ -1207,7 +1076,6 @@ pub struct QuestionnaireError {
     state: Entity<QuestionnaireState>,
     item: SharedString,
     style: StyleRefinement,
-    size: Size,
     children: Vec<AnyElement>,
 }
 
@@ -1217,7 +1085,6 @@ impl QuestionnaireError {
             state: state.clone(),
             item: item.into(),
             style: StyleRefinement::default(),
-            size: Size::Medium,
             children: Vec::new(),
         }
     }
@@ -1226,13 +1093,6 @@ impl QuestionnaireError {
 impl Styled for QuestionnaireError {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
-    }
-}
-
-impl Sizable for QuestionnaireError {
-    fn with_size(mut self, size: impl Into<Size>) -> Self {
-        self.size = size.into();
-        self
     }
 }
 
@@ -1250,6 +1110,7 @@ impl RenderOnce for QuestionnaireError {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = self.state.read(cx);
         let Some(item) = state.item_state(&self.item) else {
+            report_unknown_item(&self.item);
             return gpui::Empty.into_any_element();
         };
         let error = state.error(&self.item).cloned();
@@ -1264,7 +1125,6 @@ impl RenderOnce for QuestionnaireError {
             questionnaire_error_root(element_id(&self.state, format!("error-{}", self.item)))
                 .mt(spacing.sm)
                 .text_color(colors.destructive),
-            self.size,
             cx,
         )
         .refine_style(&self.style)
@@ -1281,7 +1141,6 @@ impl RenderOnce for QuestionnaireError {
 pub struct QuestionnaireActions {
     state: Entity<QuestionnaireState>,
     style: StyleRefinement,
-    size: Size,
     children: Vec<AnyElement>,
 }
 
@@ -1290,7 +1149,6 @@ impl QuestionnaireActions {
         Self {
             state: state.clone(),
             style: StyleRefinement::default(),
-            size: Size::Medium,
             children: Vec::new(),
         }
     }
@@ -1302,13 +1160,6 @@ impl Styled for QuestionnaireActions {
     }
 }
 
-impl Sizable for QuestionnaireActions {
-    fn with_size(mut self, size: impl Into<Size>) -> Self {
-        self.size = size.into();
-        self
-    }
-}
-
 impl ParentElement for QuestionnaireActions {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
         self.children.extend(elements);
@@ -1317,7 +1168,7 @@ impl ParentElement for QuestionnaireActions {
 
 impl RenderOnce for QuestionnaireActions {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let metrics = QuestionnaireMetrics::new(self.size, cx);
+        let metrics = QuestionnaireMetrics::new(cx);
         let debug_selector = format!("questionnaire-{}-actions", self.state.entity_id());
         div()
             .id(element_id(&self.state, "actions"))
@@ -1465,7 +1316,6 @@ mod tests {
     #[test]
     fn compound_parts_support_builder_customization() {
         let _ = QuestionnaireChoiceDescription::new()
-            .small()
             .opacity(0.8)
             .child("Description");
     }

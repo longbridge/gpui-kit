@@ -216,26 +216,24 @@ impl QuestionnaireStory {
         state: &Entity<QuestionnaireState>,
         item: &'static str,
         choices: impl IntoIterator<Item = &'static str>,
-        size: Size,
     ) -> QuestionnaireItem {
         let result = QuestionnaireItem::new(state, item)
-            .with_size(size)
-            .child(QuestionnaireTitle::new(state, item).with_size(size))
-            .child(QuestionnaireDescription::new(state, item).with_size(size));
+            .child(QuestionnaireTitle::new(state, item))
+            .child(QuestionnaireDescription::new(state, item));
 
-        let mut choice_parts = QuestionnaireChoices::new(state, item).with_size(size);
+        let mut choice_parts = QuestionnaireChoices::new(state, item);
         for value in choices {
-            let choice = QuestionnaireChoice::new(state, item, value).with_size(size);
+            let choice = QuestionnaireChoice::new(state, item, value);
             choice_parts = choice_parts.child(choice);
         }
 
         // Keep the freeform answer in the same answer group as fixed choices,
         // matching the ReUI questionnaire composition and spacing.
-        choice_parts = choice_parts.child(QuestionnaireInput::new(state, item).with_size(size));
+        choice_parts = choice_parts.child(QuestionnaireInput::new(state, item));
 
         result
             .child(choice_parts)
-            .child(QuestionnaireError::new(state, item).with_size(size))
+            .child(QuestionnaireError::new(state, item))
     }
 
     fn questionnaire_view(
@@ -243,16 +241,13 @@ impl QuestionnaireStory {
         size: Size,
         items: &[(&'static str, &'static [&'static str])],
     ) -> Questionnaire {
-        let mut questionnaire = Questionnaire::new(state)
-            .with_size(size)
-            .child(QuestionnaireProgress::new(state).with_size(size));
+        let mut questionnaire = Questionnaire::new(state).child(QuestionnaireProgress::new(state));
         for (name, choices) in items {
             questionnaire =
-                questionnaire.child(Self::item_view(state, name, choices.iter().copied(), size));
+                questionnaire.child(Self::item_view(state, name, choices.iter().copied()));
         }
         questionnaire.child(
             QuestionnaireActions::new(state)
-                .with_size(size)
                 .child(QuestionnairePrevious::new(state).with_size(size))
                 .child(QuestionnaireSkip::new(state).with_size(size))
                 .child(QuestionnaireNext::new(state).with_size(size))
@@ -691,29 +686,24 @@ impl Render for QuestionnaireStory {
             .item_state("environment")
             .is_some_and(|item| !item.is_disabled());
         let custom_control = Questionnaire::new(&control_state)
-            .with_size(self.size)
-            .child(QuestionnaireProgress::new(&control_state).with_size(self.size))
+            .child(QuestionnaireProgress::new(&control_state))
             .child(Self::item_view(
                 &control_state,
                 "runtime",
                 ["local", "cloud"],
-                self.size,
             ))
             .child(Self::item_view(
                 &control_state,
                 "delivery",
                 ["guided", "automatic"],
-                self.size,
             ))
             .child(Self::item_view(
                 &control_state,
                 "environment",
                 ["staging", "production"],
-                self.size,
             ))
             .child(
                 QuestionnaireActions::new(&control_state)
-                    .with_size(self.size)
                     .when(control_previous_visible, |actions| {
                         actions.child(
                             Button::new("questionnaire-custom-previous")
@@ -798,20 +788,13 @@ impl Render for QuestionnaireStory {
 
         let custom_choice_state = self.custom_choice_state.clone();
         let custom_choice = Questionnaire::new(&custom_choice_state)
-            .with_size(self.size)
             .child(
                 QuestionnaireItem::new(&custom_choice_state, "custom")
-                    .with_size(self.size)
-                    .child(
-                        QuestionnaireTitle::new(&custom_choice_state, "custom")
-                            .with_size(self.size),
-                    )
+                    .child(QuestionnaireTitle::new(&custom_choice_state, "custom"))
                     .child(
                         QuestionnaireChoices::new(&custom_choice_state, "custom")
-                            .with_size(self.size)
                             .child(
                                 QuestionnaireChoice::new(&custom_choice_state, "custom", "compact")
-                                    .with_size(self.size)
                                     .content_style(StyleRefinement::default().gap_2())
                                     .render_indicator(|choice, _, cx| {
                                         div()
@@ -839,13 +822,9 @@ impl Render for QuestionnaireStory {
                                         v_flex()
                                             .gap_1()
                                             .child(div().font_medium().child("Compact"))
-                                            .child(
-                                                QuestionnaireChoiceDescription::new()
-                                                    .with_size(self.size)
-                                                    .child(
-                                                        "A custom indicator and composed description.",
-                                                    ),
-                                            ),
+                                            .child(QuestionnaireChoiceDescription::new().child(
+                                                "A custom indicator and composed description.",
+                                            )),
                                     ),
                             )
                             .child(
@@ -854,19 +833,14 @@ impl Render for QuestionnaireStory {
                                     "custom",
                                     "comfortable",
                                 )
-                                .with_size(self.size)
                                 .indicator_style(StyleRefinement::default().opacity(0.65))
                                 .shortcut_style(StyleRefinement::default().opacity(0.65)),
                             ),
                     )
-                    .child(
-                        QuestionnaireError::new(&custom_choice_state, "custom")
-                            .with_size(self.size),
-                    ),
+                    .child(QuestionnaireError::new(&custom_choice_state, "custom")),
             )
             .child(
                 QuestionnaireActions::new(&custom_choice_state)
-                    .with_size(self.size)
                     .child(QuestionnaireSubmit::new(&custom_choice_state).with_size(self.size)),
             );
 
@@ -890,24 +864,18 @@ impl Render for QuestionnaireStory {
                     )
                     .child(
                         Questionnaire::new(&dialog_content_state)
-                            .with_size(Size::Small)
                             .child(
-                                QuestionnaireProgress::new(&dialog_content_state)
-                                    .with_size(Size::Small),
+                                QuestionnaireProgress::new(&dialog_content_state),
                             )
                             .child(Self::item_view(
                                 &dialog_content_state,
                                 "dialog",
-                                ["first", "second"],
-                                Size::Small,
-                            ))
+                                ["first", "second"],))
                             .child(
                                 Self::item_view(
                                     &dialog_content_state,
                                     "dialog_verification",
-                                    ["targeted", "full"],
-                                    Size::Small,
-                                ),
+                                    ["targeted", "full"],),
                             )
                             .child(
                                 DialogFooter::new()
@@ -921,7 +889,6 @@ impl Render for QuestionnaireStory {
                                     )
                                     .child(
                                         QuestionnaireActions::new(&dialog_content_state)
-                                            .with_size(Size::Small)
                                             .child(
                                                 QuestionnairePrevious::new(&dialog_content_state)
                                                     .with_size(Size::Small),
@@ -1259,8 +1226,8 @@ impl Render for QuestionnaireStory {
                     .child(dialog),
             )
             .child(
-                section("All sizes")
-                    .description("Medium matches the ReUI skin; the same composition scales through all four Size values.")
+                section("Navigation button sizes")
+                    .description("The questionnaire skin has one fixed scale; Sizable only reaches the navigation buttons.")
                     .w(px(600.))
                     .child(
                         h_flex()

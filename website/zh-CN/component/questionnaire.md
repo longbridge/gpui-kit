@@ -282,7 +282,7 @@ let disabled_input_definition = QuestionnaireInputDefinition::new(
 
 `QuestionnaireState::new` 会拒绝重复 item name、同一 item 中重复的 choice value，
 以及单选 item 的多个默认值。针对未知 item 或 choice 的 setter 会返回
-`QuestionnaireStateError`。
+`QuestionnaireSchemaError`。
 
 ## 导航与状态
 
@@ -493,8 +493,7 @@ Enter 确认已填写的答案。Command/Ctrl+Enter 确认当前 item。空答�
 state，使用现有 `Progress` 或 `Stepper` 组合自定义指示器。
 
 ```rust
-QuestionnaireProgress::new(&state)
-    .with_size(Size::Small);
+QuestionnaireProgress::new(&state);
 
 let progress = state.read(cx).progress();
 let percent = if progress.total() == 0 {
@@ -511,47 +510,23 @@ Stepper::new("questionnaire-steps")
 
 ## 尺寸与主题
 
-Questionnaire 部件实现与其他组件相同的 `Sizable` 契约。默认尺寸为 `Medium`，其
-外观对齐 ReUI 的 `base-nova` questionnaire。支持的命名尺寸为 `XSmall`、`Small`、
-`Medium` 和 `Large`；也可以使用 `Size::Size(value)` 自定义比例。
+Questionnaire 皮肤只有一套比例。spacing、typography、radius、border、input、
+primary、muted、destructive 和 focus ring 全部取自当前主题的 semantic tokens，
+应用通过调整主题来改变问卷的密度与形状，而不是给每个部件传 size。答案文字与
+Checkbox、Radio 家族的 medium label 一致，因此选项卡片会比上游皮肤略高；卡片仍
+保留最小高度，使内容很短的选项也是完整的一行。
 
-组合部件不会自动继承 root 的 size。需要保持同一比例时，应将相同 size 传给 root、
-progress、item、title、description、choices、choice、choice description、input、
-error、actions 和 navigation 部件。
+`Sizable` 只作用于导航按钮，它们会把 size 透传给 `Button`：
 
 ```rust
 use gpui_kit::component::{Sizable as _, Size};
 
-let size = Size::Small;
-Questionnaire::new(&state)
-    .with_size(size)
-    .child(QuestionnaireProgress::new(&state).with_size(size))
-    .child(
-        QuestionnaireItem::new(&state, "direction")
-            .with_size(size)
-            .child(QuestionnaireTitle::new(&state, "direction").with_size(size))
-            .child(QuestionnaireDescription::new(&state, "direction").with_size(size))
-            .child(
-                QuestionnaireChoices::new(&state, "direction")
-                    .with_size(size)
-                    .child(QuestionnaireChoice::new(&state, "direction", "delegation").with_size(size))
-                    .child(QuestionnaireInput::new(&state, "direction").with_size(size)),
-            )
-            .child(QuestionnaireError::new(&state, "direction").with_size(size)),
-    )
-    .child(
-        QuestionnaireActions::new(&state)
-            .with_size(size)
-            .child(QuestionnairePrevious::new(&state).with_size(size))
-            .child(QuestionnaireSkip::new(&state).with_size(size))
-            .child(QuestionnaireNext::new(&state).with_size(size))
-            .child(QuestionnaireSubmit::new(&state).with_size(size)),
-    );
+QuestionnaireActions::new(&state)
+    .child(QuestionnairePrevious::new(&state).with_size(Size::Small))
+    .child(QuestionnaireNext::new(&state).with_size(Size::Small));
 ```
 
-默认皮肤从当前主题的 semantic tokens 派生 spacing、typography、radius、border、
-input、primary、muted、destructive 和 focus-ring。局部调整可以使用 `Styled` 方法
-或 `StyleRefinement`；局部 style refinement 会在组件默认值之后应用。
+局部微调使用 `Styled` 方法或 `StyleRefinement`，实例样式在组件默认样式之后应用。
 
 ## Card 和 Dialog 组合
 
@@ -716,10 +691,10 @@ builder；Questionnaire 仍通过错误 alert、语义分组状态、焦点行�
 
 ## 当前范围
 
-此 GPUI port 覆盖状态、导航、校验、焦点、可访问性、组合渲染和本地提交事件。以下
-Web 专属或未来行为暂不提供：SSR/hydration collection diagnostics、`FormData`、
-原生 HTML 校验、DOM mutation registration、异步校验、definition 的运行时插入/重排，
-以及内置动画或持久化/传输。
+问卷一次只呈现一道题：非当前题的部件不会渲染任何内容，因此它不适合做「一页多题」
+的表单。schema 在构造时固定 —— 运行时不能插入或重排题目与选项，但可以禁用其中
+任意一项 —— 校验器同步执行。持久化、传输和提交后的副作用属于外层页面，由它订阅
+`QuestionnaireEvent` 处理。
 
 ## API 参考
 
@@ -761,7 +736,7 @@ Web 专属或未来行为暂不提供：SSR/hydration collection diagnostics、`
 - [QuestionnaireSubmission]
 - [QuestionnaireSubmissionItem]
 - [QuestionnaireEvent]
-- [QuestionnaireStateError]
+- [QuestionnaireSchemaError]
 - [Sizable]
 
 [Questionnaire]: https://docs.rs/gpui-component/latest/gpui_component/questionnaire/struct.Questionnaire.html
@@ -797,5 +772,5 @@ Web 专属或未来行为暂不提供：SSR/hydration collection diagnostics、`
 [QuestionnaireSubmission]: https://docs.rs/gpui-component/latest/gpui_component/questionnaire/struct.QuestionnaireSubmission.html
 [QuestionnaireSubmissionItem]: https://docs.rs/gpui-component/latest/gpui_component/questionnaire/struct.QuestionnaireSubmissionItem.html
 [QuestionnaireEvent]: https://docs.rs/gpui-component/latest/gpui_component/questionnaire/enum.QuestionnaireEvent.html
-[QuestionnaireStateError]: https://docs.rs/gpui-component/latest/gpui_component/questionnaire/enum.QuestionnaireStateError.html
+[QuestionnaireSchemaError]: https://docs.rs/gpui-component/latest/gpui_component/questionnaire/enum.QuestionnaireSchemaError.html
 [Sizable]: https://docs.rs/gpui-component/latest/gpui_component/trait.Sizable.html

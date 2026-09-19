@@ -632,7 +632,7 @@ pub enum QuestionnaireEvent {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum QuestionnaireStateError {
+pub enum QuestionnaireSchemaError {
     DuplicateItem(SharedString),
     DuplicateChoice {
         item: SharedString,
@@ -647,7 +647,7 @@ pub enum QuestionnaireStateError {
     AnswerDoesNotMatchItem(SharedString),
 }
 
-impl fmt::Display for QuestionnaireStateError {
+impl fmt::Display for QuestionnaireSchemaError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DuplicateItem(item) => write!(formatter, "duplicate questionnaire item `{item}`"),
@@ -669,4 +669,4 @@ impl fmt::Display for QuestionnaireStateError {
     }
 }
 
-impl Error for QuestionnaireStateError {}
+impl Error for QuestionnaireSchemaError {}
