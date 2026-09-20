@@ -41,6 +41,16 @@ enum SelectionMode {
 
 impl SelectionMode {
     #[inline(always)]
+    fn is_row(&self) -> bool {
+        matches!(self, SelectionMode::Row)
+    }
+
+    #[inline(always)]
+    fn is_column(&self) -> bool {
+        matches!(self, SelectionMode::Column)
+    }
+
+    #[inline(always)]
     fn is_cell(&self) -> bool {
         matches!(self, SelectionMode::Cell)
     }
@@ -468,18 +478,14 @@ where
     /// A selected cell reports as [`TableSelection::Cell`] only; use
     /// `selected_cell().map(|(row_ix, _)| row_ix)` when the cell's row is wanted.
     pub fn selection(&self) -> TableSelection {
-        match self.selection_mode {
-            SelectionMode::Row => self
-                .selected_row
-                .map_or(TableSelection::None, TableSelection::Row),
-            SelectionMode::Column => self
-                .selected_col
-                .map_or(TableSelection::None, TableSelection::Column),
-            SelectionMode::Cell => self
-                .selected_cell
-                .map_or(TableSelection::None, |(row_ix, col_ix)| {
-                    TableSelection::Cell(row_ix, col_ix)
-                }),
+        if let Some(row_ix) = self.selected_row() {
+            TableSelection::Row(row_ix)
+        } else if let Some(col_ix) = self.selected_col() {
+            TableSelection::Column(col_ix)
+        } else if let Some((row_ix, col_ix)) = self.selected_cell() {
+            TableSelection::Cell(row_ix, col_ix)
+        } else {
+            TableSelection::None
         }
     }
 
@@ -488,10 +494,7 @@ where
     /// `Some` only when a row itself is selected; a selected cell does not
     /// count, see [`TableState::selection`].
     pub fn selected_row(&self) -> Option<usize> {
-        match self.selection() {
-            TableSelection::Row(row_ix) => Some(row_ix),
-            _ => None,
-        }
+        self.selected_row.filter(|_| self.selection_mode.is_row())
     }
 
     /// Sets the selected row to the given index.
@@ -539,10 +542,8 @@ where
     /// `Some` only when a column itself is selected; a selected cell does not
     /// count, see [`TableState::selection`].
     pub fn selected_col(&self) -> Option<usize> {
-        match self.selection() {
-            TableSelection::Column(col_ix) => Some(col_ix),
-            _ => None,
-        }
+        self.selected_col
+            .filter(|_| self.selection_mode.is_column())
     }
 
     /// Sets the selected col to the given index.
@@ -568,10 +569,7 @@ where
     /// }
     /// ```
     pub fn selected_cell(&self) -> Option<(usize, usize)> {
-        match self.selection() {
-            TableSelection::Cell(row_ix, col_ix) => Some((row_ix, col_ix)),
-            _ => None,
-        }
+        self.selected_cell.filter(|_| self.selection_mode.is_cell())
     }
 
     /// Sets the selected cell to the given row and column indices.
