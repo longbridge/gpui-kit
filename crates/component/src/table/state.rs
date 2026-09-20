@@ -455,8 +455,14 @@ where
     }
 
     /// Returns the selected row index.
+    ///
+    /// Returns `None` if no row is selected or the table is in column/cell selection mode.
     pub fn selected_row(&self) -> Option<usize> {
-        self.selected_row
+        if self.selection_mode.is_row() {
+            self.selected_row
+        } else {
+            None
+        }
     }
 
     /// Sets the selected row to the given index.
@@ -500,8 +506,14 @@ where
     }
 
     /// Returns the selected column index.
+    ///
+    /// Returns `None` if no column is selected or the table is in row/cell selection mode.
     pub fn selected_col(&self) -> Option<usize> {
-        self.selected_col
+        if self.selection_mode.is_column() {
+            self.selected_col
+        } else {
+            None
+        }
     }
 
     /// Sets the selected col to the given index.
@@ -527,7 +539,11 @@ where
     /// }
     /// ```
     pub fn selected_cell(&self) -> Option<(usize, usize)> {
-        self.selected_cell
+        if self.selection_mode.is_cell() {
+            self.selected_cell
+        } else {
+            None
+        }
     }
 
     /// Sets the selected cell to the given row and column indices.

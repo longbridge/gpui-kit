@@ -85,6 +85,69 @@ impl Render for Records {
     }
 }
 #[gpui_kit::test]
+fn table_selection_getters_follow_the_active_mode(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let handle = cx.open_window(size(px(640.), px(320.)), |window, cx| Records {
+        table: cx.new(|cx| TableState::new(Rows, window, cx).cell_selectable(true)),
+    });
+    cx.update_window(handle.into(), |root, window, cx| {
+        let table = root.downcast::<Records>().unwrap().read(cx).table.clone();
+        table.update(cx, |table, cx| {
+            let selection = |table: &TableState<Rows>| {
+                (
+                    table.selected_row(),
+                    table.selected_col(),
+                    table.selected_cell(),
+                )
+            };
+            assert_eq!(selection(table), (None, None, None));
+            table.set_selected_cell(5, 1, cx);
+            assert_eq!(selection(table), (None, None, Some((5, 1))));
+            table.set_selected_row(3, cx);
+            assert_eq!(selection(table), (Some(3), None, None));
+            table.set_selected_cell(4, 0, cx);
+            assert_eq!(selection(table), (None, None, Some((4, 0))));
+            table.set_selected_col(1, cx);
+            assert_eq!(selection(table), (None, Some(1), None));
+            table.set_selected_row(2, cx);
+            assert_eq!(selection(table), (Some(2), None, None));
+            table.set_selected_col(0, cx);
+            assert_eq!(selection(table), (None, Some(0), None));
+            table.set_selected_cell(1, 1, cx);
+            assert_eq!(selection(table), (None, None, Some((1, 1))));
+            table.clear_selection(cx);
+            assert_eq!(selection(table), (None, None, None));
+        });
+        window.render_frame(cx);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn table_retains_navigation_positions_when_selection_mode_changes(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let handle = cx.open_window(size(px(640.), px(320.)), |window, cx| Records {
+        table: cx.new(|cx| TableState::new(Rows, window, cx)),
+    });
+    cx.update_window(handle.into(), |root, window, cx| {
+        let table = root.downcast::<Records>().unwrap().read(cx).table.clone();
+        table.focus_handle(cx).focus(window, cx);
+        table.update(cx, |table, cx| {
+            table.set_selected_row(5, cx);
+            table.set_selected_col(0, cx);
+        });
+        window.render_frame(cx);
+        window.press("down", cx);
+        assert_eq!(table.read(cx).selected_row(), Some(6));
+        assert_eq!(table.read(cx).selected_col(), None);
+        window.press("right", cx);
+        assert_eq!(table.read(cx).selected_col(), Some(1));
+        assert_eq!(table.read(cx).selected_row(), None);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn table_selects_rows_and_keyboard_scrolls_virtualized_content(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(640.), px(320.)), |window, cx| Records {
