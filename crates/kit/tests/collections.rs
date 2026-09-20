@@ -84,13 +84,14 @@ impl Render for Records {
         div().size_full().child(DataTable::new(&self.table))
     }
 }
+
 #[gpui_kit::test]
 fn table_selection_getters_follow_the_active_mode(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let handle = cx.open_window(size(px(640.), px(320.)), |window, cx| Records {
         table: cx.new(|cx| TableState::new(Rows, window, cx).cell_selectable(true)),
     });
-    cx.update_window(handle.into(), |root, window, cx| {
+    cx.update_window(handle.into(), |root, _, cx| {
         let table = root.downcast::<Records>().unwrap().read(cx).table.clone();
         table.update(cx, |table, cx| {
             let selection = |table: &TableState<Rows>| {
@@ -118,7 +119,6 @@ fn table_selection_getters_follow_the_active_mode(cx: &mut TestAppContext) {
             table.clear_selection(cx);
             assert_eq!(selection(table), (None, None, None));
         });
-        window.render_frame(cx);
     })
     .unwrap();
 }
