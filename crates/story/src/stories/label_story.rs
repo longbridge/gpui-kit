@@ -210,6 +210,8 @@ impl Render for LabelStory {
                                     )
                                     .child(
                                         Label::new("$9,182.10")
+                                            .secondary("USD")
+                                            .highlights("182")
                                             .text_2xl()
                                             .font_semibold()
                                             .masked(self.masked),

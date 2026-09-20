@@ -143,6 +143,18 @@ impl Label {
             }
         }
 
+        if self.masked {
+            // Each source character becomes one bullet, regardless of its UTF-8 width.
+            ranges = ranges
+                .into_iter()
+                .filter_map(|range| {
+                    let start = full_text.get(..range.start)?.chars().count() * MASKED.len();
+                    let end = full_text.get(..range.end)?.chars().count() * MASKED.len();
+                    Some(start..end)
+                })
+                .collect();
+        }
+
         ranges
     }
 
@@ -194,13 +206,12 @@ impl Styled for Label {
 impl RenderOnce for Label {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let mut text = self.full_text();
+        let highlights = self.measure_highlights(text.len(), cx);
         let chars_count = text.chars().count();
 
         if self.masked {
             text = SharedString::from(MASKED.repeat(chars_count))
         };
-
-        let highlights = self.measure_highlights(text.len(), cx);
 
         div()
             .line_height(rems(1.25))
@@ -215,6 +226,58 @@ impl RenderOnce for Label {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct MaskedLabels;
+
+    impl gpui::Render for MaskedLabels {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            div()
+                .child(Label::new("Hello").secondary("World").masked(true))
+                .child(Label::new("Hello").highlights("ell").masked(true))
+                .child(
+                    Label::new("é🙂")
+                        .secondary("世界")
+                        .highlights("🙂 世")
+                        .masked(true),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn masked_secondary_text_and_highlights_render(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, _| MaskedLabels);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    #[test]
+    fn masked_highlight_ranges_follow_displayed_character_boundaries() {
+        let cases = [
+            (Label::new("Hello").secondary("World"), vec![0..15, 15..33]),
+            (Label::new("Hello").highlights("ell"), vec![3..12]),
+            (
+                Label::new("é🙂").secondary("世界").highlights("🙂 世"),
+                vec![0..6, 6..15, 3..12],
+            ),
+            (
+                Label::new("é🙂").highlights(HighlightsMatch::Prefix("é".into())),
+                vec![0..3],
+            ),
+            (Label::new("").secondary(""), vec![0..0, 0..3]),
+            (Label::new("").highlights(""), vec![]),
+        ];
+
+        for (label, expected) in cases {
+            let label = label.masked(true);
+            let original = label.full_text();
+            let displayed = MASKED.repeat(original.chars().count());
+            let ranges = label.highlight_ranges(original.len());
+            assert_eq!(ranges, expected, "original text: {original:?}");
+            for range in ranges {
+                assert!(displayed.get(range).is_some());
+            }
+        }
+    }
 
     #[test]
     fn test_highlight_ranges() {
