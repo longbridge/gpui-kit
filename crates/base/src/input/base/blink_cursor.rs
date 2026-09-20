@@ -39,8 +39,12 @@ impl BlinkCursor {
         self.blink(self.epoch, cx);
     }
 
+    /// Stop the blinking and clear the blink state, so the next [`Self::start`]
+    /// begins from a visible cursor instead of resuming a stale pause.
     pub(crate) fn stop(&mut self, cx: &mut Context<Self>) {
         self.epoch = 0;
+        self.paused = false;
+        self.visible = false;
         cx.notify();
     }
 
@@ -116,5 +120,29 @@ mod tests {
         cx.executor().advance_clock(INTERVAL);
         cx.run_until_parked();
         assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
+    }
+
+    #[gpui::test]
+    fn blurring_a_paused_cursor_leaves_the_next_focus_blinking(cx: &mut TestAppContext) {
+        let cursor = cx.new(|_| BlinkCursor::new());
+        cursor.update(cx, |cursor, cx| cursor.start(cx));
+        cx.run_until_parked();
+
+        // Typing pauses the blink, then the input is blurred before the pause
+        // elapses: tabbing away right after a keystroke does exactly this.
+        cursor.update(cx, |cursor, cx| cursor.pause(cx));
+        cx.run_until_parked();
+        cursor.update(cx, |cursor, cx| cursor.stop(cx));
+        cx.run_until_parked();
+        assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
+
+        // Focusing again shows the cursor and blinks it, rather than leaving a
+        // stale pause to swallow the start.
+        cursor.update(cx, |cursor, cx| cursor.start(cx));
+        cx.run_until_parked();
+        assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
+        cx.executor().advance_clock(INTERVAL);
+        cx.run_until_parked();
+        assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
     }
 }
