@@ -9,7 +9,6 @@ use gpui_kit::component::{
     checkbox::Checkbox,
     group_box::{GroupBox, GroupBoxVariants as _},
     h_flex,
-    label::Label,
     radio::{Radio, RadioGroup},
     switch::Switch,
     text::markdown,
@@ -111,11 +110,7 @@ impl Render for GroupBoxStory {
                         .id("activity")
                         .fill()
                         .title("Contributions & activity")
-                        .footer(
-                            Label::new("Private contributions never reveal repository names.")
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground),
-                        )
+                        .footer("Private contributions never reveal repository names.")
                         .child(
                             h_flex()
                                 .justify_between()

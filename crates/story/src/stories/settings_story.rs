@@ -250,11 +250,7 @@ impl SettingsStory {
                     ]),
                     SettingGroup::new()
                         .title("Font")
-                        .footer(|_, cx| {
-                            Label::new("Font preferences apply to this story only.")
-                                .text_sm()
-                                .text_color(cx.theme().muted_foreground)
-                        })
+                        .footer(|_, _| "Font preferences apply to this story only.")
                         .item(
                             SettingItem::new(
                                 "Font Family",

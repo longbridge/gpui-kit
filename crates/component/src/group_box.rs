@@ -109,10 +109,10 @@ impl GroupBox {
         self
     }
 
-    /// Set content below the group's filled or outlined surface.
+    /// Set supporting content below the group's filled or outlined surface.
     ///
-    /// The footer participates in normal layout and uses the variant's default
-    /// horizontal content inset. Typography and colors belong to the caller.
+    /// The footer shares the title's leading edge, sits 8 px under the
+    /// surface, and renders as small muted text like a description.
     pub fn footer(mut self, footer: impl IntoElement) -> Self {
         self.footer = Some(footer.into_any_element());
         self
@@ -162,19 +162,30 @@ impl RenderOnce for GroupBox {
                 )
             })
             .child(
+                // The footer sits inside the surface's slot so its 8 px gap is
+                // independent of the root gap between the title and surface.
                 v_flex()
-                    .when_some(bg, |this, bg| this.bg(bg))
-                    .when_some(border, |this, border| this.border_color(border).border_1())
-                    .text_color(cx.theme().group_box_foreground)
-                    .when(has_paddings, |this| this.p_4())
-                    .gap_4()
-                    .rounded(cx.theme().radius)
-                    .refine_style(&self.content_style)
-                    .children(self.children),
+                    .gap_2()
+                    .child(
+                        v_flex()
+                            .when_some(bg, |this, bg| this.bg(bg))
+                            .when_some(border, |this, border| this.border_color(border).border_1())
+                            .text_color(cx.theme().group_box_foreground)
+                            .when(has_paddings, |this| this.p_4())
+                            .gap_4()
+                            .rounded(cx.theme().radius)
+                            .refine_style(&self.content_style)
+                            .children(self.children),
+                    )
+                    .when_some(self.footer, |this, footer| {
+                        this.child(
+                            div()
+                                .text_sm()
+                                .text_color(cx.theme().muted_foreground)
+                                .child(footer),
+                        )
+                    }),
             )
-            .when_some(self.footer, |this, footer| {
-                this.child(div().when(has_paddings, |this| this.px_4()).child(footer))
-            })
     }
 }
 

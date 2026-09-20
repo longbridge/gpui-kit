@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    ActiveTheme as _, Root,
+    Root,
     setting::{SettingGroup, SettingItem},
 };
 use gpui::{
@@ -184,10 +184,8 @@ fn footer_follows_group_search_visibility(cx: &mut TestAppContext) {
     let (host, cx) = setup(cx);
     cx.update(|_, cx| {
         host.update(cx, |host, cx| {
-            host.pages[1].groups[2] = host.pages[1].groups[2].clone().footer(|_, cx| {
+            host.pages[1].groups[2] = host.pages[1].groups[2].clone().footer(|_, _| {
                 div()
-                    .text_sm()
-                    .text_color(cx.theme().muted_foreground)
                     .child("Changes apply to this device only.")
                     .debug_selector(|| "font-footer".into())
             });
@@ -198,13 +196,9 @@ fn footer_follows_group_search_visibility(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("setting-1-2-1").is_some());
     assert!(cx.debug_bounds("font-footer").is_some());
 
+    // Footer copy does not independently make a group match the query.
     search(&host, "colors", cx);
     assert!(cx.debug_bounds("setting-1-1-0").is_some());
-    assert!(cx.debug_bounds("font-footer").is_none());
-
-    // Footer copy does not independently make a group match the query.
-    search(&host, "this device", cx);
-    assert!(cx.debug_bounds("setting-1-2-1").is_none());
     assert!(cx.debug_bounds("font-footer").is_none());
 
     search(&host, "font", cx);

@@ -63,19 +63,15 @@ GroupBox::new()
 ### Footer outside the surface
 
 Use `footer` for supporting content below the filled background or outline, not
-inside the content area. It uses the variant's default horizontal content inset
-(`Fill` and `Outline` are inset; `Normal` is not). `content_style` only changes
-the body. Style the footer element itself to choose its typography and color.
+inside the content area. It shares the title's leading edge, sits 8 px under
+the surface, and renders as small muted text like a description, so plain text
+is enough. `content_style` only changes the body.
 
 ```rust
 GroupBox::new()
     .fill()
     .child("Update preferences")
-    .footer(
-        Label::new("Changes apply to this device only.")
-            .text_sm()
-            .text_color(cx.theme().muted_foreground)
-    )
+    .footer("Changes apply to this device only.")
 ```
 
 ### Custom ID

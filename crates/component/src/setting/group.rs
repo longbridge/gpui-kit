@@ -56,8 +56,10 @@ impl SettingGroup {
 
     /// Render supporting content below, and outside, the group's surface.
     ///
-    /// The footer scrolls with the group and follows its search visibility; it
-    /// does not add an independently searchable item or a sidebar entry.
+    /// The footer aligns with the group title and renders as small muted text,
+    /// like a description. It scrolls with the group and follows its search
+    /// visibility; it does not add an independently searchable item or a
+    /// sidebar entry, and a group needs at least one item to be shown.
     pub fn footer<F, E>(mut self, footer: F) -> Self
     where
         E: IntoElement,
