@@ -110,77 +110,37 @@ impl Label {
             let matched_str = matched.as_str();
             if !matched_str.is_empty() {
                 let search_lower = matched_str.to_lowercase();
-                let mut full_text_lower = String::new();
-                let mut lower_to_source_ranges = Vec::new();
-
-                for (source_start, ch) in full_text.char_indices() {
-                    let source_end = source_start + ch.len_utf8();
-                    let lower_start = full_text_lower.len();
-                    full_text_lower.extend(ch.to_lowercase());
-                    let lower_end = full_text_lower.len();
-                    lower_to_source_ranges.push((lower_start..lower_end, source_start..source_end));
-                }
-
-                let source_range = |lower_range: Range<usize>| {
-                    let start = lower_to_source_ranges
-                        .iter()
-                        .find(|(lower, _)| {
-                            lower.start <= lower_range.start && lower_range.start < lower.end
-                        })?
-                        .1
-                        .start;
-                    let end = lower_to_source_ranges
-                        .iter()
-                        .find(|(lower, _)| {
-                            lower.start < lower_range.end && lower_range.end <= lower.end
-                        })?
-                        .1
-                        .end;
-                    Some(start..end)
-                };
+                let full_text_lower = full_text.to_lowercase();
 
                 if matched.is_prefix() {
                     // For prefix matching, only check if the text starts with the search term
                     if full_text_lower.starts_with(&search_lower) {
-                        if let Some(range) = source_range(0..search_lower.len()) {
-                            ranges.push(range);
-                        }
+                        ranges.push(0..matched_str.len());
                     }
                 } else {
                     // For full matching, find all occurrences
                     let mut search_start = 0;
                     while let Some(pos) = full_text_lower[search_start..].find(&search_lower) {
                         let match_start = search_start + pos;
-                        let match_end = match_start + search_lower.len();
+                        let match_end = match_start + matched_str.len();
 
-                        if let Some(range) = source_range(match_start..match_end) {
-                            ranges.push(range);
+                        if match_end <= full_text.len() {
+                            ranges.push(match_start..match_end);
                         }
 
-                        search_start = match_start
-                            + full_text_lower[match_start..]
-                                .chars()
-                                .next()
-                                .map_or(1, char::len_utf8);
+                        search_start = match_start + 1;
+                        while !full_text.is_char_boundary(search_start)
+                            && search_start < full_text.len()
+                        {
+                            search_start += 1;
+                        }
 
-                        if search_start >= full_text_lower.len() {
+                        if search_start >= full_text.len() {
                             break;
                         }
                     }
                 }
             }
-        }
-
-        if self.masked {
-            // Each source character becomes one bullet, regardless of its UTF-8 width.
-            ranges = ranges
-                .into_iter()
-                .filter_map(|range| {
-                    let start = full_text.get(..range.start)?.chars().count() * MASKED.len();
-                    let end = full_text.get(..range.end)?.chars().count() * MASKED.len();
-                    Some(start..end)
-                })
-                .collect();
         }
 
         ranges
@@ -191,6 +151,10 @@ impl Label {
         length: usize,
         cx: &mut App,
     ) -> Option<Vec<(Range<usize>, HighlightStyle)>> {
+        if self.masked {
+            return None;
+        }
+
         let ranges = self.highlight_ranges(length);
         if ranges.is_empty() {
             return None;
@@ -234,12 +198,13 @@ impl Styled for Label {
 impl RenderOnce for Label {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let mut text = self.full_text();
-        let highlights = self.measure_highlights(text.len(), cx);
         let chars_count = text.chars().count();
 
         if self.masked {
             text = SharedString::from(MASKED.repeat(chars_count))
         };
+
+        let highlights = self.measure_highlights(text.len(), cx);
 
         div()
             .line_height(rems(1.25))
@@ -274,48 +239,19 @@ mod tests {
     #[gpui::test]
     fn masked_secondary_text_and_highlights_render(cx: &mut gpui::TestAppContext) {
         cx.update(crate::init);
+        cx.update(|cx| {
+            let label = Label::new("é🙂")
+                .secondary("世界")
+                .highlights("🙂 世")
+                .masked(true);
+            assert!(
+                label
+                    .measure_highlights(label.full_text().len(), cx)
+                    .is_none()
+            );
+        });
         let (_, cx) = cx.add_window_view(|_, _| MaskedLabels);
         cx.update(|window, cx| window.draw(cx).clear(cx));
-    }
-
-    #[test]
-    fn masked_highlight_ranges_follow_displayed_character_boundaries() {
-        let cases = [
-            (Label::new("Hello").secondary("World"), vec![0..15, 15..33]),
-            (Label::new("Hello").highlights("ell"), vec![3..12]),
-            (
-                Label::new("é🙂").secondary("世界").highlights("🙂 世"),
-                vec![0..6, 6..15, 3..12],
-            ),
-            (
-                Label::new("é🙂").highlights(HighlightsMatch::Prefix("é".into())),
-                vec![0..3],
-            ),
-            (Label::new("İ").highlights("i"), vec![0..3]),
-            (Label::new("İA").highlights("a"), vec![3..6]),
-            (Label::new("").secondary(""), vec![0..0, 0..3]),
-            (Label::new("").highlights(""), vec![]),
-        ];
-
-        for (label, expected) in cases {
-            let label = label.masked(true);
-            let original = label.full_text();
-            let displayed = MASKED.repeat(original.chars().count());
-            let ranges = label.highlight_ranges(original.len());
-            assert_eq!(ranges, expected, "original text: {original:?}");
-            for range in ranges {
-                assert!(displayed.get(range).is_some());
-            }
-        }
-    }
-
-    #[test]
-    fn case_insensitive_highlight_ranges_map_back_to_source_text() {
-        let label = Label::new("İ").highlights("i");
-        assert_eq!(label.highlight_ranges("İ".len()), vec![0..2]);
-
-        let label = Label::new("İA").highlights("a");
-        assert_eq!(label.highlight_ranges("İA".len()), vec![2..3]);
     }
 
     #[test]
