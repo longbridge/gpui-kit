@@ -30,6 +30,15 @@ use gpui_kit::base::{Popover};
 
 ## 状态与事件
 
+使用 `.placement(Placement::Right).align(Align::Start).offset(px(8.))` 可按方向定位；
+`Placement` 和 `Align` 从 `gpui_kit::base` 导入。对齐默认居中，间距默认为零，
+这两个选项在设置 `placement` 时生效。首选方向容不下内容与间距时，浮层会自动翻转。
+`anchor` 保留原有角点定位，和 `placement` 中最后调用的方法决定定位策略。
+`Anchor::TopLeft` 表示浮层在触发器下方：名称描述浮层自身锚点，而不是触发器的角点。
+
+`on_position` 在内容 prepaint 前提供最终浮层和触发器边界，可用于绘制自定义箭头，
+无需额外渲染。带样式的 Component Popover 直接提供 `.arrow(true)`，默认值为 `false`。
+
 触发器切换打开状态；点击外部或 Escape 可按配置关闭。
 
 受控状态应保存在父渲染类型或 GPUI entity 中；在回调中更新并调用 `cx.notify()`，不要在每次渲染时重建持久 entity。

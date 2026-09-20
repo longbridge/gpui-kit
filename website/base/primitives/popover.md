@@ -32,6 +32,18 @@ The authoritative module is [`components/popover.rs`](https://github.com/longbri
 
 ## State and events
 
+For side positioning, use `.placement(Placement::Right).align(Align::Start).offset(px(8.))`
+with `Placement` and `Align` from `gpui_kit::base`. Alignment defaults to center
+and offset to zero; these two options apply when `placement` is set. The popup
+flips when the requested side cannot fit its content and gap. `anchor` retains
+legacy corner positioning; whichever of `anchor` and `placement` is called
+last chooses the strategy. `Anchor::TopLeft` opens below the trigger: the
+name describes the popup's anchor, not the trigger's corner.
+
+`on_position` observes resolved popup and trigger bounds before content
+prepaint, allowing custom arrow presentation without another render. The
+styled Component Popover provides `.arrow(true)` directly (default `false`).
+
 Open state can be parent-controlled; activation, outside click, and Escape request lifecycle changes.
 
 Keep controlled state on the parent render type or in a GPUI entity. Update it in callbacks and call `cx.notify()`; do not recreate persistent entities during every render.

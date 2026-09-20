@@ -1,11 +1,11 @@
 use gpui_kit::component::{
-    ActiveTheme, StyledExt, WindowExt,
-    button::{Button, ButtonVariants as _},
+    ActiveTheme, Selectable, Sizable, StyledExt, WindowExt,
+    button::{Button, ButtonGroup, ButtonVariants as _},
     h_flex,
     input::{Input, InputState},
     list::{List, ListDelegate, ListItem, ListState},
     menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
-    popover::Popover,
+    popover::{Align, Placement, Popover},
     separator::Separator,
     v_flex,
 };
@@ -137,6 +137,7 @@ pub struct PopoverStory {
     list: Entity<ListState<DropdownListDelegate>>,
     form_popover_open: bool,
     list_popover_open: bool,
+    placement: Placement,
     checked: bool,
     message: String,
 }
@@ -175,6 +176,7 @@ impl PopoverStory {
             checked: true,
             form_popover_open: false,
             list_popover_open: false,
+            placement: Placement::Bottom,
             focus_handle: cx.focus_handle(),
             message: "".to_string(),
         }
@@ -259,6 +261,61 @@ impl Render for PopoverStory {
                                     .outline(),
                             )
                             .child("This popover is open by default when first rendered."),
+                    ),
+            )
+            .child(
+                section("Placement and arrow")
+                    .description("Choose a side for the open preview below.")
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                ButtonGroup::new("placement-controls")
+                                    .small()
+                                    .outline()
+                                    .children(
+                                        [
+                                            ("top", Placement::Top),
+                                            ("bottom", Placement::Bottom),
+                                            ("left", Placement::Left),
+                                            ("right", Placement::Right),
+                                        ]
+                                        .into_iter()
+                                        .map(
+                                            |(id, placement)| {
+                                                Button::new(id)
+                                                    .outline()
+                                                    .label(placement.to_string())
+                                                    .selected(self.placement == placement)
+                                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                                        this.placement = placement;
+                                                        cx.notify();
+                                                    }))
+                                            },
+                                        ),
+                                    ),
+                            )
+                            .child(
+                                h_flex().w_full().h_40().justify_center().child(
+                                    Popover::new("placement-preview")
+                                        .open(true)
+                                        .overlay_closable(false)
+                                        .placement(self.placement)
+                                        .align(Align::Center)
+                                        .offset(px(8.))
+                                        .arrow(true)
+                                        .w_40()
+                                        .trigger(
+                                            Button::new("preview-trigger")
+                                                .small()
+                                                .outline()
+                                                .label("Trigger"),
+                                        )
+                                        .child("Popover content"),
+                                ),
+                            ),
                     ),
             )
             .child(

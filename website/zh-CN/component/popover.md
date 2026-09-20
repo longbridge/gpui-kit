@@ -35,9 +35,31 @@ Popover::new("basic-popover")
 
 ### 自定义定位
 
-`anchor` 方法用于控制 Popover 如何贴合触发器，使用 [`Anchor`] 类型。
+使用 `placement` 指定触发器的哪一侧，`align` 指定该侧的对齐方式，`offset` 指定间距。空间不足时会自动翻转到相反侧，再限制在窗口内。
 
-可以把 Popover 想象成有一个箭头尖角（像对话气泡的小三角）。anchor 指的就是这个尖角相对于触发器落在哪个点——`Anchor::TopLeft` 把它放在触发器的左上角，`Anchor::BottomRight` 放在右下角，以此类推。Popover 就从这个点挂出来。
+```rust
+use gpui_kit::px;
+use gpui_kit::component::popover::{Align, Placement, Popover};
+
+Popover::new("positioned")
+    .placement(Placement::Right)
+    .align(Align::Start)
+    .offset(px(8.))
+    .arrow(true)
+    .trigger(Button::new("details").label("详情"))
+    .child("上下文详情")
+```
+
+| 选项 | 含义 | 默认值 |
+| --- | --- | --- |
+| `placement(Placement)` | 首选方向：`Top`、`Bottom`、`Left`、`Right` | 使用原有 anchor 定位 |
+| `align(Align)` | 沿所在边对齐：`Start`、`Center`、`End` | 显式 placement 时为 `Center`，否则从 anchor 推导 |
+| `offset(Pixels)` | 触发器到弹层的间距；有箭头时为到箭头尖端的间距 | `0.25rem` |
+| `arrow(bool)` | 指向触发器的箭头，跟随实际定位方向翻转 | `false` |
+
+单独使用 `align`、`offset` 或 `arrow(true)` 也会启用 side 定位。未指定 placement 时，方向和对齐方式从 anchor 推导；默认 `TopLeft` 对应 `Bottom` + `Start`。箭头额外占用 `0.375rem`，使用弹层背景色（未设置时使用主题的 popover 色），并在弹层被窗口边界挤压时避开圆角。
+
+原有 `anchor` 方法中的 [`Anchor`] 命名的是 **Popover 自身的锚点**，并非触发器的角点。`Top*` 表示弹层在触发器下方，`Bottom*` 表示在上方。仅使用 anchor 的旧调用保持原有行为，只限制在窗口内，不自动翻转。`placement` 覆盖 anchor；之后再调用 `anchor` 会清除显式 placement。
 
 例如 `Anchor::TopLeft` 会让 Popover 出现在触发器正下方，并与其左对齐：
 
@@ -54,7 +76,7 @@ use gpui_kit::component::Anchor;
 Popover::new("top-center")
     .anchor(Anchor::TopCenter)
     .trigger(Button::new("btn").label("Top Center").outline())
-    .child("Anchored to the trigger's top-center")
+    .child("在触发器下方居中")
 ```
 
 ### 在 Popover 中渲染 View

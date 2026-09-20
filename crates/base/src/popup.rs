@@ -3,10 +3,10 @@ use std::{cell::Cell, rc::Rc};
 use gpui::{
     Anchor, AnyElement, App, Bounds, Div, ElementId, InteractiveElement, Interactivity,
     IntoElement, ParentElement, Pixels, Point, RenderOnce, StatefulInteractiveElement,
-    StyleRefinement, Styled, Window, deferred, div, px,
+    StyleRefinement, Styled, Window, canvas, deferred, div, prelude::FluentBuilder as _, px,
 };
 
-use crate::{ElementExt as _, Positioner, StyledExt as _};
+use crate::{Align, Placement, Positioner, ResolvedPosition, StyledExt as _};
 
 /// Distance kept between a popup and the window edge.
 const WINDOW_MARGIN: Pixels = px(8.);
@@ -31,6 +31,10 @@ pub struct Popup {
     base: gpui::Stateful<Div>,
     style: StyleRefinement,
     anchor: Anchor,
+    placement: Option<Placement>,
+    align: Align,
+    offset: Pixels,
+    on_position: Option<Box<dyn Fn(ResolvedPosition, Bounds<Pixels>)>>,
     trigger: AnyElement,
     content: Option<AnyElement>,
 }
@@ -43,6 +47,10 @@ impl Popup {
             id,
             style: StyleRefinement::default(),
             anchor: Anchor::TopLeft,
+            placement: None,
+            align: Align::Center,
+            offset: px(0.),
+            on_position: None,
             trigger: trigger.into_any_element(),
             content: None,
         }
@@ -50,6 +58,34 @@ impl Popup {
 
     pub fn anchor(mut self, anchor: impl Into<Anchor>) -> Self {
         self.anchor = anchor.into();
+        self.placement = None;
+        self
+    }
+
+    /// Use side positioning with automatic flipping instead of corner anchoring.
+    pub fn placement(mut self, placement: Placement) -> Self {
+        self.placement = Some(placement);
+        self
+    }
+
+    /// Alignment for side positioning, centered by default.
+    pub fn align(mut self, align: Align) -> Self {
+        self.align = align;
+        self
+    }
+
+    /// Gap for side positioning, zero by default.
+    pub fn offset(mut self, offset: Pixels) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Observe resolved popup and trigger bounds before content prepaint.
+    pub fn on_position(
+        mut self,
+        callback: impl Fn(ResolvedPosition, Bounds<Pixels>) + 'static,
+    ) -> Self {
+        self.on_position = Some(Box::new(callback));
         self
     }
 
@@ -99,6 +135,7 @@ impl RenderOnce for Popup {
         let state =
             window.use_keyed_state((self.id, "anchor"), cx, |_, _| PopupAnchorState::default());
         let anchor = self.anchor;
+        let trigger_bounds = Rc::new(Cell::new(state.read(cx).bounds));
         let position = Rc::new(Cell::new(Self::resolved_corner(
             anchor,
             state.read(cx).bounds,
@@ -107,22 +144,34 @@ impl RenderOnce for Popup {
         let root = self
             .base
             .child(self.trigger)
-            .on_prepaint({
-                let state = state.clone();
-                let position = position.clone();
-                move |bounds, window, cx| {
-                    position.set(Self::resolved_corner(anchor, bounds));
-                    let first = state.update(cx, |state, _| {
-                        let first = !state.captured;
-                        state.bounds = bounds;
-                        state.captured = true;
-                        first
-                    });
-                    if first {
-                        window.request_animation_frame();
-                    }
-                }
-            })
+            .child(
+                canvas(
+                    {
+                        let state = state.clone();
+                        let position = position.clone();
+                        let trigger_bounds = trigger_bounds.clone();
+                        move |bounds, window, cx| {
+                            trigger_bounds.set(bounds);
+                            position.set(Self::resolved_corner(anchor, bounds));
+                            let first = state.update(cx, |state, _| {
+                                let first = !state.captured;
+                                state.bounds = bounds;
+                                state.captured = true;
+                                first
+                            });
+                            if first {
+                                window.request_animation_frame();
+                            }
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full()
+                // The legacy observer is statically positioned after the trigger.
+                // Side placement needs the actual trigger rectangle instead.
+                .when(self.placement.is_some(), |this| this.top_0().left_0()),
+            )
             .refine_style(&self.style);
 
         let Some(content) = self.content else {
@@ -132,9 +181,23 @@ impl RenderOnce for Popup {
             return root;
         }
 
+        let positioner = if let Some(placement) = self.placement {
+            Positioner::side(trigger_bounds.get())
+                .tracked_trigger_bounds(trigger_bounds.clone())
+                .placement(placement)
+                .align(self.align)
+                .offset(self.offset)
+        } else {
+            Positioner::corner(anchor, position.get())
+        };
+        let positioner = if let Some(callback) = self.on_position {
+            positioner.on_position(move |position| callback(position, trigger_bounds.get()))
+        } else {
+            positioner
+        };
         root.child(
             deferred(
-                Positioner::corner(anchor, position.get())
+                positioner
                     .margin(WINDOW_MARGIN)
                     // The host blocks the mouse, so no caller has to remember:
                     // what a popup covers belongs to the popup.
