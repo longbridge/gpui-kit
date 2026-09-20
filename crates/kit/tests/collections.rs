@@ -103,11 +103,11 @@ fn table_selection_getters_follow_the_active_mode(cx: &mut TestAppContext) {
             };
             assert_eq!(selection(table), (None, None, None));
             table.set_selected_cell(5, 1, cx);
-            assert_eq!(selection(table), (None, None, Some((5, 1))));
+            assert_eq!(selection(table), (Some(5), Some(1), Some((5, 1))));
             table.set_selected_row(3, cx);
             assert_eq!(selection(table), (Some(3), None, None));
             table.set_selected_cell(4, 0, cx);
-            assert_eq!(selection(table), (None, None, Some((4, 0))));
+            assert_eq!(selection(table), (Some(4), Some(0), Some((4, 0))));
             table.set_selected_col(1, cx);
             assert_eq!(selection(table), (None, Some(1), None));
             table.set_selected_row(2, cx);
@@ -115,7 +115,7 @@ fn table_selection_getters_follow_the_active_mode(cx: &mut TestAppContext) {
             table.set_selected_col(0, cx);
             assert_eq!(selection(table), (None, Some(0), None));
             table.set_selected_cell(1, 1, cx);
-            assert_eq!(selection(table), (None, None, Some((1, 1))));
+            assert_eq!(selection(table), (Some(1), Some(1), Some((1, 1))));
             table.clear_selection(cx);
             assert_eq!(selection(table), (None, None, None));
         });

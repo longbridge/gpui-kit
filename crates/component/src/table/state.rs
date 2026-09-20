@@ -456,9 +456,14 @@ where
 
     /// Returns the selected row index.
     ///
-    /// Returns `None` if no row is selected or the table is in column/cell selection mode.
+    /// In cell selection mode this is the row of the selected cell. Returns
+    /// `None` if nothing is selected or the table is in column selection mode.
     pub fn selected_row(&self) -> Option<usize> {
-        self.selected_row.filter(|_| self.selection_mode.is_row())
+        match self.selection_mode {
+            SelectionMode::Row => self.selected_row,
+            SelectionMode::Cell => self.selected_cell.map(|(row_ix, _)| row_ix),
+            SelectionMode::Column => None,
+        }
     }
 
     /// Sets the selected row to the given index.
@@ -503,10 +508,14 @@ where
 
     /// Returns the selected column index.
     ///
-    /// Returns `None` if no column is selected or the table is in row/cell selection mode.
+    /// In cell selection mode this is the column of the selected cell. Returns
+    /// `None` if nothing is selected or the table is in row selection mode.
     pub fn selected_col(&self) -> Option<usize> {
-        self.selected_col
-            .filter(|_| self.selection_mode.is_column())
+        match self.selection_mode {
+            SelectionMode::Column => self.selected_col,
+            SelectionMode::Cell => self.selected_cell.map(|(_, col_ix)| col_ix),
+            SelectionMode::Row => None,
+        }
     }
 
     /// Sets the selected col to the given index.
@@ -1360,9 +1369,10 @@ where
                 .map(|col_group| col_group.column.selectable)
                 .unwrap_or(false);
 
-        // `selected_col()` is `None` outside column mode, so a selected cell
-        // never leaves its column highlighted.
-        if selectable && self.selected_col() == Some(col_ix) {
+        // Only column mode highlights the column; a selected cell reports its
+        // column through `selected_col()` but highlights the cell alone.
+        let is_col_selected = self.selection_mode.is_column() && self.selected_col == Some(col_ix);
+        if selectable && is_col_selected {
             el.bg(cx.theme().tokens.table_active)
         } else {
             el
@@ -1960,7 +1970,9 @@ where
     ) -> gpui::AnyElement {
         let horizontal_scroll_handle = self.horizontal_scroll_handle.clone();
         let is_stripe_row = self.options.stripe && row_ix % 2 != 0;
-        let is_selected = self.selected_row() == Some(row_ix);
+        // Only row mode selects the row itself; a selected cell reports its
+        // row through `selected_row()` but highlights the cell alone.
+        let is_selected = self.selection_mode.is_row() && self.selected_row == Some(row_ix);
         let view = cx.entity().clone();
         let row_height = self.options.size.table_row_height();
 
@@ -2190,8 +2202,7 @@ where
                         )
                         .child(self.delegate.render_last_empty_col(window, cx)),
                 )
-                // Row selected style. `selected_row()` is `None` outside row
-                // mode, so a selected cell or column never highlights its row.
+                // Row selected style
                 .when(is_selected, |this| {
                     let bg = if cx.theme().list.active_highlight {
                         cx.theme().tokens.table_active
