@@ -45,6 +45,7 @@ impl BlinkCursor {
         self.epoch = 0;
         self.paused = false;
         self.visible = false;
+        self._task = Task::ready(());
         cx.notify();
     }
 
@@ -54,7 +55,12 @@ impl BlinkCursor {
     }
 
     fn blink(&mut self, epoch: usize, cx: &mut Context<Self>) {
-        if self.paused || epoch != self.epoch {
+        // A task from an earlier blink lifecycle must not mutate the current state.
+        if epoch != self.epoch {
+            return;
+        }
+
+        if self.paused {
             self.visible = true;
             return;
         }
@@ -100,6 +106,10 @@ impl BlinkCursor {
 
             if let Some(this) = this.upgrade() {
                 this.update(cx, |this, cx| {
+                    if epoch != this.epoch {
+                        return;
+                    }
+
                     this.paused = false;
                     this.blink(epoch, cx);
                 });
@@ -186,5 +196,51 @@ mod tests {
         cx.executor().advance_clock(INTERVAL);
         cx.run_until_parked();
         assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
+    }
+
+    #[gpui::test]
+    fn stopping_a_paused_cursor_ends_the_blink_loop(cx: &mut TestAppContext) {
+        let cursor = cx.new(|_| BlinkCursor::new());
+        cursor.update(cx, |cursor, cx| cursor.start(cx));
+        cx.run_until_parked();
+        cursor.update(cx, |cursor, cx| cursor.pause(cx));
+        cx.run_until_parked();
+        cursor.update(cx, |cursor, cx| cursor.stop(cx));
+        cx.run_until_parked();
+
+        let notifications = Rc::new(Cell::new(0usize));
+        let count = notifications.clone();
+        let _observer = cx.update(|cx| cx.observe(&cursor, move |_, _| count.set(count.get() + 1)));
+        cx.run_until_parked();
+
+        cx.executor().advance_clock(Duration::from_secs(3));
+        cx.run_until_parked();
+
+        assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
+        assert_eq!(notifications.get(), 0, "a stopped cursor kept blinking");
+
+        cursor.update(cx, |cursor, cx| cursor.start(cx));
+        cx.run_until_parked();
+        assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
+    }
+
+    #[gpui::test]
+    fn stopping_a_blinking_cursor_ends_the_blink_loop(cx: &mut TestAppContext) {
+        let cursor = cx.new(|_| BlinkCursor::new());
+        cursor.update(cx, |cursor, cx| cursor.start(cx));
+        cx.run_until_parked();
+        cursor.update(cx, |cursor, cx| cursor.stop(cx));
+        cx.run_until_parked();
+
+        let notifications = Rc::new(Cell::new(0usize));
+        let count = notifications.clone();
+        let _observer = cx.update(|cx| cx.observe(&cursor, move |_, _| count.set(count.get() + 1)));
+        cx.run_until_parked();
+
+        cx.executor().advance_clock(Duration::from_secs(3));
+        cx.run_until_parked();
+
+        assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
+        assert_eq!(notifications.get(), 0, "a stopped cursor kept blinking");
     }
 }
