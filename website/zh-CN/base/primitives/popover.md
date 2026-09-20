@@ -30,14 +30,13 @@ use gpui_kit::base::{Popover};
 
 ## 状态与事件
 
-使用 `.placement(Placement::Right).align(Align::Start).offset(px(8.))` 可按方向定位；
-`Placement` 和 `Align` 从 `gpui_kit::base` 导入。对齐默认居中，间距默认为零，
-这两个选项在设置 `placement` 时生效。首选方向容不下内容与间距时，浮层会自动翻转。
-`anchor` 保留原有角点定位，和 `placement` 中最后调用的方法决定定位策略。
-`Anchor::TopLeft` 表示浮层在触发器下方：名称描述浮层自身锚点，而不是触发器的角点。
+使用 `.anchor(Anchor::TopCenter).offset(px(8.))` 可让弹层在触发器下方居中，并留出八像素间距。
+Base 的 offset 默认为零。`Top*` 在下方，`Bottom*` 在上方，
+`LeftCenter` 在右侧，`RightCenter` 在左侧。anchor 描述弹层自身的锚点。
+窗口边界限制不会翻转弹层或更改 anchor。
 
-`on_position` 在内容 prepaint 前提供最终浮层和触发器边界，可用于绘制自定义箭头，
-无需额外渲染。带样式的 Component Popover 直接提供 `.arrow(true)`，默认值为 `false`。
+`on_position` 在内容 prepaint 前提供最终弹层和触发器边界，供自定义绘制使用。
+Base 不绘制箭头；带样式的 Component Popover 提供 `.arrow(true)`（默认 `false`），箭头跟随 anchor 对齐。
 
 触发器切换打开状态；点击外部或 Escape 可按配置关闭。
 

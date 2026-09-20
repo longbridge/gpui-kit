@@ -35,17 +35,17 @@ Popover::new("basic-popover")
 
 ### Popover with Custom Positioning
 
-Use `placement` for a side of the trigger, `align` for alignment along that side,
-and `offset` for the gap. Side positioning flips to the opposite side when space
-is insufficient and then clamps to the window.
+The `anchor` method names the **popover's own** anchor, not the trigger's
+corner. `Top*` anchors open below the trigger, `Bottom*` anchors open above
+it, `LeftCenter` opens to the right, and `RightCenter` opens to the left.
+The popup clamps to the window without changing its anchor or flipping.
 
 ```rust
-use gpui_kit::px;
-use gpui_kit::component::popover::{Align, Placement, Popover};
+use gpui_kit::{Anchor, px};
+use gpui_kit::component::popover::Popover;
 
-Popover::new("positioned")
-    .placement(Placement::Right)
-    .align(Align::Start)
+Popover::new("anchored")
+    .anchor(Anchor::TopCenter)
     .offset(px(8.))
     .arrow(true)
     .trigger(Button::new("details").label("Details"))
@@ -54,22 +54,14 @@ Popover::new("positioned")
 
 | Option | Meaning | Default |
 | --- | --- | --- |
-| `placement(Placement)` | Preferred `Top`, `Bottom`, `Left`, or `Right` side | Legacy anchor positioning |
-| `align(Align)` | `Start`, `Center`, or `End` along the side | `Center` with explicit placement; otherwise derived from anchor |
+| `anchor(Anchor)` | Popup anchor, including `TopCenter` and `BottomCenter` | `TopLeft` |
 | `offset(Pixels)` | Gap from trigger to surface, or to arrow tip when enabled | `0.25rem` |
-| `arrow(bool)` | Arrow that follows the resolved side and points toward the trigger | `false` |
+| `arrow(bool)` | Show an arrow on the edge selected by the anchor | `false` |
 
-`align`, `offset`, or `arrow(true)` also enable side positioning. Without an
-explicit placement, the side and alignment are derived from `anchor` (the
-default `TopLeft` gives `Bottom` + `Start`). The arrow adds `0.375rem` to the
-surface distance and uses the surface background, falling back to the theme's
-popover color. It stays clear of rounded corners when the surface is clamped.
-
-The legacy `anchor` method uses [`Anchor`] to name the **popover's own** anchor,
-not the trigger's corner. `Top*` anchors open below the trigger and `Bottom*`
-anchors open above it. Existing anchor-only calls keep their positioning and
-clamp without flipping. `placement` overrides the anchor; calling `anchor`
-afterward clears the explicit placement.
+The arrow follows the anchor's leading, center, or trailing alignment and is
+inset as needed to avoid rounded corners. It adds `0.375rem` to the surface
+distance and uses the surface background, falling back to the theme's popover
+color. Neither `offset` nor `arrow` changes the positioning strategy.
 
 For example, `Anchor::TopLeft` places the popover just below the trigger, left-aligned to it:
 

@@ -62,7 +62,7 @@ pub struct ResolvedPosition {
 /// children.
 pub struct Positioner {
     strategy: Strategy,
-    trigger_bounds: Option<Rc<Cell<Bounds<Pixels>>>>,
+    corner_position: Option<Rc<Cell<Point<Pixels>>>>,
     on_position: Option<Box<dyn Fn(ResolvedPosition)>>,
     margin: Pixels,
     occlude: bool,
@@ -84,7 +84,7 @@ impl Positioner {
                 align: Align::Center,
                 offset: px(0.),
             },
-            trigger_bounds: None,
+            corner_position: None,
             on_position: None,
             margin: px(4.),
             occlude: false,
@@ -100,7 +100,7 @@ impl Positioner {
     pub fn corner(anchor: Anchor, position: Point<Pixels>) -> Self {
         Self {
             strategy: Strategy::Corner { anchor, position },
-            trigger_bounds: None,
+            corner_position: None,
             on_position: None,
             margin: px(4.),
             occlude: false,
@@ -137,6 +137,18 @@ impl Positioner {
         self
     }
 
+    // Read after trigger prepaint so an open popup follows a moving trigger.
+    pub(crate) fn tracked_corner_position(mut self, position: Rc<Cell<Point<Pixels>>>) -> Self {
+        self.corner_position = Some(position);
+        self
+    }
+
+    /// Observe resolved geometry before children prepaint.
+    pub fn on_position(mut self, callback: impl Fn(ResolvedPosition) + 'static) -> Self {
+        self.on_position = Some(Box::new(callback));
+        self
+    }
+
     /// Blocks the mouse over the positioned popup.
     ///
     /// Off by default, because a tooltip that swallowed the pointer would
@@ -151,19 +163,6 @@ impl Positioner {
     /// Sets the minimum distance kept between the popup and the viewport edge.
     pub fn margin(mut self, margin: Pixels) -> Self {
         self.margin = margin;
-        self
-    }
-
-    // Read after the trigger's prepaint, so moving triggers do not lag a frame.
-    pub(crate) fn tracked_trigger_bounds(mut self, bounds: Rc<Cell<Bounds<Pixels>>>) -> Self {
-        self.trigger_bounds = Some(bounds);
-        self
-    }
-
-    /// Observe the resolved geometry before children prepaint. This can drive
-    /// presentation such as an arrow without a state update or another frame.
-    pub fn on_position(mut self, callback: impl Fn(ResolvedPosition) + 'static) -> Self {
-        self.on_position = Some(Box::new(callback));
         self
     }
 }
@@ -216,17 +215,8 @@ fn resolve(
             align,
             offset,
         } => {
-            let required_size = Size::new(
-                (popup_size.width + offset).max(px(0.)),
-                (popup_size.height + offset).max(px(0.)),
-            );
-            let placement = resolve_placement(
-                trigger_bounds,
-                required_size,
-                viewport_size,
-                margin,
-                placement,
-            );
+            let placement =
+                resolve_placement(trigger_bounds, popup_size, viewport_size, margin, placement);
             let origin = side_origin(trigger_bounds, popup_size, placement, align, offset);
             ResolvedPosition {
                 bounds: clamp(Bounds::new(origin, popup_size), viewport_size, margin),
@@ -390,10 +380,10 @@ impl Element for Positioner {
             window.client_inset().unwrap_or(px(0.)),
         );
         let mut strategy = self.strategy;
-        if let (Strategy::Side { trigger_bounds, .. }, Some(tracked)) =
-            (&mut strategy, &self.trigger_bounds)
+        if let (Strategy::Corner { position, .. }, Some(tracked)) =
+            (&mut strategy, &self.corner_position)
         {
-            *trigger_bounds = tracked.get();
+            *position = tracked.get();
         }
         let position = resolve(
             strategy,
@@ -551,23 +541,6 @@ mod tests {
         );
 
         assert_eq!(position.bounds.top(), px(228.));
-    }
-
-    #[test]
-    fn side_selection_includes_the_offset_in_the_required_space() {
-        let position = resolve(
-            Strategy::Side {
-                trigger_bounds: trigger(200., 340., 40., 20.),
-                placement: Some(Placement::Bottom),
-                align: Align::Center,
-                offset: px(12.),
-            },
-            Size::new(px(40.), px(30.)),
-            viewport(),
-            Edges::all(MARGIN),
-        );
-        assert_eq!(position.placement, Some(Placement::Top));
-        assert_eq!(position.bounds.bottom(), px(328.));
     }
 
     #[test]

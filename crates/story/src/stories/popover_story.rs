@@ -5,7 +5,7 @@ use gpui_kit::component::{
     input::{Input, InputState},
     list::{List, ListDelegate, ListItem, ListState},
     menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
-    popover::{Align, Placement, Popover},
+    popover::Popover,
     separator::Separator,
     v_flex,
 };
@@ -137,7 +137,7 @@ pub struct PopoverStory {
     list: Entity<ListState<DropdownListDelegate>>,
     form_popover_open: bool,
     list_popover_open: bool,
-    placement: Placement,
+    anchor: Anchor,
     checked: bool,
     message: String,
 }
@@ -176,7 +176,7 @@ impl PopoverStory {
             checked: true,
             form_popover_open: false,
             list_popover_open: false,
-            placement: Placement::Bottom,
+            anchor: Anchor::TopCenter,
             focus_handle: cx.focus_handle(),
             message: "".to_string(),
         }
@@ -264,33 +264,37 @@ impl Render for PopoverStory {
                     ),
             )
             .child(
-                section("Placement and arrow")
-                    .description("Choose a side for the open preview below.")
+                section("Anchor and arrow")
+                    .description("Choose the anchor for the open preview below.")
                     .child(
                         v_flex()
                             .w_full()
                             .items_center()
                             .gap_2()
                             .child(
-                                ButtonGroup::new("placement-controls")
+                                ButtonGroup::new("anchor-controls")
                                     .small()
                                     .outline()
                                     .children(
                                         [
-                                            ("top", Placement::Top),
-                                            ("bottom", Placement::Bottom),
-                                            ("left", Placement::Left),
-                                            ("right", Placement::Right),
+                                            ("top-left", Anchor::TopLeft),
+                                            ("top-center", Anchor::TopCenter),
+                                            ("top-right", Anchor::TopRight),
+                                            ("bottom-left", Anchor::BottomLeft),
+                                            ("bottom-center", Anchor::BottomCenter),
+                                            ("bottom-right", Anchor::BottomRight),
+                                            ("left-center", Anchor::LeftCenter),
+                                            ("right-center", Anchor::RightCenter),
                                         ]
                                         .into_iter()
                                         .map(
-                                            |(id, placement)| {
+                                            |(id, anchor)| {
                                                 Button::new(id)
                                                     .outline()
-                                                    .label(placement.to_string())
-                                                    .selected(self.placement == placement)
+                                                    .label(format!("{anchor:?}"))
+                                                    .selected(self.anchor == anchor)
                                                     .on_click(cx.listener(move |this, _, _, cx| {
-                                                        this.placement = placement;
+                                                        this.anchor = anchor;
                                                         cx.notify();
                                                     }))
                                             },
@@ -299,11 +303,10 @@ impl Render for PopoverStory {
                             )
                             .child(
                                 h_flex().w_full().h_40().justify_center().child(
-                                    Popover::new("placement-preview")
+                                    Popover::new("anchor-preview")
                                         .open(true)
                                         .overlay_closable(false)
-                                        .placement(self.placement)
-                                        .align(Align::Center)
+                                        .anchor(self.anchor)
                                         .offset(px(8.))
                                         .arrow(true)
                                         .w_40()
@@ -459,20 +462,20 @@ impl Render for PopoverStory {
                                         .max_w(px(600.))
                                         .anchor(Anchor::TopLeft)
                                         .trigger(Button::new("btn").outline().label("TopLeft"))
-                                        .child("Anchored to the trigger's top-left."),
+                                        .child("Below the trigger, aligned left."),
                                 )
                                 .child(
                                     Popover::new("anchor-top-center")
                                         .max_w(px(600.))
                                         .anchor(Anchor::TopCenter)
                                         .trigger(Button::new("btn").outline().label("TopCenter"))
-                                        .child("Anchored to the trigger's top-center."),
+                                        .child("Below the trigger, centered."),
                                 )
                                 .child(
                                     Popover::new("anchor-top-right")
                                         .anchor(Anchor::TopRight)
                                         .trigger(Button::new("btn").outline().label("TopRight"))
-                                        .child("Anchored to the trigger's top-right."),
+                                        .child("Below the trigger, aligned right."),
                                 ),
                         ),
                     )
@@ -485,19 +488,19 @@ impl Render for PopoverStory {
                                     Popover::new("anchor-bottom-left")
                                         .trigger(Button::new("btn").outline().label("BottomLeft"))
                                         .anchor(Anchor::BottomLeft)
-                                        .child("Anchored to the trigger's bottom-left."),
+                                        .child("Above the trigger, aligned left."),
                                 )
                                 .child(
                                     Popover::new("anchor-bottom-center")
                                         .trigger(Button::new("btn").outline().label("BottomCenter"))
                                         .anchor(Anchor::BottomCenter)
-                                        .child("Anchored to the trigger's bottom-center."),
+                                        .child("Above the trigger, centered."),
                                 )
                                 .child(
                                     Popover::new("anchor-bottom-right")
                                         .anchor(Anchor::BottomRight)
                                         .trigger(Button::new("btn").outline().label("BottomRight"))
-                                        .child("Anchored to the trigger's bottom-right."),
+                                        .child("Above the trigger, aligned right."),
                                 ),
                         ),
                     ),

@@ -13,8 +13,9 @@ use crate::{
     styled::{popover_ring, popover_shadow},
     v_flex,
 };
+use gpui_base::Placement;
 use gpui_base::Popover as BasePopover;
-pub use gpui_base::{Align, Placement, PopoverState};
+pub use gpui_base::PopoverState;
 
 pub(crate) fn init(_: &mut App) {}
 
@@ -108,8 +109,6 @@ pub struct Popover {
     id: ElementId,
     style: StyleRefinement,
     anchor: Anchor,
-    placement: Option<Placement>,
-    align: Option<Align>,
     offset: Option<Pixels>,
     arrow: bool,
     default_open: bool,
@@ -139,8 +138,6 @@ impl Popover {
             id: id.into(),
             style: StyleRefinement::default(),
             anchor: Anchor::TopLeft,
-            placement: None,
-            align: None,
             offset: None,
             arrow: false,
             trigger: None,
@@ -162,35 +159,20 @@ impl Popover {
     /// This names the popover's own anchor, not a corner of the trigger.
     /// `TopLeft` opens below the trigger, left-aligned; `BottomRight` opens
     /// above it, right-aligned. Legacy anchoring clamps without flipping.
-    /// Calling this after `placement` clears the explicit side.
     pub fn anchor(mut self, anchor: impl Into<Anchor>) -> Self {
         self.anchor = anchor.into();
-        self.placement = None;
-        self
-    }
-
-    /// Prefer a side of the trigger, flipping to the opposite side when needed.
-    /// Overrides `anchor` and defaults to centered alignment.
-    pub fn placement(mut self, placement: Placement) -> Self {
-        self.placement = Some(placement);
-        self
-    }
-
-    /// Align along the side. Enables side positioning if used without `placement`.
-    pub fn align(mut self, align: Align) -> Self {
-        self.align = Some(align);
         self
     }
 
     /// Gap from the trigger to the surface (or arrow tip), default 0.25rem.
-    /// Enables side positioning, deriving the side from `anchor` if unspecified.
+    /// Preserves the anchor and does not enable automatic flipping.
     pub fn offset(mut self, offset: impl Into<Pixels>) -> Self {
         self.offset = Some(offset.into());
         self
     }
 
     /// Show an arrow pointing toward the trigger. Default is `false`.
-    /// Enables side positioning so the arrow follows automatic flipping.
+    /// Follows the anchor, with its base inset to avoid rounded corners.
     /// Uses the surface background, falling back to the theme's popover color.
     pub fn arrow(mut self, arrow: bool) -> Self {
         self.arrow = arrow;
@@ -331,24 +313,6 @@ impl Popover {
 impl RenderOnce for Popover {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let anchor = self.anchor;
-        let side_positioning =
-            self.placement.is_some() || self.align.is_some() || self.offset.is_some() || self.arrow;
-        let (inferred_side, inferred_align) = match anchor {
-            Anchor::TopLeft => (Placement::Bottom, Align::Start),
-            Anchor::TopCenter => (Placement::Bottom, Align::Center),
-            Anchor::TopRight => (Placement::Bottom, Align::End),
-            Anchor::BottomLeft => (Placement::Top, Align::Start),
-            Anchor::BottomCenter => (Placement::Top, Align::Center),
-            Anchor::BottomRight => (Placement::Top, Align::End),
-            Anchor::LeftCenter => (Placement::Right, Align::Center),
-            Anchor::RightCenter => (Placement::Left, Align::Center),
-        };
-        let placement = self.placement.unwrap_or(inferred_side);
-        let align = self.align.unwrap_or(if self.placement.is_some() {
-            Align::Center
-        } else {
-            inferred_align
-        });
         let arrow_size = if self.arrow {
             window.rem_size() * 0.375
         } else {
@@ -373,24 +337,17 @@ impl RenderOnce for Popover {
 
         BasePopover::new(self.id)
             .anchor(self.anchor)
-            .when(side_positioning, |this| {
-                this.placement(placement).align(align).offset(offset)
-            })
+            .offset(offset)
             .on_position(move |position, trigger| resolved.set(Some((position, trigger))))
             .mouse_button(self.mouse_button)
             .default_open(self.default_open)
             .overlay_closable(self.overlay_closable)
             .content(move |state, window, cx| {
-                let surface = if side_positioning {
-                    v_flex()
-                        .id("content")
-                        .occlude()
-                        .tab_group()
-                        .when(appearance, |this| this.popover_style(cx).p_3())
-                } else {
-                    Self::render_popover_content(anchor, appearance, window, cx)
-                };
-                surface
+                v_flex()
+                    .id("content")
+                    .occlude()
+                    .tab_group()
+                    .when(appearance, |this| this.popover_style(cx).p_3())
                     .when_some(content, |this, content| {
                         this.child((content)(state, window, cx))
                     })
@@ -401,12 +358,11 @@ impl RenderOnce for Popover {
                             canvas(
                                 |_, _, _| {},
                                 move |bounds, _, window, _| {
-                                    let Some((position, trigger)) = arrow_position.get() else {
+                                    let Some((_, trigger)) = arrow_position.get() else {
                                         return;
                                     };
-                                    let Some(side) = position.placement else {
-                                        return;
-                                    };
+                                    let (side, target) = arrow_anchor(anchor, trigger);
+                                    let trigger = Bounds::new(target, gpui::size(px(0.), px(0.)));
                                     let points =
                                         arrow_points(bounds, trigger, side, arrow_size, radius);
                                     let mut fill = PathBuilder::fill();
@@ -450,6 +406,20 @@ impl RenderOnce for Popover {
                 this.on_open_change(move |open, window, cx| callback(open, window, cx))
             })
             .into_any_element()
+    }
+}
+
+/// The arrow follows the named anchor instead of always aiming at trigger center.
+fn arrow_anchor(anchor: Anchor, trigger: Bounds<Pixels>) -> (Placement, Point<Pixels>) {
+    match anchor {
+        Anchor::TopLeft => (Placement::Bottom, trigger.bottom_left()),
+        Anchor::TopCenter => (Placement::Bottom, trigger.bottom_center()),
+        Anchor::TopRight => (Placement::Bottom, trigger.bottom_right()),
+        Anchor::BottomLeft => (Placement::Top, trigger.origin),
+        Anchor::BottomCenter => (Placement::Top, trigger.top_center()),
+        Anchor::BottomRight => (Placement::Top, trigger.top_right()),
+        Anchor::LeftCenter => (Placement::Right, trigger.right_center()),
+        Anchor::RightCenter => (Placement::Left, trigger.left_center()),
     }
 }
 
@@ -584,15 +554,14 @@ mod tests {
         changes: Rc<RefCell<Vec<bool>>>,
     }
 
-    struct PlacementHarness {
-        placement: Option<gpui_base::Placement>,
-        align: gpui_base::Align,
+    struct AnchorHarness {
+        anchor: Anchor,
         offset: Option<Pixels>,
         origin: Point<Pixels>,
         arrow: bool,
     }
 
-    impl Render for PlacementHarness {
+    impl Render for AnchorHarness {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div().size_full().child(
                 div()
@@ -604,9 +573,7 @@ mod tests {
                             .default_open(true)
                             .appearance(false)
                             .arrow(self.arrow)
-                            .when_some(self.placement, |this, side| {
-                                this.placement(side).align(self.align)
-                            })
+                            .anchor(self.anchor)
                             .when_some(self.offset, |this, gap| this.offset(gap))
                             .trigger(Button::new("positioned-trigger").size(px(40.)))
                             .child(
@@ -620,13 +587,10 @@ mod tests {
     }
 
     #[gpui::test]
-    fn placement_and_offset_position_the_surface_on_each_trigger_side(
-        cx: &mut gpui::TestAppContext,
-    ) {
+    fn anchor_and_offset_position_the_surface_on_each_trigger_edge(cx: &mut gpui::TestAppContext) {
         cx.update(crate::init);
-        let (view, window) = cx.add_window_view(|_, _| PlacementHarness {
-            placement: None,
-            align: gpui_base::Align::Center,
+        let (view, window) = cx.add_window_view(|_, _| AnchorHarness {
+            anchor: Anchor::TopLeft,
             offset: None,
             origin: point(px(200.), px(200.)),
             arrow: false,
@@ -639,14 +603,18 @@ mod tests {
         assert_eq!(legacy.top(), px(244.));
 
         for (side, x, y) in [
-            (gpui_base::Placement::Top, 190., 128.),
-            (gpui_base::Placement::Bottom, 190., 252.),
-            (gpui_base::Placement::Left, 128., 190.),
-            (gpui_base::Placement::Right, 252., 190.),
+            (Anchor::BottomLeft, 200., 128.),
+            (Anchor::BottomCenter, 190., 128.),
+            (Anchor::BottomRight, 180., 128.),
+            (Anchor::TopLeft, 200., 252.),
+            (Anchor::TopCenter, 190., 252.),
+            (Anchor::TopRight, 180., 252.),
+            (Anchor::RightCenter, 128., 190.),
+            (Anchor::LeftCenter, 252., 190.),
         ] {
             window.update(|window, cx| {
                 view.update(cx, |view, cx| {
-                    view.placement = Some(side);
+                    view.anchor = side;
                     view.offset = Some(px(12.));
                     cx.notify();
                 });
@@ -673,25 +641,24 @@ mod tests {
     }
 
     #[gpui::test]
-    fn arrow_reserves_space_and_side_alignment_survives_flipping(cx: &mut gpui::TestAppContext) {
+    fn arrow_reserves_space_without_changing_anchor_alignment(cx: &mut gpui::TestAppContext) {
         cx.update(crate::init);
-        let (view, window) = cx.add_window_view(|_, _| PlacementHarness {
-            placement: Some(Placement::Top),
-            align: Align::Start,
+        let (view, window) = cx.add_window_view(|_, _| AnchorHarness {
+            anchor: Anchor::TopLeft,
             offset: Some(px(12.)),
             origin: point(px(200.), px(8.)),
             arrow: true,
         });
         window.update(|window, cx| window.draw(cx).clear(cx));
         window.update(|window, cx| window.draw(cx).clear(cx));
-        // There is no room above: bottom edge 48 + tip gap 12 + arrow depth 6.
+        // Bottom edge 48 + tip gap 12 + arrow depth 6.
         assert_eq!(
             window.debug_bounds("positioned-content").unwrap().origin,
             point(px(200.), px(66.))
         );
         window.update(|window, cx| {
             view.update(cx, |view, cx| {
-                view.align = Align::End;
+                view.anchor = Anchor::TopRight;
                 view.arrow = false;
                 cx.notify();
             });
@@ -701,6 +668,73 @@ mod tests {
             window.debug_bounds("positioned-content").unwrap().origin,
             point(px(180.), px(60.))
         );
+    }
+
+    #[gpui::test]
+    fn anchor_does_not_flip_when_offset_or_arrow_is_enabled(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let (_, window) = cx.add_window_view(|_, _| AnchorHarness {
+            anchor: Anchor::BottomCenter,
+            offset: Some(px(12.)),
+            origin: point(px(200.), px(8.)),
+            arrow: true,
+        });
+        window.update(|window, cx| window.draw(cx).clear(cx));
+        window.update(|window, cx| window.draw(cx).clear(cx));
+        // Clamp to the window margin instead of flipping below the trigger.
+        assert_eq!(
+            window.debug_bounds("positioned-content").unwrap().top(),
+            px(8.)
+        );
+    }
+
+    #[test]
+    fn arrow_alignment_uses_the_anchor_instead_of_trigger_center() {
+        let trigger = Bounds::new(point(px(120.), px(120.)), size(px(40.), px(20.)));
+        for (anchor, side, target) in [
+            (
+                Anchor::TopLeft,
+                Placement::Bottom,
+                point(px(120.), px(140.)),
+            ),
+            (
+                Anchor::TopCenter,
+                Placement::Bottom,
+                point(px(140.), px(140.)),
+            ),
+            (
+                Anchor::TopRight,
+                Placement::Bottom,
+                point(px(160.), px(140.)),
+            ),
+            (
+                Anchor::BottomLeft,
+                Placement::Top,
+                point(px(120.), px(120.)),
+            ),
+            (
+                Anchor::BottomCenter,
+                Placement::Top,
+                point(px(140.), px(120.)),
+            ),
+            (
+                Anchor::BottomRight,
+                Placement::Top,
+                point(px(160.), px(120.)),
+            ),
+            (
+                Anchor::LeftCenter,
+                Placement::Right,
+                point(px(160.), px(130.)),
+            ),
+            (
+                Anchor::RightCenter,
+                Placement::Left,
+                point(px(120.), px(130.)),
+            ),
+        ] {
+            assert_eq!(arrow_anchor(anchor, trigger), (side, target));
+        }
     }
 
     #[test]

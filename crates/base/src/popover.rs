@@ -8,7 +8,7 @@ use gpui::{
 };
 
 use crate::{
-    Align, DeferredPopover, GlobalState, Placement, Popup, ResolvedPosition, Selectable,
+    DeferredPopover, GlobalState, Popup, ResolvedPosition, Selectable,
     actions::{Cancel, Confirm},
 };
 
@@ -169,8 +169,6 @@ type ContentBuilder =
 pub struct Popover {
     id: ElementId,
     anchor: Anchor,
-    placement: Option<Placement>,
-    align: Align,
     offset: gpui::Pixels,
     on_position: Option<Box<dyn Fn(ResolvedPosition, gpui::Bounds<gpui::Pixels>)>>,
     default_open: bool,
@@ -188,8 +186,6 @@ impl Popover {
         Self {
             id: id.into(),
             anchor: Anchor::TopLeft,
-            placement: None,
-            align: Align::Center,
             offset: gpui::px(0.),
             on_position: None,
             default_open: false,
@@ -205,24 +201,10 @@ impl Popover {
 
     pub fn anchor(mut self, anchor: impl Into<Anchor>) -> Self {
         self.anchor = anchor.into();
-        self.placement = None;
         self
     }
 
-    /// Prefer a side of the trigger, flipping when there is not enough space.
-    /// Overrides `anchor`; a subsequent `anchor` restores corner positioning.
-    pub fn placement(mut self, placement: Placement) -> Self {
-        self.placement = Some(placement);
-        self
-    }
-
-    /// Align along the chosen side, centered by default.
-    pub fn align(mut self, align: Align) -> Self {
-        self.align = align;
-        self
-    }
-
-    /// Gap between trigger and surface for side positioning, zero by default.
+    /// Gap from the trigger along the anchor's outward direction, zero by default.
     pub fn offset(mut self, offset: gpui::Pixels) -> Self {
         self.offset = offset;
         self
@@ -324,9 +306,7 @@ impl RenderOnce for Popover {
         let parent_view_id = window.current_view();
         let popup = Popup::new(self.id, trigger(open, window, cx))
             .anchor(self.anchor)
-            .align(self.align)
             .offset(self.offset)
-            .when_some(self.placement, |this, placement| this.placement(placement))
             .when_some(self.on_position, |this, callback| {
                 this.on_position(callback)
             })
