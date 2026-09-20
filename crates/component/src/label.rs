@@ -110,32 +110,60 @@ impl Label {
             let matched_str = matched.as_str();
             if !matched_str.is_empty() {
                 let search_lower = matched_str.to_lowercase();
-                let full_text_lower = full_text.to_lowercase();
+                let mut full_text_lower = String::new();
+                let mut lower_to_source_ranges = Vec::new();
+
+                for (source_start, ch) in full_text.char_indices() {
+                    let source_end = source_start + ch.len_utf8();
+                    let lower_start = full_text_lower.len();
+                    full_text_lower.extend(ch.to_lowercase());
+                    let lower_end = full_text_lower.len();
+                    lower_to_source_ranges.push((lower_start..lower_end, source_start..source_end));
+                }
+
+                let source_range = |lower_range: Range<usize>| {
+                    let start = lower_to_source_ranges
+                        .iter()
+                        .find(|(lower, _)| {
+                            lower.start <= lower_range.start && lower_range.start < lower.end
+                        })?
+                        .1
+                        .start;
+                    let end = lower_to_source_ranges
+                        .iter()
+                        .find(|(lower, _)| {
+                            lower.start < lower_range.end && lower_range.end <= lower.end
+                        })?
+                        .1
+                        .end;
+                    Some(start..end)
+                };
 
                 if matched.is_prefix() {
                     // For prefix matching, only check if the text starts with the search term
                     if full_text_lower.starts_with(&search_lower) {
-                        ranges.push(0..matched_str.len());
+                        if let Some(range) = source_range(0..search_lower.len()) {
+                            ranges.push(range);
+                        }
                     }
                 } else {
                     // For full matching, find all occurrences
                     let mut search_start = 0;
                     while let Some(pos) = full_text_lower[search_start..].find(&search_lower) {
                         let match_start = search_start + pos;
-                        let match_end = match_start + matched_str.len();
+                        let match_end = match_start + search_lower.len();
 
-                        if match_end <= full_text.len() {
-                            ranges.push(match_start..match_end);
+                        if let Some(range) = source_range(match_start..match_end) {
+                            ranges.push(range);
                         }
 
-                        search_start = match_start + 1;
-                        while !full_text.is_char_boundary(search_start)
-                            && search_start < full_text.len()
-                        {
-                            search_start += 1;
-                        }
+                        search_start = match_start
+                            + full_text_lower[match_start..]
+                                .chars()
+                                .next()
+                                .map_or(1, char::len_utf8);
 
-                        if search_start >= full_text.len() {
+                        if search_start >= full_text_lower.len() {
                             break;
                         }
                     }
@@ -263,6 +291,8 @@ mod tests {
                 Label::new("é🙂").highlights(HighlightsMatch::Prefix("é".into())),
                 vec![0..3],
             ),
+            (Label::new("İ").highlights("i"), vec![0..3]),
+            (Label::new("İA").highlights("a"), vec![3..6]),
             (Label::new("").secondary(""), vec![0..0, 0..3]),
             (Label::new("").highlights(""), vec![]),
         ];
@@ -277,6 +307,15 @@ mod tests {
                 assert!(displayed.get(range).is_some());
             }
         }
+    }
+
+    #[test]
+    fn case_insensitive_highlight_ranges_map_back_to_source_text() {
+        let label = Label::new("İ").highlights("i");
+        assert_eq!(label.highlight_ranges("İ".len()), vec![0..2]);
+
+        let label = Label::new("İA").highlights("a");
+        assert_eq!(label.highlight_ranges("İA".len()), vec![2..3]);
     }
 
     #[test]
