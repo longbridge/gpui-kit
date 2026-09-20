@@ -41,19 +41,28 @@ enum SelectionMode {
 
 impl SelectionMode {
     #[inline(always)]
-    fn is_row(&self) -> bool {
-        matches!(self, SelectionMode::Row)
-    }
-
-    #[inline(always)]
-    fn is_column(&self) -> bool {
-        matches!(self, SelectionMode::Column)
-    }
-
-    #[inline(always)]
     fn is_cell(&self) -> bool {
         matches!(self, SelectionMode::Cell)
     }
+}
+
+/// The current selection of a table, as one value.
+///
+/// Mirrors [`TableEvent::SelectRow`], [`TableEvent::SelectColumn`] and
+/// [`TableEvent::SelectCell`]. Match on it instead of combining
+/// [`TableState::selected_row`], [`TableState::selected_col`] and
+/// [`TableState::selected_cell`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum TableSelection {
+    /// Nothing is selected.
+    #[default]
+    None,
+    /// A row is selected.
+    Row(usize),
+    /// A column is selected.
+    Column(usize),
+    /// A cell is selected, as `(row_ix, col_ix)`.
+    Cell(usize, usize),
 }
 
 /// The Table event.
@@ -454,15 +463,34 @@ where
         })
     }
 
+    /// Returns the current selection as one value.
+    ///
+    /// A selected cell reports as [`TableSelection::Cell`] only; use
+    /// `selected_cell().map(|(row_ix, _)| row_ix)` when the cell's row is wanted.
+    pub fn selection(&self) -> TableSelection {
+        match self.selection_mode {
+            SelectionMode::Row => self
+                .selected_row
+                .map_or(TableSelection::None, TableSelection::Row),
+            SelectionMode::Column => self
+                .selected_col
+                .map_or(TableSelection::None, TableSelection::Column),
+            SelectionMode::Cell => self
+                .selected_cell
+                .map_or(TableSelection::None, |(row_ix, col_ix)| {
+                    TableSelection::Cell(row_ix, col_ix)
+                }),
+        }
+    }
+
     /// Returns the selected row index.
     ///
-    /// In cell selection mode this is the row of the selected cell. Returns
-    /// `None` if nothing is selected or the table is in column selection mode.
+    /// `Some` only when a row itself is selected; a selected cell does not
+    /// count, see [`TableState::selection`].
     pub fn selected_row(&self) -> Option<usize> {
-        match self.selection_mode {
-            SelectionMode::Row => self.selected_row,
-            SelectionMode::Cell => self.selected_cell.map(|(row_ix, _)| row_ix),
-            SelectionMode::Column => None,
+        match self.selection() {
+            TableSelection::Row(row_ix) => Some(row_ix),
+            _ => None,
         }
     }
 
@@ -508,13 +536,12 @@ where
 
     /// Returns the selected column index.
     ///
-    /// In cell selection mode this is the column of the selected cell. Returns
-    /// `None` if nothing is selected or the table is in row selection mode.
+    /// `Some` only when a column itself is selected; a selected cell does not
+    /// count, see [`TableState::selection`].
     pub fn selected_col(&self) -> Option<usize> {
-        match self.selection_mode {
-            SelectionMode::Column => self.selected_col,
-            SelectionMode::Cell => self.selected_cell.map(|(_, col_ix)| col_ix),
-            SelectionMode::Row => None,
+        match self.selection() {
+            TableSelection::Column(col_ix) => Some(col_ix),
+            _ => None,
         }
     }
 
@@ -531,7 +558,7 @@ where
 
     /// Returns the selected cell as `(row_ix, col_ix)`.
     ///
-    /// Returns `None` if no cell is currently selected or if the table is in row/column selection mode.
+    /// `Some` only when a cell is selected; see [`TableState::selection`].
     ///
     /// # Example
     ///
@@ -541,7 +568,10 @@ where
     /// }
     /// ```
     pub fn selected_cell(&self) -> Option<(usize, usize)> {
-        self.selected_cell.filter(|_| self.selection_mode.is_cell())
+        match self.selection() {
+            TableSelection::Cell(row_ix, col_ix) => Some((row_ix, col_ix)),
+            _ => None,
+        }
     }
 
     /// Sets the selected cell to the given row and column indices.
@@ -831,9 +861,7 @@ where
     }
 
     fn has_selection(&self) -> bool {
-        self.selected_row().is_some()
-            || self.selected_col().is_some()
-            || self.selected_cell().is_some()
+        self.selection() != TableSelection::None
     }
 
     pub(super) fn action_cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
@@ -1369,10 +1397,9 @@ where
                 .map(|col_group| col_group.column.selectable)
                 .unwrap_or(false);
 
-        // Only column mode highlights the column; a selected cell reports its
-        // column through `selected_col()` but highlights the cell alone.
-        let is_col_selected = self.selection_mode.is_column() && self.selected_col == Some(col_ix);
-        if selectable && is_col_selected {
+        // `selected_col()` is `None` outside column mode, so a selected cell
+        // never leaves its column highlighted.
+        if selectable && self.selected_col() == Some(col_ix) {
             el.bg(cx.theme().tokens.table_active)
         } else {
             el
@@ -1970,9 +1997,9 @@ where
     ) -> gpui::AnyElement {
         let horizontal_scroll_handle = self.horizontal_scroll_handle.clone();
         let is_stripe_row = self.options.stripe && row_ix % 2 != 0;
-        // Only row mode selects the row itself; a selected cell reports its
-        // row through `selected_row()` but highlights the cell alone.
-        let is_selected = self.selection_mode.is_row() && self.selected_row == Some(row_ix);
+        // `selected_row()` is `None` outside row mode, so a selected cell or
+        // column never highlights its row.
+        let is_selected = self.selected_row() == Some(row_ix);
         let view = cx.entity().clone();
         let row_height = self.options.size.table_row_height();
 

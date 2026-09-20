@@ -1,6 +1,6 @@
 use gpui_kit::component::{
     list::ListItem,
-    table::{Column, DataTable, TableDelegate, TableState},
+    table::{Column, DataTable, TableDelegate, TableSelection, TableState},
     tree::{Tree, TreeItem, TreeState},
 };
 use gpui_kit::test::TestWindowExt;
@@ -96,28 +96,50 @@ fn table_selection_getters_follow_the_active_mode(cx: &mut TestAppContext) {
         table.update(cx, |table, cx| {
             let selection = |table: &TableState<Rows>| {
                 (
+                    table.selection(),
                     table.selected_row(),
                     table.selected_col(),
                     table.selected_cell(),
                 )
             };
-            assert_eq!(selection(table), (None, None, None));
+            assert_eq!(selection(table), (TableSelection::None, None, None, None));
             table.set_selected_cell(5, 1, cx);
-            assert_eq!(selection(table), (Some(5), Some(1), Some((5, 1))));
+            assert_eq!(
+                selection(table),
+                (TableSelection::Cell(5, 1), None, None, Some((5, 1)))
+            );
             table.set_selected_row(3, cx);
-            assert_eq!(selection(table), (Some(3), None, None));
+            assert_eq!(
+                selection(table),
+                (TableSelection::Row(3), Some(3), None, None)
+            );
             table.set_selected_cell(4, 0, cx);
-            assert_eq!(selection(table), (Some(4), Some(0), Some((4, 0))));
+            assert_eq!(
+                selection(table),
+                (TableSelection::Cell(4, 0), None, None, Some((4, 0)))
+            );
             table.set_selected_col(1, cx);
-            assert_eq!(selection(table), (None, Some(1), None));
+            assert_eq!(
+                selection(table),
+                (TableSelection::Column(1), None, Some(1), None)
+            );
             table.set_selected_row(2, cx);
-            assert_eq!(selection(table), (Some(2), None, None));
+            assert_eq!(
+                selection(table),
+                (TableSelection::Row(2), Some(2), None, None)
+            );
             table.set_selected_col(0, cx);
-            assert_eq!(selection(table), (None, Some(0), None));
+            assert_eq!(
+                selection(table),
+                (TableSelection::Column(0), None, Some(0), None)
+            );
             table.set_selected_cell(1, 1, cx);
-            assert_eq!(selection(table), (Some(1), Some(1), Some((1, 1))));
+            assert_eq!(
+                selection(table),
+                (TableSelection::Cell(1, 1), None, None, Some((1, 1)))
+            );
             table.clear_selection(cx);
-            assert_eq!(selection(table), (None, None, None));
+            assert_eq!(selection(table), (TableSelection::None, None, None, None));
         });
     })
     .unwrap();
