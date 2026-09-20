@@ -115,6 +115,8 @@ impl Default for SelectOptions {
 // MARK: SelectState
 
 /// State of the [`Select`] component.
+///
+/// Emits [`DismissEvent`] when an open menu closes, including after a selection is confirmed.
 pub struct SelectState<D: SearchableListDelegate + 'static>
 where
     <D::Item as SearchableListItem>::Value: PartialEq + Clone,
@@ -429,9 +431,13 @@ where
     }
 
     fn set_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        let dismissed = self.state.open && !open;
         self.state.open = open;
         self.state.deferred_context = open.then(|| GlobalState::register_deferred_popover(cx));
 
+        if dismissed {
+            cx.emit(DismissEvent);
+        }
         cx.notify();
     }
 
