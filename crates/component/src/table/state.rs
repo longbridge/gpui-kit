@@ -600,6 +600,19 @@ where
         cx.notify();
     }
 
+    /// Sets the selection as one value; [`TableSelection::None`] clears it.
+    ///
+    /// Scrolls and emits exactly as the matching `set_selected_*` or
+    /// [`TableState::clear_selection`] call would.
+    pub fn set_selection(&mut self, selection: TableSelection, cx: &mut Context<Self>) {
+        match selection {
+            TableSelection::None => self.clear_selection(cx),
+            TableSelection::Row(row_ix) => self.set_selected_row(row_ix, cx),
+            TableSelection::Column(col_ix) => self.set_selected_col(col_ix, cx),
+            TableSelection::Cell(row_ix, col_ix) => self.set_selected_cell(row_ix, col_ix, cx),
+        }
+    }
+
     /// Clear the selection of the table.
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
         self.selection_mode = SelectionMode::Row;

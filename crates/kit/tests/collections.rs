@@ -140,6 +140,18 @@ fn table_selection_getters_follow_the_active_mode(cx: &mut TestAppContext) {
             );
             table.clear_selection(cx);
             assert_eq!(selection(table), (TableSelection::None, None, None, None));
+
+            // `set_selection` round-trips through `selection()`.
+            for value in [
+                TableSelection::Row(7),
+                TableSelection::Column(1),
+                TableSelection::Cell(3, 0),
+                TableSelection::None,
+            ] {
+                table.set_selection(value, cx);
+                assert_eq!(table.selection(), value);
+            }
+            assert_eq!(selection(table), (TableSelection::None, None, None, None));
         });
     })
     .unwrap();
