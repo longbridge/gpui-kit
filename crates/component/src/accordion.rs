@@ -120,12 +120,13 @@ impl RenderOnce for Accordion {
                         if accordion.open {
                             open_indices.borrow_mut().insert(ix);
                         }
+                        let disabled = self.disabled || accordion.disabled;
 
                         accordion
                             .index(ix)
                             .last(ix == last_ix)
                             .with_size(self.size)
-                            .disabled(self.disabled)
+                            .disabled(disabled)
                             .on_toggle_click({
                                 let open_indices = open_indices.clone();
                                 move |open, _, _| {
