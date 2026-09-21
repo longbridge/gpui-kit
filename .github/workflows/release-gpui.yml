@@ -44,7 +44,7 @@ jobs:
       - name: Install system dependencies
         run: script/bootstrap
       - name: Cache the staged workspace and repository builds
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry/index/

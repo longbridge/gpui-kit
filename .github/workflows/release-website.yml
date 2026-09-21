@@ -64,7 +64,7 @@ jobs:
           cargo install -f wasm-bindgen-cli --version "$version"
 
       - name: Cache Cargo dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -92,7 +92,7 @@ jobs:
           bun run test:showcases
 
       - name: Restore historical website builds
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: website/.version-cache
           key: website-versions-${{ hashFiles('website/astro.config.mjs', 'website/package.json', 'website/public/**', 'website/src/components/**', 'website/src/layouts/**', 'website/src/lib/**', 'website/src/pages/**', 'website/src/styles/**') }}-${{ github.run_id }}
@@ -106,7 +106,7 @@ jobs:
         run: script/build-website-versions
 
       - name: Save historical website builds
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: website/.version-cache
           key: website-versions-${{ hashFiles('website/astro.config.mjs', 'website/package.json', 'website/public/**', 'website/src/components/**', 'website/src/layouts/**', 'website/src/lib/**', 'website/src/pages/**', 'website/src/styles/**') }}-${{ github.run_id }}
