@@ -33,7 +33,20 @@ git -C "$repo_root" fetch origin main --depth=1 --tags
 
 release_tags=()
 while IFS= read -r tag; do
+  # Versioned website builds only support stable semver tags from v0.6.0
+  # onward. This deliberately excludes tags such as v0.6.0-preview.1.
+  if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    continue
+  fi
+  version=${tag#v}
+  IFS=. read -r major minor patch <<< "$version"
+  if ((major < 0 || (major == 0 && minor < 6))); then
+    continue
+  fi
   release_tags+=("$tag")
+  if ((${#release_tags[@]} == 20)); then
+    break
+  fi
 done < <(git -C "$repo_root" tag --list 'v*' --sort=-version:refname)
 versions_json=$(printf '%s\n' main "${release_tags[@]}" | jq -Rsc '
   split("\n") | map(select(length > 0)) | map({id: ., label: .})
