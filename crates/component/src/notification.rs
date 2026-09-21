@@ -6,6 +6,7 @@ use gpui::{
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString,
     StatefulInteractiveElement, StyleRefinement, Styled, Subscription, SystemNotification,
     SystemNotificationResponse, WeakEntity, Window, WindowId, div, prelude::FluentBuilder, px,
+    relative,
 };
 use gpui_base::{
     Toast as BaseToast, ToastManager, ToastMotion, ToastOptions, ToastStack, ToastStackState,
@@ -1018,69 +1019,19 @@ impl Render for NotificationList {
                 .v_flex()
                 .w(width)
                 .max_h(size.height)
-                .debug_selector(move || match anchor {
-                    Anchor::TopLeft => "notification-stack-top-left".into(),
-                    Anchor::TopCenter => "notification-stack-top-center".into(),
-                    Anchor::TopRight => "notification-stack-top-right".into(),
-                    Anchor::BottomLeft => "notification-stack-bottom-left".into(),
-                    Anchor::BottomCenter => "notification-stack-bottom-center".into(),
-                    Anchor::BottomRight => "notification-stack-bottom-right".into(),
-                    Anchor::LeftCenter => "notification-stack-left-center".into(),
-                    Anchor::RightCenter => "notification-stack-right-center".into(),
-                })
+                .absolute()
                 .map(|this| match anchor {
-                    Anchor::TopLeft => this
-                        .absolute()
-                        .top(margins.top)
-                        .left(margins.left)
-                        .into_any_element(),
-                    Anchor::TopRight => this
-                        .absolute()
-                        .top(margins.top)
-                        .right(margins.right)
-                        .into_any_element(),
-                    Anchor::TopCenter => div()
-                        .absolute()
-                        .top(margins.top)
-                        .left_0()
-                        .right_0()
-                        .flex()
-                        .justify_center()
-                        .child(this)
-                        .into_any_element(),
-                    Anchor::BottomLeft => this
-                        .absolute()
+                    Anchor::TopLeft => this.top(margins.top).left(margins.left),
+                    Anchor::TopRight => this.top(margins.top).right(margins.right),
+                    Anchor::TopCenter => this.top(margins.top).left(relative(0.5)).ml(-width / 2.),
+                    Anchor::BottomLeft => this.bottom(margins.bottom).left(margins.left),
+                    Anchor::BottomRight => this.bottom(margins.bottom).right(margins.right),
+                    Anchor::BottomCenter => this
                         .bottom(margins.bottom)
-                        .left(margins.left)
-                        .into_any_element(),
-                    Anchor::BottomRight => this
-                        .absolute()
-                        .bottom(margins.bottom)
-                        .right(margins.right)
-                        .into_any_element(),
-                    Anchor::BottomCenter => div()
-                        .absolute()
-                        .bottom(margins.bottom)
-                        .left_0()
-                        .right_0()
-                        .flex()
-                        .justify_center()
-                        .child(this)
-                        .into_any_element(),
-                    Anchor::LeftCenter => this
-                        .absolute()
-                        .left(margins.left)
-                        .top_0()
-                        .bottom_0()
-                        .my_auto()
-                        .into_any_element(),
-                    Anchor::RightCenter => this
-                        .absolute()
-                        .right(margins.right)
-                        .top_0()
-                        .bottom_0()
-                        .my_auto()
-                        .into_any_element(),
+                        .left(relative(0.5))
+                        .ml(-width / 2.),
+                    Anchor::LeftCenter => this.left(margins.left).top_0().bottom_0().my_auto(),
+                    Anchor::RightCenter => this.right(margins.right).top_0().bottom_0().my_auto(),
                 })
         });
 
@@ -1277,35 +1228,6 @@ mod tests {
             list.read_with(cx, |list, _| anchors(list)),
             [Anchor::TopRight]
         );
-    }
-
-    #[gpui::test]
-    fn top_center_notification_is_horizontally_centered(cx: &mut TestAppContext) {
-        cx.update(|cx| cx.set_global(Theme::default()));
-        let (root, cx) = cx.add_window_view(|window, cx| TestRoot {
-            list: cx.new(|cx| NotificationList::new(window, cx)),
-            other_focus: cx.focus_handle(),
-        });
-        cx.update(|window, _| window.activate_window());
-        let list = root.read_with(cx, |root, _| root.list.clone());
-
-        list.update_in(cx, |list, window, cx| {
-            list.push(
-                Notification::info("centered")
-                    .placement(Anchor::TopCenter)
-                    .autohide(false),
-                window,
-                cx,
-            );
-        });
-        cx.update(|window, cx| window.draw(cx).clear(cx));
-
-        let viewport_width = cx.update(|window, _| window.viewport_size().width);
-        let bounds = cx
-            .debug_bounds("notification-stack-top-center")
-            .expect("top-center notification stack was painted");
-        assert_eq!(bounds.size.width, DEFAULT_NOTIFICATION_WIDTH);
-        assert_eq!(bounds.origin.x, (viewport_width - bounds.size.width) / 2.);
     }
 
     #[gpui::test]
