@@ -24,7 +24,9 @@ use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _,
     badge::Badge,
     button::{Button, ButtonVariants as _},
-    marker::{Marker, MarkerContent, MarkerIcon, MarkerLoadingStyle, MarkerVariant},
+    marker::{
+        Marker, MarkerAlignment, MarkerContent, MarkerIcon, MarkerLoadingStyle, MarkerVariant,
+    },
     shimmer::{ShimmerStyle, ShimmerText},
     spinner::Spinner,
 };
@@ -54,6 +56,7 @@ The default state is:
 | Property | Default | Meaning |
 | --- | --- | --- |
 | Variant | `Plain` | A full-width status row without divider decoration. |
+| Alignment | unset | `Separator` centers its label; every other variant starts at the leading edge. |
 | Loading | `false` | No automatic loading effect. |
 | Loading style | `Spinner` | Used when loading is enabled. |
 | Icon slot | absent | A spinner is inserted only for spinner loading with no icon. |
@@ -119,6 +122,29 @@ Marker::new()
 
 The border is a visual boundary. Keep the unread count and meaning in text so
 the state does not depend on color or a line alone.
+
+## Alignment
+
+A marker spans the full row. `alignment(...)` decides where its children sit
+inside that row and how wrapped text lines align:
+
+```rust
+Marker::new()
+    .alignment(MarkerAlignment::Center)
+    .icon(MarkerIcon::new().child(Icon::new(IconName::Info)))
+    .content(MarkerContent::new().text("Messages are end-to-end encrypted"));
+
+Marker::new()
+    .alignment(MarkerAlignment::End)
+    .content(MarkerContent::new().text("Delivered"))
+```
+
+Unset, `Separator` centers its label between the two lines and every other
+variant starts at the leading edge. An explicit alignment applies to any
+variant; a separator then keeps only the line on the far side of its label, so
+`Start` draws the trailing line and `End` the leading one. Centered notices are the usual shape for a transcript's system rows,
+such as a stopped answer or a failed request with a retry action; an `End`
+marker trails a delivery state under an outgoing message.
 
 ## Loading styles
 
@@ -304,6 +330,7 @@ adapt a marker to a denser toolbar or a larger empty-state boundary.
 | --- | --- | --- |
 | `new()` | `Plain`, not loading, spinner style | Create a marker. |
 | `with_variant(MarkerVariant)` | `Plain` | Choose plain, separator, or border treatment. |
+| `alignment(MarkerAlignment)` | unset: `Separator` centers, others start | Place the children at the leading edge, the center, or the trailing edge. |
 | `loading(bool)` | `false` | Enable or disable loading rendering. |
 | `with_loading_style(MarkerLoadingStyle)` | `Spinner` | Choose spinner or shimmer. |
 | `with_shimmer_style(ShimmerStyle)` | default style | Configure text shimmer. |
@@ -335,6 +362,7 @@ adapt a marker to a denser toolbar or a larger empty-state boundary.
 ### Related types
 
 - [`MarkerVariant`] — `Plain`, `Separator`, and `Border`.
+- [`MarkerAlignment`] — `Start`, `Center`, and `End`.
 - [`MarkerLoadingStyle`] — `Spinner` or `Shimmer`.
 - [`ShimmerStyle`] and [`ShimmerText`] — reusable loading text controls.
 
@@ -342,6 +370,7 @@ adapt a marker to a denser toolbar or a larger empty-state boundary.
 [MarkerIcon]: https://docs.rs/gpui-component/latest/gpui_component/marker/struct.MarkerIcon.html
 [MarkerContent]: https://docs.rs/gpui-component/latest/gpui_component/marker/struct.MarkerContent.html
 [MarkerVariant]: https://docs.rs/gpui-component/latest/gpui_component/marker/enum.MarkerVariant.html
+[MarkerAlignment]: https://docs.rs/gpui-component/latest/gpui_component/marker/enum.MarkerAlignment.html
 [MarkerLoadingStyle]: https://docs.rs/gpui-component/latest/gpui_component/marker/enum.MarkerLoadingStyle.html
 [ShimmerStyle]: https://docs.rs/gpui-component/latest/gpui_component/shimmer/struct.ShimmerStyle.html
 [ShimmerText]: https://docs.rs/gpui-component/latest/gpui_component/shimmer/struct.ShimmerText.html

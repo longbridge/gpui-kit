@@ -2,7 +2,9 @@ use gpui_kit::component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     link::Link,
-    marker::{Marker, MarkerContent, MarkerIcon, MarkerLoadingStyle, MarkerVariant},
+    marker::{
+        Marker, MarkerAlignment, MarkerContent, MarkerIcon, MarkerLoadingStyle, MarkerVariant,
+    },
     shimmer::{ShimmerStyle, ShimmerText},
     spinner::Spinner,
     v_flex,
@@ -73,6 +75,46 @@ impl Render for MarkerStory {
                         Marker::new()
                             .with_variant(MarkerVariant::Border)
                             .content(MarkerContent::new().child("Unread messages")),
+                    ),
+            )
+            .child(
+                section("Alignment")
+                    .description(
+                        "Center a system notice or trail a delivery state; Separator centers by default.",
+                    )
+                    .max_w(rems(42.5))
+                    .v_flex()
+                    .gap_3()
+                    .child(Marker::new().content(MarkerContent::new().child("Leading by default")))
+                    .child(
+                        Marker::new()
+                            .alignment(MarkerAlignment::Center)
+                            .icon(MarkerIcon::new().child(Icon::new(IconName::Info)))
+                            .content(MarkerContent::new().child("Messages are end-to-end encrypted")),
+                    )
+                    .child(
+                        Marker::new()
+                            .alignment(MarkerAlignment::Center)
+                            .content(MarkerContent::new().child(
+                                "The answer was stopped before it finished. Edit the question or ask again, and a long notice wraps around its center.",
+                            )),
+                    )
+                    .child(
+                        Marker::new()
+                            .alignment(MarkerAlignment::Center)
+                            .content(MarkerContent::new().child("The message could not be sent."))
+                            .child(Button::new("marker-retry-send").text().small().label("Retry")),
+                    )
+                    .child(
+                        Marker::new()
+                            .alignment(MarkerAlignment::End)
+                            .content(MarkerContent::new().child("Delivered")),
+                    )
+                    .child(
+                        Marker::new()
+                            .with_variant(MarkerVariant::Separator)
+                            .alignment(MarkerAlignment::End)
+                            .content(MarkerContent::new().child("Today")),
                     ),
             )
             .child(

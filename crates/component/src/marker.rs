@@ -31,6 +31,17 @@ pub enum MarkerLoadingStyle {
     Shimmer,
 }
 
+/// Horizontal placement of a [`Marker`]'s children inside its full-width row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MarkerAlignment {
+    /// Keep the children at the leading edge.
+    Start,
+    /// Center the children, like a system notice in a transcript.
+    Center,
+    /// Keep the children at the trailing edge.
+    End,
+}
+
 enum MarkerChild {
     Icon(MarkerIcon),
     Content(MarkerContent),
@@ -50,6 +61,7 @@ pub struct Marker {
     style: StyleRefinement,
     separator_style: StyleRefinement,
     variant: MarkerVariant,
+    alignment: Option<MarkerAlignment>,
     loading: bool,
     loading_style: MarkerLoadingStyle,
     shimmer_style: ShimmerStyle,
@@ -65,6 +77,7 @@ impl Marker {
             style: StyleRefinement::default(),
             separator_style: StyleRefinement::default(),
             variant: MarkerVariant::default(),
+            alignment: None,
             loading: false,
             loading_style: MarkerLoadingStyle::default(),
             shimmer_style: ShimmerStyle::default(),
@@ -94,6 +107,25 @@ impl Marker {
     pub fn with_variant(mut self, variant: MarkerVariant) -> Self {
         self.variant = variant;
         self
+    }
+
+    /// Set where the row places its children.
+    ///
+    /// Unset, a [`MarkerVariant::Separator`] centers its label between the two
+    /// lines and every other variant starts at the leading edge. An explicit
+    /// alignment applies to any variant and also aligns wrapped text lines. A
+    /// separator keeps only the line on the far side of its label, so `Start`
+    /// draws the trailing line and `End` the leading one.
+    pub fn alignment(mut self, alignment: MarkerAlignment) -> Self {
+        self.alignment = Some(alignment);
+        self
+    }
+
+    fn resolved_alignment(&self) -> MarkerAlignment {
+        self.alignment.unwrap_or(match self.variant {
+            MarkerVariant::Separator => MarkerAlignment::Center,
+            MarkerVariant::Plain | MarkerVariant::Border => MarkerAlignment::Start,
+        })
     }
 
     /// Set whether the marker should display its configured loading effect.
@@ -156,6 +188,7 @@ impl RenderOnce for Marker {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let tokens = cx.theme().semantic_tokens();
         let variant = self.variant;
+        let alignment = self.resolved_alignment();
         let loading = self.loading;
         let loading_style = self.loading_style;
         let shimmer_style = self.shimmer_style;
@@ -171,6 +204,7 @@ impl RenderOnce for Marker {
                 content.shimmer = loading && loading_style == MarkerLoadingStyle::Shimmer;
                 content.shimmer_style = shimmer_style;
                 content.separator = variant == MarkerVariant::Separator;
+                content.alignment = alignment;
                 content.into_any_element()
             }
             MarkerChild::Element(element) => element,
@@ -183,40 +217,47 @@ impl RenderOnce for Marker {
             .text_sm()
             .line_height(relative(1.5))
             .text_color(tokens.colors.muted_foreground)
-            .text_left()
-            .when(variant == MarkerVariant::Separator, |this| {
-                this.justify_center()
+            .map(|this| match alignment {
+                MarkerAlignment::Start => this.justify_start().text_left(),
+                MarkerAlignment::Center => this.justify_center().text_center(),
+                MarkerAlignment::End => this.justify_end().text_right(),
             })
             .when(variant == MarkerVariant::Border, |this| {
                 this.border_b_1().border_color(tokens.colors.border).pb_2()
             })
-            .when(variant == MarkerVariant::Separator, |this| {
-                this.child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .h(px(1.))
-                        .mr_1()
-                        .bg(tokens.colors.border)
-                        .refine_style(&separator_style),
-                )
-            })
+            .when(
+                variant == MarkerVariant::Separator && alignment != MarkerAlignment::Start,
+                |this| {
+                    this.child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h(px(1.))
+                            .mr_1()
+                            .bg(tokens.colors.border)
+                            .refine_style(&separator_style),
+                    )
+                },
+            )
             .when(
                 loading && loading_style == MarkerLoadingStyle::Spinner && !has_icon,
                 |this| this.child(MarkerIcon::new().child(Spinner::new().xsmall())),
             )
             .children(children)
-            .when(variant == MarkerVariant::Separator, |this| {
-                this.child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .h(px(1.))
-                        .ml_1()
-                        .bg(tokens.colors.border)
-                        .refine_style(&separator_style),
-                )
-            })
+            .when(
+                variant == MarkerVariant::Separator && alignment != MarkerAlignment::End,
+                |this| {
+                    this.child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h(px(1.))
+                            .ml_1()
+                            .bg(tokens.colors.border)
+                            .refine_style(&separator_style),
+                    )
+                },
+            )
             .refine_style(&self.style);
 
         // `role` lives on the stateful element: accessibility nodes need the
@@ -283,6 +324,7 @@ pub struct MarkerContent {
     shimmer: bool,
     shimmer_style: ShimmerStyle,
     separator: bool,
+    alignment: MarkerAlignment,
     children: Vec<MarkerContentChild>,
 }
 
@@ -299,6 +341,7 @@ impl MarkerContent {
             shimmer: false,
             shimmer_style: ShimmerStyle::default(),
             separator: false,
+            alignment: MarkerAlignment::Start,
             children: Vec::new(),
         }
     }
@@ -355,7 +398,14 @@ impl RenderOnce for MarkerContent {
 
         let content = div()
             .min_w_0()
-            .when(self.separator, |this| this.flex_none().text_center())
+            // Between separator lines the label keeps its own width so the
+            // lines take the rest; elsewhere it may shrink and wrap.
+            .when(self.separator, |this| this.flex_none())
+            .map(|this| match self.alignment {
+                MarkerAlignment::Start => this.text_left(),
+                MarkerAlignment::Center => this.text_center(),
+                MarkerAlignment::End => this.text_right(),
+            })
             .refine_style(&self.style)
             .children(children);
 
@@ -395,8 +445,12 @@ mod tests {
         assert_eq!(marker.loading_style, MarkerLoadingStyle::Shimmer);
         assert_eq!(marker.children.len(), 1);
         assert_eq!(Marker::default().variant, MarkerVariant::Plain);
+        assert!(Marker::default().alignment.is_none());
         assert!(!Marker::default().loading);
         assert_eq!(Marker::default().loading_style, MarkerLoadingStyle::Spinner);
+
+        let centered = Marker::new().alignment(MarkerAlignment::Center);
+        assert_eq!(centered.alignment, Some(MarkerAlignment::Center));
 
         let content_first = Marker::new()
             .content(MarkerContent::new().text("Thinking"))
@@ -441,5 +495,39 @@ mod tests {
             MarkerContentChild::Element(_)
         ));
         assert!(matches!(&content.children[2], MarkerContentChild::Text(_)));
+    }
+
+    #[test]
+    fn test_marker_resolved_alignment() {
+        // Unset: only the separator centers its label.
+        assert_eq!(Marker::new().resolved_alignment(), MarkerAlignment::Start);
+        assert_eq!(
+            Marker::new()
+                .with_variant(MarkerVariant::Border)
+                .resolved_alignment(),
+            MarkerAlignment::Start
+        );
+        assert_eq!(
+            Marker::new()
+                .with_variant(MarkerVariant::Separator)
+                .resolved_alignment(),
+            MarkerAlignment::Center
+        );
+
+        // Explicit alignment wins over the variant default, in either order.
+        assert_eq!(
+            Marker::new()
+                .alignment(MarkerAlignment::End)
+                .with_variant(MarkerVariant::Separator)
+                .resolved_alignment(),
+            MarkerAlignment::End
+        );
+        assert_eq!(
+            Marker::new()
+                .with_variant(MarkerVariant::Plain)
+                .alignment(MarkerAlignment::Center)
+                .resolved_alignment(),
+            MarkerAlignment::Center
+        );
     }
 }
