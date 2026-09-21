@@ -838,6 +838,7 @@ html.dark .astro-code span {
 }
 
 .site-nav__dropdown-item:hover { background: var(--secondary); }
+.site-nav__dropdown-item.is-current { color: var(--brand); font-weight: 650; }
 
 /* ====================================================================
    Sidebar (docs layout)

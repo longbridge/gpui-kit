@@ -87,7 +87,26 @@ jobs:
         run: |
           bun install
           bun run test:showcases
-          bun run build
+
+      - name: Restore historical website builds
+        uses: actions/cache/restore@v4
+        with:
+          path: website/.version-cache
+          key: website-versions-${{ hashFiles('website/astro.config.mjs', 'website/package.json', 'website/public/**', 'website/src/components/**', 'website/src/layouts/**', 'website/src/lib/**', 'website/src/pages/**', 'website/src/styles/**') }}-${{ github.run_id }}
+          restore-keys: |
+            website-versions-
+
+      - name: Build versioned Website
+        env:
+          WEBSITE_VERSION_CACHE_DIR: ${{ github.workspace }}/website/.version-cache
+          WEBSITE_VERSION_BUILD_FINGERPRINT: ${{ hashFiles('website/astro.config.mjs', 'website/package.json', 'website/public/**', 'website/src/components/**', 'website/src/layouts/**', 'website/src/lib/**', 'website/src/pages/**', 'website/src/styles/**') }}
+        run: script/build-website-versions
+
+      - name: Save historical website builds
+        uses: actions/cache/save@v4
+        with:
+          path: website/.version-cache
+          key: website-versions-${{ hashFiles('website/astro.config.mjs', 'website/package.json', 'website/public/**', 'website/src/components/**', 'website/src/layouts/**', 'website/src/lib/**', 'website/src/pages/**', 'website/src/styles/**') }}-${{ github.run_id }}
 
       - name: Copy WASM apps to Website
         run: |

@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "bunx --bun astro dev",
-    "build": "bunx --bun astro build && bunx pagefind --site dist",
+    "build": "bunx --bun astro build && bunx pagefind --site ${SITE_OUT_DIR:-dist}",
     "test:showcases": "bun test tests/showcases.test.ts tests/showcase-browser.test.ts",
     "test:seo": "bun test tests/seo.test.ts",
     "preview": "bunx --bun astro preview",

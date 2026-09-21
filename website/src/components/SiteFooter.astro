@@ -5,7 +5,7 @@ export interface Props {
 
 const { lang = 'en' } = Astro.props;
 const isZh = lang === 'zh-CN';
-const base = import.meta.env.BASE_URL;
+const base = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/`;
 
 function url(path: string) {
   return `${base}${path}`.replace(/\/+/g, '/');
