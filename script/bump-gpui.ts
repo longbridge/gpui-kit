@@ -29,7 +29,9 @@
  *    crate. Zed's own application crates are GPL-3.0-or-later, and one of
  *    them reaching the closure would change the terms for every consumer.
  * 7. Verify with `cargo publish --workspace --dry-run`, build and test
- *    gpui-kit against the staged crates, then publish.
+ *    gpui-kit against the staged crates, then publish. A gpui-kit failure
+ *    does not hold the snapshot back: it is reported (and recorded in
+ *    `gpui-pre.json`) so the repository can be adapted right after.
  *
  * crates.io only accepts a handful of brand-new crates per ten minutes. The
  * publish step re-checks crates.io before every attempt, skips versions that
@@ -1155,6 +1157,18 @@ function stageWorkspace(
   return staging;
 }
 
+/**
+ * Add the outcome of the gpui-kit compatibility check to `gpui-pre.json`, so
+ * the workflow summary can say whether the repository needs adapting.
+ */
+function recordKitCheck(failure: string | undefined) {
+  const path = join(WORK_DIR, "gpui-pre.json");
+  const summary = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+  summary.kit_check =
+    failure === undefined ? { passed: true } : { passed: false, error: failure };
+  writeFileSync(path, `${JSON.stringify(summary, null, 2)}\n`);
+}
+
 const FACADE_PATH_MODULE = "gpui_pre_facade_paths";
 const FACADE_PATH_MARKER = `mod ${FACADE_PATH_MODULE};`;
 const PROC_MACRO_ATTRIBUTE = /^#\[proc_macro(?:_derive\([^\n]*\)|_attribute)?\]$/;
@@ -1948,8 +1962,11 @@ function parseCommandLine(argv: string[]): Args {
 /**
  * Build and test this repository against the staged crates before anything is
  * uploaded. Applications depend on `gpui-pre` with a caret requirement, so a
- * snapshot whose API drifted away from `gpui-component` would reach them on
- * their next `cargo update`; this turns that into a failed release instead.
+ * snapshot whose API drifted away from `gpui-component` reaches them on their
+ * next `cargo update`; this makes the drift visible on the release itself.
+ * The snapshot is published either way: the fix is a change to this
+ * repository, which can only land against the published crates, so the
+ * failure is returned to the caller as a warning rather than thrown.
  *
  * The staged crates are injected with `--config patch.crates-io…` so no file
  * in the repository changes. They are patched from a git repository built
@@ -1967,7 +1984,11 @@ function parseCommandLine(argv: string[]): Args {
  * requirement, so the published crates are moved to the staged version in a
  * scratch copy of `Cargo.lock`, which is restored afterwards.
  */
-async function verifyKitAgainstStaging(staging: string, crates: Crate[], version: string) {
+async function verifyKitAgainstStaging(
+  staging: string,
+  crates: Crate[],
+  version: string,
+): Promise<string | undefined> {
   const mirror = join(tmpdir(), `${PUBLISH_PREFIX}-kit-check`);
   rmSync(mirror, { recursive: true, force: true });
   cpSync(staging, mirror, {
@@ -2037,12 +2058,17 @@ async function verifyKitAgainstStaging(staging: string, crates: Crate[], version
     for (const cmd of commands) {
       const { code } = await runStreaming(cmd, REPO_ROOT);
       if (code !== 0) {
-        throw new BumpError(
-          `gpui-kit does not build or pass its tests against the staged gpui-pre ${version}; ` +
-            "adapt the repository to the Zed changes before publishing",
+        return (
+          `gpui-kit does not build or pass its tests against gpui-pre ${version} ` +
+          `(\`${cmd.filter((arg, i) => arg !== "--config" && cmd[i - 1] !== "--config").join(" ")}\` failed); ` +
+          "adapt the repository to the Zed changes"
         );
       }
     }
+    return undefined;
+  } catch (error) {
+    if (error instanceof BumpError) return error.message;
+    throw error;
   } finally {
     if (lockBackup !== undefined) writeFileSync(lockPath, lockBackup);
     else if (existsSync(lockPath)) rmSync(lockPath);
@@ -2134,12 +2160,23 @@ async function main(argv: string[]): Promise<number> {
   }
   console.log();
 
+  let kitCheckFailure: string | undefined;
   if (args.skipKitCheck) {
     logWarn("Skipping the gpui-kit compatibility check (--skip-kit-check)");
   } else {
     logStep(`6/${totalSteps}`, "Building and testing gpui-kit against the staged crates");
-    await verifyKitAgainstStaging(staging, crates, version);
-    logSuccess(`gpui-kit builds and passes its tests against gpui-pre ${version}`);
+    kitCheckFailure = await verifyKitAgainstStaging(staging, crates, version);
+    recordKitCheck(kitCheckFailure);
+    if (kitCheckFailure === undefined) {
+      logSuccess(`gpui-kit builds and passes its tests against gpui-pre ${version}`);
+    } else {
+      // The snapshot ships regardless: the repository can only be adapted
+      // against the published crates, so holding the release back would
+      // leave nothing to adapt to.
+      logWarn(`${kitCheckFailure}; publishing anyway`);
+      if (process.env.GITHUB_ACTIONS !== undefined)
+        console.log(`::warning title=gpui-kit needs adapting to gpui-pre ${version}::${kitCheckFailure}`);
+    }
   }
   console.log();
   if (args.dryRun) {
@@ -2157,6 +2194,10 @@ async function main(argv: string[]): Promise<number> {
   );
   console.log(paint("1;32", `╚${"═".repeat(56)}╝`));
   console.log();
+  if (kitCheckFailure !== undefined) {
+    logWarn(`gpui-kit still needs adapting: ${kitCheckFailure}`);
+    console.log();
+  }
   console.log("Depend on it with:");
   console.log();
   console.log("    [workspace.dependencies]");

@@ -66,6 +66,11 @@ jobs:
               echo
               echo "Zed revision: $(jq -r .zed.rev target/gpui-pre/gpui-pre.json)"
               echo
+              if [ "$(jq -r '.kit_check.passed // empty' target/gpui-pre/gpui-pre.json)" = "false" ]; then
+                echo "> [!WARNING]"
+                echo "> gpui-kit needs adapting: $(jq -r .kit_check.error target/gpui-pre/gpui-pre.json)"
+                echo
+              fi
               echo '| Zed crate | Published as |'
               echo '| --- | --- |'
               jq -r '.crates[] | "| \(.zed_name) | \(.name) |"' target/gpui-pre/gpui-pre.json
