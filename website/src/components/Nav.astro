@@ -1,6 +1,5 @@
 ---
 import DocSearch from './DocSearch.astro';
-import { currentVersion, currentVersionPath, latestVersion, siteVersions, versionHref } from '../lib/versions';
 
 export interface Props {
   lang?: 'en' | 'zh-CN';
@@ -17,7 +16,6 @@ export interface Props {
 const { lang = 'en', currentPath = '', starCount = 0, langSwitchHref: langSwitchOverride } = Astro.props;
 const base = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/`;
 const isZh = lang === 'zh-CN';
-const versionPath = currentVersionPath(currentPath, base);
 
 function url(path: string) {
   return `${base}${path}`.replace(/\/+/g, '/');
@@ -80,8 +78,6 @@ function swapLocale(path: string) {
 const langSwitchHref = langSwitchOverride ?? swapLocale(currentPath);
 const langLabel = isZh ? 'EN' : '中';
 const resourcesLabel = isZh ? '资源' : 'Resources';
-const versionsLabel = isZh ? '版本' : 'Versions';
-const currentVersionLabel = siteVersions.find((version) => version.id === currentVersion)?.label ?? currentVersion;
 ---
 
 <nav class="site-nav" aria-label="Primary">
@@ -122,25 +118,6 @@ const currentVersionLabel = siteVersions.find((version) => version.id === curren
         </div>
       </div>
 
-      <div class="site-nav__dropdown site-nav__version-dropdown">
-        <button class="site-nav__dropdown-btn site-nav__link" type="button" aria-haspopup="true" aria-expanded="false">
-          {currentVersionLabel}
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M6 9l6 6 6-6"/>
-          </svg>
-        </button>
-        <div class="site-nav__dropdown-menu" aria-label={versionsLabel}>
-          {siteVersions.map((version) => (
-            <a
-              href={versionHref(version, versionPath)}
-              class:list={["site-nav__dropdown-item", { "is-current": version.id === currentVersion }]}
-              aria-current={version.id === currentVersion ? 'page' : undefined}
-            >
-              {version.label}{version.id === latestVersion ? ` (${isZh ? '最新' : 'latest'})` : ''}
-            </a>
-          ))}
-        </div>
-      </div>
     </div>
 
     <div class="site-nav__actions">

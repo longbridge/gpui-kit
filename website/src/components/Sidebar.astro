@@ -1,5 +1,6 @@
 ---
 import type { SidebarItem } from '../lib/sidebar';
+import { currentVersion, currentVersionPath, latestVersion, siteVersions, versionHref } from '../lib/versions';
 
 export interface Props {
   items: SidebarItem[];
@@ -8,6 +9,10 @@ export interface Props {
 }
 
 const { items, currentPath, lang = 'en' } = Astro.props;
+const base = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/`;
+const versionPath = currentVersionPath(currentPath, base);
+const versionsLabel = lang === 'zh-CN' ? '版本' : 'Versions';
+const currentVersionLabel = siteVersions.find((version) => version.id === currentVersion)?.label ?? currentVersion;
 
 function isActive(link: string): boolean {
   return currentPath === link || currentPath.startsWith(link + '/');
@@ -20,6 +25,21 @@ function renderItems(items: SidebarItem[], depth = 0): any[] {
 
 <aside class="docs-sidebar" aria-label="Documentation navigation">
   <nav>
+    <details class="sidebar-version-switcher">
+      <summary>{currentVersionLabel}<span aria-hidden="true">⌄</span></summary>
+      <div class="sidebar-version-switcher__menu" aria-label={versionsLabel}>
+        {siteVersions.map((version) => (
+          <a
+            href={versionHref(version, versionPath)}
+            class:list={["sidebar-version-switcher__item", { "is-current": version.id === currentVersion }]}
+            aria-current={version.id === currentVersion ? 'page' : undefined}
+          >
+            {version.label}{version.id === latestVersion ? ` (${lang === 'zh-CN' ? '最新' : 'latest'})` : ''}
+          </a>
+        ))}
+      </div>
+    </details>
+
     {items.map(group => (
       <div class="sidebar-group">
         {group.text && (
