@@ -172,6 +172,7 @@ fn source_segments(
     rendered: &str,
     span: Option<Span>,
     source_offset: usize,
+    include_preceding_escape: bool,
 ) -> Vec<SourceSegment> {
     let Some(span) = span else {
         return Vec::new();
@@ -193,12 +194,12 @@ fn source_segments(
             1
         } else if rendered_char == '\n' && remainder.ends_with('\n') {
             remainder.len()
-        } else if remainder.starts_with(rendered_char) {
-            rendered_char.len_utf8()
         } else if let Some(escaped) = remainder.strip_prefix('\\')
             && escaped.starts_with(rendered_char)
         {
             1 + rendered_char.len_utf8()
+        } else if remainder.starts_with(rendered_char) {
+            rendered_char.len_utf8()
         } else {
             return Vec::new();
         };
@@ -214,7 +215,8 @@ fn source_segments(
     if raw_cursor != raw.len() {
         return Vec::new();
     }
-    if let Some(previous) = local_start.checked_sub(1)
+    if include_preceding_escape
+        && let Some(previous) = local_start.checked_sub(1)
         && source.as_bytes().get(previous) == Some(&b'\\')
         && let Some(first) = segments.first_mut()
     {
@@ -292,7 +294,13 @@ fn mapped_inline(
         start: cx.offset + position.start.offset,
         end: cx.offset + position.end.offset,
     });
-    let segments = source_segments(source, &text, span, cx.offset);
+    let segments = source_segments(
+        source,
+        &text,
+        span,
+        cx.offset,
+        matches!(node, Node::Text(_)),
+    );
     InlineNode::new(text).source_segments(segments)
 }
 
@@ -424,6 +432,10 @@ fn parse_paragraph(
                 url: raw.url.clone().into(),
                 title: raw.title.clone().map(|t| t.into()),
                 alt: Some(raw.alt.clone().into()),
+                span: raw.position.as_ref().map(|position| Span {
+                    start: cx.offset + position.start.offset,
+                    end: cx.offset + position.end.offset,
+                }),
                 ..Default::default()
             });
         }
@@ -618,7 +630,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
         }
         Node::Math(val) => {
             let span = new_span(val.position, cx);
-            let segments = source_segments(source, &val.value, span, cx.offset);
+            let segments = source_segments(source, &val.value, span, cx.offset, false);
             BlockNode::CodeBlock(
                 CodeBlock::new(val.value.into(), None, span).source_segments(segments),
             )
@@ -840,6 +852,142 @@ mod tests {
     #[test]
     fn selected_source_range_maps_the_whole_markdown_escape() {
         assert_eq!(selected_rendered_range(r"\*", 0..1), Some(0..2));
+    }
+
+    #[test]
+    fn selected_source_range_maps_after_an_escaped_backslash() {
+        let source = r"a\\b";
+        assert_eq!(select_rendered_range(source, 1..2), 1..3);
+        assert_eq!(select_rendered_range(source, 2..3), 3..4);
+        assert_eq!(select_rendered_range(source, 1..3), 1..4);
+
+        let repeated = r"\\\\b";
+        assert_eq!(select_rendered_range(repeated, 2..3), 4..5);
+    }
+
+    #[test]
+    fn selected_source_range_does_not_borrow_an_escape_from_the_previous_node() {
+        let source = r"a\\$x$";
+        assert_eq!(select_rendered_range(source, 2..3), 3..4);
+        assert_eq!(select_rendered_range(source, 1..3), 1..4);
+    }
+
+    #[test]
+    fn selected_source_range_does_not_shift_a_hard_break_after_an_escape() {
+        let source = "a\\\\  \nb";
+        assert_eq!(select_rendered_range(source, 2..3), 3..6);
+        assert_eq!(select_rendered_range(source, 1..3), 1..6);
+    }
+
+    #[test]
+    fn selected_source_range_includes_a_trailing_inline_image() {
+        let source = "before ![alt](image.png)";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let image = paragraph
+            .children
+            .iter()
+            .find(|child| child.image.is_some())
+            .expect("expected image");
+        let mut state = image.state.lock().unwrap();
+        state.set_text("before ".into());
+        state.selection = Some((0..7).into());
+        drop(state);
+
+        assert_eq!(document.selected_source_range(), Some(0..source.len()));
+    }
+
+    #[test]
+    fn selected_source_range_includes_a_leading_inline_image() {
+        let source = "![alt](image.png) after";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let mut state = paragraph.state.lock().unwrap();
+        state.set_text(" after".into());
+        state.selection = Some((0..6).into());
+        drop(state);
+
+        assert_eq!(document.selected_source_range(), Some(0..source.len()));
+    }
+
+    #[test]
+    fn selected_source_range_includes_an_enclosed_inline_image() {
+        let source = "before ![alt](image.png) after";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let image = paragraph
+            .children
+            .iter()
+            .find(|child| child.image.is_some())
+            .expect("expected image");
+        let mut before = image.state.lock().unwrap();
+        before.set_text("before ".into());
+        before.selection = Some((0..7).into());
+        drop(before);
+        let mut after = paragraph.state.lock().unwrap();
+        after.set_text(" after".into());
+        after.selection = Some((0..6).into());
+        drop(after);
+
+        assert_eq!(document.selected_source_range(), Some(0..source.len()));
+    }
+
+    #[test]
+    fn selected_source_range_excludes_an_unreached_inline_image() {
+        let source = "before ![alt](image.png) after";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let image = paragraph
+            .children
+            .iter()
+            .find(|child| child.image.is_some())
+            .expect("expected image");
+        let mut before = image.state.lock().unwrap();
+        before.set_text("before ".into());
+        before.selection = Some((0..3).into());
+        drop(before);
+
+        assert_eq!(document.selected_source_range(), Some(0..3));
+
+        image.state.lock().unwrap().selection = None;
+        let after_start = source.find("after").unwrap();
+        let mut after = paragraph.state.lock().unwrap();
+        after.set_text(" after".into());
+        after.selection = Some((2..6).into());
+        drop(after);
+
+        assert_eq!(
+            document.selected_source_range(),
+            Some(after_start + 1..source.len())
+        );
+    }
+
+    #[test]
+    fn selected_source_range_includes_consecutive_inline_images() {
+        let source = "![first](one.png)![second](two.png) after";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let mut state = paragraph.state.lock().unwrap();
+        state.set_text(" after".into());
+        state.selection = Some((0..6).into());
+        drop(state);
+
+        assert_eq!(document.selected_source_range(), Some(0..source.len()));
     }
 
     #[test]

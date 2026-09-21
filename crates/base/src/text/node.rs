@@ -479,6 +479,7 @@ pub struct ImageNode {
     pub alt: Option<SharedString>,
     pub width: Option<DefiniteLength>,
     pub height: Option<DefiniteLength>,
+    pub(crate) span: Option<Span>,
     /// The image a `data:` URL carries, decoded on first render and kept for
     /// the node's lifetime so it is not decoded again every frame.
     pub(super) embedded: OnceLock<Option<Arc<Image>>>,
@@ -516,6 +517,7 @@ impl std::fmt::Debug for ImageNode {
             .field("alt", &self.alt)
             .field("width", &self.width)
             .field("height", &self.height)
+            .field("span", &self.span)
             .finish()
     }
 }
@@ -528,6 +530,7 @@ impl PartialEq for ImageNode {
             && self.alt == other.alt
             && self.width == other.width
             && self.height == other.height
+            && self.span == other.span
     }
 }
 
@@ -605,7 +608,7 @@ pub(crate) struct InlineNode {
     /// Rendered UTF-8 byte spans paired with their exact Markdown source spans.
     pub(crate) source_segments: Vec<SourceSegment>,
 
-    state: Arc<Mutex<InlineState>>,
+    pub(super) state: Arc<Mutex<InlineState>>,
 }
 
 impl PartialEq for InlineNode {
@@ -1236,20 +1239,27 @@ impl Paragraph {
         let mut selected = SourceRangeSelection::Unselected;
         let mut run: Vec<(usize, &InlineNode)> = Vec::new();
         let mut offset = 0;
+        let mut pending_images: Vec<Option<Span>> = Vec::new();
+        let mut enters_image = true;
 
         let include_run = |state: &Arc<Mutex<InlineState>>,
                            run: &[(usize, &InlineNode)]|
-         -> SourceRangeSelection {
+         -> (SourceRangeSelection, RunSelection) {
             let Ok(state) = state.lock() else {
-                return SourceRangeSelection::Unmapped;
+                return (SourceRangeSelection::Unmapped, RunSelection::default());
             };
             let Some(selection) = state.selection else {
-                return SourceRangeSelection::Unselected;
+                return (SourceRangeSelection::Unselected, RunSelection::default());
             };
             if selection.start >= selection.end {
-                return SourceRangeSelection::Unselected;
+                return (SourceRangeSelection::Unselected, RunSelection::default());
             }
 
+            let mut run_selection = RunSelection {
+                at_start: selection.start == 0,
+                at_end: selection.end >= state.text.len(),
+                ..Default::default()
+            };
             let mut mapped = SourceRangeSelection::Unselected;
             let mut rendered_end = selection.start;
             for (start, child) in run {
@@ -1259,36 +1269,80 @@ impl Paragraph {
                 if lo >= hi {
                     continue;
                 }
+                run_selection.emitted = true;
                 if lo > rendered_end {
-                    return SourceRangeSelection::Unmapped;
+                    return (SourceRangeSelection::Unmapped, run_selection);
                 }
                 let Some(range) = child.selected_source_range((lo - start)..(hi - start)) else {
-                    return SourceRangeSelection::Unmapped;
+                    return (SourceRangeSelection::Unmapped, run_selection);
                 };
                 mapped.merge(SourceRangeSelection::Mapped(range));
                 rendered_end = rendered_end.max(hi);
             }
             if rendered_end < selection.end {
-                SourceRangeSelection::Unmapped
+                (SourceRangeSelection::Unmapped, run_selection)
             } else {
-                mapped
+                (mapped, run_selection)
+            }
+        };
+
+        let merge_images = |selected: &mut SourceRangeSelection, images: &mut Vec<Option<Span>>| {
+            for span in images.drain(..) {
+                selected.merge(
+                    span.map(|span| SourceRangeSelection::Mapped(span.start..span.end))
+                        .unwrap_or(SourceRangeSelection::Unmapped),
+                );
             }
         };
 
         for child in &self.children {
-            if child.custom.is_some() || child.image.is_some() {
-                selected.merge(include_run(&child.state, &run));
+            if child.custom.is_some() {
+                let (run_range, run_selection) = include_run(&child.state, &run);
+                if run_selection.emitted && run_selection.at_start {
+                    merge_images(&mut selected, &mut pending_images);
+                }
+                selected.merge(run_range);
+
                 match child.custom_selection.lock() {
-                    Ok(value) if *value => selected.merge(
-                        child
-                            .custom
-                            .as_ref()
-                            .and_then(MarkdownNode::source_range)
-                            .map(SourceRangeSelection::Mapped)
-                            .unwrap_or(SourceRangeSelection::Unmapped),
-                    ),
-                    Ok(_) => {}
-                    Err(_) => selected.merge(SourceRangeSelection::Unmapped),
+                    Ok(value) if *value => {
+                        if run.is_empty() || (run_selection.emitted && run_selection.at_end) {
+                            merge_images(&mut selected, &mut pending_images);
+                        }
+                        selected.merge(
+                            child
+                                .custom
+                                .as_ref()
+                                .and_then(MarkdownNode::source_range)
+                                .map(SourceRangeSelection::Mapped)
+                                .unwrap_or(SourceRangeSelection::Unmapped),
+                        );
+                        enters_image = true;
+                    }
+                    Ok(_) => enters_image = false,
+                    Err(_) => {
+                        selected.merge(SourceRangeSelection::Unmapped);
+                        enters_image = false;
+                    }
+                }
+                pending_images.clear();
+                run.clear();
+                offset = 0;
+                continue;
+            }
+            if let Some(image) = &child.image {
+                let run_before = !run.is_empty();
+                let (run_range, run_selection) = include_run(&child.state, &run);
+                if run_selection.emitted && run_selection.at_start {
+                    merge_images(&mut selected, &mut pending_images);
+                }
+                selected.merge(run_range);
+                if run_before {
+                    enters_image = run_selection.emitted && run_selection.at_end;
+                }
+                if enters_image {
+                    pending_images.push(image.span);
+                } else {
+                    pending_images.clear();
                 }
                 run.clear();
                 offset = 0;
@@ -1298,7 +1352,17 @@ impl Paragraph {
             offset += child.text.len();
         }
 
-        selected.merge(include_run(&self.state, &run));
+        let (trailing_range, trailing) = include_run(&self.state, &run);
+        if trailing.emitted && trailing.at_start {
+            merge_images(&mut selected, &mut pending_images);
+        }
+        selected.merge(trailing_range);
+        if !trailing.emitted
+            && enters_image
+            && !matches!(selected, SourceRangeSelection::Unselected)
+        {
+            merge_images(&mut selected, &mut pending_images);
+        }
         selected
     }
 
