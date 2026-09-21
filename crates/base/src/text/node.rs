@@ -572,6 +572,25 @@ fn source_range_for_segments(
     segments: &[SourceSegment],
     selection: Range<usize>,
 ) -> Option<Range<usize>> {
+    fn mapped_source_start(segment: &SourceSegment, rendered_start: usize) -> usize {
+        if segment.rendered.len() == segment.source.len() {
+            segment.source.start + rendered_start.saturating_sub(segment.rendered.start)
+        } else {
+            segment.source.start
+        }
+    }
+
+    fn mapped_source_end(segment: &SourceSegment, rendered_end: usize) -> usize {
+        if segment.rendered.len() == segment.source.len() {
+            segment.source.start
+                + rendered_end
+                    .min(segment.rendered.end)
+                    .saturating_sub(segment.rendered.start)
+        } else {
+            segment.source.end
+        }
+    }
+
     if selection.start >= selection.end {
         return None;
     }
@@ -584,14 +603,14 @@ fn source_range_for_segments(
         return None;
     }
     let mut rendered_end = first.rendered.end;
-    let source_start = first.source.start;
-    let mut source_end = first.source.end;
+    let source_start = mapped_source_start(first, selection.start);
+    let mut source_end = mapped_source_end(first, selection.end);
     for segment in overlapping {
         if segment.rendered.start > rendered_end {
             return None;
         }
         rendered_end = rendered_end.max(segment.rendered.end);
-        source_end = segment.source.end;
+        source_end = mapped_source_end(segment, selection.end);
     }
     (rendered_end >= selection.end).then_some(source_start..source_end)
 }
@@ -1216,25 +1235,7 @@ impl Paragraph {
         text
     }
 
-    /// Reconstruct the Markdown source for the current selection.
-    ///
-    /// Mirrors [`selected_text`](Self::selected_text), but emits Markdown
-    /// instead of the rendered text, using each inline node's `marks` (see
-    /// [`reconstruct_markdown`]).
-    ///
-    /// Selection offsets index an `InlineState.text`, and one such state spans
-    /// *several* children: [`Paragraph::render`] concatenates children until it
-    /// hits an inline image, stores that run in the image child's state, then
-    /// starts over; whatever follows the last image is stored in `self.state`.
-    /// So walk the children in the same runs and map each selected byte back to
-    /// the child it was rendered from — mapping against a single child's text
-    /// would attribute the same offsets to children in other runs.
-    ///
-    /// An image has no selection of its own, so it is emitted when the
-    /// selection runs into it: reaching the end of the run before it, and
-    /// starting at the beginning of the run after it. A paragraph that begins
-    /// or ends with an image has no run on that side, which counts as reaching
-    /// it.
+    /// Map the current rendered selection to its exact Markdown source range.
     pub(super) fn selected_source_range(&self) -> SourceRangeSelection {
         let mut selected = SourceRangeSelection::Unselected;
         let mut run: Vec<(usize, &InlineNode)> = Vec::new();
@@ -1366,6 +1367,25 @@ impl Paragraph {
         selected
     }
 
+    /// Reconstruct the Markdown source for the current selection.
+    ///
+    /// Mirrors [`selected_text`](Self::selected_text), but emits Markdown
+    /// instead of the rendered text, using each inline node's `marks` (see
+    /// [`reconstruct_markdown`]).
+    ///
+    /// Selection offsets index an `InlineState.text`, and one such state spans
+    /// *several* children: [`Paragraph::render`] concatenates children until it
+    /// hits an inline image, stores that run in the image child's state, then
+    /// starts over; whatever follows the last image is stored in `self.state`.
+    /// So walk the children in the same runs and map each selected byte back to
+    /// the child it was rendered from — mapping against a single child's text
+    /// would attribute the same offsets to children in other runs.
+    ///
+    /// An image has no selection of its own, so it is emitted when the
+    /// selection runs into it: reaching the end of the run before it, and
+    /// starting at the beginning of the run after it. A paragraph that begins
+    /// or ends with an image has no run on that side, which counts as reaching
+    /// it.
     pub(super) fn selected_source(&self) -> String {
         let mut source = MarkdownSource::default();
         let mut pending_images: Vec<String> = Vec::new();

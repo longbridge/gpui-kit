@@ -183,38 +183,8 @@ fn source_segments(
         return Vec::new();
     };
 
-    let mut segments = Vec::new();
-    let mut raw_cursor = 0;
-    for (rendered_start, rendered_char) in rendered.char_indices() {
-        let rendered_end = rendered_start + rendered_char.len_utf8();
-        let remainder = &raw[raw_cursor..];
-        let source_len = if rendered_char == ' ' && remainder.starts_with("\r\n") {
-            2
-        } else if rendered_char == ' ' && remainder.starts_with(['\n', '\r']) {
-            1
-        } else if rendered_char == '\n' && remainder.ends_with('\n') {
-            remainder.len()
-        } else if let Some(escaped) = remainder.strip_prefix('\\')
-            && escaped.starts_with(rendered_char)
-        {
-            1 + rendered_char.len_utf8()
-        } else if remainder.starts_with(rendered_char) {
-            rendered_char.len_utf8()
-        } else {
-            return Vec::new();
-        };
-        let source_start = raw_cursor;
-        let source_end = source_start + source_len;
-        segments.push(SourceSegment {
-            rendered: rendered_start..rendered_end,
-            source: (span.start + source_start)..(span.start + source_end),
-        });
-        raw_cursor = source_end;
-    }
+    let mut segments = aligned_source_segments(raw, rendered, span.start, true);
 
-    if raw_cursor != raw.len() {
-        return Vec::new();
-    }
     if include_preceding_escape
         && let Some(previous) = local_start.checked_sub(1)
         && source.as_bytes().get(previous) == Some(&b'\\')
@@ -223,6 +193,110 @@ fn source_segments(
         first.source.start -= 1;
     }
     segments
+}
+
+fn aligned_source_segments(
+    raw: &str,
+    rendered: &str,
+    source_offset: usize,
+    decode_entities: bool,
+) -> Vec<SourceSegment> {
+    let mut segments = Vec::new();
+    let mut raw_cursor = 0;
+    let mut rendered_start = 0;
+    while rendered_start < rendered.len() {
+        if decode_entities
+            && let Some((decoded, source_len)) = decoded_entity(&raw[raw_cursor..])
+            && rendered[rendered_start..].starts_with(&decoded)
+        {
+            let rendered_end = rendered_start + decoded.len();
+            segments.push(SourceSegment {
+                rendered: rendered_start..rendered_end,
+                source: (source_offset + raw_cursor)..(source_offset + raw_cursor + source_len),
+            });
+            rendered_start = rendered_end;
+            raw_cursor += source_len;
+            continue;
+        }
+
+        let rendered_char = rendered[rendered_start..]
+            .chars()
+            .next()
+            .expect("rendered cursor must be on a character boundary");
+        let rendered_end = rendered_start + rendered_char.len_utf8();
+        let remainder = &raw[raw_cursor..];
+        let (relative_start, source_len) = if rendered_char == ' ' && remainder.starts_with("\r\n")
+        {
+            (0, 2)
+        } else if rendered_char == ' ' && remainder.starts_with(['\n', '\r']) {
+            (0, 1)
+        } else if rendered_char == '\n'
+            && remainder.ends_with('\n')
+            && remainder.bytes().filter(|byte| *byte == b'\n').count() == 1
+        {
+            (0, remainder.len())
+        } else if let Some(escaped) = remainder.strip_prefix('\\')
+            && escaped.starts_with(rendered_char)
+        {
+            (0, 1 + rendered_char.len_utf8())
+        } else if remainder.starts_with(rendered_char) {
+            (0, rendered_char.len_utf8())
+        } else if let Some(relative_start) = remainder.find(rendered_char) {
+            (relative_start, rendered_char.len_utf8())
+        } else {
+            // Decoded entities and other source-only syntax have no exact
+            // rendered-byte mapping. Leave a rendered gap for this
+            // character, but keep aligning later characters in the node.
+            rendered_start = rendered_end;
+            continue;
+        };
+        let source_start = raw_cursor + relative_start;
+        let source_end = source_start + source_len;
+        segments.push(SourceSegment {
+            rendered: rendered_start..rendered_end,
+            source: (source_offset + source_start)..(source_offset + source_end),
+        });
+        raw_cursor = source_end;
+        rendered_start = rendered_end;
+    }
+    compact_source_segments(segments)
+}
+
+fn compact_source_segments(segments: Vec<SourceSegment>) -> Vec<SourceSegment> {
+    let mut compacted: Vec<SourceSegment> = Vec::with_capacity(segments.len());
+    for segment in segments {
+        if let Some(previous) = compacted.last_mut()
+            && previous.rendered.end == segment.rendered.start
+            && previous.source.end == segment.source.start
+            && previous.rendered.len() == previous.source.len()
+            && segment.rendered.len() == segment.source.len()
+        {
+            previous.rendered.end = segment.rendered.end;
+            previous.source.end = segment.source.end;
+        } else {
+            compacted.push(segment);
+        }
+    }
+    compacted
+}
+
+fn decoded_entity(source: &str) -> Option<(String, usize)> {
+    let semicolon = source.strip_prefix('&')?.find(';')? + 1;
+    let name = &source[1..=semicolon];
+    let decoded = if let Some(number) = name.strip_prefix("#x").or_else(|| name.strip_prefix("#X"))
+    {
+        char::from_u32(u32::from_str_radix(number.strip_suffix(';')?, 16).ok()?)?.to_string()
+    } else if let Some(number) = name.strip_prefix('#') {
+        char::from_u32(number.strip_suffix(';')?.parse().ok()?)?.to_string()
+    } else {
+        let &(first, second) = html5ever::data::NAMED_ENTITIES.get(name)?;
+        let mut decoded = char::from_u32(first)?.to_string();
+        if second != 0 {
+            decoded.push(char::from_u32(second)?);
+        }
+        decoded
+    };
+    Some((decoded, semicolon + 1))
 }
 
 fn code_source_segments(
@@ -252,7 +326,7 @@ fn code_source_segments(
             (character, len)
         })
         .filter(|(_, len)| *len >= 3);
-    let (search_start, search_end) = if let Some((fence, fence_len)) = fence {
+    let (body_start, body_end) = if let Some((fence, fence_len)) = fence {
         let start = raw.find('\n').map_or(raw.len(), |newline| newline + 1);
         let last_line = raw.rfind('\n').map_or(start, |newline| newline + 1);
         let closing = raw[last_line..].trim();
@@ -262,25 +336,13 @@ fn code_source_segments(
     } else {
         (0, raw.len())
     };
-    let mut matches = raw[search_start..search_end].match_indices(code);
-    let Some((relative_start, _)) = matches.next() else {
-        return Vec::new();
-    };
-    if matches.next().is_some() {
-        return Vec::new();
-    }
-    let source_start = search_start + relative_start;
 
-    code.char_indices()
-        .map(|(rendered_start, character)| {
-            let len = character.len_utf8();
-            SourceSegment {
-                rendered: rendered_start..rendered_start + len,
-                source: (span.start + source_start + rendered_start)
-                    ..(span.start + source_start + rendered_start + len),
-            }
-        })
-        .collect()
+    aligned_source_segments(
+        &raw[body_start..body_end],
+        code,
+        span.start + body_start,
+        false,
+    )
 }
 
 fn mapped_inline(
@@ -404,8 +466,13 @@ fn parse_paragraph(
         }
         Node::InlineCode(val) => {
             text = val.value.clone();
+            let span = node.position().map(|position| Span {
+                start: cx.offset + position.start.offset,
+                end: cx.offset + position.end.offset,
+            });
             paragraph.push(
-                mapped_inline(source, text.clone(), node, cx)
+                InlineNode::new(text.clone())
+                    .source_segments(code_source_segments(source, &text, span, cx.offset))
                     .marks(vec![(0..text.len(), TextMark::default().code())]),
             );
         }
@@ -461,8 +528,13 @@ fn parse_paragraph(
         }
         Node::MdxTextExpression(raw) => {
             text = raw.value.clone();
+            let span = node.position().map(|position| Span {
+                start: cx.offset + position.start.offset,
+                end: cx.offset + position.end.offset,
+            });
             paragraph.push(
-                mapped_inline(source, text.clone(), node, cx)
+                InlineNode::new(text.clone())
+                    .source_segments(code_source_segments(source, &text, span, cx.offset))
                     .marks(vec![(0..text.len(), TextMark::default())]),
             );
         }
@@ -630,7 +702,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
         }
         Node::Math(val) => {
             let span = new_span(val.position, cx);
-            let segments = source_segments(source, &val.value, span, cx.offset, false);
+            let segments = code_source_segments(source, &val.value, span, cx.offset);
             BlockNode::CodeBlock(
                 CodeBlock::new(val.value.into(), None, span).source_segments(segments),
             )
@@ -648,11 +720,14 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
                 BlockNode::Paragraph(Paragraph::new(val.value))
             }
         },
-        Node::MdxFlowExpression(val) => BlockNode::CodeBlock(CodeBlock::new(
-            val.value.into(),
-            Some("mdx".into()),
-            new_span(val.position, cx),
-        )),
+        Node::MdxFlowExpression(val) => {
+            let span = new_span(val.position, cx);
+            let segments = code_source_segments(source, &val.value, span, cx.offset);
+            BlockNode::CodeBlock(
+                CodeBlock::new(val.value.into(), Some("mdx".into()), span)
+                    .source_segments(segments),
+            )
+        }
         Node::Yaml(val) => BlockNode::CodeBlock(CodeBlock::new(
             val.value.into(),
             Some("yml".into()),
@@ -749,12 +824,40 @@ mod tests {
 
     use crate::text::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
 
+    fn first_paragraph(block: &BlockNode) -> Option<&Paragraph> {
+        match block {
+            BlockNode::Paragraph(paragraph)
+            | BlockNode::Heading {
+                children: paragraph,
+                ..
+            } => Some(paragraph),
+            BlockNode::Root { children, .. }
+            | BlockNode::Blockquote { children, .. }
+            | BlockNode::List { children, .. }
+            | BlockNode::ListItem { children, .. } => children.iter().find_map(first_paragraph),
+            _ => None,
+        }
+    }
+
+    fn first_code_block(block: &BlockNode) -> Option<&CodeBlock> {
+        match block {
+            BlockNode::CodeBlock(code) => Some(code),
+            BlockNode::Root { children, .. }
+            | BlockNode::Blockquote { children, .. }
+            | BlockNode::List { children, .. }
+            | BlockNode::ListItem { children, .. } => children.iter().find_map(first_code_block),
+            _ => None,
+        }
+    }
+
     fn selected_rendered_range(source: &str, selection: Range<usize>) -> Option<Range<usize>> {
         let mut cx = NodeContext::default();
         let document = parse(source, &mut cx).unwrap();
-        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
-            panic!("expected paragraph");
-        };
+        let paragraph = document
+            .blocks
+            .iter()
+            .find_map(first_paragraph)
+            .expect("expected paragraph");
         let rendered = paragraph.text();
         let mut state = paragraph.state.lock().unwrap();
         state.set_text(rendered.into());
@@ -765,6 +868,54 @@ mod tests {
 
     fn select_rendered_range(source: &str, selection: Range<usize>) -> Range<usize> {
         selected_rendered_range(source, selection).expect("source range")
+    }
+
+    fn selected_code_range(source: &str, selection: Range<usize>) -> Option<Range<usize>> {
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let code = document
+            .blocks
+            .iter()
+            .find_map(first_code_block)
+            .expect("expected code block");
+        code.set_selection(selection);
+        document.selected_source_range()
+    }
+
+    fn selected_mdx_rendered_range(source: &str, selection: Range<usize>) -> Option<Range<usize>> {
+        let mut cx = NodeContext {
+            markdown_extensions: Arc::new(MarkdownExtensions::default().mdx()),
+            ..Default::default()
+        };
+        let document = parse(source, &mut cx).unwrap();
+        let paragraph = document
+            .blocks
+            .iter()
+            .find_map(first_paragraph)
+            .expect("expected MDX paragraph");
+        let rendered = paragraph.text();
+        let mut state = paragraph.state.lock().unwrap();
+        state.set_text(rendered.into());
+        state.selection = Some(selection.into());
+        drop(state);
+        document.selected_source_range()
+    }
+
+    fn selected_mdx_code(source: &str, selected_text: &str) -> Option<Range<usize>> {
+        let mut cx = NodeContext {
+            markdown_extensions: Arc::new(MarkdownExtensions::default().mdx()),
+            ..Default::default()
+        };
+        let document = parse(source, &mut cx).unwrap();
+        let code = document
+            .blocks
+            .iter()
+            .find_map(first_code_block)
+            .expect("expected MDX code block");
+        let code_text = code.code();
+        let start = code_text.find(selected_text).expect("selected MDX code");
+        code.set_selection(start..start + selected_text.len());
+        document.selected_source_range()
     }
 
     #[test]
@@ -780,15 +931,102 @@ mod tests {
     }
 
     #[test]
+    fn source_segments_compact_contiguous_one_to_one_mappings() {
+        let source = "plain text";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let paragraph = first_paragraph(&document.blocks[0]).unwrap();
+        assert_eq!(
+            paragraph.children[0].source_segments,
+            vec![SourceSegment {
+                rendered: 0..source.len(),
+                source: 0..source.len(),
+            }]
+        );
+
+        assert_eq!(select_rendered_range(source, 2..7), 2..7);
+    }
+
+    #[test]
+    fn source_segments_keep_non_linear_mappings_atomic() {
+        let source = r"a\* &amp; b";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let paragraph = first_paragraph(&document.blocks[0]).unwrap();
+        let segments = &paragraph.children[0].source_segments;
+
+        assert!(
+            segments.len() < paragraph.children[0].text.chars().count(),
+            "ordinary characters should be compacted into runs"
+        );
+        assert!(segments.contains(&SourceSegment {
+            rendered: 1..2,
+            source: 1..3,
+        }));
+        assert!(segments.contains(&SourceSegment {
+            rendered: 3..4,
+            source: 4..9,
+        }));
+
+        assert_eq!(select_rendered_range(source, 1..2), 1..3);
+        assert_eq!(select_rendered_range(source, 3..4), 4..9);
+    }
+
+    #[test]
     fn selected_source_range_crosses_style_boundaries() {
         let source = "left **bold** right";
         assert_eq!(select_rendered_range(source, 2..12), 2..16);
     }
 
     #[test]
-    fn selected_source_range_rejects_unmapped_gap_in_merged_styled_node() {
+    fn selected_source_range_maps_inline_code_in_merged_styled_node() {
         let source = "**left `code` right**";
-        assert_eq!(selected_rendered_range(source, 5..9), None);
+        assert_eq!(selected_rendered_range(source, 5..9), Some(8..12));
+    }
+
+    #[test]
+    fn selected_source_range_maps_inline_code_delimiters_and_boundaries() {
+        let source = "`code` x";
+        assert_eq!(selected_rendered_range(source, 0..4), Some(1..5));
+        assert_eq!(selected_rendered_range(source, 5..6), Some(7..8));
+        assert_eq!(selected_rendered_range(source, 3..6), Some(4..8));
+
+        let padded = "`` code ` value ``";
+        assert_eq!(selected_rendered_range(padded, 0..4), Some(3..7));
+        assert_eq!(selected_rendered_range(padded, 5..6), Some(8..9));
+
+        let literal_entity = "`&amp;`";
+        assert_eq!(selected_rendered_range(literal_entity, 0..5), Some(1..6));
+    }
+
+    #[test]
+    fn selected_source_range_maps_footnote_reference_syntax() {
+        let source = "before[^note] after\n\n[^note]: body";
+        assert_eq!(selected_rendered_range(source, 0..6), Some(0..6));
+        assert_eq!(selected_rendered_range(source, 6..12), Some(6..13));
+        assert_eq!(selected_rendered_range(source, 13..18), Some(14..19));
+        assert_eq!(selected_rendered_range(source, 4..15), Some(4..16));
+    }
+
+    #[test]
+    fn selected_source_range_maps_mdx_text_expression_body() {
+        let source = "before {value + 1} after";
+        assert_eq!(selected_mdx_rendered_range(source, 7..16), Some(8..17));
+        assert_eq!(selected_mdx_rendered_range(source, 4..19), Some(4..21));
+    }
+
+    #[test]
+    fn selected_source_range_maps_mdx_flow_expression_body() {
+        let source = "{\n  value + 1\n}";
+        assert_eq!(selected_mdx_code(source, "value + 1"), Some(4..13));
+        assert_eq!(selected_mdx_code(source, "lue +"), Some(6..11));
+    }
+
+    #[test]
+    fn selected_source_range_maps_math_block_body() {
+        let source = "$$\nx + y\n$$";
+        assert_eq!(selected_code_range(source, 0..5), Some(3..8));
+        assert_eq!(selected_code_range(source, 2..3), Some(5..6));
     }
 
     #[test]
@@ -807,7 +1045,7 @@ mod tests {
         assert_eq!(document.selected_source_range(), Some(0..6));
 
         entity.state.lock().unwrap().selection = Some((2..3).into());
-        assert_eq!(document.selected_source_range(), None);
+        assert_eq!(document.selected_source_range(), Some(0..15));
     }
 
     #[test]
@@ -847,6 +1085,38 @@ mod tests {
         code.set_selection(0..4);
 
         assert_eq!(document.selected_source_range(), Some(4..8));
+    }
+
+    #[test]
+    fn selected_source_range_maps_multiline_indented_code() {
+        let source = "    one\n    two\n    three";
+        assert_eq!(selected_code_range(source, 0..3), Some(4..7));
+        assert_eq!(selected_code_range(source, 4..7), Some(12..15));
+        assert_eq!(selected_code_range(source, 0..13), Some(4..25));
+    }
+
+    #[test]
+    fn selected_source_range_maps_fenced_code_nested_in_a_list() {
+        let source = "- ```rust\n  one\n  two\n  ```";
+        assert_eq!(selected_code_range(source, 0..3), Some(12..15));
+        assert_eq!(selected_code_range(source, 4..7), Some(18..21));
+        assert_eq!(selected_code_range(source, 0..7), Some(12..21));
+    }
+
+    #[test]
+    fn selected_source_range_maps_fenced_code_nested_in_a_blockquote() {
+        let source = "> ```\n> one\n> two\n> ```";
+        assert_eq!(selected_code_range(source, 0..3), Some(8..11));
+        assert_eq!(selected_code_range(source, 4..7), Some(14..17));
+        assert_eq!(selected_code_range(source, 0..7), Some(8..17));
+    }
+
+    #[test]
+    fn selected_source_range_maps_fenced_code_with_blank_lines_and_repeated_text() {
+        let source = "```\nsame\n\nsame\n```";
+        assert_eq!(selected_code_range(source, 0..4), Some(4..8));
+        assert_eq!(selected_code_range(source, 6..10), Some(10..14));
+        assert_eq!(selected_code_range(source, 0..10), Some(4..14));
     }
 
     #[test]
@@ -991,7 +1261,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_source_range_rejects_decoded_entity_without_exact_mapping() {
+    fn selected_source_range_maps_decoded_entity_to_its_source_syntax() {
         let source = "A &amp; B";
         let mut cx = NodeContext::default();
         let document = parse(source, &mut cx).unwrap();
@@ -1000,7 +1270,44 @@ mod tests {
         };
         assert_eq!(paragraph.text(), "A & B");
 
-        assert_eq!(selected_rendered_range(source, 2..3), None);
+        assert_eq!(selected_rendered_range(source, 2..3), Some(2..7));
+    }
+
+    #[test]
+    fn selected_source_range_maps_around_named_and_numeric_entities() {
+        let source = "Copyright &copy; &#x1F600; &#169; 2024";
+        assert_eq!(selected_rendered_range(source, 0..9), Some(0..9));
+        assert_eq!(selected_rendered_range(source, 10..12), Some(10..16));
+        assert_eq!(selected_rendered_range(source, 13..17), Some(17..26));
+        assert_eq!(selected_rendered_range(source, 18..20), Some(27..33));
+        assert_eq!(selected_rendered_range(source, 21..25), Some(34..38));
+        assert_eq!(selected_rendered_range(source, 8..22), Some(8..35));
+    }
+
+    #[test]
+    fn selected_source_range_maps_soft_breaks_with_source_prefixes() {
+        assert_eq!(selected_rendered_range("a\n   b", 0..1), Some(0..1));
+        assert_eq!(selected_rendered_range("a\n   b", 2..3), Some(5..6));
+        assert_eq!(selected_rendered_range("a\n   b", 0..3), Some(0..6));
+
+        assert_eq!(selected_rendered_range("> a\n> b", 0..1), Some(2..3));
+        assert_eq!(selected_rendered_range("> a\n> b", 2..3), Some(6..7));
+        assert_eq!(selected_rendered_range("> a\n> b", 0..3), Some(2..7));
+
+        assert_eq!(selected_rendered_range("- a\n  b", 0..1), Some(2..3));
+        assert_eq!(selected_rendered_range("- a\n  b", 2..3), Some(6..7));
+        assert_eq!(selected_rendered_range("- a\n  b", 0..3), Some(2..7));
+    }
+
+    #[test]
+    fn selected_source_range_maps_soft_breaks_with_trailing_spaces_and_crlf() {
+        assert_eq!(selected_rendered_range("a \nb", 0..1), Some(0..1));
+        assert_eq!(selected_rendered_range("a \nb", 2..3), Some(3..4));
+        assert_eq!(selected_rendered_range("a \nb", 0..3), Some(0..4));
+
+        assert_eq!(selected_rendered_range("a\r\nb", 0..1), Some(0..1));
+        assert_eq!(selected_rendered_range("a\r\nb", 2..3), Some(3..4));
+        assert_eq!(selected_rendered_range("a\r\nb", 0..3), Some(0..4));
     }
 
     #[test]
