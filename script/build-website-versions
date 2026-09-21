@@ -24,7 +24,7 @@ version_fingerprint=${WEBSITE_VERSION_BUILD_FINGERPRINT:-$(
   git -C "$repo_root" ls-files -z -- \
     website/astro.config.mjs website/package.json website/src/components \
     website/src/layouts website/src/lib website/src/pages website/src/styles \
-    website/public \
+    website/public script/build-website-versions script/normalize-website-frontmatter.mjs \
     | xargs -0 git -C "$repo_root" hash-object \
     | git hash-object --stdin
 )}
@@ -63,6 +63,7 @@ snapshot_website() {
     git -C "$repo_root" archive "$tag" website/src/components/HomeApp.vue \
       | tar -x --strip-components=3 -C "$target/src/components"
   fi
+  bun "$repo_root/script/normalize-website-frontmatter.mjs" "$target"
 }
 
 latest_dir="$work_dir/latest"
