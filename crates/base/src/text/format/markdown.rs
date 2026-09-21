@@ -225,11 +225,18 @@ fn aligned_source_segments(
             .expect("rendered cursor must be on a character boundary");
         let rendered_end = rendered_start + rendered_char.len_utf8();
         let remainder = &raw[raw_cursor..];
-        let (relative_start, source_len) = if rendered_char == ' ' && remainder.starts_with("\r\n")
+        let (relative_start, source_len) = if rendered_char == ' '
+            && let Some(newline) = remainder.find(['\n', '\r'])
+            && remainder[..newline]
+                .chars()
+                .all(|character| matches!(character, ' ' | '\t'))
         {
-            (0, 2)
-        } else if rendered_char == ' ' && remainder.starts_with(['\n', '\r']) {
-            (0, 1)
+            let newline_len = if remainder[newline..].starts_with("\r\n") {
+                2
+            } else {
+                1
+            };
+            (newline, newline_len)
         } else if rendered_char == '\n'
             && remainder.ends_with('\n')
             && remainder.bytes().filter(|byte| *byte == b'\n').count() == 1
@@ -281,7 +288,14 @@ fn compact_source_segments(segments: Vec<SourceSegment>) -> Vec<SourceSegment> {
 }
 
 fn decoded_entity(source: &str) -> Option<(String, usize)> {
-    let semicolon = source.strip_prefix('&')?.find(';')? + 1;
+    let candidate = source.strip_prefix('&')?;
+    let candidate_end = candidate
+        .bytes()
+        .position(|byte| byte == b';' || !(byte.is_ascii_alphanumeric() || byte == b'#'))?;
+    if candidate.as_bytes()[candidate_end] != b';' {
+        return None;
+    }
+    let semicolon = candidate_end + 1;
     let name = &source[1..=semicolon];
     let decoded = if let Some(number) = name.strip_prefix("#x").or_else(|| name.strip_prefix("#X"))
     {
@@ -1302,8 +1316,12 @@ mod tests {
     #[test]
     fn selected_source_range_maps_soft_breaks_with_trailing_spaces_and_crlf() {
         assert_eq!(selected_rendered_range("a \nb", 0..1), Some(0..1));
+        assert_eq!(selected_rendered_range("a \nb", 1..2), Some(2..3));
         assert_eq!(selected_rendered_range("a \nb", 2..3), Some(3..4));
         assert_eq!(selected_rendered_range("a \nb", 0..3), Some(0..4));
+
+        assert_eq!(selected_rendered_range("a \r\nb", 1..2), Some(2..4));
+        assert_eq!(selected_rendered_range("a \r\nb", 2..3), Some(4..5));
 
         assert_eq!(selected_rendered_range("a\r\nb", 0..1), Some(0..1));
         assert_eq!(selected_rendered_range("a\r\nb", 2..3), Some(3..4));
