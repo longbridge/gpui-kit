@@ -1,5 +1,8 @@
-name: Release Docs
+name: Release Website
 on:
+  push:
+    branches:
+      - website-versioned-docs
   workflow_run:
     workflows: ["Release Crate"]
     types:
