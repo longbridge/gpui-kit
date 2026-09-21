@@ -101,6 +101,8 @@ jobs:
 
       - name: Build versioned Website
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHOWCASES_DIR: ${{ github.workspace }}/.showcases
           WEBSITE_VERSION_CACHE_DIR: ${{ github.workspace }}/website/.version-cache
           WEBSITE_VERSION_BUILD_FINGERPRINT: ${{ hashFiles('website/astro.config.mjs', 'website/package.json', 'website/public/**', 'website/src/components/**', 'website/src/layouts/**', 'website/src/lib/**', 'website/src/pages/**', 'website/src/styles/**') }}
         run: script/build-website-versions
