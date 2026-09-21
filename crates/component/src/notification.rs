@@ -6,6 +6,7 @@ use gpui::{
     InteractiveElement as _, IntoElement, ParentElement as _, Pixels, Render, SharedString,
     StatefulInteractiveElement, StyleRefinement, Styled, Subscription, SystemNotification,
     SystemNotificationResponse, WeakEntity, Window, WindowId, div, prelude::FluentBuilder, px,
+    relative,
 };
 use gpui_base::{
     Toast as BaseToast, ToastManager, ToastMotion, ToastOptions, ToastStack, ToastStackState,
@@ -1022,12 +1023,13 @@ impl Render for NotificationList {
                 .map(|this| match anchor {
                     Anchor::TopLeft => this.top(margins.top).left(margins.left),
                     Anchor::TopRight => this.top(margins.top).right(margins.right),
-                    Anchor::TopCenter => this.top(margins.top).left_0().right_0().mx_auto(),
+                    Anchor::TopCenter => this.top(margins.top).left(relative(0.5)).ml(-width / 2.),
                     Anchor::BottomLeft => this.bottom(margins.bottom).left(margins.left),
                     Anchor::BottomRight => this.bottom(margins.bottom).right(margins.right),
-                    Anchor::BottomCenter => {
-                        this.bottom(margins.bottom).left_0().right_0().mx_auto()
-                    }
+                    Anchor::BottomCenter => this
+                        .bottom(margins.bottom)
+                        .left(relative(0.5))
+                        .ml(-width / 2.),
                     Anchor::LeftCenter => this.left(margins.left).top_0().bottom_0().my_auto(),
                     Anchor::RightCenter => this.right(margins.right).top_0().bottom_0().my_auto(),
                 })
