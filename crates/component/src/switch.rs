@@ -246,6 +246,7 @@ impl RenderOnce for Switch {
                         })
                         .w(bg_width)
                         .h(bg_height)
+                        .flex_shrink_0()
                         .rounded(radius)
                         .flex()
                         .items_center()
@@ -285,6 +286,7 @@ impl RenderOnce for Switch {
                             .when(cfg!(test), |this| {
                                 this.debug_selector(|| "switch-label".into())
                             })
+                            .min_w_0()
                             .line_height(bg_height)
                             .child(label)
                             .map(|this| match self.size {
@@ -500,6 +502,53 @@ mod tests {
         });
 
         assert!(cx.debug_bounds("focus-ring").is_none());
+    }
+
+    #[gpui::test]
+    fn long_labels_preserve_track_size_in_narrow_containers(cx: &mut TestAppContext) {
+        struct NarrowSwitch {
+            size: Size,
+            checked: bool,
+            disabled: bool,
+        }
+
+        impl Render for NarrowSwitch {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(160.))
+                    .debug_selector(|| "narrow-switch".into())
+                    .child(
+                        Switch::new("switch")
+                            .with_size(self.size)
+                            .checked(self.checked)
+                            .disabled(self.disabled)
+                            .label("Automatically transcribe downloaded episodes"),
+                    )
+            }
+        }
+
+        cx.update(crate::init);
+        for (size, width, height) in [(Size::Small, 28., 16.), (Size::Medium, 36., 20.)] {
+            for checked in [false, true] {
+                for disabled in [false, true] {
+                    let (_, cx) = cx.add_window_view(move |_, _| NarrowSwitch {
+                        size,
+                        checked,
+                        disabled,
+                    });
+                    cx.update(|window, cx| window.draw(cx).clear(cx));
+
+                    let container = cx.debug_bounds("narrow-switch").unwrap();
+                    let track = cx.debug_bounds("switch-bar").unwrap();
+                    let label = cx.debug_bounds("switch-label").unwrap();
+                    assert_eq!(track.size.width, px(width), "the track must not shrink");
+                    assert_eq!(track.size.height, px(height));
+                    assert!(label.origin.x >= track.right());
+                    assert!(label.right() <= container.right());
+                    assert!(label.size.height > track.size.height, "the label must wrap");
+                }
+            }
+        }
     }
 
     #[gpui::test]
