@@ -331,6 +331,15 @@ impl SidebarToggleButton {
         self
     }
 
+    /// Set the accessibility label of the toggle button.
+    ///
+    /// The default toggle is icon-only; without an explicit label it has no
+    /// accessible name.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.btn = self.btn.accessibility_label(label);
+        self
+    }
+
     /// Add a click handler to the toggle button.
     pub fn on_click(
         mut self,

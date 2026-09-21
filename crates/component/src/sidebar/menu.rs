@@ -9,8 +9,8 @@ use crate::{
 };
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement as _, IntoElement,
-    ParentElement as _, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled,
-    Window, div, percentage, prelude::FluentBuilder,
+    ParentElement as _, Role, SharedString, StatefulInteractiveElement as _, StyleRefinement,
+    Styled, Window, div, percentage, prelude::FluentBuilder,
 };
 use gpui_base::TestSupportExt as _;
 use std::rc::Rc;
@@ -94,6 +94,7 @@ impl Styled for SidebarMenu {
 pub struct SidebarMenuItem {
     icon: Option<Icon>,
     label: SharedString,
+    accessibility_label: Option<SharedString>,
     label_style: StyleRefinement,
     style: StyleRefinement,
     handler: Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>,
@@ -114,6 +115,7 @@ impl SidebarMenuItem {
         Self {
             icon: None,
             label: label.into(),
+            accessibility_label: None,
             label_style: StyleRefinement::default(),
             style: StyleRefinement::default(),
             handler: Rc::new(|_, _, _| {}),
@@ -138,6 +140,14 @@ impl SidebarMenuItem {
     /// Set the style for the label
     pub fn label_style(mut self, style: StyleRefinement) -> Self {
         self.label_style = style;
+        self
+    }
+
+    /// Set the accessibility label of the item row.
+    ///
+    /// Defaults to the visible label text.
+    pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.accessibility_label = Some(label.into());
         self
     }
 
@@ -256,6 +266,8 @@ impl SidebarItem for SidebarMenuItem {
         let default_open = self.default_open;
         let collapsed_tooltip = self.collapsed_tooltip();
         let id = id.into();
+        let label_text = self.label.clone();
+        let accessibility_label = self.accessibility_label.clone();
         let is_submenu = self.is_submenu();
         let open_state = if is_submenu {
             Some(window.use_keyed_state(id.clone(), cx, |_, _| default_open))
@@ -279,6 +291,9 @@ impl SidebarItem for SidebarMenuItem {
                 h_flex()
                     .size_full()
                     .id("item")
+                    .role(Role::TreeItem)
+                    .aria_label(accessibility_label.unwrap_or_else(|| label_text.clone()))
+                    .aria_selected(is_active)
                     .overflow_x_hidden()
                     .flex_shrink_0()
                     .p_2()
