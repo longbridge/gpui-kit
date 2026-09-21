@@ -73,32 +73,6 @@ impl Render for SwitchStory {
             }))
             .child(story_toolbar(self.size))
             .child(
-                section("Long labels")
-                    .description("Labels wrap in narrow containers while the track keeps its size.")
-                    .child(
-                        v_flex()
-                            .w(px(160.))
-                            .gap_4()
-                            .child(
-                                Switch::new("long-label")
-                                    .with_size(self.size)
-                                    .label("Automatically transcribe downloaded episodes")
-                                    .checked(self.long_label_checked)
-                                    .on_change(cx.listener(|this, checked, _, cx| {
-                                        this.long_label_checked = *checked;
-                                        cx.notify();
-                                    })),
-                            )
-                            .child(
-                                Switch::new("long-label-disabled")
-                                    .with_size(self.size)
-                                    .label("Automatically download new episodes")
-                                    .checked(true)
-                                    .disabled(true),
-                            ),
-                    ),
-            )
-            .child(
                 section("Default")
                     .description("Switches work well in a compact settings list.")
                     .w_128()
@@ -165,6 +139,37 @@ impl Render for SwitchStory {
                                                 cx.notify();
                                             })),
                                     ),
+                            ),
+                    ),
+            )
+            .child(
+                section("Long labels")
+                    .description("Long setting names wrap while the track keeps its size.")
+                    .child(
+                        v_flex()
+                            .w(px(320.))
+                            .border_1()
+                            .border_color(theme.border)
+                            .rounded(theme.radius_lg)
+                            .child(
+                                Switch::new("long-label")
+                                    .p_4()
+                                    .with_size(self.size)
+                                    .label("Automatically transcribe downloaded episodes")
+                                    .checked(self.long_label_checked)
+                                    .on_change(cx.listener(|this, checked, _, cx| {
+                                        this.long_label_checked = *checked;
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(Separator::horizontal())
+                            .child(
+                                Switch::new("long-label-disabled")
+                                    .p_4()
+                                    .with_size(self.size)
+                                    .label("Automatically download new episodes")
+                                    .checked(true)
+                                    .disabled(true),
                             ),
                     ),
             )
