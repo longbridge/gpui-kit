@@ -895,46 +895,6 @@ html.dark .astro-code span {
   background-color: var(--scrollbar-thumb-hover);
 }
 
-.sidebar-version-switcher {
-  margin: 0 0 1.25rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-control);
-  background: var(--background);
-}
-
-.sidebar-version-switcher summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.55rem 0.65rem;
-  color: var(--foreground);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  cursor: pointer;
-  list-style: none;
-}
-
-.sidebar-version-switcher summary::-webkit-details-marker { display: none; }
-.sidebar-version-switcher summary span { color: var(--muted-foreground); font-size: 1rem; }
-.sidebar-version-switcher[open] summary span { transform: rotate(180deg); }
-
-.sidebar-version-switcher__menu {
-  display: grid;
-  gap: 0.1rem;
-  padding: 0 0.35rem 0.35rem;
-}
-
-.sidebar-version-switcher__item {
-  padding: 0.35rem 0.45rem;
-  border-radius: var(--radius-control);
-  color: var(--muted-foreground);
-  font-size: 0.78rem;
-  text-decoration: none;
-}
-
-.sidebar-version-switcher__item:hover { background: var(--secondary); color: var(--foreground); }
-.sidebar-version-switcher__item.is-current { color: var(--brand); font-weight: 650; }
-
 /* Sidebar group heading */
 .sidebar-group__title {
   color: var(--muted-foreground);
