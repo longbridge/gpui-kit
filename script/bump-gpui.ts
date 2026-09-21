@@ -1527,6 +1527,25 @@ fn helper(input: TokenStream) -> TokenStream { input }
     if (JSON.stringify(actual) !== JSON.stringify(expected))
       throw new BumpError(`self-test relaxed \`${JSON.stringify(input)}\` to \`${JSON.stringify(actual)}\``);
   }
+  const workspaceFixture = [
+    'gpui = { package = "gpui-pre", version = "=0.3.6" }',
+    'gpui_platform = { package = "gpui-pre-platform", version = "=0.3.6", features = ["font-kit"] }',
+    '# gpui_web = { package = "gpui-pre-web", version = "=0.3.6" }',
+    'reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false }',
+    'gpui_kit = { package = "gpui-kit", version = "=0.6.4" }',
+    'serde = { version = "1", features = ["derive"] }',
+    '[profile.dev.package]',
+    'gpui-pre = { opt-level = 3 }',
+  ].join("\n");
+  const snapshotCrates = ["gpui-pre", "gpui-pre-platform", "gpui-pre-web"].map(
+    (publishedName) => ({ publishedName }) as Crate,
+  );
+  const pinned = pinWorkspaceRequirements(workspaceFixture, snapshotCrates, "0.3.7");
+  const expectedPinned = workspaceFixture
+    .replace('"gpui-pre", version = "=0.3.6"', '"gpui-pre", version = "=0.3.7"')
+    .replace('"gpui-pre-platform", version = "=0.3.6"', '"gpui-pre-platform", version = "=0.3.7"');
+  if (pinned !== expectedPinned)
+    throw new BumpError(`self-test pinned the workspace to:\n${pinned}`);
   logSuccess("Facade-aware gpui_macros transformation self-test passed");
 }
 
@@ -1961,15 +1980,20 @@ function parseCommandLine(argv: string[]): Args {
 
 /**
  * Build and test this repository against the staged crates before anything is
- * uploaded. Applications depend on `gpui-pre` with a caret requirement, so a
- * snapshot whose API drifted away from `gpui-component` reaches them on their
- * next `cargo update`; this makes the drift visible on the release itself.
- * The snapshot is published either way: the fix is a change to this
- * repository, which can only land against the published crates, so the
- * failure is returned to the caller as a warning rather than thrown.
+ * uploaded. The workspace pins the snapshot crates to an exact version, so a
+ * snapshot whose API drifted away from `gpui-component` never reaches an
+ * application on its own; it reaches them through the gpui-kit release that
+ * bumps the pin, and this makes the drift visible on the release itself so
+ * that bump can carry the adaptation. The snapshot is published either way:
+ * the fix is a change to this repository, which can only land against the
+ * published crates, so the failure is returned to the caller as a warning
+ * rather than thrown.
  *
- * The staged crates are injected with `--config patch.crates-io…` so no file
- * in the repository changes. They are patched from a git repository built
+ * The staged crates are injected with `--config patch.crates-io…`, and the
+ * workspace's exact pins are moved onto the staged version for the duration
+ * of the check (a `[patch]` only applies to a source that satisfies the
+ * requirement); `Cargo.toml` is restored afterwards, so no file in the
+ * repository changes. They are patched from a git repository built
  * around a copy outside the repository, not as path dependencies: Cargo
  * treats a path dependency as local code and compiles it without
  * `--cap-lints allow`, so a `RUSTFLAGS=-D warnings` job (the release
@@ -1984,6 +2008,22 @@ function parseCommandLine(argv: string[]): Args {
  * requirement, so the published crates are moved to the staged version in a
  * scratch copy of `Cargo.lock`, which is restored afterwards.
  */
+/**
+ * Move the workspace's exact requirements on the published crates onto
+ * `version`, keeping every other byte of the manifest as it is. Only
+ * `=x.y.z` requirements on a `package = "gpui-pre-…"` dependency that is part
+ * of this snapshot are rewritten; a hand-published crate such as
+ * `gpui-pre-reqwest` keeps its own pin.
+ */
+function pinWorkspaceRequirements(manifest: string, crates: Crate[], version: string): string {
+  const published = new Set(crates.map((crate) => crate.publishedName));
+  return manifest.replace(
+    /^([A-Za-z0-9_-]+\s*=\s*\{[^\n]*?\bpackage\s*=\s*"([^"]+)"[^\n]*?\bversion\s*=\s*")=[^"]+(")/gm,
+    (line, head: string, name: string, tail: string) =>
+      published.has(name) ? `${head}=${version}${tail}` : line,
+  );
+}
+
 async function verifyKitAgainstStaging(
   staging: string,
   crates: Crate[],
@@ -2010,6 +2050,9 @@ async function verifyKitAgainstStaging(
   ]);
   const lockPath = join(REPO_ROOT, "Cargo.lock");
   const lockBackup = existsSync(lockPath) ? readFileSync(lockPath) : undefined;
+  const manifestPath = join(REPO_ROOT, "Cargo.toml");
+  const manifestBackup = readFileSync(manifestPath, "utf8");
+  writeFileSync(manifestPath, pinWorkspaceRequirements(manifestBackup, crates, version));
   const locked = new Set(
     [...(lockBackup?.toString() ?? "").matchAll(/^name = "([^"]+)"$/gm)].map((m) => m[1]),
   );
@@ -2070,6 +2113,7 @@ async function verifyKitAgainstStaging(
     if (error instanceof BumpError) return error.message;
     throw error;
   } finally {
+    writeFileSync(manifestPath, manifestBackup);
     if (lockBackup !== undefined) writeFileSync(lockPath, lockBackup);
     else if (existsSync(lockPath)) rmSync(lockPath);
   }

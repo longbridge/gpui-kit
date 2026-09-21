@@ -59,13 +59,20 @@ gpui-wry = { path = "crates/webview", version = "0.6.4" }
 gpui-component-shell = { path = "crates/component-shell", version = "0.6.4" }
 story = { path = "crates/story" }
 
-gpui = { package = "gpui-pre", version = "0.3.6" }
-gpui_platform = { package = "gpui-pre-platform", version = "0.3.6", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { package = "gpui-pre-web", version = "0.3.6" }
-gpui_macros = { package = "gpui-pre-macros", version = "0.3.6" }
-reqwest_client = { package = "gpui-pre-reqwest-client", version = "0.3.6" }
-sum-tree = { package = "gpui-pre-sum-tree", version = "0.3.6" }
-reqwest = { package = "gpui-pre-reqwest", version = "0.12.15", default-features = false, features = [
+# GPUI comes from the `gpui-pre-*` snapshots of Zed's crates, and any snapshot
+# may change GPUI's API. These requirements are what the published gpui-kit
+# crates carry to crates.io, so they pin the exact snapshot the release was
+# built against: a caret requirement let the weekly release move applications
+# onto a newer snapshot that gpui-component did not compile with (#3156). Bump
+# every snapshot crate together with its Cargo.lock entry; `script/check-gpui-pin.ts`
+# fails CI when a pin is not exact.
+gpui = { package = "gpui-pre", version = "=0.3.6" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.6", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { package = "gpui-pre-web", version = "=0.3.6" }
+gpui_macros = { package = "gpui-pre-macros", version = "=0.3.6" }
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.6" }
+sum-tree = { package = "gpui-pre-sum-tree", version = "=0.3.6" }
+reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false, features = [
     "charset",
     "http2",
     "macos-system-configuration",

@@ -45,6 +45,9 @@ jobs:
           done
       - name: Verify published recipe fragments
         run: python3 script/check-ai docs
+      - uses: oven-sh/setup-bun@v2
+      - name: gpui-pre is pinned exactly
+        run: bun script/check-gpui-pin.ts
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete@0.9.1
