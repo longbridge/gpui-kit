@@ -63,6 +63,7 @@ import {
 } from "node:fs";
 import { dirname, join, normalize, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 /**
@@ -1951,12 +1952,20 @@ function parseCommandLine(argv: string[]): Args {
  * their next `cargo update`; this turns that into a failed release instead.
  *
  * The staged crates are injected with `--config patch.crates-io…` so no file
- * in the repository changes. They are patched from a copy outside the
- * repository: a path dependency under the workspace root would be treated as
- * a member of this workspace and lose its own `workspace = true` inheritance.
- * Cargo keeps a locked version when it still satisfies the requirement, so
- * the published crates are moved to the staged version in a scratch copy of
- * `Cargo.lock`, which is restored afterwards.
+ * in the repository changes. They are patched from a git repository built
+ * around a copy outside the repository, not as path dependencies: Cargo
+ * treats a path dependency as local code and compiles it without
+ * `--cap-lints allow`, so a `RUSTFLAGS=-D warnings` job (the release
+ * workflow's toolchain action sets it) would promote Zed's own warnings, such
+ * as the deprecated `cocoa` types in `gpui_apple`, to errors that no
+ * consumer of the registry crates ever sees. Git dependencies get the same
+ * lint capping as registry ones, so the check mirrors what an application
+ * building against the published snapshot gets. The copy also has to live
+ * outside the repository: a path under the workspace root would be treated
+ * as a member of this workspace and lose its own `workspace = true`
+ * inheritance. Cargo keeps a locked version when it still satisfies the
+ * requirement, so the published crates are moved to the staged version in a
+ * scratch copy of `Cargo.lock`, which is restored afterwards.
  */
 async function verifyKitAgainstStaging(staging: string, crates: Crate[], version: string) {
   const mirror = join(tmpdir(), `${PUBLISH_PREFIX}-kit-check`);
@@ -1967,9 +1976,16 @@ async function verifyKitAgainstStaging(staging: string, crates: Crate[], version
     // judged relative to the staging root, which itself lives under `target/`.
     filter: (path) => relative(staging, path).split("/")[0] !== "target",
   });
+  // Ignored files still belong to the mirror: the copy is what gets built, so
+  // nothing from a `.gitignore` Zed ships may be left out of the commit.
+  const git = ["git", "-c", "user.name=gpui-kit", "-c", "user.email=gpui-kit@localhost", "-c", "commit.gpgsign=false"];
+  await run([...git, "init", "-q", "-b", "main"], { cwd: mirror });
+  await run([...git, "add", "--all", "--force"], { cwd: mirror });
+  await run([...git, "commit", "-q", "-m", `gpui-pre ${version} kit check`], { cwd: mirror });
+  const mirrorUrl = pathToFileURL(mirror).href;
   const patches = crates.flatMap((crate) => [
     "--config",
-    `patch.crates-io.${crate.publishedName}.path=${JSON.stringify(join(mirror, crate.relDir))}`,
+    `patch.crates-io.${crate.publishedName}.git=${JSON.stringify(mirrorUrl)}`,
   ]);
   const lockPath = join(REPO_ROOT, "Cargo.lock");
   const lockBackup = existsSync(lockPath) ? readFileSync(lockPath) : undefined;
@@ -1987,16 +2003,19 @@ async function verifyKitAgainstStaging(staging: string, crates: Crate[], version
 
     const metadata = JSON.parse(
       await run(["cargo", "metadata", "--format-version", "1", ...patches], { cwd: REPO_ROOT, capture: true }),
-    ) as { packages: { name: string; version: string; manifest_path: string }[] };
+    ) as { packages: { name: string; version: string; source: string | null }[] };
     // A crate can appear twice when only part of the closure fell back to the
-    // registry (a path dependency of a staged crate next to a registry copy),
-    // so every package of the name is inspected, not the first one found.
+    // registry (a dependency of a staged crate next to a registry copy), so
+    // every package of the name is inspected, not the first one found. A
+    // staged crate reports the mirror as its source (`git+file://…#sha`);
+    // Cargo checks the repository out under its own cache, so the manifest
+    // path says nothing about where a package came from.
     const published = new Set(crates.map((crate) => crate.publishedName));
     const foreign = metadata.packages.filter(
-      (pkg) => published.has(pkg.name) && !pkg.manifest_path.startsWith(mirror),
+      (pkg) => published.has(pkg.name) && !(pkg.source ?? "").startsWith(`git+${mirrorUrl}`),
     );
     if (foreign.length > 0) {
-      const detail = foreign.map((pkg) => `${pkg.name} ${pkg.version} from ${pkg.manifest_path}`).join("\n  ");
+      const detail = foreign.map((pkg) => `${pkg.name} ${pkg.version} from ${pkg.source ?? "this workspace"}`).join("\n  ");
       throw new BumpError(
         `the workspace resolved these crates from the registry instead of the staged ${version}:\n  ${detail}\n` +
           "Either the workspace's Cargo.toml requirement excludes the new version, or a " +
@@ -2007,12 +2026,12 @@ async function verifyKitAgainstStaging(staging: string, crates: Crate[], version
       );
     }
 
-    // The same commands the repository's CI runs.
-    // Staged crates are injected as path dependencies, so keep Clippy scoped
-    // to gpui-kit and do not promote upstream GPUI deprecations to errors.
+    // The same commands the repository's CI runs. Clippy stays scoped to the
+    // crates this repository publishes; `--no-deps` keeps it off the staged
+    // crates, whose warnings are Zed's to fix.
     const commands = [
       ["cargo", "check", ...patches, "--workspace", "--all-targets"],
-      ["cargo", "clippy", ...patches, "--no-deps", "-p", "gpui-component", "-p", "gpui-component-story", "-p", "gpui-kit-assets", "-p", "gpui-kit", "--", "--deny", "warnings", "--allow", "deprecated"],
+      ["cargo", "clippy", ...patches, "--no-deps", "-p", "gpui-component", "-p", "gpui-component-story", "-p", "gpui-kit-assets", "-p", "gpui-kit", "--", "--deny", "warnings"],
       ["cargo", "test", ...patches, "--workspace", "--exclude", "gpui-shell", "--features", "gpui-component-story/test-support"],
     ];
     for (const cmd of commands) {
