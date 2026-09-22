@@ -107,7 +107,17 @@ impl Root {
         }
         let factory: PluginFactory = Rc::new(move |window, cx| {
             let entity = cx.new(|cx| build(window, cx));
-            cx.observe(&entity, |_, _, cx| cx.notify()).detach();
+            let root = cx.weak_entity();
+            let observed = entity.clone();
+            // Plugin construction can enqueue notifications. Observe only after
+            // that effect cycle so mounting a Root does not immediately render
+            // application content a second time.
+            cx.defer(move |cx| {
+                cx.observe(&observed, move |_, cx| {
+                    let _ = root.update(cx, |_, cx| cx.notify());
+                })
+                .detach();
+            });
             let prepare = entity.clone();
             let style = entity.clone();
             let decorate = entity.clone();
