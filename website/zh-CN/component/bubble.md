@@ -104,7 +104,7 @@ Bubble 的普通 variant 最大宽度为可用宽度的 80%，`Ghost` variant �
 | `Muted` | 低强调度的普通内容。 | `muted` 与普通前景色。 |
 | `Tinted` | 轻微使用 primary 色调的内容。 | 由主题背景与 primary 混合。 |
 | `Outline` | 需要清晰边界但不需要填充色的内容。 | 背景色与 `border`。 |
-| `Ghost` | 作为消息布局中的无表面富内容。 | 无 padding、边框和背景。 |
+| `Ghost` | 作为消息布局中的无表面富内容。 | 无 padding、边框和背景，也不裁切子元素（没有表面可裁，裁了只会切掉富内容的阴影与探出的控件）。 |
 | `Destructive` | 失败、拒绝或无效结果。 | 语义 destructive 色。 |
 
 ```rust
