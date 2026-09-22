@@ -64,6 +64,19 @@ v_resizable("vertical-layout")
     )
 ```
 
+### Resize Handle Appearance
+
+A divider rests as a hairline. As the pointer engages it, an indicator grows and solidifies on top of that line through three levels — hovered, pressed, dragging — so a drag stays readable after the pointer has left the handle's own band, which happens within a pixel or two of the drag starting.
+
+`h_resizable`, `v_resizable` and the Dock install this appearance. `resize_handle_appearance()` is exported for a handle you build yourself, or to pass explicitly to `with_handle_appearance`:
+
+```rust
+gpui_kit::base::h_resizable("my-layout")
+    .with_handle_appearance(resize_handle_appearance())
+```
+
+The indicator's duration and easing come from the theme's motion tokens, and a system reduced-motion preference takes it straight to its target.
+
 ### Panel Size Constraints
 
 ```rust

@@ -65,13 +65,7 @@ pub mod progress;
 pub mod questionnaire;
 pub mod radio;
 pub mod rating;
-/// Backwards-compatible resizable component paths.
-pub mod resizable {
-    pub use super::{
-        ResizablePanel, ResizablePanelEvent, ResizablePanelGroup, ResizableState, h_resizable,
-        resizable_panel, v_resizable,
-    };
-}
+pub mod resizable;
 pub mod scroll;
 pub mod searchable_list;
 pub mod select;
@@ -106,16 +100,16 @@ pub use gpui_base::{
     AxisExt, Edges, FocusTrapElement, InteractiveElementExt, LengthExt, Measure, OngoingScrollExt,
     Placement, Side, measure, measure_if,
 };
-pub use gpui_base::{
-    ResizablePanel, ResizablePanelEvent, ResizablePanelGroup, ResizableState, h_resizable,
-    resizable_panel, v_resizable,
-};
 pub use gpui_component_macros::icon_named;
 pub use icon::*;
 pub use index_path::IndexPath;
 pub use input::{Rope, RopeExt, RopeLines};
 #[cfg(any(feature = "inspector", debug_assertions))]
 pub use inspector::*;
+pub use resizable::{
+    ResizablePanel, ResizablePanelEvent, ResizablePanelGroup, ResizableState, h_resizable,
+    resizable_panel, resize_handle_appearance, v_resizable,
+};
 pub use styled::*;
 pub use theme::*;
 pub use time::{calendar, date_picker};

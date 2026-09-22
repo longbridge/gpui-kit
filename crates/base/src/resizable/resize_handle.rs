@@ -2,14 +2,22 @@ use std::{cell::Cell, rc::Rc};
 
 use gpui::{
     AnyElement, App, Axis, Element, ElementId, Entity, GlobalElementId, InteractiveElement,
-    IntoElement, MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
-    StatefulInteractiveElement, Styled as _, Window, div, prelude::FluentBuilder as _, px,
+    IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Point,
+    Render, StatefulInteractiveElement, Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
 
-use crate::{AxisExt as _, Side, theme::ActiveTheme as _};
+use crate::{AxisExt as _, theme::ActiveTheme as _};
 
 pub(crate) const HANDLE_PADDING: Pixels = px(4.);
 pub(crate) const HANDLE_SIZE: Pixels = px(1.);
+/// How far a hugging handle's hairline sits from the boundary it marks.
+///
+/// It is room for a renderer to draw something thicker than the line and have
+/// it overhang evenly without crossing back outside the container, where
+/// [`HandleEdge`] explains what would happen to it. Expressed as padding
+/// rather than as an inset on the handle's own box, because an inset on the
+/// side a handle is pinned to does not survive the box's own sizing.
+pub(crate) const EDGE_CLEARANCE: Pixels = px(1.);
 
 /// Create a resize handle for a resizable panel.
 #[doc(hidden)]
@@ -33,7 +41,7 @@ pub type ResizeHandleRenderer =
 /// renderer only supplies what is painted inside it.
 pub struct ResizeHandleContext {
     axis: Axis,
-    active: bool,
+    state: ResizeHandleState,
 }
 
 impl ResizeHandleContext {
@@ -43,10 +51,62 @@ impl ResizeHandleContext {
         self.axis
     }
 
-    /// Whether this handle is the one being dragged right now.
+    /// Whether the pointer currently owns this handle.
     pub fn is_active(&self) -> bool {
-        self.active
+        self.state.is_active()
     }
+
+    /// How far the pointer has gone with this handle.
+    pub fn state(&self) -> ResizeHandleState {
+        self.state
+    }
+}
+
+/// How far the pointer has gone with a resize handle.
+///
+/// A drag takes the pointer out of the handle's own band within a pixel or
+/// two, so GPUI's hover reads false for most of a drag and cannot stand in for
+/// `Dragging`. Base tracks the progression instead, and a renderer reads it
+/// through [`ResizeHandleContext::state`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ResizeHandleState {
+    /// The pointer is somewhere else.
+    #[default]
+    Idle,
+    /// The pointer is over the handle's band.
+    Hovered,
+    /// The pointer went down on the handle and has not moved since.
+    Pressed,
+    /// The handle is being dragged.
+    Dragging,
+}
+
+impl ResizeHandleState {
+    /// Whether the pointer owns the handle -- pressed on it, or dragging it.
+    pub fn is_active(self) -> bool {
+        matches!(self, Self::Pressed | Self::Dragging)
+    }
+}
+
+/// Which edge of its own container a handle hugs.
+///
+/// A handle named no edge straddles the boundary it resizes, half its band on
+/// either side, which is what a divider between two panels of a group wants.
+/// A dock's own edge handle cannot: [`dock_frame`] clips to the dock's box, so
+/// the half hanging outside is cut away -- what it paints and what it
+/// hit-tests alike, which is why the outer half of a dock's grab band has
+/// never actually been grabbable. Naming the edge moves the whole handle
+/// inside, one pixel clear of the boundary so that an indicator thicker than
+/// the hairline still sits centred on it without crossing back out.
+///
+/// [`dock_frame`]: crate::dock::dock_frame
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HandleEdge {
+    /// Where the axis starts: the left edge of a horizontal handle's
+    /// container, the top edge of a vertical one's.
+    Leading,
+    /// Where the axis ends.
+    Trailing,
 }
 
 #[doc(hidden)]
@@ -54,7 +114,7 @@ pub struct ResizeHandle<T: 'static, E: 'static + Render> {
     id: ElementId,
     axis: Axis,
     drag_value: Option<Rc<T>>,
-    placement: Option<Side>,
+    edge: Option<HandleEdge>,
     on_drag: Option<Rc<dyn Fn(&Point<Pixels>, &mut Window, &mut App) -> Entity<E>>>,
     appearance: Option<ResizeHandleRenderer>,
 }
@@ -66,7 +126,7 @@ impl<T: 'static, E: 'static + Render> ResizeHandle<T, E> {
             id: id.clone(),
             on_drag: None,
             drag_value: None,
-            placement: None,
+            edge: None,
             appearance: None,
             axis,
         }
@@ -91,24 +151,37 @@ impl<T: 'static, E: 'static + Render> ResizeHandle<T, E> {
         self
     }
 
-    pub fn placement(mut self, placement: Side) -> Self {
-        self.placement = Some(placement);
+    /// Keep the whole handle inside its container, hugging `edge`, instead of
+    /// straddling the boundary it resizes.
+    pub fn inside(mut self, edge: HandleEdge) -> Self {
+        self.edge = Some(edge);
         self
     }
 }
 
+/// One handle's [`ResizeHandleState`], shared between the element and the
+/// mouse listeners it registers.
+///
+/// The `Rc` is load-bearing. `with_element_state` hands back a clone and a
+/// bare `Cell` clones by value, so a listener holding one wrote its progress
+/// into a copy that died with the event: the stored state never left `Idle`
+/// and `is_active` never once read true.
 #[derive(Default, Debug, Clone)]
-struct ResizeHandleState {
-    active: Cell<bool>,
+struct SharedHandleState {
+    state: Rc<Cell<ResizeHandleState>>,
 }
 
-impl ResizeHandleState {
-    fn set_active(&self, active: bool) {
-        self.active.set(active);
+impl SharedHandleState {
+    fn get(&self) -> ResizeHandleState {
+        self.state.get()
     }
 
-    fn is_active(&self) -> bool {
-        self.active.get()
+    /// Reports whether the state actually changed, so a listener repaints the
+    /// window only when there is something new to paint.
+    fn set(&self, state: ResizeHandleState) -> bool {
+        let changed = self.state.get() != state;
+        self.state.set(state);
+        changed
     }
 }
 
@@ -140,11 +213,18 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
     ) -> (gpui::LayoutId, Self::RequestLayoutState) {
         let neg_offset = -HANDLE_PADDING;
         let axis = self.axis;
+        // Sizes are border-box: the extent has to name the whole band, padding
+        // included, or the content box resolves to zero and the hairline
+        // overflows into the padding -- which is how a handle pinned to an edge
+        // ended up drawing its line flush against the boundary it was supposed
+        // to stay clear of.
+        let hug_extent = HANDLE_SIZE + HANDLE_PADDING + EDGE_CLEARANCE;
+        let straddle_extent = HANDLE_SIZE + HANDLE_PADDING * 2.;
 
         window.with_element_state(id.unwrap(), |state, window| {
-            let state = state.unwrap_or(ResizeHandleState::default());
+            let state: SharedHandleState = state.unwrap_or_default();
 
-            let bg_color = handle_color(&cx.theme(), state.is_active());
+            let bg_color = handle_color(&cx.theme(), state.get().is_active());
 
             let mut el = div()
                 .id(self.id.clone())
@@ -158,34 +238,57 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
                         move |_, position, window, cx| on_drag(&position, window, cx),
                     )
                 })
-                .map(|this| match self.placement {
-                    Some(Side::Left) => {
-                        // Special for Left Dock
-                        //  FIXME: Improve this to let the scroll bar have px(HANDLE_PADDING)
-                        this.cursor_col_resize()
-                            .top_0()
-                            .right(px(1.))
-                            .h_full()
-                            .w(HANDLE_SIZE)
-                            .pl(HANDLE_PADDING)
-                    }
-                    _ => this
-                        .when(axis.is_horizontal(), |this| {
-                            this.cursor_col_resize()
-                                .top_0()
-                                .left(neg_offset)
-                                .h_full()
-                                .w(HANDLE_SIZE)
-                                .px(HANDLE_PADDING)
-                        })
-                        .when(axis.is_vertical(), |this| {
-                            this.cursor_row_resize()
-                                .top(neg_offset)
-                                .left_0()
-                                .w_full()
-                                .h(HANDLE_SIZE)
-                                .py(HANDLE_PADDING)
-                        }),
+                .map(|this| match (self.edge, axis) {
+                    // Hugging an edge: the whole band is inside the container,
+                    // and the hairline sits a pixel clear of the boundary.
+                    // FIXME: Improve this to let the scroll bar have px(HANDLE_PADDING)
+                    (Some(HandleEdge::Trailing), Axis::Horizontal) => this
+                        .cursor_col_resize()
+                        .top_0()
+                        .right_0()
+                        .h_full()
+                        .w(hug_extent)
+                        .pl(HANDLE_PADDING)
+                        .pr(EDGE_CLEARANCE),
+                    (Some(HandleEdge::Leading), Axis::Horizontal) => this
+                        .cursor_col_resize()
+                        .top_0()
+                        .left_0()
+                        .h_full()
+                        .w(hug_extent)
+                        .pr(HANDLE_PADDING)
+                        .pl(EDGE_CLEARANCE),
+                    (Some(HandleEdge::Trailing), Axis::Vertical) => this
+                        .cursor_row_resize()
+                        .bottom_0()
+                        .left_0()
+                        .w_full()
+                        .h(hug_extent)
+                        .pt(HANDLE_PADDING)
+                        .pb(EDGE_CLEARANCE),
+                    (Some(HandleEdge::Leading), Axis::Vertical) => this
+                        .cursor_row_resize()
+                        .top_0()
+                        .left_0()
+                        .w_full()
+                        .h(hug_extent)
+                        .pb(HANDLE_PADDING)
+                        .pt(EDGE_CLEARANCE),
+                    // Straddling the boundary: half the band on either side.
+                    (None, Axis::Horizontal) => this
+                        .cursor_col_resize()
+                        .top_0()
+                        .left(neg_offset)
+                        .h_full()
+                        .w(straddle_extent)
+                        .px(HANDLE_PADDING),
+                    (None, Axis::Vertical) => this
+                        .cursor_row_resize()
+                        .top(neg_offset)
+                        .left_0()
+                        .w_full()
+                        .h(straddle_extent)
+                        .py(HANDLE_PADDING),
                 })
                 .child(
                     // A renderer that declines — or is absent — leaves the
@@ -197,7 +300,7 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
                             appearance(
                                 &ResizeHandleContext {
                                     axis,
-                                    active: state.is_active(),
+                                    state: state.get(),
                                 },
                                 window,
                                 cx,
@@ -248,14 +351,16 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
     ) {
         request_layout.paint(window, cx);
 
-        window.with_element_state(id.unwrap(), |state: Option<ResizeHandleState>, window| {
-            let state = state.unwrap_or(ResizeHandleState::default());
+        window.with_element_state(id.unwrap(), |state: Option<SharedHandleState>, window| {
+            let state = state.unwrap_or_default();
 
             window.on_mouse_event({
                 let state = state.clone();
                 move |ev: &MouseDownEvent, phase, window, _| {
-                    if bounds.contains(&ev.position) && phase.bubble() {
-                        state.set_active(true);
+                    if bounds.contains(&ev.position)
+                        && phase.bubble()
+                        && state.set(ResizeHandleState::Pressed)
+                    {
                         window.refresh();
                     }
                 }
@@ -263,9 +368,42 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
 
             window.on_mouse_event({
                 let state = state.clone();
-                move |_: &MouseUpEvent, _, window, _| {
-                    if state.is_active() {
-                        state.set_active(false);
+                move |ev: &MouseMoveEvent, phase, window, _| {
+                    if !phase.bubble() {
+                        return;
+                    }
+
+                    // A press that moves is a drag, and stays one until the
+                    // button comes back up: by the second frame the pointer is
+                    // outside this nine-pixel band, so where it is says nothing
+                    // about whether the handle is still being dragged.
+                    let next = match state.get() {
+                        engaged if engaged.is_active() => ResizeHandleState::Dragging,
+                        _ if bounds.contains(&ev.position) => ResizeHandleState::Hovered,
+                        _ => ResizeHandleState::Idle,
+                    };
+                    if state.set(next) {
+                        window.refresh();
+                    }
+                }
+            });
+
+            window.on_mouse_event({
+                let state = state.clone();
+                move |ev: &MouseUpEvent, _, window, _| {
+                    if !state.get().is_active() {
+                        return;
+                    }
+
+                    // Releasing over the handle leaves it hovered. Going
+                    // straight to idle there would drop the indicator for one
+                    // frame and bring it back under a pointer that never left.
+                    let next = if bounds.contains(&ev.position) {
+                        ResizeHandleState::Hovered
+                    } else {
+                        ResizeHandleState::Idle
+                    };
+                    if state.set(next) {
                         window.refresh();
                     }
                 }
@@ -298,8 +436,39 @@ pub(crate) fn handle_color(theme: &crate::Theme, active: bool) -> gpui::Hsla {
 mod tests {
     use gpui::{TestAppContext, hsla};
 
-    use super::handle_color;
+    use super::{ResizeHandleState, SharedHandleState, handle_color};
     use crate::{ResizableTheme, Theme};
+
+    #[test]
+    fn a_listener_writes_its_progress_back_into_the_stored_state() {
+        let stored = SharedHandleState::default();
+        // What `paint` hands each mouse listener.
+        let listener = stored.clone();
+
+        assert!(listener.set(ResizeHandleState::Pressed));
+
+        // The regression this pins down: the state used to be a bare `Cell`,
+        // which clones by value, so a listener wrote into a copy that died
+        // with the event and the handle never left `Idle`.
+        assert_eq!(stored.get(), ResizeHandleState::Pressed);
+        assert!(stored.get().is_active());
+    }
+
+    #[test]
+    fn setting_the_state_it_already_has_asks_for_no_repaint() {
+        let state = SharedHandleState::default();
+
+        assert!(state.set(ResizeHandleState::Hovered));
+        assert!(!state.set(ResizeHandleState::Hovered));
+    }
+
+    #[test]
+    fn only_a_held_handle_is_active() {
+        assert!(!ResizeHandleState::Idle.is_active());
+        assert!(!ResizeHandleState::Hovered.is_active());
+        assert!(ResizeHandleState::Pressed.is_active());
+        assert!(ResizeHandleState::Dragging.is_active());
+    }
 
     #[gpui::test]
     fn an_unprojected_handle_resolves_from_the_theme_tokens(cx: &mut TestAppContext) {

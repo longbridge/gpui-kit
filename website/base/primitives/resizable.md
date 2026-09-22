@@ -36,6 +36,12 @@ Panel sizes live in resizable state; dragging handles updates adjacent panels su
 
 Keep controlled state on the parent render type or in a GPUI entity. Update it in callbacks and call `cx.notify()`; do not recreate persistent entities during every render.
 
+## Handle appearance
+
+Base owns a handle's hit band, its cursor and the drag; what is painted inside it is the consumer's. `ResizeHandleRenderer` is handed a `ResizeHandleContext` carrying the axis and a `ResizeHandleState` — `Idle`, `Hovered`, `Pressed` or `Dragging`. The last two are tracked by base because a drag takes the pointer out of the nine-pixel band almost at once, so GPUI's hover reads false for most of a drag.
+
+Returning `None` keeps base's own one-pixel line, so a renderer can override some handles and leave the rest alone.
+
 ## Complete Rust example
 
 The complete implementation used by the runnable showcase is embedded directly from Rust source:

@@ -34,6 +34,12 @@ ResizableState 持久保存面板尺寸；拖动手柄时更新约束内的比�
 
 受控状态应保存在父渲染类型或 GPUI entity 中；在回调中更新并调用 `cx.notify()`，不要在每次渲染时重建持久 entity。
 
+## 手柄外观
+
+手柄的命中带、光标和拖拽由 Base 负责，画在里面的东西归使用方。`ResizeHandleRenderer` 拿到的 `ResizeHandleContext` 带有轴向和一个 `ResizeHandleState`——`Idle`、`Hovered`、`Pressed` 或 `Dragging`。后两个状态由 Base 自己跟踪：拖拽开始后指针几乎立刻离开那条 9px 的命中带，GPUI 的 hover 在整段拖拽里大多是 false。
+
+renderer 返回 `None` 时保留 Base 自带的 1px 细线，因此只想改其中几个手柄时，不必把其余的一并重画。
+
 ## 完整 Rust 示例
 
 <<< ../../../../crates/base/examples/showcase/components/resizable.rs{rust}
