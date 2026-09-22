@@ -6,7 +6,7 @@ order: -2.2
 
 # Window
 
-GPUI 原生提供 `Window` 作为单个原生窗口的上下文。它把渲染后的 Element 树与平台输入、Focus、Action 派发、绘制和窗口控制连接起来。GPUI 只会在更新或渲染这个窗口时，把它传给 View：
+GPUI 提供 `Window` 作为单个系统窗口的上下文。它把渲染后的 Element 树与平台输入、Focus、Action 派发、绘制和窗口控制连接起来。GPUI 只会在更新或渲染这个窗口时，把它传给 View：
 
 ```rust
 impl Render for Chat {

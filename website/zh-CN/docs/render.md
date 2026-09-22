@@ -6,7 +6,7 @@ order: -2.5
 
 # Render
 
-GPUI 原生提供 `Render` trait，用于把 `Entity` 的当前状态转换成元素树。对于 Chat 面板、设置页面、Workspace 这类状态会持续变化、生命周期较长的 View，应使用 `Render`。
+GPUI 提供 `Render` trait，用于把 `Entity` 的当前状态转换成元素树。对于 Chat 面板、设置页面、Workspace 这类状态会持续变化、生命周期较长的 View，应使用 `Render`。
 
 ```rust
 use gpui::{div, prelude::*, Context, IntoElement, Render, Window};

@@ -6,7 +6,7 @@ order: -2.1
 
 # Entity
 
-当一份状态需要由多个 View、handler 或异步任务共同使用时，把它放进 GPUI 原生提供的 `Entity<T>`。例如，Chat 可以用 `Entity<Chat>` 保存消息；任何持有其 clone 的代码都能通过 GPUI Context 访问同一份 Chat。
+当一份状态需要由多个 View、handler 或异步任务共同使用时，把它放进 GPUI 提供的 `Entity<T>`。例如，Chat 可以用 `Entity<Chat>` 保存消息；任何持有其 clone 的代码都能通过 GPUI Context 访问同一份 Chat。
 
 使用 `cx.new` 创建 Entity，使用 `read` 读取状态，使用 `update` 修改状态。当 `Chat` 实现 `Render` 时，`Entity<Chat>` 还可以直接作为 View 渲染；不需要渲染时，它就是一个共享状态 model。
 
