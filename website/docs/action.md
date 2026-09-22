@@ -41,7 +41,7 @@ h_flex()
             .flex_1()
             .track_focus(&self.chat_focus)
             .key_context("Chat")
-            .on_action(cx.listener(Self::send_message))
+            .on_action(cx.listener(Self::on_action_send_message))
             .child("Chat"),
     )
 ```
@@ -92,7 +92,7 @@ Use the exact check for an input caret or selected control. Use containment when
 div()
     .track_focus(&self.focus_handle)
     .key_context("Chat")
-    .on_action(cx.listener(Self::send_message))
+    .on_action(cx.listener(Self::on_action_send_message))
 ```
 
 That registration has several connected effects:
@@ -176,7 +176,7 @@ struct OpenConversation {
 }
 
 impl Workspace {
-    fn open_conversation(
+    fn on_action_open_conversation(
         &mut self,
         action: &OpenConversation,
         window: &mut Window,
@@ -190,7 +190,7 @@ impl Workspace {
 
 // Workspace is an ancestor of both Sidebar and Chat.
 h_flex()
-    .on_action(cx.listener(Self::open_conversation))
+    .on_action(cx.listener(Self::on_action_open_conversation))
     .child(self.sidebar.clone())
     .child(self.chat.clone())
 
@@ -205,7 +205,7 @@ The dispatch route is now explicit: **Sidebar → Workspace → Chat**. The Acti
 
 :::info INFO — A sibling is not on the Dispatch Path
 
-If `open_conversation` is attached only to Chat, an Action dispatched while Sidebar has Focus cannot reach it: Chat is a sibling, not an ancestor on the current Dispatch Path. The same mistake can make a shortcut appear unresponsive when its `on_action` handler sits outside the path selected by Focus. Put a cross-region handler on the nearest common owner, register the `KeyBinding`, and place its `key_context` and handler on the path where the shortcut should work.
+If `on_action_open_conversation` is attached only to Chat, an Action dispatched while Sidebar has Focus cannot reach it: Chat is a sibling, not an ancestor on the current Dispatch Path. The same mistake can make a shortcut appear unresponsive when its `on_action` handler sits outside the path selected by Focus. Put a cross-region handler on the nearest common owner, register the `KeyBinding`, and place its `key_context` and handler on the path where the shortcut should work.
 
 :::
 
@@ -233,7 +233,12 @@ Attach focus, context, and handler to the same owning region:
 
 ```rust
 impl Chat {
-    fn send_message(&mut self, _: &SendMessage, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_action_send_message(
+        &mut self,
+        _: &SendMessage,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.submit_draft();
         cx.notify();
     }
@@ -244,8 +249,8 @@ impl Render for Chat {
         div()
             .track_focus(&self.focus_handle)
             .key_context(CHAT_CONTEXT)
-            .on_action(cx.listener(Self::send_message))
-            .child("AI Chat")
+            .on_action(cx.listener(Self::on_action_send_message))
+            .child("Chat")
     }
 }
 ```

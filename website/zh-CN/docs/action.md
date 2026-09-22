@@ -41,7 +41,7 @@ h_flex()
             .flex_1()
             .track_focus(&self.chat_focus)
             .key_context("Chat")
-            .on_action(cx.listener(Self::send_message))
+            .on_action(cx.listener(Self::on_action_send_message))
             .child("Chat"),
     )
 ```
@@ -92,7 +92,7 @@ impl Focusable for Chat {
 div()
     .track_focus(&self.focus_handle)
     .key_context("Chat")
-    .on_action(cx.listener(Self::send_message))
+    .on_action(cx.listener(Self::on_action_send_message))
 ```
 
 调用 `track_focus` 会把 `FocusHandle` 注册到这个 Element 对应的 dispatch node，并把该 Element 标记为可以接收 Focus。这会产生几项关联行为：
@@ -176,7 +176,7 @@ struct OpenConversation {
 }
 
 impl Workspace {
-    fn open_conversation(
+    fn on_action_open_conversation(
         &mut self,
         action: &OpenConversation,
         window: &mut Window,
@@ -190,7 +190,7 @@ impl Workspace {
 
 // Workspace 是 Sidebar 与 Chat 的共同祖先。
 h_flex()
-    .on_action(cx.listener(Self::open_conversation))
+    .on_action(cx.listener(Self::on_action_open_conversation))
     .child(self.sidebar.clone())
     .child(self.chat.clone())
 
@@ -205,7 +205,7 @@ window.dispatch_action(
 
 :::info INFO — sibling 不在当前 Dispatch Path 上
 
-如果只把 `open_conversation` handler 挂在 Chat 上，当 Sidebar 拥有 Focus 时派发的 Action 无法到达它：Chat 是 sibling，不是当前 Dispatch Path 上的祖先。同一种错误也会导致快捷键看起来没有响应——`on_action` handler 位于 Focus 选中的路径之外。跨区域 handler 应放在最近的共同 owner 上；注册 `KeyBinding` 后，还要把对应的 `key_context` 与 handler 放在快捷键应该生效的路径上。
+如果只把 `on_action_open_conversation` handler 挂在 Chat 上，当 Sidebar 拥有 Focus 时派发的 Action 无法到达它：Chat 是 sibling，不是当前 Dispatch Path 上的祖先。同一种错误也会导致快捷键看起来没有响应——`on_action` handler 位于 Focus 选中的路径之外。跨区域 handler 应放在最近的共同 owner 上；注册 `KeyBinding` 后，还要把对应的 `key_context` 与 handler 放在快捷键应该生效的路径上。
 
 :::
 
@@ -233,7 +233,12 @@ fn init(cx: &mut App) {
 
 ```rust
 impl Chat {
-    fn send_message(&mut self, _: &SendMessage, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_action_send_message(
+        &mut self,
+        _: &SendMessage,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.submit_draft();
         cx.notify();
     }
@@ -244,8 +249,8 @@ impl Render for Chat {
         div()
             .track_focus(&self.focus_handle)
             .key_context(CHAT_CONTEXT)
-            .on_action(cx.listener(Self::send_message))
-            .child("AI Chat")
+            .on_action(cx.listener(Self::on_action_send_message))
+            .child("Chat")
     }
 }
 ```
