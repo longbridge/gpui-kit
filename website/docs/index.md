@@ -25,8 +25,9 @@ or build your own design system on the reusable behavior and infrastructure in
 application development. For library APIs, see [GPUI Component](/component),
 [GPUI Base](/base), and [GPUI Shell](/shell).
 
-Read [Action](./action) for a practical guide to GPUI focus, `track_focus`,
-key contexts, Actions, shortcuts, and Events.
+Read [Action](./action) for GPUI Focus, `track_focus`, Key Contexts,
+KeyBindings, and command dispatch. Continue with [Event](./event) for typed
+notifications and the relationship between Actions and Events.
 
 ## Features
 

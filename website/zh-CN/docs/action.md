@@ -261,63 +261,15 @@ Action handler 默认停止冒泡。如果内层 handler 不处理，希望父�
 
 先执行 `cx.bind_keys(...)`，再执行 `cx.set_menus(...)`。Native menu 创建时会固定当时的快捷键显示；之后只改 binding，不会自动更新已有菜单。
 
-## Event 用来做什么
+## Action 与 Event 如何配合
 
-Event 是一个 Entity 发给观察者的类型化通知。它不经过 Focus、Key Context 或 Element Tree。
-
-```rust
-#[derive(Clone, Debug)]
-enum ChatEvent {
-    DraftChanged,
-    MessageSent { message_id: MessageId },
-}
-
-impl EventEmitter<ChatEvent> for Chat {}
-```
-
-状态变化后发出一个有业务含义的事实：
-
-```rust
-fn finish_send(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
-    self.draft.clear();
-    cx.emit(ChatEvent::MessageSent { message_id });
-    cx.notify();
-}
-```
-
-Owner 在组装 Entity 时订阅：
-
-```rust
-let chat = cx.new(Chat::new);
-let subscription = cx.subscribe(&chat, |workspace, _, event, cx| {
-    if matches!(event, ChatEvent::MessageSent { .. }) {
-        workspace.refresh_conversation();
-        cx.notify();
-    }
-});
-```
-
-API 要求时必须保留返回的 `Subscription`，通常存进 `_subscriptions: Vec<Subscription>`。丢弃它就会断开订阅。回调还需要 `&mut Window` 时使用 `window.subscribe(...)`。
-
-`cx.notify()` 与 `cx.emit(...)` 不同。`notify` 告诉观察者重新读取 Entity state，通常会触发重绘；`emit` 携带 payload 发送类型化语义事件。一次变化可能只需要其中一个，也可能两个都需要；Event 不会自动代替 render notification。
-
-## 什么时候用 Action，什么时候用 Event
-
-| 问题 | 使用 | 例子 |
-| --- | --- | --- |
-| 这是用户或调用者希望执行的指令吗？ | **Action** | 保存、删除、打开搜索 |
-| 它需要绑定快捷键或出现在菜单里吗？ | **Action** | 复制、切换侧边栏、重命名 |
-| 这是状态或生命周期变化后报告的事实吗？ | **Event** | ValueChanged、Saved、Dismissed |
-| Owner 是否要独立于 UI tree 观察 child？ | **Event** | 输入变化、选择行、提交对话框 |
-| 它只是鼠标手势且没有其他命令入口吗？ | callback | hover、拖动距离、指针位置 |
-
-一个正常流程经常同时使用两者：
+Action 与 Event 描述同一次交互中的两个相反方向：
 
 ```text
-⌘ Enter → SendMessage Action → AI Chat 发送 → MessageSent Event → Workspace 更新
+⌘ Enter → SendMessage Action → Chat 发送 → MessageSent Event → Workspace 更新
 ```
 
-Action 把“**想做什么**”向内传给 command owner；Event 把“**发生了什么**”向外传给感兴趣的 owner。因此 Event 应命名为 `Saved`，而不是 `Save`。不要把 Event 当成全局命令总线，否则会绕开 focus 与 command routing。
+Action 把“**想做什么**”向内传给 command owner；操作改变状态后，Event 再把“**发生了什么**”向外传给感兴趣的 owner。阅读 [Event](./event)，继续了解 `EventEmitter`、`emit`、订阅生命周期，以及完整的 Action/Event 选择方法。
 
 ## 全局与上下文快捷键
 

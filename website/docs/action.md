@@ -261,63 +261,15 @@ Action handlers stop bubbling by default. If an inner handler declines the Actio
 
 Register key bindings before `cx.set_menus(...)`. Native menus capture displayed shortcuts when built, so changing bindings later does not update an existing menu automatically.
 
-## What Events are for
+## How Action and Event work together
 
-An Event is a typed notification from one entity to its observers. It does not use focus, key contexts, or the element tree.
-
-```rust
-#[derive(Clone, Debug)]
-enum ChatEvent {
-    DraftChanged,
-    MessageSent { message_id: MessageId },
-}
-
-impl EventEmitter<ChatEvent> for Chat {}
-```
-
-Emit a semantic fact after the state change:
-
-```rust
-fn finish_send(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
-    self.draft.clear();
-    cx.emit(ChatEvent::MessageSent { message_id });
-    cx.notify();
-}
-```
-
-The owner subscribes while wiring entities together:
-
-```rust
-let chat = cx.new(Chat::new);
-let subscription = cx.subscribe(&chat, |workspace, _, event, cx| {
-    if matches!(event, ChatEvent::MessageSent { .. }) {
-        workspace.refresh_conversation();
-        cx.notify();
-    }
-});
-```
-
-Keep the returned `Subscription` alive when required, commonly in `_subscriptions: Vec<Subscription>`. Dropping it disconnects the observer. Use `window.subscribe(...)` when the callback also needs `&mut Window`.
-
-`cx.notify()` and `cx.emit(...)` are different. `notify` tells observers to reread entity state, usually causing a rerender. `emit` sends a typed semantic event with a payload. A change may need one or both; an Event does not replace a render notification.
-
-## Action or Event?
-
-| Question | Use | Examples |
-| --- | --- | --- |
-| Is this an instruction a user or caller wants performed? | **Action** | Save, Delete, Open Search |
-| Should it be bindable to a key or shown in a menu? | **Action** | Copy, Toggle Sidebar, Rename |
-| Is this a fact reported after state or lifecycle changed? | **Event** | ValueChanged, Saved, Dismissed |
-| Should an owner observe a child independently of its UI tree? | **Event** | Input changed, row selected, dialog submitted |
-| Is it only a pointer gesture with no other command entry point? | callback | hover, drag delta, pointer position |
-
-A normal flow often uses both:
+Action and Event describe opposite directions in the same interaction:
 
 ```text
-⌘ Enter → SendMessage Action → AI Chat sends → MessageSent Event → Workspace updates
+⌘ Enter → SendMessage Action → Chat sends → MessageSent Event → Workspace updates
 ```
 
-An Action carries **intent inward** to the command owner. An Event carries **what happened outward** to interested owners. Name the Event `Saved`, not `Save`, and do not use Events as a global command bus that bypasses focus and command routing.
+An Action carries **intent inward** to the command owner. After the operation changes state, an Event carries **what happened outward** to interested owners. Read [Event](./event) for `EventEmitter`, `emit`, subscriptions, lifetime management, and the complete Action-or-Event decision guide.
 
 ## Contextual and global shortcuts
 
