@@ -6,7 +6,9 @@ order: -6.1
 
 # Entity
 
-GPUI 原生提供 `Entity<T>`，它是应用所管理状态的类型化句柄。View 通常是一个同时实现了 `Render` 的 Entity；不负责渲染的 model 也使用同一套机制。
+GPUI 原生提供 `Entity<T>`，用于保存并共享一份由 GPUI 管理的 `T`。通过 `cx.new` 创建 Entity；clone 一个 Entity 只会复制句柄，所有句柄仍然访问同一份 `T`。读取和修改都必须经过 GPUI Context。
+
+当 `T` 实现 `Render` 时，`Entity<T>` 可以直接作为 View 渲染。`T` 不实现 `Render` 时，Entity 也可以只保存应用状态，作为 model 使用。
 
 ```text
 Entity<Chat>

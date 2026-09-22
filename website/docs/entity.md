@@ -6,7 +6,9 @@ order: -6.1
 
 # Entity
 
-GPUI provides `Entity<T>` as a typed handle to state owned by the application. A View is usually an Entity whose state also implements `Render`, while models can use the same mechanism without rendering anything.
+GPUI provides `Entity<T>` to store and share a `T` managed by GPUI. Create one with `cx.new`; cloning the Entity only copies its handle, so every clone still accesses the same `T`. Reads and updates must go through a GPUI context.
+
+When `T` implements `Render`, its `Entity<T>` can render directly as a View. Without `Render`, the Entity can hold application state as a model.
 
 ```text
 Entity<Chat>
