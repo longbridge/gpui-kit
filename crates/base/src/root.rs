@@ -1,10 +1,10 @@
-//! Window roots and presentation-layer extensions.
+//! Window roots and presentation-layer plugins.
 use crate::input::Copy;
 use crate::{StyledExt, TextSelectionLayer};
 use gpui::{
     AnyElement, AnyView, App, AppContext, ClipboardItem, Context, Div, Entity, Global,
-    InteractiveElement, IntoElement, KeyBinding, ParentElement, Pixels, Render, Stateful,
-    StyleRefinement, Styled, Window, actions, div, px,
+    InteractiveElement, IntoElement, KeyBinding, ParentElement, Render, Stateful, StyleRefinement,
+    Styled, Window, actions, div,
 };
 use std::{any::TypeId, rc::Rc};
 
@@ -26,14 +26,14 @@ pub(crate) fn init(cx: &mut App) {
 ///
 /// Register during explicit application initialization, before creating windows.
 /// The view renders above application content. Base owns the root regardless of
-/// which extensions are registered; Cargo features never select its type.
+/// which plugins are registered; Cargo features never select its type.
 ///
-/// Extensions render in registration order, later ones above earlier ones.
+/// Plugins render in registration order, later ones above earlier ones.
 /// Notify their entity after changing state so the root also refreshes its
 /// preparation and surface styles. Preparation and styling must not notify.
 /// Factories are captured when a root is created, so registration affects only
 /// future windows.
-pub trait RootExtension: Render + Sized {
+pub trait RootPlugin: Render + Sized {
     /// Update window settings before content and overlays render.
     fn prepare(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
 
@@ -52,14 +52,14 @@ pub trait RootExtension: Render + Sized {
     }
 }
 
-type ExtensionFactory = Rc<dyn Fn(&mut Window, &mut Context<Root>) -> Extension>;
+type PluginFactory = Rc<dyn Fn(&mut Window, &mut Context<Root>) -> Plugin>;
 type Prepare = Rc<dyn Fn(&mut Window, &mut App)>;
 type SurfaceStyle = Rc<dyn Fn(&mut Stateful<Div>, &mut Window, &mut App)>;
 type Decorate = Rc<dyn Fn(AnyElement, &Root, &mut Window, &mut App) -> AnyElement>;
 #[derive(Default)]
-struct Extensions(Vec<(TypeId, ExtensionFactory)>);
-impl Global for Extensions {}
-struct Extension {
+struct PluginRegistry(Vec<(TypeId, PluginFactory)>);
+impl Global for PluginRegistry {}
+struct Plugin {
     view: AnyView,
     prepare: Prepare,
     style: SurfaceStyle,
@@ -70,28 +70,26 @@ struct Extension {
 pub struct Root {
     view: AnyView,
     style: StyleRefinement,
-    extensions: Vec<Extension>,
-    bordered: bool,
-    window_shadow_size: Pixels,
+    plugins: Vec<Plugin>,
 }
 
 impl Root {
-    /// Register a presentation extension once per application. Re-registering its
+    /// Register a presentation plugin once per application. Re-registering its
     /// type replaces the factory for future windows rather than mounting it twice.
-    pub fn register_extension<V: RootExtension>(
+    pub fn register_plugin<V: RootPlugin>(
         cx: &mut App,
         build: fn(&mut Window, &mut Context<V>) -> V,
     ) {
-        if !cx.has_global::<Extensions>() {
-            cx.set_global(Extensions::default());
+        if !cx.has_global::<PluginRegistry>() {
+            cx.set_global(PluginRegistry::default());
         }
-        let factory: ExtensionFactory = Rc::new(move |window, cx| {
+        let factory: PluginFactory = Rc::new(move |window, cx| {
             let entity = cx.new(|cx| build(window, cx));
             cx.observe(&entity, |_, _, cx| cx.notify()).detach();
             let prepare = entity.clone();
             let style = entity.clone();
             let decorate = entity.clone();
-            Extension {
+            Plugin {
                 view: entity.into(),
                 prepare: Rc::new(move |window, cx| {
                     prepare.update(cx, |state, cx| state.prepare(window, cx))
@@ -104,14 +102,11 @@ impl Root {
                 }),
             }
         });
-        let extensions = &mut cx.global_mut::<Extensions>().0;
-        if let Some(entry) = extensions
-            .iter_mut()
-            .find(|(id, _)| *id == TypeId::of::<V>())
-        {
+        let plugins = &mut cx.global_mut::<PluginRegistry>().0;
+        if let Some(entry) = plugins.iter_mut().find(|(id, _)| *id == TypeId::of::<V>()) {
             entry.1 = factory;
         } else {
-            extensions.push((TypeId::of::<V>(), factory));
+            plugins.push((TypeId::of::<V>(), factory));
         }
     }
 
@@ -119,22 +114,16 @@ impl Root {
         #[cfg(all(target_os = "macos", not(test)))]
         crate::install_window_hit_test_forwarder(window);
         let factories = cx
-            .try_global::<Extensions>()
+            .try_global::<PluginRegistry>()
             .map(|e| e.0.clone())
             .unwrap_or_default();
         Self {
             view: view.into(),
             style: StyleRefinement::default(),
-            extensions: factories
+            plugins: factories
                 .into_iter()
                 .map(|(_, build)| build(window, cx))
                 .collect(),
-            bordered: true,
-            window_shadow_size: if cfg!(target_os = "linux") {
-                px(20.)
-            } else {
-                px(0.)
-            },
         }
     }
 
@@ -143,30 +132,11 @@ impl Root {
         &self.view
     }
 
-    /// Find a presentation extension owned by this window.
-    pub fn extension<V: RootExtension>(&self) -> Option<Entity<V>> {
-        self.extensions
+    /// Find a presentation plugin owned by this window.
+    pub fn plugin<V: RootPlugin>(&self) -> Option<Entity<V>> {
+        self.plugins
             .iter()
             .find_map(|entry| entry.view.clone().downcast::<V>().ok())
-    }
-
-    /// Whether a presentation extension should draw client-side window chrome.
-    pub fn is_bordered(&self) -> bool {
-        self.bordered
-    }
-    /// Enable or disable client-side chrome supplied by a presentation extension.
-    pub fn bordered(mut self, bordered: bool) -> Self {
-        self.bordered = bordered;
-        self
-    }
-    /// Configure the physical shadow inset used by client-side window chrome.
-    pub fn window_shadow_size(mut self, size: impl Into<Pixels>) -> Self {
-        self.window_shadow_size = size.into();
-        self
-    }
-    /// The physical shadow inset for presentation extensions.
-    pub fn shadow_size(&self) -> Pixels {
-        self.window_shadow_size
     }
 
     pub fn read<'a>(window: &'a Window, cx: &'a App) -> &'a Self {
@@ -275,8 +245,8 @@ impl Styled for Root {
 }
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        for extension in &self.extensions {
-            (extension.prepare)(window, cx);
+        for plugin in &self.plugins {
+            (plugin.prepare)(window, cx);
         }
         let mut content = div()
             .id("root")
@@ -289,18 +259,17 @@ impl Render for Root {
             .child(TextSelectionLayer)
             .child(self.view.clone())
             .child(
-                div().absolute().inset_0().children(
-                    self.extensions
-                        .iter()
-                        .map(|extension| extension.view.clone()),
-                ),
+                div()
+                    .absolute()
+                    .inset_0()
+                    .children(self.plugins.iter().map(|plugin| plugin.view.clone())),
             );
-        for extension in &self.extensions {
-            (extension.style)(&mut content, window, cx);
+        for plugin in &self.plugins {
+            (plugin.style)(&mut content, window, cx);
         }
         let mut content = content.refine_style(&self.style).into_any_element();
-        for extension in &self.extensions {
-            content = (extension.decorate)(content, self, window, cx);
+        for plugin in &self.plugins {
+            content = (plugin.decorate)(content, self, window, cx);
         }
         content
     }
@@ -323,17 +292,17 @@ mod tests {
             div()
         }
     }
-    impl RootExtension for Layer {}
+    impl RootPlugin for Layer {}
     fn layer(_: &mut Window, _: &mut Context<Layer>) -> Layer {
         Layer
     }
 
     #[gpui::test]
-    fn extension_registration_is_idempotent_and_state_is_per_window(cx: &mut TestAppContext) {
+    fn plugin_registration_is_idempotent_and_state_is_per_window(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::init(cx);
-            Root::register_extension(cx, layer);
-            Root::register_extension(cx, layer);
+            Root::register_plugin(cx, layer);
+            Root::register_plugin(cx, layer);
         });
         let mut ids = Vec::new();
         for _ in 0..2 {
@@ -342,25 +311,11 @@ mod tests {
                 Root::new(content, window, cx)
             });
             let id = root.read_with(cx, |root, _| {
-                assert_eq!(root.extensions.len(), 1);
-                root.extension::<Layer>().unwrap().entity_id()
+                assert_eq!(root.plugins.len(), 1);
+                root.plugin::<Layer>().unwrap().entity_id()
             });
             ids.push(id);
         }
         assert_ne!(ids[0], ids[1]);
-    }
-
-    #[gpui::test]
-    fn root_preserves_window_chrome_configuration(cx: &mut TestAppContext) {
-        let (root, _) = cx.add_window_view(|window, cx| {
-            let content = cx.new(|_| Content);
-            Root::new(content, window, cx)
-                .bordered(false)
-                .window_shadow_size(px(12.))
-        });
-        root.read_with(cx, |root, _| {
-            assert!(!root.is_bordered());
-            assert_eq!(root.shadow_size(), px(12.));
-        });
     }
 }

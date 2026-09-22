@@ -8726,13 +8726,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "root_borderless"
-version = "0.6.4"
-dependencies = [
- "gpui-kit",
-]
-
-[[package]]
 name = "ropey"
 version = "2.0.0-beta.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

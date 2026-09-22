@@ -56,7 +56,7 @@ The helper is defined only in Kit. `component::Root` re-exports the Base type.
 Base owns the root, content, overlay hosting, keyboard traversal and selection
 copying. Explicit `gpui_component::init` registers a per-window extension for
 styled dialogs, sheets, notifications, tooltips, menus, touch selection and
-window presentation. Base does not depend on Component or its theme. Extensions
+window presentation. Base does not depend on Component or its theme. Plugins
 must be registered before creating windows; they do not retrofit existing roots.
 
 Component operations belong to `WindowExt`; the previous Component-specific
@@ -68,15 +68,13 @@ let (window, view) = gpui_kit::open_window(WindowOptions::default(), cx, |window
 })?;
 ```
 
-Call `gpui_kit::init(cx)` before opening component-backed windows. For a customized
-Root, use `cx.open_window` and construct `Root::new` yourself; do not return a
-Root from this helper's builder. In an async context, call the helper inside
-`cx.update`.
+Call `gpui_kit::init(cx)` before opening component-backed windows, and do not
+return a Root from this helper's builder. In an async context, call the helper
+inside `cx.update`.
 
 Kit examples and the native/web story galleries use this helper for standard window
-startup. The borderless-root example keeps the lower-level constructor to
-configure `Root::bordered(false)`. Base examples continue using `gpui_base::init`
-and GPUI's window API directly, without a dependency on Kit. The FPS example
+startup. Base examples continue using `gpui_base::init` and GPUI's window API
+directly, without a dependency on Kit. The FPS example
 disables Kit's default features. The previously standalone color-mixing source
 is now a workspace
 package, runnable with `cargo run -p color_mix_oklab`.
@@ -85,5 +83,6 @@ Quit and close-window actions, keyboard shortcuts and confirmation flows remain
 application-owned. Kit initialization does not install default quit or close
 bindings.
 
-`Root::clear_text_selection` and `WindowExt::clear_text_selection` are removed.
-Use `gpui_base::TextSelection::clear(window, cx)` directly.
+`Root::clear_text_selection` is removed. The deprecated
+`WindowExt::clear_text_selection` compatibility method remains available and delegates to
+`gpui_base::TextSelection::clear(window, cx)`.

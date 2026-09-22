@@ -30,7 +30,7 @@ fn main() {
 }
 ```
 
-Use `cx.open_window` + `cx.new(|cx| Root::new(view, window, cx))` only when the `Root` needs configuring (`bordered(false)`); `Root` must still be the window's root view.
+Use `gpui_kit::open_window` for application windows; it mounts `Root` as the window's root view.
 
 ---
 

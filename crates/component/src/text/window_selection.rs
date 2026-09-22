@@ -583,6 +583,10 @@ mod tests {
                 TextSelection::has_selection(window, cx)
             );
 
+            crate::WindowExt::clear_text_selection(window, cx);
+            assert!(!TextSelection::has_selection(window, cx));
+
+            text_view.update(cx, |state, cx| state.select_all(cx));
             TextSelection::clear(window, cx);
             assert!(!crate::WindowExt::has_text_selection(window, cx));
         });

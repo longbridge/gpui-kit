@@ -18,7 +18,7 @@ use gpui_base::{TextSelection, TextSelectionScopeId};
 use std::{any::TypeId, rc::Rc};
 
 pub(crate) fn init(cx: &mut App) {
-    gpui_base::Root::register_extension::<WindowState>(cx, WindowState::new);
+    gpui_base::Root::register_plugin::<WindowState>(cx, WindowState::new);
 }
 
 /// Component-owned window state and presentation; Base owns the actual root.
@@ -86,10 +86,7 @@ impl WindowState {
     }
 
     fn entity(window: &Window, cx: &App) -> Option<Entity<Self>> {
-        window
-            .root::<gpui_base::Root>()??
-            .read(cx)
-            .extension::<Self>()
+        window.root::<gpui_base::Root>()??.read(cx).plugin::<Self>()
     }
 
     fn allocate_text_selection_scope(&mut self) -> TextSelectionScopeId {
@@ -434,7 +431,7 @@ impl WindowState {
     }
 }
 
-impl gpui_base::RootExtension for WindowState {
+impl gpui_base::RootPlugin for WindowState {
     fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         window.set_rem_size(cx.theme().font_size);
         TextSelection::activate_scope(self.active_text_selection_scope(), window, cx);
@@ -453,18 +450,11 @@ impl gpui_base::RootExtension for WindowState {
     fn decorate(
         &self,
         content: gpui::AnyElement,
-        root: &gpui_base::Root,
+        _root: &gpui_base::Root,
         _window: &mut Window,
         _cx: &mut App,
     ) -> gpui::AnyElement {
-        if root.is_bordered() {
-            window_border()
-                .shadow_size(root.shadow_size())
-                .child(content)
-                .into_any_element()
-        } else {
-            content
-        }
+        window_border().child(content).into_any_element()
     }
 }
 

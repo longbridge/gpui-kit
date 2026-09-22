@@ -43,21 +43,11 @@ impl Render for BootstrapView {
 ```
 <!-- recipe:bootstrap:end -->
 
-## Customizing the Root
-
-`gpui_kit::open_window` is `cx.open_window` plus the `Root` wrapper. Build the
-`Root` yourself when it needs configuring — for example `bordered(false)` for a
-layer-shell fullscreen window that should not render GPUI Component's
-client-side window border:
-
-```rs
-cx.open_window(WindowOptions::default(), |window, cx| {
-    let view = cx.new(|_| MyApp);
-    cx.new(|cx| Root::new(view, window, cx).bordered(false))
-})
-```
-
-Whichever way it is built, `Root` must be the window's root view: `window.open_dialog`, `open_sheet` and `push_notification` store their state on it and panic with a pointer to this page when it is missing.
+`gpui_kit::open_window` is `cx.open_window` plus the `Root` wrapper. `Root` must
+be the window's root view so window-level facilities such as dialogs, sheets,
+notifications, focus traversal, and text selection remain available. Client-side
+window borders are selected from the window's decoration mode; server-decorated
+and layer-shell windows do not require Root configuration.
 
 `open_window` returns the window and the view, so a view that must be built inside the window (it owns an `InputState`, say) can still be kept:
 

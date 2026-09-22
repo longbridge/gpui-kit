@@ -43,18 +43,9 @@ impl Render for BootstrapView {
 ```
 <!-- recipe:bootstrap:end -->
 
-## 定制 Root
-
-`gpui_kit::open_window` 就是 `cx.open_window` 加上 `Root` 包裹。窗口需要配置 `Root` 时自己构造它——例如 layer-shell 全屏窗口不该画 GPUI Component 的客户端窗口边框，用 `bordered(false)`：
-
-```rs
-cx.open_window(WindowOptions::default(), |window, cx| {
-    let view = cx.new(|_| MyApp);
-    cx.new(|cx| Root::new(view, window, cx).bordered(false))
-})
-```
-
-不论怎么构造，`Root` 都必须是窗口的根视图：`window.open_dialog`、`open_sheet`、`push_notification` 把状态存在它上面，缺少它时会 panic 并指向本页。
+`gpui_kit::open_window` 就是 `cx.open_window` 加上 `Root` 包裹。`Root` 必须是窗口的根视图，
+以提供对话框、侧边面板、通知、焦点遍历和文本选择等窗口级能力。客户端窗口边框由窗口的
+decorations 模式决定；server decorations 和 layer-shell 窗口不需要配置 Root。
 
 `open_window` 同时返回窗口和视图，所以必须在窗口内构造的视图（比如它持有 `InputState`）也能留住句柄：
 

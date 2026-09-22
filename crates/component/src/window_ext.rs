@@ -98,6 +98,10 @@ pub trait WindowExt: Sized {
     #[deprecated(note = "use gpui_base::TextSelection::has_selection instead")]
     fn has_text_selection(&mut self, cx: &mut App) -> bool;
 
+    /// Clears the window text selection and all registered renderer-local selections.
+    #[deprecated(note = "use gpui_base::TextSelection::clear instead")]
+    fn clear_text_selection(&mut self, cx: &mut App);
+
     /// Ends the in-progress window-level text selection drag (if any).
     #[deprecated(note = "use gpui_base::TextSelection::end instead")]
     fn end_text_selection(&mut self, cx: &mut App);
@@ -247,6 +251,11 @@ impl WindowExt for Window {
     #[inline]
     fn has_text_selection(&mut self, cx: &mut App) -> bool {
         gpui_base::TextSelection::has_selection(self, cx)
+    }
+
+    #[inline]
+    fn clear_text_selection(&mut self, cx: &mut App) {
+        gpui_base::TextSelection::clear(self, cx);
     }
 
     #[inline]
