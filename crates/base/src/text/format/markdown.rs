@@ -1,7 +1,11 @@
 use std::{ops::Range, sync::Arc};
 
 use gpui::SharedString;
-use markdown::mdast::{self, Node};
+use markdown::{
+    ParseOptions,
+    mdast::{self, Node},
+    unist::Point,
+};
 
 use crate::text::{
     document::ParsedDocument,
@@ -15,9 +19,208 @@ use crate::text::{
 /// Parse Markdown into a tree of nodes.
 pub(crate) fn parse(source: &str, cx: &mut NodeContext) -> Result<ParsedDocument, SharedString> {
     let options = cx.markdown_extensions.parse_options();
-    markdown::to_mdast(&source, &options)
-        .map(|n| ast_to_document(source, n, cx))
-        .map_err(|e| e.to_string().into())
+    let mut root =
+        markdown::to_mdast(source, &options).map_err(|e| SharedString::from(e.to_string()))?;
+    let mut prose = options;
+    prose.constructs.math_text = false;
+    prose.constructs.math_flow = false;
+    flatten_unclaimed_math(&mut root, source, &prose, cx);
+    Ok(ast_to_document(source, root, cx))
+}
+
+/// Math parsing is on by default, so prose that merely contains two dollar
+/// signs ("$5 and $10") parses as an inline math node. When no plugin claims
+/// such a node, the text between the dollars must stay ordinary Markdown:
+/// emphasis, inline HTML and links inside it render as they would anywhere
+/// else, and inline HTML tags may pair with tags outside the span. Re-parse
+/// the node's source without the math constructs and, when it holds any
+/// markup, splice the result into its parent with positions shifted back into
+/// the document. Plain prose keeps the literal node, whose atomic source
+/// mapping the selection tests rely on.
+fn flatten_unclaimed_math(node: &mut Node, source: &str, options: &ParseOptions, cx: &NodeContext) {
+    let Some(children) = node.children_mut() else {
+        return;
+    };
+    let mut ix = 0;
+    while ix < children.len() {
+        let prose = match &children[ix] {
+            Node::InlineMath(_) => {
+                let parse_cx = MarkdownParseContext::new(source, cx.offset);
+                if cx
+                    .markdown_extensions
+                    .parse_inline(&children[ix], &parse_cx)
+                    .is_some()
+                {
+                    None
+                } else {
+                    reparse_as_prose(&children[ix], source, options)
+                }
+            }
+            _ => None,
+        };
+        if let Some(prose) = prose {
+            let count = prose.len();
+            children.splice(ix..=ix, prose);
+            ix += count;
+            continue;
+        }
+        flatten_unclaimed_math(&mut children[ix], source, options, cx);
+        ix += 1;
+    }
+}
+
+fn reparse_as_prose(node: &Node, source: &str, options: &ParseOptions) -> Option<Vec<Node>> {
+    let position = node.position()?.clone();
+    let literal = source.get(position.start.offset..position.end.offset)?;
+    if !may_hold_inline_markup(literal) {
+        return None;
+    }
+    let Ok(Node::Root(mut root)) = markdown::to_mdast(literal, options) else {
+        return None;
+    };
+    let [Node::Paragraph(paragraph)] = root.children.as_mut_slice() else {
+        return None;
+    };
+    if paragraph
+        .children
+        .iter()
+        .all(|child| matches!(child, Node::Text(_)))
+    {
+        return None;
+    }
+    let mut children = std::mem::take(&mut paragraph.children);
+    for child in &mut children {
+        shift_positions(child, &position.start);
+    }
+    Some(children)
+}
+
+/// A cheap gate before re-parsing: every inline construct starts with one of
+/// these bytes (tags, emphasis, code, links, images, escapes, entities,
+/// strikethrough) or is a GFM autolink literal.
+fn may_hold_inline_markup(literal: &str) -> bool {
+    literal.bytes().any(|byte| {
+        matches!(
+            byte,
+            b'<' | b'*' | b'_' | b'[' | b'`' | b'~' | b'\\' | b'!' | b'&'
+        )
+    }) || literal.contains("://")
+        || literal.contains("www.")
+}
+
+fn shift_positions(node: &mut Node, origin: &Point) {
+    if let Some(position) = node.position_mut() {
+        for point in [&mut position.start, &mut position.end] {
+            let first_line = point.line == 1;
+            point.offset += origin.offset;
+            point.line += origin.line - 1;
+            if first_line {
+                point.column += origin.column - 1;
+            }
+        }
+    }
+    if let Some(children) = node.children_mut() {
+        for child in children {
+            shift_positions(child, origin);
+        }
+    }
+}
+
+enum InlineGroup<'a> {
+    Node(&'a Node),
+    Marked(TextMark, &'a [Node]),
+}
+
+/// CommonMark hands each raw inline tag over as its own `Html` node, so
+/// `<strong>x</strong>` arrives as three siblings and the tags alone carry no
+/// text. Pair the formatting tags this renderer knows with their closing tag
+/// among the siblings and treat what lies between as a marked run, the same
+/// way `**x**` is handled.
+fn inline_groups(children: &[Node]) -> Vec<InlineGroup<'_>> {
+    let mut groups = Vec::with_capacity(children.len());
+    let mut ix = 0;
+    while ix < children.len() {
+        if let Some((false, name)) = inline_html_tag(&children[ix])
+            && let Some(mark) = inline_html_mark(&name)
+            && let Some(close) = matching_close_tag(children, ix, &name)
+        {
+            groups.push(InlineGroup::Marked(mark, &children[ix + 1..close]));
+            ix = close + 1;
+            continue;
+        }
+        groups.push(InlineGroup::Node(&children[ix]));
+        ix += 1;
+    }
+    groups
+}
+
+fn inline_html_tag(node: &Node) -> Option<(bool, String)> {
+    let Node::Html(html) = node else {
+        return None;
+    };
+    let inner = html.value.trim().strip_prefix('<')?.strip_suffix('>')?;
+    if inner.ends_with('/') {
+        return None;
+    }
+    let (closing, rest) = match inner.strip_prefix('/') {
+        Some(rest) => (true, rest),
+        None => (false, inner),
+    };
+    let name = rest
+        .chars()
+        .take_while(char::is_ascii_alphanumeric)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    (!name.is_empty()).then_some((closing, name))
+}
+
+fn inline_html_mark(name: &str) -> Option<TextMark> {
+    Some(match name {
+        "strong" | "b" => TextMark::default().bold(),
+        "em" | "i" => TextMark::default().italic(),
+        "u" => TextMark::default().underline(),
+        "s" | "del" | "strike" => TextMark::default().strikethrough(),
+        _ => return None,
+    })
+}
+
+fn matching_close_tag(children: &[Node], open: usize, name: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (ix, child) in children.iter().enumerate().skip(open + 1) {
+        match inline_html_tag(child) {
+            Some((false, tag)) if tag == name => depth += 1,
+            Some((true, tag)) if tag == name => {
+                if depth == 0 {
+                    return Some(ix);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn parse_inline_children(
+    source: &str,
+    paragraph: &mut Paragraph,
+    children: &[Node],
+    cx: &mut NodeContext,
+) -> String {
+    let mut text = String::new();
+    for group in inline_groups(children) {
+        match group {
+            InlineGroup::Node(child) => {
+                text.push_str(&parse_paragraph(source, paragraph, child, cx));
+            }
+            InlineGroup::Marked(mark, nodes) => {
+                text.push_str(&merge_children_with_mark(
+                    source, paragraph, nodes, mark, cx,
+                ));
+            }
+        }
+    }
+    text
 }
 
 fn parse_table_row(source: &str, table: &mut Table, node: &mdast::TableRow, cx: &mut NodeContext) {
@@ -40,9 +243,7 @@ fn parse_table_cell(
     cx: &mut NodeContext,
 ) {
     let mut paragraph = Paragraph::default();
-    node.children.iter().for_each(|c| {
-        parse_paragraph(source, &mut paragraph, c, cx);
-    });
+    parse_inline_children(source, &mut paragraph, &node.children, cx);
     let table_cell = node::TableCell {
         children: paragraph,
         ..Default::default()
@@ -100,9 +301,14 @@ fn merge_children_with_mark(
     let mut merged_marks = Vec::new();
     let mut merged_source_segments = Vec::new();
 
-    for child in children {
+    for group in inline_groups(children) {
         let mut child_paragraph = Paragraph::default();
-        let child_text = parse_paragraph(source, &mut child_paragraph, child, cx);
+        let child_text = match group {
+            InlineGroup::Node(child) => parse_paragraph(source, &mut child_paragraph, child, cx),
+            InlineGroup::Marked(child_mark, nodes) => {
+                merge_children_with_mark(source, &mut child_paragraph, nodes, child_mark, cx)
+            }
+        };
         text.push_str(&child_text);
 
         for mut node in child_paragraph.children {
@@ -432,9 +638,7 @@ fn parse_paragraph(
 
     match node {
         Node::Paragraph(val) => {
-            val.children.iter().for_each(|c| {
-                text.push_str(&parse_paragraph(source, paragraph, c, cx));
-            });
+            text.push_str(&parse_inline_children(source, paragraph, &val.children, cx));
         }
         Node::Text(val) => {
             // A CommonMark *soft* break lives inside this value as a plain
@@ -648,9 +852,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
         Node::Root(_) => unreachable!("node::Root should be handled separately"),
         Node::Paragraph(val) => {
             let mut paragraph = Paragraph::default();
-            val.children.iter().for_each(|c| {
-                parse_paragraph(source, &mut paragraph, c, cx);
-            });
+            parse_inline_children(source, &mut paragraph, &val.children, cx);
             paragraph.span = new_span(val.position, cx);
             BlockNode::Paragraph(paragraph)
         }
@@ -704,9 +906,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
         }
         Node::Heading(val) => {
             let mut paragraph = Paragraph::default();
-            val.children.iter().for_each(|c| {
-                parse_paragraph(source, &mut paragraph, c, cx);
-            });
+            parse_inline_children(source, &mut paragraph, &val.children, cx);
 
             BlockNode::Heading {
                 level: val.depth,
@@ -754,17 +954,13 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
         )),
         Node::MdxJsxTextElement(val) => {
             let mut paragraph = Paragraph::default();
-            val.children.iter().for_each(|c| {
-                parse_paragraph(source, &mut paragraph, c, cx);
-            });
+            parse_inline_children(source, &mut paragraph, &val.children, cx);
             paragraph.span = new_span(val.position, cx);
             BlockNode::Paragraph(paragraph)
         }
         Node::MdxJsxFlowElement(val) => {
             let mut paragraph = Paragraph::default();
-            val.children.iter().for_each(|c| {
-                parse_paragraph(source, &mut paragraph, c, cx);
-            });
+            parse_inline_children(source, &mut paragraph, &val.children, cx);
             paragraph.span = new_span(val.position, cx);
             BlockNode::Paragraph(paragraph)
         }
@@ -799,9 +995,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
                 },
             )]));
 
-            def.children.iter().for_each(|c| {
-                parse_paragraph(source, &mut paragraph, c, cx);
-            });
+            parse_inline_children(source, &mut paragraph, &def.children, cx);
             paragraph.span = new_span(def.position, cx);
             BlockNode::Paragraph(paragraph)
         }
@@ -1661,6 +1855,90 @@ mod tests {
         };
         assert_eq!(code.code(), "\\sum_{i=1}^{n} i");
         assert!(document.to_markdown().contains("\\sum_{i=1}^{n} i"));
+    }
+
+    fn bold_runs(paragraph: &Paragraph) -> Vec<String> {
+        paragraph
+            .children
+            .iter()
+            .flat_map(|node| {
+                node.marks
+                    .iter()
+                    .filter(|(_, mark)| mark.bold)
+                    .map(|(range, _)| node.text[range.clone()].to_string())
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn unclaimed_inline_math_parses_its_span_as_prose() {
+        // Two dollar amounts pair up into an unclaimed math span. What lies
+        // between them is ordinary prose: inline HTML there must still pair
+        // with the tags outside the span, and emphasis inside it must render.
+        let source =
+            "EPS of <strong>$1.56</strong> beat the <strong>$1.50</strong> consensus, *up $2*";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        assert_eq!(
+            document.text(),
+            "EPS of $1.56 beat the $1.50 consensus, up $2\n"
+        );
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!()
+        };
+        assert_eq!(bold_runs(paragraph), ["$1.56", "$1.50"]);
+        assert!(paragraph.children.iter().any(|node| {
+            node.marks
+                .iter()
+                .any(|(range, mark)| mark.italic && node.text[range.clone()] == *"up $2")
+        }));
+        assert!(document.to_markdown().contains("$1.56"));
+    }
+
+    #[test]
+    fn claimed_inline_math_survives_prose_flattening() {
+        let extensions = MarkdownExtensions::default().plugin(
+            crate::text::markdown_ext::TestInlinePlugin::new("formula").parse_with(|node, _| {
+                let Node::InlineMath(math) = node else {
+                    return None;
+                };
+                Some(MarkdownNode::new("formula", ()).text(format!("[{}]", math.value)))
+            }),
+        );
+        let mut cx = NodeContext {
+            markdown_extensions: extensions.into(),
+            ..Default::default()
+        };
+        let document = parse("area $x^2$ costs $5 and $10", &mut cx).unwrap();
+        assert_eq!(document.text(), "area [x^2] costs [5 and ]10\n");
+    }
+
+    #[test]
+    fn inline_html_formatting_tags_pair_across_siblings() {
+        let source = "a <strong>b *c* <em>d</em></strong> e <b>f</b> <i>g</i> <del>h</del> <br> <strong>unclosed";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        assert_eq!(document.text(), "a b c d e f g h \n unclosed\n");
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!()
+        };
+        assert_eq!(bold_runs(paragraph), ["b c d", "f"]);
+        let marked = |predicate: fn(&TextMark) -> bool| -> Vec<String> {
+            paragraph
+                .children
+                .iter()
+                .flat_map(|node| {
+                    node.marks
+                        .iter()
+                        .filter(|(_, mark)| predicate(mark))
+                        .map(|(range, _)| node.text[range.clone()].to_string())
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+        assert_eq!(marked(|mark| mark.italic), ["c", "d", "g"]);
+        assert_eq!(marked(|mark| mark.strikethrough), ["h"]);
     }
 
     #[test]
