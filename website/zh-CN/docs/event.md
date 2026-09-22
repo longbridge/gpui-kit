@@ -10,10 +10,10 @@ GPUI 原生提供 **Event**，用于在 Entity 之间发送类型明确的通知
 
 ## Action 进入，Event 返回
 
-Action 与 Event 经常组成一次完整交互：
+Action 可以触发状态变化，但 Event 的传递从状态变化之后开始：
 
 ```text
-⌘ Enter → SendMessage Action → Chat 发送 → MessageSent Event → Workspace 更新
+Chat 状态变化 → emit(MessageSent) → 订阅者收到 Event → Workspace 更新
 ```
 
 - [**Action**](./action) 把意图向内传递：“发送这条消息”；

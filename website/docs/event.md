@@ -10,10 +10,10 @@ GPUI provides **Event** as a typed notification mechanism between Entities. An E
 
 ## Action in, Event out
 
-Action and Event often form one complete interaction:
+An Action can cause the state change, but Event delivery starts after that change:
 
 ```text
-⌘ Enter → SendMessage Action → Chat sends → MessageSent Event → Workspace updates
+Chat changes state → emit(MessageSent) → subscribers receive Event → Workspace updates
 ```
 
 - [**Action**](./action) carries intent inward: “send this message.”
