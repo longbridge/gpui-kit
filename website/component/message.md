@@ -74,6 +74,8 @@ The default state is:
 | Outer layout | full width, `min_w_0()`, `gap_2()` | Keeps rows usable in a virtual list. |
 | Inner stack gap | `rems(0.625)` | Separates metadata, body, and footer. |
 | Header/footer inset | enabled, `px_3()` | Aligns metadata with a regular bubble surface. |
+| Typography | inherited | The header and footer set their own; content typography belongs to the bubble or the caller. |
+| Identity and role | none, presentational | `id(...)` gives the row a stable identity; `role(...)` announces it. |
 | Avatar baseline | `min_w_8()`, circular muted surface | Gives sender identity a stable column. |
 
 `Message` applies its alignment to the complete row and to the named content
@@ -312,7 +314,9 @@ Message::new()
 
 Use `with_stack_style(...)` for the vertical stack, slot refinements for
 header/content/footer typography and spacing, and the child component's own
-API for bubble, attachment, or button surfaces. Radius, spacing, typography,
+API for bubble, attachment, or button surfaces. `Message` itself sets no text
+size or line height, so Markdown or other rich content placed in a `Ghost`
+bubble keeps the typography of its renderer. Radius, spacing, typography,
 and colors should come from the active semantic theme or shared scale. Avoid
 raw colors at message call sites so the same composition works in light and
 dark themes.
@@ -321,6 +325,9 @@ dark themes.
 
 - Keep sender identity and message content in readable text. An avatar alone
   should not be the only indication of who sent a message.
+- A message is presentational by default. Give transcript rows `.id(...)` and
+  `.role(Role::ListItem)` so assistive technology can move between them; the
+  role needs the stable identity an id provides.
 - Put commands in semantic `Button` or `Link` controls. For the current
   `Button` API, use a visible `.label(...)` when a footer action needs an
   accessible name; a tooltip is supplemental.
@@ -359,6 +366,8 @@ domain policy out of the general-purpose primitive.
 | --- | --- | --- |
 | `new()` | `Start`, no slots | Create a message row. |
 | `alignment(MessageAlignment)` | `Start` | Set leading or trailing alignment. |
+| `id(ElementId)` | none | Give the row a stable identity for element state and the accessibility tree. |
+| `role(Role)` | presentational | Announce the row to assistive technology, e.g. `Role::ListItem`; requires `id(...)`. |
 | `with_stack_style(StyleRefinement)` | component stack defaults | Refine the inner vertical stack. |
 | `avatar(element)` | none | Wrap an element in `MessageAvatar`. |
 | `avatar_slot(MessageAvatar)` | none | Set a fully configured avatar slot. |
