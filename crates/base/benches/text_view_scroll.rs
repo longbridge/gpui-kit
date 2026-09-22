@@ -17,13 +17,25 @@ use gpui_base::text::{TextView, TextViewState};
 /// A long assistant answer: headings, emphasis, links, lists, a code block,
 /// and plenty of prose paragraphs.
 fn markdown() -> String {
+    markdown_with(false)
+}
+
+/// The same answer with inline code in every paragraph and list item, the
+/// way a coding assistant's answers name identifiers and paths: those
+/// paragraphs are laid out by `InlineFlow` instead of one `Inline`.
+fn markdown_with_inline_code() -> String {
+    markdown_with(true)
+}
+
+fn markdown_with(inline_code: bool) -> String {
     let mut out = String::new();
+    let (c, s) = if inline_code { ("`", "`") } else { ("", "") };
     for section in 0..24 {
         let _ = writeln!(out, "## Section {section}: what the data shows\n");
         for paragraph in 0..4 {
             let _ = writeln!(
                 out,
-                "Paragraph {paragraph} of section {section}. The **dip window** is 08-18 → 08-26 \
+                "Paragraph {paragraph} of section {section}. The **dip window** is {c}08-18{s} → {c}08-26{s} \
                  (trough $208.48 on 08-24), followed by a post-earnings jump. Let me confirm the \
                  earnings date and date the specific news events in that window, then weave in \
                  [the filing](https://example.com/filing/{section}) and the *guidance* update so \
@@ -32,7 +44,7 @@ fn markdown() -> String {
         }
         let _ = writeln!(
             out,
-            "- FOMC 09-16: +25bp to 3.75–4.00%, 12-0. First hike since July 2023."
+            "- FOMC 09-16: +25bp to {c}3.75–4.00%{s}, 12-0. First hike since July 2023."
         );
         let _ = writeln!(
             out,
@@ -75,8 +87,16 @@ impl Render for Chat {
 
 #[gpui::bench]
 fn text_view_scroll(cx: &mut BenchAppContext) {
+    scroll_answer(markdown(), cx);
+}
+
+#[gpui::bench]
+fn text_view_scroll_inline_code(cx: &mut BenchAppContext) {
+    scroll_answer(markdown_with_inline_code(), cx);
+}
+
+fn scroll_answer(markdown: String, cx: &mut BenchAppContext) {
     cx.update(gpui_base::init);
-    let markdown = markdown();
     let mut window = cx.add_empty_window();
     let chat = window.update(|window, cx| {
         window.replace_root(cx, |_, cx| Chat {
@@ -102,5 +122,5 @@ fn text_view_scroll(cx: &mut BenchAppContext) {
     });
 }
 
-gpui::bench_group!(benches, text_view_scroll);
+gpui::bench_group!(benches, text_view_scroll, text_view_scroll_inline_code);
 gpui::bench_main!(benches);
