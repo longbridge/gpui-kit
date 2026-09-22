@@ -1,7 +1,7 @@
 ---
 title: Coding Guides
 description: Architecture and coding conventions for maintainable GPUI Kit applications
-order: -2.2
+order: -13
 ---
 
 # Coding Guides

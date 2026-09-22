@@ -313,7 +313,16 @@ const copy = computed(() =>
                                 <b /><b /><b />
                             </template>
                             <template v-else-if="cap.icon === 'wasm'">
-                                <span class="cap__platform">Rust</span><ArrowRight :size="16" /><Globe2 :size="34" /><span class="cap__platform">Web</span>
+                                <span class="cap__platform">Rust</span>
+                                <ArrowRight :size="16" />
+                                <svg class="cap__wasm-logo" viewBox="0 0 512 512" role="img" aria-label="WebAssembly">
+                                    <rect width="512" height="512" fill="#fff" />
+                                    <path
+                                        fill="#654ff0"
+                                        d="m159.1 270.1h24l16.5 87.2 19.8-87.2h22.5l17.9 88.3 18.9-88.3h23.5l-30.6 128.2h-23.8L230 311l-19.1 87.3h-24.3zm170.2 0h37.8l37.5 128.2h-24.7l-8.2-28.6h-43.1l-6.3 28.6h-24.1zm14.4 31.6-10.5 47h32.6l-12.1-47zM297.4 75v2c0 22.9-18.6 41.5-41.5 41.5S214.4 99.9 214.4 77v-2H75v362h362V75z"
+                                    />
+                                </svg>
+                                <span class="cap__platform">Web</span>
                             </template>
                             <template v-else-if="cap.icon === 'a11y'">
                                 <Accessibility :size="38" />
@@ -765,6 +774,12 @@ html[lang^="zh"] .section-kicker { letter-spacing: 0.04em; }
     background: var(--background);
     color: var(--foreground);
     font: 0.72rem/1 var(--font-mono);
+}
+
+.cap__wasm-logo {
+    width: 2.6rem;
+    height: 2.6rem;
+    flex: 0 0 auto;
 }
 
 .cap__a11y-tree { display: grid; gap: 0.28rem; }
