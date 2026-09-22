@@ -6,7 +6,7 @@ order: -6
 
 # Event
 
-GPUI 原生提供 **Event**，用于在 Entity 之间发送类型明确的通知。Event 报告已经发生的事实，不经过 Focus、Key Context、KeyBinding 或 Dispatch Path。
+GPUI 原生提供 **Event**，用于在 Entity 之间发送类型明确的通知。Event 报告已经发生的事实；与 [**Action**](./action) 不同，它不经过 Focus、Key Context、KeyBinding 或 Dispatch Path。
 
 ## Action 进入，Event 返回
 
@@ -16,7 +16,7 @@ Action 与 Event 经常组成一次完整交互：
 ⌘ Enter → SendMessage Action → Chat 发送 → MessageSent Event → Workspace 更新
 ```
 
-- **Action** 把意图向内传递：“发送这条消息”；
+- [**Action**](./action) 把意图向内传递：“发送这条消息”；
 - **Event** 把结果向外报告：“这条消息已经发送”。
 
 Command owner 处理 Action 并改变状态，再发出 Event，让 owner 或 service 响应结果，而不必依赖命令来自快捷键、按钮还是菜单。Focus、KeyBinding 与 Action 派发参见 [Action](./action)。

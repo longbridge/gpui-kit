@@ -6,14 +6,14 @@ order: -5
 
 # Action
 
-GPUI provides **Focus**, **Key Context**, **Action**, **KeyBinding**, and **Event** as its core interaction mechanisms. Together they let an application route commands to the active part of a window and communicate typed state changes between entities.
+GPUI provides **Focus**, **Key Context**, **Action**, **KeyBinding**, and [**Event**](./event) as its core interaction mechanisms. Together they let an application route commands to the active part of a window and communicate typed state changes between entities.
 
 This guide shows how to use those mechanisms together:
 
 - **Focus** says where keyboard interaction is happening;
 - **`track_focus`** registers a stable `FocusHandle` on an Element so pointer input and command routing can use it;
 - an **Action** expresses a command and can come from a `KeyBinding`, menu, button, or code;
-- an **Event** reports what an entity did or experienced to its subscribers.
+- an [**Event**](./event) reports what an entity did or experienced to its subscribers.
 
 ## How a shortcut works
 

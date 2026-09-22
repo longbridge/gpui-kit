@@ -6,7 +6,7 @@ order: -6
 
 # Event
 
-GPUI provides **Event** as a typed notification mechanism between Entities. An Event reports something that already happened; it does not use Focus, Key Contexts, KeyBindings, or the Dispatch Path.
+GPUI provides **Event** as a typed notification mechanism between Entities. An Event reports something that already happened; unlike an [**Action**](./action), it does not use Focus, Key Contexts, KeyBindings, or the Dispatch Path.
 
 ## Action in, Event out
 
@@ -16,7 +16,7 @@ Action and Event often form one complete interaction:
 ⌘ Enter → SendMessage Action → Chat sends → MessageSent Event → Workspace updates
 ```
 
-- **Action** carries intent inward: “send this message.”
+- [**Action**](./action) carries intent inward: “send this message.”
 - **Event** reports the result outward: “this message was sent.”
 
 The command owner handles the Action and changes its state. It then emits an Event so owners or services can react without being coupled to the command's UI entry point. See [Action](./action) for Focus, KeyBindings, and Action dispatch.
