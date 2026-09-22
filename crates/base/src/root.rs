@@ -28,19 +28,41 @@ pub(crate) fn init(cx: &mut App) {
 /// The view renders above application content. Base owns the root regardless of
 /// which plugins are registered; Cargo features never select its type.
 ///
-/// Plugins render in registration order, later ones above earlier ones.
-/// Notify their entity after changing state so the root also refreshes its
-/// preparation and surface styles. Preparation and styling must not notify.
+/// On every root render, each plugin participates in three stages:
+///
+/// 1. [`RootPlugin::prepare`] synchronizes window state before elements are built.
+/// 2. [`RootPlugin::style`] supplies defaults for the root surface.
+/// 3. [`RootPlugin::decorate`] wraps the completed surface in presentation owned
+///    by the plugin.
+///
+/// The plugin's [`Render`] output is mounted as an overlay above application
+/// content. Plugins and their overlays are processed in registration order, so
+/// later plugins appear above earlier ones. Notify the plugin entity after its
+/// state changes to render the root again; `prepare` and `style` must not notify,
+/// because they run during that render.
+///
 /// Factories are captured when a root is created, so registration affects only
 /// future windows.
 pub trait RootPlugin: Render + Sized {
-    /// Update window settings before content and overlays render.
+    /// Synchronize settings derived from this plugin with the window.
+    ///
+    /// This runs before the root surface and plugin overlays are built. It is
+    /// intended for window-scoped state such as rem size or the active text
+    /// selection scope, not for producing elements.
     fn prepare(&mut self, _window: &mut Window, _cx: &mut Context<Self>) {}
 
-    /// Apply default surface styles. Instance styles take precedence.
+    /// Apply this plugin's default styles directly to the root surface.
+    ///
+    /// Styles set on the [`Root`] instance are refined onto the surface after
+    /// this hook and therefore take precedence over plugin defaults.
     fn style(&self, _content: &mut Stateful<Div>, _window: &mut Window, _cx: &mut App) {}
 
-    /// Wrap the completed surface in optional presentation such as window chrome.
+    /// Add presentation around the completed root surface.
+    ///
+    /// This runs after plugin defaults and instance styles have been applied.
+    /// Return `content` unchanged when no outer presentation is needed. Typical
+    /// uses include client-side window borders or another structural wrapper.
+    /// `root` provides read-only access to the root and its application view.
     fn decorate(
         &self,
         content: AnyElement,
