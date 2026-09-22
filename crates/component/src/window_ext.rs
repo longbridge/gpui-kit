@@ -90,19 +90,16 @@ pub trait WindowExt: Sized {
 
     /// Returns the merged selected text across registered selectable regions
     /// in this window, in logical document order and joined with `\n`.
-    #[deprecated(note = "use gpui_base::TextSelection::selected_text instead")]
     fn selected_text(&mut self, cx: &mut App) -> String;
 
     /// Returns true if any registered region has an active text selection in
     /// this window, including renderer-local selections such as select-all.
-    #[deprecated(note = "use gpui_base::TextSelection::has_selection instead")]
     fn has_text_selection(&mut self, cx: &mut App) -> bool;
 
     /// Clears the window text selection and all registered renderer-local selections.
     fn clear_text_selection(&mut self, cx: &mut App);
 
     /// Ends the in-progress window-level text selection drag (if any).
-    #[deprecated(note = "use gpui_base::TextSelection::end instead")]
     fn end_text_selection(&mut self, cx: &mut App);
 }
 

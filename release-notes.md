@@ -83,5 +83,6 @@ Quit and close-window actions, keyboard shortcuts and confirmation flows remain
 application-owned. Kit initialization does not install default quit or close
 bindings.
 
-`Root::clear_text_selection` is removed. `WindowExt::clear_text_selection`
-remains available and delegates to `gpui_base::TextSelection::clear(window, cx)`.
+The `WindowExt` text-selection query, clearing and drag-ending methods remain
+available and delegate to `gpui_base::TextSelection`.
+`Root::clear_text_selection` is removed.

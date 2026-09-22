@@ -554,8 +554,7 @@ mod tests {
     }
 
     #[gpui::test]
-    #[allow(deprecated)]
-    fn deprecated_component_window_methods_share_the_base_selection(cx: &mut TestAppContext) {
+    fn component_window_methods_share_the_base_selection(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (root, cx) = cx.add_window_view(|window, cx| {
             let content = cx.new(BaseOwnedTextViewSelection::new);
@@ -593,8 +592,7 @@ mod tests {
     }
 
     #[gpui::test]
-    #[allow(deprecated)]
-    fn deprecated_component_end_stops_the_base_drag(cx: &mut TestAppContext) {
+    fn component_end_stops_the_base_drag(cx: &mut TestAppContext) {
         let (_, cx) = setup(true, cx);
 
         cx.simulate_mouse_down(
