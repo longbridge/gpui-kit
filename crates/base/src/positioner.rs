@@ -108,6 +108,20 @@ impl Positioner {
         }
     }
 
+    /// Updates the requested corner position.
+    ///
+    /// This is useful when an animation moves an already-composed popup. It
+    /// has no effect on a side-positioned popup.
+    pub fn position(mut self, position: Point<Pixels>) -> Self {
+        if let Strategy::Corner {
+            position: current, ..
+        } = &mut self.strategy
+        {
+            *current = position;
+        }
+        self
+    }
+
     /// Sets the preferred side. Only meaningful for [`Positioner::side`].
     pub fn placement(mut self, placement: Placement) -> Self {
         if let Strategy::Side {
@@ -574,6 +588,20 @@ mod tests {
         assert_eq!(position.placement, None);
         assert_eq!(position.bounds.right(), viewport().width - MARGIN);
         assert_eq!(position.bounds.bottom(), viewport().height - MARGIN);
+    }
+
+    #[test]
+    fn corner_position_can_be_updated_without_rebuilding_the_positioner() {
+        let positioner = Positioner::corner(Anchor::TopLeft, point(px(10.), px(20.)))
+            .position(point(px(30.), px(40.)));
+
+        assert!(matches!(
+            positioner.strategy,
+            Strategy::Corner {
+                position,
+                ..
+            } if position == point(px(30.), px(40.))
+        ));
     }
 
     /// A tiled edge draws no shadow, so a popup may run right up to the

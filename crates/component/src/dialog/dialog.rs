@@ -3,7 +3,7 @@ use gpui_base::TestSupportExt as _;
 use std::{rc::Rc, sync::LazyLock, time::Duration};
 
 use gpui::{
-    Action, Animation, AnimationExt as _, AnyElement, App, BoxShadow, ClickEvent, Edges,
+    Action, Anchor, Animation, AnimationExt as _, AnyElement, App, BoxShadow, ClickEvent, Edges,
     FocusHandle, Hsla, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce,
     SharedString, StyleRefinement, Styled, Window, WindowControlArea, anchored, div, hsla, point,
     prelude::FluentBuilder, px,
@@ -568,18 +568,20 @@ impl RenderOnce for Dialog {
                 window_paddings.left + window_paddings.right,
                 window_paddings.top + window_paddings.bottom,
             );
-        // The dialog keeps this much of the viewport clear on the sides and
-        // below it, so a small window shrinks the surface instead of the
-        // surface running off the window. The top keeps `margin_top` (a tenth
-        // of the viewport by default) plus the 16px step of each stacked layer.
+        // The dialog keeps this much of the viewport clear around its edges,
+        // so a small window shrinks the surface instead of letting it run off
+        // the window. A dialog that fits keeps `margin_top` (a tenth of the
+        // viewport by default); an overflowing one is snapped up to this edge
+        // margin so that the preferred offset does not waste usable height.
         let margin = cx.theme().spacing_tokens().lg;
-        let y = self.props.margin_top.unwrap_or(view_size.height / 10.) + px(layer_ix as f32 * 16.);
+        let layer_offset = px(layer_ix as f32 * 16.);
+        let y = self.props.margin_top.unwrap_or(view_size.height / 10.) + layer_offset;
         let width = self
             .props
             .width
             .min((view_size.width - margin * 2.).max(px(0.)));
         let x = (view_size.width - width) / 2.;
-        let max_height = (view_size.height - y - margin).max(px(0.));
+        let max_height = (view_size.height - margin * 2. - layer_offset).max(px(0.));
 
         let base_size = window.text_style().font_size;
         let rem_size = window.rem_size();
@@ -654,123 +656,135 @@ impl RenderOnce for Dialog {
                                 }
                             })
                             .popup(
-                                v_flex()
-                                    .id(layer_ix)
-                                    .test_support()
-                                    .debug_selector(move || format!("dialog-{layer_ix}"))
-                                    .bg(cx.theme().tokens.background)
-                                    .border_1()
-                                    .border_color(cx.theme().border)
-                                    .rounded(cx.theme().radius_lg)
-                                    .min_h_24()
-                                    .pt(paddings.top)
-                                    .pb(paddings.bottom)
-                                    .gap(paddings.top.max(px(8.)))
-                                    .refine_style(&self.style)
-                                    .px_0()
-                                    // There style is high priority, can't be overridden.
-                                    .absolute()
-                                    .occlude()
-                                    .relative()
-                                    .left(x)
-                                    .top(y)
-                                    .w(width)
-                                    .when_some(self.props.max_width, |this, w| this.max_w(w))
-                                    .max_h(max_height)
-                                    .child(
-                                        v_flex()
-                                            .flex_1()
-                                            .overflow_hidden()
-                                            .gap_y_2()
-                                            .when_some(self.header, |this, header| {
-                                                this.child(
-                                                    div()
-                                                        .pl(paddings.left)
-                                                        .pr(paddings.right)
-                                                        .child(header),
-                                                )
-                                            })
-                                            .when_some(self.title, |this, title| {
-                                                this.child(
-                                                    DialogTitle::new()
-                                                        .pl(paddings.left)
-                                                        .pr(paddings.right)
-                                                        .child(title),
-                                                )
-                                            })
-                                            .when_some(self.content_builder, |this, builder| {
-                                                this.child(builder(
-                                                    DialogContent::new()
-                                                        .gap(paddings.bottom)
-                                                        .pl(paddings.left)
-                                                        .pr(paddings.right),
-                                                    window,
-                                                    cx,
-                                                ))
-                                            })
-                                            .when(!self.children.is_empty(), |this| {
-                                                this.child(
-                                                    div().flex_1().overflow_hidden().child(
-                                                        // Body
-                                                        v_flex()
-                                                            .size_full()
-                                                            .overflow_y_scrollbar()
+                                gpui_base::Positioner::corner(
+                                    Anchor::TopLeft,
+                                    point(window_paddings.left + x, window_paddings.top + y),
+                                )
+                                .margin(margin)
+                                .child(
+                                    v_flex()
+                                        .id(layer_ix)
+                                        .test_support()
+                                        .debug_selector(move || format!("dialog-{layer_ix}"))
+                                        .bg(cx.theme().tokens.background)
+                                        .border_1()
+                                        .border_color(cx.theme().border)
+                                        .rounded(cx.theme().radius_lg)
+                                        .min_h_24()
+                                        .pt(paddings.top)
+                                        .pb(paddings.bottom)
+                                        .gap(paddings.top.max(px(8.)))
+                                        .refine_style(&self.style)
+                                        .px_0()
+                                        .occlude()
+                                        .w(width)
+                                        .when_some(self.props.max_width, |this, w| this.max_w(w))
+                                        .max_h(max_height)
+                                        .child(
+                                            v_flex()
+                                                .flex_1()
+                                                .overflow_hidden()
+                                                .gap_y_2()
+                                                .when_some(self.header, |this, header| {
+                                                    this.child(
+                                                        div()
                                                             .pl(paddings.left)
                                                             .pr(paddings.right)
-                                                            .children(self.children),
-                                                    ),
-                                                )
-                                            }),
-                                    )
-                                    .when_some(self.footer, |this, footer| {
-                                        this.child(
-                                            div()
-                                                .pl(paddings.left)
-                                                .pr(paddings.right)
-                                                .child(footer),
+                                                            .child(header),
+                                                    )
+                                                })
+                                                .when_some(self.title, |this, title| {
+                                                    this.child(
+                                                        DialogTitle::new()
+                                                            .pl(paddings.left)
+                                                            .pr(paddings.right)
+                                                            .child(title),
+                                                    )
+                                                })
+                                                .when_some(self.content_builder, |this, builder| {
+                                                    this.child(builder(
+                                                        DialogContent::new()
+                                                            .gap(paddings.bottom)
+                                                            .pl(paddings.left)
+                                                            .pr(paddings.right),
+                                                        window,
+                                                        cx,
+                                                    ))
+                                                })
+                                                .when(!self.children.is_empty(), |this| {
+                                                    this.child(
+                                                        div().flex_1().overflow_hidden().child(
+                                                            // Body
+                                                            v_flex()
+                                                                .size_full()
+                                                                .overflow_y_scrollbar()
+                                                                .pl(paddings.left)
+                                                                .pr(paddings.right)
+                                                                .children(self.children),
+                                                        ),
+                                                    )
+                                                }),
                                         )
-                                    })
-                                    .children(self.props.close_button.then(|| {
-                                        let top = (paddings.top - px(10.)).max(px(8.));
-                                        let right = (paddings.right - px(10.)).max(px(8.));
+                                        .when_some(self.footer, |this, footer| {
+                                            this.child(
+                                                div()
+                                                    .pl(paddings.left)
+                                                    .pr(paddings.right)
+                                                    .child(footer),
+                                            )
+                                        })
+                                        .children(self.props.close_button.then(|| {
+                                            let top = (paddings.top - px(10.)).max(px(8.));
+                                            let right = (paddings.right - px(10.)).max(px(8.));
 
-                                        gpui_base::DialogClose::new()
-                                            .absolute()
-                                            .top(top)
-                                            .right(right)
-                                            .trigger(|button| {
-                                                Button::new("close")
-                                                    .with_base(button)
-                                                    .small()
-                                                    .ghost()
-                                                    .icon(IconName::Close)
-                                            })
-                                    }))
-                                    .with_animation(
-                                        "slide-down",
-                                        animation.clone(),
-                                        move |this, delta| {
-                                            // This is equivalent to `shadow_xl` with an extra opacity.
-                                            let shadow = vec![
-                                                BoxShadow {
-                                                    color: hsla(0., 0., 0., 0.1 * delta),
-                                                    offset: point(px(0.), px(20.)),
-                                                    blur_radius: px(25.),
-                                                    spread_radius: px(-5.),
-                                                    inset: false,
-                                                },
-                                                BoxShadow {
-                                                    color: hsla(0., 0., 0., 0.1 * delta),
-                                                    offset: point(px(0.), px(8.)),
-                                                    blur_radius: px(10.),
-                                                    spread_radius: px(-6.),
-                                                    inset: false,
-                                                },
-                                            ];
-                                            this.top(y * delta).shadow(shadow)
-                                        },
-                                    )
-                                    .text_selection_scope(selection_scope),
+                                            gpui_base::DialogClose::new()
+                                                .absolute()
+                                                .top(top)
+                                                .right(right)
+                                                .trigger(|button| {
+                                                    Button::new("close")
+                                                        .with_base(button)
+                                                        .small()
+                                                        .ghost()
+                                                        .icon(IconName::Close)
+                                                })
+                                        }))
+                                        .with_animation(
+                                            "slide-down-shadow",
+                                            animation.clone(),
+                                            move |this, delta| {
+                                                // This is equivalent to `shadow_xl` with an extra opacity.
+                                                let shadow = vec![
+                                                    BoxShadow {
+                                                        color: hsla(0., 0., 0., 0.1 * delta),
+                                                        offset: point(px(0.), px(20.)),
+                                                        blur_radius: px(25.),
+                                                        spread_radius: px(-5.),
+                                                        inset: false,
+                                                    },
+                                                    BoxShadow {
+                                                        color: hsla(0., 0., 0., 0.1 * delta),
+                                                        offset: point(px(0.), px(8.)),
+                                                        blur_radius: px(10.),
+                                                        spread_radius: px(-6.),
+                                                        inset: false,
+                                                    },
+                                                ];
+                                                this.shadow(shadow)
+                                            },
+                                        )
+                                        .text_selection_scope(selection_scope),
+                                )
+                                .with_animation(
+                                    "slide-down",
+                                    animation.clone(),
+                                    move |this, delta| {
+                                        this.position(point(
+                                            window_paddings.left + x,
+                                            window_paddings.top + y * delta,
+                                        ))
+                                    },
+                                ),
                             ),
                     )
                     .with_animation("fade-in", animation, move |this, delta| this.opacity(delta)),
@@ -842,8 +856,9 @@ pub(crate) mod tests {
     }
 
     /// A dialog wider and taller than the window must shrink to the viewport
-    /// instead of running off both edges, and its footer must still be inside
-    /// the surface rather than clipped below it.
+    /// instead of running off both edges. It also gives up the usual top
+    /// offset so that space is available to its content, while its footer
+    /// remains inside the surface rather than clipped below it.
     #[gpui::test]
     fn a_dialog_larger_than_the_window_stays_inside_it(cx: &mut TestAppContext) {
         let viewport = size(px(400.), px(300.));
@@ -867,7 +882,7 @@ pub(crate) mod tests {
             bounds.bottom() <= viewport.height - margin,
             "the dialog ran off the bottom: {bounds:?}"
         );
-        assert_eq!(bounds.origin.y, viewport.height / 10.);
+        assert_eq!(bounds.origin.y, margin);
         assert!(
             footer.bottom() <= bounds.bottom(),
             "the footer was clipped below the dialog: footer {footer:?}, dialog {bounds:?}"
