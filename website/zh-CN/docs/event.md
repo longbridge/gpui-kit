@@ -70,7 +70,7 @@ impl Workspace {
 }
 ```
 
-不要只用局部变量保存返回的 `Subscription`：函数结束后它会被 drop，观察者随即断开。把 `_subscriptions` 放在 `Workspace` 上，两者便拥有相同生命周期；View 释放时，Subscription 也会一起释放并取消订阅。也不要把 View 级 Subscription 存到生命周期更长的全局 owner，否则 View 消失后 callback 与捕获的资源仍可能被保留。
+不要只用局部变量保存返回的 `Subscription`：函数结束后它会被 drop，观察者随即断开。把 `_subscriptions` 放在 `Workspace` 上，两者便拥有相同生命周期；View 释放时，Subscription 也会一起释放并取消订阅。也不要把 View 级 Subscription 存到生命周期更长的全局 owner，否则 View 消失后 callback 与捕获的资源仍然存活，可能造成内存泄漏。
 
 回调需要 `&mut Window` 时使用 `cx.subscribe_in(..., window, ...)`，返回的 `Subscription` 同样保存在这个字段中。
 

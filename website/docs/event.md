@@ -70,7 +70,7 @@ impl Workspace {
 }
 ```
 
-Do not leave the returned `Subscription` in a local variable: it is dropped when the function returns, which disconnects the observer. Keeping `_subscriptions` on `Workspace` gives both the same lifetime. When the View is dropped, its subscriptions are dropped and disconnected too. Avoid storing View-scoped subscriptions in a longer-lived global owner, because that keeps callbacks and captured resources alive after the View should be gone.
+Do not leave the returned `Subscription` in a local variable: it is dropped when the function returns, which disconnects the observer. Keeping `_subscriptions` on `Workspace` gives both the same lifetime. When the View is dropped, its subscriptions are dropped and disconnected too. Avoid storing View-scoped subscriptions in a longer-lived global owner: keeping callbacks and captured resources alive after the View is gone can cause a memory leak.
 
 Use `cx.subscribe_in(..., window, ...)` when the callback needs `&mut Window`; keep that returned `Subscription` in the same field as well.
 
