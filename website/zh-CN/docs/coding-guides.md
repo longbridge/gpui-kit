@@ -1,7 +1,7 @@
 ---
 title: 编码指南
 description: 构建可维护 GPUI Kit 应用的架构、代码风格与命名规范
-order: -2.2
+order: -13
 ---
 
 # 编码指南

@@ -1,7 +1,7 @@
 ---
 title: FPS Monitor
 description: 读懂 gpui-fps 的 HUD —— MAX FPS 是什么、为什么是推导而非计数，以及每一行在测什么。
-order: -5
+order: -15
 ---
 
 # FPS Monitor

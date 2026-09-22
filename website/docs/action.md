@@ -1,7 +1,7 @@
 ---
 title: Action
 description: Understand how GPUI routes Focus, keyboard shortcuts, Actions, and Events.
-order: -3.8
+order: -5
 ---
 
 # Action

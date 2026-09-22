@@ -1,7 +1,7 @@
 ---
 title: FPS Monitor
 description: Read the gpui-fps HUD — what MAX FPS is, why it is derived rather than counted, and what each row measures.
-order: -5
+order: -15
 ---
 
 # FPS Monitor

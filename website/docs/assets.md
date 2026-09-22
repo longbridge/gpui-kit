@@ -1,7 +1,7 @@
 ---
 title: Icons & Assets
 description: Configure bundled icons and custom assets for GPUI Component applications.
-order: -4
+order: -7
 ---
 
 # Icons & Assets

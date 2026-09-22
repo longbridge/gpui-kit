@@ -1,7 +1,7 @@
 ---
 title: 测试
 description: 通过 Rust 单元测试、TestAppContext、真实 UI 交互和布局断言测试 GPUI Kit 应用与 GPUI 行为。
-order: -2.3
+order: -11
 example: false
 ---
 

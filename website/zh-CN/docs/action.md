@@ -1,7 +1,7 @@
 ---
 title: Action
 description: 理解 GPUI 如何路由 Focus、快捷键、Action 与 Event。
-order: -3.8
+order: -5
 ---
 
 # Action

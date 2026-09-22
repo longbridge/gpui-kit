@@ -1,7 +1,7 @@
 ---
 title: 设计指南
 description: 面向 GPUI Kit 客户端应用的产品、视觉与交互设计规范
-order: -2.1
+order: -12
 ---
 
 # 设计指南

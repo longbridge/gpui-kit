@@ -1,7 +1,7 @@
 ---
 title: Event
 description: 使用 GPUI Event 发送类型化通知，并理解它与 Action 的关系。
-order: -3.7
+order: -6
 ---
 
 # Event

@@ -1,7 +1,7 @@
 ---
 title: Event
 description: Use GPUI Events for typed notifications and connect them to Actions.
-order: -3.7
+order: -6
 ---
 
 # Event
