@@ -22,22 +22,31 @@ GPUI 原生提供 **Focus**、**Key Context**、**Action**、**KeyBinding** 与 
 
 假设窗口左侧是 Sidebar，右侧是 Chat。点击 Sidebar 后，Focus Path 包含 `Sidebar`；点击聊天输入区后，Focus Path 包含 `Chat`。因此绑定到 `Chat` 的快捷键只会在右侧区域激活。
 
-布局可以明确声明这两个键盘交互区域：
+可以在同一段布局代码中明确声明两个键盘交互区域：
 
 ```rust
 h_flex()
     .size_full()
     .child(
+        // 左侧：点击后激活 Sidebar Key Context。
         div()
             .w_64()
             .track_focus(&self.sidebar_focus)
             .key_context("Sidebar")
-            .child(self.sidebar.clone()),
+            .child("Sidebar"),
     )
-    .child(div().flex_1().child(self.chat.clone()))
+    .child(
+        // 右侧：点击后激活 Chat Key Context。
+        div()
+            .flex_1()
+            .track_focus(&self.chat_focus)
+            .key_context("Chat")
+            .on_action(cx.listener(Self::send_message))
+            .child("Chat"),
+    )
 ```
 
-`Chat` 在自己的 renderer 中 track 独立的 handle，并声明 `key_context("Chat")`。只有包含当前 focused handle 的区域，才会把自己的 Key Context 加入快捷键匹配。
+两个区域各自拥有稳定的 `FocusHandle` 与 Key Context。点击 Chat 后，Focus 移到 `chat_focus`，`Chat` 进入当前 Dispatch Path，`SendMessage` handler 才能收到匹配后的 Action。点击 Sidebar 则会激活 `Sidebar`，此时只属于 Chat 的 binding 不会匹配。
 
 按下一个键时，GPUI 会：
 
@@ -194,7 +203,7 @@ window.dispatch_action(
 
 现在路由关系很明确：**Sidebar → Workspace → Chat**。Action 从 Sidebar 当前的 Dispatch Path 向上走，由 `Workspace` 接收；`Workspace` 再通过 Entity API 调用 Chat。Action 本身不会从 Sidebar 横向跳到 Chat。
 
-:::note NOTE — sibling 不在当前 Dispatch Path 上
+:::info INFO — sibling 不在当前 Dispatch Path 上
 
 如果只把 `open_conversation` handler 挂在 Chat 上，当 Sidebar 拥有 Focus 时派发的 Action 无法到达它：Chat 是 sibling，不是当前 Dispatch Path 上的祖先。同一种错误也会导致快捷键看起来没有响应——`on_action` handler 位于 Focus 选中的路径之外。跨区域 handler 应放在最近的共同 owner 上；注册 `KeyBinding` 后，还要把对应的 `key_context` 与 handler 放在快捷键应该生效的路径上。
 

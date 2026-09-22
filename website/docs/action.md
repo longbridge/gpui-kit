@@ -22,22 +22,31 @@ This guide shows how to use those mechanisms together:
 
 Imagine a window split into a Sidebar on the left and Chat on the right. Clicking the Sidebar produces a focus path containing `Sidebar`; clicking the chat composer produces one containing `Chat`. A binding scoped to `Chat` is therefore active only on the right.
 
-The layout can make those two keyboard regions explicit:
+The layout can make both keyboard regions explicit in one place:
 
 ```rust
 h_flex()
     .size_full()
     .child(
+        // Left: clicking here activates the Sidebar context.
         div()
             .w_64()
             .track_focus(&self.sidebar_focus)
             .key_context("Sidebar")
-            .child(self.sidebar.clone()),
+            .child("Sidebar"),
     )
-    .child(div().flex_1().child(self.chat.clone()))
+    .child(
+        // Right: clicking here activates the Chat context.
+        div()
+            .flex_1()
+            .track_focus(&self.chat_focus)
+            .key_context("Chat")
+            .on_action(cx.listener(Self::send_message))
+            .child("Chat"),
+    )
 ```
 
-`Chat` tracks its own handle and declares `key_context("Chat")` in its renderer. Only the region containing the focused handle contributes its context to shortcut matching.
+Each region has its own stable `FocusHandle` and Key Context. Clicking Chat moves Focus to `chat_focus`, so `Chat` joins the active Dispatch Path and the `SendMessage` handler can receive the matched Action. Clicking Sidebar activates `Sidebar` instead, so the Chat-only binding does not match.
 
 When a key is pressed, GPUI:
 
@@ -194,7 +203,7 @@ window.dispatch_action(
 
 The dispatch route is now explicit: **Sidebar → Workspace → Chat**. The Action travels upward on Sidebar's current Dispatch Path until `Workspace` handles it. `Workspace` then calls Chat through the Entity API. The Action itself never travels sideways from Sidebar into Chat.
 
-:::note NOTE — A sibling is not on the Dispatch Path
+:::info INFO — A sibling is not on the Dispatch Path
 
 If `open_conversation` is attached only to Chat, an Action dispatched while Sidebar has Focus cannot reach it: Chat is a sibling, not an ancestor on the current Dispatch Path. The same mistake can make a shortcut appear unresponsive when its `on_action` handler sits outside the path selected by Focus. Put a cross-region handler on the nearest common owner, register the `KeyBinding`, and place its `key_context` and handler on the path where the shortcut should work.
 
