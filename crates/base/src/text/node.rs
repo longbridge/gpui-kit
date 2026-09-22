@@ -3186,16 +3186,14 @@ impl BlockNode {
                     _ => (rems(1.), FontWeight::NORMAL),
                 };
 
-                let mut text_size = text_size.to_pixels(node_cx.style.heading_base_font_size());
-                if let Some(size) = node_cx.style.heading_font_size(*level) {
-                    text_size = size;
-                }
+                let text_size = text_size.to_pixels(px(14.));
 
                 div()
-                    .pb(node_cx.style.heading_gap())
+                    .pb(rems(0.3))
                     .whitespace_normal()
                     .text_size(text_size)
                     .font_weight(font_weight)
+                    .refine_style(&node_cx.style.heading(*level))
                     .child(children.render(
                         span.map(|span| TextLeafKey::block(span.start)),
                         node_cx,

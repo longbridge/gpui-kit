@@ -73,6 +73,18 @@ let style = TextViewStyle::default()
 TextView::markdown("themed", source).style(style)
 ```
 
+Heading refinements receive the Markdown heading level (1-6) and are applied
+on top of the built-in size, weight, and spacing for that level:
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _, rems};
+
+let style = TextViewStyle::default().with_heading(|level| match level {
+    1 => StyleRefinement::default().pt(rems(1.)).pb(rems(0.75)),
+    _ => StyleRefinement::default(),
+});
+```
+
 `TextViewStyle::from_theme(&theme)` maps the semantic colors from a `gpui_kit::base::Theme`. Applications using the higher-level component theme can use `gpui_kit::component::text::text_view_style(cx.theme())`.
 
 ## Syntax highlighting is opt-in
