@@ -1,7 +1,7 @@
 ---
 title: Window
 description: 使用 GPUI Window 处理窗口内的输入、Focus、绘制与异步任务。
-order: -2.2
+order: -2.3
 ---
 
 # Window

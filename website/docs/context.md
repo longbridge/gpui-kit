@@ -1,30 +1,60 @@
 ---
 title: Context
 description: Understand how GPUI provides application, Entity, Window, and async access.
-order: -2.3
+order: -2.2
 ---
 
 # Context
 
-GPUI passes a Context into your code whenever it is safe to access application state. Its type tells you what is available now:
+GPUI callbacks often receive `window: &mut Window, cx: &mut Context<Self>`. GPUI supplies these parameters for the duration of the call, giving code access to the current window, current Entity, and whole application while keeping mutable access within that call.
 
-```text
-App
-├─ Window                         current window
-├─ Context<T>                    App + current Entity<T>
-├─ AsyncApp                      App access across await points
-└─ AsyncWindowContext            AsyncApp + current Window
+Start by separating the three scopes:
+
+| Type | Scope | Common capabilities |
+| --- | --- | --- |
+| `Window` | Current system window | Focus, input, window bounds, drawing, Action dispatch |
+| `Context<T>` | The `Entity<T>` currently being updated | The Entity for `self`, `notify`, subscriptions, Entity tasks |
+| `App` | The whole application | Globals, creating Entities, opening windows, application Actions and tasks |
+
+`Context<T>` dereferences to `App`, so code with `cx: &mut Context<T>` can already call App APIs and does not need a separate `&mut App`. Window remains separate because the same Entity may appear in different windows, while a data-only update may not belong to any window.
+
+## `window, cx` or only `cx`
+
+View state belongs to its Entity, while window interaction belongs to Window. A method receives both when it changes View state and operates on the window displaying that View. GPUI style places runtime parameters last, in `window, cx` order:
+
+```rust
+fn focus_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.composer_open = true;
+    self.input_focus.focus(window);
+    cx.notify();
+}
 ```
 
-| Type | Use it for | Usually received from |
-| --- | --- | --- |
-| `&mut App` | Globals, creating Entities, opening windows | application and window callbacks |
-| `&mut Context<T>` | Current `T`, notifications, subscriptions and owned tasks | `cx.new`, `Entity::update`, `Render` |
-| `&mut Window` | Focus, input and operations tied to one window | render and window callbacks |
-| `&mut AsyncApp` | App or Entity access after an `await` | `cx.spawn` |
-| `&mut AsyncWindowContext` | Entity and Window access after an `await` | `cx.spawn_in` |
+An Action, Event, or pointer callback may put `action`, `event`, or similar arguments first, while keeping runtime parameters last:
 
-`Context<T>` dereferences to `App`, so application APIs are also available from it. `Window` stays separate because an application may own several windows.
+```rust
+fn on_action_send_message(
+    &mut self,
+    action: &SendMessage,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+) {
+    // ...
+}
+```
+
+If a method only changes data and does not read Focus, input, window bounds, or other window state, keep only the final `cx` argument:
+
+```rust
+fn clear_messages(&mut self, cx: &mut Context<Self>) {
+    self.messages.clear();
+    cx.notify();
+}
+```
+
+When there is no current Entity and the work is application-wide, a callback receives `&mut App` directly. Application initialization, registering global state, and opening the first window are common examples. Do not add an unused Window for signature consistency; parameters should expose the scope the logic actually needs.
+
+Async code uses the corresponding `AsyncApp` or `AsyncWindowContext` to re-enter GPUI after an `await`. See [Window](./window) for Window-specific capabilities.
 
 ## Create, read, and update
 

@@ -1,7 +1,7 @@
 ---
 title: Window
 description: Use GPUI Window for window-local input, focus, rendering, and asynchronous work.
-order: -2.2
+order: -2.3
 ---
 
 # Window

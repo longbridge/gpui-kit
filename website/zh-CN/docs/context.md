@@ -1,30 +1,60 @@
 ---
 title: Context
 description: 了解 GPUI 如何提供应用、Entity、Window 与异步访问能力。
-order: -2.3
+order: -2.2
 ---
 
 # Context
 
-GPUI 会在可以安全访问应用状态时把 Context 传给代码。它的类型表明当前可以访问什么：
+GPUI callback 中经常出现 `window: &mut Window, cx: &mut Context<Self>`。这些参数由 GPUI 在调用期间提供，让代码访问当前窗口、当前 Entity 与整个应用，同时确保可变访问不会超出这次调用。
 
-```text
-App
-├─ Window                         当前窗口
-├─ Context<T>                    App + 当前 Entity<T>
-├─ AsyncApp                      跨 await 访问 App
-└─ AsyncWindowContext            AsyncApp + 当前 Window
+先区分三个范围：
+
+| 类型 | 作用范围 | 常见能力 |
+| --- | --- | --- |
+| `Window` | 当前系统窗口 | Focus、输入、窗口尺寸、绘制、Action 派发 |
+| `Context<T>` | 当前正在更新的 `Entity<T>` | `self` 对应的 Entity、`notify`、订阅、Entity task |
+| `App` | 整个应用 | Global、创建 Entity、打开窗口、应用级 Action 与 task |
+
+`Context<T>` 会解引用为 `App`，所以拿到 `cx: &mut Context<T>` 时已经可以调用 App API，不需要再传一个 `&mut App`。`Window` 必须单独传入，因为同一个 Entity 可能显示在不同窗口中，而纯数据更新也可能不属于任何窗口。
+
+## `window, cx` 与只有 `cx`
+
+View 的状态属于 Entity，窗口交互属于 Window。一个方法既要修改 View 状态，又要操作这个 View 所在的窗口时，就同时接收两者。按照 GPUI 风格，它们放在参数列表最后，并保持 `window, cx` 的顺序：
+
+```rust
+fn focus_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    self.composer_open = true;
+    self.input_focus.focus(window);
+    cx.notify();
+}
 ```
 
-| 类型 | 用途 | 通常由哪里传入 |
-| --- | --- | --- |
-| `&mut App` | Global、创建 Entity、打开窗口 | 应用和窗口 callback |
-| `&mut Context<T>` | 当前 `T`、通知、订阅和属于它的任务 | `cx.new`、`Entity::update`、`Render` |
-| `&mut Window` | Focus、输入和单个窗口的操作 | render 和窗口 callback |
-| `&mut AsyncApp` | 经过 `await` 后访问 App 或 Entity | `cx.spawn` |
-| `&mut AsyncWindowContext` | 经过 `await` 后访问 Entity 和 Window | `cx.spawn_in` |
+Action、Event 或鼠标 callback 可能在前面带有 `action`、`event` 等参数，但运行时参数仍放在最后：
 
-`Context<T>` 会解引用为 `App`，因此也能调用应用级 API。`Window` 是独立参数，因为一个应用可以拥有多个窗口。
+```rust
+fn on_action_send_message(
+    &mut self,
+    action: &SendMessage,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+) {
+    // ...
+}
+```
+
+如果方法只处理数据，不读取 Focus、输入、窗口尺寸或其他窗口状态，就只保留最后一个 `cx` 参数：
+
+```rust
+fn clear_messages(&mut self, cx: &mut Context<Self>) {
+    self.messages.clear();
+    cx.notify();
+}
+```
+
+当前没有 Entity，只执行应用级工作时，callback 会直接接收 `&mut App`。例如应用初始化、注册全局状态或打开第一个窗口。不要为了统一签名加入未使用的 Window；函数参数应该直接反映逻辑真正依赖的范围。
+
+异步代码使用对应的 `AsyncApp` 或 `AsyncWindowContext`，在 `await` 以后重新进入 GPUI。Window 的具体能力见 [Window](./window)。
 
 ## 创建、读取和更新
 
