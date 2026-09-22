@@ -97,13 +97,15 @@ Setup and examples: [references/usage.md](references/usage.md).
 
 ```rust
 use gpui_kit::*;
-use gpui_kit::component::Root;
 
 gpui_kit::application()
     .with_assets(gpui_kit::assets::Assets)
     .run(|cx| {
         gpui_kit::init(cx);                       // first, before anything else
-        // ... open_window(..., |window, cx| cx.new(|cx| Root::new(view, window, cx)))
+        gpui_kit::open_window(options, cx, |window, cx| {
+            cx.new(|cx| AppView::new(window, cx))
+        })
+        .expect("failed to open window");
     });
 ```
 

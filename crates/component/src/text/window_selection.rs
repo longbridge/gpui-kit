@@ -554,82 +554,6 @@ mod tests {
     }
 
     #[gpui::test]
-    fn component_window_methods_share_the_base_selection(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let (root, cx) = cx.add_window_view(|window, cx| {
-            let content = cx.new(BaseOwnedTextViewSelection::new);
-            Root::new(content, window, cx)
-        });
-        let content = root.read_with(cx, |root, _| {
-            root.view()
-                .clone()
-                .downcast::<BaseOwnedTextViewSelection>()
-                .unwrap()
-        });
-        let text_view = content.read_with(cx, |content, _| content.text_view.clone());
-        let cx: &mut VisualTestContext = cx;
-        cx.run_until_parked();
-        cx.update(|window, cx| {
-            let _ = window.draw(cx);
-            text_view.update(cx, |state, cx| state.select_all(cx));
-
-            assert_eq!(
-                crate::WindowExt::selected_text(window, cx),
-                TextSelection::selected_text(window, cx)
-            );
-            assert_eq!(
-                crate::WindowExt::has_text_selection(window, cx),
-                TextSelection::has_selection(window, cx)
-            );
-
-            crate::WindowExt::clear_text_selection(window, cx);
-            assert!(!TextSelection::has_selection(window, cx));
-
-            text_view.update(cx, |state, cx| state.select_all(cx));
-            TextSelection::clear(window, cx);
-            assert!(!crate::WindowExt::has_text_selection(window, cx));
-        });
-    }
-
-    #[gpui::test]
-    fn component_end_stops_the_base_drag(cx: &mut TestAppContext) {
-        let (_, cx) = setup(true, cx);
-
-        cx.simulate_mouse_down(
-            point(px(1.), px(15.)),
-            MouseButton::Left,
-            Modifiers::default(),
-        );
-        cx.simulate_mouse_move(
-            point(px(60.), px(15.)),
-            Some(MouseButton::Left),
-            Modifiers::default(),
-        );
-        cx.update(|window, cx| {
-            let _ = window.draw(cx);
-        });
-        let before = window_selected_text(cx);
-        assert!(!before.is_empty());
-
-        cx.update(|window, cx| crate::WindowExt::end_text_selection(window, cx));
-        cx.simulate_mouse_move(
-            point(px(300.), px(70.)),
-            Some(MouseButton::Left),
-            Modifiers::default(),
-        );
-        cx.update(|window, cx| {
-            let _ = window.draw(cx);
-        });
-
-        assert_eq!(window_selected_text(cx), before);
-        cx.simulate_mouse_up(
-            point(px(300.), px(70.)),
-            MouseButton::Left,
-            Modifiers::default(),
-        );
-    }
-
-    #[gpui::test]
     fn base_clear_then_select_all_in_one_effect_keeps_the_new_selection(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (root, cx) = cx.add_window_view(|window, cx| {
@@ -2030,9 +1954,8 @@ mod tests {
         );
     }
 
-    /// A view with a selectable TextView in the base window that also mounts the
-    /// Dialog/Sheet layers (which `Root::render` does not mount itself), so a
-    /// real modal can be opened on top of the base content.
+    /// A view with a selectable TextView used as Root content. Root mounts the
+    /// Dialog/Sheet layers automatically, so a real modal can be opened above it.
     struct ModalScopeTestView {
         focus_handle: FocusHandle,
         base: Entity<TextViewState>,

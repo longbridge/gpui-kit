@@ -8,7 +8,6 @@ not enable the gallery's test-support development dependency.
 
 | Example | Command |
 | --- | --- |
-| Color mixing | `cargo run -p color_mix_oklab` |
 | Editor | `cargo run -p example-editor` |
 | Brush | `cargo run -p example-brush` |
 | Dock | `cargo run -p example-dock` |

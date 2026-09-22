@@ -34,7 +34,7 @@ impl Render for AppView {
 }
 ```
 
-If the application already calls `gpui_kit::component::init`, Base initialization is included. `gpui-component::Root` also installs the window selection layer.
+If the application already calls `gpui_kit::component::init`, Base initialization is included. A window using `gpui_base::Root`—including one opened by `gpui_kit::open_window`—installs the selection layer automatically; do not render a second layer in its content.
 
 TextView is selectable by default. While dragging a selection near a viewport edge, the shared selection layer scrolls the related `overflow_*_scroll` region automatically; no TextView scroll or selection parameter is required. Use `.selectable(false)` only to disable selection explicitly.
 

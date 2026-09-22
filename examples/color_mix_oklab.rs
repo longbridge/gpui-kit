@@ -1,9 +1,9 @@
+use gpui_kit::*;
 use gpui_kit::component::{
     h_flex,
     theme::{ActiveTheme, Colorize},
-    v_flex,
+    v_flex, Root, Sizable,
 };
-use gpui_kit::*;
 
 actions!(demo, [Quit]);
 
@@ -12,7 +12,7 @@ struct ColorMixDemo {
 }
 
 impl ColorMixDemo {
-    fn new(cx: &mut Context<Self>) -> Self {
+    fn new(cx: &mut WindowContext) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
         }
@@ -20,8 +20,8 @@ impl ColorMixDemo {
 }
 
 impl Render for ColorMixDemo {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let destructive = cx.theme().danger;
+    fn render(&mut self, cx: &mut ViewContext<Self>) -> impl IntoElement {
+        let destructive = cx.theme().destructive;
         let transparent = hsla(0.0, 0.0, 0.0, 0.0);
 
         // 类似 CSS: color-mix(in oklab, var(--destructive) 20%, transparent)
@@ -113,7 +113,10 @@ impl Render for ColorMixDemo {
                                             .text_color(gpui_kit::white())
                                             .child("HSL"),
                                     )
-                                    .child(destructive.mix(transparent, 0.5).to_hex()),
+                                    .child(format!(
+                                        "{}",
+                                        destructive.mix(transparent, 0.5).to_hex()
+                                    )),
                             )
                             .child(
                                 v_flex()
@@ -126,7 +129,7 @@ impl Render for ColorMixDemo {
                                             .text_color(gpui_kit::white())
                                             .child("Oklab"),
                                     )
-                                    .child(mixed_50.to_hex()),
+                                    .child(format!("{}", mixed_50.to_hex())),
                             ),
                     ),
             )
@@ -143,23 +146,34 @@ impl Render for ColorMixDemo {
 }
 
 fn main() {
-    gpui_kit::application().run(move |cx| {
+    env_logger::init();
+
+    Application::new().run(move |cx| {
         gpui_kit::init(cx);
 
         cx.activate(true);
-        cx.on_action(|_: &Quit, cx: &mut App| {
+        cx.on_action(|_: &Quit, cx: &mut AppContext| {
             cx.quit();
         });
         cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
 
-        gpui_kit::open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::centered(size(px(600.), px(400.)), cx)),
-                ..Default::default()
-            },
-            cx,
-            |_, cx| cx.new(ColorMixDemo::new),
-        )
-        .expect("failed to open window");
+        cx.spawn(|cx| async move {
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                        None,
+                        size(px(600.), px(400.)),
+                        cx,
+                    ))),
+                    ..Default::default()
+                },
+                |window, cx| {
+                    let view = cx.new(|cx| ColorMixDemo::new(cx));
+                    cx.new(|cx| Root::new(view, window, cx))
+                },
+            )
+            .unwrap();
+        })
+        .detach();
     });
 }

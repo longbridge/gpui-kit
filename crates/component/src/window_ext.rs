@@ -87,20 +87,6 @@ pub trait WindowExt: Sized {
     fn focused_input(&mut self, cx: &mut App) -> Option<AnyInputState>;
     /// Returns true if there is a focused Input entity.
     fn has_focused_input(&mut self, cx: &mut App) -> bool;
-
-    /// Returns the merged selected text across registered selectable regions
-    /// in this window, in logical document order and joined with `\n`.
-    fn selected_text(&mut self, cx: &mut App) -> String;
-
-    /// Returns true if any registered region has an active text selection in
-    /// this window, including renderer-local selections such as select-all.
-    fn has_text_selection(&mut self, cx: &mut App) -> bool;
-
-    /// Clears the window text selection and all registered renderer-local selections.
-    fn clear_text_selection(&mut self, cx: &mut App);
-
-    /// Ends the in-progress window-level text selection drag (if any).
-    fn end_text_selection(&mut self, cx: &mut App);
 }
 
 impl WindowExt for Window {
@@ -237,25 +223,5 @@ impl WindowExt for Window {
             }
         });
         None
-    }
-
-    #[inline]
-    fn selected_text(&mut self, cx: &mut App) -> String {
-        gpui_base::TextSelection::selected_text(self, cx)
-    }
-
-    #[inline]
-    fn has_text_selection(&mut self, cx: &mut App) -> bool {
-        gpui_base::TextSelection::has_selection(self, cx)
-    }
-
-    #[inline]
-    fn clear_text_selection(&mut self, cx: &mut App) {
-        gpui_base::TextSelection::clear(self, cx);
-    }
-
-    #[inline]
-    fn end_text_selection(&mut self, cx: &mut App) {
-        gpui_base::TextSelection::end(self, cx);
     }
 }

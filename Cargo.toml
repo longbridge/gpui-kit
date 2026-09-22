@@ -13,7 +13,6 @@ members = [
     "crates/fps",
     "crates/webview",
     "examples/app_assets",
-    "examples/color_mix_oklab",
     "examples/fps_monitor",
     "examples/hello_world",
     "examples/input",

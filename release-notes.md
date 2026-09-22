@@ -74,15 +74,12 @@ inside `cx.update`.
 
 Kit examples and the native/web story galleries use this helper for standard window
 startup. Base examples continue using `gpui_base::init` and GPUI's window API
-directly, without a dependency on Kit. The FPS example
-disables Kit's default features. The previously standalone color-mixing source
-is now a workspace
-package, runnable with `cargo run -p color_mix_oklab`.
+directly, without a dependency on Kit. The FPS example disables Kit's default
+features.
 
 Quit and close-window actions, keyboard shortcuts and confirmation flows remain
 application-owned. Kit initialization does not install default quit or close
 bindings.
 
-The `WindowExt` text-selection query, clearing and drag-ending methods remain
-available and delegate to `gpui_base::TextSelection`.
-`Root::clear_text_selection` is removed.
+The `Root` and `WindowExt` text-selection methods are removed. Use
+`gpui_base::TextSelection::{selected_text, has_selection, clear, end}`.
