@@ -1938,7 +1938,7 @@ mod tests {
         // B (whose old band crossed B) so B can clear its now-stale highlight.
         //
         // We check this on the in-drag frame, not after mouse-up:
-        // `end_text_selection` notifies every selectable view, which would
+        // `TextSelection::end` notifies every selectable view, which would
         // notify B for an unrelated reason and mask the bug.
         cx.simulate_mouse_move(
             point(px(60.), px(15.)),
