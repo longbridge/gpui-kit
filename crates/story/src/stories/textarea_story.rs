@@ -5,9 +5,9 @@ use gpui_kit::{
     px,
 };
 
-use crate::section;
+use crate::{ChangeStorySize, section, story_toolbar};
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable,
+    ActiveTheme as _, Icon, IconName, Sizable, Size,
     attachment::{
         Attachment, AttachmentActions, AttachmentContent, AttachmentDescription, AttachmentGroup,
         AttachmentMedia, AttachmentTitle,
@@ -40,6 +40,7 @@ pub struct TextareaStory {
     /// Counter for attachment ids; `Image::id` is a content hash, so pasting
     /// the same image twice would collide.
     next_attachment_id: u64,
+    size: Size,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -170,6 +171,7 @@ impl TextareaStory {
             composer,
             attachments: Vec::new(),
             next_attachment_id: 0,
+            size: Size::Medium,
             _subscriptions,
         }
     }
@@ -210,12 +212,17 @@ impl Render for TextareaStory {
         v_flex()
             .w_full()
             .gap_3()
+            .on_action(cx.listener(|this, action: &ChangeStorySize, _, cx| {
+                this.size = action.0;
+                cx.notify();
+            }))
+            .child(story_toolbar(self.size))
             .child(
                 section("Textarea").w(px(560.)).child(
                     v_flex()
                         .gap_2()
                         .w_full()
-                        .child(Textarea::new(&self.textarea).h(px(320.)))
+                        .child(Textarea::new(&self.textarea).with_size(self.size).h(px(320.)))
                         .child(
                             h_flex()
                                 .justify_between()
@@ -248,17 +255,17 @@ impl Render for TextareaStory {
             .child(
                 section("No Wrap")
                     .w(px(560.))
-                    .child(Textarea::new(&self.textarea_no_wrap).h(px(200.))),
+                    .child(Textarea::new(&self.textarea_no_wrap).with_size(self.size).h(px(200.))),
             )
             .child(
                 section("Auto Grow")
                     .w(px(560.))
-                    .child(Textarea::new(&self.textarea_auto_grow)),
+                    .child(Textarea::new(&self.textarea_auto_grow).with_size(self.size)),
             )
             .child(
                 section("Auto Grow with No Wrap")
                     .w(px(560.))
-                    .child(Textarea::new(&self.textarea_auto_grow_no_wrap)),
+                    .child(Textarea::new(&self.textarea_auto_grow_no_wrap).with_size(self.size)),
             )
             .child(
                 section("Submit on Enter (Chat)").w(px(560.)).child(
@@ -276,7 +283,7 @@ impl Render for TextareaStory {
                                     .child(msg.clone())
                             }),
                         ))
-                        .child(Textarea::new(&self.chat_input)),
+                        .child(Textarea::new(&self.chat_input).with_size(self.size)),
                 ),
             )
             .child(
@@ -332,7 +339,9 @@ impl Render for TextareaStory {
                             })
                             .child({
                                 let view = cx.entity().downgrade();
-                                Textarea::new(&self.composer).on_paste(move |item, _, cx| {
+                                Textarea::new(&self.composer)
+                                    .with_size(self.size)
+                                    .on_paste(move |item, _, cx| {
                                     let images: Vec<_> = item
                                         .entries()
                                         .iter()
