@@ -1,5 +1,7 @@
 use std::{
+    cell::RefCell,
     ops::Range,
+    rc::Rc,
     sync::{Arc, Mutex},
 };
 use unicode_segmentation::UnicodeSegmentation as _;
@@ -7,10 +9,9 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use gpui::{
     AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, DefiniteLength, Element, ElementId,
     GlobalElementId, ImageSource, InspectorElementId, InteractiveElement as _, IntoElement,
-    LayoutId, LineFragment as WrapLineFragment, ObjectFit, ParentElement as _, Pixels,
-    Refineable as _, ShapedLine, SharedString, Size, StatefulInteractiveElement as _, Styled,
-    StyledImage as _, TextRun, TextStyle, WhiteSpace, Window, div, img, point,
-    prelude::FluentBuilder as _, px, relative, size,
+    LayoutId, LineFragment as WrapLineFragment, ObjectFit, Pixels, Refineable as _, ShapedLine,
+    SharedString, Size, StatefulInteractiveElement as _, Styled, StyledImage as _, TextRun,
+    TextStyle, WhiteSpace, Window, img, point, prelude::FluentBuilder as _, px, relative, size,
 };
 
 use crate::text::text_view::{LinkClickHandlerFn, handle_link_click};
@@ -62,6 +63,29 @@ pub(super) enum InlineFlowItem {
 pub(crate) struct InlineFlowLayoutState {
     layout: Arc<Mutex<Option<InlineFlowLayout>>>,
     typography: InlineFlowTypography,
+    frame_state: Rc<RefCell<InlineFlowFrameState>>,
+}
+
+/// What a flow keeps from one frame to the next, as GPUI element state under
+/// the flow's id.
+#[derive(Default)]
+struct InlineFlowFrameState {
+    /// One state per fragment, by fragment index. A fragment's `Inline`
+    /// retains its shaped text under its state (see `RetainedLayout`), so
+    /// the state has to be the same one next frame for the text to be
+    /// found; a fresh state per frame shaped every fragment again and left
+    /// an entry in the table that nobody would take.
+    fragment_states: Vec<Arc<Mutex<InlineState>>>,
+}
+
+impl InlineFlowFrameState {
+    fn fragment_state(&mut self, fragment_ix: usize) -> Arc<Mutex<InlineState>> {
+        if self.fragment_states.len() <= fragment_ix {
+            self.fragment_states
+                .resize_with(fragment_ix + 1, Default::default);
+        }
+        self.fragment_states[fragment_ix].clone()
+    }
 }
 
 /// Resolved before `request_measured_layout`, while the parent's text-style
@@ -223,11 +247,15 @@ impl Element for InlineFlow {
 
     fn request_layout(
         &mut self,
-        _id: Option<&GlobalElementId>,
+        id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
+        let frame_state = window.with_optional_element_state(id, |state, _| {
+            let state: Rc<RefCell<InlineFlowFrameState>> = state.flatten().unwrap_or_default();
+            (state.clone(), Some(state))
+        });
         let measure_items = self.items.iter().map(MeasureItem::from).collect::<Vec<_>>();
         // A measured-layout callback runs after the parent's text-style stack
         // is gone. Capture every resolved typography input while this element
@@ -262,6 +290,7 @@ impl Element for InlineFlow {
         let layout_state = InlineFlowLayoutState {
             layout: Arc::default(),
             typography: typography.clone(),
+            frame_state,
         };
         let layout_ref = layout_state.layout.clone();
         let layout_typography = typography.clone();
@@ -321,9 +350,10 @@ impl Element for InlineFlow {
             .unwrap_or_default();
         let typography = request_layout.typography.clone();
         let text_style = &typography.text_style;
+        let frame_state = request_layout.frame_state.clone();
         let mut elements = Vec::with_capacity(fragments.len());
 
-        for fragment in fragments {
+        for (fragment_ix, fragment) in fragments.into_iter().enumerate() {
             match fragment {
                 PositionedFragment::Object {
                     item_ix,
@@ -390,7 +420,7 @@ impl Element for InlineFlow {
                     else {
                         continue;
                     };
-                    let state = Arc::new(Mutex::new(InlineState::default()));
+                    let state = frame_state.borrow_mut().fragment_state(fragment_ix);
                     if let Ok(mut state) = state.lock() {
                         state.set_text(text.clone());
                     }
@@ -439,36 +469,42 @@ impl Element for InlineFlow {
                     } else {
                         None
                     };
-                    let inline =
+                    // The fragment's typography: the flow's style at the
+                    // fragment's size, on one line. Fragments are already
+                    // wrapped, so this leaf must not wrap independently.
+                    let mut fragment_style = text_style.clone();
+                    fragment_style.font_size = font_size.into();
+                    fragment_style.line_height = fragment_size.height.into();
+                    fragment_style.white_space = WhiteSpace::Nowrap;
+                    let mut element =
                         Inline::new(state, links, highlights, self.link_click_handler.clone())
                             .selection_source(source_state.clone(), source_range)
-                            .text_style(text_style.clone())
+                            .text_style(fragment_style.clone())
                             .selection_bounds(Bounds::new(
                                 point(bounds.left(), bounds.top() + selection_bounds.top()),
                                 size(bounds.size.width, selection_bounds.size.height),
                             ))
-                            .paint_origin(bounds.origin + origin + point(padding, Pixels::ZERO));
-                    let mut element = div()
-                        .font(text_style.font())
-                        .text_color(text_style.color)
-                        .when_some(text_style.background_color, |this, color| {
-                            this.text_bg(color)
-                        })
-                        .text_size(font_size)
-                        .line_height(fragment_size.height)
-                        // Fragments are already wrapped, so this leaf must not wrap independently.
-                        .whitespace_nowrap()
-                        .child(inline)
-                        .into_any_element();
+                            .paint_origin(bounds.origin + origin + point(padding, Pixels::ZERO))
+                            .into_any_element();
+                    // The `Inline` is its own layout root, with no box around
+                    // it: its text measures with the window's text style, so
+                    // the fragment's style is pushed for the layout.
                     window.with_rem_size(Some(typography.rem_size), |window| {
-                        element.prepaint_as_root(
-                            bounds.origin + origin + point(padding, Pixels::ZERO),
-                            size(
-                                AvailableSpace::Definite(fragment_size.width - padding * 2.),
-                                AvailableSpace::Definite(fragment_size.height),
-                            ),
-                            window,
-                            cx,
+                        window.with_text_style(
+                            Some(fragment_style.subtract(&Default::default())),
+                            |window| {
+                                element.prepaint_as_root(
+                                    bounds.origin + origin + point(padding, Pixels::ZERO),
+                                    size(
+                                        AvailableSpace::Definite(
+                                            fragment_size.width - padding * 2.,
+                                        ),
+                                        AvailableSpace::Definite(fragment_size.height),
+                                    ),
+                                    window,
+                                    cx,
+                                );
+                            },
                         );
                     });
                     elements.push((element, background));

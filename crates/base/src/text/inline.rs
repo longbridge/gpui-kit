@@ -1837,4 +1837,48 @@ mod retained_layout_tests {
         let retained = RETAINED_LAYOUTS.with(|layouts| layouts.borrow().len());
         assert_eq!(retained, 2, "one layout per paragraph state");
     }
+
+    struct Once {
+        state: Entity<TextViewState>,
+    }
+
+    impl Render for Once {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().w(px(300.)).child(TextView::new(&self.state))
+        }
+    }
+
+    /// A paragraph with a code span is laid out by `InlineFlow`, as one
+    /// `Inline` per wrapped fragment. The fragments' states have to outlive
+    /// the frame, or every frame shapes the fragments again and leaves the
+    /// table an entry nobody will take.
+    #[gpui::test]
+    fn inline_flow_fragments_keep_their_layouts_across_frames(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, cx| Once {
+            state: cx.new(|cx| TextViewState::markdown("Call `foo` now.", cx)),
+        });
+        cx.run_until_parked();
+
+        for _ in 0..3 {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+
+        // "Call ", "foo" and " now.": three fragments on one line.
+        let (retained, alive) = RETAINED_LAYOUTS.with(|layouts| {
+            let layouts = layouts.borrow();
+            (
+                layouts.len(),
+                layouts
+                    .values()
+                    .filter(|retained| retained.state.strong_count() > 0)
+                    .count(),
+            )
+        });
+        assert_eq!(retained, 3, "one layout per fragment");
+        assert_eq!(
+            alive, 3,
+            "every retained layout belongs to a live fragment state"
+        );
+    }
 }
