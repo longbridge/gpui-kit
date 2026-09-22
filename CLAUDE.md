@@ -311,7 +311,7 @@ Uses `rust-i18n` crate.
   cp website/docs/coding-guides.md skills/gpui-kit/references/coding-guides.md
   ```
 
-  CI fails if the copies drift. Never edit the copy directly — edit `website/docs/`.
+  Never edit the copy directly — edit `website/docs/`.
 
 ## Platform Support
 
