@@ -602,14 +602,13 @@ Every node stays exactly filled by its ribbons under either scale, so children a
 
 ## Hover and Tooltips
 
-Every chart is a static plot until it is given an `id`. With one, it hit-tests the cursor, shows a tooltip for the datum under it, and emphasizes that datum the way the chart's kind calls for:
+Every chart hit-tests the cursor, shows a tooltip for the datum under it, and emphasizes that datum the way the chart's kind calls for. Nothing opts in:
 
 ```rust
 LineChart::new(data)
     .x(|d| d.date.clone())
     .y(|d| d.value)
     .name("Desktop") // The series name in the tooltip row
-    .id("visitors")  // Unique among sibling elements
 ```
 
 | Chart | On hover |
@@ -623,17 +622,27 @@ LineChart::new(data)
 
 The tooltip box follows the cursor, flipping toward the center of the plot near each edge. `AreaChart` and `RadarChart` take one `.name()` per series, called after the matching `.y()` / `.value()`.
 
+### Identity
+
+All of it is keyed on an `ElementId`, which a chart takes from the source location it was constructed at — unique for a chart written out once, which is nearly every chart. Where one construction site renders several charts as siblings, name them apart, or they share one hover state and one cache:
+
+```rust
+shares.iter().enumerate().map(|(i, share)| PieChart::new(share.clone()).id(("share", i)))
+```
+
+A `GlobalElementId` is the whole id stack, so siblings that already carry an id of their own — rows drawn by `List` or `uniform_list`, say — separate the charts beneath them without help.
+
 ### Motion
 
 The emphasis is animated with the styled layer's motion tokens (`cx.theme().motion_tokens()`): pointers — crosshair, band, dots — follow the hovered datum on a fast spring, a pie slice lifts on the control spring, and the whole overlay fades in when the cursor lands on a datum and out after it leaves. The motion honors the operating system's reduced-motion preference, under which every value adopts its target at once.
 
 ### Caching
 
-An identified chart also keeps its heavy geometry across frames, since a chart repaints on every frame it is on screen: line and area strokes and pie slices stay tessellated while their projected points are unchanged, and a sankey diagram keeps its placement while its data, settings and size are unchanged. Charts without an `id` rebuild everything on each paint, as sibling charts would otherwise share one cache.
+A chart also keeps its heavy geometry across frames, since it repaints on every frame it is on screen: line and area strokes and pie slices stay tessellated while their projected points are unchanged, and a sankey diagram keeps its placement while its data, settings and size are unchanged. This cache hangs off the same id, so charts sharing one share the cache and thrash it — another reason to name siblings apart.
 
 ### Custom Plots
 
-A custom [`Plot`] opts in the same way: return the id from `Plot::id`, resolve the datum under the cursor in `Plot::tooltip_state`, and build the overlay in `Plot::tooltip`. To animate the emphasis, implement `Plot::hover`, which runs each frame before `tooltip` and `paint` with the [`PlotHover`] in focus — it carries the `TooltipState` and lingers after the cursor leaves while `hover.focus()` eases back to zero, so sample the motion there and keep the result on `self` for the other two methods. A `Tooltip` returned from `tooltip` fades with the hover on its own:
+A custom [`Plot`] opts in by hand — `Plot::id` defaults to `None` there: return an id from it, resolve the datum under the cursor in `Plot::tooltip_state`, and build the overlay in `Plot::tooltip`. To animate the emphasis, implement `Plot::hover`, which runs each frame before `tooltip` and `paint` with the [`PlotHover`] in focus — it carries the `TooltipState` and lingers after the cursor leaves while `hover.focus()` eases back to zero, so sample the motion there and keep the result on `self` for the other two methods. A `Tooltip` returned from `tooltip` fades with the hover on its own:
 
 ```rust
 fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {

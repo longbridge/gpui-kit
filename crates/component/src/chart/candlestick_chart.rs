@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-use super::{build_band_labels, pointer_spring};
+use super::{build_band_labels, caller_id, pointer_spring};
 
 /// The hover a candlestick chart paints, sampled once per frame in [`Plot::hover`].
 #[derive(Clone, Copy)]
@@ -46,7 +46,7 @@ where
     grid: bool,
     bullish: Option<Hsla>,
     bearish: Option<Hsla>,
-    id: Option<ElementId>,
+    id: ElementId,
     hover: Option<CandlestickHover>,
 }
 
@@ -55,6 +55,7 @@ where
     X: Eq + Hash + Into<SharedString> + 'static,
     Y: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
 {
+    #[track_caller]
     pub fn new<I>(data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -72,18 +73,19 @@ where
             grid: true,
             bullish: None,
             bearish: None,
-            id: None,
+            id: caller_id(),
             hover: None,
         }
     }
 
-    /// Enable an interactive hover tooltip (a highlight band and the open, high,
-    /// low and close of the hovered candle) for this chart.
+    /// Name this chart's [`ElementId`], replacing the default taken from the
+    /// construction site.
     ///
-    /// The `id` must be unique among sibling elements. Without it, the chart stays a
-    /// non-interactive plot.
+    /// Pass one where a single construction site renders several of these
+    /// charts as siblings: they share the default id, and with it one hover
+    /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
-        self.id = Some(id.into());
+        self.id = id.into();
         self
     }
 
@@ -307,7 +309,7 @@ where
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.id.clone()
+        Some(self.id.clone())
     }
 
     fn tooltip_state(

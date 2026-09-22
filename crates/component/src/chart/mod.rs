@@ -14,9 +14,9 @@ pub use pie_chart::PieChart;
 pub use radar_chart::{RadarChart, RadarLabel};
 pub use sankey_chart::{SankeyChart, SankeyLabel};
 
-use std::hash::Hash;
+use std::{hash::Hash, panic::Location};
 
-use gpui::{App, Hsla, Pixels, SharedString, TextAlign, px};
+use gpui::{App, ElementId, Hsla, Pixels, SharedString, TextAlign, px};
 use gpui_base::Spring;
 
 use crate::{
@@ -26,6 +26,25 @@ use crate::{
         scale::{Scale, ScaleBand, ScalePoint},
     },
 };
+
+/// The [`ElementId`] a chart carries when the caller names none: the source
+/// location it was constructed at.
+///
+/// The crosshair, the hover lift, the tooltip and the path cache all need an id
+/// unique among siblings, and a chart that has to be handed one per call site is
+/// a chart every caller leaves static. One construction site written out once,
+/// which is nearly every chart, is unique by construction.
+///
+/// The exception is one site rendering several charts as siblings, where every
+/// copy shares this location and therefore one hover state and one path cache.
+/// A `GlobalElementId` is the whole id stack, so rows that carry their own id —
+/// which `List` and `uniform_list` give them — already separate the copies
+/// underneath them; only id-less siblings collide, and those name an id with
+/// `id`. GPUI takes this same trade-off for [`gpui::Window::use_state`].
+#[track_caller]
+pub(crate) fn caller_id() -> ElementId {
+    ElementId::CodeLocation(*Location::caller())
+}
 
 /// The spring a chart's pointer — the crosshair, highlight band or hover dot —
 /// follows the hovered datum with.
@@ -116,4 +135,43 @@ where
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{chart::PieChart, plot::Plot};
+
+    fn chart() -> PieChart<f32> {
+        PieChart::new([1., 2.])
+    }
+
+    /// The whole point of the default: a chart nobody gave an id to is still
+    /// interactive, because every caller forgot to ask for it.
+    #[test]
+    fn a_chart_is_interactive_without_being_given_an_id() {
+        assert!(Plot::id(&chart()).is_some());
+    }
+
+    /// Two construction sites must not share hover state or a path cache.
+    #[test]
+    fn charts_built_at_different_sites_get_different_ids() {
+        assert_ne!(
+            Plot::id(&PieChart::new([1.])),
+            Plot::id(&PieChart::new([1.]))
+        );
+    }
+
+    /// One site reached twice is one id — the caveat `id` exists for.
+    #[test]
+    fn charts_built_at_one_site_share_an_id() {
+        assert_eq!(Plot::id(&chart()), Plot::id(&chart()));
+    }
+
+    #[test]
+    fn a_named_id_replaces_the_default() {
+        assert_eq!(
+            Plot::id(&chart().id("pie")),
+            Some(gpui::ElementId::Name("pie".into()))
+        );
+    }
 }

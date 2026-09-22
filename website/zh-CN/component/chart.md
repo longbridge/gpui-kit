@@ -578,14 +578,13 @@ SankeyChart::new(nodes, links).value_scale(SankeyValueScale::Sqrt)
 
 ## 悬停与 Tooltip
 
-图表在设置 `id` 之前都是静态绘图。设置之后，它会对光标做命中测试，为光标所在的数据显示 tooltip，并按图表类型强调这条数据：
+图表默认就会对光标做命中测试，为光标所在的数据显示 tooltip，并按图表类型强调这条数据，无需额外开启：
 
 ```rust
 LineChart::new(data)
     .x(|d| d.date.clone())
     .y(|d| d.value)
     .name("Desktop") // tooltip 行中的系列名
-    .id("visitors")  // 在同级元素中须唯一
 ```
 
 | 图表 | 悬停时 |
@@ -599,17 +598,27 @@ LineChart::new(data)
 
 tooltip 框跟随光标，靠近边缘时翻向绘图区中心。`AreaChart` 与 `RadarChart` 每个系列各取一个 `.name()`，在对应的 `.y()` / `.value()` 之后调用。
 
+### 标识
+
+这些行为都以 `ElementId` 为键，图表默认取自己的构造位置作为 id——只写出一次的图表因此天然唯一，绝大多数图表都是这种情况。若同一处构造被渲染成多个同级图表，需要分别命名，否则它们会共用同一份悬停状态与缓存：
+
+```rust
+shares.iter().enumerate().map(|(i, share)| PieChart::new(share.clone()).id(("share", i)))
+```
+
+`GlobalElementId` 是整条 id 栈，因此本身已带 id 的同级元素（例如 `List`、`uniform_list` 绘制的行）会自动把其下的图表区分开，无需额外处理。
+
 ### 动效
 
 强调效果使用样式层的 motion tokens（`cx.theme().motion_tokens()`）驱动：十字线、高亮条、圆点等指示器以快速弹簧跟随悬停的数据，饼图扇区以 control 弹簧抬起，整个覆盖层在光标落到数据上时淡入、离开后淡出。动效遵循操作系统的减弱动态效果偏好，开启后所有值立即到达目标。
 
 ### 缓存
 
-设置了 `id` 的图表还会跨帧保留较重的几何计算，因为图表在屏幕上的每一帧都会重绘：折线与面积的描边、饼图扇区在投影点不变时保持已细分的路径，桑基图在数据、设置和尺寸不变时保留布局。没有 `id` 的图表每次绘制都重新计算，否则同级图表会共用同一份缓存。
+图表还会跨帧保留较重的几何计算，因为它在屏幕上的每一帧都会重绘：折线与面积的描边、饼图扇区在投影点不变时保持已细分的路径，桑基图在数据、设置和尺寸不变时保留布局。这份缓存挂在同一个 id 上，因此共用 id 的图表会互相冲刷缓存——这是同级图表需要分别命名的另一个理由。
 
 ### 自定义 Plot
 
-自定义 [`Plot`] 以同样的方式接入：在 `Plot::id` 返回 id，在 `Plot::tooltip_state` 解析光标所在的数据，在 `Plot::tooltip` 构建覆盖层。要为强调效果加动画，实现 `Plot::hover`——它在每帧的 `tooltip` 与 `paint` 之前运行，收到当前聚焦的 [`PlotHover`]；它携带 `TooltipState`，光标离开后会保留一段时间，`hover.focus()` 逐渐回到零，因此在这里采样动效并把结果存到 `self` 供另外两个方法使用。`tooltip` 返回的 `Tooltip` 会自动随悬停淡入淡出：
+自定义 [`Plot`] 需要手动接入——那里的 `Plot::id` 仍默认返回 `None`：在 `Plot::id` 返回 id，在 `Plot::tooltip_state` 解析光标所在的数据，在 `Plot::tooltip` 构建覆盖层。要为强调效果加动画，实现 `Plot::hover`——它在每帧的 `tooltip` 与 `paint` 之前运行，收到当前聚焦的 [`PlotHover`]；它携带 `TooltipState`，光标离开后会保留一段时间，`hover.focus()` 逐渐回到零，因此在这里采样动效并把结果存到 `self` 供另外两个方法使用。`tooltip` 返回的 `Tooltip` 会自动随悬停淡入淡出：
 
 ```rust
 fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {

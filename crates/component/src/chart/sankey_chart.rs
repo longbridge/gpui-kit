@@ -9,6 +9,7 @@ use gpui::{
 };
 use gpui_component_macros::IntoPlot;
 
+use super::caller_id;
 use crate::{
     ActiveTheme,
     plot::{
@@ -128,7 +129,7 @@ pub struct SankeyChart<T: 'static> {
     link_opacity: f32,
     min_link_width: f32,
     label_gap: f32,
-    id: Option<ElementId>,
+    id: ElementId,
     /// The placement for this frame, resolved in `prepaint` (measuring labels
     /// needs the window) and read by `tooltip_state` and `paint`.
     frame: Option<Rc<SankeyFrame>>,
@@ -138,6 +139,7 @@ pub struct SankeyChart<T: 'static> {
 impl<T> SankeyChart<T> {
     /// Create a chart from nodes and links; links reference nodes by their
     /// index in `nodes` (map string ids to indices before constructing).
+    #[track_caller]
     pub fn new<I, L>(nodes: I, links: L) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -159,20 +161,20 @@ impl<T> SankeyChart<T> {
             link_opacity: DEFAULT_LINK_OPACITY,
             min_link_width: DEFAULT_MIN_LINK_WIDTH,
             label_gap: DEFAULT_LABEL_GAP,
-            id: None,
+            id: caller_id(),
             frame: None,
             hover: None,
         }
     }
 
-    /// Enable an interactive hover tooltip for this chart: the links of the
-    /// hovered node stand out from the rest and the tooltip shows its label and
-    /// throughput.
+    /// Name this chart's [`ElementId`], replacing the default taken from the
+    /// construction site.
     ///
-    /// The `id` must be unique among sibling elements. Without it, the chart
-    /// stays a non-interactive plot.
+    /// Pass one where a single construction site renders several of these
+    /// charts as siblings: they share the default id, and with it one hover
+    /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
-        self.id = Some(id.into());
+        self.id = id.into();
         self
     }
 
@@ -479,25 +481,20 @@ impl<T> Plot for SankeyChart<T> {
 
         let node_labels = self.node_labels(cx);
 
-        // An identified chart keeps its placement across frames; without an id,
-        // sibling charts would share one cache and thrash it.
-        self.frame = if self.id.is_some() {
-            let key = self.frame_key(bounds, &node_labels);
-            let cache =
-                window.use_keyed_state("sankey-frame", cx, |_, _| SankeyFrameCache::default());
-            let cached = cache.read(cx);
-            if cached.key == Some(key) {
-                cached.frame.clone()
-            } else {
-                let frame = self.place(bounds, node_labels, window).map(Rc::new);
-                cache.update(cx, |cache, _| {
-                    cache.key = Some(key);
-                    cache.frame = frame.clone();
-                });
-                frame
-            }
+        // The chart's own id is on the stack, so this cache belongs to it alone:
+        // the placement survives every frame that did not move it.
+        let key = self.frame_key(bounds, &node_labels);
+        let cache = window.use_keyed_state("sankey-frame", cx, |_, _| SankeyFrameCache::default());
+        let cached = cache.read(cx);
+        self.frame = if cached.key == Some(key) {
+            cached.frame.clone()
         } else {
-            self.place(bounds, node_labels, window).map(Rc::new)
+            let frame = self.place(bounds, node_labels, window).map(Rc::new);
+            cache.update(cx, |cache, _| {
+                cache.key = Some(key);
+                cache.frame = frame.clone();
+            });
+            frame
         };
 
         vec![]
@@ -639,7 +636,7 @@ impl<T> Plot for SankeyChart<T> {
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.id.clone()
+        Some(self.id.clone())
     }
 
     fn tooltip_state(

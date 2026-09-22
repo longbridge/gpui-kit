@@ -19,7 +19,7 @@ use crate::{
     },
 };
 
-use super::{build_band_labels, pointer_spring};
+use super::{build_band_labels, caller_id, pointer_spring};
 
 /// Space reserved along the band axis for the value-axis tick labels, in pixels.
 ///
@@ -62,7 +62,7 @@ where
     grid: bool,
     alignment: BarAlignment,
     corner_radii: Corners<Pixels>,
-    id: Option<ElementId>,
+    id: ElementId,
     name: Option<SharedString>,
     /// The label gaps of horizontal bars, measured in `prepaint` for the frame,
     /// so `tooltip_state` (which has no window) can keep the hover off the labels.
@@ -75,6 +75,7 @@ where
     B: Eq + Hash + Into<SharedString> + 'static,
     V: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
 {
+    #[track_caller]
     pub fn new<I>(data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -93,20 +94,21 @@ where
             grid: true,
             alignment: BarAlignment::default(),
             corner_radii: Corners::all(px(0.)),
-            id: None,
+            id: caller_id(),
             name: None,
             horizontal_gaps: (0., 0.),
             hover: None,
         }
     }
 
-    /// Enable an interactive hover tooltip (crosshair + category/value) for this chart.
+    /// Name this chart's [`ElementId`], replacing the default taken from the
+    /// construction site.
     ///
-    /// The `id` must be unique among sibling elements. Without it, the chart stays a
-    /// non-interactive plot. Works for every [`BarAlignment`] (vertical bars get a
-    /// vertical crosshair, horizontal bars a horizontal one).
+    /// Pass one where a single construction site renders several of these
+    /// charts as siblings: they share the default id, and with it one hover
+    /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
-        self.id = Some(id.into());
+        self.id = id.into();
         self
     }
 
@@ -689,7 +691,7 @@ where
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.id.clone()
+        Some(self.id.clone())
     }
 
     fn tooltip_state(

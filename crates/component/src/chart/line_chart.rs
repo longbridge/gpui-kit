@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-use super::{HOVER_DOT_SIZE, build_point_x_labels, hover_halo_size, pointer_spring};
+use super::{HOVER_DOT_SIZE, build_point_x_labels, caller_id, hover_halo_size, pointer_spring};
 
 /// The hover a line chart paints, sampled once per frame in [`Plot::hover`].
 #[derive(Clone, Copy)]
@@ -45,7 +45,7 @@ where
     tick_margin: usize,
     x_axis: bool,
     grid: bool,
-    id: Option<ElementId>,
+    id: ElementId,
     name: Option<SharedString>,
     hover: Option<LineHover>,
 }
@@ -55,6 +55,7 @@ where
     X: PartialEq + Into<SharedString> + 'static,
     Y: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
 {
+    #[track_caller]
     pub fn new<I>(data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -69,18 +70,20 @@ where
             tick_margin: 1,
             x_axis: true,
             grid: true,
-            id: None,
+            id: caller_id(),
             name: None,
             hover: None,
         }
     }
 
-    /// Enable an interactive hover tooltip (with crosshair and a data dot) for this chart.
+    /// Name this chart's [`ElementId`], replacing the default taken from the
+    /// construction site.
     ///
-    /// The `id` must be unique among sibling elements. Without it, the chart stays a
-    /// non-interactive plot.
+    /// Pass one where a single construction site renders several of these
+    /// charts as siblings: they share the default id, and with it one hover
+    /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
-        self.id = Some(id.into());
+        self.id = id.into();
         self
     }
 
@@ -224,20 +227,16 @@ where
             line = line.dot().dot_size(8.).dot_fill_color(stroke);
         }
 
-        // An identified chart keeps its stroke tessellated across frames; without
-        // an id, sibling charts would share one cache slot and thrash it.
-        if self.id.is_some() {
-            let caches = PathCaches::for_paint("line", window, cx);
-            caches.update(cx, |caches, _| {
-                line.paint_cached(&bounds, caches.slot(0), window);
-            });
-        } else {
-            line.paint(&bounds, window);
-        }
+        // The chart's own id is on the stack, so this cache belongs to it alone:
+        // the tessellation survives every frame that did not move it.
+        let caches = PathCaches::for_paint("line", window, cx);
+        caches.update(cx, |caches, _| {
+            line.paint_cached(&bounds, caches.slot(0), window);
+        });
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.id.clone()
+        Some(self.id.clone())
     }
 
     fn tooltip_state(

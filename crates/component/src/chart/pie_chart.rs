@@ -8,6 +8,7 @@ use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
 use num_traits::Zero;
 
+use super::caller_id;
 use crate::{
     ActiveTheme,
     plot::{
@@ -51,12 +52,13 @@ pub struct PieChart<T: 'static> {
     label_line_color: Option<Rc<dyn Fn(&T) -> Hsla + 'static>>,
     label_color: Option<Hsla>,
     label_gap: f32,
-    id: Option<ElementId>,
+    id: ElementId,
     name: Option<SharedString>,
     hover: Option<PieHover>,
 }
 
 impl<T> PieChart<T> {
+    #[track_caller]
     pub fn new<I>(data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -74,19 +76,20 @@ impl<T> PieChart<T> {
             label_line_color: None,
             label_color: None,
             label_gap: DEFAULT_LABEL_GAP,
-            id: None,
+            id: caller_id(),
             name: None,
             hover: None,
         }
     }
 
-    /// Enable an interactive hover tooltip for this chart: the hovered slice
-    /// lifts out of the ring and the tooltip shows its value and share.
+    /// Name this chart's [`ElementId`], replacing the default taken from the
+    /// construction site.
     ///
-    /// The `id` must be unique among sibling elements. Without it, the chart
-    /// stays a non-interactive plot.
+    /// Pass one where a single construction site renders several of these
+    /// charts as siblings: they share the default id, and with it one hover
+    /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
-        self.id = Some(id.into());
+        self.id = id.into();
         self
     }
 
@@ -247,39 +250,26 @@ impl<T> Plot for PieChart<T> {
             .outer_radius(outer_radius);
         let arcs = self.arcs();
 
-        // An identified chart keeps its slices tessellated across frames; without
-        // an id, sibling charts would share one cache and thrash it.
-        let caches = self
-            .id
-            .is_some()
-            .then(|| PathCaches::for_paint("slices", window, cx));
+        // The chart's own id is on the stack, so this cache belongs to it alone:
+        // the tessellation survives every frame that did not move it.
+        let caches = PathCaches::for_paint("slices", window, cx);
         for (ix, a) in arcs.iter().enumerate() {
             let inner_radius = self.get_inner_radius(a);
             // The hovered slice lifts out of the ring while the others fade behind it.
             let (lift, opacity) = self.slice_emphasis(a.index);
             let slice_radius = self.get_outer_radius(a, outer_radius) + HOVER_LIFT * lift;
             let color = self.slice_color(a.data, cx).opacity(opacity);
-            match caches.as_ref() {
-                Some(caches) => caches.update(cx, |caches, _| {
-                    arc.paint_cached(
-                        a,
-                        color,
-                        Some(inner_radius),
-                        Some(slice_radius),
-                        &bounds,
-                        caches.slot(ix),
-                        window,
-                    );
-                }),
-                None => arc.paint(
+            caches.update(cx, |caches, _| {
+                arc.paint_cached(
                     a,
                     color,
                     Some(inner_radius),
                     Some(slice_radius),
                     &bounds,
+                    caches.slot(ix),
                     window,
-                ),
-            }
+                );
+            });
         }
 
         // Draw leader-line labels outside the ring (only when `label` is set).
@@ -376,7 +366,7 @@ impl<T> Plot for PieChart<T> {
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.id.clone()
+        Some(self.id.clone())
     }
 
     fn tooltip_state(
