@@ -347,7 +347,10 @@ impl Card {
                     .justify_between()
                     .when(centered, |this| this.justify_center())
                     .child(
+                        // The heading holds its width; the legend beside it is
+                        // what gives way and wraps.
                         v_flex()
+                            .flex_shrink_0()
                             .when(centered, |this| this.text_center())
                             .child(div().font_semibold().child(self.title))
                             .child(
@@ -385,15 +388,20 @@ impl Card {
 }
 
 /// A row of swatch-and-label pairs.
+///
+/// It shares the heading row with the title, so it has to yield width rather
+/// than hold its own: shrinking lets `flex_wrap` fold a long series list onto a
+/// second line instead of running out past the card.
 fn legend(entries: Vec<(Hsla, SharedString)>, cx: &App) -> gpui_kit::Div {
     h_flex()
-        .flex_shrink_0()
         .flex_wrap()
+        .justify_end()
         .gap_3()
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .children(entries.into_iter().map(|(color, label)| {
             h_flex()
+                .flex_shrink_0()
                 .gap_1p5()
                 .items_center()
                 .child(div().size_2().rounded_sm().bg(color))
