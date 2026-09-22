@@ -6,7 +6,7 @@ order: -5
 
 # Action
 
-GPUI 原生提供 **Focus**、**Key Context**、**Action**、**KeyBinding** 与 [**Event**](./event)，它们是 GPUI 的核心交互机制。应用通过这些机制，把操作命令路由到窗口中当前活跃的区域，并在 Entity 之间传递类型明确的状态变化。
+GPUI 提供 **Focus**、**Key Context**、**Action**、**KeyBinding** 与 [**Event**](./event)，它们是 GPUI 的核心交互机制。应用通过这些机制，把操作命令路由到窗口中当前活跃的区域，并在 Entity 之间传递类型明确的状态变化。
 
 这篇 Guide 说明如何配合使用这些机制：
 

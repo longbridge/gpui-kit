@@ -6,7 +6,7 @@ order: -6
 
 # Event
 
-GPUI 原生提供 **Event**，用于在 Entity 之间发送类型明确的通知。Event 报告已经发生的事实；与 [**Action**](./action) 不同，它不经过 Focus、Key Context、KeyBinding 或 Dispatch Path。
+GPUI 提供 **Event**，用于在 Entity 之间发送类型明确的通知。Event 报告已经发生的事实；与 [**Action**](./action) 不同，它不经过 Focus、Key Context、KeyBinding 或 Dispatch Path。
 
 ## Action 进入，Event 返回
 

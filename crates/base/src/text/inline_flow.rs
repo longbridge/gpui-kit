@@ -1,16 +1,17 @@
 use std::{
+    cell::RefCell,
     ops::Range,
+    rc::Rc,
     sync::{Arc, Mutex},
 };
 use unicode_segmentation::UnicodeSegmentation as _;
 
 use gpui::{
     AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, DefiniteLength, Element, ElementId,
-    GlobalElementId, ImageSource, InspectorElementId, InteractiveElement as _, IntoElement,
-    LayoutId, LineFragment as WrapLineFragment, ObjectFit, ParentElement as _, Pixels,
-    Refineable as _, ShapedLine, SharedString, Size, StatefulInteractiveElement as _, Styled,
-    StyledImage as _, TextRun, TextStyle, WhiteSpace, Window, div, img, point,
-    prelude::FluentBuilder as _, px, relative, size,
+    GlobalElementId, Hsla, ImageSource, InspectorElementId, InteractiveElement as _, IntoElement,
+    LayoutId, LineFragment as WrapLineFragment, ObjectFit, Pixels, Refineable as _, ShapedLine,
+    SharedString, Size, StatefulInteractiveElement as _, Styled, StyledImage as _, TextRun,
+    TextStyle, WhiteSpace, Window, img, point, prelude::FluentBuilder as _, px, relative, size,
 };
 
 use crate::text::text_view::{LinkClickHandlerFn, handle_link_click};
@@ -60,13 +61,100 @@ pub(super) enum InlineFlowItem {
 }
 
 pub(crate) struct InlineFlowLayoutState {
-    layout: Arc<Mutex<Option<InlineFlowLayout>>>,
     typography: InlineFlowTypography,
+    frame_state: Rc<RefCell<InlineFlowFrameState>>,
+    /// The layout this element's last measurement returned, which is the
+    /// one to paint. Per element, not per state: two flows under the same
+    /// id (the same document shown twice) share the state's layouts but
+    /// paint their own.
+    current: Rc<RefCell<Option<Rc<InlineFlowLayout>>>>,
+}
+
+/// What a flow keeps from one frame to the next, as GPUI element state under
+/// the flow's id.
+#[derive(Default)]
+struct InlineFlowFrameState {
+    /// One state per text fragment, by text-fragment index. A fragment's `Inline`
+    /// retains its shaped text under its state (see `RetainedLayout`), so
+    /// the state has to be the same one next frame for the text to be
+    /// found; a fresh state per frame shaped every fragment again and left
+    /// an entry in the table that nobody would take.
+    fragment_states: Vec<Arc<Mutex<InlineState>>>,
+    /// What `layouts` were laid out from. A frame whose items or typography
+    /// differ starts over.
+    key: Option<FlowLayoutKey>,
+    /// The layouts of `key`, one per wrap width the flow was measured at:
+    /// taffy probes a flow at more than one width in a frame (unconstrained,
+    /// then the column's). A frame that changes nothing finds every width
+    /// here and wraps and shapes nothing.
+    layouts: Vec<Rc<InlineFlowLayout>>,
+}
+
+/// How many wrap widths a flow keeps a layout for.
+const LAYOUTS_PER_FLOW: usize = 3;
+
+impl InlineFlowFrameState {
+    fn fragment_state(&mut self, fragment_ix: usize) -> Arc<Mutex<InlineState>> {
+        if self.fragment_states.len() <= fragment_ix {
+            self.fragment_states
+                .resize_with(fragment_ix + 1, Default::default);
+        }
+        self.fragment_states[fragment_ix].clone()
+    }
+
+    /// Makes `key` the current one, dropping the layouts of another key.
+    fn set_key(&mut self, key: FlowLayoutKey) {
+        if !self
+            .key
+            .as_ref()
+            .is_some_and(|current| current.matches(&key))
+        {
+            self.layouts.clear();
+        }
+        self.key = Some(key);
+    }
+
+    /// The layout at `wrap_width`, if the key was laid out there already.
+    fn layout_at(&self, wrap_width: Option<Pixels>) -> Option<Rc<InlineFlowLayout>> {
+        self.layouts
+            .iter()
+            .find(|layout| layout.wrap_width == wrap_width)
+            .cloned()
+    }
+
+    /// Keeps `layout`, in place of the oldest one when the flow has been
+    /// measured at more widths than it keeps.
+    fn push_layout(&mut self, layout: Rc<InlineFlowLayout>) {
+        if self.layouts.len() >= LAYOUTS_PER_FLOW {
+            self.layouts.remove(0);
+        }
+        self.layouts.push(layout);
+    }
+}
+
+/// Everything but the wrap width that a flow's layout depends on.
+struct FlowLayoutKey {
+    items: Vec<MeasureItem>,
+    image_sizes: Vec<Option<Size<Pixels>>>,
+    typography: InlineFlowTypography,
+}
+
+impl FlowLayoutKey {
+    fn matches(&self, other: &Self) -> bool {
+        self.items.len() == other.items.len()
+            && self
+                .items
+                .iter()
+                .zip(&other.items)
+                .all(|(item, other)| item.same_layout_input(other))
+            && self.image_sizes == other.image_sizes
+            && self.typography == other.typography
+    }
 }
 
 /// Resolved before `request_measured_layout`, while the parent's text-style
 /// and rem stacks are still active.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct InlineFlowTypography {
     text_style: TextStyle,
     rem_size: Pixels,
@@ -77,9 +165,9 @@ struct InlineFlowTypography {
 struct InlineFlowLayout {
     fragments: Vec<PositionedFragment>,
     size: Size<Pixels>,
+    wrap_width: Option<Pixels>,
 }
 
-#[derive(Clone)]
 enum PositionedFragment {
     Object {
         item_ix: usize,
@@ -97,6 +185,8 @@ enum PositionedFragment {
         links: Vec<(Range<usize>, LinkMark)>,
         highlights: Vec<(Range<usize>, InlineHighlight)>,
         selection_bounds: Bounds<Pixels>,
+        /// The rounded box behind a code span, relative to the flow.
+        code_background: Option<(Bounds<Pixels>, Hsla)>,
     },
     Image {
         item_ix: usize,
@@ -139,6 +229,8 @@ enum LineFragmentKind {
         text: SharedString,
         links: Vec<(Range<usize>, LinkMark)>,
         highlights: Vec<(Range<usize>, InlineHighlight)>,
+        /// The code span's box, relative to the fragment.
+        code_background: Option<(Bounds<Pixels>, Hsla)>,
     },
     Image,
 }
@@ -223,11 +315,15 @@ impl Element for InlineFlow {
 
     fn request_layout(
         &mut self,
-        _id: Option<&GlobalElementId>,
+        id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
+        let frame_state = window.with_optional_element_state(id, |state, _| {
+            let state: Rc<RefCell<InlineFlowFrameState>> = state.flatten().unwrap_or_default();
+            (state.clone(), Some(state))
+        });
         let measure_items = self.items.iter().map(MeasureItem::from).collect::<Vec<_>>();
         // A measured-layout callback runs after the parent's text-style stack
         // is gone. Capture every resolved typography input while this element
@@ -259,45 +355,57 @@ impl Element for InlineFlow {
             })
             .collect::<Vec<_>>();
         let objects = prepare_objects(&measure_items, &typography.text_style, window, cx);
-        let layout_state = InlineFlowLayoutState {
-            layout: Arc::default(),
+        frame_state.borrow_mut().set_key(FlowLayoutKey {
+            items: measure_items,
+            image_sizes,
             typography: typography.clone(),
+        });
+        let layout_state = InlineFlowLayoutState {
+            typography: typography.clone(),
+            frame_state: frame_state.clone(),
+            current: Rc::default(),
         };
-        let layout_ref = layout_state.layout.clone();
-        let layout_typography = typography.clone();
+        let current = layout_state.current.clone();
 
         let layout_id = window.request_measured_layout(Default::default(), {
             move |known_dimensions, available_space, window, cx| {
-                window.with_rem_size(Some(layout_typography.rem_size), |window| {
+                let wrap_width = if typography.text_style.white_space == WhiteSpace::Normal {
+                    known_dimensions.width.or(match available_space.width {
+                        AvailableSpace::Definite(width) => Some(width),
+                        _ => None,
+                    })
+                } else {
+                    None
+                };
+                let mut state = frame_state.borrow_mut();
+                if let Some(layout) = state.layout_at(wrap_width) {
+                    let size = layout.size;
+                    *current.borrow_mut() = Some(layout);
+                    return size;
+                }
+                let state = &mut *state;
+                let key = state.key.as_ref().expect("set by request_layout");
+                let layout = window.with_rem_size(Some(typography.rem_size), |window| {
                     window.with_text_style(
-                        Some(layout_typography.text_style.subtract(&Default::default())),
+                        Some(typography.text_style.subtract(&Default::default())),
                         |window| {
-                            let wrap_width =
-                                if layout_typography.text_style.white_space == WhiteSpace::Normal {
-                                    known_dimensions.width.or(match available_space.width {
-                                        AvailableSpace::Definite(width) => Some(width),
-                                        _ => None,
-                                    })
-                                } else {
-                                    None
-                                };
-                            let layout = layout_measured_flow(
-                                &measure_items,
-                                &image_sizes,
+                            layout_measured_flow(
+                                &key.items,
+                                &key.image_sizes,
                                 &objects,
-                                &layout_typography.text_style,
+                                &typography.text_style,
                                 wrap_width,
                                 window,
                                 cx,
-                            );
-                            let size = layout.size;
-                            if let Ok(mut state) = layout_ref.lock() {
-                                *state = Some(layout);
-                            }
-                            size
+                            )
                         },
                     )
-                })
+                });
+                let size = layout.size;
+                let layout = Rc::new(layout);
+                *current.borrow_mut() = Some(layout.clone());
+                state.push_layout(layout);
+                size
             }
         });
 
@@ -313,17 +421,16 @@ impl Element for InlineFlow {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let fragments = request_layout
-            .layout
-            .lock()
-            .ok()
-            .and_then(|layout| layout.as_ref().map(|layout| layout.fragments.clone()))
-            .unwrap_or_default();
+        let frame_state = request_layout.frame_state.clone();
+        let Some(layout) = request_layout.current.borrow().clone() else {
+            return Vec::new();
+        };
         let typography = request_layout.typography.clone();
         let text_style = &typography.text_style;
-        let mut elements = Vec::with_capacity(fragments.len());
+        let mut elements = Vec::with_capacity(layout.fragments.len());
 
-        for fragment in fragments {
+        let mut text_fragment_count = 0;
+        for fragment in &layout.fragments {
             match fragment {
                 PositionedFragment::Object {
                     item_ix,
@@ -338,7 +445,7 @@ impl Element for InlineFlow {
                         selected,
                         link,
                         ..
-                    } = &self.items[item_ix]
+                    } = &self.items[*item_ix]
                     else {
                         continue;
                     };
@@ -347,7 +454,7 @@ impl Element for InlineFlow {
                         ("inline-object", *id),
                         text.clone(),
                         accessibility_label.clone(),
-                        *object,
+                        (**object).clone(),
                         selected.clone(),
                         Bounds::new(
                             bounds.origin + selection_bounds.origin,
@@ -361,7 +468,7 @@ impl Element for InlineFlow {
                     .link(link.clone(), self.link_click_handler.clone())
                     .into_any_element();
                     element.prepaint_as_root(
-                        bounds.origin + origin,
+                        bounds.origin + *origin,
                         size(
                             AvailableSpace::Definite(object_size.width),
                             AvailableSpace::Definite(object_size.height),
@@ -379,18 +486,20 @@ impl Element for InlineFlow {
                     font_size,
                     text,
                     links,
-                    mut highlights,
+                    highlights,
                     selection_bounds,
-                    ..
+                    code_background,
                 } => {
                     let InlineFlowItem::Text {
                         state: source_state,
                         ..
-                    } = &self.items[item_ix]
+                    } = &self.items[*item_ix]
                     else {
                         continue;
                     };
-                    let state = Arc::new(Mutex::new(InlineState::default()));
+                    let (origin, fragment_size, font_size) = (*origin, *fragment_size, *font_size);
+                    let state = frame_state.borrow_mut().fragment_state(text_fragment_count);
+                    text_fragment_count += 1;
                     if let Ok(mut state) = state.lock() {
                         state.set_text(text.clone());
                     }
@@ -401,74 +510,52 @@ impl Element for InlineFlow {
                     } else {
                         Pixels::ZERO
                     };
-                    let background = if is_code {
-                        let runs = text_runs(text.len(), text_style, &highlights);
-                        let line = shape_line(text.clone(), font_size, &runs, window);
-                        let baseline =
-                            (fragment_size.height - line.ascent - line.descent) / 2. + line.ascent;
-                        let cap_height = runs
-                            .iter()
-                            .map(|run| {
-                                let font = window.text_system().resolve_font(&run.font);
-                                window.text_system().cap_height(font, font_size)
-                            })
-                            .fold(Pixels::ZERO, Pixels::max);
-                        // Center the background on the capital-height body of the text.
-                        // Share descender room between both sides instead of adding it only below.
-                        let vertical_padding = font_size * 0.125 + line.descent / 2.;
-                        let color = highlights
-                            .iter()
-                            .find_map(|(_, h)| h.style.background_color);
-                        for (_, highlight) in &mut highlights {
-                            highlight.style.background_color = None;
-                        }
-                        color.map(|color| {
-                            (
-                                Bounds::new(
-                                    bounds.origin
-                                        + origin
-                                        + point(
-                                            Pixels::ZERO,
-                                            baseline - cap_height - vertical_padding,
-                                        ),
-                                    size(fragment_size.width, cap_height + vertical_padding * 2.),
-                                ),
-                                color,
-                            )
-                        })
-                    } else {
-                        None
-                    };
-                    let inline =
-                        Inline::new(state, links, highlights, self.link_click_handler.clone())
-                            .selection_source(source_state.clone(), source_range)
-                            .text_style(text_style.clone())
-                            .selection_bounds(Bounds::new(
-                                point(bounds.left(), bounds.top() + selection_bounds.top()),
-                                size(bounds.size.width, selection_bounds.size.height),
-                            ))
-                            .paint_origin(bounds.origin + origin + point(padding, Pixels::ZERO));
-                    let mut element = div()
-                        .font(text_style.font())
-                        .text_color(text_style.color)
-                        .when_some(text_style.background_color, |this, color| {
-                            this.text_bg(color)
-                        })
-                        .text_size(font_size)
-                        .line_height(fragment_size.height)
-                        // Fragments are already wrapped, so this leaf must not wrap independently.
-                        .whitespace_nowrap()
-                        .child(inline)
-                        .into_any_element();
+                    let background = code_background.map(|(background, color)| {
+                        (
+                            Bounds::new(bounds.origin + background.origin, background.size),
+                            color,
+                        )
+                    });
+                    // The fragment's typography: the flow's style at the
+                    // fragment's size, on one line. Fragments are already
+                    // wrapped, so this leaf must not wrap independently.
+                    let mut fragment_style = text_style.clone();
+                    fragment_style.font_size = font_size.into();
+                    fragment_style.line_height = fragment_size.height.into();
+                    fragment_style.white_space = WhiteSpace::Nowrap;
+                    let mut element = Inline::new(
+                        state,
+                        links.clone(),
+                        highlights.clone(),
+                        self.link_click_handler.clone(),
+                    )
+                    .selection_source(source_state.clone(), source_range.clone())
+                    .text_style(fragment_style.clone())
+                    .selection_bounds(Bounds::new(
+                        point(bounds.left(), bounds.top() + selection_bounds.top()),
+                        size(bounds.size.width, selection_bounds.size.height),
+                    ))
+                    .paint_origin(bounds.origin + origin + point(padding, Pixels::ZERO))
+                    .into_any_element();
+                    // The `Inline` is its own layout root, with no box around
+                    // it: its text measures with the window's text style, so
+                    // the fragment's style is pushed for the layout.
                     window.with_rem_size(Some(typography.rem_size), |window| {
-                        element.prepaint_as_root(
-                            bounds.origin + origin + point(padding, Pixels::ZERO),
-                            size(
-                                AvailableSpace::Definite(fragment_size.width - padding * 2.),
-                                AvailableSpace::Definite(fragment_size.height),
-                            ),
-                            window,
-                            cx,
+                        window.with_text_style(
+                            Some(fragment_style.subtract(&Default::default())),
+                            |window| {
+                                element.prepaint_as_root(
+                                    bounds.origin + origin + point(padding, Pixels::ZERO),
+                                    size(
+                                        AvailableSpace::Definite(
+                                            fragment_size.width - padding * 2.,
+                                        ),
+                                        AvailableSpace::Definite(fragment_size.height),
+                                    ),
+                                    window,
+                                    cx,
+                                );
+                            },
                         );
                     });
                     elements.push((element, background));
@@ -483,10 +570,11 @@ impl Element for InlineFlow {
                         link,
                         title,
                         ..
-                    } = &self.items[item_ix]
+                    } = &self.items[*item_ix]
                     else {
                         continue;
                     };
+                    let (origin, fragment_size) = (*origin, *fragment_size);
                     let mut element = Self::image_element(
                         elements.len(),
                         source,
@@ -508,6 +596,11 @@ impl Element for InlineFlow {
                 }
             }
         }
+
+        frame_state
+            .borrow_mut()
+            .fragment_states
+            .truncate(text_fragment_count);
 
         elements
     }
@@ -588,6 +681,34 @@ impl MeasureItem {
         match self {
             MeasureItem::Text { text, .. } => text.len(),
             MeasureItem::Image { .. } | MeasureItem::Object { .. } => IMAGE_LEN,
+        }
+    }
+
+    /// Whether `other` lays out the same as this item. An object is
+    /// rendered anew every frame, so a flow with one is never reused.
+    fn same_layout_input(&self, other: &Self) -> bool {
+        match (self, other) {
+            (
+                MeasureItem::Text {
+                    text,
+                    links,
+                    highlights,
+                },
+                MeasureItem::Text {
+                    text: other_text,
+                    links: other_links,
+                    highlights: other_highlights,
+                },
+            ) => text == other_text && links == other_links && highlights == other_highlights,
+            (
+                MeasureItem::Image { width, height, .. },
+                MeasureItem::Image {
+                    width: other_width,
+                    height: other_height,
+                    ..
+                },
+            ) => width == other_width && height == other_height,
+            _ => false,
         }
     }
 }
@@ -686,6 +807,12 @@ fn layout_flow(
     )
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many flows were laid out (wrapped and shaped) on this thread.
+    pub(super) static FLOW_LAYOUTS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 fn layout_measured_flow(
     items: &[MeasureItem],
     image_sizes: &[Option<Size<Pixels>>],
@@ -695,6 +822,8 @@ fn layout_measured_flow(
     window: &mut Window,
     _cx: &mut App,
 ) -> InlineFlowLayout {
+    #[cfg(test)]
+    FLOW_LAYOUTS.with(|layouts| layouts.set(layouts.get() + 1));
     let line_height = window.pixel_snap(window.line_height());
     let rem_size = window.rem_size();
     let total_len = items.iter().map(MeasureItem::len).sum::<usize>();
@@ -753,9 +882,10 @@ fn layout_measured_flow(
                             continue;
                         }
                         let subtext = SharedString::from(text[start..end].to_string());
-                        let highlights = slice_ranges(highlights, start, end, |range, style| {
-                            (range, style.clone())
-                        });
+                        let mut highlights =
+                            slice_ranges(highlights, start, end, |range, style| {
+                                (range, style.clone())
+                            });
                         let links =
                             slice_ranges(links, start, end, |range, link| (range, link.clone()));
                         let runs = text_runs(subtext.len(), text_style, &highlights);
@@ -773,6 +903,19 @@ fn layout_measured_flow(
                         // The compact code background is painted independently.
                         let (segment_line_height, baseline) =
                             shaped_line_height_and_baseline(&shaped_line, line_height, window);
+                        let code_background = is_code
+                            .then(|| {
+                                code_background(
+                                    &shaped_line,
+                                    &runs,
+                                    segment_font_size,
+                                    &mut highlights,
+                                    size(width, segment_line_height),
+                                    baseline,
+                                    window,
+                                )
+                            })
+                            .flatten();
                         line_ascent = line_ascent.max(baseline);
                         line_descent = line_descent.max(segment_line_height - baseline);
                         line_width += width;
@@ -783,6 +926,7 @@ fn layout_measured_flow(
                                 text: subtext,
                                 links,
                                 highlights,
+                                code_background,
                             },
                             size: size(width, segment_line_height),
                             source_range: start..end,
@@ -847,6 +991,7 @@ fn layout_measured_flow(
                     text,
                     links,
                     highlights,
+                    code_background,
                 } => PositionedFragment::Text {
                     item_ix: fragment.item_ix,
                     origin,
@@ -857,6 +1002,12 @@ fn layout_measured_flow(
                     text,
                     links,
                     highlights,
+                    code_background: code_background.map(|(background, color)| {
+                        (
+                            Bounds::new(origin + background.origin, background.size),
+                            color,
+                        )
+                    }),
                 },
                 LineFragmentKind::Image => PositionedFragment::Image {
                     item_ix: fragment.item_ix,
@@ -875,7 +1026,47 @@ fn layout_measured_flow(
     InlineFlowLayout {
         fragments,
         size: size(max_width, y),
+        wrap_width,
     }
+}
+
+/// The rounded box behind a code span, relative to the fragment: centered on
+/// the capital-height body of the text, with the descender room shared
+/// between both sides instead of added only below. Takes the background
+/// color out of `highlights`, so the text does not paint it a second time
+/// at the full line height.
+fn code_background(
+    shaped_line: &ShapedLine,
+    runs: &[TextRun],
+    font_size: Pixels,
+    highlights: &mut [(Range<usize>, InlineHighlight)],
+    fragment_size: Size<Pixels>,
+    baseline: Pixels,
+    window: &Window,
+) -> Option<(Bounds<Pixels>, Hsla)> {
+    let cap_height = runs
+        .iter()
+        .map(|run| {
+            let font = window.text_system().resolve_font(&run.font);
+            window.text_system().cap_height(font, font_size)
+        })
+        .fold(Pixels::ZERO, Pixels::max);
+    let vertical_padding = font_size * 0.125 + shaped_line.descent / 2.;
+    let color = highlights
+        .iter()
+        .find_map(|(_, h)| h.style.background_color);
+    for (_, highlight) in highlights.iter_mut() {
+        highlight.style.background_color = None;
+    }
+    color.map(|color| {
+        (
+            Bounds::new(
+                point(Pixels::ZERO, baseline - cap_height - vertical_padding),
+                size(fragment_size.width, cap_height + vertical_padding * 2.),
+            ),
+            color,
+        )
+    })
 }
 
 fn line_ranges(
@@ -1194,6 +1385,94 @@ pub(super) fn slice_ranges<T, U>(
 mod tests {
     use super::*;
     use gpui::SharedUri;
+
+    mod frames {
+        use super::super::FLOW_LAYOUTS;
+        use crate::text::{TextView, TextViewState};
+        use gpui::{
+            AppContext as _, Context, Entity, IntoElement, ParentElement as _, Pixels, Render,
+            Styled as _, TestAppContext, VisualTestContext, Window, div, px,
+        };
+
+        struct Answer {
+            state: Entity<TextViewState>,
+            width: Pixels,
+        }
+
+        impl Render for Answer {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(self.width).child(TextView::new(&self.state))
+            }
+        }
+
+        fn draw(cx: &mut VisualTestContext) {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+
+        fn layouts() -> usize {
+            FLOW_LAYOUTS.with(|layouts| layouts.get())
+        }
+
+        /// Scrolling redraws every visible paragraph each frame; a flow whose
+        /// text, style and width are unchanged has nothing to wrap or shape.
+        #[gpui::test]
+        fn an_unchanged_flow_is_not_laid_out_again(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let (_, cx) = cx.add_window_view(|_, cx| Answer {
+                state: cx.new(|cx| TextViewState::markdown("Call `foo` now.", cx)),
+                width: px(300.),
+            });
+            cx.run_until_parked();
+            draw(cx);
+            let after_first_frame = layouts();
+            assert!(after_first_frame >= 1, "the first frame lays the flow out");
+
+            for _ in 0..3 {
+                draw(cx);
+            }
+
+            assert_eq!(layouts(), after_first_frame, "a frame that changes nothing");
+        }
+
+        #[gpui::test]
+        fn a_flow_is_laid_out_again_at_another_width(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let (answer, cx) = cx.add_window_view(|_, cx| Answer {
+                state: cx.new(|cx| TextViewState::markdown("Call `foo` now.", cx)),
+                width: px(300.),
+            });
+            cx.run_until_parked();
+            draw(cx);
+            let before = layouts();
+
+            answer.update(cx, |answer, _| answer.width = px(120.));
+            draw(cx);
+
+            assert!(layouts() > before, "a narrower flow wraps differently");
+        }
+
+        #[gpui::test]
+        fn a_flow_is_laid_out_again_when_its_text_changes(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let (answer, cx) = cx.add_window_view(|_, cx| Answer {
+                state: cx.new(|cx| TextViewState::markdown("Call `foo` now.", cx)),
+                width: px(300.),
+            });
+            cx.run_until_parked();
+            draw(cx);
+            let before = layouts();
+
+            answer.update(cx, |answer, cx| {
+                answer.state.update(cx, |state, cx| {
+                    state.set_text("Call `foo` and `bar` now.", cx);
+                })
+            });
+            cx.run_until_parked();
+            draw(cx);
+
+            assert!(layouts() > before, "a new text has a new layout");
+        }
+    }
 
     #[test]
     fn atomic_objects_wrap_and_share_a_baseline_at_multiple_font_sizes() {

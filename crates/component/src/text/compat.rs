@@ -327,18 +327,30 @@ pub(super) fn resolve_component_style(
     // a dark theme.
     let is_dark = themed.is_dark() || legacy.is_dark;
 
-    let mut style = themed
+    let heading_base_font_size = legacy.heading_base_font_size;
+    let heading_font_size = legacy.heading_font_size;
+    let style = themed
         .with_paragraph_gap(legacy.paragraph_gap)
-        .with_heading_base_font_size(legacy.heading_base_font_size)
+        .with_heading(move |level| {
+            let default_size = match level {
+                1 => gpui::rems(2.),
+                2 => gpui::rems(1.5),
+                3 => gpui::rems(1.25),
+                4 => gpui::rems(1.125),
+                _ => gpui::rems(1.),
+            }
+            .to_pixels(heading_base_font_size);
+            let text_size = heading_font_size.as_ref().map_or(default_size, |resolve| {
+                resolve(level, heading_base_font_size)
+            });
+            StyleRefinement::default().text_size(text_size)
+        })
         .with_code_block(code_block)
         .with_table(table)
         .with_table_head(table_head)
         .with_table_cell(table_cell)
         .with_inline_code(inline_code)
         .with_dark(is_dark);
-    if let Some(heading_font_size) = legacy.heading_font_size {
-        style = style.with_heading_font_size(move |level, base| heading_font_size(level, base));
-    }
     style
 }
 
