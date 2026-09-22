@@ -1881,4 +1881,36 @@ mod retained_layout_tests {
             "every retained layout belongs to a live fragment state"
         );
     }
+
+    #[gpui::test]
+    fn shortening_an_inline_flow_releases_obsolete_fragment_layouts(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let source = "word `code` ".repeat(100);
+        let (view, cx) = cx.add_window_view(|_, cx| Once {
+            state: cx.new(|cx| TextViewState::markdown(&source, cx)),
+        });
+        cx.run_until_parked();
+        for _ in 0..2 {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+
+        view.update(cx, |view, cx| {
+            view.state.update(cx, |state, cx| {
+                state.set_text("word `code` now", cx);
+            });
+        });
+        cx.run_until_parked();
+        for _ in 0..2 {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+
+        let alive = RETAINED_LAYOUTS.with(|layouts| {
+            layouts
+                .borrow()
+                .values()
+                .filter(|retained| retained.state.strong_count() > 0)
+                .count()
+        });
+        assert_eq!(alive, 3, "one live layout per remaining fragment");
+    }
 }

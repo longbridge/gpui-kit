@@ -74,7 +74,7 @@ pub(crate) struct InlineFlowLayoutState {
 /// the flow's id.
 #[derive(Default)]
 struct InlineFlowFrameState {
-    /// One state per fragment, by fragment index. A fragment's `Inline`
+    /// One state per text fragment, by text-fragment index. A fragment's `Inline`
     /// retains its shaped text under its state (see `RetainedLayout`), so
     /// the state has to be the same one next frame for the text to be
     /// found; a fresh state per frame shaped every fragment again and left
@@ -429,7 +429,8 @@ impl Element for InlineFlow {
         let text_style = &typography.text_style;
         let mut elements = Vec::with_capacity(layout.fragments.len());
 
-        for (fragment_ix, fragment) in layout.fragments.iter().enumerate() {
+        let mut text_fragment_count = 0;
+        for fragment in &layout.fragments {
             match fragment {
                 PositionedFragment::Object {
                     item_ix,
@@ -497,7 +498,8 @@ impl Element for InlineFlow {
                         continue;
                     };
                     let (origin, fragment_size, font_size) = (*origin, *fragment_size, *font_size);
-                    let state = frame_state.borrow_mut().fragment_state(fragment_ix);
+                    let state = frame_state.borrow_mut().fragment_state(text_fragment_count);
+                    text_fragment_count += 1;
                     if let Ok(mut state) = state.lock() {
                         state.set_text(text.clone());
                     }
@@ -594,6 +596,11 @@ impl Element for InlineFlow {
                 }
             }
         }
+
+        frame_state
+            .borrow_mut()
+            .fragment_states
+            .truncate(text_fragment_count);
 
         elements
     }
