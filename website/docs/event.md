@@ -41,7 +41,6 @@ Emit the Event after the state change succeeds:
 fn finish_send(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
     self.draft.clear();
     cx.emit(ChatEvent::MessageSent { message_id });
-    cx.notify();
 }
 ```
 
@@ -49,29 +48,37 @@ Name Events as facts in the past tense: `MessageSent`, `Saved`, or `Dismissed`. 
 
 ## Subscribe from the owner
 
-The owner subscribes while wiring its Entities together:
+The owner stores subscriptions on the same View that subscribes. This follows the pattern used by GPUI Kit examples:
 
 ```rust
-let chat = cx.new(Chat::new);
-let subscription = cx.subscribe(&chat, |workspace, _, event, cx| {
-    if matches!(event, ChatEvent::MessageSent { .. }) {
-        workspace.refresh_conversation();
-        cx.notify();
+struct Workspace {
+    chat: Entity<Chat>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl Workspace {
+    fn new(cx: &mut Context<Self>) -> Self {
+        let chat = cx.new(Chat::new);
+        let _subscriptions = vec![cx.subscribe(&chat, |workspace, _, event, _cx| {
+            if matches!(event, ChatEvent::MessageSent { .. }) {
+                workspace.refresh_conversation();
+            }
+        })];
+
+        Self { chat, _subscriptions }
     }
-});
+}
 ```
 
-Keep the returned `Subscription` alive when required, commonly in `_subscriptions: Vec<Subscription>`. Dropping it disconnects the observer. Use `window.subscribe(...)` when the callback also needs `&mut Window`.
+Do not leave the returned `Subscription` in a local variable: it is dropped when the function returns, which disconnects the observer. Keeping `_subscriptions` on `Workspace` gives both the same lifetime. When the View is dropped, its subscriptions are dropped and disconnected too. Avoid storing View-scoped subscriptions in a longer-lived global owner, because that keeps callbacks and captured resources alive after the View should be gone.
+
+Use `cx.subscribe_in(..., window, ...)` when the callback needs `&mut Window`; keep that returned `Subscription` in the same field as well.
 
 :::info INFO — Event delivery does not follow Focus
 
 An Event goes to subscribers of its source Entity. Moving Focus or changing a Key Context does not change who receives it. Do not use Events as a global command bus to bypass Action routing.
 
 :::
-
-## `emit` and `notify` are different
-
-`cx.emit(...)` sends a typed semantic fact with a payload. `cx.notify()` tells observers to reread Entity state, usually causing a rerender. A state change may need one or both; emitting an Event does not automatically request a render.
 
 ## Action or Event?
 

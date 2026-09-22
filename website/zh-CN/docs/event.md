@@ -41,7 +41,6 @@ impl EventEmitter<ChatEvent> for Chat {}
 fn finish_send(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
     self.draft.clear();
     cx.emit(ChatEvent::MessageSent { message_id });
-    cx.notify();
 }
 ```
 
@@ -49,29 +48,37 @@ Event 应按已经发生的事实命名，例如 `MessageSent`、`Saved`、`Dism
 
 ## 由 owner 订阅
 
-Owner 在组装 Entity 时订阅：
+订阅方应把 Subscription 保存在发起订阅的同一个 View 上。GPUI Kit 的示例采用下面这种模式：
 
 ```rust
-let chat = cx.new(Chat::new);
-let subscription = cx.subscribe(&chat, |workspace, _, event, cx| {
-    if matches!(event, ChatEvent::MessageSent { .. }) {
-        workspace.refresh_conversation();
-        cx.notify();
+struct Workspace {
+    chat: Entity<Chat>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl Workspace {
+    fn new(cx: &mut Context<Self>) -> Self {
+        let chat = cx.new(Chat::new);
+        let _subscriptions = vec![cx.subscribe(&chat, |workspace, _, event, _cx| {
+            if matches!(event, ChatEvent::MessageSent { .. }) {
+                workspace.refresh_conversation();
+            }
+        })];
+
+        Self { chat, _subscriptions }
     }
-});
+}
 ```
 
-API 要求时必须保留返回的 `Subscription`，通常存进 `_subscriptions: Vec<Subscription>`。丢弃它就会断开订阅。回调还需要 `&mut Window` 时使用 `window.subscribe(...)`。
+不要只用局部变量保存返回的 `Subscription`：函数结束后它会被 drop，观察者随即断开。把 `_subscriptions` 放在 `Workspace` 上，两者便拥有相同生命周期；View 释放时，Subscription 也会一起释放并取消订阅。也不要把 View 级 Subscription 存到生命周期更长的全局 owner，否则 View 消失后 callback 与捕获的资源仍可能被保留。
+
+回调需要 `&mut Window` 时使用 `cx.subscribe_in(..., window, ...)`，返回的 `Subscription` 同样保存在这个字段中。
 
 :::info INFO — Event 不跟随 Focus 路由
 
 Event 只发送给 source Entity 的订阅者。移动 Focus 或改变 Key Context 不会改变接收者。不要把 Event 当成绕过 Action routing 的全局命令总线。
 
 :::
-
-## `emit` 与 `notify` 不同
-
-`cx.emit(...)` 携带 payload 发送类型化语义事实；`cx.notify()` 告诉观察者重新读取 Entity state，通常会触发重绘。一次状态变化可能只需要其中一个，也可能两个都需要；发出 Event 不会自动请求 render。
 
 ## 什么时候用 Action，什么时候用 Event
 
