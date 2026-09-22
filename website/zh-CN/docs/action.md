@@ -1,0 +1,308 @@
+---
+title: Action
+description: 理解 GPUI 如何路由 Focus、快捷键、Action 与 Event。
+order: -3.8
+---
+
+# Action
+
+GPUI 原生提供 **Focus**、**Key Context**、**Action**、**KeyBinding** 与 **Event**，它们是 GPUI 的核心交互机制。应用通过这些机制，把操作命令路由到窗口中当前活跃的区域，并在 Entity 之间传递类型明确的状态变化。
+
+这篇 Guide 说明如何配合使用这些机制：
+
+- **Focus** 表示键盘交互此刻发生在哪里；
+- **`track_focus`** 在 Element 上注册稳定的 `FocusHandle`，让鼠标交互与命令路由可以使用它；
+- **Action** 表示一条命令，可以来自快捷键、菜单、按钮或代码；
+- **Event** 表示某个 Entity 已经发生了什么，并通知它的订阅者。
+
+## 快捷键怎样生效
+
+<img class="architecture-light" src="/focus-action-flow.svg?v=20260922-2" alt="左右分栏中，AI Chat 获得 Focus 后激活 AiChat Key Context 而非 Sidebar Key Context，因此 ⌘ Enter 匹配 SendMessage">
+<img class="architecture-dark" src="/focus-action-flow-dark.svg?v=20260922-2" alt="左右分栏中，AI Chat 获得 Focus 后激活 AiChat Key Context 而非 Sidebar Key Context，因此 ⌘ Enter 匹配 SendMessage">
+
+假设窗口左侧是 Sidebar，右侧是 AI Chat。点击 Sidebar 后，Focus Path 包含 `Sidebar`；点击聊天输入区后，Focus Path 包含 `AiChat`。因此绑定到 `AiChat` 的快捷键只会在右侧区域激活。
+
+布局可以明确声明这两个键盘交互区域：
+
+```rust
+h_flex()
+    .size_full()
+    .child(
+        div()
+            .w_64()
+            .track_focus(&self.sidebar_focus)
+            .key_context("Sidebar")
+            .child(self.sidebar.clone()),
+    )
+    .child(div().flex_1().child(self.chat.clone()))
+```
+
+`AiChat` 在自己的 renderer 中 track 独立的 handle，并声明 `key_context("AiChat")`。只有包含当前 focused handle 的区域，才会把自己的 Key Context 加入快捷键匹配。
+
+按下一个键时，GPUI 会：
+
+1. 从获得 Focus 的元素出发，沿祖先节点组成 Dispatch Path；
+2. 收集路径上的 `key_context`，用它们匹配 `KeyBinding`；
+3. 把匹配到的 Action 沿同一条路径派发，最具体的 handler 最先处理。
+
+活跃的 Focus Path 让同一个按键可以在窗口的不同区域表达不同含义，不需要额外维护一套全局快捷键分发开关。
+
+## Focus 是位置
+
+`FocusHandle` 是键盘目标的稳定身份。让拥有这段交互的 Entity 保存它：
+
+```rust
+struct AiChat {
+    focus_handle: FocusHandle,
+}
+
+impl AiChat {
+    fn new(cx: &mut Context<Self>) -> Self {
+        Self { focus_handle: cx.focus_handle() }
+    }
+}
+
+impl Focusable for AiChat {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+```
+
+- `handle.is_focused(window)`：Focus 正好在这个目标上；
+- `handle.contains_focused(window, cx)`：Focus 也可以在它的子树里；
+- `handle.focus(window, cx)`：主动把 Focus 移到这里。
+
+输入光标、选中的 widget 通常检查 exact Focus；当子控件获得 Focus 时整个面板仍应保持激活，则检查 containment。
+
+## `track_focus` 到底做了什么
+
+`track_focus` 把 handle 绑定到当前帧里的具体元素：
+
+```rust
+div()
+    .track_focus(&self.focus_handle)
+    .key_context("AiChat")
+    .on_action(cx.listener(Self::send_message))
+```
+
+调用 `track_focus` 会把 `FocusHandle` 注册到这个 Element 对应的 dispatch node，并把该 Element 标记为可以接收 Focus。这会产生几项关联行为：
+
+- 在 Element 内按下鼠标时，GPUI 默认把 Focus 移到这个 handle；
+- `focus`、`in_focus` 与 `focus_visible` style 可以读取它的状态；
+- GPUI 可以计算 Focus containment 与 Focus Path；
+- 这条路径上的 Key Context 和 Action handler 会参与按键匹配与 Action 派发。
+
+嵌套控件需要保留自己的 Focus 时，可以通过 `cx.prevent_default()` 阻止父元素在 mouse down 时接管 Focus。
+
+`track_focus` **不会在 render 时立刻让 Element 获得 Focus**。打开视图或进入交互时，调用 `focus_handle.focus(window, cx)`。不要在 `render` 里无条件请求 Focus，否则每次渲染都会把 Focus 抢回来。
+
+### Focus 与 Tab 顺序是两件事
+
+被 track 的 handle 不会自动成为 Tab stop。Tab 行为要声明在 handle 本身：
+
+```rust
+let focus_handle = cx.focus_handle().tab_stop(true);
+```
+
+需要明确顺序时使用 `tab_index(...)`。在元素上调用 `.tab_stop(...)` 不会改变传给 `track_focus` 的 handle。
+
+Stateless component 可以用 keyed state 让 handle 跨 render 保持稳定：
+
+```rust
+let focus_handle = window.use_keyed_state(id, cx, |_, cx| {
+    cx.focus_handle().tab_stop(true)
+});
+```
+
+## Action 是命令协议
+
+Action 是 GPUI 表达应用操作的核心方式：它是一个有类型的命令值，sender 无需耦合 receiver 就能 dispatch，GPUI 再沿当前 Focus Path 路由。同一个 Action 同时服务三个层次：
+
+1. **输入映射**：`KeyBinding` 把按键映射为 Action；
+2. **命令派发**：命令面板、按钮、Popup Menu 或其他 handler dispatch 这个 Action；
+3. **配置**：Keymap 把命令序列化为稳定的 Action name 与可选 JSON payload，GPUI 的 Action registry 再将其反序列化为有类型的 Action；这是 Zed 风格用户 Keymap 的基础。
+
+例如，命令面板保存 Action，而不是为每一行各存一份 callback：
+
+```rust
+let commands: Vec<(&str, Box<dyn Action>)> = vec![
+    ("发送消息", Box::new(SendMessage)),
+    ("切换侧边栏", Box::new(ToggleSidebar)),
+];
+
+// 用户确认当前命令时：
+window.dispatch_action(commands[selected].1.boxed_clone(), cx);
+```
+
+应用可以按自己的模型保存 owned 或 cloneable command entry；这里的关键边界是：选择命令后得到一个 Action 并 dispatch，当前 focused owner 仍然负责如何处理它。
+
+Native application menu 也使用同一套协议。在 macOS 上，菜单命令通过 Action 接入，而不是普通 element click callback：
+
+```rust
+MenuItem::action("发送消息", SendMessage)
+```
+
+通过 `actions!` 声明的 unit Action 会按名称注册。Action 需要携带配置数据时，derive `Action` 与 `Deserialize`，并设置 namespace：
+
+```rust
+#[derive(Action, Clone, PartialEq, Deserialize)]
+#[action(namespace = ai_chat)]
+struct InsertPrompt {
+    text: SharedString,
+}
+```
+
+Keymap 因此可以用稳定的 Action name 标识命令，并在需要时附带 JSON payload。`#[action(no_json)]` 会明确禁止从 JSON 构造该 Action，适用于不应该出现在用户配置中的 runtime-only command。
+
+### 通过共同 owner 协调并列组件
+
+并列组件之间不需要互相持有 callback。Sidebar 可以 dispatch `FocusChat`，共同的 `Workspace` owner 负责处理，并把 Focus 移到 AI Chat：
+
+```rust
+actions!(workspace, [FocusChat]);
+
+impl Workspace {
+    fn focus_chat(&mut self, _: &FocusChat, window: &mut Window, cx: &mut Context<Self>) {
+        self.chat.read(cx).focus_handle(cx).focus(window, cx);
+    }
+}
+
+// 挂在共同的 Workspace 区域上：
+h_flex()
+    .on_action(cx.listener(Self::focus_chat))
+    .child(self.sidebar.clone())
+    .child(self.chat.clone())
+
+// 从 Sidebar 的按钮或命令行派发：
+window.dispatch_action(Box::new(FocusChat), cx);
+```
+
+Action 沿当前 Dispatch Path 传播，不会直接跳进一个无关 sibling。跨区域命令应由最近的共同 owner 处理；只有真正属于整个应用的命令才使用 global handler。
+
+## 完整实现一条键盘命令
+
+先定义并绑定一次命令：
+
+```rust
+actions!(ai_chat, [SendMessage]);
+const AI_CHAT_CONTEXT: &str = "AiChat";
+
+fn init(cx: &mut App) {
+    cx.bind_keys([
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-enter", SendMessage, Some(AI_CHAT_CONTEXT)),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-enter", SendMessage, Some(AI_CHAT_CONTEXT)),
+    ]);
+}
+```
+
+把 Focus、Key Context 和 handler 放在同一个 owner region：
+
+```rust
+impl AiChat {
+    fn send_message(&mut self, _: &SendMessage, _: &mut Window, cx: &mut Context<Self>) {
+        self.submit_draft();
+        cx.notify();
+    }
+}
+
+impl Render for AiChat {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .track_focus(&self.focus_handle)
+            .key_context(AI_CHAT_CONTEXT)
+            .on_action(cx.listener(Self::send_message))
+            .child("AI Chat")
+    }
+}
+```
+
+所有入口都派发同一个 `SendMessage` Action：`KeyBinding` 负责快捷键，按钮在 click handler 中调用 `window.dispatch_action(...)`，Popup Menu 与 macOS native menu 保存同一个 Action。真正的消息提交逻辑只实现一次。
+
+Action handler 默认停止冒泡。如果内层 handler 不处理，希望父级继续尝试，调用 `cx.propagate()`。使用 `cx.on_action(...)` 注册的全局 handler 在不适用时也必须 propagate。
+
+先执行 `cx.bind_keys(...)`，再执行 `cx.set_menus(...)`。Native menu 创建时会固定当时的快捷键显示；之后只改 binding，不会自动更新已有菜单。
+
+## Event 用来做什么
+
+Event 是一个 Entity 发给观察者的类型化通知。它不经过 Focus、Key Context 或 Element Tree。
+
+```rust
+#[derive(Clone, Debug)]
+enum AiChatEvent {
+    DraftChanged,
+    MessageSent { message_id: MessageId },
+}
+
+impl EventEmitter<AiChatEvent> for AiChat {}
+```
+
+状态变化后发出一个有业务含义的事实：
+
+```rust
+fn finish_send(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
+    self.draft.clear();
+    cx.emit(AiChatEvent::MessageSent { message_id });
+    cx.notify();
+}
+```
+
+Owner 在组装 Entity 时订阅：
+
+```rust
+let chat = cx.new(AiChat::new);
+let subscription = cx.subscribe(&chat, |workspace, _, event, cx| {
+    if matches!(event, AiChatEvent::MessageSent { .. }) {
+        workspace.refresh_conversation();
+        cx.notify();
+    }
+});
+```
+
+API 要求时必须保留返回的 `Subscription`，通常存进 `_subscriptions: Vec<Subscription>`。丢弃它就会断开订阅。回调还需要 `&mut Window` 时使用 `window.subscribe(...)`。
+
+`cx.notify()` 与 `cx.emit(...)` 不同。`notify` 告诉观察者重新读取 Entity state，通常会触发重绘；`emit` 携带 payload 发送类型化语义事件。一次变化可能只需要其中一个，也可能两个都需要；Event 不会自动代替 render notification。
+
+## 什么时候用 Action，什么时候用 Event
+
+| 问题 | 使用 | 例子 |
+| --- | --- | --- |
+| 这是用户或调用者希望执行的指令吗？ | **Action** | 保存、删除、打开搜索 |
+| 它需要绑定快捷键或出现在菜单里吗？ | **Action** | 复制、切换侧边栏、重命名 |
+| 这是状态或生命周期变化后报告的事实吗？ | **Event** | ValueChanged、Saved、Dismissed |
+| Owner 是否要独立于 UI tree 观察 child？ | **Event** | 输入变化、选择行、提交对话框 |
+| 它只是鼠标手势且没有其他命令入口吗？ | callback | hover、拖动距离、指针位置 |
+
+一个正常流程经常同时使用两者：
+
+```text
+⌘ Enter → SendMessage Action → AI Chat 发送 → MessageSent Event → Workspace 更新
+```
+
+Action 把“**想做什么**”向内传给 command owner；Event 把“**发生了什么**”向外传给感兴趣的 owner。因此 Event 应命名为 `Saved`，而不是 `Save`。不要把 Event 当成全局命令总线，否则会绕开 focus 与 command routing。
+
+## 全局与上下文快捷键
+
+编辑和导航快捷键通常都应有 Key Context。它们只在特定区域包含 Focus 时有意义，也应该让更具体的 child 优先处理。
+
+真正的全局 fallback 或 service command 才使用 `cx.on_action(...)`。危险的全局快捷键还要在 owner 中检查运行时状态。Longbridge Pro 的交易快捷键既限制在 Workspace Key Context，又会在输入框或对话框获得 Focus 时拒绝执行。Key Context 决定“**命令在哪里有资格匹配**”，handler 决定“**它现在是否允许执行**”。
+
+## 排查“点击以后才生效”
+
+如果快捷键只有点击某个区域以后才生效，通常是这次点击把 Focus 移进了包含目标 Key Context 和 handler 的路径。把它当作路由问题，沿 GPUI 使用的同一条链路检查。
+
+按整条链路依次检查：
+
+1. **Binding**：按键是否绑定到预期的 Action 和 Key Context？
+2. **Focus**：点击前后，究竟哪个 `FocusHandle` 获得 Focus？
+3. **Tracking**：同一个 handle 是否在已渲染元素上调用 `track_focus`？
+4. **Context**：目标 `key_context` 是否位于 focused element 或其祖先上？
+5. **Handler**：`on_action` 是否也在同一条 Dispatch Path 上？
+6. **Propagation**：是否有更具体的 handler 提前吞掉 Action？
+7. **Lifetime**：全局 handler 或 Event subscription 是否已释放？过期 handler 是否忘了 propagate？
+
+最常见的修复，是让同一个 region 一起拥有稳定 handle、`track_focus`、`key_context` 与 `on_action`，然后在用户进入该区域时把 Focus 移进去。
+
+这些模式来自 GPUI 的 dispatch 实现，并在 GPUI Kit 的 Menu、Tree、Input、Dialog、Color Picker，Zed 的 panel 与 editor，以及 Longbridge Pro 的 workspace 和交易快捷键中得到实际验证。

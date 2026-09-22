@@ -1,6 +1,6 @@
 ---
 title: 组件
-description: 浏览 60 多个面向生产环境的 Rust UI 组件，覆盖表单、导航、数据、反馈与桌面应用布局。
+description: 浏览 75+ 个生产就绪的 Rust UI 组件与原语，覆盖表单、导航、数据、反馈、编辑与应用布局。
 order: 2
 collapsed: false
 ---

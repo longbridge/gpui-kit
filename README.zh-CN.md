@@ -8,7 +8,8 @@
 
 GPUI Kit 是一个综合性的 Rust 桌面应用开发框架。它将生产级 UI
 系统、应用级数据与布局能力、编辑能力，以及可复用的行为、状态和基础设施整合在一起，
-并让交付后的应用可以被 JavaScript 扩展。
+并让交付后的应用可以被 JavaScript 扩展。0.7 版本提供 75+ 个有完整文档的组件与原语，
+并具备 WebAssembly、AccessKit 无障碍、UI 集成测试及可选的 JavaScript 扩展运行时。
 
 文档：<https://gpui-kit.com>
 
@@ -22,8 +23,11 @@ gpui-kit             应用唯一需要依赖的 crate
 
 ## 特性
 
-- **60+ 组件**：覆盖表单、导航、浮层、反馈和布局等场景，提供成熟交互与高效默认值。
+- **75+ 组件与原语**：覆盖表单、导航、浮层、数据展示、编辑、反馈和布局等场景，提供成熟交互与高效默认值。
 - **生产就绪**：从第一天起用于构建 Longbridge Pro，并在公开发布的商业桌面应用中持续打磨。
+- **WebAssembly**：应用与组件示例可通过 `wasm32-unknown-unknown` 在 Web 中运行。
+- **无障碍**：交互层内置 AccessKit role、name、state、relationship 与 action，并有对应测试覆盖。
+- **UI 集成测试**：在 headless window 中渲染真实组件，驱动鼠标与键盘输入，并验证状态、Focus、布局和无障碍信息。
 - **原生体验**：现代控件设计灵感来自 macOS 与 Windows，并提供语义化主题和多种尺寸。
 - **120 FPS**：GPU 加速界面，在高负载下依然保持流畅。
 - **数据表格**：虚拟滚动、固定列、列宽调整、排序与单元格选择，可承载数十万行数据。
@@ -96,7 +100,7 @@ GPUI Kit 从第一天起就用于构建 [Longbridge Pro](https://longbridge.com/
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "0.7"
 ```
 
 `gpui-kit` 始终引入 GPUI 和 `gpui-base`；`gpui-component` 和默认图标集默认开启。只想保留部分层时关闭默认 feature 按需选择即可。`gpui-component` 的 feature（`inspector`、`decimal`、`tree-sitter` 及各 `tree-sitter-<language>`）在 `gpui-kit` 上同名可用。
@@ -156,7 +160,7 @@ npx skills add longbridge/gpui-kit
 
 | 技能                     | 描述                                                                                                          |
 | ------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `gpui-kit`               | 初始化、组件目录、常用使用模式、GPUI 机制（Element、Entity、异步、焦点、Actions、测试），以及 Coding Guides。 |
+| `gpui-kit`               | 初始化、组件目录、常用使用模式、GPUI 机制（Element、Entity、异步、Focus、Action、测试），以及 Coding Guides。 |
 | `gpui-kit-design-guides` | Design Guides：布局、间距、层级、交互状态、浮层与界面文案的规范。                                             |
 
 ## Development

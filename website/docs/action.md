@@ -1,0 +1,308 @@
+---
+title: Action
+description: Understand how GPUI routes Focus, keyboard shortcuts, Actions, and Events.
+order: -3.8
+---
+
+# Action
+
+GPUI provides **Focus**, **Key Context**, **Action**, **KeyBinding**, and **Event** as its core interaction mechanisms. Together they let an application route commands to the active part of a window and communicate typed state changes between entities.
+
+This guide shows how to use those mechanisms together:
+
+- **Focus** says where keyboard interaction is happening;
+- **`track_focus`** registers a stable `FocusHandle` on an Element so pointer input and command routing can use it;
+- an **Action** expresses a command and can come from a `KeyBinding`, menu, button, or code;
+- an **Event** reports what an entity did or experienced to its subscribers.
+
+## How a shortcut works
+
+<img class="architecture-light" src="/focus-action-flow.svg?v=20260922-2" alt="In a split layout, focus in AI Chat activates the AiChat key context instead of the Sidebar context, so ⌘ Enter maps to SendMessage">
+<img class="architecture-dark" src="/focus-action-flow-dark.svg?v=20260922-2" alt="In a split layout, focus in AI Chat activates the AiChat key context instead of the Sidebar context, so ⌘ Enter maps to SendMessage">
+
+Imagine a window split into a Sidebar on the left and AI Chat on the right. Clicking the Sidebar produces a focus path containing `Sidebar`; clicking the chat composer produces one containing `AiChat`. A binding scoped to `AiChat` is therefore active only on the right.
+
+The layout can make those two keyboard regions explicit:
+
+```rust
+h_flex()
+    .size_full()
+    .child(
+        div()
+            .w_64()
+            .track_focus(&self.sidebar_focus)
+            .key_context("Sidebar")
+            .child(self.sidebar.clone()),
+    )
+    .child(div().flex_1().child(self.chat.clone()))
+```
+
+`AiChat` tracks its own handle and declares `key_context("AiChat")` in its renderer. Only the region containing the focused handle contributes its context to shortcut matching.
+
+When a key is pressed, GPUI:
+
+1. starts at the focused element and builds a path through its ancestors;
+2. collects the `key_context` values on that path and matches a `KeyBinding`;
+3. dispatches the matched Action along the same path, starting with the most specific handler.
+
+The active focus path makes the same keystroke mean different things in different parts of a window without introducing a global shortcut switchboard.
+
+## Focus is a location
+
+A `FocusHandle` is a stable identity for a keyboard target. Keep it on the entity that owns the interaction:
+
+```rust
+struct AiChat {
+    focus_handle: FocusHandle,
+}
+
+impl AiChat {
+    fn new(cx: &mut Context<Self>) -> Self {
+        Self { focus_handle: cx.focus_handle() }
+    }
+}
+
+impl Focusable for AiChat {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus_handle.clone()
+    }
+}
+```
+
+- `handle.is_focused(window)` checks this exact target.
+- `handle.contains_focused(window, cx)` also accepts a focused descendant.
+- `handle.focus(window, cx)` deliberately moves focus here.
+
+Use the exact check for an input caret or selected widget. Use containment when a panel remains active while one of its controls has focus.
+
+## What `track_focus` does
+
+`track_focus` registers the `FocusHandle` on the Element's dispatch node and marks that Element as able to receive Focus:
+
+```rust
+div()
+    .track_focus(&self.focus_handle)
+    .key_context("AiChat")
+    .on_action(cx.listener(Self::send_message))
+```
+
+That registration has several connected effects:
+
+- mouse down inside the Element moves Focus to the handle by default;
+- `focus`, `in_focus`, and `focus_visible` styles can read its state;
+- GPUI can calculate Focus containment and the Focus Path;
+- Key Contexts and Action handlers on that path participate in key matching and Action dispatch.
+
+A nested control can call `cx.prevent_default()` when it must keep the parent Element from taking Focus on mouse down.
+
+`track_focus` does **not** immediately give the Element Focus during render. Call `focus_handle.focus(window, cx)` when opening a view or entering an interaction. Never request Focus unconditionally from `render`, because every render would steal it back.
+
+### Focus and Tab order are separate
+
+A tracked handle is not automatically reachable with Tab. Declare Tab behavior on the handle itself:
+
+```rust
+let focus_handle = cx.focus_handle().tab_stop(true);
+```
+
+Use `tab_index(...)` for an intentional order. Calling `.tab_stop(...)` on the element does not change a handle passed to `track_focus`.
+
+For a stateless component, retain the handle across renders with keyed state:
+
+```rust
+let focus_handle = window.use_keyed_state(id, cx, |_, cx| {
+    cx.focus_handle().tab_stop(true)
+});
+```
+
+## An Action is a command protocol
+
+An Action is GPUI's core representation of an application operation: a typed command value that can be dispatched without coupling the sender to the receiver. GPUI routes it through the active focus path. The same Action serves three layers:
+
+1. **Input mapping:** a key binding maps a keystroke to an Action.
+2. **Command dispatch:** a command palette, button, popup menu, or another handler dispatches the Action.
+3. **Configuration:** a Keymap serializes a command as a stable Action name plus an optional JSON payload, and GPUI's Action registry deserializes it back into the typed Action. This is the basis of Zed-style user keymaps.
+
+For example, a command palette stores Actions rather than a callback for every row:
+
+```rust
+let commands: Vec<(&str, Box<dyn Action>)> = vec![
+    ("Send message", Box::new(SendMessage)),
+    ("Toggle sidebar", Box::new(ToggleSidebar)),
+];
+
+// When the user confirms the selected command:
+window.dispatch_action(commands[selected].1.boxed_clone(), cx);
+```
+
+In application code, use whatever owned or cloneable command entry your palette model provides; the important boundary is that selection produces an Action and dispatches it. The focused owner still decides how to handle it.
+
+Native application menus use the same protocol. On macOS, menu commands are Actions rather than ordinary element click callbacks:
+
+```rust
+MenuItem::action("Send Message", SendMessage)
+```
+
+Unit Actions declared with `actions!` are registered by name. For an Action carrying configuration data, derive `Action` and `Deserialize` and give it a namespace:
+
+```rust
+#[derive(Action, Clone, PartialEq, Deserialize)]
+#[action(namespace = ai_chat)]
+struct InsertPrompt {
+    text: SharedString,
+}
+```
+
+A keymap can then identify the command by its stable action name and, when needed, a JSON payload. `#[action(no_json)]` deliberately opts an Action out of JSON construction; use it for runtime-only commands that should never appear in user configuration.
+
+### Coordinate sibling components through their owner
+
+Parallel components do not need direct callbacks to each other. The Sidebar can dispatch `FocusChat`; their common `Workspace` owner handles it and focuses AI Chat:
+
+```rust
+actions!(workspace, [FocusChat]);
+
+impl Workspace {
+    fn focus_chat(&mut self, _: &FocusChat, window: &mut Window, cx: &mut Context<Self>) {
+        self.chat.read(cx).focus_handle(cx).focus(window, cx);
+    }
+}
+
+// On the common Workspace region:
+h_flex()
+    .on_action(cx.listener(Self::focus_chat))
+    .child(self.sidebar.clone())
+    .child(self.chat.clone())
+
+// From a Sidebar button or command row:
+window.dispatch_action(Box::new(FocusChat), cx);
+```
+
+An Action follows the current dispatch path; it does not jump directly into an unrelated sibling. Put cross-region handlers on the nearest common owner. Reserve global handlers for commands that are truly application-wide.
+
+## Build a command end to end
+
+Define and bind the command once:
+
+```rust
+actions!(ai_chat, [SendMessage]);
+const AI_CHAT_CONTEXT: &str = "AiChat";
+
+fn init(cx: &mut App) {
+    cx.bind_keys([
+        #[cfg(target_os = "macos")]
+        KeyBinding::new("cmd-enter", SendMessage, Some(AI_CHAT_CONTEXT)),
+        #[cfg(not(target_os = "macos"))]
+        KeyBinding::new("ctrl-enter", SendMessage, Some(AI_CHAT_CONTEXT)),
+    ]);
+}
+```
+
+Attach focus, context, and handler to the same owning region:
+
+```rust
+impl AiChat {
+    fn send_message(&mut self, _: &SendMessage, _: &mut Window, cx: &mut Context<Self>) {
+        self.submit_draft();
+        cx.notify();
+    }
+}
+
+impl Render for AiChat {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .track_focus(&self.focus_handle)
+            .key_context(AI_CHAT_CONTEXT)
+            .on_action(cx.listener(Self::send_message))
+            .child("AI Chat")
+    }
+}
+```
+
+Every entry point dispatches the same `SendMessage` Action: `KeyBinding` covers the shortcut, the button calls `window.dispatch_action(...)` from its click handler, and popup or macOS native menus hold the same Action. Message submission is implemented once in the Action handler.
+
+Action handlers stop bubbling by default. If an inner handler declines the Action and a parent should try it, call `cx.propagate()`. A global handler registered with `cx.on_action(...)` must also propagate whenever it does not apply.
+
+Register key bindings before `cx.set_menus(...)`. Native menus capture displayed shortcuts when built, so changing bindings later does not update an existing menu automatically.
+
+## What Events are for
+
+An Event is a typed notification from one entity to its observers. It does not use focus, key contexts, or the element tree.
+
+```rust
+#[derive(Clone, Debug)]
+enum AiChatEvent {
+    DraftChanged,
+    MessageSent { message_id: MessageId },
+}
+
+impl EventEmitter<AiChatEvent> for AiChat {}
+```
+
+Emit a semantic fact after the state change:
+
+```rust
+fn finish_send(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
+    self.draft.clear();
+    cx.emit(AiChatEvent::MessageSent { message_id });
+    cx.notify();
+}
+```
+
+The owner subscribes while wiring entities together:
+
+```rust
+let chat = cx.new(AiChat::new);
+let subscription = cx.subscribe(&chat, |workspace, _, event, cx| {
+    if matches!(event, AiChatEvent::MessageSent { .. }) {
+        workspace.refresh_conversation();
+        cx.notify();
+    }
+});
+```
+
+Keep the returned `Subscription` alive when required, commonly in `_subscriptions: Vec<Subscription>`. Dropping it disconnects the observer. Use `window.subscribe(...)` when the callback also needs `&mut Window`.
+
+`cx.notify()` and `cx.emit(...)` are different. `notify` tells observers to reread entity state, usually causing a rerender. `emit` sends a typed semantic event with a payload. A change may need one or both; an Event does not replace a render notification.
+
+## Action or Event?
+
+| Question | Use | Examples |
+| --- | --- | --- |
+| Is this an instruction a user or caller wants performed? | **Action** | Save, Delete, Open Search |
+| Should it be bindable to a key or shown in a menu? | **Action** | Copy, Toggle Sidebar, Rename |
+| Is this a fact reported after state or lifecycle changed? | **Event** | ValueChanged, Saved, Dismissed |
+| Should an owner observe a child independently of its UI tree? | **Event** | Input changed, row selected, dialog submitted |
+| Is it only a pointer gesture with no other command entry point? | callback | hover, drag delta, pointer position |
+
+A normal flow often uses both:
+
+```text
+⌘ Enter → SendMessage Action → AI Chat sends → MessageSent Event → Workspace updates
+```
+
+An Action carries **intent inward** to the command owner. An Event carries **what happened outward** to interested owners. Name the Event `Saved`, not `Save`, and do not use Events as a global command bus that bypasses focus and command routing.
+
+## Contextual and global shortcuts
+
+Most editing and navigation shortcuts should be contextual: they only make sense while a region contains focus and should yield to a more specific child.
+
+Use `cx.on_action(...)` for a true application-wide fallback or service command. For dangerous shortcuts, also check runtime state in the owner. Longbridge Pro scopes trading bindings to a workspace and separately rejects them while an input or dialog has focus. Context decides **where a command is eligible**; the handler decides **whether it is currently allowed**.
+
+## Debug “works only after clicking”
+
+If a shortcut only works after clicking a particular region, the click has usually moved focus into the path containing the required key context and handler. Treat this as a routing problem and inspect the same pipeline GPUI uses.
+
+Check the pipeline in order:
+
+1. **Binding:** Is the key bound to the expected Action and context?
+2. **Focus:** Which `FocusHandle` is focused before and after the click?
+3. **Tracking:** Is that same handle passed to `track_focus` on a rendered element?
+4. **Context:** Is the required `key_context` on the focused element or an ancestor?
+5. **Handler:** Is `on_action` on the same dispatch path?
+6. **Propagation:** Did a more specific handler consume the Action?
+7. **Lifetime:** Was a global handler or Event subscription dropped, or did a stale handler fail to propagate?
+
+The usual fix is to make one region own the retained handle, `track_focus`, `key_context`, and `on_action`, then move focus into that region when the user enters it.
+
+These patterns follow GPUI's dispatch implementation and are exercised in GPUI Kit's Menu, Tree, Input, Dialog, and Color Picker code, Zed's panels and editors, and Longbridge Pro's workspace and trading shortcuts.

@@ -47,7 +47,7 @@ order: -1
 安装库时，只需要在 `Cargo.toml` 的 `[dependencies]` 中加入：
 
 ```toml
-gpui-kit = "0.6"
+gpui-kit = "0.7"
 ```
 
 `gpui-kit` 会替你引入配套的 GPUI crate，应用无需再单独声明 GPUI。`use gpui_kit::*;` 就是 GPUI 本身，各层按名访问：`gpui_kit::component`（带样式的组件）、`gpui_kit::base`、`gpui_kit::assets`、`gpui_kit::platform`。

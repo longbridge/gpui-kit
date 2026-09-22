@@ -14,7 +14,8 @@ all reachable through the single `gpui-kit` dependency:
 - **`gpui-base`**: Unstyled behavior, controlled state, focus, overlays,
   virtual lists, dock infrastructure, and semantic design tokens.
 - **`gpui-component`**: GPUI Component, the complete styled component library
-  with 60+ controls, themes, data tables, dock layout, and a code editor.
+  with 75+ documented components and primitives, themes, data tables, dock
+  layout, and a code editor.
 - **`gpui-shell`**: Opens a Rust host to JavaScript extensions, one granted
   capability at a time.
 
@@ -24,10 +25,16 @@ or build your own design system on the reusable behavior and infrastructure in
 application development. For library APIs, see [GPUI Component](/component),
 [GPUI Base](/base), and [GPUI Shell](/shell).
 
+Read [Action](./action) for a practical guide to GPUI focus, `track_focus`,
+key contexts, Actions, shortcuts, and Events.
+
 ## Features
 
-- **60+ UI Components**: Forms, navigation, overlays, feedback, layout, and more.
+- **75+ Components and Primitives**: Forms, navigation, overlays, data display, editing, feedback, layout, and more.
 - **Production Ready**: Used to build Longbridge Pro from day one and refined in a publicly shipped commercial desktop application.
+- **WebAssembly**: Applications and component showcases run on the web through `wasm32-unknown-unknown`.
+- **Accessibility**: AccessKit roles, names, states, relationships, and actions are built into the interaction layer.
+- **UI Integration Testing**: Headless windows exercise real pointer, keyboard, focus, layout, and accessibility behavior.
 - **Native Feel**: Modern controls inspired by macOS and Windows.
 - **120 FPS**: GPU-accelerated interfaces that remain smooth under load.
 - **Data Tables**: Virtual scrolling, fixed and resizable columns, sorting, and cell selection across hundreds of thousands of rows.
@@ -45,7 +52,7 @@ Add `gpui-kit` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "0.7"
 ```
 
 Then create a simple "Hello, World!" application with a button:
