@@ -681,6 +681,7 @@ pub struct MaterializeRequest<'a> {
     issued_children: SmallVec<[(u64, u32); 4]>,
     next_child_token: u64,
     request_id: u64,
+    element_id: gpui::ElementId,
     child_lane: ChildLane,
     slots: Slots,
     /// Deferred slots, still unbuilt. A factory leases the snapshot and
@@ -703,6 +704,7 @@ pub(crate) type SlotSpecs = SmallVec<[(&'static str, u32); 2]>;
 
 pub(crate) struct MaterializeRequestInit<'a> {
     pub component_name: &'static str,
+    pub element_id: gpui::ElementId,
     pub payload: &'a ComponentPayload,
     pub operations: &'a [crate::spec::SpecOp],
     pub runtime: &'a Rc<crate::ShellRuntime>,
@@ -740,6 +742,7 @@ impl<'a> MaterializeRequest<'a> {
             issued_children: SmallVec::new(),
             next_child_token: 0,
             request_id: NEXT_MATERIALIZE_REQUEST_ID.fetch_add(1, Ordering::Relaxed),
+            element_id: init.element_id,
             child_lane: ChildLane::Unclaimed,
             slots: init.slots,
             slot_factory_specs: init.slot_factory_specs,
@@ -758,6 +761,17 @@ impl<'a> MaterializeRequest<'a> {
             anyhow::anyhow!("component app effects require a root application snapshot")
         })?;
         Ok(ComponentAppEffects::new(self.runtime, application, view))
+    }
+
+    /// The element id of the spec node being materialized: the script's `key`
+    /// for it, or its address in the description.
+    ///
+    /// A component that keeps per-element state — a hitbox, a hover, a cached
+    /// path — keys it on this, so two of the same component in one description
+    /// stay apart instead of sharing one slot. Plain elements already carry it;
+    /// a registered component reads it from here.
+    pub fn element_id(&self) -> &gpui::ElementId {
+        &self.element_id
     }
 
     pub fn payload(&self) -> &ComponentPayload {
@@ -2441,6 +2455,7 @@ mod tests {
             anyhow::bail!("no element argument expected")
         };
         let mut request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Slotted",
             payload: &payload,
             operations: &operations,
@@ -2480,6 +2495,7 @@ mod tests {
             anyhow::bail!("no element argument expected")
         };
         let mut request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Slotted",
             payload: &payload,
             operations: &operations,
@@ -2523,6 +2539,7 @@ mod tests {
             Ok(div().into_any_element())
         };
         let mut request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Parent",
             payload: &payload,
             operations: &operations,
@@ -2560,6 +2577,7 @@ mod tests {
             Ok(div().into_any_element())
         };
         let mut request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "RepeatedParent",
             payload: &payload,
             operations: &operations,
@@ -2599,6 +2617,7 @@ mod tests {
         let mut ordinary_resolver =
             |_, _: Option<&mut Window>, _: Option<&mut App>| Ok(div().into_any_element());
         let mut ordinary = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Ordinary",
             payload: &payload,
             operations: &operations,
@@ -2625,6 +2644,7 @@ mod tests {
         let mut typed_resolver =
             |_, _: Option<&mut Window>, _: Option<&mut App>| Ok(div().into_any_element());
         let mut typed = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Typed",
             payload: &payload,
             operations: &operations,
@@ -2667,6 +2687,7 @@ mod tests {
         let mut resolve_element =
             |_, _: Option<&mut Window>, _: Option<&mut App>| anyhow::bail!("child adapter failed");
         let request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Parent",
             payload: &payload,
             operations: &operations,
@@ -2704,6 +2725,7 @@ mod tests {
         let mut resolver_c =
             |_, _: Option<&mut Window>, _: Option<&mut App>| Ok(div().into_any_element());
         let mut request_a = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "A",
             payload: &payload,
             operations: &operations,
@@ -2721,6 +2743,7 @@ mod tests {
             application_owner: None,
         });
         let mut request_b = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "B",
             payload: &payload,
             operations: &operations,
@@ -2738,6 +2761,7 @@ mod tests {
             application_owner: None,
         });
         let mut request_c = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "C",
             payload: &payload,
             operations: &operations,

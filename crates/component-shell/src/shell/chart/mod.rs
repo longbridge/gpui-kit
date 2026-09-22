@@ -3,6 +3,11 @@
 //! `gpui_component::plot::Plot` is deliberately not registered: it is a Rust
 //! painting trait implemented by concrete chart elements, not a constructible
 //! component surface.
+//!
+//! A chart keys its hover state and path caches on an `ElementId`, and the one
+//! it takes by default is its construction site — which is this file, shared by
+//! every chart of that kind a script draws. So the wrapper carries the spec
+//! node's own id, and the element id stack tells the charts under it apart.
 
 use super::support::bool_method;
 
@@ -11,7 +16,10 @@ use gpui_shell::{
     ArgumentDescriptor, ArgumentSchema, ComponentArgument, ComponentDataValue, ComponentDescriptor,
     ComponentMaterializer, ComponentPayload, ComponentRegistry, ConstructorDescriptor,
     MaterializeRequest, MethodDescriptor, RegistryError, anyhow,
-    gpui::{self, IntoElement as _, ParentElement as _, Refineable as _, RenderOnce, Styled as _},
+    gpui::{
+        self, InteractiveElement as _, IntoElement as _, ParentElement as _, Refineable as _,
+        RenderOnce, Styled as _,
+    },
 };
 use std::sync::Arc;
 
@@ -83,7 +91,10 @@ fn wrap(
         request.take_children()?.is_empty(),
         "charts do not accept ordinary children"
     );
-    let mut wrapper = gpui::div().size_full().child(chart);
+    let mut wrapper = gpui::div()
+        .id(request.element_id().clone())
+        .size_full()
+        .child(chart);
     wrapper.style().refine(&request.take_style());
     Ok(wrapper.into_any_element())
 }
