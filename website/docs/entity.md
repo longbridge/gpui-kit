@@ -6,9 +6,9 @@ order: -6.1
 
 # Entity
 
-GPUI provides `Entity<T>` to store and share a `T` managed by GPUI. Create one with `cx.new`; cloning the Entity only copies its handle, so every clone still accesses the same `T`. Reads and updates must go through a GPUI context.
+When several Views, handlers, or async tasks need the same state, put that state in GPUI's `Entity<T>`. A Chat, for example, can keep its messages in an `Entity<Chat>`; any code holding a clone can access the same Chat through a GPUI context.
 
-When `T` implements `Render`, its `Entity<T>` can render directly as a View. Without `Render`, the Entity can hold application state as a model.
+Create the Entity with `cx.new`, read it with `read`, and change it with `update`. If `Chat` implements `Render`, its `Entity<Chat>` can also render directly as a View. Otherwise, it works as a shared state model.
 
 ```text
 Entity<Chat>
@@ -17,7 +17,7 @@ Entity<Chat>
     └── downgrade()    → WeakEntity<Chat>
 ```
 
-Unlike `Rc<RefCell<T>>`, an Entity can only be accessed through a GPUI context. This lets GPUI coordinate updates, rendering, subscriptions, and the Entity lifecycle.
+Cloning an Entity copies its handle, not the state inside it. Entity access always goes through a GPUI context, allowing GPUI to coordinate updates, rendering, subscriptions, and the Entity lifecycle.
 
 ## Create an Entity
 

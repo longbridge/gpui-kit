@@ -6,9 +6,9 @@ order: -6.1
 
 # Entity
 
-GPUI 原生提供 `Entity<T>`，用于保存并共享一份由 GPUI 管理的 `T`。通过 `cx.new` 创建 Entity；clone 一个 Entity 只会复制句柄，所有句柄仍然访问同一份 `T`。读取和修改都必须经过 GPUI Context。
+当一份状态需要由多个 View、handler 或异步任务共同使用时，把它放进 GPUI 原生提供的 `Entity<T>`。例如，Chat 可以用 `Entity<Chat>` 保存消息；任何持有其 clone 的代码都能通过 GPUI Context 访问同一份 Chat。
 
-当 `T` 实现 `Render` 时，`Entity<T>` 可以直接作为 View 渲染。`T` 不实现 `Render` 时，Entity 也可以只保存应用状态，作为 model 使用。
+使用 `cx.new` 创建 Entity，使用 `read` 读取状态，使用 `update` 修改状态。当 `Chat` 实现 `Render` 时，`Entity<Chat>` 还可以直接作为 View 渲染；不需要渲染时，它就是一个共享状态 model。
 
 ```text
 Entity<Chat>
@@ -17,7 +17,7 @@ Entity<Chat>
     └── downgrade()    → WeakEntity<Chat>
 ```
 
-与 `Rc<RefCell<T>>` 不同，Entity 只能通过 GPUI context 访问。因此 GPUI 可以统一协调状态更新、渲染、订阅和 Entity 生命周期。
+clone Entity 只会复制句柄，不会复制其中的状态。Entity 只能通过 GPUI Context 访问，因此 GPUI 可以统一协调状态更新、渲染、订阅和 Entity 生命周期。
 
 ## 创建 Entity
 
