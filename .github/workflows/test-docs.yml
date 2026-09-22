@@ -38,3 +38,4 @@ jobs:
           bun run test:showcases
           bun run build
           bun run test:seo
+          bun run test:versioned-examples

@@ -5200,6 +5200,68 @@ mod tests {
         });
     }
 
+    /// Regression test: editing at a caret that sits far outside the viewport
+    /// must reveal it in one frame. The cursor-follow in `layout_cursors` runs
+    /// only on the frame the selection changes, so its old one-line step left
+    /// the caret offscreen after typing at the end of a long paste.
+    #[gpui::test]
+    fn test_edit_reveals_far_offscreen_caret(cx: &mut TestAppContext) {
+        let mut input = None;
+        let window = cx.open_window(size(px(720.), px(400.)), |window, cx| {
+            cx.set_global(Theme::default());
+            super::super::init(cx);
+            let state = cx.new(|cx| crate::input::TextareaState::new(window, cx).auto_grow(1, 6));
+            input = Some(state.clone());
+            TestRoot(state)
+        });
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let input = input.unwrap();
+
+        let text: String = (1..=100)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value(text, window, cx);
+                let end = state.text.len();
+                state.set_selection(end, end);
+            });
+        });
+        cx.run_until_parked();
+
+        // The user scrolled back to the top to read the pasted text.
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                state.scroll_handle.set_offset(point(px(0.), px(0.)));
+                cx.notify();
+            });
+        });
+        cx.run_until_parked();
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "X", window, cx);
+            });
+        });
+        cx.run_until_parked();
+
+        cx.update(|_, cx| {
+            input.read_with(cx, |state, _| {
+                assert!(state.value().ends_with("line 100X"));
+                let (caret, _) = state.cursor_layout().expect("caret painted");
+                let viewport = state.input_bounds();
+                let scroll_y = state.scroll_handle.offset().y;
+                let top = caret.origin.y - viewport.origin.y + scroll_y;
+                assert!(
+                    top >= px(0.) && top + caret.size.height <= viewport.size.height,
+                    "caret top {top:?} outside viewport height {:?} (scroll {scroll_y:?})",
+                    viewport.size.height,
+                );
+            });
+        });
+    }
+
     /// Regression test: `scroll_to` at end-of-buffer must produce a deferred
     /// scroll target within the safe scroll range, so the painted frame
     /// matches what `update_scroll_offset` persists (no jitter). A small

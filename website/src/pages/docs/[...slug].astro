@@ -22,7 +22,8 @@ const pathname = Astro.url.pathname;
 const seoTitle = entry.id.replace(/\.md$/, '') === 'index'
   ? 'Documentation'
   : `${entry.data.title} Guide`;
-const base = import.meta.env.BASE_URL;
+// The current main checkout owns the single WASM deployment at the site root.
+const examplesBase = '/';
 const devVersion = import.meta.env.DEV ? 'dev' : undefined;
 ---
 
@@ -39,7 +40,7 @@ const devVersion = import.meta.env.DEV ? 'dev' : undefined;
       client:load
       frontmatter={entry.data}
       pathname={pathname}
-      baseUrl={base}
+      baseUrl={examplesBase}
       devVersion={devVersion}
     />
   )}

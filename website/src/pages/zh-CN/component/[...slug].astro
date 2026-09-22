@@ -18,7 +18,8 @@ export async function getStaticPaths() {
 const { entry } = Astro.props;
 const { Content, headings } = await render(entry);
 const pathname = Astro.url.pathname;
-const base = import.meta.env.BASE_URL;
+// The current main checkout owns the single WASM deployment at the site root.
+const examplesBase = '/';
 const devVersion = import.meta.env.DEV ? 'dev' : undefined;
 const seoTitle = entry.id.replace(/\.md$/, '') === 'index' ? entry.data.title : `${entry.data.title} — GPUI Component`;
 ---
@@ -36,7 +37,7 @@ const seoTitle = entry.id.replace(/\.md$/, '') === 'index' ? entry.data.title : 
       client:load
       frontmatter={{ ...entry.data, exampleKind: 'component' }}
       pathname={pathname}
-      baseUrl={base}
+      baseUrl={examplesBase}
       devVersion={devVersion}
     />
   )}

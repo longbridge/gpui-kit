@@ -2,7 +2,7 @@ use futures::Stream as _;
 #[cfg(not(target_family = "wasm"))]
 use std::time::Instant;
 use std::{
-    ops::RangeInclusive,
+    ops::{Range, RangeInclusive},
     pin::Pin,
     sync::{Arc, Mutex},
     task::Poll,
@@ -382,6 +382,26 @@ impl TextViewState {
     /// Return the selected text, in the view's [`SelectionFormat`].
     pub fn selected_text(&self) -> String {
         self.selected_text_in(None)
+    }
+
+    /// Return the original Markdown source byte range corresponding to the
+    /// rendered selection.
+    ///
+    /// The range addresses the source passed to this Markdown TextView. It is
+    /// derived from parser positions retained by the rendered inline nodes, so
+    /// identical rendered text maps to the occurrence that was actually
+    /// selected. The result is one contiguous source range, so it includes any
+    /// Markdown delimiters between the selected rendered endpoints. HTML views
+    /// and selections without an exact source mapping return `None`. Select-all
+    /// in a Markdown view returns the full source range.
+    pub fn selected_source_range(&self) -> Option<Range<usize>> {
+        if self.format != TextViewFormat::Markdown {
+            return None;
+        }
+        if self.select_all {
+            return Some(0..self.source().len());
+        }
+        self.parsed_content.document.selected_source_range()
     }
 
     /// The format to copy in, which is [`SelectionFormat::Plain`] whenever the
@@ -1006,7 +1026,7 @@ fn parse_content(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::text::MarkdownNode;
+    use crate::text::{MarkdownNode, node::BlockNode};
     use gpui::TestAppContext;
 
     mod stream_fade {
@@ -1571,6 +1591,67 @@ mod tests {
         state.read_with(cx, |state, _| {
             assert_eq!(state.selected_text().trim(), markdown);
         });
+    }
+
+    #[gpui::test]
+    fn selected_source_range_returns_full_markdown_source_for_select_all(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let markdown = "**quick** value";
+        let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown(markdown, cx)));
+        cx.run_until_parked();
+
+        state.update(cx, |state, cx| state.select_all(cx));
+
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.selected_source_range(), Some(0..markdown.len()));
+        });
+    }
+
+    #[gpui::test]
+    fn selected_source_range_returns_none_for_html(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|cx| TextViewState::html("<b>quick</b>", cx)));
+        cx.run_until_parked();
+
+        state.update(cx, |state, cx| state.select_all(cx));
+
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.selected_source_range(), None);
+        });
+    }
+
+    #[test]
+    fn selected_source_range_keeps_global_offsets_after_incremental_tail_parse() {
+        let options = UpdateOptions {
+            revision: 1,
+            pending_text: "first\n\nsecond".to_string(),
+            append: false,
+            mode: ParseMode::Replace,
+            markdown_extensions: Arc::default(),
+        };
+        let content = parse_content(TextViewFormat::Markdown, ParsedContent::default(), &options)
+            .expect("initial parse");
+        let content = parse_content(
+            TextViewFormat::Markdown,
+            content,
+            &UpdateOptions {
+                revision: 2,
+                pending_text: "\n\n**écho**".to_string(),
+                append: true,
+                mode: ParseMode::Compatible,
+                markdown_extensions: Arc::default(),
+            },
+        )
+        .expect("incremental parse");
+        let BlockNode::Paragraph(paragraph) = &content.document.blocks[2] else {
+            panic!("expected appended paragraph");
+        };
+        let mut state = paragraph.state.lock().unwrap();
+        state.set_text(paragraph.text().into());
+        state.selection = Some((0.."écho".len()).into());
+        drop(state);
+
+        assert_eq!(content.document.selected_source_range(), Some(17..22));
     }
 
     #[gpui::test]

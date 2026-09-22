@@ -1,4 +1,5 @@
 import { readdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineConfig } from 'astro/config';
 import vue from '@astrojs/vue';
 import tailwindcss from '@tailwindcss/vite';
@@ -13,7 +14,8 @@ import { rehypeHeadingAnchors } from './src/lib/rehype-heading-anchors.js';
 import { wasmExamplesDevServer } from './src/lib/wasm-middleware.js';
 import { shikiConfig, defaultHighlightLang } from './src/lib/markdown.js';
 
-const BASE = '/';
+const configuredBase = process.env.PUBLIC_SITE_BASE || '/';
+const BASE = configuredBase === '/' ? '/' : `/${configuredBase.replace(/^\/+|\/+$/g, '')}/`;
 
 // GitHub Pages serves static HTML redirects for old component bookmarks.
 const componentRedirects = Object.fromEntries(
@@ -46,6 +48,7 @@ const legacyDocRedirects = Object.fromEntries(
 export default defineConfig({
   site: 'https://gpui-kit.com',
   base: BASE,
+  outDir: resolve(process.cwd(), process.env.SITE_OUT_DIR || './dist'),
   output: 'static',
   trailingSlash: 'never',
   redirects: {
@@ -72,6 +75,6 @@ export default defineConfig({
   },
 
   vite: {
-    plugins: [tailwindcss(), wasmExamplesDevServer(BASE)],
+    plugins: [tailwindcss(), wasmExamplesDevServer('/')],
   },
 });
