@@ -63,6 +63,7 @@ where
     alignment: BarAlignment,
     corner_radii: Corners<Pixels>,
     id: ElementId,
+    interactive: bool,
     name: Option<SharedString>,
     /// The label gaps of horizontal bars, measured in `prepaint` for the frame,
     /// so `tooltip_state` (which has no window) can keep the hover off the labels.
@@ -95,6 +96,7 @@ where
             alignment: BarAlignment::default(),
             corner_radii: Corners::all(px(0.)),
             id: caller_id(),
+            interactive: true,
             name: None,
             horizontal_gaps: (0., 0.),
             hover: None,
@@ -109,6 +111,19 @@ where
     /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.id = id.into();
+        self
+    }
+
+    /// Turn this chart's interactive layer on or off. On by default.
+    ///
+    /// The layer is the hitbox under the cursor and what it drives: a crosshair
+    /// marks the hovered band, and a tooltip shows its category and value. Turn
+    /// it off for a chart that only decorates, or one an element above it wants
+    /// the cursor for: without a hitbox it neither answers the mouse nor takes
+    /// the hover from what sits over it. A chart that is off also drops its path
+    /// cache, which is keyed on the same id.
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
         self
     }
 
@@ -691,7 +706,7 @@ where
     }
 
     fn id(&self) -> Option<ElementId> {
-        Some(self.id.clone())
+        self.interactive.then(|| self.id.clone())
     }
 
     fn tooltip_state(

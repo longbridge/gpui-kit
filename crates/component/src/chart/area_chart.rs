@@ -49,6 +49,7 @@ where
     x_axis: bool,
     grid: bool,
     id: ElementId,
+    interactive: bool,
     hover: Option<AreaHover>,
 }
 
@@ -74,6 +75,7 @@ where
             x_axis: true,
             grid: true,
             id: caller_id(),
+            interactive: true,
             hover: None,
         }
     }
@@ -86,6 +88,19 @@ where
     /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.id = id.into();
+        self
+    }
+
+    /// Turn this chart's interactive layer on or off. On by default.
+    ///
+    /// The layer is the hitbox under the cursor and what it drives: a crosshair
+    /// and a dot per series mark the hovered point, and a tooltip shows a row
+    /// each. Turn it off for a chart that only decorates, or one an element above
+    /// it wants the cursor for: without a hitbox it neither answers the mouse nor
+    /// takes the hover from what sits over it. A chart that is off also drops its
+    /// path cache, which is keyed on the same id.
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
         self
     }
 
@@ -242,19 +257,26 @@ where
                 .fill(fill)
         });
 
-        // The chart's own id is on the stack, so this cache belongs to it alone:
-        // the tessellation survives every frame that did not move it.
-        let caches = PathCaches::for_paint("areas", window, cx);
-        caches.update(cx, |caches, _| {
-            for (i, area) in areas.enumerate() {
-                let (fill, line) = caches.slot_pair(i);
-                area.paint_cached(&bounds, fill, line, window);
+        // Caching hangs off the chart's own id, which only an interactive chart
+        // puts on the stack; without one, siblings would share a slot and thrash
+        // it, so a chart that is off tessellates afresh each paint.
+        if self.interactive {
+            let caches = PathCaches::for_paint("areas", window, cx);
+            caches.update(cx, |caches, _| {
+                for (i, area) in areas.enumerate() {
+                    let (fill, line) = caches.slot_pair(i);
+                    area.paint_cached(&bounds, fill, line, window);
+                }
+            });
+        } else {
+            for area in areas {
+                area.paint(&bounds, window);
             }
-        });
+        }
     }
 
     fn id(&self) -> Option<ElementId> {
-        Some(self.id.clone())
+        self.interactive.then(|| self.id.clone())
     }
 
     fn tooltip_state(

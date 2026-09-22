@@ -664,6 +664,7 @@ impl ChartCard {
                             .outer_radius(76.)
                             .color(move |d| shade(mid, color_index(&d.region)))
                             .label(|d| d.region.clone())
+                            .tooltip_name(|d| d.region.clone())
                             .name("Revenue")
                             .id("pie-chart-label"),
                     )
@@ -1248,21 +1249,28 @@ impl ChartCard {
                     let up = cx.theme().success;
                     let down = cx.theme().danger;
                     let muted = cx.theme().muted_foreground;
-                    chart.labels(move |d: &TslaNode, _| {
-                        let mut lines = vec![SankeyLabel::new(format!(
-                            "${:.2}B",
-                            d.value / 1_000_000_000.
-                        ))];
-                        if let Some(growth) = d.growth {
-                            let arrow = if growth >= 0. { "▲" } else { "▼" };
-                            lines.push(
-                                SankeyLabel::new(format!("{} {:+.2}%", arrow, growth))
-                                    .color(if growth >= 0. { up } else { down }),
-                            );
-                        }
-                        lines.push(SankeyLabel::new(d.name.clone()).color(muted));
-                        lines
-                    })
+                    // `labels` draws the node text but never reaches the tooltip,
+                    // so the tooltip needs its own name and value.
+                    chart
+                        .tooltip_name(|d: &TslaNode| d.name.clone())
+                        .tooltip_value(|d: &TslaNode, _| {
+                            format!("${:.2}B", d.value / 1_000_000_000.).into()
+                        })
+                        .labels(move |d: &TslaNode, _| {
+                            let mut lines = vec![SankeyLabel::new(format!(
+                                "${:.2}B",
+                                d.value / 1_000_000_000.
+                            ))];
+                            if let Some(growth) = d.growth {
+                                let arrow = if growth >= 0. { "▲" } else { "▼" };
+                                lines.push(
+                                    SankeyLabel::new(format!("{} {:+.2}%", arrow, growth))
+                                        .color(if growth >= 0. { up } else { down }),
+                                );
+                            }
+                            lines.push(SankeyLabel::new(d.name.clone()).color(muted));
+                            lines
+                        })
                 } else {
                     chart
                         .node_label(|d| d.name.clone())

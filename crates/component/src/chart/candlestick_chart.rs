@@ -47,6 +47,7 @@ where
     bullish: Option<Hsla>,
     bearish: Option<Hsla>,
     id: ElementId,
+    interactive: bool,
     hover: Option<CandlestickHover>,
 }
 
@@ -74,6 +75,7 @@ where
             bullish: None,
             bearish: None,
             id: caller_id(),
+            interactive: true,
             hover: None,
         }
     }
@@ -86,6 +88,19 @@ where
     /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.id = id.into();
+        self
+    }
+
+    /// Turn this chart's interactive layer on or off. On by default.
+    ///
+    /// The layer is the hitbox under the cursor and what it drives: a highlight
+    /// band marks the hovered candle, and a tooltip shows its open, high, low and
+    /// close. Turn it off for a chart that only decorates, or one an element
+    /// above it wants the cursor for: without a hitbox it neither answers the
+    /// mouse nor takes the hover from what sits over it. A chart that is off also
+    /// drops its path cache, which is keyed on the same id.
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
         self
     }
 
@@ -309,7 +324,7 @@ where
     }
 
     fn id(&self) -> Option<ElementId> {
-        Some(self.id.clone())
+        self.interactive.then(|| self.id.clone())
     }
 
     fn tooltip_state(
