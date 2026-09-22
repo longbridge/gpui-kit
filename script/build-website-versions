@@ -24,7 +24,8 @@ version_fingerprint=${WEBSITE_VERSION_BUILD_FINGERPRINT:-$(
   git -C "$repo_root" ls-files -z -- \
     website/astro.config.mjs website/package.json website/src/components \
     website/src/layouts website/src/lib website/src/pages website/src/styles \
-    website/public script/build-website-versions script/normalize-website-frontmatter.mjs \
+    website/public script/build-website-versions script/snapshot-website \
+    script/normalize-website-frontmatter.mjs \
     | xargs -0 git -C "$repo_root" hash-object \
     | git hash-object --stdin
 )}
@@ -61,21 +62,8 @@ git -C "$repo_root" worktree add --detach "$work_dir/main" origin/main >/dev/nul
 snapshot_website() {
   local tag=$1
   local target=$2
-  local snapshot_paths=()
 
-  for path in website/docs website/component website/base website/shell website/zh-CN; do
-    if git -C "$repo_root" cat-file -e "$tag:$path" 2>/dev/null; then
-      snapshot_paths+=("$path")
-    fi
-  done
-  if ((${#snapshot_paths[@]} > 0)); then
-    git -C "$repo_root" archive "$tag" "${snapshot_paths[@]}" \
-      | tar -x --strip-components=1 -C "$target"
-  fi
-  if git -C "$repo_root" cat-file -e "$tag:website/src/components/HomeApp.vue" 2>/dev/null; then
-    git -C "$repo_root" archive "$tag" website/src/components/HomeApp.vue \
-      | tar -x --strip-components=3 -C "$target/src/components"
-  fi
+  "$repo_root/script/snapshot-website" "$repo_root" "$tag" "$target"
   bun "$repo_root/script/normalize-website-frontmatter.mjs" "$target"
 }
 

@@ -95,7 +95,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: website/.version-cache
-          key: website-versions-${{ hashFiles('website/astro.config.mjs', 'website/package.json', 'website/public/**', 'website/src/components/**', 'website/src/layouts/**', 'website/src/lib/**', 'website/src/pages/**', 'website/src/styles/**') }}-${{ github.run_id }}
+          key: website-versions-${{ hashFiles('website/astro.config.mjs', 'website/package.json', 'website/public/**', 'website/src/components/**', 'website/src/layouts/**', 'website/src/lib/**', 'website/src/pages/**', 'website/src/styles/**', 'script/build-website-versions', 'script/snapshot-website', 'script/normalize-website-frontmatter.mjs') }}-${{ github.run_id }}
           restore-keys: |
             website-versions-
 
@@ -104,14 +104,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHOWCASES_DIR: ${{ github.workspace }}/.showcases
           WEBSITE_VERSION_CACHE_DIR: ${{ github.workspace }}/website/.version-cache
-          WEBSITE_VERSION_BUILD_FINGERPRINT: ${{ hashFiles('website/astro.config.mjs', 'website/package.json', 'website/public/**', 'website/src/components/**', 'website/src/layouts/**', 'website/src/lib/**', 'website/src/pages/**', 'website/src/styles/**') }}
+          WEBSITE_VERSION_BUILD_FINGERPRINT: ${{ hashFiles('website/astro.config.mjs', 'website/package.json', 'website/public/**', 'website/src/components/**', 'website/src/layouts/**', 'website/src/lib/**', 'website/src/pages/**', 'website/src/styles/**', 'script/build-website-versions', 'script/snapshot-website', 'script/normalize-website-frontmatter.mjs') }}
         run: script/build-website-versions
 
       - name: Save historical website builds
         uses: actions/cache/save@v6
         with:
           path: website/.version-cache
-          key: website-versions-${{ hashFiles('website/astro.config.mjs', 'website/package.json', 'website/public/**', 'website/src/components/**', 'website/src/layouts/**', 'website/src/lib/**', 'website/src/pages/**', 'website/src/styles/**') }}-${{ github.run_id }}
+          key: website-versions-${{ hashFiles('website/astro.config.mjs', 'website/package.json', 'website/public/**', 'website/src/components/**', 'website/src/layouts/**', 'website/src/lib/**', 'website/src/pages/**', 'website/src/styles/**', 'script/build-website-versions', 'script/snapshot-website', 'script/normalize-website-frontmatter.mjs') }}-${{ github.run_id }}
 
       - name: Copy WASM apps to Website
         run: |
