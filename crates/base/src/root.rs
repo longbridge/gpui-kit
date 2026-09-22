@@ -55,22 +55,22 @@ pub trait RootPlugin: Render + Sized {
     ///
     /// Styles set on the [`Root`] instance are refined onto the surface after
     /// this hook and therefore take precedence over plugin defaults.
-    fn style(&self, _content: &mut Stateful<Div>, _window: &mut Window, _cx: &mut App) {}
+    fn style(&self, _surface: &mut Stateful<Div>, _window: &mut Window, _cx: &mut App) {}
 
     /// Add presentation around the completed root surface.
     ///
     /// This runs after plugin defaults and instance styles have been applied.
-    /// Return `content` unchanged when no outer presentation is needed. Typical
+    /// Return `surface` unchanged when no outer presentation is needed. Typical
     /// uses include client-side window borders or another structural wrapper.
     /// `root` provides read-only access to the root and its application view.
     fn decorate(
         &self,
-        content: AnyElement,
+        surface: AnyElement,
         _root: &Root,
         _window: &mut Window,
         _cx: &mut App,
-    ) -> AnyElement {
-        content
+    ) -> impl IntoElement {
+        surface
     }
 }
 
@@ -126,11 +126,13 @@ impl Root {
                 prepare: Rc::new(move |window, cx| {
                     prepare.update(cx, |state, cx| state.prepare(window, cx))
                 }),
-                style: Rc::new(move |content, window, cx| {
-                    style.update(cx, |state, cx| state.style(content, window, cx))
+                style: Rc::new(move |surface, window, cx| {
+                    style.update(cx, |state, cx| state.style(surface, window, cx))
                 }),
-                decorate: Rc::new(move |content, root, window, cx| {
-                    decorate.update(cx, |state, cx| state.decorate(content, root, window, cx))
+                decorate: Rc::new(move |surface, root, window, cx| {
+                    decorate.update(cx, |state, cx| {
+                        state.decorate(surface, root, window, cx).into_any_element()
+                    })
                 }),
             }
         });

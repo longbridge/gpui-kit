@@ -437,9 +437,9 @@ impl gpui_base::RootPlugin for WindowState {
         TextSelection::activate_scope(self.active_text_selection_scope(), window, cx);
     }
 
-    fn style(&self, content: &mut gpui::Stateful<gpui::Div>, _window: &mut Window, cx: &mut App) {
+    fn style(&self, surface: &mut gpui::Stateful<gpui::Div>, _window: &mut Window, cx: &mut App) {
         use gpui::Refineable as _;
-        content.style().refine(
+        surface.style().refine(
             &gpui::StyleRefinement::default()
                 .font_family(cx.theme().font_family.clone())
                 .bg(cx.theme().tokens.background)
@@ -449,12 +449,12 @@ impl gpui_base::RootPlugin for WindowState {
 
     fn decorate(
         &self,
-        content: gpui::AnyElement,
+        surface: gpui::AnyElement,
         _root: &gpui_base::Root,
         _window: &mut Window,
         _cx: &mut App,
-    ) -> gpui::AnyElement {
-        window_border().child(content).into_any_element()
+    ) -> impl IntoElement {
+        window_border().child(surface)
     }
 }
 
