@@ -13,7 +13,7 @@ Build fantastic, high-performance desktop apps with Rust and GPUI.
 GPUI Kit is a comprehensive Rust desktop application framework. It combines a
 production-ready UI system with application-grade data, layout, and editing
 capabilities, all built on a reusable foundation of behavior, state, and
-infrastructure. Version 0.7 ships 75+ documented components and primitives,
+infrastructure. GPUI Kit ships 75+ documented components and primitives,
 WebAssembly support, AccessKit accessibility, UI integration testing, and an
 optional JavaScript extension runtime.
 
@@ -119,7 +119,7 @@ commercial desktop application rather than designed in isolation.
 
 ```toml
 [dependencies]
-gpui-kit = "0.7"
+gpui-kit = "0.6"
 ```
 
 `gpui-kit` always brings in GPUI and `gpui-base`; `gpui-component` and the

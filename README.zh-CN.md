@@ -8,7 +8,7 @@
 
 GPUI Kit 是一个综合性的 Rust 桌面应用开发框架。它将生产级 UI
 系统、应用级数据与布局能力、编辑能力，以及可复用的行为、状态和基础设施整合在一起，
-并让交付后的应用可以被 JavaScript 扩展。0.7 版本提供 75+ 个有完整文档的组件与原语，
+并让交付后的应用可以被 JavaScript 扩展。GPUI Kit 提供 75+ 个有完整文档的组件与原语，
 并具备 WebAssembly、AccessKit 无障碍、UI 集成测试及可选的 JavaScript 扩展运行时。
 
 文档：<https://gpui-kit.com>
@@ -100,7 +100,7 @@ GPUI Kit 从第一天起就用于构建 [Longbridge Pro](https://longbridge.com/
 
 ```toml
 [dependencies]
-gpui-kit = "0.7"
+gpui-kit = "0.6"
 ```
 
 `gpui-kit` 始终引入 GPUI 和 `gpui-base`；`gpui-component` 和默认图标集默认开启。只想保留部分层时关闭默认 feature 按需选择即可。`gpui-component` 的 feature（`inspector`、`decimal`、`tree-sitter` 及各 `tree-sitter-<language>`）在 `gpui-kit` 上同名可用。

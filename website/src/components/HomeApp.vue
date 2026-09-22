@@ -77,7 +77,7 @@ const capIcons: Record<string, any> = {
 // `gpui-kit` is the one dependency an application needs: it pins GPUI and
 // carries every layer. The line on screen is what the clipboard gets, with
 // the `[dependencies]` header so it pastes straight into Cargo.toml.
-const installCommand = 'gpui-kit = "0.7.0"';
+const installCommand = 'gpui-kit = "0.6.0"';
 const installSnippet = ["[dependencies]", installCommand].join("\n");
 
 const copied = ref(false);
@@ -97,7 +97,7 @@ const copy = computed(() =>
     isZh.value
         ? {
               copyLabel: "复制安装命令",
-              eyebrow: "GPUI Kit 0.7 · 经过 Longbridge 生产验证",
+              eyebrow: "经过 Longbridge 生产验证",
               title: "构建出色的高性能桌面应用。",
               lead: "生产就绪的 Rust UI 框架，提供 75+ 组件与原语、WebAssembly、无障碍与 UI 集成测试，并集成数据表格、Dock、图表、代码编辑器和 JavaScript 扩展能力。",
               componentsAction: "浏览组件",
@@ -152,7 +152,7 @@ const copy = computed(() =>
           }
         : {
               copyLabel: "Copy install command",
-              eyebrow: "GPUI Kit 0.7 · Proven in production at Longbridge",
+              eyebrow: "Proven in production at Longbridge",
               title: "Build fantastic, high-performance desktop apps.",
               lead: "A production-ready Rust UI framework with 75+ components and primitives, WebAssembly, accessibility, UI integration testing, data tables, docking, charts, code editing, and JavaScript extensions.",
               componentsAction: "Browse components",
@@ -311,6 +311,16 @@ const copy = computed(() =>
                             </template>
                             <template v-else-if="cap.icon === 'dock'">
                                 <b /><b /><b />
+                            </template>
+                            <template v-else-if="cap.icon === 'wasm'">
+                                <span class="cap__platform">Rust</span><ArrowRight :size="16" /><Globe2 :size="34" /><span class="cap__platform">Web</span>
+                            </template>
+                            <template v-else-if="cap.icon === 'a11y'">
+                                <Accessibility :size="38" />
+                                <span class="cap__a11y-tree"><i>role</i><i>name</i><i>action</i></span>
+                            </template>
+                            <template v-else-if="cap.icon === 'test'">
+                                <i v-for="label in ['render', 'input', 'assert']" :key="label" class="cap__test-row"><Check :size="13" /><span>{{ label }}</span><b /></i>
                             </template>
                             <template v-else>
                                 <em v-for="t in 6" :key="t" />
@@ -740,6 +750,37 @@ html[lang^="zh"] .section-kicker { letter-spacing: 0.04em; }
 .cap__preview--dock b:first-child { flex: 0.55; }
 .cap__preview--dock b:nth-child(2) { flex: 1.3; border-color: color-mix(in srgb, var(--data-2) 45%, var(--border)); background: color-mix(in srgb, var(--data-2) 10%, transparent); }
 .cap__preview--dock b:last-child { flex: 0.8; }
+
+.cap__preview--wasm,
+.cap__preview--a11y {
+    align-items: center;
+    justify-content: center;
+    color: var(--muted-foreground);
+}
+
+.cap__platform {
+    padding: 0.35rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: 0.35rem;
+    background: var(--background);
+    color: var(--foreground);
+    font: 0.72rem/1 var(--font-mono);
+}
+
+.cap__a11y-tree { display: grid; gap: 0.28rem; }
+.cap__a11y-tree i {
+    padding: 0.2rem 0.45rem;
+    border-left: 2px solid var(--data-2);
+    background: color-mix(in srgb, var(--data-2) 8%, transparent);
+    color: var(--foreground);
+    font: 0.68rem/1.2 var(--font-mono);
+    font-style: normal;
+}
+
+.cap__preview--test { flex-direction: column; justify-content: center; }
+.cap__test-row { display: flex; align-items: center; gap: 0.45rem; color: var(--success); font-style: normal; }
+.cap__test-row span { width: 3.2rem; color: var(--muted-foreground); font: 0.68rem/1 var(--font-mono); }
+.cap__test-row b { flex: 1; height: 0.3rem; border-radius: 999px; background: color-mix(in srgb, var(--success) 24%, var(--border)); }
 
 .cap__preview--theme em { flex: 1; border: 1px solid var(--border); border-radius: 0.3rem; }
 .cap__preview--theme em:nth-child(1) { background: #0a0a0a; }

@@ -12,7 +12,7 @@ order: -2
 
 ```toml
 [dependencies]
-gpui-kit = "0.7"
+gpui-kit = "0.6"
 anyhow = "1.0"
 ```
 
@@ -20,7 +20,7 @@ anyhow = "1.0"
 `gpui-kit` 始终引入 GPUI 和 `gpui-base`，并默认带上 `gpui-component` 和默认图标集。如果你希望自行管理图标与资源文件，只保留需要的 feature 即可：
 
 ```toml
-gpui-kit = { version = "0.7", default-features = false, features = ["component"] }
+gpui-kit = { version = "0.6", default-features = false, features = ["component"] }
 ```
 更多说明见 [资源与图标](./assets.md)。
 :::

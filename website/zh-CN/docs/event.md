@@ -16,6 +16,9 @@ Action 可以触发状态变化，但 Event 的传递从状态变化之后开始
 Chat 状态变化 → emit(MessageSent) → 订阅者收到 Event → Workspace 更新
 ```
 
+<img class="architecture-light" src="/event-subscriptions-flow.svg?v=20260922-1" alt="Chat 发出一个 MessageSent Event，分别送达 Workspace、Activity Log 与 Telemetry 三个独立订阅者">
+<img class="architecture-dark" src="/event-subscriptions-flow-dark.svg?v=20260922-1" alt="Chat 发出一个 MessageSent Event，分别送达 Workspace、Activity Log 与 Telemetry 三个独立订阅者">
+
 - [**Action**](./action) 把意图向内传递：“发送这条消息”；
 - **Event** 把结果向外报告：“这条消息已经发送”。
 

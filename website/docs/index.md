@@ -53,7 +53,7 @@ Add `gpui-kit` to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-gpui-kit = "0.7"
+gpui-kit = "0.6"
 ```
 
 Then create a simple "Hello, World!" application with a button:

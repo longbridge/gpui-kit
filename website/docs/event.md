@@ -16,6 +16,9 @@ An Action can cause the state change, but Event delivery starts after that chang
 Chat changes state → emit(MessageSent) → subscribers receive Event → Workspace updates
 ```
 
+<img class="architecture-light" src="/event-subscriptions-flow.svg?v=20260922-1" alt="Chat emits one MessageSent Event to independent Workspace, Activity Log, and Telemetry subscribers">
+<img class="architecture-dark" src="/event-subscriptions-flow-dark.svg?v=20260922-1" alt="Chat emits one MessageSent Event to independent Workspace, Activity Log, and Telemetry subscribers">
+
 - [**Action**](./action) carries intent inward: “send this message.”
 - **Event** reports the result outward: “this message was sent.”
 

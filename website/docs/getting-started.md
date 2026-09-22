@@ -12,7 +12,7 @@ Add dependencies to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-gpui-kit = "0.7"
+gpui-kit = "0.6"
 anyhow = "1.0"
 ```
 
@@ -20,7 +20,7 @@ anyhow = "1.0"
 `gpui-kit` always pulls in GPUI and `gpui-base`, and by default `gpui-component` and the default icon set. To manage your own assets, keep only the features you need:
 
 ```toml
-gpui-kit = { version = "0.7", default-features = false, features = ["component"] }
+gpui-kit = { version = "0.6", default-features = false, features = ["component"] }
 ```
 
 See [Icons & Assets](./assets.md) for more details.
