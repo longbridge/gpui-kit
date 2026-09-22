@@ -17,10 +17,10 @@ GPUI 原生提供 **Focus**、**Key Context**、**Action**、**KeyBinding** 与 
 
 ## 快捷键怎样生效
 
-<img class="architecture-light" src="/focus-action-flow.svg?v=20260922-2" alt="左右分栏中，AI Chat 获得 Focus 后激活 AiChat Key Context 而非 Sidebar Key Context，因此 ⌘ Enter 匹配 SendMessage">
-<img class="architecture-dark" src="/focus-action-flow-dark.svg?v=20260922-2" alt="左右分栏中，AI Chat 获得 Focus 后激活 AiChat Key Context 而非 Sidebar Key Context，因此 ⌘ Enter 匹配 SendMessage">
+<img class="architecture-light" src="/focus-action-flow.svg?v=20260922-3" alt="GPUI 从 Focus 组成 Dispatch Path，用路径上的 Key Context 匹配 KeyBinding，再把 Action 派发给最具体的 handler">
+<img class="architecture-dark" src="/focus-action-flow-dark.svg?v=20260922-3" alt="GPUI 从 Focus 组成 Dispatch Path，用路径上的 Key Context 匹配 KeyBinding，再把 Action 派发给最具体的 handler">
 
-假设窗口左侧是 Sidebar，右侧是 AI Chat。点击 Sidebar 后，Focus Path 包含 `Sidebar`；点击聊天输入区后，Focus Path 包含 `AiChat`。因此绑定到 `AiChat` 的快捷键只会在右侧区域激活。
+假设窗口左侧是 Sidebar，右侧是 Chat。点击 Sidebar 后，Focus Path 包含 `Sidebar`；点击聊天输入区后，Focus Path 包含 `Chat`。因此绑定到 `Chat` 的快捷键只会在右侧区域激活。
 
 布局可以明确声明这两个键盘交互区域：
 
@@ -37,7 +37,7 @@ h_flex()
     .child(div().flex_1().child(self.chat.clone()))
 ```
 
-`AiChat` 在自己的 renderer 中 track 独立的 handle，并声明 `key_context("AiChat")`。只有包含当前 focused handle 的区域，才会把自己的 Key Context 加入快捷键匹配。
+`Chat` 在自己的 renderer 中 track 独立的 handle，并声明 `key_context("Chat")`。只有包含当前 focused handle 的区域，才会把自己的 Key Context 加入快捷键匹配。
 
 按下一个键时，GPUI 会：
 
@@ -52,17 +52,17 @@ h_flex()
 `FocusHandle` 是键盘目标的稳定身份。让拥有这段交互的 Entity 保存它：
 
 ```rust
-struct AiChat {
+struct Chat {
     focus_handle: FocusHandle,
 }
 
-impl AiChat {
+impl Chat {
     fn new(cx: &mut Context<Self>) -> Self {
         Self { focus_handle: cx.focus_handle() }
     }
 }
 
-impl Focusable for AiChat {
+impl Focusable for Chat {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
@@ -73,7 +73,7 @@ impl Focusable for AiChat {
 - `handle.contains_focused(window, cx)`：Focus 也可以在它的子树里；
 - `handle.focus(window, cx)`：主动把 Focus 移到这里。
 
-输入光标、选中的 widget 通常检查 exact Focus；当子控件获得 Focus 时整个面板仍应保持激活，则检查 containment。
+输入光标、选中的控件通常检查 exact Focus；当子控件获得 Focus 时整个面板仍应保持激活，则检查 containment。
 
 ## `track_focus` 到底做了什么
 
@@ -82,7 +82,7 @@ impl Focusable for AiChat {
 ```rust
 div()
     .track_focus(&self.focus_handle)
-    .key_context("AiChat")
+    .key_context("Chat")
     .on_action(cx.listener(Self::send_message))
 ```
 
@@ -147,7 +147,7 @@ MenuItem::action("发送消息", SendMessage)
 
 ```rust
 #[derive(Action, Clone, PartialEq, Deserialize)]
-#[action(namespace = ai_chat)]
+#[action(namespace = chat)]
 struct InsertPrompt {
     text: SharedString,
 }
@@ -157,43 +157,65 @@ Keymap 因此可以用稳定的 Action name 标识命令，并在需要时附带
 
 ### 通过共同 owner 协调并列组件
 
-并列组件之间不需要互相持有 callback。Sidebar 可以 dispatch `FocusChat`，共同的 `Workspace` owner 负责处理，并把 Focus 移到 AI Chat：
+假设用户在 Sidebar 选择一条会话后，Chat 需要打开这条会话。Sidebar 只需要用 `OpenConversation` 表达这个意图，不需要持有 Chat 的 callback 或引用。二者最近的共同 owner `Workspace` 负责处理 Action，再更新 Chat：
 
 ```rust
-actions!(workspace, [FocusChat]);
+#[derive(Action, Clone, PartialEq)]
+#[action(namespace = workspace, no_json)]
+struct OpenConversation {
+    conversation_id: ConversationId,
+}
 
 impl Workspace {
-    fn focus_chat(&mut self, _: &FocusChat, window: &mut Window, cx: &mut Context<Self>) {
-        self.chat.read(cx).focus_handle(cx).focus(window, cx);
+    fn open_conversation(
+        &mut self,
+        action: &OpenConversation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.chat.update(cx, |chat, cx| {
+            chat.open(action.conversation_id.clone(), window, cx);
+        });
     }
 }
 
-// 挂在共同的 Workspace 区域上：
+// Workspace 是 Sidebar 与 Chat 的共同祖先。
 h_flex()
-    .on_action(cx.listener(Self::focus_chat))
+    .on_action(cx.listener(Self::open_conversation))
     .child(self.sidebar.clone())
     .child(self.chat.clone())
 
-// 从 Sidebar 的按钮或命令行派发：
-window.dispatch_action(Box::new(FocusChat), cx);
+// Sidebar 中的会话行派发命令。
+window.dispatch_action(
+    Box::new(OpenConversation { conversation_id }),
+    cx,
+);
 ```
 
-Action 沿当前 Dispatch Path 传播，不会直接跳进一个无关 sibling。跨区域命令应由最近的共同 owner 处理；只有真正属于整个应用的命令才使用 global handler。
+现在路由关系很明确：**Sidebar → Workspace → Chat**。Action 从 Sidebar 当前的 Dispatch Path 向上走，由 `Workspace` 接收；`Workspace` 再通过 Entity API 调用 Chat。Action 本身不会从 Sidebar 横向跳到 Chat。
+
+:::note NOTE — sibling 不在当前 Dispatch Path 上
+
+如果只把 `open_conversation` handler 挂在 Chat 上，当 Sidebar 拥有 Focus 时派发的 Action 无法到达它：Chat 是 sibling，不是当前 Dispatch Path 上的祖先。同一种错误也会导致快捷键看起来没有响应——`on_action` handler 位于 Focus 选中的路径之外。跨区域 handler 应放在最近的共同 owner 上；注册 `KeyBinding` 后，还要把对应的 `key_context` 与 handler 放在快捷键应该生效的路径上。
+
+:::
+
+只有真正属于整个应用的命令才使用 global handler。
 
 ## 完整实现一条键盘命令
 
 先定义并绑定一次命令：
 
 ```rust
-actions!(ai_chat, [SendMessage]);
-const AI_CHAT_CONTEXT: &str = "AiChat";
+actions!(chat, [SendMessage]);
+const CHAT_CONTEXT: &str = "Chat";
 
 fn init(cx: &mut App) {
     cx.bind_keys([
         #[cfg(target_os = "macos")]
-        KeyBinding::new("cmd-enter", SendMessage, Some(AI_CHAT_CONTEXT)),
+        KeyBinding::new("cmd-enter", SendMessage, Some(CHAT_CONTEXT)),
         #[cfg(not(target_os = "macos"))]
-        KeyBinding::new("ctrl-enter", SendMessage, Some(AI_CHAT_CONTEXT)),
+        KeyBinding::new("ctrl-enter", SendMessage, Some(CHAT_CONTEXT)),
     ]);
 }
 ```
@@ -201,18 +223,18 @@ fn init(cx: &mut App) {
 把 Focus、Key Context 和 handler 放在同一个 owner region：
 
 ```rust
-impl AiChat {
+impl Chat {
     fn send_message(&mut self, _: &SendMessage, _: &mut Window, cx: &mut Context<Self>) {
         self.submit_draft();
         cx.notify();
     }
 }
 
-impl Render for AiChat {
+impl Render for Chat {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .track_focus(&self.focus_handle)
-            .key_context(AI_CHAT_CONTEXT)
+            .key_context(CHAT_CONTEXT)
             .on_action(cx.listener(Self::send_message))
             .child("AI Chat")
     }
@@ -231,12 +253,12 @@ Event 是一个 Entity 发给观察者的类型化通知。它不经过 Focus、
 
 ```rust
 #[derive(Clone, Debug)]
-enum AiChatEvent {
+enum ChatEvent {
     DraftChanged,
     MessageSent { message_id: MessageId },
 }
 
-impl EventEmitter<AiChatEvent> for AiChat {}
+impl EventEmitter<ChatEvent> for Chat {}
 ```
 
 状态变化后发出一个有业务含义的事实：
@@ -244,7 +266,7 @@ impl EventEmitter<AiChatEvent> for AiChat {}
 ```rust
 fn finish_send(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
     self.draft.clear();
-    cx.emit(AiChatEvent::MessageSent { message_id });
+    cx.emit(ChatEvent::MessageSent { message_id });
     cx.notify();
 }
 ```
@@ -252,9 +274,9 @@ fn finish_send(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
 Owner 在组装 Entity 时订阅：
 
 ```rust
-let chat = cx.new(AiChat::new);
+let chat = cx.new(Chat::new);
 let subscription = cx.subscribe(&chat, |workspace, _, event, cx| {
-    if matches!(event, AiChatEvent::MessageSent { .. }) {
+    if matches!(event, ChatEvent::MessageSent { .. }) {
         workspace.refresh_conversation();
         cx.notify();
     }

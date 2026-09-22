@@ -17,10 +17,10 @@ This guide shows how to use those mechanisms together:
 
 ## How a shortcut works
 
-<img class="architecture-light" src="/focus-action-flow.svg?v=20260922-2" alt="In a split layout, focus in AI Chat activates the AiChat key context instead of the Sidebar context, so ⌘ Enter maps to SendMessage">
-<img class="architecture-dark" src="/focus-action-flow-dark.svg?v=20260922-2" alt="In a split layout, focus in AI Chat activates the AiChat key context instead of the Sidebar context, so ⌘ Enter maps to SendMessage">
+<img class="architecture-light" src="/focus-action-flow.svg?v=20260922-3" alt="Focus builds a Dispatch Path, its key contexts match a KeyBinding, and the resulting Action is dispatched to the most specific handler first">
+<img class="architecture-dark" src="/focus-action-flow-dark.svg?v=20260922-3" alt="Focus builds a Dispatch Path, its key contexts match a KeyBinding, and the resulting Action is dispatched to the most specific handler first">
 
-Imagine a window split into a Sidebar on the left and AI Chat on the right. Clicking the Sidebar produces a focus path containing `Sidebar`; clicking the chat composer produces one containing `AiChat`. A binding scoped to `AiChat` is therefore active only on the right.
+Imagine a window split into a Sidebar on the left and Chat on the right. Clicking the Sidebar produces a focus path containing `Sidebar`; clicking the chat composer produces one containing `Chat`. A binding scoped to `Chat` is therefore active only on the right.
 
 The layout can make those two keyboard regions explicit:
 
@@ -37,7 +37,7 @@ h_flex()
     .child(div().flex_1().child(self.chat.clone()))
 ```
 
-`AiChat` tracks its own handle and declares `key_context("AiChat")` in its renderer. Only the region containing the focused handle contributes its context to shortcut matching.
+`Chat` tracks its own handle and declares `key_context("Chat")` in its renderer. Only the region containing the focused handle contributes its context to shortcut matching.
 
 When a key is pressed, GPUI:
 
@@ -52,17 +52,17 @@ The active focus path makes the same keystroke mean different things in differen
 A `FocusHandle` is a stable identity for a keyboard target. Keep it on the entity that owns the interaction:
 
 ```rust
-struct AiChat {
+struct Chat {
     focus_handle: FocusHandle,
 }
 
-impl AiChat {
+impl Chat {
     fn new(cx: &mut Context<Self>) -> Self {
         Self { focus_handle: cx.focus_handle() }
     }
 }
 
-impl Focusable for AiChat {
+impl Focusable for Chat {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
@@ -73,7 +73,7 @@ impl Focusable for AiChat {
 - `handle.contains_focused(window, cx)` also accepts a focused descendant.
 - `handle.focus(window, cx)` deliberately moves focus here.
 
-Use the exact check for an input caret or selected widget. Use containment when a panel remains active while one of its controls has focus.
+Use the exact check for an input caret or selected control. Use containment when a panel remains active while one of its controls has focus.
 
 ## What `track_focus` does
 
@@ -82,7 +82,7 @@ Use the exact check for an input caret or selected widget. Use containment when 
 ```rust
 div()
     .track_focus(&self.focus_handle)
-    .key_context("AiChat")
+    .key_context("Chat")
     .on_action(cx.listener(Self::send_message))
 ```
 
@@ -147,7 +147,7 @@ Unit Actions declared with `actions!` are registered by name. For an Action carr
 
 ```rust
 #[derive(Action, Clone, PartialEq, Deserialize)]
-#[action(namespace = ai_chat)]
+#[action(namespace = chat)]
 struct InsertPrompt {
     text: SharedString,
 }
@@ -157,43 +157,65 @@ A keymap can then identify the command by its stable action name and, when neede
 
 ### Coordinate sibling components through their owner
 
-Parallel components do not need direct callbacks to each other. The Sidebar can dispatch `FocusChat`; their common `Workspace` owner handles it and focuses AI Chat:
+Suppose selecting a conversation in the Sidebar should open it in Chat. The Sidebar should describe that intent with `OpenConversation`; it does not need a callback or direct reference to Chat. Their nearest common owner, `Workspace`, handles the Action and updates Chat:
 
 ```rust
-actions!(workspace, [FocusChat]);
+#[derive(Action, Clone, PartialEq)]
+#[action(namespace = workspace, no_json)]
+struct OpenConversation {
+    conversation_id: ConversationId,
+}
 
 impl Workspace {
-    fn focus_chat(&mut self, _: &FocusChat, window: &mut Window, cx: &mut Context<Self>) {
-        self.chat.read(cx).focus_handle(cx).focus(window, cx);
+    fn open_conversation(
+        &mut self,
+        action: &OpenConversation,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.chat.update(cx, |chat, cx| {
+            chat.open(action.conversation_id.clone(), window, cx);
+        });
     }
 }
 
-// On the common Workspace region:
+// Workspace is an ancestor of both Sidebar and Chat.
 h_flex()
-    .on_action(cx.listener(Self::focus_chat))
+    .on_action(cx.listener(Self::open_conversation))
     .child(self.sidebar.clone())
     .child(self.chat.clone())
 
-// From a Sidebar button or command row:
-window.dispatch_action(Box::new(FocusChat), cx);
+// A conversation row in Sidebar dispatches the command.
+window.dispatch_action(
+    Box::new(OpenConversation { conversation_id }),
+    cx,
+);
 ```
 
-An Action follows the current dispatch path; it does not jump directly into an unrelated sibling. Put cross-region handlers on the nearest common owner. Reserve global handlers for commands that are truly application-wide.
+The dispatch route is now explicit: **Sidebar → Workspace → Chat**. The Action travels upward on Sidebar's current Dispatch Path until `Workspace` handles it. `Workspace` then calls Chat through the Entity API. The Action itself never travels sideways from Sidebar into Chat.
+
+:::note NOTE — A sibling is not on the Dispatch Path
+
+If `open_conversation` is attached only to Chat, an Action dispatched while Sidebar has Focus cannot reach it: Chat is a sibling, not an ancestor on the current Dispatch Path. The same mistake can make a shortcut appear unresponsive when its `on_action` handler sits outside the path selected by Focus. Put a cross-region handler on the nearest common owner, register the `KeyBinding`, and place its `key_context` and handler on the path where the shortcut should work.
+
+:::
+
+Reserve global handlers for commands that are truly application-wide.
 
 ## Build a command end to end
 
 Define and bind the command once:
 
 ```rust
-actions!(ai_chat, [SendMessage]);
-const AI_CHAT_CONTEXT: &str = "AiChat";
+actions!(chat, [SendMessage]);
+const CHAT_CONTEXT: &str = "Chat";
 
 fn init(cx: &mut App) {
     cx.bind_keys([
         #[cfg(target_os = "macos")]
-        KeyBinding::new("cmd-enter", SendMessage, Some(AI_CHAT_CONTEXT)),
+        KeyBinding::new("cmd-enter", SendMessage, Some(CHAT_CONTEXT)),
         #[cfg(not(target_os = "macos"))]
-        KeyBinding::new("ctrl-enter", SendMessage, Some(AI_CHAT_CONTEXT)),
+        KeyBinding::new("ctrl-enter", SendMessage, Some(CHAT_CONTEXT)),
     ]);
 }
 ```
@@ -201,18 +223,18 @@ fn init(cx: &mut App) {
 Attach focus, context, and handler to the same owning region:
 
 ```rust
-impl AiChat {
+impl Chat {
     fn send_message(&mut self, _: &SendMessage, _: &mut Window, cx: &mut Context<Self>) {
         self.submit_draft();
         cx.notify();
     }
 }
 
-impl Render for AiChat {
+impl Render for Chat {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .track_focus(&self.focus_handle)
-            .key_context(AI_CHAT_CONTEXT)
+            .key_context(CHAT_CONTEXT)
             .on_action(cx.listener(Self::send_message))
             .child("AI Chat")
     }
@@ -231,12 +253,12 @@ An Event is a typed notification from one entity to its observers. It does not u
 
 ```rust
 #[derive(Clone, Debug)]
-enum AiChatEvent {
+enum ChatEvent {
     DraftChanged,
     MessageSent { message_id: MessageId },
 }
 
-impl EventEmitter<AiChatEvent> for AiChat {}
+impl EventEmitter<ChatEvent> for Chat {}
 ```
 
 Emit a semantic fact after the state change:
@@ -244,7 +266,7 @@ Emit a semantic fact after the state change:
 ```rust
 fn finish_send(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
     self.draft.clear();
-    cx.emit(AiChatEvent::MessageSent { message_id });
+    cx.emit(ChatEvent::MessageSent { message_id });
     cx.notify();
 }
 ```
@@ -252,9 +274,9 @@ fn finish_send(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
 The owner subscribes while wiring entities together:
 
 ```rust
-let chat = cx.new(AiChat::new);
+let chat = cx.new(Chat::new);
 let subscription = cx.subscribe(&chat, |workspace, _, event, cx| {
-    if matches!(event, AiChatEvent::MessageSent { .. }) {
+    if matches!(event, ChatEvent::MessageSent { .. }) {
         workspace.refresh_conversation();
         cx.notify();
     }

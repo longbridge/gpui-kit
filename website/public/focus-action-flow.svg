@@ -1,23 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="390" viewBox="0 0 1120 390" role="img" aria-labelledby="title desc">
-  <title id="title">How GPUI turns a keystroke into an action</title>
-  <desc id="desc">Focus determines a context stack, the context stack matches a key binding, and the resulting action bubbles from the focused node toward the root.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="250" viewBox="0 0 1120 250" role="img" aria-labelledby="title desc">
+  <title id="title">GPUI shortcut dispatch in three steps</title>
+  <desc id="desc">GPUI builds the Dispatch Path from Focus, matches a KeyBinding with Key Contexts on that path, then dispatches the Action from the most specific handler upward.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="#52606d"/></marker>
-    <style>.t{font:700 18px ui-sans-serif,system-ui;fill:#17212b}.l{font:600 15px ui-sans-serif,system-ui;fill:#17212b}.b{font:400 13px ui-sans-serif,system-ui;fill:#52606d}.box{fill:#fff;stroke:#9aa7b2;stroke-width:1.5}.active{fill:#e8f2ff;stroke:#3578c8;stroke-width:2}.action{fill:#edf8f0;stroke:#3b8d57;stroke-width:2}.a{stroke:#52606d;stroke-width:1.7;fill:none;marker-end:url(#arrow)}.d{stroke:#8795a1;stroke-width:1.5;stroke-dasharray:6 5;fill:none;marker-end:url(#arrow)}</style>
+    <style>.step{font:700 14px ui-sans-serif,system-ui;fill:#3578c8}.title{font:700 18px ui-sans-serif,system-ui;fill:#17212b}.body{font:400 14px ui-sans-serif,system-ui;fill:#52606d}.code{font:600 14px ui-monospace,SFMono-Regular,monospace;fill:#17212b}.box{fill:#fff;stroke:#a7b2bc;stroke-width:1.5}.active{fill:#edf5ff;stroke:#3578c8;stroke-width:1.5}.action{fill:#edf8f0;stroke:#3b8d57;stroke-width:1.5}.arrow{stroke:#52606d;stroke-width:1.8;fill:none;marker-end:url(#arrow)}</style>
   </defs>
-  <text x="30" y="32" class="t">1. Focus selects a region</text><rect x="30" y="52" width="290" height="290" rx="14" class="box"/>
-  <rect x="55" y="78" width="240" height="58" rx="9" class="box"/><text x="74" y="102" class="l">Workspace</text><text x="74" y="122" class="b">two regions side by side</text>
-  <rect x="55" y="158" width="104" height="136" rx="9" class="box"/><text x="73" y="187" class="l">Sidebar</text><text x="73" y="211" class="b">context:</text><text x="73" y="229" class="b">Sidebar</text>
-  <rect x="171" y="158" width="124" height="136" rx="9" class="active"/><text x="189" y="187" class="l">AI Chat</text><text x="189" y="211" class="b">track_focus</text><text x="189" y="229" class="b">context: AiChat</text><text x="189" y="263" class="b">focused</text>
-  <path d="M233 158V136" class="d"/><text x="53" y="320" class="b">Active path: Workspace → AI Chat</text>
-  <path d="M333 215H398" class="a"/><text x="345" y="177" class="b">press</text><text x="337" y="197" class="l">⌘ Enter</text>
-  <text x="410" y="32" class="t">2. Match the key context</text><rect x="410" y="52" width="300" height="290" rx="14" class="box"/>
-  <text x="436" y="89" class="l">Registered bindings</text><rect x="436" y="112" width="248" height="64" rx="9" class="active"/><text x="454" y="138" class="b">⌘ Enter + "AiChat"</text><text x="454" y="160" class="l">→ SendMessage</text>
-  <rect x="436" y="194" width="248" height="64" rx="9" class="box"/><text x="454" y="220" class="b">⌘ Enter + "Sidebar"</text><text x="454" y="242" class="l">no binding</text>
-  <text x="436" y="291" class="b">The deepest matching context wins.</text><text x="436" y="313" class="b">No matching context means no action.</text>
-  <path d="M723 195H788" class="a"/><text x="733" y="177" class="b">dispatch</text>
-  <text x="800" y="32" class="t">3. Bubble the Action</text><rect x="800" y="52" width="290" height="290" rx="14" class="box"/>
-  <rect x="827" y="82" width="236" height="68" rx="9" class="action"/><text x="846" y="108" class="l">AI Chat handles Send</text><text x="846" y="132" class="b">stops here by default</text>
-  <path d="M945 178V150" class="d"/><rect x="847" y="178" width="196" height="52" rx="9" class="box"/><text x="866" y="209" class="l">Pane handler</text>
-  <path d="M945 258V230" class="d"/><rect x="867" y="258" width="156" height="52" rx="9" class="box"/><text x="886" y="289" class="l">Workspace</text><text x="824" y="365" class="b">cx.propagate() continues upward.</text>
+  <rect x="24" y="24" width="310" height="202" rx="14" class="box"/>
+  <text x="50" y="58" class="step">1 · FOCUS</text><text x="50" y="88" class="title">Build the Dispatch Path</text>
+  <rect x="50" y="111" width="258" height="58" rx="9" class="active"/><text x="70" y="136" class="code">Chat → Workspace</text><text x="70" y="157" class="body">focused Element → ancestors</text>
+  <text x="50" y="201" class="body">Start at the Element with Focus.</text>
+  <path d="M348 125H393" class="arrow"/>
+  <rect x="407" y="24" width="310" height="202" rx="14" class="box"/>
+  <text x="433" y="58" class="step">2 · KEY CONTEXT</text><text x="433" y="88" class="title">Match a KeyBinding</text>
+  <rect x="433" y="111" width="258" height="58" rx="9" class="active"/><text x="453" y="136" class="code">⌘ Enter + "Chat"</text><text x="453" y="157" class="code">→ SendMessage</text>
+  <text x="433" y="201" class="body">Use key_context values on the path.</text>
+  <path d="M731 125H776" class="arrow"/>
+  <rect x="790" y="24" width="306" height="202" rx="14" class="box"/>
+  <text x="816" y="58" class="step">3 · ACTION</text><text x="816" y="88" class="title">Dispatch along the path</text>
+  <rect x="816" y="111" width="254" height="58" rx="9" class="action"/><text x="836" y="136" class="code">Chat handler</text><text x="836" y="157" class="body">then parents if propagated</text>
+  <text x="816" y="201" class="body">The most specific handler runs first.</text>
 </svg>
