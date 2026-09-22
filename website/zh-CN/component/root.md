@@ -6,15 +6,14 @@ example: false
 
 # Root View
 
-[Root] 组件是 GPUI Component 在窗口中的根提供者。要启用 GPUI Component 的功能，必须把 [Root] 作为窗口中的 **第一层子节点**。
+[Root] 是由 Base 提供的统一窗口根视图。应用统一通过 `gpui_kit::open_window` 创建窗口，它始终使用这个类型。Base 不提供额外的窗口创建函数；`component::Root` 重导出 Base 类型。
 
-这一点很重要。如果不把 [Root] 放在窗口的第一层，许多行为都会出现异常或不符合预期。
+Base 负责内容与浮层承载、键盘焦点遍历和文本选择复制。显式调用 `gpui_component::init` 会注册窗口展示扩展，提供对话框、抽屉、通知、tooltip、菜单、触屏选择、主题与窗口边框。必须在创建窗口前初始化。仅使用 Base 的应用调用 `gpui_base::init`，无需依赖 Component 或 Kit。Cargo feature 合并不会改变窗口根类型。
 
-下面这份完整的 **Tested consumer recipe** 在隔离的 `gpui-kit` 消费者工作区中编译。它会在创建窗口前初始化 GPUI Kit，将 `Root` 作为窗口的第一层视图，并渲染全部 Root 浮层。
+下面这份完整的 **Tested consumer recipe** 在隔离的 `gpui-kit` 消费者工作区中编译。它先初始化 GPUI Kit，再打开一个以 `Root` 包裹应用视图为根的窗口。
 
 <!-- recipe:bootstrap:start -->
 ```rust
-use gpui_kit::component::Root;
 use gpui_kit::{
     AppContext as _, Context, IntoElement, ParentElement as _, Render, Styled as _, Window,
     WindowOptions, div,
@@ -25,52 +24,47 @@ pub fn run() {
         .with_assets(gpui_kit::assets::Assets)
         .run(|cx| {
             gpui_kit::init(cx);
-            cx.spawn(async move |cx| {
-                cx.open_window(WindowOptions::default(), |window, cx| {
-                    let view = cx.new(|_| BootstrapView);
-                    cx.new(|cx| Root::new(view, window, cx))
-                })
-                .expect("failed to open window");
+            // The window's root view is a `Root` wrapping the view, which
+            // renders dialogs, sheets and notifications above it.
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+                cx.new(|_| BootstrapView)
             })
-            .detach();
+            .expect("failed to open window");
         });
 }
 
 struct BootstrapView;
 
 impl Render for BootstrapView {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .child("My application")
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child("My application")
     }
 }
 ```
 <!-- recipe:bootstrap:end -->
 
-## 窗口边框
+`gpui_kit::open_window` 就是 `cx.open_window` 加上 `Root` 包裹。`Root` 必须是窗口的根视图，
+以提供对话框、侧边面板、通知、焦点遍历和文本选择等窗口级能力。客户端窗口边框由窗口的
+decorations 模式决定；server decorations 和 layer-shell 窗口不需要配置 Root。
 
-默认情况下，[Root] 会渲染 GPUI Component 的客户端窗口边框包装层。`layer-shell` 全屏窗口等场景不应渲染这层边框，可以使用 `bordered(false)` 关闭：
+`open_window` 同时返回窗口和视图，所以必须在窗口内构造的视图（比如它持有 `InputState`）也能留住句柄：
 
-```rs
-cx.new(|cx| Root::new(view, window, cx).bordered(false))
+```rust
+let (window, editor) = gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+    cx.new(|cx| Editor::new(window, cx))
+})?;
 ```
+
+## 关闭窗口与退出应用
+
+应用自行定义退出和关闭窗口的 action 及快捷键，`gpui_kit::init` 不会安装这些绑定。应用应在关闭窗口或退出之前处理未保存的内容及确认流程。
 
 ## 浮层
 
-对话框、抽屉、通知等 UI 都需要一个统一的展示层，[Root] 提供了这些浮层的渲染入口：
+`Root` 统一挂载对话框、抽屉和通知层，始终渲染在应用内容之上。应用只需调用 `window.open_dialog`、`window.open_sheet` 或 `window.push_notification`，不需要手动挂载或配置开关。子视图是否缓存不影响浮层渲染。
 
-- [Root::render_dialog_layer](https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html#method.render_dialog_layer) - 渲染当前打开的对话框
-- [Root::render_sheet_layer](https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html#method.render_sheet_layer) - 渲染当前打开的抽屉
-- [Root::render_notification_layer](https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html#method.render_notification_layer) - 渲染通知列表
+### 迁移到 0.7.0
 
-在 `Root` 之下的第一层视图的 `render` 方法中放置这些图层；上方经过测试的 recipe 展示了所需的 `window, cx` 参数。
+`Root::render_dialog_layer`、`Root::render_sheet_layer` 和 `Root::render_notification_layer` 已删除。删除视图中对应的调用及 `.children(...)` 即可。此前自定义的层位置统一改为窗口级 Root 的浮层位置。
 
-:::tip
-这里使用的是 `children` 而不是 `child`，因为当没有打开的 dialog、sheet 或 notification 时，这些方法会返回 `None`，GPUI 就不会渲染任何内容。
-:::
-
-[Root]: https://docs.rs/gpui-component/latest/gpui_component/root/struct.Root.html
+[Root]: https://docs.rs/gpui-base/latest/gpui_base/struct.Root.html

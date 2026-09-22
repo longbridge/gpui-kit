@@ -361,8 +361,80 @@ type StateFactory = dyn Fn(&[ComponentArgument], &mut Window, &mut App) -> Resul
     + Sync
     + 'static;
 
+type PreparedStateCall =
+    Box<dyn FnOnce(&mut Window, &mut App) -> anyhow::Result<ComponentDataValue>>;
+type PrepareStateCall = dyn Fn(
+        &RetainedStateStore,
+        u64,
+        &'static str,
+        Vec<ComponentDataValue>,
+    ) -> anyhow::Result<PreparedStateCall>
+    + Send
+    + Sync;
+
+/// An opt-in operation on retained state. Clone the handle before entering GPUI,
+/// so callbacks never execute with the registry's state table borrowed.
+#[derive(Clone)]
+pub struct StateMethodDescriptor {
+    name: &'static str,
+    signature: &'static str,
+    readonly: bool,
+    prepare: Arc<PrepareStateCall>,
+}
+impl StateMethodDescriptor {
+    pub fn new<T: Any + Clone>(
+        name: &'static str,
+        signature: &'static str,
+        call: impl Fn(
+            &T,
+            &[ComponentDataValue],
+            &mut Window,
+            &mut App,
+        ) -> anyhow::Result<ComponentDataValue>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
+        let call = Arc::new(call);
+        Self {
+            name,
+            signature,
+            readonly: false,
+            prepare: Arc::new(move |store, handle, kind, args| {
+                let state = store.with::<T, _>(handle, kind, Clone::clone)?;
+                let call = call.clone();
+                Ok(Box::new(move |window, cx| call(&state, &args, window, cx)))
+            }),
+        }
+    }
+    pub fn with_readonly(mut self, readonly: bool) -> Self {
+        self.readonly = readonly;
+        self
+    }
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+    /// TypeScript parameter list and result, e.g. `(): string`.
+    pub fn signature(&self) -> &'static str {
+        self.signature
+    }
+    pub fn is_readonly(&self) -> bool {
+        self.readonly
+    }
+    pub(crate) fn prepare(
+        &self,
+        store: &RetainedStateStore,
+        handle: u64,
+        kind: &'static str,
+        args: Vec<ComponentDataValue>,
+    ) -> anyhow::Result<PreparedStateCall> {
+        (self.prepare)(store, handle, kind, args)
+    }
+}
+
 #[derive(Clone)]
 pub struct StateDescriptor {
+    methods: Vec<StateMethodDescriptor>,
     export: &'static str,
     kind: &'static str,
     arguments: Vec<ArgumentDescriptor>,
@@ -388,6 +460,7 @@ impl StateDescriptor {
         + 'static,
     ) -> Self {
         Self {
+            methods: Vec::new(),
             export,
             kind,
             arguments,
@@ -399,6 +472,14 @@ impl StateDescriptor {
     pub fn with_documentation(mut self, documentation: &'static str) -> Self {
         self.documentation = Some(documentation);
         self
+    }
+
+    pub fn with_methods(mut self, methods: Vec<StateMethodDescriptor>) -> Self {
+        self.methods = methods;
+        self
+    }
+    pub fn methods(&self) -> &[StateMethodDescriptor] {
+        &self.methods
     }
 
     pub fn export(&self) -> &'static str {
@@ -600,6 +681,7 @@ pub struct MaterializeRequest<'a> {
     issued_children: SmallVec<[(u64, u32); 4]>,
     next_child_token: u64,
     request_id: u64,
+    element_id: gpui::ElementId,
     child_lane: ChildLane,
     slots: Slots,
     /// Deferred slots, still unbuilt. A factory leases the snapshot and
@@ -622,6 +704,7 @@ pub(crate) type SlotSpecs = SmallVec<[(&'static str, u32); 2]>;
 
 pub(crate) struct MaterializeRequestInit<'a> {
     pub component_name: &'static str,
+    pub element_id: gpui::ElementId,
     pub payload: &'a ComponentPayload,
     pub operations: &'a [crate::spec::SpecOp],
     pub runtime: &'a Rc<crate::ShellRuntime>,
@@ -659,6 +742,7 @@ impl<'a> MaterializeRequest<'a> {
             issued_children: SmallVec::new(),
             next_child_token: 0,
             request_id: NEXT_MATERIALIZE_REQUEST_ID.fetch_add(1, Ordering::Relaxed),
+            element_id: init.element_id,
             child_lane: ChildLane::Unclaimed,
             slots: init.slots,
             slot_factory_specs: init.slot_factory_specs,
@@ -677,6 +761,17 @@ impl<'a> MaterializeRequest<'a> {
             anyhow::anyhow!("component app effects require a root application snapshot")
         })?;
         Ok(ComponentAppEffects::new(self.runtime, application, view))
+    }
+
+    /// The element id of the spec node being materialized: the script's `key`
+    /// for it, or its address in the description.
+    ///
+    /// A component that keeps per-element state — a hitbox, a hover, a cached
+    /// path — keys it on this, so two of the same component in one description
+    /// stay apart instead of sharing one slot. Plain elements already carry it;
+    /// a registered component reads it from here.
+    pub fn element_id(&self) -> &gpui::ElementId {
+        &self.element_id
     }
 
     pub fn payload(&self) -> &ComponentPayload {
@@ -1204,7 +1299,6 @@ impl ComponentDataCallback {
 }
 
 impl ComponentElementCallback {
-    #[cfg(test)]
     pub(crate) fn from_runtime(runtime: &Rc<crate::ShellRuntime>, id: u64) -> Self {
         Self {
             callback: ComponentCallback::from_runtime(runtime, id),
@@ -1259,6 +1353,31 @@ impl ComponentElementCallback {
             .upgrade()
             .ok_or_else(|| anyhow::anyhow!("component callback runtime has been released"))?;
         runtime.dispatch_component_element_data_callback(self.callback.id, arguments, window, cx)
+    }
+    /// Build a frame-owned inline subtree whose child callbacks retire with that frame.
+    pub fn build_interactive_data_with(
+        &self,
+        arguments: &[ComponentDataValue],
+        window: &mut Window,
+        cx: &mut App,
+    ) -> anyhow::Result<Option<AnyElement>> {
+        anyhow::ensure!(
+            !self.active.replace(true),
+            "component element callback is already running"
+        );
+        struct Reset<'a>(&'a Cell<bool>);
+        impl Drop for Reset<'_> {
+            fn drop(&mut self) {
+                self.0.set(false)
+            }
+        }
+        let _reset = Reset(&self.active);
+        let runtime = self
+            .callback
+            .runtime
+            .upgrade()
+            .ok_or_else(|| anyhow::anyhow!("component callback runtime has been released"))?;
+        runtime.dispatch_inline_element_data(self.callback.id, arguments, true, window, cx)
     }
 }
 
@@ -1440,7 +1559,6 @@ impl ComponentClickCallback {
 }
 
 impl ComponentCallback {
-    #[cfg(test)]
     pub(crate) fn from_runtime(runtime: &Rc<crate::ShellRuntime>, id: u64) -> Self {
         Self {
             runtime: Rc::downgrade(runtime),
@@ -1495,6 +1613,21 @@ impl ComponentCallback {
     ///
     /// GPUI event closures cannot return an error. Adapters should use this
     /// entry point instead of discarding the [`Result`] from [`Self::invoke_with`].
+    pub fn invoke_data_with(
+        &self,
+        arguments: &[ComponentDataValue],
+        window: &mut Window,
+        cx: &mut App,
+    ) -> anyhow::Result<()> {
+        let runtime = self
+            .runtime
+            .upgrade()
+            .ok_or_else(|| anyhow::anyhow!("component callback runtime has been released"))?;
+        runtime
+            .dispatch_component_event_data(self.id, arguments, window, cx)
+            .map(|_| ())
+    }
+
     pub fn invoke_and_report_with(
         &self,
         context: &str,
@@ -1990,6 +2123,15 @@ impl ComponentRegistry {
         if self.state_kinds.contains(descriptor.kind) {
             return Err(RegistryError::DuplicateStateKind(descriptor.kind));
         }
+        let mut method_names = HashSet::new();
+        for method in &descriptor.methods {
+            if !is_javascript_identifier(method.name) || !method_names.insert(method.name) {
+                return Err(RegistryError::InvalidMethod {
+                    component: descriptor.kind,
+                    method: method.name,
+                });
+            }
+        }
         validate_arguments(descriptor.kind, descriptor.export, &descriptor.arguments)?;
         self.exports.insert(descriptor.export);
         self.state_kinds.insert(descriptor.kind);
@@ -2238,7 +2380,11 @@ impl FrozenComponentRegistry {
             source.push_str(state.export);
             source.push_str("(...args) { const handle = globalThis.__gpui_components[");
             source.push_str(&format!("{:?}", state.export));
-            source.push_str("](args); const value = Object.freeze({}); __stateHandles.set(value, handle); return value; }\nexport { ");
+            source.push_str("](args); const value = Object.freeze({");
+            for method in state.methods() {
+                source.push_str(&format!("{:?}: (...args) => globalThis.__gpui_components[{:?}](__stateProof, handle, args),", method.name(), format!("{}.{}", state.export(), method.name())));
+            }
+            source.push_str("}); __stateHandles.set(value, handle); return value; }\nexport { ");
             source.push_str(state.export);
             source.push_str(" };\n");
         }
@@ -2309,6 +2455,7 @@ mod tests {
             anyhow::bail!("no element argument expected")
         };
         let mut request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Slotted",
             payload: &payload,
             operations: &operations,
@@ -2348,6 +2495,7 @@ mod tests {
             anyhow::bail!("no element argument expected")
         };
         let mut request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Slotted",
             payload: &payload,
             operations: &operations,
@@ -2391,6 +2539,7 @@ mod tests {
             Ok(div().into_any_element())
         };
         let mut request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Parent",
             payload: &payload,
             operations: &operations,
@@ -2428,6 +2577,7 @@ mod tests {
             Ok(div().into_any_element())
         };
         let mut request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "RepeatedParent",
             payload: &payload,
             operations: &operations,
@@ -2467,6 +2617,7 @@ mod tests {
         let mut ordinary_resolver =
             |_, _: Option<&mut Window>, _: Option<&mut App>| Ok(div().into_any_element());
         let mut ordinary = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Ordinary",
             payload: &payload,
             operations: &operations,
@@ -2493,6 +2644,7 @@ mod tests {
         let mut typed_resolver =
             |_, _: Option<&mut Window>, _: Option<&mut App>| Ok(div().into_any_element());
         let mut typed = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Typed",
             payload: &payload,
             operations: &operations,
@@ -2535,6 +2687,7 @@ mod tests {
         let mut resolve_element =
             |_, _: Option<&mut Window>, _: Option<&mut App>| anyhow::bail!("child adapter failed");
         let request = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "Parent",
             payload: &payload,
             operations: &operations,
@@ -2572,6 +2725,7 @@ mod tests {
         let mut resolver_c =
             |_, _: Option<&mut Window>, _: Option<&mut App>| Ok(div().into_any_element());
         let mut request_a = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "A",
             payload: &payload,
             operations: &operations,
@@ -2589,6 +2743,7 @@ mod tests {
             application_owner: None,
         });
         let mut request_b = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "B",
             payload: &payload,
             operations: &operations,
@@ -2606,6 +2761,7 @@ mod tests {
             application_owner: None,
         });
         let mut request_c = MaterializeRequest::new(MaterializeRequestInit {
+            element_id: gpui::ElementId::Name("test".into()),
             component_name: "C",
             payload: &payload,
             operations: &operations,

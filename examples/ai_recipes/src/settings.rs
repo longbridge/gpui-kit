@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme, IconName, Root, WindowExt,
+    ActiveTheme, IconName, WindowExt,
     button::Button,
     checkbox::Checkbox,
     form::{Field, Form},
@@ -57,7 +57,7 @@ impl Settings {
 }
 
 impl Render for Settings {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -115,8 +115,5 @@ impl Render for Settings {
                             }),
                     ),
             )
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
     }
 }

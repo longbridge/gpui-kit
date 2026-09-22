@@ -6,6 +6,7 @@ use crate::input::Selection;
 /// immediately before the replacement was applied.
 #[derive(Debug, PartialEq, Clone)]
 pub(super) struct Change {
+    pub(super) token_delta: Option<Box<super::inline_tokens::TokenDelta>>,
     pub(crate) old_range: Selection,
     pub(crate) old_text: String,
     pub(crate) new_range: Selection,
@@ -20,6 +21,7 @@ impl Change {
         new_text: &str,
     ) -> Self {
         Self {
+            token_delta: None,
             old_range: old_range.into(),
             old_text: old_text.to_string(),
             new_range: new_range.into(),
@@ -32,6 +34,7 @@ impl Change {
     pub(super) fn shifted(&self, delta: isize) -> Self {
         let shift = |offset: usize| (offset as isize + delta).max(0) as usize;
         Self {
+            token_delta: self.token_delta.clone(),
             old_range: (shift(self.old_range.start)..shift(self.old_range.end)).into(),
             old_text: self.old_text.clone(),
             new_range: (shift(self.new_range.start)..shift(self.new_range.end)).into(),

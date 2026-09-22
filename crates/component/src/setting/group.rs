@@ -1,6 +1,8 @@
+use std::rc::Rc;
+
 use gpui::{
-    App, IntoElement, ParentElement as _, SharedString, StyleRefinement, Styled, Window,
-    prelude::FluentBuilder as _,
+    AnyElement, App, IntoElement, ParentElement as _, SharedString, StyleRefinement, Styled,
+    Window, prelude::FluentBuilder as _,
 };
 
 use crate::{
@@ -15,6 +17,7 @@ use crate::{
 #[derive(Clone)]
 pub struct SettingGroup {
     style: StyleRefinement,
+    footer: Option<Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>>,
 
     pub(super) title: Option<SharedString>,
     pub(super) description: Option<SharedString>,
@@ -32,6 +35,7 @@ impl SettingGroup {
     pub fn new() -> Self {
         Self {
             style: StyleRefinement::default(),
+            footer: None,
             title: None,
             description: None,
             items: Vec::new(),
@@ -47,6 +51,23 @@ impl SettingGroup {
     /// Set the description of the setting group, default is None.
     pub fn description(mut self, description: impl Into<SharedString>) -> Self {
         self.description = Some(description.into());
+        self
+    }
+
+    /// Render supporting content below, and outside, the group's surface.
+    ///
+    /// The footer aligns with the group title and renders as small muted text,
+    /// like a description. It scrolls with the group and follows its search
+    /// visibility; it does not add an independently searchable item or a
+    /// sidebar entry, and a group needs at least one item to be shown.
+    pub fn footer<F, E>(mut self, footer: F) -> Self
+    where
+        E: IntoElement,
+        F: Fn(&mut Window, &mut App) -> E + 'static,
+    {
+        self.footer = Some(Rc::new(move |window, cx| {
+            footer(window, cx).into_any_element()
+        }));
         self
     }
 
@@ -109,6 +130,7 @@ impl SettingGroup {
                     None
                 }
             }))
+            .when_some(self.footer, |this, footer| this.footer(footer(window, cx)))
             .refine_style(&self.style)
     }
 

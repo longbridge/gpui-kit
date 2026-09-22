@@ -6,18 +6,22 @@ use std::{ops::Deref as _, rc::Rc, sync::Arc};
 use gpui::{
     AnyElement, App, AppContext as _, Axis, Context, Div, Element, Empty, InteractiveElement as _,
     IntoElement, MouseMoveEvent, MouseUpEvent, ParentElement as _, Pixels, Render, Stateful, Style,
-    Styled as _, Window, div, prelude::FluentBuilder as _,
+    Styled as _, Window, div,
 };
-use gpui_base::dock::{
-    DockAreaRenderer, DockContext, DockEvent, DockPlacement, NodeId, PanelState, PanelView,
-    TabGroupRenderer,
+use gpui_base::{
+    HandleEdge, ResizeHandleContext,
+    dock::{
+        DockAreaRenderer, DockContext, DockEvent, DockPlacement, NodeId, PanelState, PanelView,
+        TabGroupRenderer,
+    },
 };
 
 use crate::{
-    ActiveTheme as _, Side,
+    ActiveTheme as _,
     dock::{
         DockSkin, SkinShared, invalid_panel::InvalidPanel, panel_handle, tab_panel::TabGroupSkin,
     },
+    resizable::{render_resize_handle, resize_handle_appearance},
     resize_handle,
 };
 
@@ -42,6 +46,15 @@ impl DockAreaRenderer for DockSkin {
 
     fn center_frame(&self, _: &mut Window, _: &mut App) -> Stateful<Div> {
         div().id("dock-area-center")
+    }
+
+    fn render_split_handle(
+        &self,
+        handle: &ResizeHandleContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        Some(render_resize_handle(handle, window, cx))
     }
 
     fn split_frame(&self, node: NodeId, _: Axis, _: &mut Window, cx: &mut App) -> Stateful<Div> {
@@ -118,8 +131,17 @@ impl DockSkin {
             DockPlacement::Center => "resize-handle-center",
         };
 
+        // Every dock's handle lives inside the dock, because `dock_frame` clips
+        // to the dock's box. The left dock hugs its trailing edge; the right
+        // and bottom docks hug their leading one.
+        let edge = match placement {
+            DockPlacement::Left => HandleEdge::Trailing,
+            _ => HandleEdge::Leading,
+        };
+
         resize_handle(id, placement.axis())
-            .when(placement.is_left(), |this| this.placement(Side::Left))
+            .with_appearance(resize_handle_appearance())
+            .inside(edge)
             .on_drag(ResizePanel, move |info, _, _, cx| {
                 cx.stop_propagation();
                 shared.resizing_dock().set(Some(placement));

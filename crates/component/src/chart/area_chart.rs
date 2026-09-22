@@ -4,20 +4,32 @@ use gpui::{
     AnyElement, App, Background, Bounds, ElementId, Hsla, IntoElement, Pixels, Point, SharedString,
     Window, point, px,
 };
+use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
 use num_traits::{Num, ToPrimitive};
 
 use crate::{
     ActiveTheme,
     plot::{
-        AXIS_GAP, Grid, Plot, PlotAxis, StrokeStyle,
+        AXIS_GAP, Grid, PathCaches, Plot, PlotAxis, StrokeStyle,
         scale::{Scale, ScaleLinear, ScalePoint, Sealed},
         shape::Area,
-        tooltip::{CrossLine, Dot, Tooltip, TooltipState},
+        tooltip::{CrossLine, Dot, PlotHover, Tooltip, TooltipState},
     },
 };
 
-use super::build_point_x_labels;
+use super::{HOVER_DOT_SIZE, build_point_x_labels, caller_id, hover_halo_size, pointer_spring};
+
+/// The hover an area chart paints, sampled once per frame in [`Plot::hover`].
+#[derive(Clone)]
+struct AreaHover {
+    /// Where the crosshair has slid to along the x axis.
+    x: Pixels,
+    /// Where each series' dot has slid to; the dots follow their series.
+    dots: Vec<Point<Pixels>>,
+    /// How far the hover has faded in.
+    focus: f32,
+}
 
 #[derive(IntoPlot)]
 pub struct AreaChart<T, X, Y>
@@ -36,7 +48,9 @@ where
     tick_margin: usize,
     x_axis: bool,
     grid: bool,
-    id: Option<ElementId>,
+    id: ElementId,
+    interactive: bool,
+    hover: Option<AreaHover>,
 }
 
 impl<T, X, Y> AreaChart<T, X, Y>
@@ -44,6 +58,7 @@ where
     X: Clone + PartialEq + Into<SharedString> + 'static,
     Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
 {
+    #[track_caller]
     pub fn new<I>(data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -59,16 +74,33 @@ where
             y: vec![],
             x_axis: true,
             grid: true,
-            id: None,
+            id: caller_id(),
+            interactive: true,
+            hover: None,
         }
     }
 
-    /// Enable an interactive hover tooltip (crosshair + a dot and row per series).
+    /// Name this chart's [`ElementId`], replacing the default taken from the
+    /// construction site.
     ///
-    /// The `id` must be unique among sibling elements. Without it, the chart stays a
-    /// non-interactive plot.
+    /// Pass one where a single construction site renders several of these
+    /// charts as siblings: they share the default id, and with it one hover
+    /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
-        self.id = Some(id.into());
+        self.id = id.into();
+        self
+    }
+
+    /// Turn this chart's interactive layer on or off. On by default.
+    ///
+    /// The layer is the hitbox under the cursor and what it drives: a crosshair
+    /// and a dot per series mark the hovered point, and a tooltip shows a row
+    /// each. Turn it off for a chart that only decorates, or one an element above
+    /// it wants the cursor for: without a hitbox it neither answers the mouse nor
+    /// takes the hover from what sits over it. A chart that is off also drops its
+    /// path cache, which is keyed on the same id.
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
         self
     }
 
@@ -200,19 +232,16 @@ where
         }
 
         // Draw area
-        for (i, y_fn) in self.y.iter().enumerate() {
+        let default_fill: Background = cx.theme().chart_2.opacity(0.4).into();
+        let default_stroke = cx.theme().chart_2;
+        let areas = self.y.iter().enumerate().map(|(i, y_fn)| {
             let x = x.clone();
             let y = y.clone();
             let x_fn = x_fn.clone();
             let y_fn = y_fn.clone();
 
-            let fill = *self
-                .fills
-                .get(i)
-                .unwrap_or(&cx.theme().chart_2.opacity(0.4).into());
-
-            let stroke = *self.strokes.get(i).unwrap_or(&cx.theme().chart_2);
-
+            let fill = *self.fills.get(i).unwrap_or(&default_fill);
+            let stroke = *self.strokes.get(i).unwrap_or(&default_stroke);
             let stroke_style = *self
                 .stroke_styles
                 .get(i)
@@ -226,12 +255,28 @@ where
                 .stroke(stroke)
                 .stroke_style(stroke_style)
                 .fill(fill)
-                .paint(&bounds, window);
+        });
+
+        // Caching hangs off the chart's own id, which only an interactive chart
+        // puts on the stack; without one, siblings would share a slot and thrash
+        // it, so a chart that is off tessellates afresh each paint.
+        if self.interactive {
+            let caches = PathCaches::for_paint("areas", window, cx);
+            caches.update(cx, |caches, _| {
+                for (i, area) in areas.enumerate() {
+                    let (fill, line) = caches.slot_pair(i);
+                    area.paint_cached(&bounds, fill, line, window);
+                }
+            });
+        } else {
+            for area in areas {
+                area.paint(&bounds, window);
+            }
         }
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.id.clone()
+        self.interactive.then(|| self.id.clone())
     }
 
     fn tooltip_state(
@@ -267,6 +312,31 @@ where
         ))
     }
 
+    fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
+        self.hover = hover.map(|hover| {
+            // The crosshair and each series' dot slide to the hovered point; on the
+            // first hovered frame they adopt it instead of travelling from where the
+            // last hover ended.
+            let state = hover.state();
+            let policy = pointer_spring(cx).with_travel(!hover.is_entering());
+            let x = spring(("area-chart", "x"), state.cross_line.x, policy, window, cx);
+            let dots = state
+                .dots
+                .iter()
+                .enumerate()
+                .map(|(i, dot)| {
+                    let id = ElementId::named_usize("area-chart-dot", i);
+                    point(x, spring(id, dot.y, policy, window, cx))
+                })
+                .collect();
+            AreaHover {
+                x,
+                dots,
+                focus: hover.focus(),
+            }
+        });
+    }
+
     fn tooltip(
         &self,
         state: &TooltipState,
@@ -283,21 +353,28 @@ where
         let dot_stroke = cx.theme().background;
         let color = |i: usize| *self.strokes.get(i).unwrap_or(&default_color);
 
+        // Where the hover has slid to this frame; the data points themselves, in
+        // full focus, before the first `hover` sample.
+        let (x, dots, focus) = match self.hover.as_ref() {
+            Some(hover) => (hover.x, &hover.dots, hover.focus),
+            None => (state.cross_line.x, &state.dots, 1.),
+        };
+
         // Follow the cursor; the crosshair and dots stay snapped to the data point.
         let mut tooltip = Tooltip::new(cursor, bounds.size)
             .gap(px(8.))
             // Confine the crosshair to the plot area so it doesn't cross the x-axis.
             .cross_line(
-                CrossLine::new(state.cross_line)
+                CrossLine::new(point(x, state.cross_line.y))
                     .height(bounds.size.height.as_f32() - if self.x_axis { AXIS_GAP } else { 0. }),
             )
-            .dots(
-                state
-                    .dots
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| Dot::new(*p).stroke(dot_stroke).fill(color(i))),
-            )
+            .dots(dots.iter().enumerate().map(|(i, p)| {
+                Dot::new(*p)
+                    .size(HOVER_DOT_SIZE)
+                    .halo(hover_halo_size(focus))
+                    .stroke(dot_stroke)
+                    .fill(color(i))
+            }))
             .title(title);
 
         // One row per series: swatch + label + value.

@@ -579,7 +579,7 @@ impl Render for MotionExample {
             .size_full()
             .bg(example_canvas())
             .text_color(example_rgb(0x171717))
-            .font_family("Inter Variable")
+            .font_family(".SystemUIFont")
             .text_xs()
             .flex()
             .items_center()

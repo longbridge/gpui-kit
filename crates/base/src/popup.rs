@@ -3,10 +3,10 @@ use std::{cell::Cell, rc::Rc};
 use gpui::{
     Anchor, AnyElement, App, Bounds, Div, ElementId, InteractiveElement, Interactivity,
     IntoElement, ParentElement, Pixels, Point, RenderOnce, StatefulInteractiveElement,
-    StyleRefinement, Styled, Window, deferred, div, px,
+    StyleRefinement, Styled, Window, canvas, deferred, div, point, px,
 };
 
-use crate::{ElementExt as _, Positioner, StyledExt as _};
+use crate::{Positioner, ResolvedPosition, StyledExt as _};
 
 /// Distance kept between a popup and the window edge.
 const WINDOW_MARGIN: Pixels = px(8.);
@@ -31,6 +31,8 @@ pub struct Popup {
     base: gpui::Stateful<Div>,
     style: StyleRefinement,
     anchor: Anchor,
+    offset: Pixels,
+    on_position: Option<Box<dyn Fn(ResolvedPosition, Bounds<Pixels>)>>,
     trigger: AnyElement,
     content: Option<AnyElement>,
 }
@@ -43,6 +45,8 @@ impl Popup {
             id,
             style: StyleRefinement::default(),
             anchor: Anchor::TopLeft,
+            offset: px(0.),
+            on_position: None,
             trigger: trigger.into_any_element(),
             content: None,
         }
@@ -50,6 +54,21 @@ impl Popup {
 
     pub fn anchor(mut self, anchor: impl Into<Anchor>) -> Self {
         self.anchor = anchor.into();
+        self
+    }
+
+    /// Gap from the trigger along the anchor's outward direction, zero by default.
+    pub fn offset(mut self, offset: Pixels) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Observe resolved popup and trigger bounds before content prepaint.
+    pub fn on_position(
+        mut self,
+        callback: impl Fn(ResolvedPosition, Bounds<Pixels>) + 'static,
+    ) -> Self {
+        self.on_position = Some(Box::new(callback));
         self
     }
 
@@ -80,6 +99,20 @@ impl Popup {
     }
 }
 
+/// Match the popup's anchor to the opposite edge of the measured trigger.
+fn anchor_position(anchor: Anchor, trigger: Bounds<Pixels>, offset: Pixels) -> Point<Pixels> {
+    match anchor {
+        Anchor::TopLeft => trigger.bottom_left() + point(px(0.), offset),
+        Anchor::TopCenter => trigger.bottom_center() + point(px(0.), offset),
+        Anchor::TopRight => trigger.bottom_right() + point(px(0.), offset),
+        Anchor::BottomLeft => trigger.origin - point(px(0.), offset),
+        Anchor::BottomCenter => trigger.top_center() - point(px(0.), offset),
+        Anchor::BottomRight => trigger.top_right() - point(px(0.), offset),
+        Anchor::LeftCenter => trigger.right_center() + point(offset, px(0.)),
+        Anchor::RightCenter => trigger.left_center() - point(offset, px(0.)),
+    }
+}
+
 impl Styled for Popup {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
@@ -99,30 +132,44 @@ impl RenderOnce for Popup {
         let state =
             window.use_keyed_state((self.id, "anchor"), cx, |_, _| PopupAnchorState::default());
         let anchor = self.anchor;
-        let position = Rc::new(Cell::new(Self::resolved_corner(
+        let trigger_bounds = Rc::new(Cell::new(state.read(cx).bounds));
+        let offset = self.offset;
+        let position = Rc::new(Cell::new(anchor_position(
             anchor,
             state.read(cx).bounds,
+            offset,
         )));
 
         let root = self
             .base
             .child(self.trigger)
-            .on_prepaint({
-                let state = state.clone();
-                let position = position.clone();
-                move |bounds, window, cx| {
-                    position.set(Self::resolved_corner(anchor, bounds));
-                    let first = state.update(cx, |state, _| {
-                        let first = !state.captured;
-                        state.bounds = bounds;
-                        state.captured = true;
-                        first
-                    });
-                    if first {
-                        window.request_animation_frame();
-                    }
-                }
-            })
+            .child(
+                canvas(
+                    {
+                        let state = state.clone();
+                        let position = position.clone();
+                        let trigger_bounds = trigger_bounds.clone();
+                        move |bounds, window, cx| {
+                            trigger_bounds.set(bounds);
+                            position.set(anchor_position(anchor, bounds, offset));
+                            let first = state.update(cx, |state, _| {
+                                let first = !state.captured;
+                                state.bounds = bounds;
+                                state.captured = true;
+                                first
+                            });
+                            if first {
+                                window.request_animation_frame();
+                            }
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full()
+                .top_0()
+                .left_0(),
+            )
             .refine_style(&self.style);
 
         let Some(content) = self.content else {
@@ -132,9 +179,16 @@ impl RenderOnce for Popup {
             return root;
         }
 
+        let positioner =
+            Positioner::corner(anchor, position.get()).tracked_corner_position(position);
+        let positioner = if let Some(callback) = self.on_position {
+            positioner.on_position(move |position| callback(position, trigger_bounds.get()))
+        } else {
+            positioner
+        };
         root.child(
             deferred(
-                Positioner::corner(anchor, position.get())
+                positioner
                     .margin(WINDOW_MARGIN)
                     // The host blocks the mouse, so no caller has to remember:
                     // what a popup covers belongs to the popup.

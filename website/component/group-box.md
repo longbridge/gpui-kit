@@ -60,6 +60,20 @@ GroupBox::new()
     .child(Button::new("save").primary().label("Save Changes"))
 ```
 
+### Footer outside the surface
+
+Use `footer` for supporting content below the filled background or outline, not
+inside the content area. It shares the title's leading edge, sits 8 px under
+the surface, and renders as small muted text like a description, so plain text
+is enough. `content_style` only changes the body.
+
+```rust
+GroupBox::new()
+    .fill()
+    .child("Update preferences")
+    .footer("Changes apply to this device only.")
+```
+
 ### Custom ID
 
 ```rust

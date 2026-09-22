@@ -2539,7 +2539,7 @@ export default class Themed extends View {
 }
 
 #[gpui::test]
-fn render_context_theme_snapshot_is_deeply_read_only(cx: &mut TestAppContext) {
+fn render_context_theme_snapshot_is_deeply_readonly(cx: &mut TestAppContext) {
     cx.update(crate::init);
     let runtime = ShellRuntime::new_isolated().expect("runtime");
     cx.update(|cx| runtime.set_global(cx));

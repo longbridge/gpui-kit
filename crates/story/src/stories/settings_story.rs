@@ -158,7 +158,6 @@ impl SettingsStory {
                                     } else {
                                         ThemeMode::Light
                                     };
-                                    Theme::global_mut(cx).mode = mode;
                                     Theme::change(mode, None, cx);
                                 },
                             )
@@ -251,6 +250,7 @@ impl SettingsStory {
                     ]),
                     SettingGroup::new()
                         .title("Font")
+                        .footer(|_, _| "Font preferences apply to this story only.")
                         .item(
                             SettingItem::new(
                                 "Font Family",

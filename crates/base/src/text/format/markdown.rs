@@ -1,23 +1,226 @@
 use std::{ops::Range, sync::Arc};
 
 use gpui::SharedString;
-use markdown::mdast::{self, Node};
+use markdown::{
+    ParseOptions,
+    mdast::{self, Node},
+    unist::Point,
+};
 
 use crate::text::{
     document::ParsedDocument,
     markdown_ext::MarkdownParseContext,
     node::{
-        self, BlockNode, CodeBlock, ImageNode, InlineNode, LinkMark, NodeContext, Paragraph, Span,
-        Table, TableRow, TextMark,
+        self, BlockNode, CodeBlock, ImageNode, InlineNode, LinkMark, NodeContext, Paragraph,
+        SourceSegment, Span, Table, TableRow, TextMark,
     },
 };
 
 /// Parse Markdown into a tree of nodes.
 pub(crate) fn parse(source: &str, cx: &mut NodeContext) -> Result<ParsedDocument, SharedString> {
     let options = cx.markdown_extensions.parse_options();
-    markdown::to_mdast(&source, &options)
-        .map(|n| ast_to_document(source, n, cx))
-        .map_err(|e| e.to_string().into())
+    let mut root =
+        markdown::to_mdast(source, &options).map_err(|e| SharedString::from(e.to_string()))?;
+    let mut prose = options;
+    prose.constructs.math_text = false;
+    prose.constructs.math_flow = false;
+    flatten_unclaimed_math(&mut root, source, &prose, cx);
+    Ok(ast_to_document(source, root, cx))
+}
+
+/// Math parsing is on by default, so prose that merely contains two dollar
+/// signs ("$5 and $10") parses as an inline math node. When no plugin claims
+/// such a node, the text between the dollars must stay ordinary Markdown:
+/// emphasis, inline HTML and links inside it render as they would anywhere
+/// else, and inline HTML tags may pair with tags outside the span. Re-parse
+/// the node's source without the math constructs and, when it holds any
+/// markup, splice the result into its parent with positions shifted back into
+/// the document. Plain prose keeps the literal node, whose atomic source
+/// mapping the selection tests rely on.
+fn flatten_unclaimed_math(node: &mut Node, source: &str, options: &ParseOptions, cx: &NodeContext) {
+    let Some(children) = node.children_mut() else {
+        return;
+    };
+    let mut ix = 0;
+    while ix < children.len() {
+        let prose = match &children[ix] {
+            Node::InlineMath(_) => {
+                let parse_cx = MarkdownParseContext::new(source, cx.offset);
+                if cx
+                    .markdown_extensions
+                    .parse_inline(&children[ix], &parse_cx)
+                    .is_some()
+                {
+                    None
+                } else {
+                    reparse_as_prose(&children[ix], source, options)
+                }
+            }
+            _ => None,
+        };
+        if let Some(prose) = prose {
+            let count = prose.len();
+            children.splice(ix..=ix, prose);
+            ix += count;
+            continue;
+        }
+        flatten_unclaimed_math(&mut children[ix], source, options, cx);
+        ix += 1;
+    }
+}
+
+fn reparse_as_prose(node: &Node, source: &str, options: &ParseOptions) -> Option<Vec<Node>> {
+    let position = node.position()?.clone();
+    let literal = source.get(position.start.offset..position.end.offset)?;
+    if !may_hold_inline_markup(literal) {
+        return None;
+    }
+    let Ok(Node::Root(mut root)) = markdown::to_mdast(literal, options) else {
+        return None;
+    };
+    let [Node::Paragraph(paragraph)] = root.children.as_mut_slice() else {
+        return None;
+    };
+    if paragraph
+        .children
+        .iter()
+        .all(|child| matches!(child, Node::Text(_)))
+    {
+        return None;
+    }
+    let mut children = std::mem::take(&mut paragraph.children);
+    for child in &mut children {
+        shift_positions(child, &position.start);
+    }
+    Some(children)
+}
+
+/// A cheap gate before re-parsing: every inline construct starts with one of
+/// these bytes (tags, emphasis, code, links, images, escapes, entities,
+/// strikethrough) or is a GFM autolink literal.
+fn may_hold_inline_markup(literal: &str) -> bool {
+    literal.bytes().any(|byte| {
+        matches!(
+            byte,
+            b'<' | b'*' | b'_' | b'[' | b'`' | b'~' | b'\\' | b'!' | b'&'
+        )
+    }) || literal.contains("://")
+        || literal.contains("www.")
+}
+
+fn shift_positions(node: &mut Node, origin: &Point) {
+    if let Some(position) = node.position_mut() {
+        for point in [&mut position.start, &mut position.end] {
+            let first_line = point.line == 1;
+            point.offset += origin.offset;
+            point.line += origin.line - 1;
+            if first_line {
+                point.column += origin.column - 1;
+            }
+        }
+    }
+    if let Some(children) = node.children_mut() {
+        for child in children {
+            shift_positions(child, origin);
+        }
+    }
+}
+
+enum InlineGroup<'a> {
+    Node(&'a Node),
+    Marked(TextMark, &'a [Node]),
+}
+
+/// CommonMark hands each raw inline tag over as its own `Html` node, so
+/// `<strong>x</strong>` arrives as three siblings and the tags alone carry no
+/// text. Pair the formatting tags this renderer knows with their closing tag
+/// among the siblings and treat what lies between as a marked run, the same
+/// way `**x**` is handled.
+fn inline_groups(children: &[Node]) -> Vec<InlineGroup<'_>> {
+    let mut groups = Vec::with_capacity(children.len());
+    let mut ix = 0;
+    while ix < children.len() {
+        if let Some((false, name)) = inline_html_tag(&children[ix])
+            && let Some(mark) = inline_html_mark(&name)
+            && let Some(close) = matching_close_tag(children, ix, &name)
+        {
+            groups.push(InlineGroup::Marked(mark, &children[ix + 1..close]));
+            ix = close + 1;
+            continue;
+        }
+        groups.push(InlineGroup::Node(&children[ix]));
+        ix += 1;
+    }
+    groups
+}
+
+fn inline_html_tag(node: &Node) -> Option<(bool, String)> {
+    let Node::Html(html) = node else {
+        return None;
+    };
+    let inner = html.value.trim().strip_prefix('<')?.strip_suffix('>')?;
+    if inner.ends_with('/') {
+        return None;
+    }
+    let (closing, rest) = match inner.strip_prefix('/') {
+        Some(rest) => (true, rest),
+        None => (false, inner),
+    };
+    let name = rest
+        .chars()
+        .take_while(char::is_ascii_alphanumeric)
+        .collect::<String>()
+        .to_ascii_lowercase();
+    (!name.is_empty()).then_some((closing, name))
+}
+
+fn inline_html_mark(name: &str) -> Option<TextMark> {
+    Some(match name {
+        "strong" | "b" => TextMark::default().bold(),
+        "em" | "i" => TextMark::default().italic(),
+        "u" => TextMark::default().underline(),
+        "s" | "del" | "strike" => TextMark::default().strikethrough(),
+        _ => return None,
+    })
+}
+
+fn matching_close_tag(children: &[Node], open: usize, name: &str) -> Option<usize> {
+    let mut depth = 0usize;
+    for (ix, child) in children.iter().enumerate().skip(open + 1) {
+        match inline_html_tag(child) {
+            Some((false, tag)) if tag == name => depth += 1,
+            Some((true, tag)) if tag == name => {
+                if depth == 0 {
+                    return Some(ix);
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn parse_inline_children(
+    source: &str,
+    paragraph: &mut Paragraph,
+    children: &[Node],
+    cx: &mut NodeContext,
+) -> String {
+    let mut text = String::new();
+    for group in inline_groups(children) {
+        match group {
+            InlineGroup::Node(child) => {
+                text.push_str(&parse_paragraph(source, paragraph, child, cx));
+            }
+            InlineGroup::Marked(mark, nodes) => {
+                text.push_str(&merge_children_with_mark(
+                    source, paragraph, nodes, mark, cx,
+                ));
+            }
+        }
+    }
+    text
 }
 
 fn parse_table_row(source: &str, table: &mut Table, node: &mdast::TableRow, cx: &mut NodeContext) {
@@ -40,9 +243,7 @@ fn parse_table_cell(
     cx: &mut NodeContext,
 ) {
     let mut paragraph = Paragraph::default();
-    node.children.iter().for_each(|c| {
-        parse_paragraph(source, &mut paragraph, c, cx);
-    });
+    parse_inline_children(source, &mut paragraph, &node.children, cx);
     let table_cell = node::TableCell {
         children: paragraph,
         ..Default::default()
@@ -59,13 +260,16 @@ fn push_merged(
     paragraph: &mut Paragraph,
     text: String,
     marks: Vec<(Range<usize>, TextMark)>,
+    source_segments: Vec<SourceSegment>,
     new_mark: TextMark,
 ) {
     if text.is_empty() {
         return;
     }
 
-    let mut node = InlineNode::new(text).marks(marks);
+    let mut node = InlineNode::new(text)
+        .marks(marks)
+        .source_segments(source_segments);
     let len = node.text.len();
     if let Some(last) = node.marks.last_mut()
         && last.0.start == 0
@@ -95,10 +299,16 @@ fn merge_children_with_mark(
     let mut text = String::new();
     let mut merged_text = String::new();
     let mut merged_marks = Vec::new();
+    let mut merged_source_segments = Vec::new();
 
-    for child in children {
+    for group in inline_groups(children) {
         let mut child_paragraph = Paragraph::default();
-        let child_text = parse_paragraph(source, &mut child_paragraph, child, cx);
+        let child_text = match group {
+            InlineGroup::Node(child) => parse_paragraph(source, &mut child_paragraph, child, cx),
+            InlineGroup::Marked(child_mark, nodes) => {
+                merge_children_with_mark(source, &mut child_paragraph, nodes, child_mark, cx)
+            }
+        };
         text.push_str(&child_text);
 
         for mut node in child_paragraph.children {
@@ -107,6 +317,7 @@ fn merge_children_with_mark(
                     paragraph,
                     std::mem::take(&mut merged_text),
                     std::mem::take(&mut merged_marks),
+                    std::mem::take(&mut merged_source_segments),
                     mark.clone(),
                 );
                 if let Some((_, existing)) = node.marks.first_mut() {
@@ -119,6 +330,11 @@ fn merge_children_with_mark(
             }
             let merged_offset = merged_text.len();
             merged_text.push_str(&node.text);
+            merged_source_segments.extend(node.source_segments.drain(..).map(|mut segment| {
+                segment.rendered.start += merged_offset;
+                segment.rendered.end += merged_offset;
+                segment
+            }));
 
             for (range, child_mark) in node.marks {
                 merged_marks.push((
@@ -139,6 +355,7 @@ fn merge_children_with_mark(
                     paragraph,
                     std::mem::take(&mut merged_text),
                     std::mem::take(&mut merged_marks),
+                    std::mem::take(&mut merged_source_segments),
                     mark.clone(),
                 );
                 paragraph.push(InlineNode::image(image));
@@ -146,8 +363,227 @@ fn merge_children_with_mark(
         }
     }
 
-    push_merged(paragraph, merged_text, merged_marks, mark);
+    push_merged(
+        paragraph,
+        merged_text,
+        merged_marks,
+        merged_source_segments,
+        mark,
+    );
     text
+}
+
+fn source_segments(
+    source: &str,
+    rendered: &str,
+    span: Option<Span>,
+    source_offset: usize,
+    include_preceding_escape: bool,
+) -> Vec<SourceSegment> {
+    let Some(span) = span else {
+        return Vec::new();
+    };
+    let local_start = span.start.saturating_sub(source_offset);
+    let local_end = span.end.saturating_sub(source_offset);
+    let Some(raw) = source.get(local_start..local_end) else {
+        return Vec::new();
+    };
+
+    let mut segments = aligned_source_segments(raw, rendered, span.start, true);
+
+    if include_preceding_escape
+        && let Some(previous) = local_start.checked_sub(1)
+        && source.as_bytes().get(previous) == Some(&b'\\')
+        && let Some(first) = segments.first_mut()
+    {
+        first.source.start -= 1;
+    }
+    segments
+}
+
+fn aligned_source_segments(
+    raw: &str,
+    rendered: &str,
+    source_offset: usize,
+    decode_entities: bool,
+) -> Vec<SourceSegment> {
+    let mut segments = Vec::new();
+    let mut raw_cursor = 0;
+    let mut rendered_start = 0;
+    while rendered_start < rendered.len() {
+        if decode_entities
+            && let Some((decoded, source_len)) = decoded_entity(&raw[raw_cursor..])
+            && rendered[rendered_start..].starts_with(&decoded)
+        {
+            let rendered_end = rendered_start + decoded.len();
+            segments.push(SourceSegment {
+                rendered: rendered_start..rendered_end,
+                source: (source_offset + raw_cursor)..(source_offset + raw_cursor + source_len),
+            });
+            rendered_start = rendered_end;
+            raw_cursor += source_len;
+            continue;
+        }
+
+        let rendered_char = rendered[rendered_start..]
+            .chars()
+            .next()
+            .expect("rendered cursor must be on a character boundary");
+        let rendered_end = rendered_start + rendered_char.len_utf8();
+        let remainder = &raw[raw_cursor..];
+        let (relative_start, source_len) = if rendered_char == ' '
+            && let Some(newline) = remainder.find(['\n', '\r'])
+            && remainder[..newline]
+                .chars()
+                .all(|character| matches!(character, ' ' | '\t'))
+        {
+            let newline_len = if remainder[newline..].starts_with("\r\n") {
+                2
+            } else {
+                1
+            };
+            (newline, newline_len)
+        } else if rendered_char == '\n'
+            && remainder.ends_with('\n')
+            && remainder.bytes().filter(|byte| *byte == b'\n').count() == 1
+        {
+            (0, remainder.len())
+        } else if let Some(escaped) = remainder.strip_prefix('\\')
+            && escaped.starts_with(rendered_char)
+        {
+            (0, 1 + rendered_char.len_utf8())
+        } else if remainder.starts_with(rendered_char) {
+            (0, rendered_char.len_utf8())
+        } else if let Some(relative_start) = remainder.find(rendered_char) {
+            (relative_start, rendered_char.len_utf8())
+        } else {
+            // Decoded entities and other source-only syntax have no exact
+            // rendered-byte mapping. Leave a rendered gap for this
+            // character, but keep aligning later characters in the node.
+            rendered_start = rendered_end;
+            continue;
+        };
+        let source_start = raw_cursor + relative_start;
+        let source_end = source_start + source_len;
+        segments.push(SourceSegment {
+            rendered: rendered_start..rendered_end,
+            source: (source_offset + source_start)..(source_offset + source_end),
+        });
+        raw_cursor = source_end;
+        rendered_start = rendered_end;
+    }
+    compact_source_segments(segments)
+}
+
+fn compact_source_segments(segments: Vec<SourceSegment>) -> Vec<SourceSegment> {
+    let mut compacted: Vec<SourceSegment> = Vec::with_capacity(segments.len());
+    for segment in segments {
+        if let Some(previous) = compacted.last_mut()
+            && previous.rendered.end == segment.rendered.start
+            && previous.source.end == segment.source.start
+            && previous.rendered.len() == previous.source.len()
+            && segment.rendered.len() == segment.source.len()
+        {
+            previous.rendered.end = segment.rendered.end;
+            previous.source.end = segment.source.end;
+        } else {
+            compacted.push(segment);
+        }
+    }
+    compacted
+}
+
+fn decoded_entity(source: &str) -> Option<(String, usize)> {
+    let candidate = source.strip_prefix('&')?;
+    let candidate_end = candidate
+        .bytes()
+        .position(|byte| byte == b';' || !(byte.is_ascii_alphanumeric() || byte == b'#'))?;
+    if candidate.as_bytes()[candidate_end] != b';' {
+        return None;
+    }
+    let semicolon = candidate_end + 1;
+    let name = &source[1..=semicolon];
+    let decoded = if let Some(number) = name.strip_prefix("#x").or_else(|| name.strip_prefix("#X"))
+    {
+        char::from_u32(u32::from_str_radix(number.strip_suffix(';')?, 16).ok()?)?.to_string()
+    } else if let Some(number) = name.strip_prefix('#') {
+        char::from_u32(number.strip_suffix(';')?.parse().ok()?)?.to_string()
+    } else {
+        let &(first, second) = html5ever::data::NAMED_ENTITIES.get(name)?;
+        let mut decoded = char::from_u32(first)?.to_string();
+        if second != 0 {
+            decoded.push(char::from_u32(second)?);
+        }
+        decoded
+    };
+    Some((decoded, semicolon + 1))
+}
+
+fn code_source_segments(
+    source: &str,
+    code: &str,
+    span: Option<Span>,
+    source_offset: usize,
+) -> Vec<SourceSegment> {
+    let Some(span) = span else {
+        return Vec::new();
+    };
+    let Some(raw) = source
+        .get(span.start.saturating_sub(source_offset)..span.end.saturating_sub(source_offset))
+    else {
+        return Vec::new();
+    };
+    let trimmed = raw.trim_start();
+    let fence = trimmed
+        .chars()
+        .next()
+        .filter(|character| matches!(character, '`' | '~'))
+        .map(|character| {
+            let len = trimmed
+                .chars()
+                .take_while(|candidate| candidate == &character)
+                .count();
+            (character, len)
+        })
+        .filter(|(_, len)| *len >= 3);
+    let (body_start, body_end) = if let Some((fence, fence_len)) = fence {
+        let start = raw.find('\n').map_or(raw.len(), |newline| newline + 1);
+        let last_line = raw.rfind('\n').map_or(start, |newline| newline + 1);
+        let closing = raw[last_line..].trim();
+        let is_closing = closing.chars().count() >= fence_len
+            && closing.chars().all(|character| character == fence);
+        (start, if is_closing { last_line } else { raw.len() })
+    } else {
+        (0, raw.len())
+    };
+
+    aligned_source_segments(
+        &raw[body_start..body_end],
+        code,
+        span.start + body_start,
+        false,
+    )
+}
+
+fn mapped_inline(
+    source: &str,
+    text: impl Into<SharedString>,
+    node: &mdast::Node,
+    cx: &NodeContext,
+) -> InlineNode {
+    let text = text.into();
+    let span = node.position().map(|position| Span {
+        start: cx.offset + position.start.offset,
+        end: cx.offset + position.end.offset,
+    });
+    let segments = source_segments(
+        source,
+        &text,
+        span,
+        cx.offset,
+        matches!(node, Node::Text(_)),
+    );
+    InlineNode::new(text).source_segments(segments)
 }
 
 fn append_inline_html_blocks(paragraph: &mut Paragraph, blocks: Vec<BlockNode>) -> Option<String> {
@@ -202,9 +638,7 @@ fn parse_paragraph(
 
     match node {
         Node::Paragraph(val) => {
-            val.children.iter().for_each(|c| {
-                text.push_str(&parse_paragraph(source, paragraph, c, cx));
-            });
+            text.push_str(&parse_inline_children(source, paragraph, &val.children, cx));
         }
         Node::Text(val) => {
             // A CommonMark *soft* break lives inside this value as a plain
@@ -219,7 +653,7 @@ fn parse_paragraph(
             // the CR with the newline: dropping only the newline would strand
             // the CR in the middle of the reflowed line.
             text = val.value.replace("\r\n", " ").replace(['\n', '\r'], " ");
-            paragraph.push_str(&text)
+            paragraph.push(mapped_inline(source, text.clone(), node, cx))
         }
         Node::Emphasis(val) => {
             text = merge_children_with_mark(
@@ -250,8 +684,14 @@ fn parse_paragraph(
         }
         Node::InlineCode(val) => {
             text = val.value.clone();
+            let span = node.position().map(|position| Span {
+                start: cx.offset + position.start.offset,
+                end: cx.offset + position.end.offset,
+            });
             paragraph.push(
-                InlineNode::new(&text).marks(vec![(0..text.len(), TextMark::default().code())]),
+                InlineNode::new(text.clone())
+                    .source_segments(code_source_segments(source, &text, span, cx.offset))
+                    .marks(vec![(0..text.len(), TextMark::default().code())]),
             );
         }
         Node::Link(val) => {
@@ -277,6 +717,10 @@ fn parse_paragraph(
                 url: raw.url.clone().into(),
                 title: raw.title.clone().map(|t| t.into()),
                 alt: Some(raw.alt.clone().into()),
+                span: raw.position.as_ref().map(|position| Span {
+                    start: cx.offset + position.start.offset,
+                    end: cx.offset + position.end.offset,
+                }),
                 ..Default::default()
             });
         }
@@ -285,7 +729,7 @@ fn parse_paragraph(
             // inline-HTML <br> path: emit a newline inline node so the break
             // renders instead of silently concatenating adjacent lines.
             text.push('\n');
-            paragraph.push(InlineNode::new("\n"));
+            paragraph.push(mapped_inline(source, "\n", node, cx));
         }
         Node::InlineMath(raw) => {
             // Math parsing is on by default, so ordinary prose that merely
@@ -298,12 +742,19 @@ fn parse_paragraph(
                 .node_source(node)
                 .map(str::to_string)
                 .unwrap_or_else(|| raw.value.clone());
-            paragraph.push_str(&text);
+            paragraph.push(mapped_inline(source, text.clone(), node, cx));
         }
         Node::MdxTextExpression(raw) => {
             text = raw.value.clone();
-            paragraph
-                .push(InlineNode::new(&text).marks(vec![(0..text.len(), TextMark::default())]));
+            let span = node.position().map(|position| Span {
+                start: cx.offset + position.start.offset,
+                end: cx.offset + position.end.offset,
+            });
+            paragraph.push(
+                InlineNode::new(text.clone())
+                    .source_segments(code_source_segments(source, &text, span, cx.offset))
+                    .marks(vec![(0..text.len(), TextMark::default())]),
+            );
         }
         Node::Html(val) => match super::html::parse(&val.value, cx) {
             Ok(el) => {
@@ -327,7 +778,7 @@ fn parse_paragraph(
         },
         Node::FootnoteReference(foot) => {
             let prefix = format!("[{}]", foot.identifier);
-            paragraph.push(InlineNode::new(&prefix).marks(vec![(
+            paragraph.push(mapped_inline(source, prefix.clone(), node, cx).marks(vec![(
                 0..prefix.len(),
                 TextMark {
                     italic: true,
@@ -401,9 +852,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
         Node::Root(_) => unreachable!("node::Root should be handled separately"),
         Node::Paragraph(val) => {
             let mut paragraph = Paragraph::default();
-            val.children.iter().for_each(|c| {
-                parse_paragraph(source, &mut paragraph, c, cx);
-            });
+            parse_inline_children(source, &mut paragraph, &val.children, cx);
             paragraph.span = new_span(val.position, cx);
             BlockNode::Paragraph(paragraph)
         }
@@ -447,16 +896,17 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
             html: false,
             span: new_span(val.position, cx),
         },
-        Node::Code(raw) => BlockNode::CodeBlock(CodeBlock::new(
-            raw.value.into(),
-            raw.lang.map(|s| s.into()),
-            new_span(raw.position, cx),
-        )),
+        Node::Code(raw) => {
+            let span = new_span(raw.position, cx);
+            let segments = code_source_segments(source, &raw.value, span, cx.offset);
+            BlockNode::CodeBlock(
+                CodeBlock::new(raw.value.into(), raw.lang.map(Into::into), span)
+                    .source_segments(segments),
+            )
+        }
         Node::Heading(val) => {
             let mut paragraph = Paragraph::default();
-            val.children.iter().for_each(|c| {
-                parse_paragraph(source, &mut paragraph, c, cx);
-            });
+            parse_inline_children(source, &mut paragraph, &val.children, cx);
 
             BlockNode::Heading {
                 level: val.depth,
@@ -464,11 +914,13 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
                 span: new_span(val.position, cx),
             }
         }
-        Node::Math(val) => BlockNode::CodeBlock(CodeBlock::new(
-            val.value.into(),
-            None,
-            new_span(val.position, cx),
-        )),
+        Node::Math(val) => {
+            let span = new_span(val.position, cx);
+            let segments = code_source_segments(source, &val.value, span, cx.offset);
+            BlockNode::CodeBlock(
+                CodeBlock::new(val.value.into(), None, span).source_segments(segments),
+            )
+        }
         Node::Html(val) => match super::html::parse(&val.value, cx) {
             Ok(el) => BlockNode::Root {
                 children: Arc::unwrap_or_clone(el.blocks),
@@ -482,11 +934,14 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
                 BlockNode::Paragraph(Paragraph::new(val.value))
             }
         },
-        Node::MdxFlowExpression(val) => BlockNode::CodeBlock(CodeBlock::new(
-            val.value.into(),
-            Some("mdx".into()),
-            new_span(val.position, cx),
-        )),
+        Node::MdxFlowExpression(val) => {
+            let span = new_span(val.position, cx);
+            let segments = code_source_segments(source, &val.value, span, cx.offset);
+            BlockNode::CodeBlock(
+                CodeBlock::new(val.value.into(), Some("mdx".into()), span)
+                    .source_segments(segments),
+            )
+        }
         Node::Yaml(val) => BlockNode::CodeBlock(CodeBlock::new(
             val.value.into(),
             Some("yml".into()),
@@ -499,17 +954,13 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
         )),
         Node::MdxJsxTextElement(val) => {
             let mut paragraph = Paragraph::default();
-            val.children.iter().for_each(|c| {
-                parse_paragraph(source, &mut paragraph, c, cx);
-            });
+            parse_inline_children(source, &mut paragraph, &val.children, cx);
             paragraph.span = new_span(val.position, cx);
             BlockNode::Paragraph(paragraph)
         }
         Node::MdxJsxFlowElement(val) => {
             let mut paragraph = Paragraph::default();
-            val.children.iter().for_each(|c| {
-                parse_paragraph(source, &mut paragraph, c, cx);
-            });
+            parse_inline_children(source, &mut paragraph, &val.children, cx);
             paragraph.span = new_span(val.position, cx);
             BlockNode::Paragraph(paragraph)
         }
@@ -544,9 +995,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
                 },
             )]));
 
-            def.children.iter().for_each(|c| {
-                parse_paragraph(source, &mut paragraph, c, cx);
-            });
+            parse_inline_children(source, &mut paragraph, &def.children, cx);
             paragraph.span = new_span(def.position, cx);
             BlockNode::Paragraph(paragraph)
         }
@@ -582,6 +1031,496 @@ mod tests {
     use gpui::ParentElement;
 
     use crate::text::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
+
+    fn first_paragraph(block: &BlockNode) -> Option<&Paragraph> {
+        match block {
+            BlockNode::Paragraph(paragraph)
+            | BlockNode::Heading {
+                children: paragraph,
+                ..
+            } => Some(paragraph),
+            BlockNode::Root { children, .. }
+            | BlockNode::Blockquote { children, .. }
+            | BlockNode::List { children, .. }
+            | BlockNode::ListItem { children, .. } => children.iter().find_map(first_paragraph),
+            _ => None,
+        }
+    }
+
+    fn first_code_block(block: &BlockNode) -> Option<&CodeBlock> {
+        match block {
+            BlockNode::CodeBlock(code) => Some(code),
+            BlockNode::Root { children, .. }
+            | BlockNode::Blockquote { children, .. }
+            | BlockNode::List { children, .. }
+            | BlockNode::ListItem { children, .. } => children.iter().find_map(first_code_block),
+            _ => None,
+        }
+    }
+
+    fn selected_rendered_range(source: &str, selection: Range<usize>) -> Option<Range<usize>> {
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let paragraph = document
+            .blocks
+            .iter()
+            .find_map(first_paragraph)
+            .expect("expected paragraph");
+        let rendered = paragraph.text();
+        let mut state = paragraph.state.lock().unwrap();
+        state.set_text(rendered.into());
+        state.selection = Some(selection.into());
+        drop(state);
+        document.selected_source_range()
+    }
+
+    fn select_rendered_range(source: &str, selection: Range<usize>) -> Range<usize> {
+        selected_rendered_range(source, selection).expect("source range")
+    }
+
+    fn selected_code_range(source: &str, selection: Range<usize>) -> Option<Range<usize>> {
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let code = document
+            .blocks
+            .iter()
+            .find_map(first_code_block)
+            .expect("expected code block");
+        code.set_selection(selection);
+        document.selected_source_range()
+    }
+
+    fn selected_mdx_rendered_range(source: &str, selection: Range<usize>) -> Option<Range<usize>> {
+        let mut cx = NodeContext {
+            markdown_extensions: Arc::new(MarkdownExtensions::default().mdx()),
+            ..Default::default()
+        };
+        let document = parse(source, &mut cx).unwrap();
+        let paragraph = document
+            .blocks
+            .iter()
+            .find_map(first_paragraph)
+            .expect("expected MDX paragraph");
+        let rendered = paragraph.text();
+        let mut state = paragraph.state.lock().unwrap();
+        state.set_text(rendered.into());
+        state.selection = Some(selection.into());
+        drop(state);
+        document.selected_source_range()
+    }
+
+    fn selected_mdx_code(source: &str, selected_text: &str) -> Option<Range<usize>> {
+        let mut cx = NodeContext {
+            markdown_extensions: Arc::new(MarkdownExtensions::default().mdx()),
+            ..Default::default()
+        };
+        let document = parse(source, &mut cx).unwrap();
+        let code = document
+            .blocks
+            .iter()
+            .find_map(first_code_block)
+            .expect("expected MDX code block");
+        let code_text = code.code();
+        let start = code_text.find(selected_text).expect("selected MDX code");
+        code.set_selection(start..start + selected_text.len());
+        document.selected_source_range()
+    }
+
+    #[test]
+    fn selected_source_range_uses_the_selected_identical_styled_occurrence() {
+        let source = "**same** then **same**";
+        assert_eq!(select_rendered_range(source, 10..14), 16..20);
+    }
+
+    #[test]
+    fn selected_source_range_maps_partial_styled_text() {
+        let source = "**same** then **same**";
+        assert_eq!(select_rendered_range(source, 11..13), 17..19);
+    }
+
+    #[test]
+    fn source_segments_compact_contiguous_one_to_one_mappings() {
+        let source = "plain text";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let paragraph = first_paragraph(&document.blocks[0]).unwrap();
+        assert_eq!(
+            paragraph.children[0].source_segments,
+            vec![SourceSegment {
+                rendered: 0..source.len(),
+                source: 0..source.len(),
+            }]
+        );
+
+        assert_eq!(select_rendered_range(source, 2..7), 2..7);
+    }
+
+    #[test]
+    fn source_segments_keep_non_linear_mappings_atomic() {
+        let source = r"a\* &amp; b";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let paragraph = first_paragraph(&document.blocks[0]).unwrap();
+        let segments = &paragraph.children[0].source_segments;
+
+        assert!(
+            segments.len() < paragraph.children[0].text.chars().count(),
+            "ordinary characters should be compacted into runs"
+        );
+        assert!(segments.contains(&SourceSegment {
+            rendered: 1..2,
+            source: 1..3,
+        }));
+        assert!(segments.contains(&SourceSegment {
+            rendered: 3..4,
+            source: 4..9,
+        }));
+
+        assert_eq!(select_rendered_range(source, 1..2), 1..3);
+        assert_eq!(select_rendered_range(source, 3..4), 4..9);
+    }
+
+    #[test]
+    fn selected_source_range_crosses_style_boundaries() {
+        let source = "left **bold** right";
+        assert_eq!(select_rendered_range(source, 2..12), 2..16);
+    }
+
+    #[test]
+    fn selected_source_range_maps_inline_code_in_merged_styled_node() {
+        let source = "**left `code` right**";
+        assert_eq!(selected_rendered_range(source, 5..9), Some(8..12));
+    }
+
+    #[test]
+    fn selected_source_range_maps_inline_code_delimiters_and_boundaries() {
+        let source = "`code` x";
+        assert_eq!(selected_rendered_range(source, 0..4), Some(1..5));
+        assert_eq!(selected_rendered_range(source, 5..6), Some(7..8));
+        assert_eq!(selected_rendered_range(source, 3..6), Some(4..8));
+
+        let padded = "`` code ` value ``";
+        assert_eq!(selected_rendered_range(padded, 0..4), Some(3..7));
+        assert_eq!(selected_rendered_range(padded, 5..6), Some(8..9));
+
+        let literal_entity = "`&amp;`";
+        assert_eq!(selected_rendered_range(literal_entity, 0..5), Some(1..6));
+    }
+
+    #[test]
+    fn selected_source_range_maps_footnote_reference_syntax() {
+        let source = "before[^note] after\n\n[^note]: body";
+        assert_eq!(selected_rendered_range(source, 0..6), Some(0..6));
+        assert_eq!(selected_rendered_range(source, 6..12), Some(6..13));
+        assert_eq!(selected_rendered_range(source, 13..18), Some(14..19));
+        assert_eq!(selected_rendered_range(source, 4..15), Some(4..16));
+    }
+
+    #[test]
+    fn selected_source_range_maps_mdx_text_expression_body() {
+        let source = "before {value + 1} after";
+        assert_eq!(selected_mdx_rendered_range(source, 7..16), Some(8..17));
+        assert_eq!(selected_mdx_rendered_range(source, 4..19), Some(4..21));
+    }
+
+    #[test]
+    fn selected_source_range_maps_mdx_flow_expression_body() {
+        let source = "{\n  value + 1\n}";
+        assert_eq!(selected_mdx_code(source, "value + 1"), Some(4..13));
+        assert_eq!(selected_mdx_code(source, "lue +"), Some(6..11));
+    }
+
+    #[test]
+    fn selected_source_range_maps_math_block_body() {
+        let source = "$$\nx + y\n$$";
+        assert_eq!(selected_code_range(source, 0..5), Some(3..8));
+        assert_eq!(selected_code_range(source, 2..3), Some(5..6));
+    }
+
+    #[test]
+    fn selected_source_range_rejects_mapped_block_plus_unmappable_entity() {
+        let source = "mapped\n\nA &amp; B";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let [BlockNode::Paragraph(mapped), BlockNode::Paragraph(entity)] =
+            document.blocks.as_slice()
+        else {
+            panic!("expected two paragraphs");
+        };
+        mapped.state.lock().unwrap().selection = Some((0..6).into());
+
+        entity.state.lock().unwrap().selection = Some((2..2).into());
+        assert_eq!(document.selected_source_range(), Some(0..6));
+
+        entity.state.lock().unwrap().selection = Some((2..3).into());
+        assert_eq!(document.selected_source_range(), Some(0..15));
+    }
+
+    #[test]
+    fn selected_source_range_maps_fenced_code_body_after_matching_info_string() {
+        let source = "```rust\nrust\n```";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::CodeBlock(code) = &document.blocks[0] else {
+            panic!("expected code block");
+        };
+        code.set_selection(0..4);
+
+        assert_eq!(document.selected_source_range(), Some(8..12));
+    }
+
+    #[test]
+    fn selected_source_range_excludes_closing_fence_candidate() {
+        let source = "````text\n```\n````";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::CodeBlock(code) = &document.blocks[0] else {
+            panic!("expected code block");
+        };
+        code.set_selection(0..3);
+
+        assert_eq!(document.selected_source_range(), Some(9..12));
+    }
+
+    #[test]
+    fn selected_source_range_maps_indented_code_content() {
+        let source = "    rust";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::CodeBlock(code) = &document.blocks[0] else {
+            panic!("expected code block");
+        };
+        code.set_selection(0..4);
+
+        assert_eq!(document.selected_source_range(), Some(4..8));
+    }
+
+    #[test]
+    fn selected_source_range_maps_multiline_indented_code() {
+        let source = "    one\n    two\n    three";
+        assert_eq!(selected_code_range(source, 0..3), Some(4..7));
+        assert_eq!(selected_code_range(source, 4..7), Some(12..15));
+        assert_eq!(selected_code_range(source, 0..13), Some(4..25));
+    }
+
+    #[test]
+    fn selected_source_range_maps_fenced_code_nested_in_a_list() {
+        let source = "- ```rust\n  one\n  two\n  ```";
+        assert_eq!(selected_code_range(source, 0..3), Some(12..15));
+        assert_eq!(selected_code_range(source, 4..7), Some(18..21));
+        assert_eq!(selected_code_range(source, 0..7), Some(12..21));
+    }
+
+    #[test]
+    fn selected_source_range_maps_fenced_code_nested_in_a_blockquote() {
+        let source = "> ```\n> one\n> two\n> ```";
+        assert_eq!(selected_code_range(source, 0..3), Some(8..11));
+        assert_eq!(selected_code_range(source, 4..7), Some(14..17));
+        assert_eq!(selected_code_range(source, 0..7), Some(8..17));
+    }
+
+    #[test]
+    fn selected_source_range_maps_fenced_code_with_blank_lines_and_repeated_text() {
+        let source = "```\nsame\n\nsame\n```";
+        assert_eq!(selected_code_range(source, 0..4), Some(4..8));
+        assert_eq!(selected_code_range(source, 6..10), Some(10..14));
+        assert_eq!(selected_code_range(source, 0..10), Some(4..14));
+    }
+
+    #[test]
+    fn selected_source_range_maps_the_whole_markdown_escape() {
+        assert_eq!(selected_rendered_range(r"\*", 0..1), Some(0..2));
+    }
+
+    #[test]
+    fn selected_source_range_maps_after_an_escaped_backslash() {
+        let source = r"a\\b";
+        assert_eq!(select_rendered_range(source, 1..2), 1..3);
+        assert_eq!(select_rendered_range(source, 2..3), 3..4);
+        assert_eq!(select_rendered_range(source, 1..3), 1..4);
+
+        let repeated = r"\\\\b";
+        assert_eq!(select_rendered_range(repeated, 2..3), 4..5);
+    }
+
+    #[test]
+    fn selected_source_range_does_not_borrow_an_escape_from_the_previous_node() {
+        let source = r"a\\$x$";
+        assert_eq!(select_rendered_range(source, 2..3), 3..4);
+        assert_eq!(select_rendered_range(source, 1..3), 1..4);
+    }
+
+    #[test]
+    fn selected_source_range_does_not_shift_a_hard_break_after_an_escape() {
+        let source = "a\\\\  \nb";
+        assert_eq!(select_rendered_range(source, 2..3), 3..6);
+        assert_eq!(select_rendered_range(source, 1..3), 1..6);
+    }
+
+    #[test]
+    fn selected_source_range_includes_a_trailing_inline_image() {
+        let source = "before ![alt](image.png)";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let image = paragraph
+            .children
+            .iter()
+            .find(|child| child.image.is_some())
+            .expect("expected image");
+        let mut state = image.state.lock().unwrap();
+        state.set_text("before ".into());
+        state.selection = Some((0..7).into());
+        drop(state);
+
+        assert_eq!(document.selected_source_range(), Some(0..source.len()));
+    }
+
+    #[test]
+    fn selected_source_range_includes_a_leading_inline_image() {
+        let source = "![alt](image.png) after";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let mut state = paragraph.state.lock().unwrap();
+        state.set_text(" after".into());
+        state.selection = Some((0..6).into());
+        drop(state);
+
+        assert_eq!(document.selected_source_range(), Some(0..source.len()));
+    }
+
+    #[test]
+    fn selected_source_range_includes_an_enclosed_inline_image() {
+        let source = "before ![alt](image.png) after";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let image = paragraph
+            .children
+            .iter()
+            .find(|child| child.image.is_some())
+            .expect("expected image");
+        let mut before = image.state.lock().unwrap();
+        before.set_text("before ".into());
+        before.selection = Some((0..7).into());
+        drop(before);
+        let mut after = paragraph.state.lock().unwrap();
+        after.set_text(" after".into());
+        after.selection = Some((0..6).into());
+        drop(after);
+
+        assert_eq!(document.selected_source_range(), Some(0..source.len()));
+    }
+
+    #[test]
+    fn selected_source_range_excludes_an_unreached_inline_image() {
+        let source = "before ![alt](image.png) after";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let image = paragraph
+            .children
+            .iter()
+            .find(|child| child.image.is_some())
+            .expect("expected image");
+        let mut before = image.state.lock().unwrap();
+        before.set_text("before ".into());
+        before.selection = Some((0..3).into());
+        drop(before);
+
+        assert_eq!(document.selected_source_range(), Some(0..3));
+
+        image.state.lock().unwrap().selection = None;
+        let after_start = source.find("after").unwrap();
+        let mut after = paragraph.state.lock().unwrap();
+        after.set_text(" after".into());
+        after.selection = Some((2..6).into());
+        drop(after);
+
+        assert_eq!(
+            document.selected_source_range(),
+            Some(after_start + 1..source.len())
+        );
+    }
+
+    #[test]
+    fn selected_source_range_includes_consecutive_inline_images() {
+        let source = "![first](one.png)![second](two.png) after";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        let mut state = paragraph.state.lock().unwrap();
+        state.set_text(" after".into());
+        state.selection = Some((0..6).into());
+        drop(state);
+
+        assert_eq!(document.selected_source_range(), Some(0..source.len()));
+    }
+
+    #[test]
+    fn selected_source_range_maps_decoded_entity_to_its_source_syntax() {
+        let source = "A &amp; B";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected paragraph");
+        };
+        assert_eq!(paragraph.text(), "A & B");
+
+        assert_eq!(selected_rendered_range(source, 2..3), Some(2..7));
+    }
+
+    #[test]
+    fn selected_source_range_maps_around_named_and_numeric_entities() {
+        let source = "Copyright &copy; &#x1F600; &#169; 2024";
+        assert_eq!(selected_rendered_range(source, 0..9), Some(0..9));
+        assert_eq!(selected_rendered_range(source, 10..12), Some(10..16));
+        assert_eq!(selected_rendered_range(source, 13..17), Some(17..26));
+        assert_eq!(selected_rendered_range(source, 18..20), Some(27..33));
+        assert_eq!(selected_rendered_range(source, 21..25), Some(34..38));
+        assert_eq!(selected_rendered_range(source, 8..22), Some(8..35));
+    }
+
+    #[test]
+    fn selected_source_range_maps_soft_breaks_with_source_prefixes() {
+        assert_eq!(selected_rendered_range("a\n   b", 0..1), Some(0..1));
+        assert_eq!(selected_rendered_range("a\n   b", 2..3), Some(5..6));
+        assert_eq!(selected_rendered_range("a\n   b", 0..3), Some(0..6));
+
+        assert_eq!(selected_rendered_range("> a\n> b", 0..1), Some(2..3));
+        assert_eq!(selected_rendered_range("> a\n> b", 2..3), Some(6..7));
+        assert_eq!(selected_rendered_range("> a\n> b", 0..3), Some(2..7));
+
+        assert_eq!(selected_rendered_range("- a\n  b", 0..1), Some(2..3));
+        assert_eq!(selected_rendered_range("- a\n  b", 2..3), Some(6..7));
+        assert_eq!(selected_rendered_range("- a\n  b", 0..3), Some(2..7));
+    }
+
+    #[test]
+    fn selected_source_range_maps_soft_breaks_with_trailing_spaces_and_crlf() {
+        assert_eq!(selected_rendered_range("a \nb", 0..1), Some(0..1));
+        assert_eq!(selected_rendered_range("a \nb", 1..2), Some(2..3));
+        assert_eq!(selected_rendered_range("a \nb", 2..3), Some(3..4));
+        assert_eq!(selected_rendered_range("a \nb", 0..3), Some(0..4));
+
+        assert_eq!(selected_rendered_range("a \r\nb", 1..2), Some(2..4));
+        assert_eq!(selected_rendered_range("a \r\nb", 2..3), Some(4..5));
+
+        assert_eq!(selected_rendered_range("a\r\nb", 0..1), Some(0..1));
+        assert_eq!(selected_rendered_range("a\r\nb", 2..3), Some(3..4));
+        assert_eq!(selected_rendered_range("a\r\nb", 0..3), Some(0..4));
+    }
 
     #[test]
     fn test_nested_emphasis_merges_text_marks() {
@@ -916,6 +1855,90 @@ mod tests {
         };
         assert_eq!(code.code(), "\\sum_{i=1}^{n} i");
         assert!(document.to_markdown().contains("\\sum_{i=1}^{n} i"));
+    }
+
+    fn bold_runs(paragraph: &Paragraph) -> Vec<String> {
+        paragraph
+            .children
+            .iter()
+            .flat_map(|node| {
+                node.marks
+                    .iter()
+                    .filter(|(_, mark)| mark.bold)
+                    .map(|(range, _)| node.text[range.clone()].to_string())
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn unclaimed_inline_math_parses_its_span_as_prose() {
+        // Two dollar amounts pair up into an unclaimed math span. What lies
+        // between them is ordinary prose: inline HTML there must still pair
+        // with the tags outside the span, and emphasis inside it must render.
+        let source =
+            "EPS of <strong>$1.56</strong> beat the <strong>$1.50</strong> consensus, *up $2*";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        assert_eq!(
+            document.text(),
+            "EPS of $1.56 beat the $1.50 consensus, up $2\n"
+        );
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!()
+        };
+        assert_eq!(bold_runs(paragraph), ["$1.56", "$1.50"]);
+        assert!(paragraph.children.iter().any(|node| {
+            node.marks
+                .iter()
+                .any(|(range, mark)| mark.italic && node.text[range.clone()] == *"up $2")
+        }));
+        assert!(document.to_markdown().contains("$1.56"));
+    }
+
+    #[test]
+    fn claimed_inline_math_survives_prose_flattening() {
+        let extensions = MarkdownExtensions::default().plugin(
+            crate::text::markdown_ext::TestInlinePlugin::new("formula").parse_with(|node, _| {
+                let Node::InlineMath(math) = node else {
+                    return None;
+                };
+                Some(MarkdownNode::new("formula", ()).text(format!("[{}]", math.value)))
+            }),
+        );
+        let mut cx = NodeContext {
+            markdown_extensions: extensions.into(),
+            ..Default::default()
+        };
+        let document = parse("area $x^2$ costs $5 and $10", &mut cx).unwrap();
+        assert_eq!(document.text(), "area [x^2] costs [5 and ]10\n");
+    }
+
+    #[test]
+    fn inline_html_formatting_tags_pair_across_siblings() {
+        let source = "a <strong>b *c* <em>d</em></strong> e <b>f</b> <i>g</i> <del>h</del> <br> <strong>unclosed";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        assert_eq!(document.text(), "a b c d e f g h \n unclosed\n");
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!()
+        };
+        assert_eq!(bold_runs(paragraph), ["b c d", "f"]);
+        let marked = |predicate: fn(&TextMark) -> bool| -> Vec<String> {
+            paragraph
+                .children
+                .iter()
+                .flat_map(|node| {
+                    node.marks
+                        .iter()
+                        .filter(|(_, mark)| predicate(mark))
+                        .map(|(range, _)| node.text[range.clone()].to_string())
+                        .collect::<Vec<_>>()
+                })
+                .collect()
+        };
+        assert_eq!(marked(|mark| mark.italic), ["c", "d", "g"]);
+        assert_eq!(marked(|mark| mark.strikethrough), ["h"]);
     }
 
     #[test]

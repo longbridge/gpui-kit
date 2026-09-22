@@ -28,6 +28,7 @@ struct ComposerAttachment {
 }
 
 pub struct TextareaStory {
+    tokens: Entity<super::input_tokens::TokenExample>,
     textarea: Entity<TextareaState>,
     textarea_auto_grow: Entity<TextareaState>,
     textarea_no_wrap: Entity<TextareaState>,
@@ -159,6 +160,7 @@ impl TextareaStory {
         )];
 
         Self {
+            tokens: super::input_tokens::TokenExample::new(true, window, cx),
             textarea,
             textarea_auto_grow,
             textarea_no_wrap,
@@ -364,5 +366,8 @@ impl Render for TextareaStory {
                             }),
                     ),
             )
+            .child(section("Atomic inline tokens")
+                .description("References keep their identity through selection, deletion and undo. Copy returns the underlying text.")
+                .w_full().child(self.tokens.clone()))
     }
 }

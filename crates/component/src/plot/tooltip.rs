@@ -2,6 +2,7 @@ use gpui::{
     AnyElement, App, Div, Half as _, Hsla, IntoElement, ParentElement, Pixels, Point, RenderOnce,
     SharedString, Size, StyleRefinement, Styled, Window, deferred, div, prelude::FluentBuilder, px,
 };
+use gpui_base::motion::{Transition, transition};
 
 use crate::ThemeStyled as _;
 use crate::{ActiveTheme, Colorize, StyledExt, h_flex, v_flex};
@@ -186,6 +187,8 @@ pub struct Dot {
     size: Pixels,
     stroke: Hsla,
     fill: Hsla,
+    /// Diameter of the translucent ring behind the dot; `None` draws no ring.
+    halo: Option<Pixels>,
 }
 
 impl Dot {
@@ -195,12 +198,21 @@ impl Dot {
             size: px(6.),
             stroke: gpui::transparent_black(),
             fill: gpui::transparent_black(),
+            halo: None,
         }
     }
 
     /// Set the size of the dot.
     pub fn size(mut self, size: impl Into<Pixels>) -> Self {
         self.size = size.into();
+        self
+    }
+
+    /// Draw a translucent ring of the fill color, `size` across, behind the dot,
+    /// which marks the hovered point the way a chart marks its emphasized
+    /// symbol.
+    pub fn halo(mut self, size: impl Into<Pixels>) -> Self {
+        self.halo = Some(size.into());
         self
     }
 
@@ -222,7 +234,7 @@ impl RenderOnce for Dot {
         let border_width = px(1.);
         let offset = self.size / 2. - border_width / 2.;
 
-        div()
+        let dot = div()
             .absolute()
             .w(self.size)
             .h(self.size)
@@ -231,7 +243,21 @@ impl RenderOnce for Dot {
             .border_color(self.stroke)
             .bg(self.fill)
             .left(self.point.x - offset)
-            .top(self.point.y - offset)
+            .top(self.point.y - offset);
+
+        // The ring paints first so it sits behind the dot, both centered on the
+        // point.
+        let halo = self.halo.map(|halo| {
+            div()
+                .absolute()
+                .size(halo)
+                .rounded_full()
+                .bg(self.fill.opacity(0.2))
+                .left(self.point.x - halo / 2.)
+                .top(self.point.y - halo / 2.)
+        });
+
+        div().absolute().top_0().left_0().children(halo).child(dot)
     }
 }
 
@@ -250,6 +276,128 @@ impl TooltipState {
             dots,
         }
     }
+}
+
+/// The datum a plot has in focus this frame, handed to [`Plot::hover`](super::Plot::hover).
+///
+/// Carries the [`TooltipState`] the cursor resolved to and how far the hover has
+/// faded in. After the cursor leaves, the state lingers here while the focus
+/// eases back to zero, so a hover-driven presentation can fade out over the
+/// last datum instead of vanishing.
+#[derive(Clone)]
+pub struct PlotHover {
+    state: TooltipState,
+    focus: f32,
+    hovered: bool,
+}
+
+impl PlotHover {
+    /// The datum in focus: the one under the cursor, or the last one while the
+    /// hover fades out.
+    pub fn state(&self) -> &TooltipState {
+        &self.state
+    }
+
+    /// How far the hover has faded in, from `0` to `1`.
+    ///
+    /// Rises over the styled layer's fast duration when the cursor lands on a
+    /// datum and falls back after it leaves, during which [`Self::is_hovered`]
+    /// is false.
+    pub fn focus(&self) -> f32 {
+        self.focus
+    }
+
+    /// Whether the cursor is on the datum, as opposed to the state lingering
+    /// while its hover fades out.
+    pub fn is_hovered(&self) -> bool {
+        self.hovered
+    }
+
+    /// Whether this is the first frame the cursor is on a datum: the hover has
+    /// not started fading in yet. A position that follows the hovered datum
+    /// adopts it here instead of travelling from where the last hover ended.
+    pub fn is_entering(&self) -> bool {
+        self.hovered && self.focus == 0.
+    }
+}
+
+/// The last datum the cursor resolved to, where the cursor was and how far the
+/// hover has faded in, kept in element state so the hover can fade out over it
+/// after the cursor leaves and so [`Tooltip`] can read the fade without being
+/// handed it.
+struct HoverMemory {
+    state: Option<TooltipState>,
+    cursor: Point<Pixels>,
+    focus: f32,
+}
+
+impl Default for HoverMemory {
+    fn default() -> Self {
+        Self {
+            state: None,
+            cursor: Point::default(),
+            // A tooltip rendered outside the derive's tracking is fully opaque.
+            focus: 1.,
+        }
+    }
+}
+
+/// The element-state key of a plot's [`HoverMemory`], within the plot's scope.
+const HOVER_MEMORY: &str = "__plot-hover";
+
+/// Resolve the datum a plot shows this frame from the `live` state the cursor
+/// resolved to.
+///
+/// While `live` is `Some` it is shown as is. After the cursor leaves, the last
+/// state lingers with its focus easing to zero over the styled layer's fast
+/// duration, then is dropped. Called by the `IntoPlot` derive within the plot's
+/// element scope; the returned cursor is the live one, or the last one while
+/// the state lingers.
+#[doc(hidden)]
+pub fn track_hover(
+    live: Option<TooltipState>,
+    cursor: Option<Point<Pixels>>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<(PlotHover, Point<Pixels>)> {
+    let hovered = live.is_some();
+    let memory = window.use_keyed_state(HOVER_MEMORY, cx, |_, _| HoverMemory::default());
+
+    let motion = cx.theme().motion_tokens();
+    let easing = if hovered {
+        motion.easing_enter.clone()
+    } else {
+        motion.easing_exit.clone()
+    };
+    let focus = transition(
+        (HOVER_MEMORY, "focus"),
+        if hovered { 1. } else { 0. },
+        Transition::new(motion.duration_fast).easing(easing),
+        window,
+        cx,
+    );
+
+    memory.update(cx, |memory, _| {
+        if let (Some(live), Some(cursor)) = (live, cursor) {
+            memory.state = Some(live);
+            memory.cursor = cursor;
+        }
+        memory.focus = focus;
+        if !hovered && focus <= 0. {
+            memory.state = None;
+        }
+    });
+
+    let memory = memory.read(cx);
+    let state = memory.state.clone()?;
+    Some((
+        PlotHover {
+            state,
+            focus,
+            hovered,
+        },
+        memory.cursor,
+    ))
 }
 
 /// A single labelled row in a [`Tooltip`]: a colored swatch, a muted label, and a value.
@@ -273,13 +421,18 @@ pub struct Tooltip {
     /// Plot size, used to flip the box toward the center near each edge so it never
     /// overflows the near side.
     within: Size<Pixels>,
+    /// Opacity of the whole overlay when set; see [`Self::focus`].
+    focus: Option<f32>,
 }
 
 impl Tooltip {
     /// Create a tooltip whose box follows the cursor at `cursor` within a `within`-sized plot.
     pub fn new(cursor: Point<Pixels>, within: Size<Pixels>) -> Self {
         Self {
-            base: v_flex(),
+            // The same row rhythm the structured content lays out with, so a
+            // tooltip built from freeform children does not have to rediscover
+            // it — and does not read as one solid block when it forgets.
+            base: v_flex().gap_y_1(),
             gap: px(0.),
             cross_line: None,
             dots: None,
@@ -288,7 +441,19 @@ impl Tooltip {
             rows: Vec::new(),
             cursor,
             within,
+            focus: None,
         }
+    }
+
+    /// Fade the whole overlay — crosshair, dots and box — to `focus` (`0..=1`).
+    ///
+    /// A tooltip returned from [`Plot::tooltip`](super::Plot::tooltip) already
+    /// follows the plot's hover, easing in when the cursor lands on a datum and
+    /// out after it leaves ([`PlotHover::focus`]); set this to override that,
+    /// or to fade a tooltip rendered outside a plot.
+    pub fn focus(mut self, focus: f32) -> Self {
+        self.focus = Some(focus.clamp(0., 1.));
+        self
     }
 
     /// Set a bold title row shown at the top of the tooltip (e.g. the hovered x value).
@@ -350,7 +515,13 @@ impl ParentElement for Tooltip {
 }
 
 impl RenderOnce for Tooltip {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // Rendered within the plot's element scope, so this is the fade the
+        // derive tracked for it this frame; fully opaque outside a plot.
+        let tracked_focus = window
+            .use_keyed_state(HOVER_MEMORY, cx, |_, _| HoverMemory::default())
+            .read(cx)
+            .focus;
         let Tooltip {
             base,
             gap,
@@ -361,12 +532,13 @@ impl RenderOnce for Tooltip {
             rows,
             cursor,
             within,
+            focus,
         } = self;
+        let focus = focus.unwrap_or(tracked_focus);
 
         // Structured content (title + rows) takes precedence over freeform `base` children.
         let content = if title.is_some() || !rows.is_empty() {
             v_flex()
-                .text_sm()
                 .gap_1()
                 .when_some(title, |this, title| {
                     this.child(div().font_semibold().child(title))
@@ -397,20 +569,27 @@ impl RenderOnce for Tooltip {
         } else {
             base
         };
+        // One size for every tooltip, structured or freeform, boxed or bare: a
+        // transient overlay over dense data reads at the compact tier, and a
+        // per-call-site size is how a dozen charts end up at a dozen sizes.
+        // Content that wants a hierarchy sets it on its own children.
+        let content = content.text_xs();
 
         div()
             .size_full()
             .absolute()
             .top_0()
             .left_0()
+            .opacity(focus)
             .when_some(cross_line, |this, cross_line| this.child(cross_line))
             .when_some(dots, |this, dots| this.children(dots))
             // Only the box is deferred: it can overflow the plot bounds and must paint above
             // sibling content, while the crosshair and dots stay in the plot's own layer so
-            // they don't cover elements drawn over the plot.
+            // they don't cover elements drawn over the plot. A deferred draw paints outside
+            // this element's opacity, so the box carries the fade itself.
             .child(deferred(content.map(|mut this| {
                 if !appearance {
-                    return this.size_full().relative();
+                    return this.size_full().relative().opacity(focus);
                 }
 
                 // Default min width only applies when the caller hasn't set one, so a
@@ -420,6 +599,7 @@ impl RenderOnce for Tooltip {
                 // The box hugs the cursor, flipping toward the center near each edge so it
                 // never overflows the near side.
                 this.absolute()
+                    .opacity(focus)
                     .when(min_w_unset, |c| c.min_w(px(150.)))
                     .popover_style(cx)
                     .p_2()
@@ -438,5 +618,42 @@ impl RenderOnce for Tooltip {
                         }
                     })
             })))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{point, px};
+
+    use super::*;
+
+    #[test]
+    fn test_plot_hover_readers() {
+        let state = TooltipState::new(2, point(px(10.), px(20.)), vec![]);
+        let hover = PlotHover {
+            state,
+            focus: 1.,
+            hovered: true,
+        };
+        assert_eq!(hover.state().index, 2);
+        assert!(hover.is_hovered());
+        // Fully in focus: a pointer keeps travelling rather than snapping.
+        assert!(!hover.is_entering());
+
+        // The first hovered frame, before the fade has started.
+        let entering = PlotHover {
+            focus: 0.,
+            ..hover.clone()
+        };
+        assert!(entering.is_entering());
+
+        // Fading out after the cursor left: neither hovered nor entering.
+        let lingering = PlotHover {
+            focus: 0.4,
+            hovered: false,
+            ..hover
+        };
+        assert!(!lingering.is_hovered());
+        assert!(!lingering.is_entering());
     }
 }

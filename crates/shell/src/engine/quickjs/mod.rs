@@ -485,6 +485,77 @@ mod component_callback_value_tests {
     }
 
     #[gpui::test]
+    fn inline_element_callbacks_retire_with_their_element(cx: &mut TestAppContext) {
+        let runtime = ShellRuntime::new_isolated().unwrap();
+        let (good, _) = callback(
+            &runtime,
+            r#"() => __gpui.Button.new("child").on_click(() => {})"#,
+            None,
+        );
+        let (bad, _) = callback(
+            &runtime,
+            r#"() => { __gpui.Button.new("child").on_click(() => {}); throw new Error("failed render"); }"#,
+            None,
+        );
+        let good = crate::ComponentElementCallback::from_runtime(&runtime, good);
+        let bad = crate::ComponentElementCallback::from_runtime(&runtime, bad);
+        let baseline = runtime.callbacks.borrow().len();
+        struct Probe {
+            renderer: Option<crate::ComponentElementCallback>,
+            failed: bool,
+        }
+        impl gpui::Render for Probe {
+            fn render(
+                &mut self,
+                window: &mut Window,
+                cx: &mut gpui::Context<Self>,
+            ) -> impl gpui::IntoElement {
+                use gpui::IntoElement as _;
+                let Some(renderer) = &self.renderer else {
+                    return gpui::div().into_any_element();
+                };
+                match renderer.build_interactive_data_with(&[], window, cx) {
+                    Ok(Some(element)) => element,
+                    result => {
+                        self.failed = result.is_err();
+                        gpui::div().into_any_element()
+                    }
+                }
+            }
+        }
+        let window = cx.add_window(|_, _| Probe {
+            renderer: None,
+            failed: false,
+        });
+        let mut context = VisualTestContext::from_window(*window.deref(), cx);
+        let probe = window.root(&mut context).unwrap();
+        for _ in 0..8 {
+            probe.update(&mut context, |probe, cx| {
+                probe.renderer = Some(good.clone());
+                cx.notify();
+            });
+            context.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(runtime.callbacks.borrow().len(), baseline + 1);
+            probe.update(&mut context, |probe, cx| {
+                probe.renderer = None;
+                cx.notify();
+            });
+            // The previous frame's event table also owns the lease.
+            context.update(|window, cx| window.draw(cx).clear(cx));
+            context.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(runtime.callbacks.borrow().len(), baseline);
+            probe.update(&mut context, |probe, cx| {
+                probe.renderer = Some(bad.clone());
+                cx.notify();
+            });
+            context.update(|window, cx| window.draw(cx).clear(cx));
+            assert!(context.update(|_, cx| probe.read(cx).failed));
+            assert_eq!(runtime.callbacks.borrow().len(), baseline);
+            assert!(!runtime.interactive_inline_layout.get());
+        }
+    }
+
+    #[gpui::test]
     fn temporary_delegate_arena_restores_after_panic_and_later_materializes(
         cx: &mut TestAppContext,
     ) {
@@ -1295,6 +1366,7 @@ pub struct ShellRuntime {
     callbacks: RefCell<CallbackArena<Persistent<Function<'static>>>>,
     components: FrozenComponentRegistry,
     component_state_proof: String,
+    interactive_inline_layout: Cell<bool>,
     component_states: RefCell<crate::component_registry::RetainedStateStore>,
     pending_component_state_releases: RefCell<Vec<Rc<ApplicationGeneration>>>,
     component_app_effects: RefCell<HashMap<usize, ComponentAppEffectGeneration>>,
@@ -1629,6 +1701,7 @@ impl ShellRuntime {
             callbacks: RefCell::new(CallbackArena::default()),
             components,
             component_state_proof,
+            interactive_inline_layout: Cell::new(false),
             component_states: RefCell::new(Default::default()),
             pending_component_state_releases: RefCell::new(Vec::new()),
             component_app_effects: RefCell::new(HashMap::new()),
@@ -4505,6 +4578,25 @@ impl ShellRuntime {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<ComponentCallbackValue> {
+        self.dispatch_component_event(id, EventArguments::Scalar(arguments), window, cx)
+    }
+    pub(crate) fn dispatch_component_event_data(
+        self: &Rc<Self>,
+        id: CallbackId,
+        arguments: &[ComponentDataValue],
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<ComponentCallbackValue> {
+        self.dispatch_component_event(id, EventArguments::Data(arguments), window, cx)
+    }
+
+    fn dispatch_component_event(
+        self: &Rc<Self>,
+        id: CallbackId,
+        arguments: EventArguments<'_>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<ComponentCallbackValue> {
         let entry = self
             .callbacks
             .borrow()
@@ -4538,8 +4630,17 @@ impl ShellRuntime {
         let result = self.with_js(|ctx| {
             let handler = entry.value.clone().restore(ctx)?;
             let mut js_arguments = JsArgs::new(ctx.clone(), arguments.len() + 1);
-            for argument in arguments {
-                js_arguments.push_arg(callback_argument_to_js(ctx, argument)?)?;
+            match arguments {
+                EventArguments::Scalar(values) => {
+                    for value in values {
+                        js_arguments.push_arg(callback_argument_to_js(ctx, value)?)?;
+                    }
+                }
+                EventArguments::Data(values) => {
+                    for value in values {
+                        js_arguments.push_arg(component_data_into_js(ctx, value)?)?;
+                    }
+                }
             }
             js_arguments.push_arg(context_object(ctx, ContextBinding::Call(generation))?)?;
             let value: Value<'_> = handler.call_arg(js_arguments)?;
@@ -4678,6 +4779,17 @@ impl ShellRuntime {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<Option<gpui::AnyElement>> {
+        self.dispatch_inline_element_data(id, arguments, false, window, cx)
+    }
+
+    pub(crate) fn dispatch_inline_element_data(
+        self: &Rc<Self>,
+        id: CallbackId,
+        arguments: &[ComponentDataValue],
+        interactive: bool,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<Option<gpui::AnyElement>> {
         let entry = self
             .callbacks
             .borrow()
@@ -4707,6 +4819,33 @@ impl ShellRuntime {
             );
             scope::adopt(entry.registered_in);
             let temporary = TemporarySpecArena::enter(self);
+            let callback_generation = if interactive {
+                anyhow::ensure!(
+                    !self.callbacks.borrow().is_building(),
+                    "inline renderer cannot nest callback recording"
+                );
+                Some(self.callbacks.borrow_mut().begin())
+            } else {
+                None
+            };
+            struct CallbackGuard<'a> {
+                runtime: &'a ShellRuntime,
+                previous: bool,
+                active: bool,
+            }
+            impl Drop for CallbackGuard<'_> {
+                fn drop(&mut self) {
+                    self.runtime.interactive_inline_layout.set(self.previous);
+                    if self.active {
+                        self.runtime.callbacks.borrow_mut().abort();
+                    }
+                }
+            }
+            let mut callbacks = CallbackGuard {
+                runtime: self,
+                previous: self.interactive_inline_layout.replace(interactive),
+                active: interactive,
+            };
             let described = self.with_js(|ctx| {
                 let handler = entry.value.clone().restore(ctx)?;
                 let mut args = JsArgs::new(ctx.clone(), arguments.len() + 1);
@@ -4724,8 +4863,38 @@ impl ShellRuntime {
             let arena = temporary.finish();
             match described {
                 Ok(Some(root)) => {
-                    crate::materialize::try_materialize_subtree(self, &arena, root, window, cx)
-                        .map(Some)
+                    if let Some(generation) = callback_generation {
+                        self.callbacks.borrow_mut().commit();
+                        callbacks.active = false;
+                        let snapshot = RenderSnapshot::new(
+                            self,
+                            generation,
+                            root,
+                            arena,
+                            entry.application.clone(),
+                            entry.view.clone(),
+                        );
+                        let element = crate::materialize::try_materialize_subtree(
+                            self,
+                            snapshot.arena(),
+                            root,
+                            window,
+                            cx,
+                        )?;
+                        use gpui::{InteractiveElement as _, IntoElement as _, ParentElement as _};
+                        // The frame's event table holds the lease until the next frame replaces it.
+                        Ok(Some(
+                            gpui::div()
+                                .child(element)
+                                .on_mouse_move(move |_, _, _| {
+                                    let _ = &snapshot;
+                                })
+                                .into_any_element(),
+                        ))
+                    } else {
+                        crate::materialize::try_materialize_subtree(self, &arena, root, window, cx)
+                            .map(Some)
+                    }
                 }
                 Ok(None) => Ok(None),
                 Err(error) => Err(error.into()),
@@ -5844,10 +6013,20 @@ globalThis.__gpui = (() => {
 
   // Retained state is held by handle; the methods close over it so nothing has
   // to read it back off `this`.
+  const tokenStateMethods = (handle, invoke) => Object.fromEntries([
+    "content", "tokens", "replace_with_token", "replace_range_with_token",
+    "set_selected_range", "replace"
+  ].map(name => [name, (...args) => invoke(handle, name, args)]));
+  // A value is plain text or a content snapshot with tokens.
+  const setValue = (handle, setText, invoke) => (next) =>
+    next !== null && typeof next === "object"
+      ? invoke(handle, "set_value", [next])
+      : setText(handle, String(next ?? ""));
   const inputState = (handle) => ({
+    ...tokenStateMethods(handle, __input_token_call),
     __handle: handle,
     value: () => __input_value(handle),
-    set_value: (next) => __input_set_value(handle, String(next ?? "")),
+    set_value: setValue(handle, __input_set_value, __input_token_call),
     on: (event, handler) => __input_on(handle, String(event), handler),
     // What makes a text state a number state. There is no `NumberInputState`:
     // the step, the bounds and the mask are fields on this one, so a plain
@@ -5863,9 +6042,10 @@ globalThis.__gpui = (() => {
   // The multi-line state shares almost all of its surface with the single-line
   // one, and adds the three calls that only mean anything once text can wrap.
   const textareaState = (handle) => ({
+    ...tokenStateMethods(handle, __textarea_token_call),
     __handle: handle,
     value: () => __textarea_value(handle),
-    set_value: (next) => __textarea_set_value(handle, String(next ?? "")),
+    set_value: setValue(handle, __textarea_set_value, __textarea_token_call),
     on: (event, handler) => __textarea_on(handle, String(event), handler),
     set_rows: (rows) => __textarea_set_rows(handle, oneBased(rows, "set_rows(rows)")),
     set_auto_grow: (min_rows, max_rows) =>
@@ -6866,6 +7046,8 @@ impl ShellRuntime {
                 "on_item_click",
                 "on_item_secondary_click",
                 "on_change",
+                "token",
+                "on_token_click",
                 "on_open_change",
                 "on_confirm",
                 "on_dismiss",
@@ -7459,6 +7641,26 @@ impl ShellRuntime {
             ctx.globals()
                 .set("__gpui_components", component_module.clone())?;
             for descriptor in self.components.states() {
+                for method in descriptor.methods() {
+                    let method_runtime = runtime.clone();
+                    let kind = descriptor.kind();
+                    let method = method.clone();
+                    component_module.set(format!("{}.{}", descriptor.export(), method.name()), Func::from(move |ctx: Ctx<'_>, proof: String, handle: u64, arguments: PlainDataArguments| -> JsResult<DataResult> {
+                        let runtime = upgrade(&method_runtime, &ctx)?;
+                        if proof != runtime.component_state_proof { return Err(Exception::throw_type(&ctx, "state belongs to another runtime")); }
+                        if !method.is_readonly() && matches!(scope::current_phase(), Some(ScopePhase::Render | ScopePhase::Layout)) {
+                            return Err(Exception::throw_type(&ctx, "state cannot be changed during render or layout"));
+                        }
+                        runtime.flush_component_state_releases();
+                        let call = {
+                            let store = runtime.component_states.try_borrow().map_err(|_| Exception::throw_type(&ctx, "state registry is already borrowed"))?;
+                            method.prepare(&store, handle, kind, arguments.0).map_err(|e| state_operation_error(&ctx, e))?
+                        };
+                        scope::with_current(move |window, cx| call(window, cx))
+                            .ok_or_else(|| Exception::throw_type(&ctx, "state operation requires a live host call"))?
+                            .map(DataResult).map_err(|e| state_operation_error(&ctx, e))
+                    }))?;
+                }
                 let state_runtime = runtime.clone();
                 let descriptor = descriptor.clone();
                 component_module.set(
@@ -7717,7 +7919,9 @@ impl ShellRuntime {
             // a `Callback` op because the name is discovered at run time and a
             // `Callback` holds a `&'static str`; see `SpecOp::ActionCallback`.
             "on_action" => {
-                if scope::current_phase() == Some(ScopePhase::Layout) {
+                if scope::current_phase() == Some(ScopePhase::Layout)
+                    && !self.interactive_inline_layout.get()
+                {
                     return Err(Exception::throw_type(
                         ctx,
                         "`on_action` cannot be registered from a virtual list's item \
@@ -7758,7 +7962,9 @@ impl ShellRuntime {
             // fixed names GPUI's own `MouseButton` maps onto — so the op stays
             // the `(&'static str, CallbackId)` pair every other callback uses.
             "on_mouse_down" | "on_mouse_up" => {
-                if scope::current_phase() == Some(ScopePhase::Layout) {
+                if scope::current_phase() == Some(ScopePhase::Layout)
+                    && !self.interactive_inline_layout.get()
+                {
                     return Err(Exception::throw_type(
                         ctx,
                         &format!(
@@ -7815,6 +8021,8 @@ impl ShellRuntime {
             | "on_link_click"
             | "on_resize"
             | "on_change"
+            | "token"
+            | "on_token_click"
             | "on_open_change"
             | "on_confirm"
             | "on_dismiss"
@@ -7842,7 +8050,9 @@ impl ShellRuntime {
                 // leaked quietly. `on_item_click` on the list is the one
                 // handler that covers the rows, and it is registered from
                 // `render()` like every other.
-                if scope::current_phase() == Some(ScopePhase::Layout) {
+                if scope::current_phase() == Some(ScopePhase::Layout)
+                    && !self.interactive_inline_layout.get()
+                {
                     return Err(Exception::throw_type(
                         ctx,
                         &format!(
@@ -9405,6 +9615,47 @@ enum Argument {
     Slot(u16),
 }
 
+enum EventArguments<'a> {
+    Scalar(&'a [ComponentCallbackArgument]),
+    Data(&'a [ComponentDataValue]),
+}
+impl EventArguments<'_> {
+    fn len(&self) -> usize {
+        match self {
+            Self::Scalar(values) => values.len(),
+            Self::Data(values) => values.len(),
+        }
+    }
+}
+
+struct PlainDataArguments(Vec<ComponentDataValue>);
+impl<'js> FromJs<'js> for PlainDataArguments {
+    fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> JsResult<Self> {
+        match component_data_from_js(ctx, value, 0, &mut ComponentDataBudget::default())? {
+            ComponentDataValue::Array(values) => Ok(Self(values)),
+            _ => Err(Exception::throw_type(
+                ctx,
+                "state operation expects an argument array",
+            )),
+        }
+    }
+}
+struct DataResult(ComponentDataValue);
+impl<'js> rquickjs::IntoJs<'js> for DataResult {
+    fn into_js(self, ctx: &Ctx<'js>) -> JsResult<Value<'js>> {
+        component_data_into_js(ctx, &self.0)
+    }
+}
+fn state_operation_error(ctx: &Ctx<'_>, error: anyhow::Error) -> rquickjs::Error {
+    if let Some(token) = error.downcast_ref::<gpui_base::input::InlineTokenError>() {
+        if let Ok(exception) = Exception::from_message(ctx.clone(), &token.to_string()) {
+            let _ = exception.as_object().set("code", format!("{token:?}"));
+            return exception.throw();
+        }
+    }
+    Exception::throw_type(ctx, &error.to_string())
+}
+
 struct Arguments(SmallVec<[Argument; 2]>);
 
 /// The single argument of a parametric style method.
@@ -9718,6 +9969,8 @@ fn callback_op_name(method: &str) -> Option<&'static str> {
         "drop_indicator" => "drop_indicator",
         "dock" => "dock",
         "on_change" => "on_change",
+        "token" => "token",
+        "on_token_click" => "on_token_click",
         "on_confirm" => "on_confirm",
         "on_dismiss" => "on_dismiss",
         "on_step" => "on_step",

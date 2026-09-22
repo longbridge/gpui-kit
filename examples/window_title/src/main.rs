@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    Root, TitleBar,
+    TitleBar,
     button::{Button, ButtonVariants},
     h_flex, v_flex,
 };
@@ -45,16 +45,10 @@ fn main() {
     app.run(move |cx| {
         gpui_kit::init(cx);
 
-        cx.spawn(async move |cx| {
-            // Setup GPUI to use custom title bar
-            let window_options = TitleBar::window_options();
+        // Setup GPUI to use custom title bar
+        let window_options = TitleBar::window_options();
 
-            cx.open_window(window_options, |window, cx| {
-                let view = cx.new(|_| Example);
-                cx.new(|cx| Root::new(view, window, cx))
-            })
+        gpui_kit::open_window(window_options, cx, |_, cx| cx.new(|_| Example))
             .expect("Failed to open window");
-        })
-        .detach();
     });
 }

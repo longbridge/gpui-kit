@@ -93,6 +93,10 @@ import {
   PieChart,
   Popover,
   Progress,
+  Questionnaire,
+  QuestionnaireChoice,
+  QuestionnaireInput,
+  QuestionnaireItem,
   RadarChart,
   Radio,
   RadioGroup,
@@ -141,6 +145,7 @@ import {
   StepperItem,
   SuccessAlert,
   Toggle,
+  Toolbar,
   Tooltip,
   Tree,
   WarningAlert,
@@ -225,7 +230,19 @@ const retained = (key, create) => {
  * GPUI input state cannot be created from render, and every descriptor here
  * needs a stable identity so interaction survives subsequent frames.
  */
+/** @type {import("gpui-component").InputContent} */
+const tokenDraft = {
+  text: "🙂 Ask @alice@bob to review",
+  tokens: [
+    { range: { start: 7, end: 13 }, token: { id: "alice", text: "@alice", label: "Alice" } },
+    { range: { start: 13, end: 17 }, token: { id: "bob", text: "@bob", label: "Bob" } },
+  ],
+};
+
 export function initializeRegisteredExamples() {
+  retained("token-input", () => { const input = InputState(); input.set_value(tokenDraft); return input; });
+  retained("questionnaire-direction", () => InputState("Type another direction…"));
+  retained("token-textarea", () => { const input = TextareaState(); input.set_value(tokenDraft); return input; });
   for (const [id, placeholder, value] of inputGroupFields) {
     retained(`input-group-extra:${id}`, () => InputState(placeholder, value));
   }
@@ -490,6 +507,45 @@ function expandedInputGroupExamples(cx) {
   return result;
 }
 
+
+/** @param {boolean} multiline @param {import("gpui-kit").Context} cx */
+function tokenExample(multiline, cx) {
+  const key = multiline ? "token-textarea" : "token-input";
+  const input = /** @type {import("gpui-component").InputState | import("gpui-component").TextareaState} */ (demo.get(key));
+  const content = input.content();
+  const control = multiline
+    ? new Textarea(/** @type {import("gpui-component").TextareaState} */ (input)).w_full().h(100)
+        .token(token => h_flex().gap(4).px(4).h(token.line_height)
+          .child("◆").child(token.token.label ?? token.token.text))
+    : new Input(/** @type {import("gpui-component").InputState} */ (input)).w_full();
+  return {
+    label: "Atomic inline references",
+    description: "Delete a reference and undo. Drafts preserve identity; copied text stays plain.",
+    element: v_flex().w(520).max_w_full().gap(8)
+      .child(control.on_token_click((event, cx) => setState(`${key}-status`, `Opened ${event.token.label}`, cx))
+        .on_change((_text, cx) => cx.notify()))
+      .child(h_flex().gap(8)
+        .child(new Button(`${key}-insert`).label("Insert reference").on_click((_event, cx) => {
+          // The ID names the resource, so inserting it twice reuses it.
+          input.replace_with_token({ id: "reference", text: "@reference", label: "Reference" });
+          cx.notify();
+        }))
+        .child(new Button(`${key}-save`).label("Save draft").on_click((_event, cx) => {
+          setState(`${key}-saved`, input.content(), cx);
+        }))
+        .child(new Button(`${key}-restore`).label("Restore draft").on_click((_event, cx) => {
+          input.set_value(/** @type {import("gpui-component").InputContent} */ (state(`${key}-saved`, tokenDraft)));
+          cx.notify();
+        }))
+        .child(new Button(`${key}-submit`).label("Submit").on_click((_event, cx) => {
+          const current = input.content();
+          setState(`${key}-status`, `Submitted ${current.tokens.length} references: ${current.text}`, cx);
+        })))
+      .child(div().text_sm().child(`Text: ${content.text}`))
+      .child(div().text_sm().child(`Tokens: ${content.tokens.map(span => `${span.token.id} [${span.range.start}, ${span.range.end})`).join(", ")}`))
+      .child(div().text_sm().child(String(state(`${key}-status`, "")))),
+  };
+}
 
 /**
  * The cases shown for one registered surface.
@@ -1241,6 +1297,7 @@ export function registeredExamples(surface, cx) {
               ),
             ),
         },
+        tokenExample(false, cx),
       ];
     case "NumberInput":
       return [
@@ -1283,6 +1340,7 @@ export function registeredExamples(surface, cx) {
               .h(120),
           ),
         },
+        tokenExample(true, cx),
       ];
     case "Checkbox":
       return [
@@ -1663,6 +1721,39 @@ export function registeredExamples(surface, cx) {
             ),
         },
       ];
+    case "Questionnaire":
+      return [
+        {
+          label: "Guided setup",
+          description:
+            "One question at a time, with letter shortcuts, a freeform answer, and validation on Next.",
+          element: asElement(
+            new Questionnaire("registered-questionnaire")
+              .shortcuts("letters")
+              .child(
+                new QuestionnaireItem("direction", "What should we prototype next?")
+                  .required(true)
+                  .description("Choose a direction or write your own.")
+                  .child(new QuestionnaireChoice("delegation", "Delegation"))
+                  .child(new QuestionnaireChoice("questions", "Question prompts"))
+                  .child(
+                    new QuestionnaireInput(
+                      retained("questionnaire-direction", () =>
+                        InputState("Type another direction…"),
+                      ),
+                      "Another direction",
+                    ),
+                  ),
+              )
+              .child(
+                new QuestionnaireItem("tone", "What tone should the interface use?")
+                  .description("This optional question can be skipped.")
+                  .child(new QuestionnaireChoice("direct", "Direct"))
+                  .child(new QuestionnaireChoice("warm", "Warm")),
+              ),
+          ),
+        },
+      ];
     case "Progress":
       return [
         {
@@ -1760,6 +1851,54 @@ export function registeredExamples(surface, cx) {
               .right_content(asElement(new Button("status-position").ghost().size("xsmall").label("Ln 12, Col 34")))
               .right_content(asElement(new VerticalSeparator().h(14)))
               .right_content(asElement(new Button("status-language").ghost().size("xsmall").label("JavaScript"))),
+          ),
+        },
+      ];
+    case "Toolbar":
+      return [
+        {
+          label: "Document toolbar",
+          description: "Leading file and history commands, a centered document name, and trailing utilities.",
+          element: asElement(
+            div()
+              .w_full()
+              .border(1)
+              .child(
+                asElement(
+                  new Toolbar("document-toolbar")
+                    .w_full()
+                    .child(asElement(new Button("toolbar-new").ghost().compact().size("small").label("New")))
+                    .child(asElement(new Button("toolbar-open").ghost().compact().size("small").label("Open")))
+                    .child(asElement(new VerticalSeparator().h(20)))
+                    .child(asElement(new Button("toolbar-undo").ghost().compact().size("small").label("Undo")))
+                    .child(asElement(new Button("toolbar-redo").ghost().compact().size("small").label("Redo")))
+                    .child(asElement(div().flex_1()))
+                    .child(asElement(new Text("Quarterly report")))
+                    .child(asElement(div().flex_1()))
+                    .child(asElement(new Button("toolbar-find").ghost().compact().size("small").label("Find")))
+                    .child(asElement(new Button("toolbar-more").ghost().compact().size("small").label("More"))),
+                ),
+              ),
+          ),
+        },
+        {
+          label: "Table toolbar",
+          description: "A compact table header with status content and trailing data commands.",
+          element: asElement(
+            div()
+              .w_full()
+              .border(1)
+              .child(
+                asElement(
+                  new Toolbar("table-toolbar")
+                    .w_full()
+                    .child(asElement(new Text("Open orders · 24")))
+                    .child(asElement(div().flex_1()))
+                    .child(asElement(new Button("toolbar-export-orders").ghost().compact().size("small").label("Export…")))
+                    .child(asElement(new Button("toolbar-refresh-orders").ghost().compact().size("small").label("Refresh")))
+                    .child(asElement(new Button("toolbar-columns").ghost().compact().size("small").label("Columns"))),
+                ),
+              ),
           ),
         },
       ];

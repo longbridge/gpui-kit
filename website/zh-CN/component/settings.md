@@ -193,6 +193,19 @@ SettingGroup::new()
     .items(vec![...])
 ```
 
+### 分组表面外的底部说明
+
+用 `footer` 在分组的背景或边框下方渲染辅助内容。它与分组标题左对齐，并像描述文字一样以小号 muted 文本渲染，直接传入纯文本即可；闭包接收当前窗口和应用上下文，可用于更复杂的内容。它随分组一起滚动和过滤，不会成为独立的可搜索设置项，也不会新增侧栏入口；分组仍需至少一个设置项才会显示。
+
+```rust
+SettingGroup::new()
+    .item(SettingItem::new(
+        "Update source",
+        SettingField::render(|_, _, _| "GitHub Releases"),
+    ))
+    .footer(|_, _| "Changes apply to this device only.")
+```
+
 ## Setting Item
 
 ### 基础设置项

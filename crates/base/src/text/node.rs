@@ -147,6 +147,36 @@ impl BlockNode {
         })
     }
 
+    pub(super) fn selected_source_range(&self) -> SourceRangeSelection {
+        let mut selected = SourceRangeSelection::Unselected;
+        match self {
+            BlockNode::Root { children, .. }
+            | BlockNode::Blockquote { children, .. }
+            | BlockNode::List { children, .. }
+            | BlockNode::ListItem { children, .. } => {
+                for child in children {
+                    selected.merge(child.selected_source_range());
+                }
+            }
+            BlockNode::Paragraph(paragraph) => selected = paragraph.selected_source_range(),
+            BlockNode::Heading { children, .. } => selected = children.selected_source_range(),
+            BlockNode::Table(table) => {
+                for row in &table.children {
+                    for cell in &row.children {
+                        selected.merge(cell.children.selected_source_range());
+                    }
+                }
+            }
+            BlockNode::CodeBlock(code_block) => selected = code_block.selected_source_range(),
+            BlockNode::Custom(_)
+            | BlockNode::Definition { .. }
+            | BlockNode::Break { .. }
+            | BlockNode::HorizontalRule { .. }
+            | BlockNode::Unknown => {}
+        }
+        selected
+    }
+
     fn text_by_kind(&self, kind: BlockTextKind) -> String {
         let mut text = String::new();
         match self {
@@ -449,6 +479,7 @@ pub struct ImageNode {
     pub alt: Option<SharedString>,
     pub width: Option<DefiniteLength>,
     pub height: Option<DefiniteLength>,
+    pub(crate) span: Option<Span>,
     /// The image a `data:` URL carries, decoded on first render and kept for
     /// the node's lifetime so it is not decoded again every frame.
     pub(super) embedded: OnceLock<Option<Arc<Image>>>,
@@ -486,6 +517,7 @@ impl std::fmt::Debug for ImageNode {
             .field("alt", &self.alt)
             .field("width", &self.width)
             .field("height", &self.height)
+            .field("span", &self.span)
             .finish()
     }
 }
@@ -498,7 +530,89 @@ impl PartialEq for ImageNode {
             && self.alt == other.alt
             && self.width == other.width
             && self.height == other.height
+            && self.span == other.span
     }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SourceSegment {
+    pub(crate) rendered: Range<usize>,
+    pub(crate) source: Range<usize>,
+}
+
+pub(crate) enum SourceRangeSelection {
+    Unselected,
+    Mapped(Range<usize>),
+    Unmapped,
+}
+
+impl SourceRangeSelection {
+    pub(crate) fn merge(&mut self, other: Self) {
+        match (&mut *self, other) {
+            (_, Self::Unselected) => {}
+            (_, Self::Unmapped) => *self = Self::Unmapped,
+            (Self::Unselected, mapped @ Self::Mapped(_)) => *self = mapped,
+            (Self::Mapped(selected), Self::Mapped(range)) => {
+                selected.start = selected.start.min(range.start);
+                selected.end = selected.end.max(range.end);
+            }
+            (Self::Unmapped, Self::Mapped(_)) => {}
+        }
+    }
+
+    pub(crate) fn into_range(self) -> Option<Range<usize>> {
+        match self {
+            Self::Mapped(range) => Some(range),
+            Self::Unselected | Self::Unmapped => None,
+        }
+    }
+}
+
+fn source_range_for_segments(
+    segments: &[SourceSegment],
+    selection: Range<usize>,
+) -> Option<Range<usize>> {
+    fn mapped_source_start(segment: &SourceSegment, rendered_start: usize) -> usize {
+        if segment.rendered.len() == segment.source.len() {
+            segment.source.start + rendered_start.saturating_sub(segment.rendered.start)
+        } else {
+            segment.source.start
+        }
+    }
+
+    fn mapped_source_end(segment: &SourceSegment, rendered_end: usize) -> usize {
+        if segment.rendered.len() == segment.source.len() {
+            segment.source.start
+                + rendered_end
+                    .min(segment.rendered.end)
+                    .saturating_sub(segment.rendered.start)
+        } else {
+            segment.source.end
+        }
+    }
+
+    if selection.start >= selection.end {
+        return None;
+    }
+
+    let mut overlapping = segments.iter().filter(|segment| {
+        segment.rendered.start < selection.end && segment.rendered.end > selection.start
+    });
+    let first = overlapping.next()?;
+    if first.rendered.start > selection.start {
+        return None;
+    }
+    let mut rendered_end = first.rendered.end;
+    let source_start = mapped_source_start(first, selection.start);
+    let mut source_end = mapped_source_end(first, selection.end);
+    for segment in overlapping {
+        if segment.rendered.start > rendered_end {
+            return None;
+        }
+        rendered_end = rendered_end.max(segment.rendered.end);
+        source_end = mapped_source_end(segment, selection.end);
+    }
+    (rendered_end >= selection.end).then_some(source_start..source_end)
 }
 
 #[derive(Default, Clone, Debug)]
@@ -510,8 +624,10 @@ pub(crate) struct InlineNode {
     custom_selection: Arc<Mutex<bool>>,
     /// The text styles, each tuple contains the range of the text and the style.
     pub(crate) marks: Vec<(Range<usize>, TextMark)>,
+    /// Rendered UTF-8 byte spans paired with their exact Markdown source spans.
+    pub(crate) source_segments: Vec<SourceSegment>,
 
-    state: Arc<Mutex<InlineState>>,
+    pub(super) state: Arc<Mutex<InlineState>>,
 }
 
 impl PartialEq for InlineNode {
@@ -520,6 +636,7 @@ impl PartialEq for InlineNode {
             && self.image == other.image
             && self.custom == other.custom
             && self.marks == other.marks
+            && self.source_segments == other.source_segments
     }
 }
 
@@ -926,6 +1043,7 @@ impl InlineNode {
             custom: None,
             custom_selection: Arc::default(),
             marks: vec![],
+            source_segments: vec![],
             state: Arc::new(Mutex::new(InlineState::default())),
         }
     }
@@ -946,6 +1064,15 @@ impl InlineNode {
         self.marks = marks;
         self
     }
+
+    pub(crate) fn source_segments(mut self, source_segments: Vec<SourceSegment>) -> Self {
+        self.source_segments = source_segments;
+        self
+    }
+
+    fn selected_source_range(&self, selection: Range<usize>) -> Option<Range<usize>> {
+        source_range_for_segments(&self.source_segments, selection)
+    }
 }
 
 /// The paragraph element, contains multiple text nodes.
@@ -962,6 +1089,44 @@ pub(crate) struct Paragraph {
     pub(super) link_refs: HashMap<SharedString, SharedString>,
 
     pub(crate) state: Arc<Mutex<InlineState>>,
+    /// What the plain (text-only) render path derives from `children`, kept
+    /// between frames; see [`ParagraphRender`].
+    pub(super) render_cache: ParagraphRenderCache,
+}
+
+/// Derived state: a clone starts empty and rebuilds, and it is invisible to
+/// `Debug` and equality.
+#[derive(Default)]
+pub(super) struct ParagraphRenderCache(Mutex<Option<ParagraphRender>>);
+
+impl Clone for ParagraphRenderCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl std::fmt::Debug for ParagraphRenderCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ParagraphRenderCache")
+    }
+}
+
+/// The text, highlights and links a text-only paragraph renders with.
+///
+/// They are a pure function of the paragraph's children and the style they
+/// are rendered under, yet every frame rebuilt them: the paragraph's text was
+/// re-concatenated and copied into a fresh `SharedString`, and its marks
+/// merged into highlights through `combine_highlights` once per child. On a
+/// scroll that was ~8% of the frame for nothing. Streamed fades change every
+/// frame and are layered on afterwards; reference links are resolved
+/// afterwards too, since a definition can arrive later in the document.
+struct ParagraphRender {
+    style: Arc<TextViewStyle>,
+    mono_font: SharedString,
+    text: SharedString,
+    highlights: Vec<(Range<usize>, InlineHighlight)>,
+    /// Links as written, before reference resolution.
+    links: Vec<(Range<usize>, LinkMark)>,
 }
 
 impl PartialEq for Paragraph {
@@ -979,7 +1144,69 @@ impl Paragraph {
             children: vec![InlineNode::new(&text)],
             link_refs: HashMap::new(),
             state: Arc::new(Mutex::new(InlineState::default())),
+            render_cache: ParagraphRenderCache::default(),
         }
+    }
+
+    /// The text, highlights and (unresolved) links of a text-only paragraph,
+    /// from the cache when the style has not changed since they were built.
+    fn plain_render(
+        &self,
+        node_cx: &NodeContext,
+        cx: &App,
+    ) -> (
+        SharedString,
+        Vec<(Range<usize>, InlineHighlight)>,
+        Vec<(Range<usize>, LinkMark)>,
+    ) {
+        let mono_font = cx.theme().tokens.typography.mono.clone();
+        if let Ok(cache) = self.render_cache.0.lock()
+            && let Some(cached) = cache.as_ref()
+            && (Arc::ptr_eq(&cached.style, &node_cx.style) || *cached.style == *node_cx.style)
+            && cached.mono_font == mono_font
+        {
+            return (
+                cached.text.clone(),
+                cached.highlights.clone(),
+                cached.links.clone(),
+            );
+        }
+
+        let mut text = String::new();
+        let mut highlights: Vec<(Range<usize>, InlineHighlight)> = vec![];
+        let mut links: Vec<(Range<usize>, LinkMark)> = vec![];
+        let mut offset = 0;
+        for inline_node in &self.children {
+            let text_len = inline_node.text.len();
+            text.push_str(&inline_node.text);
+            let mut node_highlights = vec![];
+            for (range, style) in &inline_node.marks {
+                let inner_range = (offset + range.start)..(offset + range.end);
+                let mut highlight = mark_highlight(style, node_cx, cx);
+                if let Some(link_mark) = style.link.clone() {
+                    highlight.style.color = Some(node_cx.style.link());
+                    highlight.style.underline = Some(gpui::UnderlineStyle {
+                        thickness: gpui::px(1.),
+                        ..Default::default()
+                    });
+                    links.push((inner_range.clone(), link_mark));
+                }
+                node_highlights.push((inner_range, highlight));
+            }
+            highlights = combine_highlights(highlights, node_highlights);
+            offset += text_len;
+        }
+        let text = SharedString::from(text);
+        if let Ok(mut cache) = self.render_cache.0.lock() {
+            *cache = Some(ParagraphRender {
+                style: node_cx.style.clone(),
+                mono_font,
+                text: text.clone(),
+                highlights: highlights.clone(),
+                links: links.clone(),
+            });
+        }
+        (text, highlights, links)
     }
 
     pub(super) fn selected_text(&self) -> String {
@@ -1006,6 +1233,138 @@ impl Paragraph {
         }
 
         text
+    }
+
+    /// Map the current rendered selection to its exact Markdown source range.
+    pub(super) fn selected_source_range(&self) -> SourceRangeSelection {
+        let mut selected = SourceRangeSelection::Unselected;
+        let mut run: Vec<(usize, &InlineNode)> = Vec::new();
+        let mut offset = 0;
+        let mut pending_images: Vec<Option<Span>> = Vec::new();
+        let mut enters_image = true;
+
+        let include_run = |state: &Arc<Mutex<InlineState>>,
+                           run: &[(usize, &InlineNode)]|
+         -> (SourceRangeSelection, RunSelection) {
+            let Ok(state) = state.lock() else {
+                return (SourceRangeSelection::Unmapped, RunSelection::default());
+            };
+            let Some(selection) = state.selection else {
+                return (SourceRangeSelection::Unselected, RunSelection::default());
+            };
+            if selection.start >= selection.end {
+                return (SourceRangeSelection::Unselected, RunSelection::default());
+            }
+
+            let mut run_selection = RunSelection {
+                at_start: selection.start == 0,
+                at_end: selection.end >= state.text.len(),
+                ..Default::default()
+            };
+            let mut mapped = SourceRangeSelection::Unselected;
+            let mut rendered_end = selection.start;
+            for (start, child) in run {
+                let end = start + child.text.len();
+                let lo = selection.start.max(*start);
+                let hi = selection.end.min(end);
+                if lo >= hi {
+                    continue;
+                }
+                run_selection.emitted = true;
+                if lo > rendered_end {
+                    return (SourceRangeSelection::Unmapped, run_selection);
+                }
+                let Some(range) = child.selected_source_range((lo - start)..(hi - start)) else {
+                    return (SourceRangeSelection::Unmapped, run_selection);
+                };
+                mapped.merge(SourceRangeSelection::Mapped(range));
+                rendered_end = rendered_end.max(hi);
+            }
+            if rendered_end < selection.end {
+                (SourceRangeSelection::Unmapped, run_selection)
+            } else {
+                (mapped, run_selection)
+            }
+        };
+
+        let merge_images = |selected: &mut SourceRangeSelection, images: &mut Vec<Option<Span>>| {
+            for span in images.drain(..) {
+                selected.merge(
+                    span.map(|span| SourceRangeSelection::Mapped(span.start..span.end))
+                        .unwrap_or(SourceRangeSelection::Unmapped),
+                );
+            }
+        };
+
+        for child in &self.children {
+            if child.custom.is_some() {
+                let (run_range, run_selection) = include_run(&child.state, &run);
+                if run_selection.emitted && run_selection.at_start {
+                    merge_images(&mut selected, &mut pending_images);
+                }
+                selected.merge(run_range);
+
+                match child.custom_selection.lock() {
+                    Ok(value) if *value => {
+                        if run.is_empty() || (run_selection.emitted && run_selection.at_end) {
+                            merge_images(&mut selected, &mut pending_images);
+                        }
+                        selected.merge(
+                            child
+                                .custom
+                                .as_ref()
+                                .and_then(MarkdownNode::source_range)
+                                .map(SourceRangeSelection::Mapped)
+                                .unwrap_or(SourceRangeSelection::Unmapped),
+                        );
+                        enters_image = true;
+                    }
+                    Ok(_) => enters_image = false,
+                    Err(_) => {
+                        selected.merge(SourceRangeSelection::Unmapped);
+                        enters_image = false;
+                    }
+                }
+                pending_images.clear();
+                run.clear();
+                offset = 0;
+                continue;
+            }
+            if let Some(image) = &child.image {
+                let run_before = !run.is_empty();
+                let (run_range, run_selection) = include_run(&child.state, &run);
+                if run_selection.emitted && run_selection.at_start {
+                    merge_images(&mut selected, &mut pending_images);
+                }
+                selected.merge(run_range);
+                if run_before {
+                    enters_image = run_selection.emitted && run_selection.at_end;
+                }
+                if enters_image {
+                    pending_images.push(image.span);
+                } else {
+                    pending_images.clear();
+                }
+                run.clear();
+                offset = 0;
+                continue;
+            }
+            run.push((offset, child));
+            offset += child.text.len();
+        }
+
+        let (trailing_range, trailing) = include_run(&self.state, &run);
+        if trailing.emitted && trailing.at_start {
+            merge_images(&mut selected, &mut pending_images);
+        }
+        selected.merge(trailing_range);
+        if !trailing.emitted
+            && enters_image
+            && !matches!(selected, SourceRangeSelection::Unselected)
+        {
+            merge_images(&mut selected, &mut pending_images);
+        }
+        selected
     }
 
     /// Reconstruct the Markdown source for the current selection.
@@ -1254,6 +1613,7 @@ impl Paragraph {
                 children: vec![],
                 link_refs: Default::default(),
                 state: Arc::new(Mutex::new(InlineState::default())),
+                render_cache: ParagraphRenderCache::default(),
             },
         )
     }
@@ -1270,14 +1630,22 @@ impl Paragraph {
         self.children.push(
             InlineNode::new(text.to_string()).marks(vec![(0..text.len(), TextMark::default())]),
         );
+        self.invalidate_render_cache();
     }
 
     pub(crate) fn push(&mut self, text: InlineNode) {
         self.children.push(text);
+        self.invalidate_render_cache();
     }
 
     pub(crate) fn push_image(&mut self, image: ImageNode) {
         self.children.push(InlineNode::image(image));
+        self.invalidate_render_cache();
+    }
+
+    /// The children changed, so what was derived from them is stale.
+    fn invalidate_render_cache(&mut self) {
+        self.render_cache = ParagraphRenderCache::default();
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -1298,6 +1666,7 @@ impl Paragraph {
 
     pub(crate) fn merge(&mut self, other: Self) {
         self.children.extend(other.children);
+        self.invalidate_render_cache();
     }
 }
 
@@ -1306,6 +1675,7 @@ pub struct CodeBlock {
     lang: Option<SharedString>,
     state: Arc<Mutex<InlineState>>,
     highlight_cache: Arc<Mutex<Option<CachedCodeBlockHighlights>>>,
+    source_segments: Vec<SourceSegment>,
     pub span: Option<Span>,
 }
 
@@ -1365,8 +1735,36 @@ impl CodeBlock {
             lang,
             state,
             highlight_cache: Arc::new(Mutex::new(None)),
+            source_segments: vec![],
             span: span.map(|s| s.into()),
         }
+    }
+
+    pub(crate) fn source_segments(mut self, source_segments: Vec<SourceSegment>) -> Self {
+        self.source_segments = source_segments;
+        self
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_selection(&self, selection: Range<usize>) {
+        if let Ok(mut state) = self.state.lock() {
+            state.selection = Some(selection.into());
+        }
+    }
+
+    pub(super) fn selected_source_range(&self) -> SourceRangeSelection {
+        let Ok(state) = self.state.lock() else {
+            return SourceRangeSelection::Unmapped;
+        };
+        let Some(selection) = state.selection else {
+            return SourceRangeSelection::Unselected;
+        };
+        if selection.start >= selection.end {
+            return SourceRangeSelection::Unselected;
+        }
+        source_range_for_segments(&self.source_segments, selection.start..selection.end)
+            .map(SourceRangeSelection::Mapped)
+            .unwrap_or(SourceRangeSelection::Unmapped)
     }
 
     fn highlighted_styles(
@@ -1635,8 +2033,35 @@ impl Paragraph {
             .into_any_element();
         }
 
-        let mut child_nodes: Vec<AnyElement> = vec![];
         let has_image = children.iter().any(|child| child.image.is_some());
+        // Text alone is one `Inline`, which needs no box of its own, and its
+        // text, highlights and links are cached across frames.
+        if !has_image {
+            let (text, highlights, mut links) = self.plain_render(node_cx, cx);
+            if text.is_empty() {
+                return div().into_any_element();
+            }
+            for (_, link_mark) in &mut links {
+                if let Some(identifier) = link_mark.identifier.as_ref()
+                    && let Some(mark) = node_cx.link_refs.get(identifier)
+                {
+                    *link_mark = mark.clone();
+                }
+            }
+            let highlights = fade_highlights(highlights, &slice_fades(fades, 0, text.len()));
+            if let Ok(mut state) = self.state.lock() {
+                state.set_text(text);
+            }
+            return Inline::new(
+                self.state.clone(),
+                links,
+                highlights,
+                node_cx.link_click_handler.clone(),
+            )
+            .into_any_element();
+        }
+
+        let mut child_nodes: Vec<AnyElement> = vec![];
 
         let mut text = String::new();
         let mut highlights: Vec<(Range<usize>, InlineHighlight)> = vec![];
@@ -3204,6 +3629,7 @@ mod tests {
             children,
             link_refs: HashMap::new(),
             state: Arc::new(Mutex::new(InlineState::default())),
+            render_cache: ParagraphRenderCache::default(),
         };
         if let Ok(mut state) = paragraph.state.lock() {
             state.set_text(combined.into());
@@ -3593,6 +4019,7 @@ mod tests {
             children: vec![InlineNode::image(image)],
             link_refs: HashMap::new(),
             state: Arc::new(Mutex::new(InlineState::default())),
+            render_cache: ParagraphRenderCache::default(),
         }
     }
 

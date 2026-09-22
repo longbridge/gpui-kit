@@ -438,10 +438,12 @@ impl StoryWorkspace {
                 ..gpui_kit::component::TitleBar::window_options()
             };
 
-            let window = cx.open_window(options, |window, cx| {
-                let story_view = cx.new(|cx| StoryWorkspace::new(window, cx));
-                cx.new(|cx| Root::new(story_view, window, cx))
+            let (window, _) = cx.update(|cx| {
+                gpui_kit::open_window(options, cx, |window, cx| {
+                    cx.new(|cx| StoryWorkspace::new(window, cx))
+                })
             })?;
+            let window = window.downcast::<Root>().expect("kit window has a Root");
 
             window
                 .update(cx, |_, window, cx| {
@@ -538,11 +540,7 @@ pub fn open_new(
 }
 
 impl Render for StoryWorkspace {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let sheet_layer = Root::render_sheet_layer(window, cx);
-        let dialog_layer = Root::render_dialog_layer(window, cx);
-        let notification_layer = Root::render_notification_layer(window, cx);
-
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("story-workspace")
             .on_action(cx.listener(Self::on_action_add_panel))
@@ -593,9 +591,6 @@ impl Render for StoryWorkspace {
                             })),
                     ),
             )
-            .children(sheet_layer)
-            .children(dialog_layer)
-            .children(notification_layer)
     }
 }
 

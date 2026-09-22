@@ -1,7 +1,7 @@
 ---
 title: 移动端
 description: 使用实验性的 gpui-pre-mobile 平台构建 iOS 应用，或将 GPUI Kit 嵌入 Swift UIKit 容器。
-order: -2.4
+order: -10
 ---
 
 # 移动端

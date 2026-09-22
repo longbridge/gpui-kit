@@ -60,6 +60,19 @@ v_resizable("vertical-layout")
     )
 ```
 
+### 分隔条外观
+
+分隔条静止时是一条细线。指针接近后，线上会浮出一条指示条，并随 hover、按下、拖拽三级逐步变长、变实——拖拽开始一两个像素后指针就离开了手柄自身的命中带，这条指示条让「正在拖拽」仍然看得出来。
+
+`h_resizable`、`v_resizable` 和 Dock 都已装上这套外观。`resize_handle_appearance()` 也已导出，供自建手柄使用，或显式传给 `with_handle_appearance`：
+
+```rust
+gpui_kit::base::h_resizable("my-layout")
+    .with_handle_appearance(resize_handle_appearance())
+```
+
+指示条的时长与缓动取自主题的 motion token；系统开启了减弱动态效果时，它直接到位，不播过渡。
+
 ### 面板尺寸约束
 
 ```rust

@@ -1,7 +1,8 @@
+mod common;
 use gpui_kit::component::{
     Disableable, IndexPath,
     checkbox::Checkbox,
-    select::{SearchableVec, Select, SelectState},
+    select::{SearchableVec, Select, SelectEvent, SelectState},
     switch::Switch,
     tab::{Tab, TabBar},
 };
@@ -9,7 +10,7 @@ use gpui_kit::test::{TestAppContextExt, TestWindowExt};
 use gpui_kit::{
     AnyWindowHandle, AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size,
 };
-use std::time::Duration;
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
 struct Form {
     agreed: bool,
@@ -68,18 +69,20 @@ impl Render for Form {
 #[gpui_kit::test]
 fn checkbox_switch_and_tabs_report_controlled_state(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(640.), px(600.)), |window, cx| Form {
-        agreed: false,
-        notifications: false,
-        tab: 0,
-        language: cx.new(|cx| {
-            SelectState::new(
-                SearchableVec::new(vec!["Rust", "Go"]),
-                Some(IndexPath::new(0)),
-                window,
-                cx,
-            )
-        }),
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(600.))), |window, cx| {
+        cx.new(|cx| Form {
+            agreed: false,
+            notifications: false,
+            tab: 0,
+            language: cx.new(|cx| {
+                SelectState::new(
+                    SearchableVec::new(vec!["Rust", "Go"]),
+                    Some(IndexPath::new(0)),
+                    window,
+                    cx,
+                )
+            }),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -119,18 +122,20 @@ fn checkbox_switch_and_tabs_report_controlled_state(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 async fn select_reports_value_and_keyboard_open_state(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(640.), px(600.)), |window, cx| Form {
-        agreed: false,
-        notifications: false,
-        tab: 0,
-        language: cx.new(|cx| {
-            SelectState::new(
-                SearchableVec::new(vec!["Rust", "Go"]),
-                Some(IndexPath::new(0)),
-                window,
-                cx,
-            )
-        }),
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(600.))), |window, cx| {
+        cx.new(|cx| Form {
+            agreed: false,
+            notifications: false,
+            tab: 0,
+            language: cx.new(|cx| {
+                SelectState::new(
+                    SearchableVec::new(vec!["Rust", "Go"]),
+                    Some(IndexPath::new(0)),
+                    window,
+                    cx,
+                )
+            }),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -151,6 +156,103 @@ async fn select_reports_value_and_keyboard_open_state(cx: &mut TestAppContext) {
             && window.find("language").value() == Some("Language: Go")
     })
     .await;
+}
+
+#[gpui_kit::test]
+fn select_emits_one_dismiss_event_for_each_open_to_closed_transition(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    for searchable in [false, true] {
+        let (handle, handle_content) =
+            common::open_window(cx, Some(size(px(640.), px(600.))), |window, cx| {
+                cx.new(|cx| Form {
+                    agreed: false,
+                    notifications: false,
+                    tab: 0,
+                    language: cx.new(|cx| {
+                        SelectState::new(
+                            SearchableVec::new(vec!["Rust", "Go"]),
+                            Some(IndexPath::new(0)),
+                            window,
+                            cx,
+                        )
+                        .searchable(searchable)
+                    }),
+                })
+            });
+        let language = common::update_content(handle, &handle_content, cx, |form, _, _| {
+            form.language.clone()
+        })
+        .unwrap();
+        cx.update_window(handle.into(), |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let _subscriptions = cx.update(|cx| {
+            let dismissed = events.clone();
+            let confirmed = events.clone();
+            [
+                cx.subscribe(&language, move |_, _: &gpui_kit::DismissEvent, _| {
+                    dismissed.borrow_mut().push("dismiss");
+                }),
+                cx.subscribe(
+                    &language,
+                    move |_, _: &SelectEvent<SearchableVec<&str>>, _| {
+                        confirmed.borrow_mut().push("confirm");
+                    },
+                ),
+            ]
+        });
+
+        for close in ["escape", "outside", "blur", "confirm"] {
+            events.borrow_mut().clear();
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.within("language").click("input", cx);
+                assert_eq!(window.find("language").expanded(), Some(true));
+            })
+            .unwrap();
+            cx.run_until_parked();
+            assert!(events.borrow().is_empty(), "opening must not dismiss");
+
+            cx.update_window(handle.into(), |_, window, cx| {
+                match close {
+                    "escape" => window.press("escape", cx),
+                    "outside" => window.click("agree", cx),
+                    "blur" => window.blur(cx),
+                    "confirm" => window.press("enter", cx),
+                    _ => unreachable!(),
+                }
+                window.render_frame(cx);
+            })
+            .unwrap();
+            cx.run_until_parked();
+            cx.update_window(handle.into(), |_, window, cx| {
+                window.render_frame(cx);
+                assert_eq!(
+                    window.find("language").expanded(),
+                    Some(false),
+                    "{close}, searchable={searchable}"
+                );
+                // Follow-up Escape and blur notifications must not dismiss twice.
+                language.update(cx, |language, cx| language.focus(window, cx));
+                window.press("escape", cx);
+                window.blur(cx);
+                window.render_frame(cx);
+            })
+            .unwrap();
+            cx.run_until_parked();
+            let expected = if close == "confirm" {
+                vec!["confirm", "dismiss"]
+            } else {
+                vec!["dismiss"]
+            };
+            assert_eq!(
+                *events.borrow(),
+                expected,
+                "{close}, searchable={searchable}"
+            );
+        }
+    }
 }
 
 struct HoverHelp;
@@ -186,9 +288,9 @@ impl Render for HoverHelp {
 #[gpui_kit::test]
 async fn real_hover_card_opens_and_closes_after_pointer_delays(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(480.))), |_window, cx| {
         let view = cx.new(|_| HoverHelp);
-        gpui_kit::component::Root::new(view, window, cx)
+        view
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -224,7 +326,7 @@ impl Render for DisconnectedCheckbox {
 #[gpui_kit::test]
 fn checkbox_click_cannot_fabricate_a_successful_state_change(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.add_window(|_, _| DisconnectedCheckbox);
+    let (handle, _) = common::open_window(cx, None, |_, cx| cx.new(|_| DisconnectedCheckbox));
     cx.update_window(handle.into(), |_, window, cx| {
         window.click("agree", cx);
         assert_eq!(window.find("agree").checked(), Some(false));
@@ -247,13 +349,15 @@ impl Render for SearchableLanguageForm {
 
 fn open_searchable_language(cx: &mut TestAppContext) -> AnyWindowHandle {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
-        let items = SearchableVec::new(vec!["Dutch", "English", "French", "Hungarian"]);
-        SearchableLanguageForm {
-            language: cx.new(|cx| {
-                SelectState::new(items, Some(IndexPath::new(1)), window, cx).searchable(true)
-            }),
-        }
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(480.))), |window, cx| {
+        cx.new(|cx| {
+            let items = SearchableVec::new(vec!["Dutch", "English", "French", "Hungarian"]);
+            SearchableLanguageForm {
+                language: cx.new(|cx| {
+                    SelectState::new(items, Some(IndexPath::new(1)), window, cx).searchable(true)
+                }),
+            }
+        })
     });
     handle.into()
 }

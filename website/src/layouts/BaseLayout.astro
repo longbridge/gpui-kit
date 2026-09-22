@@ -1,5 +1,6 @@
 ---
 import { SITE_URL } from '../lib/site';
+import { currentVersion, currentVersionPath, isLatestVersion, versionHref } from '../lib/versions';
 
 export interface Props {
   title?: string;
@@ -18,24 +19,30 @@ const {
   lang = 'en',
   ogTitle,
   canonical = new URL(Astro.url.pathname, SITE_URL).href,
-  robots,
+  robots: robotsProp,
   alternates = true,
   structuredData,
 } = Astro.props;
 
 const SITE_TITLE = 'GPUI Kit';
 const OG_IMAGE = `${SITE_URL}/og.png`;
+const robots = robotsProp ?? (isLatestVersion ? undefined : 'noindex, nofollow');
+const includeAlternates = alternates && isLatestVersion;
 
 const pageTitle = !title || title === SITE_TITLE
   ? SITE_TITLE
   : title.includes(SITE_TITLE) ? title : `${title} · ${SITE_TITLE}`;
 const socialTitle = ogTitle ?? pageTitle;
-const base = import.meta.env.BASE_URL;
+const base = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/`;
 
 const path = Astro.url.pathname;
 const isZh = lang.toLowerCase().startsWith('zh');
-const englishPath = isZh ? path.replace(/^\/zh-CN(?=\/|$)/, '') || '/' : path;
-const chinesePath = isZh ? path : `/zh-CN${path === '/' ? '' : path}`;
+const versionedPath = currentVersionPath(path, import.meta.env.BASE_URL);
+const englishRoute = isZh ? versionedPath.replace(/^\/zh-CN(?=\/|$)/, '') || '/' : versionedPath;
+const chineseRoute = isZh ? versionedPath : `/zh-CN${versionedPath === '/' ? '' : versionedPath}`;
+const version = { id: currentVersion, label: currentVersion };
+const englishPath = versionHref(version, englishRoute);
+const chinesePath = versionHref(version, chineseRoute);
 const englishUrl = new URL(englishPath, SITE_URL).href;
 const chineseUrl = new URL(chinesePath, SITE_URL).href;
 
@@ -77,9 +84,9 @@ const jsonLd = JSON.stringify(structuredData ?? defaultStructuredData).replace(/
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={OG_IMAGE} />
     <link rel="canonical" href={canonical} />
-    {alternates && <link rel="alternate" hreflang="en" href={englishUrl} />}
-    {alternates && <link rel="alternate" hreflang="zh-CN" href={chineseUrl} />}
-    {alternates && <link rel="alternate" hreflang="x-default" href={englishUrl} />}
+    {includeAlternates && <link rel="alternate" hreflang="en" href={englishUrl} />}
+    {includeAlternates && <link rel="alternate" hreflang="zh-CN" href={chineseUrl} />}
+    {includeAlternates && <link rel="alternate" hreflang="x-default" href={englishUrl} />}
     <script type="application/ld+json" set:html={jsonLd} />
 
     <!-- Theme: apply before paint to avoid FOUC -->

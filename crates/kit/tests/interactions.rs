@@ -1,3 +1,4 @@
+mod common;
 use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, MouseButton, ScrollDelta, ScrollHandle, TestAppContext, Window, div,
@@ -28,8 +29,10 @@ impl Render for Scopes {
 #[gpui_kit::test]
 fn scoped_queries_follow_existing_gpui_paths_without_observed_containers(cx: &mut TestAppContext) {
     let clicks = Rc::new(RefCell::new(vec![]));
-    let handle = cx.add_window(|_, _| Scopes {
-        clicks: clicks.clone(),
+    let (handle, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|_| Scopes {
+            clicks: clicks.clone(),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -47,8 +50,10 @@ fn scoped_queries_follow_existing_gpui_paths_without_observed_containers(cx: &mu
 #[gpui_kit::test]
 #[should_panic(expected = "Registered paths:")]
 fn missing_targets_explain_the_registered_frame(cx: &mut TestAppContext) {
-    let handle = cx.add_window(|_, _| Scopes {
-        clicks: Default::default(),
+    let (handle, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|_| Scopes {
+            clicks: Default::default(),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -86,8 +91,10 @@ impl Render for Pointer {
 #[gpui_kit::test]
 fn hover_right_click_and_double_click_dispatch_native_pointer_events(cx: &mut TestAppContext) {
     let events = Rc::new(RefCell::new(vec![]));
-    let handle = cx.add_window(|_, _| Pointer {
-        events: events.clone(),
+    let (handle, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|_| Pointer {
+            events: events.clone(),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.hover("surface", cx);
@@ -128,8 +135,10 @@ impl Render for Scrolling {
 #[gpui_kit::test]
 fn scrolling_changes_clipping_and_resolved_row_positions(cx: &mut TestAppContext) {
     let scroll = ScrollHandle::new();
-    let handle = cx.open_window(size(px(200.), px(200.)), |_, _| Scrolling {
-        scroll: scroll.clone(),
+    let (handle, _) = common::open_window(cx, Some(size(px(200.), px(200.))), |_, cx| {
+        cx.new(|_| Scrolling {
+            scroll: scroll.clone(),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -177,8 +186,10 @@ impl Render for Dropping {
 #[gpui_kit::test]
 fn dragging_runs_gpui_drag_creation_and_drop_hit_testing(cx: &mut TestAppContext) {
     let drops = Rc::new(RefCell::new(0));
-    let handle = cx.add_window(|_, _| Dropping {
-        drops: drops.clone(),
+    let (handle, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|_| Dropping {
+            drops: drops.clone(),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -202,16 +213,15 @@ impl Render for Loading {
 }
 #[gpui_kit::test]
 async fn wait_for_drives_test_time_and_refreshes_async_changes(cx: &mut TestAppContext) {
-    let handle = cx.add_window(|_, _| Loading { ready: false });
+    let (handle, handle_content) =
+        common::open_window(cx, None, |_, cx| cx.new(|_| Loading { ready: false }));
     let executor = cx.executor();
     cx.spawn(move |mut cx| async move {
         executor.timer(Duration::from_millis(25)).await;
-        handle
-            .update(&mut cx, |view, _, cx| {
-                view.ready = true;
-                cx.notify();
-            })
-            .unwrap();
+        handle_content.update(&mut cx, |view, cx| {
+            view.ready = true;
+            cx.notify();
+        });
     })
     .detach();
     cx.wait_for(handle.into(), Duration::from_millis(100), |window, _| {
@@ -222,7 +232,7 @@ async fn wait_for_drives_test_time_and_refreshes_async_changes(cx: &mut TestAppC
 #[gpui_kit::test]
 #[should_panic(expected = "UI condition timed out")]
 async fn wait_for_has_a_bounded_failure(cx: &mut TestAppContext) {
-    let handle = cx.add_window(|_, _| Loading { ready: false });
+    let (handle, _) = common::open_window(cx, None, |_, cx| cx.new(|_| Loading { ready: false }));
     cx.wait_for(handle.into(), Duration::from_millis(20), |window, _| {
         window.try_find("loaded").is_some()
     })
@@ -280,10 +290,12 @@ impl Render for ChoiceStates {
 #[gpui_kit::test]
 fn mixed_checkbox_radio_and_toggle_report_distinct_states(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.add_window(|_, _| ChoiceStates {
-        checkbox: gpui_kit::base::CheckboxState::Indeterminate,
-        radio: false,
-        pressed: false,
+    let (handle, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|_| ChoiceStates {
+            checkbox: gpui_kit::base::CheckboxState::Indeterminate,
+            radio: false,
+            pressed: false,
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -339,8 +351,10 @@ impl Render for VirtualRows {
 }
 #[gpui_kit::test]
 fn scrolling_a_real_virtual_list_registers_new_rows_and_releases_old_ones(cx: &mut TestAppContext) {
-    let handle = cx.open_window(size(px(200.), px(200.)), |_, _| VirtualRows {
-        scroll: gpui_kit::base::VirtualListScrollHandle::new(),
+    let (handle, _) = common::open_window(cx, Some(size(px(200.), px(200.))), |_, cx| {
+        cx.new(|_| VirtualRows {
+            scroll: gpui_kit::base::VirtualListScrollHandle::new(),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -377,13 +391,15 @@ impl<T: Render> Render for Pair<T> {
 fn scoped_pointer_events_do_not_reach_duplicate_ids_in_another_scope(cx: &mut TestAppContext) {
     let left = Rc::new(RefCell::new(vec![]));
     let right = Rc::new(RefCell::new(vec![]));
-    let handle = cx.add_window(|_, cx| Pair {
-        left: cx.new(|_| Pointer {
-            events: left.clone(),
-        }),
-        right: cx.new(|_| Pointer {
-            events: right.clone(),
-        }),
+    let (handle, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|cx| Pair {
+            left: cx.new(|_| Pointer {
+                events: left.clone(),
+            }),
+            right: cx.new(|_| Pointer {
+                events: right.clone(),
+            }),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -404,13 +420,15 @@ fn scoped_pointer_events_do_not_reach_duplicate_ids_in_another_scope(cx: &mut Te
 fn scoped_scroll_moves_only_the_selected_list(cx: &mut TestAppContext) {
     let left = ScrollHandle::new();
     let right = ScrollHandle::new();
-    let handle = cx.add_window(|_, cx| Pair {
-        left: cx.new(|_| Scrolling {
-            scroll: left.clone(),
-        }),
-        right: cx.new(|_| Scrolling {
-            scroll: right.clone(),
-        }),
+    let (handle, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|cx| Pair {
+            left: cx.new(|_| Scrolling {
+                scroll: left.clone(),
+            }),
+            right: cx.new(|_| Scrolling {
+                scroll: right.clone(),
+            }),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -429,13 +447,15 @@ fn scoped_scroll_moves_only_the_selected_list(cx: &mut TestAppContext) {
 fn scoped_drag_to_resolves_both_ids_inside_the_scope(cx: &mut TestAppContext) {
     let left = Rc::new(RefCell::new(0));
     let right = Rc::new(RefCell::new(0));
-    let handle = cx.add_window(|_, cx| Pair {
-        left: cx.new(|_| Dropping {
-            drops: left.clone(),
-        }),
-        right: cx.new(|_| Dropping {
-            drops: right.clone(),
-        }),
+    let (handle, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|cx| Pair {
+            left: cx.new(|_| Dropping {
+                drops: left.clone(),
+            }),
+            right: cx.new(|_| Dropping {
+                drops: right.clone(),
+            }),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -449,8 +469,10 @@ fn scoped_drag_to_resolves_both_ids_inside_the_scope(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn drag_to_uses_native_drop_dispatch(cx: &mut TestAppContext) {
     let drops = Rc::new(RefCell::new(0));
-    let handle = cx.add_window(|_, _| Dropping {
-        drops: drops.clone(),
+    let (handle, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|_| Dropping {
+            drops: drops.clone(),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.drag_to("source", "target", cx);
@@ -502,14 +524,17 @@ impl Render for KeyboardJump {
 #[gpui_kit::test]
 fn scoped_input_stops_when_a_handler_moves_focus_to_another_scope(cx: &mut TestAppContext) {
     let keys = Rc::new(RefCell::new(vec![]));
-    let handle = cx.add_window(|_, cx| KeyboardJump {
-        left: cx.focus_handle(),
-        right: cx.focus_handle(),
-        keys: keys.clone(),
+    let (handle, handle_content) = common::open_window(cx, None, |_, cx| {
+        cx.new(|cx| KeyboardJump {
+            left: cx.focus_handle(),
+            right: cx.focus_handle(),
+            keys: keys.clone(),
+        })
     });
-    handle
-        .update(cx, |view, window, cx| view.right.focus(window, cx))
-        .unwrap();
+    common::update_content(handle, &handle_content, cx, |view, window, cx| {
+        view.right.focus(window, cx)
+    })
+    .unwrap();
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
         let error = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -554,12 +579,16 @@ impl Render for KeyboardFrames {
 fn scoped_keyboard_refreshes_without_extra_renders(cx: &mut TestAppContext) {
     let renders = Rc::new(std::cell::Cell::new(0));
     let keys = Rc::new(RefCell::new(vec![]));
-    let handle = cx.add_window(|_, cx| KeyboardFrames {
-        focus: cx.focus_handle(),
-        renders: renders.clone(),
-        keys: keys.clone(),
+    let (handle, handle_content) = common::open_window(cx, None, |_, cx| {
+        cx.new(|cx| KeyboardFrames {
+            focus: cx.focus_handle(),
+            renders: renders.clone(),
+            keys: keys.clone(),
+        })
     });
-    let focus = handle.update(cx, |view, _, _| view.focus.clone()).unwrap();
+    let focus =
+        common::update_content(handle, &handle_content, cx, |view, _, _| view.focus.clone())
+            .unwrap();
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
         // External focus changes must be refreshed before the scoped guard runs.

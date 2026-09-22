@@ -1,3 +1,4 @@
+mod common;
 use gpui_kit::component::{
     Root, WindowExt,
     button::Button,
@@ -16,10 +17,7 @@ struct Workspace {
     draft: Entity<InputState>,
 }
 impl Render for Workspace {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let dialogs = Root::render_dialog_layer(window, cx);
-        let sheets = Root::render_sheet_layer(window, cx);
-        let notifications = Root::render_notification_layer(window, cx);
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let draft = self.draft.clone();
         let saved = self.saved.clone();
         div()
@@ -81,21 +79,18 @@ impl Render for Workspace {
                         );
                     }),
             )
-            .children(dialogs)
-            .children(sheets)
-            .children(notifications)
     }
 }
 
 #[gpui_kit::test]
 async fn dialog_validates_scoped_input_saves_and_dismisses_notification(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(800.), px(700.)), |window, cx| {
+    let (handle, _) = common::open_window(cx, Some(size(px(800.), px(700.))), |window, cx| {
         let view = cx.new(|cx| Workspace {
             saved: cx.new(|cx| InputState::new(window, cx)),
             draft: cx.new(|cx| InputState::new(window, cx)),
         });
-        Root::new(view, window, cx)
+        view
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -153,12 +148,12 @@ async fn dialog_validates_scoped_input_saves_and_dismisses_notification(cx: &mut
 #[gpui_kit::test]
 async fn escape_dismisses_dialog_and_sheet_and_restores_focus(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(800.), px(700.)), |window, cx| {
+    let (handle, _) = common::open_window(cx, Some(size(px(800.), px(700.))), |window, cx| {
         let view = cx.new(|cx| Workspace {
             saved: cx.new(|cx| InputState::new(window, cx)),
             draft: cx.new(|cx| InputState::new(window, cx)),
         });
-        Root::new(view, window, cx)
+        view
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -213,12 +208,12 @@ async fn escape_dismisses_dialog_and_sheet_and_restores_focus(cx: &mut TestAppCo
 #[gpui_kit::test]
 async fn notification_auto_dismisses_after_its_timer(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(800.), px(700.)), |window, cx| {
+    let (handle, _) = common::open_window(cx, Some(size(px(800.), px(700.))), |window, cx| {
         let view = cx.new(|cx| Workspace {
             saved: cx.new(|cx| InputState::new(window, cx)),
             draft: cx.new(|cx| InputState::new(window, cx)),
         });
-        Root::new(view, window, cx)
+        view
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -253,8 +248,7 @@ struct Stealer {
     outside: Entity<InputState>,
 }
 impl Render for Stealer {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let dialogs = Root::render_dialog_layer(window, cx);
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
             .size_full()
             .p_4()
@@ -285,7 +279,6 @@ impl Render for Stealer {
                         });
                     }),
             )
-            .children(dialogs)
     }
 }
 
@@ -296,11 +289,11 @@ async fn open_dialog_and_steal_focus(
     open: &'static str,
 ) -> gpui_kit::AnyWindowHandle {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(800.), px(700.)), |window, cx| {
+    let (handle, _) = common::open_window(cx, Some(size(px(800.), px(700.))), |window, cx| {
         let view = cx.new(|cx| Stealer {
             outside: cx.new(|cx| InputState::new(window, cx)),
         });
-        Root::new(view, window, cx)
+        view
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);

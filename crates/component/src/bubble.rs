@@ -194,7 +194,11 @@ impl RenderOnce for BubbleContent {
         div()
             .min_w_0()
             .max_w_full()
-            .overflow_hidden()
+            // A ghost bubble has no surface to clip against; clipping would
+            // only cut the shadows and overhanging controls of rich content.
+            .when(self.variant != BubbleVariant::Ghost, |this| {
+                this.overflow_hidden()
+            })
             .rounded(cx.theme().radius_2xl())
             .border_1()
             .border_color(cx.theme().transparent)

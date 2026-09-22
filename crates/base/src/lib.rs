@@ -46,10 +46,12 @@ mod popover;
 mod popup;
 mod positioner;
 mod progress;
+pub mod questionnaire;
 mod radio;
 mod radio_group;
 mod reduce_motion;
 mod resizable;
+mod root;
 mod scroll_bounce;
 mod scrollable_mask;
 mod scrollbar;
@@ -70,6 +72,7 @@ pub mod theme_tokens;
 mod toast;
 mod toggle;
 mod toggle_group;
+mod toolbar;
 mod tooltip;
 mod touch_selection;
 mod tree;
@@ -143,12 +146,14 @@ pub use progress::{Progress, ProgressIndicator, ProgressTrack};
 pub use radio::{Radio, RadioStyles};
 pub use radio_group::RadioGroup;
 pub use reduce_motion::apply_system_reduce_motion;
+pub use resizable::{
+    HandleEdge, ResizablePanel, ResizablePanelEvent, ResizablePanelGroup, ResizableState,
+    ResizeHandleContext, ResizeHandleRenderer, ResizeHandleState, h_resizable, resizable_panel,
+    v_resizable,
+};
 #[doc(hidden)]
 pub use resizable::{PANEL_MIN_SIZE, resize_handle};
-pub use resizable::{
-    ResizablePanel, ResizablePanelEvent, ResizablePanelGroup, ResizableState, ResizeHandleContext,
-    ResizeHandleRenderer, h_resizable, resizable_panel, v_resizable,
-};
+pub use root::{Root, RootPlugin};
 pub use scroll_bounce::{ScrollBounce, ScrollBounceMotion};
 pub use scrollable_mask::ScrollableMask;
 pub use scrollbar::{
@@ -190,6 +195,7 @@ pub use toast::{
 };
 pub use toggle::{Toggle, ToggleStyles};
 pub use toggle_group::ToggleGroup;
+pub use toolbar::{Toolbar, ToolbarGroup};
 pub use tooltip::{Tooltip, TooltipOverlay, TooltipPositioner, TooltipRequest, TooltipTransition};
 pub use touch_selection::{SelectionEdge, TouchHandle, TouchSelectionSnapshot};
 pub use tree::{Tree, TreeEntry, TreeEntryState, TreeEvent, TreeItem, TreeState};
@@ -226,6 +232,7 @@ pub fn init(cx: &mut App) {
     input::init(cx);
     tree::init(cx);
     text::init(cx);
+    root::init(cx);
 }
 
 #[cfg(feature = "test-support")]

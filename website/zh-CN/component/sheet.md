@@ -16,35 +16,9 @@ use gpui_kit::component::Placement;
 
 ## 用法
 
-### 在根视图中渲染 Sheet 图层
+### 抽屉的渲染位置
 
-如果应用要支持 Sheet，需要在根视图中渲染 sheet layer。
-
-[Root::render_sheet_layer](https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html#method.render_sheet_layer) 会把当前激活的 Sheet 渲染到应用内容之上。
-
-```rust
-use gpui_kit::component::TitleBar;
-
-struct MyApp {
-    view: AnyView,
-}
-
-impl Render for MyApp {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let sheet_layer = Root::render_sheet_layer(window, cx);
-
-        div()
-            .size_full()
-            .child(
-                v_flex()
-                    .size_full()
-                    .child(TitleBar::new())
-                    .child(div().flex_1().overflow_hidden().child(self.view.clone())),
-            )
-            .children(sheet_layer)
-    }
-}
-```
+窗口的 [Root](./root.md) 会自动挂载并渲染抽屉层。使用 `gpui_kit::open_window` 打开窗口，或将应用视图包裹在 `Root::new` 中即可，无需在视图中手动渲染浮层。
 
 ### 基础 Sheet
 

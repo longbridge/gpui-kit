@@ -1,4 +1,4 @@
-use gpui_kit::component::{ActiveTheme as _, Placement, Root, button::*};
+use gpui_kit::component::{ActiveTheme as _, Placement, button::*};
 use gpui_kit::*;
 
 struct TooltipTopEdgeExample;
@@ -44,13 +44,9 @@ fn main() {
             ..Default::default()
         };
 
-        cx.spawn(async move |cx| {
-            cx.open_window(window_options, |window, cx| {
-                let view = cx.new(|_| TooltipTopEdgeExample);
-                cx.new(|cx| Root::new(view, window, cx).bg(cx.theme().background))
-            })
-            .expect("Failed to open window");
+        gpui_kit::open_window(window_options, cx, |_, cx| {
+            cx.new(|_| TooltipTopEdgeExample)
         })
-        .detach();
+        .expect("Failed to open window");
     });
 }

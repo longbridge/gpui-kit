@@ -1,9 +1,7 @@
-use gpui_kit::component::{
-    Root,
-    dock::{
-        BasePanel, DockArea, DockLayout, DockSkin, Panel, PanelControl, PanelEvent, PanelStyle,
-        panel_handle,
-    },
+mod common;
+use gpui_kit::component::dock::{
+    BasePanel, DockArea, DockLayout, DockSkin, Panel, PanelControl, PanelEvent, PanelStyle,
+    panel_handle,
 };
 use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
 use gpui_kit::{
@@ -55,7 +53,7 @@ impl Render for Editor {
 #[gpui_kit::test]
 async fn dock_switches_and_reorders_real_tabs(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(900.), px(600.)), |window, cx| {
+    let (handle, _) = common::open_window(cx, Some(size(px(900.), px(600.))), |window, cx| {
         let (area, skin) = DockSkin::dock_area("editor", None, window, cx);
         skin.set_panel_style(PanelStyle::TabBar, cx);
         let a = cx.new(|cx| Document {
@@ -71,7 +69,7 @@ async fn dock_switches_and_reorders_real_tabs(cx: &mut TestAppContext) {
             .panel_view(panel_handle(b), cx);
         area.update(cx, |area, cx| area.set_center(layout, window, cx));
         let editor = cx.new(|_| Editor { area });
-        Root::new(editor, window, cx)
+        editor
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -101,7 +99,7 @@ async fn dock_switches_and_reorders_real_tabs(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 async fn dock_moves_a_tab_between_groups_and_zooms_the_result(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(900.), px(600.)), |window, cx| {
+    let (handle, _) = common::open_window(cx, Some(size(px(900.), px(600.))), |window, cx| {
         let (area, _) = DockSkin::dock_area("editor", None, window, cx);
         let a = cx.new(|cx| Document {
             name: "alpha",
@@ -125,7 +123,7 @@ async fn dock_moves_a_tab_between_groups_and_zooms_the_result(cx: &mut TestAppCo
             .child(DockLayout::tabs().panel_view(panel_handle(c), cx), None);
         area.update(cx, |area, cx| area.set_center(layout, window, cx));
         let editor = cx.new(|_| Editor { area });
-        Root::new(editor, window, cx)
+        editor
     });
     let mut right_bounds = None;
     cx.update_window(handle.into(), |_, window, cx| {

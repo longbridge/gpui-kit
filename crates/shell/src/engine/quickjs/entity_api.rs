@@ -54,6 +54,52 @@ impl<'js> FromJs<'js> for Handler {
 pub fn install(ctx: &Ctx<'_>, module: &Object<'_>, runtime: Weak<ShellRuntime>) -> JsResult<()> {
     let _ = module;
     let globals = ctx.globals();
+    for multiline in [false, true] {
+        let token_runtime = runtime.clone();
+        globals.set(
+            if multiline {
+                "__textarea_token_call"
+            } else {
+                "__input_token_call"
+            },
+            Func::from(
+                move |ctx: Ctx<'_>,
+                      handle: EntityHandle,
+                      method: String,
+                      args: super::PlainDataArguments|
+                      -> JsResult<super::DataResult> {
+                    if !crate::input_tokens::METHODS
+                        .iter()
+                        .any(|(name, _, readonly)| *name == method && *readonly)
+                    {
+                        refuse_mutation_in_render(&ctx, &method)?;
+                    }
+                    let runtime = alive(&ctx, &token_runtime)?;
+                    scope::with_current(|window, cx| {
+                        if multiline {
+                            let state = runtime.entities().textarea(handle).ok_or_else(|| {
+                                anyhow::anyhow!("textarea state has been released")
+                            })?;
+                            crate::input_tokens::invoke_textarea(
+                                &state, &method, &args.0, window, cx,
+                            )
+                        } else {
+                            let state = runtime
+                                .entities()
+                                .input(handle)
+                                .ok_or_else(|| anyhow::anyhow!("input state has been released"))?;
+                            crate::input_tokens::invoke_input(&state, &method, &args.0, window, cx)
+                        }
+                    })
+                    .ok_or_else(|| {
+                        Exception::throw_type(&ctx, "input operation requires a live host call")
+                    })?
+                    .map(super::DataResult)
+                    .map_err(|e| super::state_operation_error(&ctx, e))
+                },
+            ),
+        )?;
+    }
 
     // Every entity call reaches its store through the runtime, because the
     // store belongs to the runtime rather than to the thread — see

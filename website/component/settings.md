@@ -199,6 +199,24 @@ SettingGroup::new()
     .items(vec![...])
 ```
 
+### Footer outside the group surface
+
+Use `footer` to render supporting content below the group's background or
+border. It aligns with the group title and renders as small muted text like a
+description, so plain text is enough; the callback receives the current window
+and application context for richer content. It scrolls and is filtered with
+the group; it is not an independently searchable setting or a sidebar entry,
+and a group still needs at least one item to be shown.
+
+```rust
+SettingGroup::new()
+    .item(SettingItem::new(
+        "Update source",
+        SettingField::render(|_, _, _| "GitHub Releases"),
+    ))
+    .footer(|_, _| "Changes apply to this device only.")
+```
+
 ## Setting Item
 
 ### Basic Item

@@ -79,3 +79,21 @@ user.
 `Textarea` deliberately does not expose Input-only adornments such as `prefix`,
 `suffix`, mask toggle, or the clear button. Compose related actions beside the
 textarea.
+
+## Atomic inline tokens
+
+Use tokens to include mentions, file references or commands in a multi-line
+message. Insert a token with `TextareaState::replace_with_token`, or restore a
+saved draft with `set_value`. The default label is ready to use; add a renderer
+when you want an icon or other custom content:
+
+```rust
+Textarea::new(&state)
+    .token(|token, _, _| InputToken::new(token).icon(IconName::File))
+```
+
+Import `InputToken` from `gpui_kit::component::input` and `IconName` from
+`gpui_kit::component`. A token wraps onto the next line as a whole, and auto-grow adjusts the textarea
+height to fit. Put line breaks in the text between tokens. See
+[Input: atomic inline tokens](./input.md#atomic-inline-tokens) for editing,
+activation, draft persistence, mode restrictions and JavaScript APIs.

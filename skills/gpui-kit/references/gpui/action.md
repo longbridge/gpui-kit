@@ -1,6 +1,6 @@
 # Actions & Keybindings
 
-**Contents:** [Overview](#overview) · [Quick Start](#quick-start) · [Key Formats](#key-formats) · [Action Naming](#action-naming) · [Context-Aware Bindings](#context-aware-bindings) · [Best Practices](#best-practices)
+**Contents:** [Overview](#overview) · [Quick Start](#quick-start) · [Key Formats](#key-formats) · [Menu Bar Shortcuts](#menu-bar-shortcuts) · [Action Naming](#action-naming) · [Context-Aware Bindings](#context-aware-bindings) · [Best Practices](#best-practices)
 
 ## Overview
 
@@ -103,6 +103,41 @@ impl Editor {
 "backspace", "delete"
 "-", "=", "[", "]", etc.  // Special characters
 ```
+
+## Menu Bar Shortcuts
+
+`cx.set_menus` reads the keymap **at the moment it is called** and bakes each
+item's shortcut into the native menu. A key bound afterwards never appears next
+to its menu item, and the item does not react to that key. There is no event to
+hook: bind first, then build the menus, and rebuild them when the keymap
+changes.
+
+```rust
+pub fn init(cx: &mut App) {
+    // 1. Bindings first — the menu items copy their shortcuts from these.
+    cx.bind_keys([
+        KeyBinding::new("cmd-n", NewChat, None),
+        KeyBinding::new("cmd-,", OpenSettings, None),
+        KeyBinding::new("cmd-q", Quit, None),
+    ]);
+
+    // 2. Then the menu bar.
+    cx.set_menus(vec![Menu {
+        name: "File".into(),
+        items: vec![
+            MenuItem::action("New Chat", NewChat),
+            MenuItem::action("Settings…", OpenSettings),
+            MenuItem::separator(),
+            MenuItem::action("Quit", Quit),
+        ],
+    }]);
+}
+```
+
+Call `cx.set_menus` again after anything that changes bindings or labels: a
+user keymap file loaded later, a locale switch that renames the items. `Undo`,
+`Redo`, `Cut`, `Copy`, `Paste` need no `on_action` of your own — give the item
+an `OsAction` and the platform forwards it to the focused text control.
 
 ## Action Naming
 

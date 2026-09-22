@@ -1,7 +1,7 @@
 ---
 title: Icon
 description: 为 GPUI Component 应用配置内置图标、自定义 SVG 与资源加载方式。
-order: -4
+order: -7
 ---
 
 # Icon
@@ -147,15 +147,10 @@ fn main() {
         // We must initialize gpui_component before using it.
         gpui_kit::init(cx);
 
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| Example);
-                // The first level on the window must be Root.
-                cx.new(|cx| Root::new(view, window, cx))
-            })
-            .expect("Failed to open window");
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| Example)
         })
-        .detach();
+        .expect("Failed to open window");
     });
 }
 ```

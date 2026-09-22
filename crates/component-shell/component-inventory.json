@@ -685,6 +685,41 @@
     },
     {
       "source": "ui",
+      "name": "questionnaire",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Questionnaire",
+        "exports": [
+          "Questionnaire"
+        ],
+        "related": [
+          {
+            "descriptor": "QuestionnaireItem",
+            "exports": [
+              "QuestionnaireItem"
+            ],
+            "role": "typed-item"
+          },
+          {
+            "descriptor": "QuestionnaireChoice",
+            "exports": [
+              "QuestionnaireChoice"
+            ],
+            "role": "typed-item"
+          },
+          {
+            "descriptor": "QuestionnaireInput",
+            "exports": [
+              "QuestionnaireInput"
+            ],
+            "role": "typed-item"
+          }
+        ]
+      }
+    },
+    {
+      "source": "ui",
       "name": "radio",
       "classification": "component",
       "registration": {
@@ -1088,6 +1123,18 @@
       "name": "theme",
       "classification": "infrastructure",
       "explanation": "Non-renderable theme infrastructure is consumed by registered controls."
+    },
+    {
+      "source": "ui",
+      "name": "toolbar",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Toolbar",
+        "exports": [
+          "Toolbar"
+        ]
+      }
     },
     {
       "source": "ui",
@@ -1958,6 +2005,41 @@
     },
     {
       "source": "story",
+      "name": "questionnaire",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Questionnaire",
+        "exports": [
+          "Questionnaire"
+        ],
+        "related": [
+          {
+            "descriptor": "QuestionnaireItem",
+            "exports": [
+              "QuestionnaireItem"
+            ],
+            "role": "typed-item"
+          },
+          {
+            "descriptor": "QuestionnaireChoice",
+            "exports": [
+              "QuestionnaireChoice"
+            ],
+            "role": "typed-item"
+          },
+          {
+            "descriptor": "QuestionnaireInput",
+            "exports": [
+              "QuestionnaireInput"
+            ],
+            "role": "typed-item"
+          }
+        ]
+      }
+    },
+    {
+      "source": "story",
       "name": "radio",
       "classification": "component",
       "registration": {
@@ -2379,6 +2461,18 @@
         "descriptor": "Toggle",
         "exports": [
           "Toggle"
+        ]
+      }
+    },
+    {
+      "source": "story",
+      "name": "toolbar",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Toolbar",
+        "exports": [
+          "Toolbar"
         ]
       }
     },

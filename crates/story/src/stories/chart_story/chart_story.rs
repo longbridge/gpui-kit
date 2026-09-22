@@ -1,8 +1,9 @@
 use std::rc::Rc;
 
+use gpui_kit::assets::IconName;
 use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::{
-    ActiveTheme, StyledExt,
+    ActiveTheme, Icon, StyledExt,
     chart::{
         AreaChart, BarChart, CandlestickChart, LineChart, PieChart, RadarChart, SankeyChart,
         SankeyLabel,
@@ -15,9 +16,10 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext, Context, Entity, FocusHandle, Focusable, FontWeight, Hsla,
-    IntoElement, ListAlignment, ListState, ParentElement, Pixels, Render, Rgba, SharedString,
-    Styled, Window, div, linear_color_stop, linear_gradient, list, prelude::FluentBuilder, px,
+    AnyElement, App, AppContext, Background, Context, Corners, Entity, FocusHandle, Focusable,
+    FontWeight, Hsla, IntoElement, ListAlignment, ListState, ParentElement, Pixels, Render, Rgba,
+    SharedString, Styled, Window, div, linear_color_stop, linear_gradient, list,
+    prelude::FluentBuilder, px,
 };
 use serde::Deserialize;
 
@@ -45,17 +47,24 @@ fn columns_for(width: Pixels) -> usize {
         .max(1.) as usize
 }
 
+/// One month of a SaaS business, 2025.
 #[derive(Clone, Deserialize)]
-struct MonthlyDevice {
+pub struct MonthlyMetric {
     pub month: SharedString,
-    pub desktop: f64,
-    pub color_alpha: f32,
-}
-
-impl MonthlyDevice {
-    pub fn color(&self, color: Hsla) -> Hsla {
-        color.alpha(self.color_alpha)
-    }
+    pub revenue: f64,
+    pub last_year: f64,
+    pub expenses: f64,
+    pub mrr: f64,
+    pub signups: f64,
+    pub orders: f64,
+    pub refunds: f64,
+    pub conversion: f64,
+    pub subscriptions: f64,
+    pub active_users: f64,
+    pub sessions: f64,
+    pub storage_tb: f64,
+    pub deploys: f64,
+    pub downloads: f64,
 }
 
 #[derive(Clone, Deserialize)]
@@ -68,10 +77,47 @@ pub struct DailyDevice {
 }
 
 #[derive(Clone, Deserialize)]
-pub struct RadarDevice {
-    pub month: SharedString,
-    pub desktop: f64,
-    pub mobile: f64,
+struct TrafficSource {
+    source: SharedString,
+    visitors: f64,
+}
+
+#[derive(Clone, Deserialize)]
+struct BrowserShare {
+    browser: SharedString,
+    share: f64,
+}
+
+#[derive(Clone, Deserialize)]
+struct PlanMix {
+    plan: SharedString,
+    accounts: f64,
+}
+
+#[derive(Clone, Deserialize)]
+struct RegionRevenue {
+    region: SharedString,
+    revenue: f64,
+}
+
+#[derive(Clone, Deserialize)]
+struct ProductSales {
+    product: SharedString,
+    sales: f64,
+}
+
+#[derive(Clone, Deserialize)]
+struct PageViews {
+    page: SharedString,
+    views: f64,
+}
+
+/// One dimension two products are scored on, out of 100.
+#[derive(Clone, Deserialize)]
+pub struct ProductScore {
+    pub dimension: SharedString,
+    pub alpha: f64,
+    pub beta: f64,
 }
 
 #[derive(Clone, Deserialize)]
@@ -129,13 +175,238 @@ pub struct TslaNode {
 /// renderer holds one shared handle to this instead of a copy of each series.
 struct ChartData {
     daily_devices: Vec<DailyDevice>,
-    monthly_devices: Vec<MonthlyDevice>,
-    /// The monthly figures recentred on their mean, so the bar charts have a
-    /// mix of positive and negative values to draw around the zero line.
-    monthly_variations: Vec<MonthlyDevice>,
-    radar_devices: Vec<RadarDevice>,
+    metrics: Vec<MonthlyMetric>,
+    /// Revenue less expenses per month in `revenue`, which crosses zero.
+    cash_flow: Vec<MonthlyMetric>,
+    traffic_sources: Vec<TrafficSource>,
+    browsers: Vec<BrowserShare>,
+    plans: Vec<PlanMix>,
+    regions: Vec<RegionRevenue>,
+    products: Vec<ProductSales>,
+    pages: Vec<PageViews>,
+    product_scores: Vec<ProductScore>,
     stock_prices: Vec<StockPrice>,
     tsla_statements: Vec<(SharedString, Vec<TslaNode>, Vec<SankeyLink>)>,
+}
+
+/// `1234` as `1.2K`, `1234567` as `1.2M`; smaller numbers keep their digits.
+fn compact(value: f64) -> String {
+    let magnitude = value.abs();
+    if magnitude >= 1_000_000. {
+        format!("{:.1}M", value / 1_000_000.)
+    } else if magnitude >= 10_000. {
+        format!("{:.0}K", value / 1_000.)
+    } else if magnitude >= 1_000. {
+        format!("{:.1}K", value / 1_000.)
+    } else {
+        format!("{:.0}", value)
+    }
+}
+
+/// `compact` with a dollar sign, keeping the sign in front of it.
+fn money(value: f64) -> String {
+    if value < 0. {
+        format!("-${}", compact(-value))
+    } else {
+        format!("${}", compact(value))
+    }
+}
+
+/// The percentage change from `previous` to `latest`.
+fn change_percent(latest: f64, previous: f64) -> f64 {
+    if previous.abs() < f64::EPSILON {
+        0.
+    } else {
+        (latest - previous) / previous.abs() * 100.
+    }
+}
+
+/// The change from the second-to-last to the last of `values`, as a percentage.
+fn latest_change(values: impl IntoIterator<Item = f64>) -> f64 {
+    let values: Vec<f64> = values.into_iter().collect();
+    match values[..] {
+        [.., previous, latest] => change_percent(latest, previous),
+        _ => 0.,
+    }
+}
+
+/// The change between the last `window` values and the `window` before them.
+fn windowed_change(values: impl IntoIterator<Item = f64>, window: usize) -> f64 {
+    let values: Vec<f64> = values.into_iter().collect();
+    if values.len() < window * 2 {
+        return 0.;
+    }
+    let latest: f64 = values[values.len() - window..].iter().sum();
+    let previous: f64 = values[values.len() - window * 2..values.len() - window]
+        .iter()
+        .sum();
+    change_percent(latest, previous)
+}
+
+/// The sentence a card leads its footer with.
+enum Headline {
+    /// A trend arrow and `Trending up by 5.2% this month`.
+    Trend { percent: f64, period: SharedString },
+    /// A plain finding, such as the share the largest slice holds.
+    Text(SharedString),
+}
+
+/// A chart card: heading, legend, the chart and a footer that reads the data.
+struct Card {
+    title: SharedString,
+    period: SharedString,
+    legend: Vec<(Hsla, SharedString)>,
+    chart: AnyElement,
+    headline: Headline,
+    note: SharedString,
+    /// Whether the heading and footer sit over the middle of the card, as
+    /// the round charts want.
+    centered: bool,
+}
+
+impl Card {
+    fn new(title: impl Into<SharedString>, period: impl Into<SharedString>) -> Self {
+        Self {
+            title: title.into(),
+            period: period.into(),
+            legend: vec![],
+            chart: div().into_any_element(),
+            headline: Headline::Text("".into()),
+            note: "".into(),
+            centered: false,
+        }
+    }
+
+    fn chart(mut self, chart: impl IntoElement) -> Self {
+        self.chart = chart.into_any_element();
+        self
+    }
+
+    fn legend(mut self, color: Hsla, label: impl Into<SharedString>) -> Self {
+        self.legend.push((color, label.into()));
+        self
+    }
+
+    fn trend(mut self, percent: f64, period: impl Into<SharedString>) -> Self {
+        self.headline = Headline::Trend {
+            percent,
+            period: period.into(),
+        };
+        self
+    }
+
+    fn headline(mut self, text: impl Into<SharedString>) -> Self {
+        self.headline = Headline::Text(text.into());
+        self
+    }
+
+    fn note(mut self, note: impl Into<SharedString>) -> Self {
+        self.note = note.into();
+        self
+    }
+
+    fn centered(mut self) -> Self {
+        self.centered = true;
+        self
+    }
+
+    fn render(self, cx: &App) -> impl IntoElement {
+        let centered = self.centered;
+        let headline = match self.headline {
+            Headline::Trend { percent, period } => {
+                let (icon, color, direction) = if percent >= 0. {
+                    (IconName::TrendingUp, cx.theme().success, "up")
+                } else {
+                    (IconName::TrendingDown, cx.theme().danger, "down")
+                };
+                h_flex()
+                    .gap_1p5()
+                    .items_center()
+                    .when(centered, |this| this.justify_center())
+                    .child(format!(
+                        "Trending {direction} by {:.1}% {period}",
+                        percent.abs()
+                    ))
+                    .child(Icon::new(icon).size_4().text_color(color))
+                    .into_any_element()
+            }
+            Headline::Text(text) => div().child(text).into_any_element(),
+        };
+
+        v_flex()
+            .flex_1()
+            .min_w_0()
+            .h(CARD_HEIGHT)
+            .border_1()
+            .border_color(cx.theme().border)
+            .rounded(cx.theme().radius_lg)
+            .p_4()
+            .child(
+                h_flex()
+                    .items_start()
+                    .justify_between()
+                    .when(centered, |this| this.justify_center())
+                    .child(
+                        // The heading holds its width; the legend beside it is
+                        // what gives way and wraps.
+                        v_flex()
+                            .flex_shrink_0()
+                            .when(centered, |this| this.text_center())
+                            .child(div().font_semibold().child(self.title))
+                            .child(
+                                div()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .text_sm()
+                                    .child(self.period),
+                            ),
+                    )
+                    .when(!self.legend.is_empty() && !centered, |this| {
+                        this.child(legend(self.legend.clone(), cx))
+                    }),
+            )
+            // The round charts have no axis to anchor a legend beside, so
+            // theirs sits under the heading.
+            .when(!self.legend.is_empty() && centered, |this| {
+                this.child(div().pt_2().child(legend(self.legend, cx).justify_center()))
+            })
+            .child(div().flex_1().min_h_0().py_4().child(self.chart))
+            .child(
+                div()
+                    .when(centered, |this| this.text_center())
+                    .font_semibold()
+                    .text_sm()
+                    .child(headline),
+            )
+            .child(
+                div()
+                    .when(centered, |this| this.text_center())
+                    .text_color(cx.theme().muted_foreground)
+                    .text_sm()
+                    .child(self.note),
+            )
+    }
+}
+
+/// A row of swatch-and-label pairs.
+///
+/// It shares the heading row with the title, so it has to yield width rather
+/// than hold its own: shrinking lets `flex_wrap` fold a long series list onto a
+/// second line instead of running out past the card.
+fn legend(entries: Vec<(Hsla, SharedString)>, cx: &App) -> gpui_kit::Div {
+    h_flex()
+        .flex_wrap()
+        .justify_end()
+        .gap_3()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .children(entries.into_iter().map(|(color, label)| {
+            h_flex()
+                .flex_shrink_0()
+                .gap_1p5()
+                .items_center()
+                .child(div().size_2().rounded_sm().bg(color))
+                .child(label)
+        }))
 }
 
 /// One chart card in the gallery.
@@ -181,523 +452,782 @@ enum ChartCard {
     Sankey(usize),
 }
 
-impl ChartCard {
-    /// Whether the heading and footnotes sit over the middle of the card, as
-    /// the round charts want.
-    fn is_centered(self) -> bool {
-        matches!(
-            self,
-            Self::Pie
-                | Self::PieDonut
-                | Self::PiePadAngle
-                | Self::PieLabel
-                | Self::Radar
-                | Self::RadarMultiple
-                | Self::RadarDots
-                | Self::RadarLinesOnly
-        )
+/// The shade a category takes in a single-hue chart: the first category in
+/// the full color, each next one a step more transparent, so a pie or a bar
+/// group reads as one ramp rather than five competing hues.
+fn shade(base: Hsla, index: usize) -> Hsla {
+    base.alpha(1. - 0.14 * index as f32)
+}
+
+/// A stable ramp position for a category name, so the same category keeps its
+/// shade across the cards that show it.
+fn color_index(name: &str) -> usize {
+    match name {
+        "Direct" | "Chrome" | "Free" | "N. America" => 0,
+        "Organic Search" | "Safari" | "Starter" | "Europe" => 1,
+        "Social" | "Edge" | "Pro" | "APAC" => 2,
+        "Referral" | "Firefox" | "Enterprise" | "LatAm" => 3,
+        _ => 4,
     }
+}
 
+/// A fill that fades from `color` at the top of an area to nothing at its
+/// baseline.
+fn area_gradient(color: Hsla) -> Background {
+    linear_gradient(
+        0.,
+        linear_color_stop(color.opacity(0.45), 1.),
+        linear_color_stop(color.opacity(0.), 0.),
+    )
+}
+
+/// A fill that shades a bar across its width, from `color` on one edge to a
+/// lighter tint on the other, so the bar reads with a little depth while its
+/// length stays evenly colored.
+fn bar_shading(color: Hsla, alignment: BarAlignment) -> Background {
+    let angle = if alignment.is_horizontal() { 0. } else { 90. };
+    linear_gradient(
+        angle,
+        linear_color_stop(color, 0.),
+        linear_color_stop(color.opacity(0.7), 1.),
+    )
+}
+
+/// The corner radii that round only the tip end of a vertical bar.
+fn rounded_tip() -> Corners<Pixels> {
+    Corners {
+        top_left: px(6.),
+        top_right: px(6.),
+        bottom_left: px(0.),
+        bottom_right: px(0.),
+    }
+}
+
+impl ChartCard {
     fn render(self, data: &ChartData, cx: &App) -> AnyElement {
-        let color = cx.theme().chart_3;
-        let (title, chart): (SharedString, AnyElement) = match self {
-            Self::AreaStacked => (
-                "Area Chart - Stacked".into(),
-                AreaChart::new(data.daily_devices.clone())
-                    .x(|d| d.date.clone())
-                    .y(|d| d.desktop)
-                    .stroke(cx.theme().chart_1)
-                    .fill(linear_gradient(
-                        0.,
-                        linear_color_stop(cx.theme().chart_1.opacity(0.4), 1.),
-                        linear_color_stop(cx.theme().background.opacity(0.3), 0.),
+        let accent = cx.theme().chart_2;
+        let mid = cx.theme().chart_3;
+        let deep = cx.theme().chart_4;
+        let card = match self {
+            Self::AreaStacked => Card::new("Visitors", "April – June 2025")
+                .legend(accent, "Desktop")
+                .legend(deep, "Mobile")
+                .chart(
+                    AreaChart::new(data.daily_devices.clone())
+                        .x(|d| d.date.clone())
+                        .y(|d| d.desktop)
+                        .stroke(accent)
+                        .fill(area_gradient(accent))
+                        .name("Desktop")
+                        .y(|d| d.mobile)
+                        .stroke(deep)
+                        .fill(area_gradient(deep))
+                        .name("Mobile")
+                        .tick_margin(8)
+                        .id("area-chart-stacked"),
+                )
+                .trend(
+                    windowed_change(data.daily_devices.iter().map(|d| d.desktop + d.mobile), 7),
+                    "this week",
+                )
+                .note(format!(
+                    "{} visitors over the last three months",
+                    compact(
+                        data.daily_devices
+                            .iter()
+                            .map(|d| d.desktop + d.mobile)
+                            .sum()
+                    )
+                )),
+            Self::Pie => {
+                let total: f64 = data.traffic_sources.iter().map(|d| d.visitors).sum();
+                let top = data
+                    .traffic_sources
+                    .iter()
+                    .max_by(|a, b| a.visitors.total_cmp(&b.visitors));
+                let mut card = Card::new("Traffic Sources", "June 2025")
+                    .centered()
+                    .chart(
+                        PieChart::new(data.traffic_sources.clone())
+                            .value(|d| d.visitors as f32)
+                            .outer_radius(90.)
+                            .color(move |d| shade(mid, color_index(&d.source)))
+                            .name("Visitors")
+                            .id("pie-chart"),
+                    )
+                    .note(format!("{} visitors across five channels", compact(total)));
+                if let Some(top) = top {
+                    card = card.headline(format!(
+                        "{} brings {:.0}% of traffic",
+                        top.source,
+                        top.visitors / total * 100.
+                    ));
+                }
+                for source in &data.traffic_sources {
+                    card = card.legend(
+                        shade(mid, color_index(&source.source)),
+                        source.source.clone(),
+                    );
+                }
+                card
+            }
+            Self::PieDonut => {
+                let leader = &data.browsers[0];
+                let mut card = Card::new("Browser Share", "June 2025")
+                    .centered()
+                    .chart(
+                        div()
+                            .relative()
+                            .size_full()
+                            .child(
+                                PieChart::new(data.browsers.clone())
+                                    .value(|d| d.share as f32)
+                                    .inner_radius(58.)
+                                    .outer_radius(90.)
+                                    .color(move |d| shade(mid, color_index(&d.browser)))
+                                    .name("Share")
+                                    .id("pie-chart-donut"),
+                            )
+                            // The headline figure sits in the hole of the ring.
+                            .child(
+                                v_flex()
+                                    .absolute()
+                                    .inset_0()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(
+                                        div()
+                                            .text_2xl()
+                                            .font_semibold()
+                                            .child(format!("{:.0}%", leader.share)),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(cx.theme().muted_foreground)
+                                            .child(leader.browser.clone()),
+                                    ),
+                            ),
+                    )
+                    .headline(format!(
+                        "{} leads by {:.0} points",
+                        leader.browser,
+                        leader.share - data.browsers[1].share
                     ))
-                    .name("Desktop")
-                    .y(|d| d.mobile)
-                    .stroke(cx.theme().chart_2)
-                    .fill(linear_gradient(
-                        0.,
-                        linear_color_stop(cx.theme().chart_2.opacity(0.4), 1.),
-                        linear_color_stop(cx.theme().background.opacity(0.3), 0.),
+                    .note("Share of sessions by browser family");
+                for browser in &data.browsers {
+                    card = card.legend(
+                        shade(mid, color_index(&browser.browser)),
+                        browser.browser.clone(),
+                    );
+                }
+                card
+            }
+            Self::PiePadAngle => {
+                let total: f64 = data.plans.iter().map(|d| d.accounts).sum();
+                let paid: f64 = data
+                    .plans
+                    .iter()
+                    .filter(|d| d.plan != "Free")
+                    .map(|d| d.accounts)
+                    .sum();
+                let mut card = Card::new("Plan Mix", "June 2025")
+                    .centered()
+                    .chart(
+                        PieChart::new(data.plans.clone())
+                            .value(|d| d.accounts as f32)
+                            .inner_radius(56.)
+                            .outer_radius(90.)
+                            .pad_angle(4. / 100.)
+                            .color(move |d| shade(mid, color_index(&d.plan)))
+                            .name("Accounts")
+                            .id("pie-chart-pad-angle"),
+                    )
+                    .headline(format!(
+                        "{:.0}% of accounts are on a paid plan",
+                        paid / total * 100.
                     ))
-                    .name("Mobile")
-                    .tick_margin(8)
-                    .id("area-chart-tooltip")
-                    .into_any_element(),
-            ),
-            Self::Pie => (
-                "Pie Chart".into(),
-                PieChart::new(data.monthly_devices.clone())
-                    .value(|d| d.desktop as f32)
-                    .outer_radius(100.)
-                    .color(move |d| d.color(color))
-                    .into_any_element(),
-            ),
-            Self::PieDonut => (
-                "Pie Chart - Donut".into(),
-                PieChart::new(data.monthly_devices.clone())
-                    .value(|d| d.desktop as f32)
-                    .inner_radius(60.)
-                    .outer_radius_fn(|d| 100. - d.index as f32 * 4.)
-                    .color(move |d| d.color(color))
-                    .into_any_element(),
-            ),
-            Self::PiePadAngle => (
-                "Pie Chart - Pad Angle".into(),
-                PieChart::new(data.monthly_devices.clone())
-                    .value(|d| d.desktop as f32)
-                    .inner_radius(60.)
-                    .outer_radius(100.)
-                    .pad_angle(4. / 100.)
-                    .color(move |d| d.color(color))
-                    .into_any_element(),
-            ),
-            Self::PieLabel => (
-                "Pie Chart - Label".into(),
-                PieChart::new(data.monthly_devices.clone())
-                    .value(|d| d.desktop as f32)
-                    .inner_radius(50.)
-                    .outer_radius(80.)
-                    .color(move |d| d.color(color))
-                    .label(|d| d.month.clone())
-                    .into_any_element(),
-            ),
-            Self::Radar => (
-                "Radar Chart".into(),
-                RadarChart::new(data.radar_devices.clone())
-                    .label(|d| d.month.clone())
-                    .value(|d| d.desktop)
-                    .name("Desktop")
-                    .id("radar-chart")
-                    .into_any_element(),
-            ),
-            Self::RadarMultiple => (
-                "Radar Chart - Multiple".into(),
-                RadarChart::new(data.radar_devices.clone())
-                    .label(|d| d.month.clone())
-                    .value(|d| d.desktop)
-                    .name("Desktop")
-                    .value(|d| d.mobile)
-                    .name("Mobile")
-                    .id("radar-chart-multiple")
-                    .into_any_element(),
-            ),
-            Self::RadarDots => (
-                "Radar Chart - Dots".into(),
-                RadarChart::new(data.radar_devices.clone())
-                    // An element label: the dimension name over a grade badge.
-                    .label({
-                        let muted_foreground = cx.theme().muted_foreground;
-                        let accent = cx.theme().chart_2;
-                        let badge_radius = cx.theme().radius_full();
-
-                        move |d: &RadarDevice| {
-                            let grade = match d.desktop {
-                                v if v >= 250. => "A",
-                                v if v >= 200. => "B",
-                                _ => "C",
-                            };
-
-                            v_flex()
-                                .items_center()
-                                .gap_1()
-                                .child(
-                                    div()
-                                        .text_xs()
-                                        .text_color(muted_foreground)
-                                        .child(d.month.clone()),
-                                )
-                                .child(
-                                    h_flex()
-                                        .justify_center()
-                                        .size_6()
-                                        .rounded(badge_radius)
-                                        .bg(accent.opacity(0.1))
-                                        .text_sm()
-                                        .font_weight(FontWeight::SEMIBOLD)
-                                        .text_color(accent)
-                                        .child(grade),
-                                )
-                                .into_any_element()
-                        }
+                    .note(format!("{} accounts in total", compact(total)));
+                for plan in &data.plans {
+                    card = card.legend(shade(mid, color_index(&plan.plan)), plan.plan.clone());
+                }
+                card
+            }
+            Self::PieLabel => {
+                let total: f64 = data.regions.iter().map(|d| d.revenue).sum();
+                Card::new("Revenue by Region", "Q2 2025")
+                    .centered()
+                    .chart(
+                        PieChart::new(data.regions.clone())
+                            .value(|d| d.revenue as f32)
+                            .inner_radius(48.)
+                            .outer_radius(76.)
+                            .color(move |d| shade(mid, color_index(&d.region)))
+                            .label(|d| d.region.clone())
+                            .tooltip_name(|d| d.region.clone())
+                            .name("Revenue")
+                            .id("pie-chart-label"),
+                    )
+                    .headline(format!(
+                        "{} of {} comes from the two largest regions",
+                        money(data.regions[0].revenue + data.regions[1].revenue),
+                        money(total)
+                    ))
+                    .note("Recognized revenue, in US dollars")
+            }
+            Self::Radar => {
+                let average = data.product_scores.iter().map(|d| d.alpha).sum::<f64>()
+                    / data.product_scores.len() as f64;
+                Card::new("Product Score", "Alpha, Q2 review")
+                    .centered()
+                    .chart(
+                        RadarChart::new(data.product_scores.clone())
+                            .label(|d| d.dimension.clone())
+                            .value(|d| d.alpha)
+                            .stroke(accent)
+                            .fill(accent.opacity(0.3))
+                            .name("Alpha")
+                            .max_value(100.)
+                            .id("radar-chart"),
+                    )
+                    .headline(format!("Scores {average:.0} on average"))
+                    .note("Six review dimensions, scored out of 100")
+            }
+            Self::RadarMultiple => {
+                let (alpha, beta) = data
+                    .product_scores
+                    .iter()
+                    .fold((0., 0.), |(a, b), d| (a + d.alpha, b + d.beta));
+                Card::new("Alpha vs Beta", "Q2 review")
+                    .centered()
+                    .legend(accent, "Alpha")
+                    .legend(deep, "Beta")
+                    .chart(
+                        RadarChart::new(data.product_scores.clone())
+                            .label(|d| d.dimension.clone())
+                            .value(|d| d.alpha)
+                            .stroke(accent)
+                            .fill(accent.opacity(0.25))
+                            .name("Alpha")
+                            .value(|d| d.beta)
+                            .stroke(deep)
+                            .fill(deep.opacity(0.25))
+                            .name("Beta")
+                            .max_value(100.)
+                            .id("radar-chart-multiple"),
+                    )
+                    .headline(if alpha >= beta {
+                        format!("Alpha leads by {:.0} points overall", alpha - beta)
+                    } else {
+                        format!("Beta leads by {:.0} points overall", beta - alpha)
                     })
-                    .value(|d| d.desktop)
-                    .name("Desktop")
-                    .stroke(cx.theme().chart_2)
-                    .dot()
-                    // A badge label is far taller than a line of text, so
-                    // pull the ring in to leave it room.
-                    .outer_radius(64.)
-                    .id("radar-chart-dots")
-                    .into_any_element(),
-            ),
-            Self::RadarLinesOnly => (
-                "Radar Chart - Lines Only".into(),
-                RadarChart::new(data.radar_devices.clone())
-                    .label(|d| d.month.clone())
-                    .value(|d| d.desktop)
-                    .name("Desktop")
-                    .stroke(cx.theme().chart_3)
-                    .fill(gpui_kit::transparent_black())
-                    .max_value(400.)
-                    .grid_levels(5)
-                    .id("radar-chart-lines-only")
-                    .into_any_element(),
-            ),
-            Self::Bar => (
-                "Bar Chart".into(),
-                BarChart::new(data.monthly_devices.clone())
-                    .band(|d| d.month.clone())
-                    .value(|d| d.desktop)
-                    .name("Desktop")
-                    .id("bar-chart-tooltip")
-                    .into_any_element(),
-            ),
-            Self::BarMixed => (
-                "Bar Chart - Mixed".into(),
-                BarChart::new(data.monthly_devices.clone())
-                    .id("bar-chart-mixed")
-                    .name("Desktop")
-                    .band(|d| d.month.clone())
-                    .value(|d| d.desktop)
-                    .fill(move |d, _, _, _| d.color(color))
-                    .into_any_element(),
-            ),
-            Self::BarStacked => (
-                "Bar Chart - Stacked".into(),
-                StackedBarChart::new(data.daily_devices.iter().take(8).cloned().collect())
-                    .into_any_element(),
-            ),
-            Self::BarRounded => (
-                "Bar Chart - Rounded corners".into(),
-                BarChart::new(data.monthly_devices.clone())
-                    .id("bar-chart-rounded")
-                    .name("Desktop")
-                    .band(|d| d.month.clone())
-                    .value(|d| d.desktop)
-                    .label(|d| d.desktop.to_string())
-                    .corner_radii(px(8.))
-                    .into_any_element(),
-            ),
-            Self::BarBottomAligned => (
-                "Bar Chart - Bottom aligned".into(),
-                BarChart::new(data.monthly_devices.clone())
-                    .id("bar-chart-bottom")
-                    .name("Desktop")
-                    .band(|d| d.month.clone())
-                    .value(|d| d.desktop)
-                    .label(|d| d.desktop.to_string())
-                    .into_any_element(),
-            ),
-            Self::BarTopAligned => (
-                "Bar Chart - Top aligned".into(),
-                BarChart::new(data.monthly_devices.clone())
-                    .id("bar-chart-top")
-                    .name("Desktop")
-                    .band(|d| d.month.clone())
-                    .value(|d| d.desktop)
-                    .label(|d| d.desktop.to_string())
-                    .alignment(BarAlignment::Top)
-                    .into_any_element(),
-            ),
-            Self::BarLeftAligned => (
-                "Bar Chart - Left aligned".into(),
-                BarChart::new(data.monthly_devices.clone())
-                    .id("bar-chart-left")
-                    .name("Desktop")
-                    .band(|d| d.month.clone())
-                    .value(|d| d.desktop)
-                    .label(|d| d.desktop.to_string())
-                    .alignment(BarAlignment::Left)
-                    .into_any_element(),
-            ),
-            Self::BarRightAligned => (
-                "Bar Chart - Right aligned".into(),
-                BarChart::new(data.monthly_devices.clone())
-                    .id("bar-chart-right")
-                    .name("Desktop")
-                    .band(|d| d.month.clone())
-                    .value(|d| d.desktop)
-                    .label(|d| d.desktop.to_string())
-                    .alignment(BarAlignment::Right)
-                    .into_any_element(),
-            ),
-            Self::BarNegative => (
-                "Bar Chart - Negative values".into(),
-                BarChart::new(data.monthly_variations.clone())
-                    .id("bar-chart-negative")
-                    .name("Variation")
-                    .band(|d| d.month.clone())
-                    .value(|d| d.desktop)
-                    .label(|d| format!("{:.0}", d.desktop))
-                    .value_axis(true)
-                    .into_any_element(),
-            ),
-            Self::BarGradientBottom => {
-                let c = cx.theme().chart_1;
-                (
-                    "Bar Chart - Gradient (Bottom)".into(),
-                    BarChart::new(data.monthly_devices.clone())
-                        .id("bar-chart-gradient-bottom")
-                        .name("Desktop")
-                        .band(|d| d.month.clone())
-                        .value(|d| d.desktop)
-                        .label(|d| d.desktop.to_string())
-                        .fill_gradient(move |_, chart_range, chart_to_bar| {
-                            [
-                                linear_color_stop(
-                                    c.opacity(0.3),
-                                    chart_to_bar(*chart_range.start()),
-                                ),
-                                linear_color_stop(c, chart_to_bar(*chart_range.end())),
-                            ]
-                        })
-                        .into_any_element(),
-                )
+                    .note("Alpha wins on usability, Beta on reliability")
             }
-            Self::BarGradientTop => {
-                let c = cx.theme().chart_1;
-                (
-                    "Bar Chart - Gradient (Top)".into(),
-                    BarChart::new(data.monthly_devices.clone())
-                        .id("bar-chart-gradient-top")
-                        .name("Desktop")
+            Self::RadarDots => Card::new("Review Grades", "Alpha, Q2 review")
+                .centered()
+                .chart(
+                    RadarChart::new(data.product_scores.clone())
+                        // An element label: the dimension name over a grade badge.
+                        .label({
+                            let muted_foreground = cx.theme().muted_foreground;
+                            let badge_radius = cx.theme().radius_full();
+
+                            move |d: &ProductScore| {
+                                let grade = match d.alpha {
+                                    v if v >= 85. => "A",
+                                    v if v >= 70. => "B",
+                                    _ => "C",
+                                };
+
+                                v_flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(muted_foreground)
+                                            .child(d.dimension.clone()),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .justify_center()
+                                            .size_6()
+                                            .rounded(badge_radius)
+                                            .bg(accent.opacity(0.1))
+                                            .text_sm()
+                                            .font_weight(FontWeight::SEMIBOLD)
+                                            .text_color(accent)
+                                            .child(grade),
+                                    )
+                                    .into_any_element()
+                            }
+                        })
+                        .value(|d| d.alpha)
+                        .name("Alpha")
+                        .stroke(accent)
+                        .fill(accent.opacity(0.25))
+                        .max_value(100.)
+                        .dot()
+                        // A badge label is far taller than a line of text, so
+                        // pull the ring in to leave it room.
+                        .outer_radius(64.)
+                        .id("radar-chart-dots"),
+                )
+                .headline("Two dimensions graded A")
+                .note("A from 85, B from 70, C below"),
+            Self::RadarLinesOnly => Card::new("Beta Profile", "Q2 review")
+                .centered()
+                .legend(deep, "Beta")
+                .chart(
+                    RadarChart::new(data.product_scores.clone())
+                        .label(|d| d.dimension.clone())
+                        .value(|d| d.beta)
+                        .name("Beta")
+                        .stroke(deep)
+                        .fill(gpui_kit::transparent_black())
+                        .max_value(100.)
+                        .grid_levels(5)
+                        .id("radar-chart-lines-only"),
+                )
+                .headline("Strongest on reliability and support")
+                .note("Outline only, five grid rings"),
+            Self::Bar => Card::new("Monthly Revenue", "2025")
+                .chart(
+                    BarChart::new(data.metrics.clone())
                         .band(|d| d.month.clone())
-                        .value(|d| d.desktop)
-                        .label(|d| d.desktop.to_string())
+                        .value(|d| d.revenue)
+                        .name("Revenue")
+                        .fill(move |_, _, _, _| accent)
+                        .corner_radii(rounded_tip())
+                        .id("bar-chart"),
+                )
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.revenue)),
+                    "this month",
+                )
+                .note(format!(
+                    "{} recognized this year",
+                    money(data.metrics.iter().map(|d| d.revenue).sum())
+                )),
+            Self::BarMixed => {
+                let mut card = Card::new("Revenue by Region", "Q2 2025")
+                    .chart(
+                        BarChart::new(data.regions.clone())
+                            .band(|d| d.region.clone())
+                            .value(|d| d.revenue)
+                            .name("Revenue")
+                            .label(|d| money(d.revenue))
+                            .fill(move |d, _, _, _| shade(mid, color_index(&d.region)))
+                            .corner_radii(rounded_tip())
+                            .id("bar-chart-mixed"),
+                    )
+                    .headline(format!(
+                        "{} ahead of {} by {}",
+                        data.regions[0].region,
+                        data.regions[1].region,
+                        money(data.regions[0].revenue - data.regions[1].revenue)
+                    ))
+                    .note("One shade per region");
+                for region in &data.regions {
+                    card = card.legend(
+                        shade(mid, color_index(&region.region)),
+                        region.region.clone(),
+                    );
+                }
+                card
+            }
+            Self::BarStacked => {
+                let days: Vec<_> = data.daily_devices.iter().take(8).cloned().collect();
+                let total: f64 = days
+                    .iter()
+                    .map(|d| d.desktop + d.mobile + d.tablet + d.watch)
+                    .sum();
+                Card::new("Visitors by Device", "First week of April")
+                    .legend(cx.theme().chart_4, "Desktop")
+                    .legend(cx.theme().chart_3, "Mobile")
+                    .legend(cx.theme().chart_2, "Tablet")
+                    .legend(cx.theme().chart_1, "Watch")
+                    .chart(StackedBarChart::new(days))
+                    .headline(format!("{} visitors in eight days", compact(total)))
+                    .note("Stacked by device, a custom Plot")
+            }
+            Self::BarRounded => Card::new("Signups", "2025")
+                .chart(
+                    BarChart::new(data.metrics.clone())
+                        .band(|d| d.month.clone())
+                        .value(|d| d.signups)
+                        .name("Signups")
+                        .label(|d| compact(d.signups))
+                        .fill(move |_, _, _, _| accent)
+                        .corner_radii(px(8.))
+                        .id("bar-chart-rounded"),
+                )
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.signups)),
+                    "this month",
+                )
+                .note(format!(
+                    "{} new accounts this year; fully rounded bars",
+                    compact(data.metrics.iter().map(|d| d.signups).sum())
+                )),
+            Self::BarBottomAligned => Card::new("Orders", "2025")
+                .chart(
+                    BarChart::new(data.metrics.clone())
+                        .band(|d| d.month.clone())
+                        .value(|d| d.orders)
+                        .name("Orders")
+                        .label(|d| compact(d.orders))
+                        .fill(move |_, _, _, _| accent)
+                        .id("bar-chart-bottom"),
+                )
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.orders)),
+                    "this month",
+                )
+                .note("Bottom aligned: bars grow up from the axis"),
+            Self::BarTopAligned => Card::new("Refunds", "2025")
+                .chart(
+                    BarChart::new(data.metrics.clone())
+                        .band(|d| d.month.clone())
+                        .value(|d| d.refunds)
+                        .name("Refunds")
+                        .label(|d| compact(d.refunds))
+                        .fill(move |_, _, _, _| mid)
                         .alignment(BarAlignment::Top)
-                        .fill_gradient(move |_, chart_range, chart_to_bar| {
-                            [
-                                linear_color_stop(
-                                    c.opacity(0.3),
-                                    chart_to_bar(*chart_range.start()),
-                                ),
-                                linear_color_stop(c, chart_to_bar(*chart_range.end())),
-                            ]
-                        })
-                        .into_any_element(),
+                        .id("bar-chart-top"),
                 )
-            }
-            Self::BarGradientLeft => {
-                let c = cx.theme().chart_1;
-                (
-                    "Bar Chart - Gradient (Left)".into(),
-                    BarChart::new(data.monthly_devices.clone())
-                        .id("bar-chart-gradient-left")
-                        .name("Desktop")
-                        .band(|d| d.month.clone())
-                        .value(|d| d.desktop)
-                        .label(|d| d.desktop.to_string())
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.refunds)),
+                    "this month",
+                )
+                .note("Top aligned: bars hang from the axis"),
+            Self::BarLeftAligned => Card::new("Top Products", "Units sold, Q2 2025")
+                .chart(
+                    BarChart::new(data.products.clone())
+                        .band(|d| d.product.clone())
+                        .value(|d| d.sales)
+                        .name("Units")
+                        .label(|d| compact(d.sales))
+                        .fill(move |_, _, _, _| accent)
                         .alignment(BarAlignment::Left)
-                        .fill_gradient(move |_, chart_range, chart_to_bar| {
-                            [
-                                linear_color_stop(
-                                    c.opacity(0.3),
-                                    chart_to_bar(*chart_range.start()),
-                                ),
-                                linear_color_stop(c, chart_to_bar(*chart_range.end())),
-                            ]
-                        })
-                        .into_any_element(),
+                        .id("bar-chart-left"),
                 )
-            }
-            Self::BarGradientRight => {
-                let c = cx.theme().chart_1;
-                (
-                    "Bar Chart - Gradient (Right)".into(),
-                    BarChart::new(data.monthly_devices.clone())
-                        .id("bar-chart-gradient-right")
-                        .name("Desktop")
-                        .band(|d| d.month.clone())
-                        .value(|d| d.desktop)
-                        .label(|d| d.desktop.to_string())
+                .headline(format!(
+                    "{} outsells the next product by {}",
+                    data.products[0].product,
+                    compact(data.products[0].sales - data.products[1].sales)
+                ))
+                .note("Left aligned: labels beside horizontal bars"),
+            Self::BarRightAligned => Card::new("Page Views", "June 2025")
+                .chart(
+                    BarChart::new(data.pages.clone())
+                        .band(|d| d.page.clone())
+                        .value(|d| d.views)
+                        .name("Views")
+                        .label(|d| compact(d.views))
+                        .fill(move |_, _, _, _| deep)
                         .alignment(BarAlignment::Right)
-                        .fill_gradient(move |_, chart_range, chart_to_bar| {
-                            [
-                                linear_color_stop(
-                                    c.opacity(0.3),
-                                    chart_to_bar(*chart_range.start()),
-                                ),
-                                linear_color_stop(c, chart_to_bar(*chart_range.end())),
-                            ]
-                        })
-                        .into_any_element(),
+                        .id("bar-chart-right"),
                 )
+                .headline(format!("{} is the most visited page", data.pages[0].page))
+                .note("Right aligned: bars grow leftward"),
+            Self::BarNegative => {
+                let positive = cx.theme().chart_bullish;
+                let negative = cx.theme().chart_bearish;
+                let net: f64 = data.cash_flow.iter().map(|d| d.revenue).sum();
+                Card::new("Net Cash Flow", "2025")
+                    .legend(positive, "Surplus")
+                    .legend(negative, "Deficit")
+                    .chart(
+                        BarChart::new(data.cash_flow.clone())
+                            .band(|d| d.month.clone())
+                            .value(|d| d.revenue)
+                            .name("Net")
+                            .label(|d| money(d.revenue))
+                            .fill(
+                                move |d, _, _, _| {
+                                    if d.revenue >= 0. { positive } else { negative }
+                                },
+                            )
+                            .value_axis(true)
+                            .id("bar-chart-negative"),
+                    )
+                    .headline(format!("{} net for the year", money(net)))
+                    .note("Revenue less expenses; the axis sits at zero")
             }
-            Self::BarGradientPerBar => {
-                let c = cx.theme().chart_1;
-                (
-                    "Bar Chart - Gradient (Per-bar)".into(),
-                    BarChart::new(data.monthly_devices.clone())
-                        .id("bar-chart-gradient-per-bar")
-                        .name("Desktop")
+            Self::BarGradientBottom => Card::new("Downloads", "2025")
+                .chart(
+                    BarChart::new(data.metrics.clone())
                         .band(|d| d.month.clone())
-                        .value(|d| d.desktop)
-                        .label(|d| d.desktop.to_string())
-                        .fill_gradient(move |_, _, _| {
-                            [
-                                linear_color_stop(c.opacity(0.3), 0.),
-                                linear_color_stop(c, 1.),
-                            ]
-                        })
-                        .into_any_element(),
+                        .value(|d| d.downloads)
+                        .name("Downloads")
+                        .label(|d| compact(d.downloads))
+                        .fill(move |_, _, _, alignment| bar_shading(accent, alignment))
+                        .id("bar-chart-gradient-bottom"),
                 )
-            }
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.downloads)),
+                    "this month",
+                )
+                .note("Shaded across the width, not along the length"),
+            Self::BarGradientTop => Card::new("Refunds", "2025")
+                .chart(
+                    BarChart::new(data.metrics.clone())
+                        .band(|d| d.month.clone())
+                        .value(|d| d.refunds)
+                        .name("Refunds")
+                        .label(|d| compact(d.refunds))
+                        .alignment(BarAlignment::Top)
+                        .fill(move |_, _, _, alignment| bar_shading(deep, alignment))
+                        .id("bar-chart-gradient-top"),
+                )
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.refunds)),
+                    "this month",
+                )
+                .note("The shading stays with the bar as it hangs"),
+            Self::BarGradientLeft => Card::new("Page Views", "June 2025")
+                .chart(
+                    BarChart::new(data.pages.clone())
+                        .band(|d| d.page.clone())
+                        .value(|d| d.views)
+                        .name("Views")
+                        .label(|d| compact(d.views))
+                        .alignment(BarAlignment::Left)
+                        .fill(move |_, _, _, alignment| bar_shading(accent, alignment))
+                        .id("bar-chart-gradient-left"),
+                )
+                .headline(format!(
+                    "{} views across the top five pages",
+                    compact(data.pages.iter().map(|d| d.views).sum())
+                ))
+                .note("Horizontal bars shade top to bottom"),
+            Self::BarGradientRight => Card::new("Top Products", "Units sold, Q2 2025")
+                .chart(
+                    BarChart::new(data.products.clone())
+                        .band(|d| d.product.clone())
+                        .value(|d| d.sales)
+                        .name("Units")
+                        .label(|d| compact(d.sales))
+                        .alignment(BarAlignment::Right)
+                        .fill(move |_, _, _, alignment| bar_shading(deep, alignment))
+                        .id("bar-chart-gradient-right"),
+                )
+                .headline(format!(
+                    "{} units across the catalogue",
+                    compact(data.products.iter().map(|d| d.sales).sum())
+                ))
+                .note("The same shading on right-aligned bars"),
+            Self::BarGradientPerBar => Card::new("Sessions", "2025")
+                .chart(
+                    BarChart::new(data.metrics.clone())
+                        .band(|d| d.month.clone())
+                        .value(|d| d.sessions)
+                        .name("Sessions")
+                        .label(|d| compact(d.sessions))
+                        .fill(move |_, _, _, alignment| bar_shading(mid, alignment))
+                        .corner_radii(px(6.))
+                        .id("bar-chart-gradient-per-bar"),
+                )
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.sessions)),
+                    "this month",
+                )
+                .note("Fully rounded bars keep their shading"),
             Self::BarGradientDiagonal => {
                 let c1 = cx.theme().chart_1;
                 let c2 = cx.theme().chart_5;
-                (
-                    "Bar Chart - Gradient (Diagonal, across bars)".into(),
-                    BarChart::new(data.monthly_devices.clone())
-                        .id("bar-chart-gradient-diagonal")
-                        .name("Desktop")
-                        .band(|d| d.month.clone())
-                        .value(|d| d.desktop)
-                        .label(|d| d.desktop.to_string())
-                        .fill(move |_, bar, chart, _| {
-                            // Project the bar's corners onto the chart's
-                            // bottom-left → top-right diagonal so each bar
-                            // shows the slice of a chart-wide diagonal
-                            // gradient corresponding to its own footprint.
-                            let w = chart.size.width.max(f32::EPSILON);
-                            let h = chart.size.height.max(f32::EPSILON);
-                            let denom = w * w + h * h;
-                            let project = |x: f32, y: f32| -> f32 { (x * w + (h - y) * h) / denom };
-                            let lo = project(bar.origin.x, bar.origin.y + bar.size.height);
-                            let hi = project(bar.origin.x + bar.size.width, bar.origin.y);
-                            let lerp = |t: f32| Hsla {
-                                h: c1.h + (c2.h - c1.h) * t,
-                                s: c1.s + (c2.s - c1.s) * t,
-                                l: c1.l + (c2.l - c1.l) * t,
-                                a: c1.a + (c2.a - c1.a) * t,
-                            };
-                            linear_gradient(
-                                45.,
-                                linear_color_stop(lerp(lo), 0.),
-                                linear_color_stop(lerp(hi), 1.),
-                            )
-                        })
-                        .into_any_element(),
-                )
+                Card::new("Orders", "2025")
+                    .chart(
+                        BarChart::new(data.metrics.clone())
+                            .band(|d| d.month.clone())
+                            .value(|d| d.orders)
+                            .name("Orders")
+                            .label(|d| compact(d.orders))
+                            .fill(move |_, bar, chart, _| {
+                                // Project the bar's corners onto the chart's
+                                // bottom-left → top-right diagonal so each bar
+                                // shows the slice of a chart-wide diagonal
+                                // gradient corresponding to its own footprint.
+                                let w = chart.size.width.max(f32::EPSILON);
+                                let h = chart.size.height.max(f32::EPSILON);
+                                let denom = w * w + h * h;
+                                let project =
+                                    |x: f32, y: f32| -> f32 { (x * w + (h - y) * h) / denom };
+                                let lo = project(bar.origin.x, bar.origin.y + bar.size.height);
+                                let hi = project(bar.origin.x + bar.size.width, bar.origin.y);
+                                let lerp = |t: f32| Hsla {
+                                    h: c1.h + (c2.h - c1.h) * t,
+                                    s: c1.s + (c2.s - c1.s) * t,
+                                    l: c1.l + (c2.l - c1.l) * t,
+                                    a: c1.a + (c2.a - c1.a) * t,
+                                };
+                                linear_gradient(
+                                    45.,
+                                    linear_color_stop(lerp(lo), 0.),
+                                    linear_color_stop(lerp(hi), 1.),
+                                )
+                            })
+                            .id("bar-chart-gradient-diagonal"),
+                    )
+                    .trend(
+                        latest_change(data.metrics.iter().map(|d| d.orders)),
+                        "this month",
+                    )
+                    .note("One diagonal gradient across all bars")
             }
-            Self::Line => (
-                "Line Chart - Tooltip".into(),
-                LineChart::new(data.monthly_devices.clone())
-                    .x(|d| d.month.clone())
-                    .y(|d| d.desktop)
-                    .name("Desktop")
-                    .id("line-chart-tooltip")
-                    .into_any_element(),
-            ),
-            Self::LineLinear => (
-                "Line Chart - Linear".into(),
-                LineChart::new(data.monthly_devices.clone())
-                    .x(|d| d.month.clone())
-                    .y(|d| d.desktop)
-                    .linear()
-                    .id("line-chart-linear")
-                    .into_any_element(),
-            ),
-            Self::LineStepAfter => (
-                "Line Chart - Step After".into(),
-                LineChart::new(data.monthly_devices.clone())
-                    .x(|d| d.month.clone())
-                    .y(|d| d.desktop)
-                    .step_after()
-                    .id("line-chart-step-after")
-                    .into_any_element(),
-            ),
-            Self::LineDots => (
-                "Line Chart - Dots".into(),
-                LineChart::new(data.monthly_devices.clone())
-                    .x(|d| d.month.clone())
-                    .y(|d| d.desktop)
-                    .dot()
-                    .stroke(cx.theme().chart_5)
-                    .id("line-chart-dots")
-                    .into_any_element(),
-            ),
-            Self::Area => (
-                "Area Chart".into(),
-                AreaChart::new(data.monthly_devices.clone())
-                    .x(|d| d.month.clone())
-                    .y(|d| d.desktop)
-                    .id("area-chart")
-                    .into_any_element(),
-            ),
-            Self::AreaLinear => (
-                "Area Chart - Linear".into(),
-                AreaChart::new(data.monthly_devices.clone())
-                    .x(|d| d.month.clone())
-                    .y(|d| d.desktop)
-                    .linear()
-                    .id("area-chart-linear")
-                    .into_any_element(),
-            ),
-            Self::AreaStepAfter => (
-                "Area Chart - Step After".into(),
-                AreaChart::new(data.monthly_devices.clone())
-                    .x(|d| d.month.clone())
-                    .y(|d| d.desktop)
-                    .step_after()
-                    .id("area-chart-step-after")
-                    .into_any_element(),
-            ),
-            Self::AreaGradient => (
-                "Area Chart - Linear Gradient".into(),
-                AreaChart::new(data.monthly_devices.clone())
-                    .x(|d| d.month.clone())
-                    .y(|d| d.desktop)
-                    .fill(linear_gradient(
-                        0.,
-                        linear_color_stop(cx.theme().chart_1.opacity(0.4), 1.),
-                        linear_color_stop(cx.theme().background.opacity(0.3), 0.),
-                    ))
-                    .id("area-chart-gradient")
-                    .into_any_element(),
-            ),
-            Self::Candlestick => (
-                "Candlestick Chart".into(),
-                CandlestickChart::new(data.stock_prices.clone())
-                    .x(|d| d.date.clone())
-                    .open(|d| d.open)
-                    .high(|d| d.high)
-                    .low(|d| d.low)
-                    .close(|d| d.close)
-                    .into_any_element(),
-            ),
-            Self::CandlestickNarrow => (
-                "Candlestick Chart - Narrow".into(),
-                CandlestickChart::new(data.stock_prices.clone())
-                    .x(|d| d.date.clone())
-                    .open(|d| d.open)
-                    .high(|d| d.high)
-                    .low(|d| d.low)
-                    .close(|d| d.close)
-                    .body_width_ratio(0.5)
-                    .into_any_element(),
-            ),
-            Self::CandlestickWide => (
-                "Candlestick Chart - Wide".into(),
-                CandlestickChart::new(data.stock_prices.clone())
-                    .x(|d| d.date.clone())
-                    .open(|d| d.open)
-                    .high(|d| d.high)
-                    .low(|d| d.low)
-                    .close(|d| d.close)
-                    .body_width_ratio(1.0)
-                    .into_any_element(),
-            ),
-            Self::CandlestickTickMargin => (
-                "Candlestick Chart - Tick Margin".into(),
-                CandlestickChart::new(data.stock_prices.clone())
-                    .x(|d| d.date.clone())
-                    .open(|d| d.open)
-                    .high(|d| d.high)
-                    .low(|d| d.low)
-                    .close(|d| d.close)
-                    .tick_margin(2)
-                    .into_any_element(),
+            Self::Line => Card::new("Monthly Recurring Revenue", "2025")
+                .chart(
+                    LineChart::new(data.metrics.clone())
+                        .x(|d| d.month.clone())
+                        .y(|d| d.mrr)
+                        .stroke(accent)
+                        .name("MRR")
+                        .id("line-chart"),
+                )
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.mrr)),
+                    "this month",
+                )
+                .note(format!(
+                    "{} MRR in December, up from {} in January",
+                    money(data.metrics[data.metrics.len() - 1].mrr),
+                    money(data.metrics[0].mrr)
+                )),
+            Self::LineLinear => Card::new("Conversion Rate", "2025")
+                .chart(
+                    LineChart::new(data.metrics.clone())
+                        .x(|d| d.month.clone())
+                        .y(|d| d.conversion)
+                        .stroke(deep)
+                        .linear()
+                        .name("Conversion %")
+                        .id("line-chart-linear"),
+                )
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.conversion)),
+                    "this month",
+                )
+                .note("Visitors who signed up; straight segments"),
+            Self::LineStepAfter => Card::new("Active Subscriptions", "2025")
+                .chart(
+                    LineChart::new(data.metrics.clone())
+                        .x(|d| d.month.clone())
+                        .y(|d| d.subscriptions)
+                        .stroke(accent)
+                        .step_after()
+                        .name("Subscriptions")
+                        .id("line-chart-step-after"),
+                )
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.subscriptions)),
+                    "this month",
+                )
+                .note("Counts change on renewal day; step after"),
+            Self::LineDots => Card::new("Deploys", "Per month, 2025")
+                .chart(
+                    LineChart::new(data.metrics.clone())
+                        .x(|d| d.month.clone())
+                        .y(|d| d.deploys)
+                        .dot()
+                        .stroke(cx.theme().chart_5)
+                        .name("Deploys")
+                        .id("line-chart-dots"),
+                )
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.deploys)),
+                    "this month",
+                )
+                .note(format!(
+                    "{} production deploys this year",
+                    compact(data.metrics.iter().map(|d| d.deploys).sum())
+                )),
+            Self::Area => Card::new("Active Users", "2025")
+                .chart(
+                    AreaChart::new(data.metrics.clone())
+                        .x(|d| d.month.clone())
+                        .y(|d| d.active_users)
+                        .stroke(accent)
+                        .fill(accent.opacity(0.3))
+                        .name("Active users")
+                        .id("area-chart"),
+                )
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.active_users)),
+                    "this month",
+                )
+                .note("Monthly active users; a flat fill"),
+            Self::AreaLinear => Card::new("Sessions", "2025")
+                .chart(
+                    AreaChart::new(data.metrics.clone())
+                        .x(|d| d.month.clone())
+                        .y(|d| d.sessions)
+                        .stroke(deep)
+                        .fill(deep.opacity(0.3))
+                        .linear()
+                        .name("Sessions")
+                        .id("area-chart-linear"),
+                )
+                .trend(
+                    latest_change(data.metrics.iter().map(|d| d.sessions)),
+                    "this month",
+                )
+                .note("Straight segments between months"),
+            Self::AreaStepAfter => Card::new("Storage Used", "Terabytes, 2025")
+                .chart(
+                    AreaChart::new(data.metrics.clone())
+                        .x(|d| d.month.clone())
+                        .y(|d| d.storage_tb)
+                        .stroke(mid)
+                        .fill(mid.opacity(0.3))
+                        .step_after()
+                        .name("TB")
+                        .id("area-chart-step-after"),
+                )
+                .headline(format!(
+                    "{:.1} TB provisioned, from {:.1} TB in January",
+                    data.metrics[data.metrics.len() - 1].storage_tb,
+                    data.metrics[0].storage_tb
+                ))
+                .note("Capacity is added in steps"),
+            Self::AreaGradient => Card::new("Revenue vs Last Year", "2025")
+                .legend(accent, "2025")
+                .legend(cx.theme().chart_1, "2024")
+                .chart(
+                    AreaChart::new(data.metrics.clone())
+                        .x(|d| d.month.clone())
+                        .y(|d| d.last_year)
+                        .stroke(cx.theme().chart_1)
+                        .fill(area_gradient(cx.theme().chart_1))
+                        .name("2024")
+                        .y(|d| d.revenue)
+                        .stroke(accent)
+                        .fill(area_gradient(accent))
+                        .name("2025")
+                        .id("area-chart-gradient"),
+                )
+                .trend(
+                    change_percent(
+                        data.metrics.iter().map(|d| d.revenue).sum(),
+                        data.metrics.iter().map(|d| d.last_year).sum(),
+                    ),
+                    "year over year",
+                )
+                .note("Gradient fills fade to the baseline"),
+            // Forty sessions do not fit forty labels, so every card thins them.
+            Self::Candlestick => self.candlestick(data, "Daily", 0.8, 5, "candlestick-chart"),
+            Self::CandlestickNarrow => {
+                self.candlestick(data, "Narrow bodies", 0.5, 5, "candlestick-chart-narrow")
+            }
+            Self::CandlestickWide => {
+                self.candlestick(data, "Wide bodies", 1.0, 5, "candlestick-chart-wide")
+            }
+            Self::CandlestickTickMargin => self.candlestick(
+                data,
+                "Every tenth label",
+                0.8,
+                10,
+                "candlestick-chart-tick-margin",
             ),
             Self::Sankey(index) => {
                 let Some((period, nodes, links)) = data.tsla_statements.get(index) else {
@@ -707,6 +1237,7 @@ impl ChartCard {
                 // Sqrt value scale keeps the huge revenue flow from
                 // dwarfing the small profit/expense ones.
                 let chart = SankeyChart::new(nodes.clone(), links.clone())
+                    .id(("sankey-chart", index))
                     .node_align(SankeyAlign::Center)
                     .node_padding(40.)
                     .value_scale(SankeyValueScale::Sqrt)
@@ -718,35 +1249,102 @@ impl ChartCard {
                     let up = cx.theme().success;
                     let down = cx.theme().danger;
                     let muted = cx.theme().muted_foreground;
-                    chart.labels(move |d: &TslaNode, _| {
-                        let mut lines = vec![SankeyLabel::new(format!(
-                            "${:.2}B",
-                            d.value / 1_000_000_000.
-                        ))];
-                        if let Some(growth) = d.growth {
-                            let arrow = if growth >= 0. { "▲" } else { "▼" };
-                            lines.push(
-                                SankeyLabel::new(format!("{} {:+.2}%", arrow, growth))
-                                    .color(if growth >= 0. { up } else { down }),
-                            );
-                        }
-                        lines.push(SankeyLabel::new(d.name.clone()).color(muted));
-                        lines
-                    })
+                    // `labels` draws the node text but never reaches the tooltip,
+                    // so the tooltip needs its own name and value.
+                    chart
+                        .tooltip_name(|d: &TslaNode| d.name.clone())
+                        .tooltip_value(|d: &TslaNode, _| {
+                            format!("${:.2}B", d.value / 1_000_000_000.).into()
+                        })
+                        .labels(move |d: &TslaNode, _| {
+                            let mut lines = vec![SankeyLabel::new(format!(
+                                "${:.2}B",
+                                d.value / 1_000_000_000.
+                            ))];
+                            if let Some(growth) = d.growth {
+                                let arrow = if growth >= 0. { "▲" } else { "▼" };
+                                lines.push(
+                                    SankeyLabel::new(format!("{} {:+.2}%", arrow, growth))
+                                        .color(if growth >= 0. { up } else { down }),
+                                );
+                            }
+                            lines.push(SankeyLabel::new(d.name.clone()).color(muted));
+                            lines
+                        })
                 } else {
                     chart
                         .node_label(|d| d.name.clone())
                         .value_label(|d, _| format!("${:.2}B", d.value / 1_000_000_000.).into())
                 };
 
-                (
-                    format!("Sankey Chart - TSLA {}", period).into(),
-                    chart.into_any_element(),
-                )
+                let revenue = nodes.first();
+                Card::new("TSLA Income Statement", period.clone())
+                    .chart(chart)
+                    .headline(match revenue {
+                        Some(node) => format!(
+                            "{} of revenue, {}",
+                            money(node.value),
+                            match node.growth {
+                                Some(growth) if growth >= 0. => {
+                                    format!("up {:.1}% year over year", growth)
+                                }
+                                Some(growth) => format!("down {:.1}% year over year", -growth),
+                                None => "flat year over year".to_string(),
+                            }
+                        ),
+                        None => "No revenue reported".to_string(),
+                    })
+                    .note("How revenue flows into profit and expenses")
             }
         };
 
-        chart_container(title, chart, self.is_centered(), cx).into_any_element()
+        card.render(cx).into_any_element()
+    }
+
+    /// A card over the 40-session price series with the given body width and
+    /// label stride.
+    fn candlestick(
+        self,
+        data: &ChartData,
+        variant: &'static str,
+        body_width_ratio: f32,
+        tick_margin: usize,
+        id: &'static str,
+    ) -> Card {
+        let (first, last) = (
+            &data.stock_prices[0],
+            &data.stock_prices[data.stock_prices.len() - 1],
+        );
+        let high = data
+            .stock_prices
+            .iter()
+            .map(|d| d.high)
+            .fold(f64::MIN, f64::max);
+        let low = data
+            .stock_prices
+            .iter()
+            .map(|d| d.low)
+            .fold(f64::MAX, f64::min);
+        Card::new(
+            "ACME Daily",
+            format!("{} – {} 2025 · {variant}", first.date, last.date),
+        )
+        .chart(
+            CandlestickChart::new(data.stock_prices.clone())
+                .x(|d| d.date.clone())
+                .open(|d| d.open)
+                .high(|d| d.high)
+                .low(|d| d.low)
+                .close(|d| d.close)
+                .body_width_ratio(body_width_ratio)
+                .tick_margin(tick_margin)
+                .id(id),
+        )
+        .trend(change_percent(last.close, first.open), "over 40 sessions")
+        .note(format!(
+            "Closed at ${:.2}; ranged ${:.2} – ${:.2}",
+            last.close, low, high
+        ))
     }
 }
 
@@ -811,28 +1409,20 @@ pub struct ChartStory {
     list_state: ListState,
 }
 
+fn fixture<T: for<'de> Deserialize<'de>>(json: &str) -> T {
+    serde_json::from_str(json).expect("fixture is valid JSON")
+}
+
 impl ChartStory {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let daily_devices = serde_json::from_str::<Vec<DailyDevice>>(include_str!(
-            "../../fixtures/daily-devices.json"
-        ))
-        .unwrap();
-        let monthly_devices = serde_json::from_str::<Vec<MonthlyDevice>>(include_str!(
-            "../../fixtures/monthly-devices.json"
-        ))
-        .unwrap();
-        let radar_devices = serde_json::from_str::<Vec<RadarDevice>>(include_str!(
-            "../../fixtures/radar-devices.json"
-        ))
-        .unwrap();
-        let stock_prices = serde_json::from_str::<Vec<StockPrice>>(include_str!(
-            "../../fixtures/stock-prices.json"
-        ))
-        .unwrap();
-        let tsla = serde_json::from_str::<TslaIncomeStatement>(include_str!(
-            "../../fixtures/tsla-income-statement.json"
-        ))
-        .unwrap();
+        let daily_devices: Vec<DailyDevice> =
+            fixture(include_str!("../../fixtures/daily-devices.json"));
+        let metrics: Vec<MonthlyMetric> =
+            fixture(include_str!("../../fixtures/monthly-metrics.json"));
+        let stock_prices: Vec<StockPrice> =
+            fixture(include_str!("../../fixtures/stock-prices.json"));
+        let tsla: TslaIncomeStatement =
+            fixture(include_str!("../../fixtures/tsla-income-statement.json"));
         let tsla_statements = tsla
             .list
             .iter()
@@ -873,14 +1463,13 @@ impl ChartStory {
             })
             .collect::<Vec<_>>();
 
-        let mean = monthly_devices.iter().map(|d| d.desktop).sum::<f64>()
-            / monthly_devices.len().max(1) as f64;
-        let monthly_variations = monthly_devices
+        // Net cash flow rides in the `revenue` field so the bar chart reads it
+        // with the same accessor.
+        let cash_flow = metrics
             .iter()
-            .map(|d| MonthlyDevice {
-                month: d.month.clone(),
-                desktop: (d.desktop - mean).round(),
-                color_alpha: d.color_alpha,
+            .map(|d| MonthlyMetric {
+                revenue: d.revenue - d.expenses,
+                ..d.clone()
             })
             .collect();
 
@@ -898,9 +1487,15 @@ impl ChartStory {
             focus_handle: cx.focus_handle(),
             data: Rc::new(ChartData {
                 daily_devices,
-                monthly_devices,
-                monthly_variations,
-                radar_devices,
+                metrics,
+                cash_flow,
+                traffic_sources: fixture(include_str!("../../fixtures/traffic-sources.json")),
+                browsers: fixture(include_str!("../../fixtures/browsers.json")),
+                plans: fixture(include_str!("../../fixtures/plans.json")),
+                regions: fixture(include_str!("../../fixtures/regions.json")),
+                products: fixture(include_str!("../../fixtures/products.json")),
+                pages: fixture(include_str!("../../fixtures/pages.json")),
+                product_scores: fixture(include_str!("../../fixtures/product-scores.json")),
                 stock_prices,
                 tsla_statements,
             }),
@@ -996,50 +1591,6 @@ impl Focusable for ChartStory {
     }
 }
 
-fn chart_container(
-    title: SharedString,
-    chart: AnyElement,
-    center: bool,
-    cx: &App,
-) -> impl IntoElement {
-    v_flex()
-        .flex_1()
-        .min_w_0()
-        .h(CARD_HEIGHT)
-        .border_1()
-        .border_color(cx.theme().border)
-        .rounded(cx.theme().radius_lg)
-        .p_4()
-        .child(
-            div()
-                .when(center, |this| this.text_center())
-                .font_semibold()
-                .child(title),
-        )
-        .child(
-            div()
-                .when(center, |this| this.text_center())
-                .text_color(cx.theme().muted_foreground)
-                .text_sm()
-                .child("January-June 2025"),
-        )
-        .child(div().flex_1().py_4().child(chart))
-        .child(
-            div()
-                .when(center, |this| this.text_center())
-                .font_semibold()
-                .text_sm()
-                .child("Trending up by 5.2% this month"),
-        )
-        .child(
-            div()
-                .when(center, |this| this.text_center())
-                .text_color(cx.theme().muted_foreground)
-                .text_sm()
-                .child("Showing total visitors for the last 6 months"),
-        )
-}
-
 impl Render for ChartStory {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rows = Rc::new(rows_of(&self.sections, self.columns));
@@ -1082,5 +1633,35 @@ impl Render for ChartStory {
                 .py(CONTENT_INSET),
             )
             .vertical_scrollbar(&self.list_state)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compact_and_money() {
+        assert_eq!(compact(0.), "0");
+        assert_eq!(compact(437.), "437");
+        assert_eq!(compact(1_234.), "1.2K");
+        assert_eq!(compact(38_400.), "38K");
+        assert_eq!(compact(1_234_567.), "1.2M");
+        assert_eq!(money(38_400.), "$38K");
+        assert_eq!(money(-2_500.), "-$2.5K");
+    }
+
+    #[test]
+    fn test_changes() {
+        assert_eq!(change_percent(110., 100.), 10.);
+        assert_eq!(change_percent(90., 100.), -10.);
+        assert_eq!(change_percent(5., 0.), 0.);
+
+        assert_eq!(latest_change([100., 120., 150.]), 25.);
+        assert_eq!(latest_change([100.]), 0.);
+
+        // The last two values against the two before them.
+        assert_eq!(windowed_change([1., 1., 2., 2.], 2), 100.);
+        assert_eq!(windowed_change([1., 2., 3.], 2), 0.);
     }
 }

@@ -40,15 +40,10 @@ struct Host(gpui::Entity<gpui_shell::ScriptView>);
 impl gpui::Render for Host {
     fn render(
         &mut self,
-        window: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
+        _: &mut gpui::Window,
+        _: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
-        gpui::div()
-            .size_full()
-            .child(self.0.clone())
-            .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
+        gpui::div().size_full().child(self.0.clone())
     }
 }
 
@@ -247,7 +242,9 @@ export default class App extends View {
     context.update(|window, cx| window.draw(cx).clear(cx));
     let tree = context.update(|_, cx| view.read(cx).snapshot().unwrap().debug_tree());
     assert!(tree.contains("Errors:1"), "{tree}");
-    assert!(tree.contains("Closed:4"), "{tree}");
+    // Dialog: on_cancel + on_close; Sheet: on_close; AlertDialog: on_cancel +
+    // on_close, the same pair a cancelled Dialog reports.
+    assert!(tree.contains("Closed:5"), "{tree}");
 
     context.update(|window, cx| window.close_dialog(cx));
     context.simulate_click(point(px(80.), px(152.)), Modifiers::default());

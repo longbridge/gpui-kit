@@ -1,3 +1,4 @@
+mod common;
 use gpui::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window, div, prelude::*, px,
 };
@@ -34,20 +35,21 @@ impl Render for Host {
 
 #[gpui::test]
 fn cached_child_hides_and_reappears_after_refresh(cx: &mut TestAppContext) {
-    let handle = cx.add_window(|_, cx| Host {
-        child: cx.new(|_| Child {
-            label: "original".into(),
-        }),
-        hidden: false,
-        mounted: true,
+    let (handle, handle_content) = common::open_window(cx, None, |_, cx| {
+        cx.new(|cx| Host {
+            child: cx.new(|_| Child {
+                label: "original".into(),
+            }),
+            hidden: false,
+            mounted: true,
+        })
     });
     for hidden in [false, true, false] {
-        handle
-            .update(cx, |host, _, cx| {
-                host.hidden = hidden;
-                cx.notify();
-            })
-            .unwrap();
+        common::update_content(handle, &handle_content, cx, |host, _, cx| {
+            host.hidden = hidden;
+            cx.notify();
+        })
+        .unwrap();
         cx.update_window(handle.into(), |_, window, cx| {
             window.refresh();
             window.draw(cx).clear(cx);
@@ -59,12 +61,14 @@ fn cached_child_hides_and_reappears_after_refresh(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn unmount_and_remount_do_not_retain_old_metadata(cx: &mut TestAppContext) {
-    let handle = cx.add_window(|_, cx| Host {
-        child: cx.new(|_| Child {
-            label: "original".into(),
-        }),
-        hidden: false,
-        mounted: true,
+    let (handle, handle_content) = common::open_window(cx, None, |_, cx| {
+        cx.new(|cx| Host {
+            child: cx.new(|_| Child {
+                label: "original".into(),
+            }),
+            hidden: false,
+            mounted: true,
+        })
     });
     let old = cx
         .update_window(handle.into(), |_, window, cx| {
@@ -73,28 +77,26 @@ fn unmount_and_remount_do_not_retain_old_metadata(cx: &mut TestAppContext) {
             window.find("child")
         })
         .unwrap();
-    handle
-        .update(cx, |host, _, cx| {
-            host.mounted = false;
-            cx.notify();
-        })
-        .unwrap();
+    common::update_content(handle, &handle_content, cx, |host, _, cx| {
+        host.mounted = false;
+        cx.notify();
+    })
+    .unwrap();
     cx.update_window(handle.into(), |_, window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
         assert!(window.try_find("child").is_none());
     })
     .unwrap();
-    handle
-        .update(cx, |host, _, cx| {
-            host.child.update(cx, |child, cx| {
-                child.label = "replacement".into();
-                cx.notify();
-            });
-            host.mounted = true;
+    common::update_content(handle, &handle_content, cx, |host, _, cx| {
+        host.child.update(cx, |child, cx| {
+            child.label = "replacement".into();
             cx.notify();
-        })
-        .unwrap();
+        });
+        host.mounted = true;
+        cx.notify();
+    })
+    .unwrap();
     cx.update_window(handle.into(), |_, window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
@@ -129,14 +131,14 @@ impl Render for Rows {
 
 #[gpui::test]
 fn composite_ids_follow_reordered_rows(cx: &mut TestAppContext) {
-    let handle = cx.add_window(|_, _| Rows { reversed: false });
+    let (handle, handle_content) =
+        common::open_window(cx, None, |_, cx| cx.new(|_| Rows { reversed: false }));
     for reversed in [false, true, false] {
-        handle
-            .update(cx, |rows, _, cx| {
-                rows.reversed = reversed;
-                cx.notify();
-            })
-            .unwrap();
+        common::update_content(handle, &handle_content, cx, |rows, _, cx| {
+            rows.reversed = reversed;
+            cx.notify();
+        })
+        .unwrap();
         cx.update_window(handle.into(), |_, window, cx| {
             window.refresh();
             window.draw(cx).clear(cx);
@@ -152,11 +154,15 @@ fn composite_ids_follow_reordered_rows(cx: &mut TestAppContext) {
 
 #[gpui::test]
 fn closing_one_window_preserves_other_window_and_owned_snapshot(cx: &mut TestAppContext) {
-    let first = cx.add_window(|_, _| Child {
-        label: "first".into(),
+    let (first, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|_| Child {
+            label: "first".into(),
+        })
     });
-    let second = cx.add_window(|_, _| Child {
-        label: "second".into(),
+    let (second, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|_| Child {
+            label: "second".into(),
+        })
     });
     let snapshot = cx
         .update_window(first.into(), |_, window, cx| {
@@ -227,8 +233,10 @@ impl Render for Clipped {
 #[gpui::test]
 fn clipped_center_does_not_bypass_native_hit_testing(cx: &mut TestAppContext) {
     let clicks = std::rc::Rc::new(std::cell::Cell::new(0));
-    let handle = cx.add_window(|_, _| Clipped {
-        clicks: clicks.clone(),
+    let (handle, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|_| Clipped {
+            clicks: clicks.clone(),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.refresh();
@@ -265,7 +273,8 @@ impl Render for ManyRows {
 
 #[gpui::test]
 fn large_frame_removes_stale_records_when_list_shrinks(cx: &mut TestAppContext) {
-    let handle = cx.add_window(|_, _| ManyRows { count: 1000 });
+    let (handle, handle_content) =
+        common::open_window(cx, None, |_, cx| cx.new(|_| ManyRows { count: 1000 }));
     cx.update_window(handle.into(), |_, window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);
@@ -277,12 +286,11 @@ fn large_frame_removes_stale_records_when_list_shrinks(cx: &mut TestAppContext) 
         }
     })
     .unwrap();
-    handle
-        .update(cx, |rows, _, cx| {
-            rows.count = 10;
-            cx.notify();
-        })
-        .unwrap();
+    common::update_content(handle, &handle_content, cx, |rows, _, cx| {
+        rows.count = 10;
+        cx.notify();
+    })
+    .unwrap();
     cx.update_window(handle.into(), |_, window, cx| {
         window.refresh();
         window.draw(cx).clear(cx);

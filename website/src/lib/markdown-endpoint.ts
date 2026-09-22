@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { bodyWithoutFrontmatter, expandSnippets } from './llms';
+import { isLatestVersion } from './versions';
 
 /**
  * Serves a page's markdown at its own `.md` address, the way the published site
@@ -28,6 +29,7 @@ export function markdownResponse(options: {
     headers: {
       'Content-Type': 'text/markdown; charset=utf-8',
       'Cache-Control': 'public, max-age=3600',
+      ...(isLatestVersion ? {} : { 'X-Robots-Tag': 'noindex, nofollow' }),
     },
   });
 }

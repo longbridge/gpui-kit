@@ -97,7 +97,10 @@ impl UndoManager {
         if self.ignoring {
             return false;
         }
-        if change.old_range == change.new_range && change.old_text == change.new_text {
+        if change.token_delta.is_none()
+            && change.old_range == change.new_range
+            && change.old_text == change.new_text
+        {
             self.break_transaction_coalescing();
             return false;
         }
@@ -367,6 +370,9 @@ impl UndoTransaction {
 /// Changes that do not form such a chain (multi-cursor batches, for one) always
 /// report `false`, so this only ever collapses the single-region case.
 fn is_noop_batch(changes: &[Change]) -> bool {
+    if changes.iter().any(|c| c.token_delta.is_some()) {
+        return false;
+    }
     let Some(first) = changes.first() else {
         return true;
     };
@@ -412,6 +418,9 @@ fn is_adjacent_batch(intent: EditIntent, previous: &[Change], current: &[Change]
 }
 
 fn is_adjacent(intent: EditIntent, previous: &Change, current: &Change) -> bool {
+    if previous.token_delta.is_some() || current.token_delta.is_some() {
+        return false;
+    }
     match intent {
         EditIntent::Typing => {
             previous.old_range.is_empty()

@@ -1,12 +1,13 @@
 // You can draw any chart you want by using the `Plot`.
 
+use gpui_kit::base::motion::spring;
 use gpui_kit::component::{
     ActiveTheme,
     plot::{
         AXIS_GAP, AxisText, Grid, IntoPlot, Plot, PlotAxis,
         scale::{Scale, ScaleBand, ScaleLinear, ScaleOrdinal},
         shape::{Bar, Stack, StackSeries},
-        tooltip::{CrossLine, Tooltip, TooltipState},
+        tooltip::{CrossLine, PlotHover, Tooltip, TooltipState},
     },
 };
 use gpui_kit::*;
@@ -17,6 +18,8 @@ use super::DailyDevice;
 pub struct StackedBarChart {
     data: Vec<DailyDevice>,
     series: Vec<StackSeries<DailyDevice>>,
+    /// Where the highlight band has slid to, sampled in `hover`.
+    band_center: Option<Pixels>,
 }
 
 impl StackedBarChart {
@@ -34,7 +37,11 @@ impl StackedBarChart {
             })
             .series();
 
-        Self { data, series }
+        Self {
+            data,
+            series,
+            band_center: None,
+        }
     }
 }
 
@@ -150,6 +157,24 @@ impl Plot for StackedBarChart {
         ))
     }
 
+    fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
+        // The band slides to the hovered column; on the first hovered frame it
+        // adopts the column instead of travelling from where the last hover ended.
+        self.band_center = hover.map(|hover| {
+            spring(
+                ("stacked-bar-chart", "band"),
+                hover.state().cross_line.x,
+                cx.theme()
+                    .motion_tokens()
+                    .spring_control
+                    .with_epsilon(0.1)
+                    .with_travel(!hover.is_entering()),
+                window,
+                cx,
+            )
+        });
+    }
+
     fn tooltip(
         &self,
         state: &TooltipState,
@@ -181,10 +206,12 @@ impl Plot for StackedBarChart {
         .padding_outer(0.2)
         .band_width();
 
+        let center = self.band_center.unwrap_or(state.cross_line.x);
+        // The overlay fades in and out with the hover on its own.
         let mut tooltip = Tooltip::new(cursor, bounds.size)
             .gap(px(8.))
             .cross_line(
-                CrossLine::new(state.cross_line)
+                CrossLine::new(point(center, state.cross_line.y))
                     .height(bounds.size.height.as_f32() - AXIS_GAP)
                     .band(px(band_width)),
             )

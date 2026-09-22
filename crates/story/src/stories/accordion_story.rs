@@ -243,6 +243,11 @@ impl Render for AccordionStory {
                                     Items below move along with it.",
                                         )
                                 })
+                                .item(|this| {
+                                    this.title("Disabled item")
+                                        .disabled(true)
+                                        .child("This item cannot be expanded.")
+                                })
                                 .on_toggle_click(cx.listener(
                                     |this, open_ixs: &[usize], window, cx| {
                                         this.toggle_accordion(open_ixs.to_vec(), window, cx);

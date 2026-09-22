@@ -107,10 +107,19 @@ impl WrapMap {
         new_text: &Rope,
         cx: &mut App,
     ) {
+        self.wrapper.adjust_inline_metrics(range, new_text.len());
         self.wrapper.update(changed_text, range, new_text, cx);
     }
 
     /// Update layout parameters (wrap width or font)
+    pub(super) fn set_inline_metrics(
+        &mut self,
+        metrics: std::rc::Rc<[(std::ops::Range<usize>, Pixels)]>,
+        cx: &mut App,
+    ) {
+        self.wrapper.set_inline_metrics(metrics, cx);
+    }
+
     pub(super) fn on_layout_changed(&mut self, wrap_width: Option<Pixels>, cx: &mut App) {
         self.wrapper.set_wrap_width(wrap_width, cx);
     }

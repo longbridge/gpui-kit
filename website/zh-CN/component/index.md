@@ -1,6 +1,6 @@
 ---
 title: 组件
-description: 浏览 60 多个面向生产环境的 Rust UI 组件，覆盖表单、导航、数据、反馈与桌面应用布局。
+description: 浏览 75+ 个生产就绪的 Rust UI 组件与原语，覆盖表单、导航、数据、反馈、编辑与应用布局。
 order: 2
 collapsed: false
 ---
@@ -36,6 +36,7 @@ collapsed: false
 - [DatePicker](date-picker) - 日期选择器
 - [OtpInput](otp-input) - 一次性验证码输入
 - [ColorPicker](color-picker) - 颜色选择器
+- [Questionnaire](questionnaire) - 可组合的多步骤问卷与答案
 - [Form](form) - 表单容器与布局
 
 ## 布局与高级组件
@@ -49,6 +50,7 @@ collapsed: false
 - [Scrollable](scrollable) - 可滚动容器
 - [Sidebar](sidebar) - 侧边栏导航
 - [StatusBar](status-bar) - 底部状态栏，含左/中/右三区
+- [Toolbar](toolbar) - 顶部工具栏，含左/右区域与尺寸
 - [Chart](chart) - 图表组件
 - [Carousel](carousel) - 浏览一组相关内容
 - [DataTable](data-table) - 高性能数据表格

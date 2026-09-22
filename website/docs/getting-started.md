@@ -62,15 +62,10 @@ fn main() {
         // This must be called before using any GPUI Component features.
         gpui_kit::init(cx);
 
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| HelloWorld);
-                // This first level on the window, should be a Root.
-                cx.new(|cx| Root::new(view, window, cx))
-            })
+        // Opens a window with a `Root` wrapping the view, so dialogs, sheets,
+        // notifications and menus work in it.
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| HelloWorld))
             .expect("Failed to open window");
-        })
-        .detach();
     });
 }
 ```
@@ -105,7 +100,7 @@ impl Render for MyView {
 
 ### Stateful Components
 
-See the [tested application recipes](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes) for a complete window with retained subscriptions, icons, and overlay layers. `Root` must wrap each window, and the application content must render the dialog, sheet, and notification layers it uses.
+See the [tested application recipes](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes) for a complete window with retained subscriptions, icons, and overlay layers. `gpui_kit::open_window` wraps each window's view in a `Root`, which renders the dialog, sheet and notification layers above it.
 
 Controls such as Input, List, and DataTable use retained state entities. Store that state on the owning view and construct the styled element from it during render.
 
@@ -114,7 +109,7 @@ Create the [Entity] once, outside render:
 <!-- recipe:settings:start -->
 ```rust
 use gpui_kit::component::{
-    ActiveTheme, IconName, Root, WindowExt,
+    ActiveTheme, IconName, WindowExt,
     button::Button,
     checkbox::Checkbox,
     form::{Field, Form},
@@ -172,7 +167,7 @@ impl Settings {
 }
 
 impl Render for Settings {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -230,9 +225,6 @@ impl Render for Settings {
                             }),
                     ),
             )
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
     }
 }
 ```

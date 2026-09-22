@@ -1,7 +1,7 @@
 ---
 title: 编码指南
 description: 构建可维护 GPUI Kit 应用的架构、代码风格与命名规范
-order: -2.2
+order: -13
 ---
 
 # 编码指南
@@ -75,14 +75,10 @@ crate 边界也是工程边界。它让 Cargo 只重编译和测试较小的依�
 app.run(move |cx| {
     gpui_kit::init(cx);
 
-    cx.spawn(async move |cx| {
-        cx.open_window(WindowOptions::default(), |window, cx| {
-            let workspace = cx.new(|cx| Workspace::new(window, cx));
-            cx.new(|cx| Root::new(workspace, window, cx))
-        })
-        .expect("failed to open window");
+    gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+        cx.new(|cx| Workspace::new(window, cx))
     })
-    .detach();
+    .expect("failed to open window");
 });
 ```
 
@@ -268,7 +264,7 @@ div()
 
 当前有一个必须明确的 ownership 边界：`Theme::spacing_tokens()` 投射固定默认 scale，`Theme::apply_semantic_tokens(...)` 不保存 custom spacing/elevation scale。应用如需自定义，必须自行持有 `SemanticThemeTokens`（或更窄的 design-system state）并提供给 component。不能把 custom spacing snapshot 写入 global theme 后，期待下次`cx.theme().semantic_tokens()` 仍返回它。
 
-直接修改 GPUI Component global theme 后调用 `Theme::sync_base(cx)`，让 Base 拥有的 scrollbar 与 resize handle 获得新 projection；完整 `Theme::change(...)` 会自行同步。
+通过 `Theme::update(cx, |theme| ...)` 修改 GPUI Component 的 global theme。theme 里同一份颜色存了两次（`colors` 是纯色，`tokens` 是可带渐变的可绘制背景），Base 层还持有一份给 scrollbar 与 resize handle 的 projection；`update` 在闭包结束后把三份重新对齐并刷新所有窗口。通过 `Theme::global_mut(cx)` 修改只会改到你碰的那个字段——侧栏可能用新 colors 画文字、用旧 tokens 画背景——剩下的要自己做：从 `colors` 重新推导 `tokens`、调用 `Theme::sync_base(cx)`、刷新窗口。完整的 `Theme::change(...)` 会自行同步。
 
 向外绘制的 focus ring 需要空间，ancestor `overflow_hidden()` 会裁掉它。优先让布局留出空间；产品确实需要大量 clipping 时，通过 theme focus-ring policy 保留 focused border，不能悄悄消除键盘焦点。
 
@@ -279,9 +275,7 @@ div()
 通过更新 base font 并 refresh window 改变 zoom：
 
 ```rust
-Theme::global_mut(cx).font_size = px(18.);
-Theme::sync_base(cx);
-window.refresh();
+Theme::update(cx, |theme| theme.font_size = px(18.));
 ```
 
 Base font 自身是 px，因为它负责锚定 scale。Descendant application UI 通常使用`text_sm()`、`gap_2()`、`px_3()`、`h_8()`、`size_4()` 等 relative helper，让 type、whitespace、control 与 icon 一起响应。Custom component 如果把 rem-based text 与 fixed-px padding/icon geometry 混合，必须记录为什么该部分不应 zoom。
@@ -302,6 +296,8 @@ Pointer-specific 行为使用 pointer callback；需要 key binding、menu 或�
 
 只有 nested interaction 确实必须阻止 parent 处理同一 event 时才 stop propagation。无差别阻止会破坏 menu、selection、drag 与 window command。
 
+先绑键，再建菜单栏。`cx.set_menus` 在调用那一刻读取 keymap，把每个菜单项的快捷键固化进原生菜单；之后再注册的 binding 不会出现在菜单项旁，菜单项也不响应该按键。先 `cx.bind_keys`，再 `cx.set_menus`；keymap 之后又变了（用户 keymap 文件、切换语言重建菜单），就再调一次 `cx.set_menus`。
+
 Focus owner 必须明确：
 
 - 拥有 keyboard interaction 的 Entity 保存 `FocusHandle`；
@@ -309,6 +305,8 @@ Focus owner 必须明确：
 - overlay 打开时转移 focus，关闭后恢复；
 - 绘制清楚的 `focus_visible` state；
 - 禁止在 `render` 中无条件 request focus。
+
+被 track 的 handle 只有自己声明了才是 Tab stop：用 `cx.focus_handle().tab_stop(true)`（或 `.tab_index(n)`）建它，元素自身的 `tab_index`/`tab_stop` 不会作用到传给 `track_focus` 的 handle 上。Stateless component 可以在 `render` 里通过 `window.use_keyed_state(id, cx, |_, cx| cx.focus_handle().tab_stop(true))` 建这个 handle；keyed state 跨帧保留，Tab 顺序因此稳定——`Button` 就是这么做的。
 
 `key_context` 与 `on_action` 应附着于同一个 focused region。注册了 Action 但没有正确 focus path，不算实现键盘交互。Composite widget 应完成整个 navigation model：方向键、适用时的 Home/End/Page、confirm、cancel 与 Tab，而不是几个孤立 shortcut。
 
@@ -449,7 +447,7 @@ Boolean builder 可叫 `disabled(bool)`，reader 叫 `is_disabled()`。含 non-b
 
 - **selected** 是持久 membership/active item；**focused** 是 keyboard target；**hovered** 是 pointer presence；**confirmed** 是 activation result，不能混用。
 - **open/close** 描述 overlay/disclosure state；**show/hide** 表示 transient presentation request；**expand/collapse** 描述结构。
-- **disabled** 禁止交互；**read-only** 允许导航/选择但禁止编辑；**loading** 表示操作中并应防止重复提交。
+- **disabled** 禁止交互；**readonly** 允许导航/选择但禁止编辑；**loading** 表示操作中并应防止重复提交。这个状态一律拼作 `readonly`——一个词，与 `readonly(bool)` builder 和 `is_readonly()` reader 一致——标识符、界面标签和文档中都如此，不写 `read-only` 或 `read only`。
 - **index** 是当前位置；**id** 是稳定 identity；`IndexPath` 是层级位置。重排数据不能用 index 持久化或作为 key。
 - **value** 是 controlled domain data；**presentation** 是 render 用 read-only snapshot；**state** 是 retained behavior。
 - **placement** 是 side/anchor policy；**position** 是 resolved geometry。

@@ -6,6 +6,8 @@ order: 2
 
 # 快速开始
 
+应用统一通过 `gpui_kit::open_window(options, cx, build)` 创建窗口，它挂载 Base `Root`，返回窗口句柄和内容 Entity。Base 负责窗口结构和浮层承载，不依赖 Component。需要带样式的浮层时，在创建窗口前显式初始化 Component。
+
 ## 安装
 
 使用与 `gpui-base` 匹配的 GPUI 仓库版本：

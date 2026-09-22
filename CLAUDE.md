@@ -125,37 +125,44 @@ implementing this architecture:
 
 ### Component Initialization
 
-**Critical requirement**: You must call `gpui_component::init(cx)` at your application's entry point before using any GPUI Component features.
+Call `gpui_kit::init(cx)` before opening windows that use styled components.
+It includes Base initialization and registers Component's window extension.
 
 ```rust
 fn main() {
-    let app = Application::new();
-    app.run(move |cx| {
-        // This must be called first
-        gpui_component::init(cx);
-
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| MyView);
-                // The first level view in a window must be a Root
-                cx.new(|cx| Root::new(view, window, cx))
-            })
-            .expect("Failed to open window");
-        }).detach();
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| MyView)
+        })
+        .expect("Failed to open window");
     });
 }
 ```
 
+Base-only fixtures use GPUI directly and must not depend on Kit or Component.
+Applications and Kit tests use `gpui_kit::open_window` as their window entry point.
+
 ### Root View System
 
-`Root` is the top-level view for a window and manages:
+`gpui_base::Root` is the top-level view for every window created by
+`gpui_kit::open_window`. The helper belongs only to Kit; Base supplies the Root
+implementation. `component::Root` re-exports the Base type. Cargo features do not
+select a different root type.
 
-- Sheet (side panels)
-- Dialog (dialogs)
-- Notification (notifications)
-- Keyboard navigation (Tab/Shift-Tab)
+Base owns content and overlay hosting, keyboard navigation (Tab/Shift-Tab),
+and selection copying. Explicit Component initialization registers per-window
+state and presentation for dialogs, sheets, notifications, tooltips, menus,
+touch selection, themes and window chrome. Initialize before creating windows.
 
-The first view of every window must be a `Root`.
+The helper returns the window handle and application content entity. Its builder
+must return content, not another Root. Overlay layers mount automatically; do not
+call the removed `Root::render_*_layer` methods. In async contexts call the helper
+inside `cx.update`. Tests should use the same helper and retain its returned
+content entity when they need to inspect or update application state. Avoid
+constructing `Root` directly in application and test startup code.
+
+Quit/close actions, keyboard shortcuts and confirmation flows belong to the application.
 
 ### Theme System
 
@@ -244,9 +251,12 @@ Text input system based on Rope data structure:
 - When creating a PR, inspect previous PR titles in the repository and match
   that style. Do not blindly use conventional prefixes like `fix:` or `feat:`
   unless the existing PR title style uses them.
-- When a PR changes the public API of `crates/component`, add a `## Breaking Changes`
-  section with `diff` blocks showing the old and new usage. See PR #2691 and
-  `.claude/skills/gpui-component-dev/references/pr-description.md`.
+- When a PR adds, changes or removes public API in any crate, list every item
+  under a `## Public API` section of the description, grouped by crate, with its
+  signature and one line on its purpose (JavaScript methods and TypeScript
+  declarations included). Changes to existing items also go under
+  `## Breaking Changes` with `diff` blocks showing the old and new usage. See
+  PR #2691 and the "Describe public API changes" section of `CONTRIBUTING.md`.
 - Avoid `Kind` as a type-name suffix. It says an enum classifies something
   without saying what it classifies, and carries no meaning a reader could not
   already infer from `enum`. Name the type after what its variants _are_

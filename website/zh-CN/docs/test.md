@@ -1,7 +1,7 @@
 ---
 title: 测试
 description: 通过 Rust 单元测试、TestAppContext、真实 UI 交互和布局断言测试 GPUI Kit 应用与 GPUI 行为。
-order: -2.3
+order: -11
 example: false
 ---
 
@@ -297,9 +297,8 @@ Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用�
 纯展示组件通过几何或像素断言验证，不虚构交互状态。自定义部件观察已有原生元素；
 不支持的属性保持不可用，不提供手填测试值的覆盖入口。
 
-通过 `WindowExt` 打开 Dialog、Sheet 或 Notification 的视图，需要像生产应用一样挂载
-`Root::render_dialog_layer`、`Root::render_sheet_layer` 和
-`Root::render_notification_layer` 返回的子元素。仅构造 `Root` 不会自动挂载这些覆盖层。
+通过 `WindowExt` 打开 Dialog、Sheet 或 Notification 的视图，需要窗口的根视图是 `Root`。
+`Root` 始终将这三类浮层渲染在应用内容之上，缓存视图也一样，无需手动挂载。
 
 重复控件使用 `within`。Sheet 的 `"sheet"` 宿主作用域包含 `"sheet-content"` 内容表面；
 Dialog 的 `"dialog"` 作用域包含以层下标标识的表面。子菜单也包含 `"popup-menu"`，

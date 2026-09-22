@@ -142,6 +142,8 @@ pub fn parse_theme_key(key: &str) -> ParsedKey {
         "chart_3" => ("Chart", "Color 3", "chart.3"),
         "chart_4" => ("Chart", "Color 4", "chart.4"),
         "chart_5" => ("Chart", "Color 5", "chart.5"),
+        "chart_bullish" => ("Chart", "Bullish", "chart.bullish"),
+        "chart_bearish" => ("Chart", "Bearish", "chart.bearish"),
 
         // Danger / Success / Warning / Info
         "danger" => ("Danger", "Background", "danger.background"),

@@ -142,27 +142,42 @@ window.open_alert_dialog(cx, |alert, _, _| {
 })
 ```
 
-### 自定义按钮属性
+### 自定义按钮
+
+直接在对话框上设置按钮文案和变体：
 
 ```rust
-use gpui_kit::component::dialog::DialogButtonProps;
 use gpui_kit::component::button::ButtonVariant;
 
 window.open_alert_dialog(cx, |alert, _, _| {
     alert
         .title("Delete Account")
         .description("This will permanently delete your account and all associated data.")
-        .button_props(
-            DialogButtonProps::default()
-                .ok_text("Delete")
-                .ok_variant(ButtonVariant::Danger)
-                .cancel_text("Keep")
-                .show_cancel(true)
-        )
+        .confirm()
+        .ok_text("Delete")
+        .ok_variant(ButtonVariant::Danger)
+        .cancel_text("Keep")
         .on_ok(|_, window, cx| {
             window.push_notification("Account deleted", cx);
             true
         })
+})
+```
+
+`button_props` 把同样的属性打包成一个值，便于逐步拼装或在各处传递。它只覆盖该值中显式设置的字段，对话框上已有的配置——`confirm` 要求的取消按钮、此前 `on_ok` 注册的回调——都会保留，调用顺序也就不再重要：
+
+```rust
+use gpui_kit::component::dialog::DialogButtonProps;
+
+window.open_alert_dialog(cx, move |alert, _, _| {
+    alert
+        .title("Delete Account")
+        .confirm()
+        .button_props(
+            DialogButtonProps::default()
+                .ok_text("Delete")
+                .ok_variant(ButtonVariant::Danger)
+        )
 })
 ```
 
@@ -322,17 +337,12 @@ window.open_alert_dialog(cx, |alert, _, _| {
 如果 `on_ok` 或 `on_cancel` 返回 `false`，对话框不会关闭：
 
 ```rust
-use gpui_kit::component::dialog::DialogButtonProps;
-
 window.open_alert_dialog(cx, |alert, _, _| {
     alert
         .title("Processing")
         .description("A process is running. Click Continue to stop it or Cancel to keep waiting.")
-        .button_props(
-            DialogButtonProps::default()
-                .ok_text("Continue")
-                .show_cancel(true)
-        )
+        .confirm()
+        .ok_text("Continue")
         .on_ok(|_, window, cx| {
             window.push_notification("Cannot close: Process still running", cx);
             false
@@ -369,7 +379,12 @@ window.open_alert_dialog(cx, |alert, _, _| {
 | `title(title)` | 设置标题，命令式 API |
 | `description(desc)` | 设置描述，命令式 API |
 | `icon(icon)` | 设置图标，命令式 API |
-| `button_props(props)` | 设置按钮文本、样式和可见性 |
+| `confirm()` | 同时显示确认与取消按钮 |
+| `ok_text(text)` | 设置确认按钮文案，默认 `"OK"` |
+| `ok_variant(variant)` | 设置确认按钮变体，默认 `Primary` |
+| `cancel_text(text)` | 设置取消按钮文案，默认 `"Cancel"` |
+| `cancel_variant(variant)` | 设置取消按钮变体 |
+| `button_props(props)` | 只覆盖该值中显式设置的字段，其余保留 |
 | `show_cancel(bool)` | 显示或隐藏取消按钮，默认 `false` |
 | `width(px)` | 设置宽度，默认 `420px` |
 | `overlay_closable(bool)` | 是否允许点击遮罩关闭，默认 `false` |
@@ -380,6 +395,8 @@ window.open_alert_dialog(cx, |alert, _, _| {
 | `on_close(callback)` | 设置关闭后的回调 |
 
 ### DialogButtonProps
+
+每个属性在被设置前都处于未设置状态，未设置的属性会保留对话框上已有的配置。
 
 | 方法 | 说明 |
 | ------------------------- | ---------------------------------------- |
@@ -440,12 +457,9 @@ Button::new("delete")
             alert
                 .title("Delete File?")
                 .description("This action cannot be undone.")
-                .button_props(
-                    DialogButtonProps::default()
-                        .ok_text("Delete")
-                        .ok_variant(ButtonVariant::Danger)
-                        .show_cancel(true)
-                )
+                .confirm()
+                .ok_text("Delete")
+                .ok_variant(ButtonVariant::Danger)
                 .on_ok(|_, window, cx| {
                     window.push_notification("File deleted", cx);
                     true

@@ -10,6 +10,10 @@ pub fn derive_into_plot(input: TokenStream) -> TokenStream {
         Ok(path) => path,
         Err(error) => return error.into_compile_error().into(),
     };
+    let component = match crate::crate_path::component() {
+        Ok(path) => path,
+        Err(error) => return error.into_compile_error().into(),
+    };
 
     let expanded = quote! {
         impl #impl_generics #gpui::IntoElement for #type_name #type_generics #where_clause {
@@ -97,20 +101,26 @@ pub fn derive_into_plot(input: TokenStream) -> TokenStream {
                 // open popup menu) is above the plot, unlike a plain bounds test.
                 let hitbox = window.insert_hitbox(bounds, #gpui::HitboxBehavior::Normal);
 
-                let overlay = (|| {
-                    // The cell only gates visibility: it holds the cursor recorded by the
-                    // mouse handler / per-frame sync in `paint`, which is one frame stale
-                    // during scrolling. Rendering that cached point while the bounds move
-                    // makes the tooltip jitter, so derive the position from the live mouse
-                    // position and this frame's bounds instead.
-                    Self::__plot_tooltip_cursor(global_id, window).get()?;
-                    let mouse = window.mouse_position();
-                    if !bounds.contains(&mouse) {
-                        return None;
-                    }
-                    let position = mouse - bounds.origin;
-                    let state = <Self as Plot>::tooltip_state(self, position, bounds, cx)?;
+                // The cell only gates visibility: it holds the cursor recorded by the
+                // mouse handler / per-frame sync in `paint`, which is one frame stale
+                // during scrolling. Rendering that cached point while the bounds move
+                // makes the tooltip jitter, so derive the position from the live mouse
+                // position and this frame's bounds instead.
+                let cursor = Self::__plot_tooltip_cursor(global_id, window)
+                    .get()
+                    .map(|_| window.mouse_position())
+                    .filter(|mouse| bounds.contains(mouse))
+                    .map(|mouse| mouse - bounds.origin);
+                let live = cursor
+                    .and_then(|position| <Self as Plot>::tooltip_state(self, position, bounds, cx));
 
+                // The datum to show this frame: the one under the cursor, or the last
+                // one while the hover fades out after the cursor leaves it.
+                let hover = #component::plot::tooltip::track_hover(live, cursor, window, cx);
+                <Self as Plot>::hover(self, hover.as_ref().map(|(hover, _)| hover), window, cx);
+
+                let overlay = hover.and_then(|(hover, cursor)| {
+                    let state = hover.state();
                     // Pass the live cursor so the tooltip box can follow it; the crosshair and
                     // dots in `state` stay snapped to the data point by `tooltip_state`.
                     //
@@ -118,10 +128,10 @@ pub fn derive_into_plot(input: TokenStream) -> TokenStream {
                     // below content drawn over the plot. The tooltip box defers itself (see
                     // `plot::tooltip::Tooltip`) to paint above sibling content, since it can
                     // extend past the plot bounds.
-                    let mut overlay = <Self as Plot>::tooltip(self, &state, position, bounds, window, cx)?;
+                    let mut overlay = <Self as Plot>::tooltip(self, state, cursor, bounds, window, cx)?;
                     overlay.prepaint_as_root(bounds.origin, bounds.size.into(), window, cx);
                     Some(overlay)
-                })();
+                });
 
                 (Some(hitbox), children, overlay)
             }

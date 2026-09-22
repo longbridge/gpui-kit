@@ -493,10 +493,18 @@ CandlestickChart::new(data)
 
 #### Candlestick Chart Colors
 
-The candlestick chart automatically uses theme colors:
+A candle that closed above its open is drawn in the theme's `chart.bullish` color and one that closed at or below it in `chart.bearish`. Markets that read a rise as red swap them:
 
-- **Bullish** (close > open): `bullish` color (green)
-- **Bearish** (close < open): `bearish` color (red)
+```rust
+CandlestickChart::new(data)
+    .x(|d| d.date.clone())
+    .open(|d| d.open)
+    .high(|d| d.high)
+    .low(|d| d.low)
+    .close(|d| d.close)
+    .bullish(cx.theme().danger)
+    .bearish(cx.theme().success)
+```
 
 ### SankeyChart
 
@@ -591,6 +599,103 @@ SankeyChart::new(nodes, links).value_scale(SankeyValueScale::Sqrt)
 ```
 
 Every node stays exactly filled by its ribbons under either scale, so children always match their parent's height.
+
+## Hover and Tooltips
+
+Every chart hit-tests the cursor, shows a tooltip for the datum under it, and emphasizes that datum the way the chart's kind calls for. Nothing opts in:
+
+```rust
+LineChart::new(data)
+    .x(|d| d.date.clone())
+    .y(|d| d.value)
+    .name("Desktop") // The series name in the tooltip row
+```
+
+| Chart | On hover |
+| --- | --- |
+| `LineChart`, `AreaChart` | A crosshair and a dot per series glide along the line to the hovered point; the dot grows a halo. |
+| `BarChart` | A highlight band the width of a bar slides to the hovered bar, and the other bars fade behind it. |
+| `PieChart` | The hovered slice lifts out of the ring and the others fade; the tooltip shows the value and its share, via `tooltip_value` if one is set. |
+| `RadarChart` | A dot per series glides along the polygon to the hovered spoke. |
+| `CandlestickChart` | A highlight band slides to the hovered candle; the tooltip lists open, high, low and close. |
+| `SankeyChart` | The links of the hovered node keep their color while the rest fade; the tooltip shows the node's name and throughput, via `tooltip_name` / `tooltip_value` if set. |
+
+The tooltip box follows the cursor, flipping toward the center of the plot near each edge. `AreaChart` and `RadarChart` take one `.name()` per series, called after the matching `.y()` / `.value()`.
+
+A tooltip row reads as a swatch, a name and a value. `PieChart::tooltip_name` and `SankeyChart::tooltip_name` set that name from the datum under the cursor — the slice's name, the node's name — which for a chart showing one number per datum is what the row wants. Unset, a pie falls back to `name`, the single name the whole series carries, and a sankey's row carries no name at all: a swatch and a number with a gap between them.
+
+`name` cannot stand in for it. It says what the numbers measure, the same for every slice, so it can never say which slice the tooltip is about. Titling the tooltip from `label` cannot either, since `label` also draws the leader lines around the ring, and a sankey's `node_label` likewise writes beside the node.
+
+`PieChart::tooltip_value` replaces the text of its row, which the default writes as the raw value and its share. Set it wherever the raw number is not what a reader should see — a value that is already a ratio reads as `0.35 (35.0%)` otherwise, and a chart drawn from adjusted values, such as a floor that keeps a hairline slice visible, would report the adjustment as though it were the datum:
+
+```rust
+PieChart::new(holdings)
+    .value(|d| d.ratio.max(MIN_VISIBLE))     // Drawn with a floor
+    .tooltip_name(|d| d.name.clone())        // Named without leader lines
+    .tooltip_value(|d, _, _| pct(d.ratio))   // Read as it truly is
+```
+
+### Identity
+
+All of it is keyed on an `ElementId`, which a chart takes from the source location it was constructed at — unique for a chart written out once, which is nearly every chart. Where one construction site renders several charts as siblings, name them apart, or they share one hover state and one cache:
+
+```rust
+shares.iter().enumerate().map(|(i, share)| PieChart::new(share.clone()).id(("share", i)))
+```
+
+A `GlobalElementId` is the whole id stack, so siblings that already carry an id of their own — rows drawn by `List` or `uniform_list`, say — separate the charts beneath them without help.
+
+### Turning it off
+
+`interactive(false)` takes the whole layer away, hitbox included, the way Highcharts' `enableMouseTracking` or ECharts' `silent` does. Reach for it in two places: a chart that only decorates, and a chart something else is drawn over:
+
+```rust
+AreaChart::new(placeholder).interactive(false) // A skeleton, a thumbnail
+AreaChart::new(range).interactive(false)       // A backdrop under drag handles
+```
+
+The second matters because a plain hitbox does not block the one behind it: an element painted over an interactive chart is hovered *and so is the chart*, so the crosshair keeps tracking under it. The chart has to stand down.
+
+### Motion
+
+The emphasis is animated with the styled layer's motion tokens (`cx.theme().motion_tokens()`): pointers — crosshair, band, dots — follow the hovered datum on a fast spring, a pie slice lifts on the control spring, and the whole overlay fades in when the cursor lands on a datum and out after it leaves. The motion honors the operating system's reduced-motion preference, under which every value adopts its target at once.
+
+### Caching
+
+A chart also keeps its heavy geometry across frames, since it repaints on every frame it is on screen: line and area strokes and pie slices stay tessellated while their projected points are unchanged, and a sankey diagram keeps its placement while its data, settings and size are unchanged. This cache hangs off the same id, so charts sharing one share the cache and thrash it — another reason to name siblings apart — and a chart with `interactive(false)`, having no id of its own, rebuilds its geometry on each paint.
+
+### Custom Plots
+
+A custom [`Plot`] opts in by hand — `Plot::id` defaults to `None` there: return an id from it, resolve the datum under the cursor in `Plot::tooltip_state`, and build the overlay in `Plot::tooltip`. To animate the emphasis, implement `Plot::hover`, which runs each frame before `tooltip` and `paint` with the [`PlotHover`] in focus — it carries the `TooltipState` and lingers after the cursor leaves while `hover.focus()` eases back to zero, so sample the motion there and keep the result on `self` for the other two methods. A `Tooltip` returned from `tooltip` fades with the hover on its own:
+
+```rust
+fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
+    self.band_center = hover.map(|hover| {
+        spring(
+            ("my-plot", "band"),
+            hover.state().cross_line.x,
+            // Adopt the datum on the first hovered frame instead of travelling
+            // from where the last hover ended.
+            cx.theme().motion_tokens().spring_control.with_travel(!hover.is_entering()),
+            window,
+            cx,
+        )
+    });
+}
+
+fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pixels>, _: &mut Window, cx: &mut App) -> Option<AnyElement> {
+    let center = self.band_center.unwrap_or(state.cross_line.x);
+    Some(
+        Tooltip::new(cursor, bounds.size)
+            .cross_line(CrossLine::new(point(center, state.cross_line.y)).band(px(24.)))
+            .title("Title")
+            .row(cx.theme().chart_1, "Series", "42")
+            .into_any_element(),
+    )
+}
+```
+
+`Dot::halo(size)` draws the translucent ring the built-in charts put behind a hovered dot.
 
 ## Data Structures
 
@@ -696,11 +801,8 @@ let chart = LineChart::new(data)
     .y(|d| d.value)
     .stroke(cx.theme().chart_1); // Uses theme chart colors
 
-// Available theme chart colors:
-// cx.theme().chart_1
-// cx.theme().chart_2
-// cx.theme().chart_3
-// ... up to chart_5
+// Available theme chart colors (`chart.1` … `chart.5` in the theme file):
+// cx.theme().chart_1 … cx.theme().chart_5
 ```
 
 ## API Reference

@@ -56,6 +56,25 @@ impl SelectionMode {
     }
 }
 
+/// The current selection of a table, as one value.
+///
+/// Mirrors [`TableEvent::SelectRow`], [`TableEvent::SelectColumn`] and
+/// [`TableEvent::SelectCell`]. Match on it instead of combining
+/// [`TableState::selected_row`], [`TableState::selected_col`] and
+/// [`TableState::selected_cell`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+pub enum TableSelection {
+    /// Nothing is selected.
+    #[default]
+    None,
+    /// A row is selected.
+    Row(usize),
+    /// A column is selected.
+    Column(usize),
+    /// A cell is selected, as `(row_ix, col_ix)`.
+    Cell(usize, usize),
+}
+
 /// The Table event.
 #[derive(Clone)]
 pub enum TableEvent {
@@ -454,9 +473,28 @@ where
         })
     }
 
+    /// Returns the current selection as one value.
+    ///
+    /// A selected cell reports as [`TableSelection::Cell`] only; use
+    /// `selected_cell().map(|(row_ix, _)| row_ix)` when the cell's row is wanted.
+    pub fn selection(&self) -> TableSelection {
+        if let Some(row_ix) = self.selected_row() {
+            TableSelection::Row(row_ix)
+        } else if let Some(col_ix) = self.selected_col() {
+            TableSelection::Column(col_ix)
+        } else if let Some((row_ix, col_ix)) = self.selected_cell() {
+            TableSelection::Cell(row_ix, col_ix)
+        } else {
+            TableSelection::None
+        }
+    }
+
     /// Returns the selected row index.
+    ///
+    /// `Some` only when a row itself is selected; a selected cell does not
+    /// count, see [`TableState::selection`].
     pub fn selected_row(&self) -> Option<usize> {
-        self.selected_row
+        self.selected_row.filter(|_| self.selection_mode.is_row())
     }
 
     /// Sets the selected row to the given index.
@@ -500,8 +538,12 @@ where
     }
 
     /// Returns the selected column index.
+    ///
+    /// `Some` only when a column itself is selected; a selected cell does not
+    /// count, see [`TableState::selection`].
     pub fn selected_col(&self) -> Option<usize> {
         self.selected_col
+            .filter(|_| self.selection_mode.is_column())
     }
 
     /// Sets the selected col to the given index.
@@ -517,7 +559,7 @@ where
 
     /// Returns the selected cell as `(row_ix, col_ix)`.
     ///
-    /// Returns `None` if no cell is currently selected or if the table is in row/column selection mode.
+    /// `Some` only when a cell is selected; see [`TableState::selection`].
     ///
     /// # Example
     ///
@@ -527,7 +569,7 @@ where
     /// }
     /// ```
     pub fn selected_cell(&self) -> Option<(usize, usize)> {
-        self.selected_cell
+        self.selected_cell.filter(|_| self.selection_mode.is_cell())
     }
 
     /// Sets the selected cell to the given row and column indices.
@@ -556,6 +598,19 @@ where
 
         cx.emit(TableEvent::SelectCell(row_ix, col_ix));
         cx.notify();
+    }
+
+    /// Sets the selection as one value; [`TableSelection::None`] clears it.
+    ///
+    /// Scrolls and emits exactly as the matching `set_selected_*` or
+    /// [`TableState::clear_selection`] call would.
+    pub fn set_selection(&mut self, selection: TableSelection, cx: &mut Context<Self>) {
+        match selection {
+            TableSelection::None => self.clear_selection(cx),
+            TableSelection::Row(row_ix) => self.set_selected_row(row_ix, cx),
+            TableSelection::Column(col_ix) => self.set_selected_col(col_ix, cx),
+            TableSelection::Cell(row_ix, col_ix) => self.set_selected_cell(row_ix, col_ix, cx),
+        }
     }
 
     /// Clear the selection of the table.
@@ -801,8 +856,7 @@ where
         // giving users a way to pick rows without the dedicated header column.
         // Double-clicks are passed through to `DoubleClickedCell` and never
         // trigger the escalation.
-        let is_reselect =
-            self.selection_mode.is_cell() && self.selected_cell == Some((row_ix, col_ix));
+        let is_reselect = self.selected_cell() == Some((row_ix, col_ix));
         let should_escalate_to_row =
             !self.row_header && self.row_selectable && is_reselect && !is_double_click;
         if should_escalate_to_row {
@@ -818,7 +872,7 @@ where
     }
 
     fn has_selection(&self) -> bool {
-        self.selected_row.is_some() || self.selected_col.is_some() || self.selected_cell.is_some()
+        self.selection() != TableSelection::None
     }
 
     pub(super) fn action_cancel(&mut self, _: &Cancel, _: &mut Window, cx: &mut Context<Self>) {
@@ -1354,12 +1408,9 @@ where
                 .map(|col_group| col_group.column.selectable)
                 .unwrap_or(false);
 
-        // Don't show column selection if a cell is selected
-        if self.selection_mode.is_cell() {
-            return el;
-        }
-
-        if selectable && self.selected_col == Some(col_ix) && self.selection_mode.is_column() {
+        // `selected_col()` is `None` outside column mode, so a selected cell
+        // never leaves its column highlighted.
+        if selectable && self.selected_col() == Some(col_ix) {
             el.bg(cx.theme().tokens.table_active)
         } else {
             el
@@ -1957,7 +2008,9 @@ where
     ) -> gpui::AnyElement {
         let horizontal_scroll_handle = self.horizontal_scroll_handle.clone();
         let is_stripe_row = self.options.stripe && row_ix % 2 != 0;
-        let is_selected = self.selected_row == Some(row_ix);
+        // `selected_row()` is `None` outside row mode, so a selected cell or
+        // column never highlights its row.
+        let is_selected = self.selected_row() == Some(row_ix);
         let view = cx.entity().clone();
         let row_height = self.options.size.table_row_height();
 
@@ -1999,9 +2052,8 @@ where
                                 let mut items = Vec::with_capacity(left_columns_count);
 
                                 (0..left_columns_count).for_each(|col_ix| {
-                                    let is_cell_selected = self.selected_cell
-                                        == Some((row_ix, col_ix))
-                                        && self.selection_mode.is_cell();
+                                    let is_cell_selected =
+                                        self.selected_cell() == Some((row_ix, col_ix));
                                     let is_cell_right_clicked =
                                         self.right_clicked_cell == Some((row_ix, col_ix));
 
@@ -2105,9 +2157,8 @@ where
 
                                         visible_range.for_each(|col_ix| {
                                             let col_ix = col_ix + left_columns_count;
-                                            let is_cell_selected = table.selected_cell
-                                                == Some((row_ix, col_ix))
-                                                && table.selection_mode.is_cell();
+                                            let is_cell_selected =
+                                                table.selected_cell() == Some((row_ix, col_ix));
                                             let is_cell_right_clicked =
                                                 table.right_clicked_cell == Some((row_ix, col_ix));
 
@@ -2190,8 +2241,7 @@ where
                         .child(self.delegate.render_last_empty_col(window, cx)),
                 )
                 // Row selected style
-                // Note: Don't show row selection if a cell is selected
-                .when(is_selected && self.selection_mode.is_row(), |this| {
+                .when(is_selected, |this| {
                     let bg = if cx.theme().list.active_highlight {
                         cx.theme().tokens.table_active
                     } else {

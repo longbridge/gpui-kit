@@ -109,6 +109,8 @@ pub(crate) fn input_style(disabled: bool, cx: &App) -> (Hsla, Hsla) {
 /// A text input element bind to an [`InputState`].
 #[derive(IntoElement)]
 pub struct Input {
+    token_renderer: Option<gpui_base::input::InlineTokenRenderer>,
+    token_click_listener: Option<gpui_base::input::InlineTokenClickListener>,
     id: Option<ElementId>,
     state: TextInputState,
     style: StyleRefinement,
@@ -170,6 +172,27 @@ impl crate::FocusableExt for Input {
 }
 
 impl Input {
+    /// The element each atomic inline token renders as, in place of the default
+    /// [`InputToken`](super::InputToken); editing and history stay
+    /// with the input.
+    pub fn token<R: IntoElement>(
+        mut self,
+        render: impl Fn(&super::InlineTokenContext, &mut Window, &mut App) -> R + 'static,
+    ) -> Self {
+        self.token_renderer = Some(Rc::new(move |token, window, cx| {
+            render(token, window, cx).into_any_element()
+        }));
+        self
+    }
+    /// Open a reference after a completed, unconsumed token click.
+    pub fn on_token_click(
+        mut self,
+        listener: impl Fn(&super::InlineTokenClickEvent, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.token_click_listener = Some(Rc::new(listener));
+        self
+    }
+
     /// Sets the GPUI identity of the input frame. By default it uses the state entity ID.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.id = Some(id.into());
@@ -213,6 +236,8 @@ impl Input {
             aria_label: None,
             context_menu_builder: None,
             paste_handler: None,
+            token_renderer: None,
+            token_click_listener: None,
         }
     }
 
@@ -489,6 +514,17 @@ impl RenderOnce for Input {
         const LINE_HEIGHT: Rems = Rems(1.25);
         let text_align = self.style.text.text_align.unwrap_or(TextAlign::Left);
         let state = self.state.clone();
+        state.install_token_presentation(
+            Some(self.token_renderer.unwrap_or_else(|| {
+                Rc::new(|token, _, _| super::InputToken::new(token).into_any_element())
+            })),
+            self.token_click_listener,
+            matches!(
+                self.content_type,
+                Some(InputContentType::Password | InputContentType::NewPassword)
+            ),
+            cx,
+        );
         // Which kind of input this registers as follows from the state itself.
         sync_focused_input_registry(&state, window, cx);
 

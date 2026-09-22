@@ -1,8 +1,11 @@
 use gpui::Corners;
 use std::{
+    cell::RefCell,
+    collections::HashMap,
+    mem,
     ops::Range,
     rc::Rc,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
 };
 
 use gpui::{
@@ -201,6 +204,12 @@ pub(super) struct Inline {
     selection_bounds: Option<Bounds<Pixels>>,
     selection_source: Option<(Arc<Mutex<InlineState>>, Range<usize>)>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    /// What this frame's layout was shaped with, to hand the shaped text to
+    /// the next frame (see [`RetainedLayout`]).
+    retained_key: Option<(Vec<TextRun>, TextStyle)>,
+    /// The shaped text is in the table, not in `styled_text`, until paint
+    /// takes it back.
+    handed_over: bool,
 
     state: Arc<Mutex<InlineState>>,
 }
@@ -214,6 +223,74 @@ pub(crate) struct InlineState {
     pub(super) selection: Option<Selection>,
 }
 
+/// One frame's [`StyledText`], kept for the next frame's [`Inline`] of the
+/// same [`InlineState`].
+///
+/// A [`TextLayout`] remembers the size and the shaped lines of its last
+/// measurement and answers a repeated measure at the same wrap width from
+/// them, but a fresh `StyledText` every frame throws that away, so every
+/// frame of a scroll paid for a line wrapper, a shaping-cache lookup that
+/// hashes the whole paragraph, and the allocations around them for every
+/// visible paragraph. Handing the same `StyledText` to the next frame makes
+/// those measurements hits. A layout is only reused when the text, the runs
+/// (colors, fades, fonts) and the text style (font size, line height) it was
+/// shaped with are unchanged; a different wrap width misses inside
+/// `TextLayout` and reshapes as before.
+///
+/// `StyledText` is main-thread only (an `Rc` inside), while `InlineState`
+/// travels through the background parse, so the layouts live in a
+/// thread-local table keyed by the state's address, with a `Weak` to tell a
+/// live state from a reused address.
+struct RetainedLayout {
+    state: Weak<Mutex<InlineState>>,
+    styled_text: StyledText,
+    text: SharedString,
+    runs: Vec<TextRun>,
+    text_style: TextStyle,
+}
+
+thread_local! {
+    static RETAINED_LAYOUTS: RefCell<HashMap<usize, RetainedLayout>> = RefCell::new(HashMap::new());
+}
+
+/// Dead entries (states that were dropped without a final paint, e.g. a
+/// replaced document) are swept once the table grows past this many.
+const RETAINED_SWEEP_AT: usize = 4096;
+
+fn state_key(state: &Arc<Mutex<InlineState>>) -> usize {
+    Arc::as_ptr(state) as usize
+}
+
+/// Takes the layout retained for `state`, if the previous frame left one.
+fn take_retained_layout(state: &Arc<Mutex<InlineState>>) -> Option<RetainedLayout> {
+    RETAINED_LAYOUTS.with(|layouts| {
+        let retained = layouts.borrow_mut().remove(&state_key(state))?;
+        // The address may belong to a new state by now.
+        retained
+            .state
+            .upgrade()
+            .is_some_and(|live| Arc::ptr_eq(&live, state))
+            .then_some(retained)
+    })
+}
+
+/// Whether the table already holds a layout for `state`: every entry left
+/// by the previous frame is taken at layout time, so one that is present
+/// afterwards was put there this frame, by another element of the same state.
+fn has_retained_layout(state: &Arc<Mutex<InlineState>>) -> bool {
+    RETAINED_LAYOUTS.with(|layouts| layouts.borrow().contains_key(&state_key(state)))
+}
+
+fn retain_layout(state: &Arc<Mutex<InlineState>>, retained: RetainedLayout) {
+    RETAINED_LAYOUTS.with(|layouts| {
+        let mut layouts = layouts.borrow_mut();
+        if layouts.len() >= RETAINED_SWEEP_AT {
+            layouts.retain(|_, retained| retained.state.strong_count() > 0);
+        }
+        layouts.insert(state_key(state), retained);
+    });
+}
+
 impl InlineState {
     /// Save actually rendered text for selected text to use.
     pub(crate) fn set_text(&mut self, text: SharedString) {
@@ -222,6 +299,50 @@ impl InlineState {
 }
 
 impl Inline {
+    /// Hands the shaped text to the next frame (see [`RetainedLayout`]).
+    /// Called after prepaint, so an element that is laid out but never
+    /// painted (scrolled out of view) keeps its layout too; paint takes it
+    /// back for the duration of painting.
+    ///
+    /// When another element of the same state already handed one over this
+    /// frame (the same document shown twice), this one keeps its own: the
+    /// table holds one layout per state, and an element must never be left
+    /// to paint without its shaped text.
+    fn retain_styled_text(&mut self) {
+        if self.handed_over || self.retained_key.is_none() || has_retained_layout(&self.state) {
+            return;
+        }
+        let Some((runs, text_style)) = self.retained_key.take() else {
+            return;
+        };
+        retain_layout(
+            &self.state,
+            RetainedLayout {
+                state: Arc::downgrade(&self.state),
+                styled_text: mem::replace(&mut self.styled_text, StyledText::new("")),
+                text: self.text.clone(),
+                runs,
+                text_style,
+            },
+        );
+        self.handed_over = true;
+    }
+
+    /// Takes the shaped text back from the table for painting. `false` when
+    /// it is gone, in which case there is nothing to paint with.
+    fn reclaim_styled_text(&mut self) -> bool {
+        if !self.handed_over {
+            return true;
+        }
+        let Some(retained) = take_retained_layout(&self.state) else {
+            return false;
+        };
+        self.styled_text = retained.styled_text;
+        self.retained_key = Some((retained.runs, retained.text_style));
+        self.handed_over = false;
+        true
+    }
+
     pub(super) fn new(
         state: Arc<Mutex<InlineState>>,
         links: Vec<(Range<usize>, LinkMark)>,
@@ -243,6 +364,8 @@ impl Inline {
             selection_bounds: None,
             selection_source: None,
             link_click_handler,
+            retained_key: None,
+            handed_over: false,
             state,
         }
     }
@@ -622,7 +745,17 @@ impl Element for Inline {
             .unwrap_or_else(|| window.text_style());
         let runs = text_runs(self.text.len(), &text_style, &self.highlights);
 
-        self.styled_text = StyledText::new(self.text.clone()).with_runs(runs);
+        // Reuse the previous frame's shaped text when it was shaped from the
+        // same text, runs and style; `StyledText` consumes its runs on every
+        // layout, so they are handed over again either way.
+        let retained = take_retained_layout(&self.state).filter(|retained| {
+            retained.text == self.text && retained.runs == runs && retained.text_style == text_style
+        });
+        self.styled_text = match retained {
+            Some(retained) => retained.styled_text.with_runs(runs.clone()),
+            None => StyledText::new(self.text.clone()).with_runs(runs.clone()),
+        };
+        self.retained_key = Some((runs, text_style));
         let (layout_id, _) =
             self.styled_text
                 .request_layout(global_element_id, inspector_id, window, cx);
@@ -661,6 +794,7 @@ impl Element for Inline {
         }
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        self.retain_styled_text();
         hitbox
     }
 
@@ -677,6 +811,12 @@ impl Element for Inline {
         let bounds = Bounds::new(self.paint_origin.unwrap_or(bounds.origin), bounds.size);
         let current_view = window.current_view();
         let hitbox = prepaint;
+        if !self.reclaim_styled_text() {
+            // Cannot happen (only this element takes what it handed over,
+            // and a live state is never swept); skip the frame rather than
+            // paint an unmeasured placeholder.
+            return;
+        }
         let text_layout = self.styled_text.layout().clone();
         self.styled_text
             .paint(global_id, None, bounds, &mut (), &mut (), window, cx);
@@ -883,6 +1023,9 @@ impl Element for Inline {
                 }
             });
         }
+
+        drop(state);
+        self.retain_styled_text();
     }
 }
 
@@ -1642,5 +1785,56 @@ mod tests {
             end,
             line_height
         ));
+    }
+}
+
+#[cfg(test)]
+mod retained_layout_tests {
+    use gpui::{
+        AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, Styled as _,
+        TestAppContext, Window, div, px,
+    };
+
+    use super::RETAINED_LAYOUTS;
+    use crate::text::{TextView, TextViewState};
+
+    /// The same document shown twice in one window, as a preview beside the
+    /// text: both `Inline`s share every `InlineState`.
+    struct Twice {
+        state: Entity<TextViewState>,
+    }
+
+    impl Render for Twice {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(300.))
+                .child(TextView::new(&self.state))
+                .child(TextView::new(&self.state))
+        }
+    }
+
+    /// Without the hand-over rule the second copy's prepaint replaced the
+    /// first copy's entry, and the first copy painted with the second's
+    /// layout — at the second's bounds.
+    #[gpui::test]
+    fn the_same_paragraph_rendered_twice_in_a_frame_keeps_one_layout_and_paints_both(
+        cx: &mut TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, cx| Twice {
+            state: cx
+                .new(|cx| TextViewState::markdown("First paragraph.\n\nSecond **paragraph**.", cx)),
+        });
+        cx.run_until_parked();
+
+        // Frame 1 fills the table, frame 2 reuses it; neither may lose the
+        // shaped text of either copy (painting an unmeasured placeholder
+        // panics inside GPUI).
+        for _ in 0..3 {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+
+        let retained = RETAINED_LAYOUTS.with(|layouts| layouts.borrow().len());
+        assert_eq!(retained, 2, "one layout per paragraph state");
     }
 }

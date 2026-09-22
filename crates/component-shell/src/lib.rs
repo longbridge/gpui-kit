@@ -57,36 +57,9 @@ fn open_window_with_root(
 
     let handle = cx.open_window(options, |window, cx| {
         let inner = build(window, cx);
-        let host = cx.new(|_| CatalogHost(inner));
-        cx.new(|cx| gpui_component::Root::new(host, window, cx))
+        cx.new(|cx| gpui_component::Root::new(inner, window, cx))
     })?;
     Ok(handle.into())
-}
-
-/// Renders the runtime's view together with the overlay layers `Root` expects
-/// its child to place.
-///
-/// `Root` itself draws only the child, the tooltip overlay and the native menu;
-/// the sheet, dialog and notification layers are the application root's to
-/// render. Without them a dialog opens into a window that never draws it, which
-/// looks exactly like a dialog that does not open.
-struct CatalogHost(gpui_shell::gpui::AnyView);
-
-impl gpui_shell::gpui::Render for CatalogHost {
-    fn render(
-        &mut self,
-        window: &mut gpui_shell::gpui::Window,
-        cx: &mut gpui_shell::gpui::Context<Self>,
-    ) -> impl gpui_shell::gpui::IntoElement {
-        use gpui_shell::gpui::{ParentElement as _, Styled as _};
-
-        gpui_shell::gpui::div()
-            .size_full()
-            .child(self.0.clone())
-            .children(gpui_component::Root::render_sheet_layer(window, cx))
-            .children(gpui_component::Root::render_dialog_layer(window, cx))
-            .children(gpui_component::Root::render_notification_layer(window, cx))
-    }
 }
 
 /// Registers this crate's descriptors into its private catalog assembly.

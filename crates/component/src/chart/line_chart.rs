@@ -4,20 +4,30 @@ use gpui::{
     AnyElement, App, Bounds, ElementId, Hsla, IntoElement, Pixels, Point, SharedString, Window,
     point, px,
 };
+use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
 use num_traits::{Num, ToPrimitive};
 
 use crate::{
     ActiveTheme,
     plot::{
-        AXIS_GAP, Grid, Plot, PlotAxis, StrokeStyle,
+        AXIS_GAP, Grid, PathCaches, Plot, PlotAxis, StrokeStyle,
         scale::{Scale, ScaleLinear, ScalePoint, Sealed},
         shape::Line,
-        tooltip::{CrossLine, Dot, Tooltip, TooltipState},
+        tooltip::{CrossLine, Dot, PlotHover, Tooltip, TooltipState},
     },
 };
 
-use super::build_point_x_labels;
+use super::{HOVER_DOT_SIZE, build_point_x_labels, caller_id, hover_halo_size, pointer_spring};
+
+/// The hover a line chart paints, sampled once per frame in [`Plot::hover`].
+#[derive(Clone, Copy)]
+struct LineHover {
+    /// Where the crosshair and the dot have slid to; the dot follows the line.
+    dot: Point<Pixels>,
+    /// How far the hover has faded in.
+    focus: f32,
+}
 
 #[derive(IntoPlot)]
 pub struct LineChart<T, X, Y>
@@ -35,8 +45,10 @@ where
     tick_margin: usize,
     x_axis: bool,
     grid: bool,
-    id: Option<ElementId>,
+    id: ElementId,
+    interactive: bool,
     name: Option<SharedString>,
+    hover: Option<LineHover>,
 }
 
 impl<T, X, Y> LineChart<T, X, Y>
@@ -44,6 +56,7 @@ where
     X: PartialEq + Into<SharedString> + 'static,
     Y: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
 {
+    #[track_caller]
     pub fn new<I>(data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -58,17 +71,34 @@ where
             tick_margin: 1,
             x_axis: true,
             grid: true,
-            id: None,
+            id: caller_id(),
+            interactive: true,
             name: None,
+            hover: None,
         }
     }
 
-    /// Enable an interactive hover tooltip (with crosshair and a data dot) for this chart.
+    /// Name this chart's [`ElementId`], replacing the default taken from the
+    /// construction site.
     ///
-    /// The `id` must be unique among sibling elements. Without it, the chart stays a
-    /// non-interactive plot.
+    /// Pass one where a single construction site renders several of these
+    /// charts as siblings: they share the default id, and with it one hover
+    /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
-        self.id = Some(id.into());
+        self.id = id.into();
+        self
+    }
+
+    /// Turn this chart's interactive layer on or off. On by default.
+    ///
+    /// The layer is the hitbox under the cursor and what it drives: a crosshair
+    /// and a dot mark the hovered point, and a tooltip shows its value. Turn it
+    /// off for a chart that only decorates, or one an element above it wants the
+    /// cursor for: without a hitbox it neither answers the mouse nor takes the
+    /// hover from what sits over it. A chart that is off also drops its path
+    /// cache, which is keyed on the same id.
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
         self
     }
 
@@ -212,11 +242,21 @@ where
             line = line.dot().dot_size(8.).dot_fill_color(stroke);
         }
 
-        line.paint(&bounds, window);
+        // Caching hangs off the chart's own id, which only an interactive chart
+        // puts on the stack; without one, siblings would share a slot and thrash
+        // it, so a chart that is off tessellates afresh each paint.
+        if self.interactive {
+            let caches = PathCaches::for_paint("line", window, cx);
+            caches.update(cx, |caches, _| {
+                line.paint_cached(&bounds, caches.slot(0), window);
+            });
+        } else {
+            line.paint(&bounds, window);
+        }
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.id.clone()
+        self.interactive.then(|| self.id.clone())
     }
 
     fn tooltip_state(
@@ -246,6 +286,24 @@ where
         ))
     }
 
+    fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
+        self.hover = hover.and_then(|hover| {
+            // The crosshair and dot slide along the line to the hovered point; on the
+            // first hovered frame they adopt it instead of travelling from where the
+            // last hover ended.
+            let target = *hover.state().dots.first()?;
+            let policy = pointer_spring(cx).with_travel(!hover.is_entering());
+            let dot = point(
+                spring(("line-chart", "x"), target.x, policy, window, cx),
+                spring(("line-chart", "y"), target.y, policy, window, cx),
+            );
+            Some(LineHover {
+                dot,
+                focus: hover.focus(),
+            })
+        });
+    }
+
     fn tooltip(
         &self,
         state: &TooltipState,
@@ -261,22 +319,30 @@ where
         let stroke = self.stroke.unwrap_or(cx.theme().chart_2);
         let name = self.name.clone().unwrap_or_default();
 
+        // Where the hover has slid to this frame; the data point itself, in full
+        // focus, before the first `hover` sample.
+        let (dot, focus) = match self.hover {
+            Some(hover) => (hover.dot, hover.focus),
+            None => (*state.dots.first()?, 1.),
+        };
+
         Some(
             // Follow the cursor; the crosshair and dot stay snapped to the data point.
             Tooltip::new(cursor, bounds.size)
                 .gap(px(8.))
                 // Confine the crosshair to the plot area so it doesn't cross the x-axis.
                 .cross_line(
-                    CrossLine::new(state.cross_line).height(
+                    CrossLine::new(point(dot.x, state.cross_line.y)).height(
                         bounds.size.height.as_f32() - if self.x_axis { AXIS_GAP } else { 0. },
                     ),
                 )
-                .dots(
-                    state
-                        .dots
-                        .iter()
-                        .map(|p| Dot::new(*p).stroke(cx.theme().background).fill(stroke)),
-                )
+                .dots(Some(
+                    Dot::new(dot)
+                        .size(HOVER_DOT_SIZE)
+                        .halo(hover_halo_size(focus))
+                        .stroke(cx.theme().background)
+                        .fill(stroke),
+                ))
                 .title(title)
                 .row(stroke, name, format!("{}", value))
                 .into_any_element(),

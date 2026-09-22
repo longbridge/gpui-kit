@@ -8,7 +8,7 @@ use gpui::{
 };
 
 use crate::{
-    DeferredPopover, GlobalState, Popup, Selectable,
+    DeferredPopover, GlobalState, Popup, ResolvedPosition, Selectable,
     actions::{Cancel, Confirm},
 };
 
@@ -169,6 +169,8 @@ type ContentBuilder =
 pub struct Popover {
     id: ElementId,
     anchor: Anchor,
+    offset: gpui::Pixels,
+    on_position: Option<Box<dyn Fn(ResolvedPosition, gpui::Bounds<gpui::Pixels>)>>,
     default_open: bool,
     open: Option<bool>,
     tracked_focus_handle: Option<FocusHandle>,
@@ -184,6 +186,8 @@ impl Popover {
         Self {
             id: id.into(),
             anchor: Anchor::TopLeft,
+            offset: gpui::px(0.),
+            on_position: None,
             default_open: false,
             open: None,
             tracked_focus_handle: None,
@@ -200,6 +204,21 @@ impl Popover {
         self
     }
 
+    /// Gap from the trigger along the anchor's outward direction, zero by default.
+    pub fn offset(mut self, offset: gpui::Pixels) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Observe geometry to supply presentation such as a pointer arrow.
+    pub fn on_position(
+        mut self,
+        callback: impl Fn(ResolvedPosition, gpui::Bounds<gpui::Pixels>) + 'static,
+    ) -> Self {
+        self.on_position = Some(Box::new(callback));
+        self
+    }
+
     pub fn mouse_button(mut self, mouse_button: MouseButton) -> Self {
         self.mouse_button = mouse_button;
         self
@@ -210,8 +229,8 @@ impl Popover {
         T: Selectable + IntoElement + 'static,
     {
         self.trigger = Some(Box::new(|is_open, _, _| {
-            let selected = trigger.is_selected();
-            trigger.selected(selected || is_open).into_any_element()
+            let open = trigger.is_open();
+            trigger.open(open || is_open).into_any_element()
         }));
         self
     }
@@ -287,6 +306,10 @@ impl RenderOnce for Popover {
         let parent_view_id = window.current_view();
         let popup = Popup::new(self.id, trigger(open, window, cx))
             .anchor(self.anchor)
+            .offset(self.offset)
+            .when_some(self.on_position, |this, callback| {
+                this.on_position(callback)
+            })
             .key_context(CONTEXT)
             .on_action({
                 let state = state.clone();
@@ -451,6 +474,85 @@ mod tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("base-popover-content").is_some());
+    }
+
+    /// A trigger that keeps "open" and "selected" apart, the way a downstream
+    /// sidebar row does: it is selected when it is the current view, and open
+    /// only while its popover is showing.
+    #[derive(IntoElement)]
+    struct RecordingTrigger {
+        calls: Rc<RefCell<Vec<(&'static str, bool)>>>,
+        selected: bool,
+        open: bool,
+    }
+
+    impl Selectable for RecordingTrigger {
+        fn selected(mut self, selected: bool) -> Self {
+            self.calls.borrow_mut().push(("selected", selected));
+            self.selected = selected;
+            self
+        }
+
+        fn is_selected(&self) -> bool {
+            self.selected
+        }
+
+        fn open(mut self, open: bool) -> Self {
+            self.calls.borrow_mut().push(("open", open));
+            self.open = open;
+            self
+        }
+
+        fn is_open(&self) -> bool {
+            self.open
+        }
+    }
+
+    impl RenderOnce for RecordingTrigger {
+        fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+            div().size(px(40.)).child("Open")
+        }
+    }
+
+    struct RecordingTriggerHarness {
+        calls: Rc<RefCell<Vec<(&'static str, bool)>>>,
+    }
+
+    impl Render for RecordingTriggerHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            Popover::new("recording-popover")
+                .trigger(RecordingTrigger {
+                    calls: self.calls.clone(),
+                    selected: false,
+                    open: false,
+                })
+                .content(|_, _, _| div().size(px(40.)))
+        }
+    }
+
+    #[gpui::test]
+    fn an_open_popover_tells_its_trigger_it_is_open_not_selected(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let (_, cx) = cx.add_window_view({
+            let calls = calls.clone();
+            move |_, _| RecordingTriggerHarness { calls }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        calls.borrow_mut().clear();
+
+        cx.simulate_click(point(px(20.), px(10.)), Default::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let calls = calls.borrow();
+        assert!(
+            calls.contains(&("open", true)),
+            "an open popover marks its trigger open, got {calls:?}"
+        );
+        assert!(
+            !calls.iter().any(|(name, _)| *name == "selected"),
+            "opening must not touch the trigger's own selection, got {calls:?}"
+        );
     }
 
     #[gpui::test]

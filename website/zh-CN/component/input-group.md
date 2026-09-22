@@ -341,3 +341,20 @@ new InputGroupButton("clear").label("清空").icon("icons/x.svg").font_semibold(
 ```
 
 执行 `gpui-component-shell types <应用目录>` 可生成编辑器补全声明。
+
+## 行内引用
+
+需要将行内引用与附件、发送按钮等组合时，将包含 token 的 Input 或 Textarea 传给 `InputGroup`，并按需自定义标签：
+
+```rust
+use gpui_kit::component::{
+    IconName,
+    input::{InputToken, InputGroup, Textarea},
+};
+
+InputGroup::new("composer")
+    .input(Textarea::new(&state)
+        .token(|token, _, _| InputToken::new(token).icon(IconName::File)))
+```
+
+JavaScript 的分组输入也提供 `token` 和 `on_token_click`。重绘时保留原输入状态，需要恢复草稿时用保存的 content 调用 `set_value`。详见[原子行内 token](./input.md#原子行内-token)。

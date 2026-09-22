@@ -598,6 +598,53 @@ html.dark .astro-code span {
   .callout--important { --callout-accent: var(--warning); }
   .callout--danger { --callout-accent: var(--destructive); }
 
+  .doc-tabs {
+    margin-block: 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+  }
+
+  .doc-tabs__input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .doc-tabs__list {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.35rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--muted);
+  }
+
+  .doc-tabs__list label {
+    padding: 0.45rem 0.85rem;
+    border-radius: calc(var(--radius-card) - 3px);
+    color: var(--muted-foreground);
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .doc-tabs__input:nth-of-type(1):checked ~ .doc-tabs__list label:nth-child(1),
+  .doc-tabs__input:nth-of-type(2):checked ~ .doc-tabs__list label:nth-child(2),
+  .doc-tabs__input:nth-of-type(3):checked ~ .doc-tabs__list label:nth-child(3) {
+    color: var(--foreground);
+    background: var(--background);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 10%, transparent);
+  }
+
+  .doc-tabs__panel { display: none; padding: 0.25rem 1.1rem; }
+  .doc-tabs__panel > :first-child { margin-top: 0.8rem; }
+  .doc-tabs__panel > :last-child { margin-bottom: 0.8rem; }
+  .doc-tabs__input:nth-of-type(1):checked ~ .doc-tabs__panels .doc-tabs__panel:nth-child(1),
+  .doc-tabs__input:nth-of-type(2):checked ~ .doc-tabs__panels .doc-tabs__panel:nth-child(2),
+  .doc-tabs__input:nth-of-type(3):checked ~ .doc-tabs__panels .doc-tabs__panel:nth-child(3) { display: block; }
+
   /* GFM footnotes. The markdown pipeline emits `<h2 class="sr-only">` as the
      section's accessible name, but Tailwind only generates classes it finds in
      source, and this one comes out of rendered markdown — so without a rule
@@ -838,6 +885,7 @@ html.dark .astro-code span {
 }
 
 .site-nav__dropdown-item:hover { background: var(--secondary); }
+.site-nav__dropdown-item.is-current { color: var(--brand); font-weight: 650; }
 
 /* ====================================================================
    Sidebar (docs layout)

@@ -159,7 +159,7 @@ impl EditorStory {
         story_toolbar_group().dropdown_child(
             Button::new("editor-options").label("Options"),
             move |menu, window, _| {
-                let menu = menu.item(PopupMenuItem::new("Read only").checked(readonly).on_click(
+                let menu = menu.item(PopupMenuItem::new("Readonly").checked(readonly).on_click(
                     window.listener_for(&story, |this, _, _, cx| {
                         this.readonly = !this.readonly;
                         cx.notify();

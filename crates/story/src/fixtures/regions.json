@@ -1,0 +1,22 @@
+[
+  {
+    "region": "N. America",
+    "revenue": 128400
+  },
+  {
+    "region": "Europe",
+    "revenue": 96200
+  },
+  {
+    "region": "APAC",
+    "revenue": 71500
+  },
+  {
+    "region": "LatAm",
+    "revenue": 23800
+  },
+  {
+    "region": "Middle East",
+    "revenue": 14100
+  }
+]

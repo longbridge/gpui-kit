@@ -26,17 +26,9 @@ fn main() {
         // This must be called before using any GPUI Component features.
         gpui_kit::init(cx);
 
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| Example);
-                // This first level on the window, should be a Root.
-                cx.new(|cx| {
-                    // You can refine the root view style by yourself.
-                    Root::new(view, window, cx).bg(cx.theme().background)
-                })
-            })
+        // Opens a window with a `Root` wrapping the view, so dialogs, sheets,
+        // notifications and menus work in it.
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Example))
             .expect("Failed to open window");
-        })
-        .detach();
     });
 }

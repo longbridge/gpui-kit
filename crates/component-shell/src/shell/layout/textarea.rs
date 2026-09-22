@@ -29,7 +29,13 @@ impl ComponentMaterializer for Materializer {
             .downcast_ref::<ComponentArgument>()
             .ok_or_else(|| anyhow::anyhow!("Textarea received an incompatible payload"))?;
         let state = request.with_state::<Entity<TextareaState>, _>(argument, Clone::clone)?;
-        let mut textarea = Textarea::new(&state).disabled(request.disabled());
+        let binding = super::super::input_tokens::prepare(
+            &request,
+            super::super::input_tokens::State::Textarea(state.clone()),
+        )?;
+        let mut textarea = binding
+            .textarea(Textarea::new(&state))
+            .disabled(request.disabled());
         for op in request
             .methods()
             .filter_map(|method| method.payload().downcast_ref::<Op>())
@@ -43,7 +49,7 @@ impl ComponentMaterializer for Materializer {
         }
         require_leaf(request.children_len())?;
         textarea.style().refine(&request.take_style());
-        Ok(textarea.into_any_element())
+        Ok(binding.wrap(textarea.into_any_element()))
     }
 }
 
@@ -83,6 +89,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
                 })))
             },
         )
+        .with_methods(gpui_shell::textarea_token_state_methods())
         .with_documentation("Retained multi-line editing state with an optional initial value."),
     )?;
     registry.register(ComponentDescriptor::new("Textarea", Arc::new(Materializer))
@@ -90,14 +97,14 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             [argument @ ComponentArgument::Entity { .. }] => Ok(ComponentPayload::new(argument.clone())),
             _ => Err("Textarea expects one TextareaState entity".into()),
         })])
-.with_methods(vec![
+.with_methods([vec![
             MethodDescriptor::new("disabled", vec![ArgumentDescriptor::new("disabled", ArgumentSchema::Boolean)], |_| Ok(ComponentPayload::new(()))).with_documentation("Sets the common disabled state."),
             bool_method("Textarea", "appearance", "Sets the corresponding native textarea presentation or editing policy.", Op::Appearance), bool_method("Textarea", "bordered", "Sets the corresponding native textarea presentation or editing policy.", Op::Bordered), bool_method("Textarea", "readonly", "Sets the corresponding native textarea presentation or editing policy.", Op::Readonly),
             MethodDescriptor::new("aria_label", vec![ArgumentDescriptor::new("label", ArgumentSchema::String)], |args| match args {
                 [ComponentArgument::String(value)] if !value.trim().is_empty() => Ok(ComponentPayload::new(Op::AriaLabel(value.clone()))),
                 _ => Err("Textarea.aria_label expects non-empty text".into()),
             }).with_documentation("Sets the accessibility label."),
-        ])
+        ], super::super::input_tokens::methods(true)].concat())
 .with_documentation("A retained native multi-line text editor. Shell style and common disabled state are honored; children are rejected."))?;
     Ok(())
 }

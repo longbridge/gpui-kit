@@ -35,9 +35,32 @@ Popover::new("basic-popover")
 
 ### 自定义定位
 
-`anchor` 方法用于控制 Popover 如何贴合触发器，使用 [`Anchor`] 类型。
+ `anchor` 命名的是 **Popover 自身的锚点**，不是触发器的角点。
+`Top*` 表示弹层在触发器下方，`Bottom*` 表示在上方；
+`LeftCenter` 表示在右侧，`RightCenter` 表示在左侧。
+弹层只限制在窗口内，不改变 anchor，也不自动翻转。
 
-可以把 Popover 想象成有一个箭头尖角（像对话气泡的小三角）。anchor 指的就是这个尖角相对于触发器落在哪个点——`Anchor::TopLeft` 把它放在触发器的左上角，`Anchor::BottomRight` 放在右下角，以此类推。Popover 就从这个点挂出来。
+```rust
+use gpui_kit::{Anchor, px};
+use gpui_kit::component::popover::Popover;
+
+Popover::new("anchored")
+    .anchor(Anchor::TopCenter)
+    .offset(px(8.))
+    .arrow(true)
+    .trigger(Button::new("details").label("详情"))
+    .child("上下文详情")
+```
+
+| 选项 | 含义 | 默认值 |
+| --- | --- | --- |
+| `anchor(Anchor)` | 弹层锚点，支持 `TopCenter`、`BottomCenter` 等八种位置 | `TopLeft` |
+| `offset(Pixels)` | 触发器到弹层的间距；有箭头时为到箭头尖端的间距 | `0.25rem` |
+| `arrow(bool)` | 在 anchor 对应边显示箭头 | `false` |
+
+箭头跟随 anchor 的起始、居中或末端对齐，并向内避开圆角。
+箭头额外占用 `0.375rem`，使用弹层背景色（未设置时使用主题的 popover 色）。
+`offset` 和 `arrow` 都不会切换定位策略。
 
 例如 `Anchor::TopLeft` 会让 Popover 出现在触发器正下方，并与其左对齐：
 
@@ -54,7 +77,7 @@ use gpui_kit::component::Anchor;
 Popover::new("top-center")
     .anchor(Anchor::TopCenter)
     .trigger(Button::new("btn").label("Top Center").outline())
-    .child("Anchored to the trigger's top-center")
+    .child("在触发器下方居中")
 ```
 
 ### 在 Popover 中渲染 View
@@ -182,6 +205,47 @@ Popover::new("default-open-popover")
     .default_open(true)
     .trigger(Button::new("default-open-btn").label("Default Open").outline())
     .child("This popover is open by default when first rendered.")
+```
+
+### 自定义触发器
+
+触发器是任意实现了 [Selectable] 的元素。Popover 打开期间会对触发器调用
+`open(true)`，而不是 `selected(true)`，这样触发器可以区分「我的 Popover 正开着」
+和「我是当前选中项」这两件事。
+
+`open` 与 `is_open` 默认落到 `selected` 和 `is_selected`，因此只实现了选中态的
+触发器行为不变，[Button] 触发器打开时的外观也与选中态一致。如果你的元素已经
+用 `selected` 表达别的含义（例如侧栏行选中表示当前视图），就覆盖这两个方法：
+
+```rust
+use gpui_kit::component::Selectable;
+
+struct SidebarRow {
+    /// 这一行是当前视图。
+    selected: bool,
+    /// 这一行的账户 Popover 正开着。
+    open: bool,
+}
+
+impl Selectable for SidebarRow {
+    fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+
+    fn open(mut self, open: bool) -> Self {
+        self.open = open;
+        self
+    }
+
+    fn is_open(&self) -> bool {
+        self.open
+    }
+}
 ```
 
 [Button]: https://docs.rs/gpui-component/latest/gpui_component/button/struct.Button.html

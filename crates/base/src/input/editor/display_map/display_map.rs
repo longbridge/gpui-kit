@@ -226,6 +226,15 @@ impl DisplayMap {
     }
 
     /// Update layout parameters (wrap width or font)
+    pub(crate) fn set_inline_metrics(
+        &mut self,
+        metrics: std::rc::Rc<[(std::ops::Range<usize>, Pixels)]>,
+        cx: &mut App,
+    ) {
+        self.wrap_map.set_inline_metrics(metrics, cx);
+        self.rebuild_fold_projection();
+    }
+
     pub fn on_layout_changed(&mut self, wrap_width: Option<Pixels>, cx: &mut App) {
         self.wrap_map.on_layout_changed(wrap_width, cx);
         self.rebuild_fold_projection();

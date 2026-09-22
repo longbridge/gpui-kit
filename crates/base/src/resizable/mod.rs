@@ -396,15 +396,20 @@ pub(crate) struct ResizablePanelState {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::Cell, rc::Rc};
-
-    use gpui::{
-        AppContext as _, Context, InteractiveElement as _, IntoElement, Modifiers, MouseButton,
-        ParentElement as _, Pixels, Render, Styled as _, TestAppContext, VisualTestContext, Window,
-        div, point, px, size,
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
     };
 
-    use super::{ResizableState, h_resizable, resizable_panel};
+    use gpui::{
+        App, AppContext as _, Context, InteractiveElement as _, IntoElement, Modifiers,
+        MouseButton, ParentElement as _, Pixels, Render, Styled as _, TestAppContext,
+        VisualTestContext, Window, div, point, px, size,
+    };
+
+    use super::{
+        ResizableState, ResizeHandleContext, ResizeHandleState, h_resizable, resizable_panel,
+    };
 
     struct MixedSizingHarness {
         width: Pixels,
@@ -625,6 +630,83 @@ mod tests {
             assert_eq!(state.sizes(), &vec![px(220.), px(180.)]);
         });
         assert_eq!(resizes.get(), 1);
+    }
+
+    /// Reports every state its divider is rendered in, so a drag can be watched
+    /// from outside the handle.
+    struct HandleStateHarness {
+        seen: Rc<RefCell<Vec<ResizeHandleState>>>,
+    }
+
+    impl Render for HandleStateHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let seen = self.seen.clone();
+            div().w(px(400.)).h(px(100.)).child(
+                h_resizable("handle-state")
+                    .with_handle_appearance(Rc::new(
+                        move |handle: &ResizeHandleContext, _: &mut Window, _: &mut App| {
+                            let mut seen = seen.borrow_mut();
+                            if seen.last() != Some(&handle.state()) {
+                                seen.push(handle.state());
+                            }
+                            // Nothing painted: this renderer is here to watch.
+                            None
+                        },
+                    ))
+                    .child(resizable_panel().size(px(150.)).child(div().size_full()))
+                    .child(
+                        resizable_panel()
+                            .size(px(250.))
+                            .child(div().size_full().debug_selector(|| "hs-second".into())),
+                    ),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_handle_reports_the_press_and_the_drag_to_its_renderer(cx: &mut TestAppContext) {
+        let seen: Rc<RefCell<Vec<ResizeHandleState>>> = Rc::new(RefCell::new(Vec::new()));
+        let (_, cx) = cx.add_window_view({
+            let seen = seen.clone();
+            move |_, _| HandleStateHarness { seen }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let boundary = cx.debug_bounds("hs-second").unwrap().left();
+        let on_handle = point(boundary - px(2.), px(50.));
+        let draw = |cx: &mut VisualTestContext| cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        cx.simulate_mouse_move(on_handle, None, Modifiers::default());
+        draw(cx);
+        cx.simulate_mouse_down(on_handle, MouseButton::Left, Modifiers::default());
+        draw(cx);
+        cx.simulate_mouse_move(
+            point(px(260.), px(50.)),
+            Some(MouseButton::Left),
+            Modifiers::default(),
+        );
+        draw(cx);
+        cx.simulate_mouse_up(
+            point(px(390.), px(90.)),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        draw(cx);
+
+        // Every one of these frames used to render `Idle`: the listeners wrote
+        // their progress into a copy of the handle's state, so no renderer ever
+        // saw a press, and `is_active` never once read true.
+        assert_eq!(
+            *seen.borrow(),
+            vec![
+                ResizeHandleState::Idle,
+                ResizeHandleState::Hovered,
+                ResizeHandleState::Pressed,
+                ResizeHandleState::Dragging,
+                ResizeHandleState::Idle,
+            ]
+        );
     }
 
     struct SizedGroupHarness;

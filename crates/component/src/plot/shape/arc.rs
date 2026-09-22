@@ -4,6 +4,8 @@ use std::{f32::consts::PI, fmt::Debug};
 
 use gpui::{Bounds, Hsla, Path, PathBuilder, Pixels, Point, Window, point, px};
 
+use crate::plot::{PathCache, ShapeKey};
+
 const EPSILON: f32 = 1e-12;
 const HALF_PI: f32 = PI / 2.;
 
@@ -172,6 +174,64 @@ impl Arc {
         builder.build().ok()
     }
 
+    /// Whether the cursor at `position` (relative to the bounds origin) is on
+    /// this arc's slice: within its angles and between `inner_radius` and
+    /// `outer_radius` (this arc's own radii when `None`).
+    pub fn contains<T>(
+        &self,
+        arc: &ArcData<T>,
+        position: Point<f32>,
+        inner_radius: Option<f32>,
+        outer_radius: Option<f32>,
+        bounds: &Bounds<Pixels>,
+    ) -> bool {
+        let dx = position.x - bounds.size.width.as_f32() / 2.;
+        let dy = position.y - bounds.size.height.as_f32() / 2.;
+        let radius = dx.hypot(dy);
+        let r0 = inner_radius.unwrap_or(self.inner_radius).max(0.);
+        let r1 = outer_radius.unwrap_or(self.outer_radius).max(0.);
+        if radius < r0 || radius > r1 {
+            return false;
+        }
+
+        // Screen angle -> pie angle (0 at 12 o'clock, clockwise), in [0, TAU).
+        let angle = (dy.atan2(dx) + HALF_PI).rem_euclid(2. * PI);
+        (arc.start_angle..arc.end_angle).contains(&angle)
+    }
+
+    /// Paint the Arc, reusing the path tessellated by an earlier paint while its
+    /// angles, radii and the bounds size are unchanged; see
+    /// [`Line::paint_cached`](super::Line::paint_cached).
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint_cached<T>(
+        &self,
+        arc: &ArcData<T>,
+        color: impl Into<Hsla>,
+        inner_radius: Option<f32>,
+        outer_radius: Option<f32>,
+        bounds: &Bounds<Pixels>,
+        cache: &mut PathCache,
+        window: &mut Window,
+    ) {
+        let key = ShapeKey::new((
+            bounds.size.width.as_f32().to_bits(),
+            bounds.size.height.as_f32().to_bits(),
+        ))
+        .f32(arc.start_angle)
+        .f32(arc.end_angle)
+        .f32(arc.pad_angle)
+        .f32(inner_radius.unwrap_or(self.inner_radius))
+        .f32(outer_radius.unwrap_or(self.outer_radius))
+        .finish();
+        let local = Bounds::new(Point::default(), bounds.size);
+        let path = cache.get(key, bounds.origin, || {
+            self.path(arc, inner_radius, outer_radius, &local)
+        });
+        if let Some(path) = path {
+            window.paint_path(path, color.into());
+        }
+    }
+
     /// Paint the Arc.
     pub fn paint<T>(
         &self,
@@ -227,5 +287,35 @@ mod tests {
 
         assert_eq!(centroid.x, expected_radius * expected_angle.cos());
         assert_eq!(centroid.y, expected_radius * expected_angle.sin());
+    }
+
+    #[test]
+    fn test_arc_contains() {
+        use gpui::{point, px, size};
+
+        // A 100x100 plot: center (50, 50). The right half, 12 to 6 o'clock.
+        let arc = Arc::new().inner_radius(10.).outer_radius(40.);
+        let right_half = ArcData {
+            data: &(),
+            index: 0,
+            value: 1.,
+            start_angle: 0.,
+            end_angle: PI,
+            pad_angle: 0.,
+        };
+        let bounds = Bounds::new(point(px(0.), px(0.)), size(px(100.), px(100.)));
+
+        // 3 o'clock, between the radii.
+        assert!(arc.contains(&right_half, point(80., 50.), None, None, &bounds));
+        // 9 o'clock is the other half.
+        assert!(!arc.contains(&right_half, point(20., 50.), None, None, &bounds));
+        // Inside the hole and past the rim.
+        assert!(!arc.contains(&right_half, point(55., 50.), None, None, &bounds));
+        assert!(!arc.contains(&right_half, point(95., 50.), None, None, &bounds));
+        // A wider outer radius reaches the same point.
+        assert!(arc.contains(&right_half, point(95., 50.), None, Some(50.), &bounds));
+        // 12 o'clock is the start of this arc, 6 o'clock the start of the next.
+        assert!(arc.contains(&right_half, point(50., 20.), None, None, &bounds));
+        assert!(!arc.contains(&right_half, point(50., 80.), None, None, &bounds));
     }
 }

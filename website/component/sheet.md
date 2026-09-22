@@ -16,36 +16,9 @@ use gpui_kit::component::Placement;
 
 ## Usage
 
-### Setup application root view for display of sheets
+### Where sheets render
 
-You need to set up your application's root view to render the sheet layer. This is typically done in your main application struct's render method.
-
-The [Root::render_sheet_layer](https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html#method.render_sheet_layer) function handles rendering any active modals on top of your app content.
-
-```rust
-use gpui_kit::component::TitleBar;
-
-struct MyApp {
-    view: AnyView,
-}
-
-impl Render for MyApp {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let sheet_layer = Root::render_sheet_layer(window, cx);
-
-        div()
-            .size_full()
-            .child(
-                v_flex()
-                    .size_full()
-                    .child(TitleBar::new())
-                    .child(div().flex_1().overflow_hidden().child(self.view.clone())),
-            )
-            // Render the sheet layer on top of the app content
-            .children(sheet_layer)
-    }
-}
-```
+The window's [Root](./root.md) automatically mounts and renders sheets. Open the window with `gpui_kit::open_window`, or wrap the application view in `Root::new`. Application views do not render overlay layers themselves.
 
 ### Basic Sheet
 

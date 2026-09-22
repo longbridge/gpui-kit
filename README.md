@@ -13,7 +13,9 @@ Build fantastic, high-performance desktop apps with Rust and GPUI.
 GPUI Kit is a comprehensive Rust desktop application framework. It combines a
 production-ready UI system with application-grade data, layout, and editing
 capabilities, all built on a reusable foundation of behavior, state, and
-infrastructure, and opens the finished application to JavaScript extensions.
+infrastructure. GPUI Kit ships 75+ documented components and primitives,
+WebAssembly support, AccessKit accessibility, UI integration testing, and an
+optional JavaScript extension runtime.
 
 Documentation: <https://gpui-kit.com>
 
@@ -31,8 +33,11 @@ See the [executable application recipe and AI-assisted development acceptance ch
 
 ## Features
 
-- **60+ UI Components**: Forms, navigation, overlays, feedback, layout, and more, with polished interactions and productive defaults.
+- **75+ Components and Primitives**: Forms, navigation, overlays, data display, editing, feedback, and layout, with polished interactions and productive defaults.
 - **Production Ready**: Used to build Longbridge Pro from day one and continuously refined in a publicly shipped commercial desktop application.
+- **WebAssembly**: Run applications and the same component showcases on the web with `wasm32-unknown-unknown`.
+- **Accessibility**: AccessKit roles, names, states, relationships, and actions are built into the interaction layer and covered by tests.
+- **UI Integration Testing**: Render real components in headless windows, drive pointer and keyboard input, and assert state, focus, layout, and accessibility.
 - **Native Feel**: Modern controls inspired by macOS and Windows, backed by semantic themes and multiple sizes.
 - **120 FPS**: GPU-accelerated interfaces that remain smooth under load.
 - **Data Tables**: Virtual scrolling, fixed and resizable columns, sorting, and cell selection across hundreds of thousands of rows.
@@ -154,18 +159,15 @@ fn main() {
         // This must be called before using any GPUI Component features.
         gpui_kit::init(cx);
 
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| HelloWorld);
-                // This first level on the window, should be a Root.
-                cx.new(|cx| Root::new(view, window, cx))
-            })
-            .expect("Failed to open window");
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| HelloWorld)
         })
-        .detach();
+        .expect("Failed to open window");
     });
 }
 ```
+
+`gpui_kit::open_window` is the application window entry point and always mounts a Base `Root`. Component initialization registers styled window facilities; Cargo features do not select a different root type.
 
 ### Icons
 

@@ -35,9 +35,33 @@ Popover::new("basic-popover")
 
 ### Popover with Custom Positioning
 
-The `anchor` method controls how the popover attaches to the trigger, using the [`Anchor`] type.
+The `anchor` method names the **popover's own** anchor, not the trigger's
+corner. `Top*` anchors open below the trigger, `Bottom*` anchors open above
+it, `LeftCenter` opens to the right, and `RightCenter` opens to the left.
+The popup clamps to the window without changing its anchor or flipping.
 
-Imagine the popover has a pointer tip (like a speech bubble's tail). The anchor is where that tip sits relative to the trigger — `Anchor::TopLeft` places it at the trigger's top-left corner, `Anchor::BottomRight` at the bottom-right, and so on. The popover then hangs off that point.
+```rust
+use gpui_kit::{Anchor, px};
+use gpui_kit::component::popover::Popover;
+
+Popover::new("anchored")
+    .anchor(Anchor::TopCenter)
+    .offset(px(8.))
+    .arrow(true)
+    .trigger(Button::new("details").label("Details"))
+    .child("Contextual details")
+```
+
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `anchor(Anchor)` | Popup anchor, including `TopCenter` and `BottomCenter` | `TopLeft` |
+| `offset(Pixels)` | Gap from trigger to surface, or to arrow tip when enabled | `0.25rem` |
+| `arrow(bool)` | Show an arrow on the edge selected by the anchor | `false` |
+
+The arrow follows the anchor's leading, center, or trailing alignment and is
+inset as needed to avoid rounded corners. It adds `0.375rem` to the surface
+distance and uses the surface background, falling back to the theme's popover
+color. Neither `offset` nor `arrow` changes the positioning strategy.
 
 For example, `Anchor::TopLeft` places the popover just below the trigger, left-aligned to it:
 
@@ -51,37 +75,37 @@ For example, `Anchor::TopLeft` places the popover just below the trigger, left-a
 ```rust
 use gpui_kit::component::Anchor;
 
-// Anchored to the trigger's top corners
+// Below the trigger: name the popover's top anchor
 Popover::new("top-left")
     .anchor(Anchor::TopLeft)
     .trigger(Button::new("btn").label("Top Left").outline())
-    .child("Anchored to the trigger's top-left")
+    .child("Below the trigger, aligned left")
 
 Popover::new("top-center")
     .anchor(Anchor::TopCenter)
     .trigger(Button::new("btn").label("Top Center").outline())
-    .child("Anchored to the trigger's top-center")
+    .child("Below the trigger, centered")
 
 Popover::new("top-right")
     .anchor(Anchor::TopRight)
     .trigger(Button::new("btn").label("Top Right").outline())
-    .child("Anchored to the trigger's top-right")
+    .child("Below the trigger, aligned right")
 
-// Anchored to the trigger's bottom corners
+// Above the trigger: name the popover's bottom anchor
 Popover::new("bottom-left")
     .anchor(Anchor::BottomLeft)
     .trigger(Button::new("btn").label("Bottom Left").outline())
-    .child("Anchored to the trigger's bottom-left")
+    .child("Above the trigger, aligned left")
 
 Popover::new("bottom-center")
     .anchor(Anchor::BottomCenter)
     .trigger(Button::new("btn").label("Bottom Center").outline())
-    .child("Anchored to the trigger's bottom-center")
+    .child("Above the trigger, centered")
 
 Popover::new("bottom-right")
     .anchor(Anchor::BottomRight)
     .trigger(Button::new("btn").label("Bottom Right").outline())
-    .child("Anchored to the trigger's bottom-right")
+    .child("Above the trigger, aligned right")
 ```
 
 ### View in Popover
@@ -230,6 +254,49 @@ Popover::new("default-open-popover")
     .default_open(true)
     .trigger(Button::new("default-open-btn").label("Default Open").outline())
     .child("This popover is open by default when first rendered.")
+```
+
+### Custom Trigger
+
+A trigger is any element that implements [Selectable]. While the popover is
+open, it calls `open(true)` on the trigger — not `selected(true)` — so a
+trigger can tell "my popover is showing" apart from "I am the selected item".
+
+`open` and `is_open` default to `selected` and `is_selected`, so a trigger that
+only implements the selected state keeps working unchanged, and a [Button]
+trigger looks the same open as it does selected. Override them when your
+element already uses `selected` for something else, such as a sidebar row that
+is selected when it is the current view:
+
+```rust
+use gpui_kit::component::Selectable;
+
+struct SidebarRow {
+    /// This row is the current view.
+    selected: bool,
+    /// This row's account popover is showing.
+    open: bool,
+}
+
+impl Selectable for SidebarRow {
+    fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    fn is_selected(&self) -> bool {
+        self.selected
+    }
+
+    fn open(mut self, open: bool) -> Self {
+        self.open = open;
+        self
+    }
+
+    fn is_open(&self) -> bool {
+        self.open
+    }
+}
 ```
 
 [Button]: https://docs.rs/gpui-component/latest/gpui_component/button/struct.Button.html

@@ -143,13 +143,7 @@ fn main() {
             ..Default::default()
         };
 
-        cx.spawn(async move |cx| {
-            cx.open_window(window_options, |window, cx| {
-                let view = cx.new(|cx| Example::new(cx));
-                cx.new(|cx| Root::new(view, window, cx).bg(cx.theme().background))
-            })
+        gpui_kit::open_window(window_options, cx, |_, cx| cx.new(|cx| Example::new(cx)))
             .expect("Failed to open window");
-        })
-        .detach();
     });
 }

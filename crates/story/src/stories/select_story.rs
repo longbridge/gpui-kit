@@ -123,6 +123,10 @@ impl SelectStory {
         cx.new(|cx| {
             cx.subscribe_in(&country_select, window, Self::on_select_event)
                 .detach();
+            cx.subscribe(&country_select, |_, _, _: &DismissEvent, _| {
+                println!("Country select dismissed");
+            })
+            .detach();
 
             Self {
                 disabled: false,

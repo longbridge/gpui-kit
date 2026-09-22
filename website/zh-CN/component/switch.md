@@ -117,6 +117,22 @@ Switch::new("switch")
     .checked(false)
 ```
 
+### 键盘焦点
+
+Switch 默认是一个 Tab 停靠点，获得焦点时会在轨道外侧绘制主题焦点环，与 `Checkbox`、`Button` 一致。若焦点样式由外层绘制，传入 `focus_ring(false)` 关闭焦点环；用 `tab_stop` / `tab_index` 调整它在 Tab 顺序中的位置。
+
+```rust
+Switch::new("switch")
+    .label("Custom tab order")
+    .tab_index(2)
+    .tab_stop(true)
+
+// 外层行自己绘制焦点样式
+Switch::new("switch")
+    .label("Quiet focus")
+    .focus_ring(false)
+```
+
 ## API 参考
 
 ### Switch
@@ -131,6 +147,9 @@ Switch::new("switch")
 | `tooltip(text)` | 添加提示文本 |
 | `color(color)` | 设置选中时的背景色，默认 `theme.primary` |
 | `on_change(fn)` | 点击回调，参数为新的 `&bool` 状态 |
+| `focus_ring(bool)` | 获得焦点时是否在轨道外侧绘制焦点环，默认 `true` |
+| `tab_stop(bool)` | 是否参与 Tab 焦点遍历，默认 `true` |
+| `tab_index(isize)` | 在 tab group 内的 Tab 顺序，默认 `0` |
 
 ### 样式
 

@@ -1,7 +1,7 @@
 ---
 title: Icons & Assets
 description: Configure bundled icons and custom assets for GPUI Component applications.
-order: -4
+order: -7
 ---
 
 # Icons & Assets
@@ -152,15 +152,10 @@ fn main() {
         // We must initialize gpui_component before using it.
         gpui_kit::init(cx);
 
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| Example);
-                // The first level on the window must be Root.
-                cx.new(|cx| Root::new(view, window, cx))
-            })
-            .expect("Failed to open window");
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| Example)
         })
-        .detach();
+        .expect("Failed to open window");
     });
 }
 ```

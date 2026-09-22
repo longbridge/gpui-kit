@@ -219,7 +219,13 @@ impl ComponentMaterializer for Materializer {
                 let state = request.with_state::<Entity<InputState>, _>(&argument, Clone::clone)?;
                 let binding =
                     binding::prepare(&mut request, NativeState::Input(state.clone()), &operations)?;
-                let mut input = InputGroupInput::new(&state).disabled(request.disabled());
+                let tokens = super::input_tokens::prepare(
+                    &request,
+                    super::input_tokens::State::Input(state.clone()),
+                )?;
+                let mut input = tokens
+                    .input(InputGroupInput::new(&state))
+                    .disabled(request.disabled());
                 for operation in &operations {
                     input = match operation {
                         Op::AriaLabel(value) => input.aria_label(value.clone()),
@@ -246,7 +252,13 @@ impl ComponentMaterializer for Materializer {
                     NativeState::Textarea(state.clone()),
                     &operations,
                 )?;
-                let mut textarea = InputGroupTextarea::new(&state).disabled(request.disabled());
+                let tokens = super::input_tokens::prepare(
+                    &request,
+                    super::input_tokens::State::Textarea(state.clone()),
+                )?;
+                let mut textarea = tokens
+                    .textarea(InputGroupTextarea::new(&state))
+                    .disabled(request.disabled());
                 for operation in &operations {
                     textarea = match operation {
                         Op::AriaLabel(value) => textarea.aria_label(value.clone()),
@@ -569,13 +581,13 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
             "InputGroupInput",
             state_constructor("InputGroupInput", "InputState", Part::Input),
             "An unframed single-line input using the existing retained InputState and native editing engine.",
-            input_methods,
+            [input_methods, super::input_tokens::methods(false)].concat(),
         ),
         (
             "InputGroupTextarea",
             state_constructor("InputGroupTextarea", "TextareaState", Part::Textarea),
             "An unframed multiline input using the existing retained TextareaState and native editing engine.",
-            textarea_methods,
+            [textarea_methods, super::input_tokens::methods(false)].concat(),
         ),
         (
             "InputGroupText",

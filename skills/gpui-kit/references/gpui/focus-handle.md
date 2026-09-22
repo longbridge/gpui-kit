@@ -107,20 +107,31 @@ impl MyInput {
 
 ### Tab Order
 
-Elements with `track_focus()` automatically participate in Tab navigation.
+A tracked handle is a Tab stop only when the handle says so. `cx.focus_handle()`
+starts with `tab_stop = false`, and an element's own `.tab_index()` /
+`.tab_stop()` do not apply to a handle passed to `track_focus`: build the handle
+with the flag.
 
 ```rust
+// In the owning entity's constructor:
+let focus1 = cx.focus_handle().tab_stop(true);          // Tab order: 1
+let focus2 = cx.focus_handle().tab_stop(true);          // Tab order: 2
+let hidden = cx.focus_handle();                         // focusable, never a Tab stop
+
 div()
-    .child(
-        input1.track_focus(&focus1)  // Tab order: 1
-    )
-    .child(
-        input2.track_focus(&focus2)  // Tab order: 2
-    )
-    .child(
-        input3.track_focus(&focus3)  // Tab order: 3
-    )
+    .child(div().track_focus(&focus1).child("first"))
+    .child(div().track_focus(&focus2).child("second"))
+    .child(div().track_focus(&hidden).child("container"))
 ```
+
+The Tab table is rebuilt every frame from the elements that painted with a
+tracked handle, in tree order (`tab_index` reorders within a `tab_group`). A
+stateless component may create its handle in `render` through keyed state —
+`window.use_keyed_state(id, cx, |_, cx| cx.focus_handle().tab_stop(true))` —
+which survives re-renders, so the order stays stable; `Button` does exactly
+this. A focused element receives `ClickEvent::Keyboard` in `on_click` when
+Enter or Space is released, so a `track_focus` + `on_click` row activates from
+the keyboard without extra bindings.
 
 ### Focus Within Containers
 
@@ -206,14 +217,20 @@ input()
 
 ### ✅ Provide Visual Focus Indicators
 
+Draw the framework's ring so custom controls match `Button` and `Input`:
+
 ```rust
-let is_focused = self.focus_handle.is_focused(cx);
+use gpui_kit::component::ThemeStyled as _;
+
+let is_focused = self.focus_handle.is_focused(window);
 
 div()
-    .when(is_focused, |el| {
-        el.border_color(cx.theme().focused_border)
-    })
+    .track_focus(&self.focus_handle)
+    .when(is_focused, |el| el.focus_ring_style(window, cx))
 ```
+
+The ring is painted 3px outside the element, so an ancestor with
+`overflow_hidden()` clips it; leave it room or draw the ring inside the element.
 
 ### ❌ Don't: Forget to Track Focus
 
