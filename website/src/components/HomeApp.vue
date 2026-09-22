@@ -284,7 +284,10 @@ const copy = computed(() =>
                 <div class="caps__grid">
                     <article v-for="cap in copy.caps" :key="cap.title" class="cap">
                         <div class="cap__head">
-                            <component :is="capIcons[cap.icon]" :size="17" />
+                            <svg v-if="cap.icon === 'wasm'" class="cap__head-wasm" viewBox="0 0 512 512" aria-hidden="true">
+                                <path d="m159.1 270.1h24l16.5 87.2 19.8-87.2h22.5l17.9 88.3 18.9-88.3h23.5l-30.6 128.2h-23.8L230 311l-19.1 87.3h-24.3zm170.2 0h37.8l37.5 128.2h-24.7l-8.2-28.6h-43.1l-6.3 28.6h-24.1zm14.4 31.6-10.5 47h32.6l-12.1-47zM297.4 75v2c0 22.9-18.6 41.5-41.5 41.5S214.4 99.9 214.4 77v-2H75v362h362V75z" />
+                            </svg>
+                            <component v-else :is="capIcons[cap.icon]" :size="17" />
                             <h3>{{ cap.title }}</h3>
                         </div>
                         <p>{{ cap.description }}</p>
@@ -313,20 +316,35 @@ const copy = computed(() =>
                                 <b /><b /><b />
                             </template>
                             <template v-else-if="cap.icon === 'wasm'">
-                                <span class="cap__platform">Rust</span>
-                                <ArrowRight :size="16" />
+                                <span class="cap__wasm-source">
+                                    <i class="cap__wasm-source-bar"><s /><s /><s /><b>Native</b></i>
+                                    <i class="cap__wasm-code"><s /><s /><s /></i>
+                                </span>
+                                <span class="cap__wasm-link"><i /><ArrowRight :size="13" /></span>
                                 <svg class="cap__wasm-logo" viewBox="0 0 512 512" role="img" aria-label="WebAssembly">
                                     <rect width="512" height="512" fill="#fff" />
                                     <path
-                                        fill="#654ff0"
+                                        fill="#111"
                                         d="m159.1 270.1h24l16.5 87.2 19.8-87.2h22.5l17.9 88.3 18.9-88.3h23.5l-30.6 128.2h-23.8L230 311l-19.1 87.3h-24.3zm170.2 0h37.8l37.5 128.2h-24.7l-8.2-28.6h-43.1l-6.3 28.6h-24.1zm14.4 31.6-10.5 47h32.6l-12.1-47zM297.4 75v2c0 22.9-18.6 41.5-41.5 41.5S214.4 99.9 214.4 77v-2H75v362h362V75z"
                                     />
                                 </svg>
-                                <span class="cap__platform">Web</span>
+                                <span class="cap__wasm-link"><i /><ArrowRight :size="13" /></span>
+                                <span class="cap__wasm-browser">
+                                    <b class="cap__wasm-web-label">Web</b>
+                                    <i class="cap__wasm-ui"><b /><span><s /><s /><s /></span></i>
+                                </span>
                             </template>
                             <template v-else-if="cap.icon === 'a11y'">
-                                <Accessibility :size="38" />
-                                <span class="cap__a11y-tree"><i>role</i><i>name</i><i>action</i></span>
+                                <span class="cap__a11y-ui">
+                                    <i class="cap__a11y-bar"><b /><b /><b /></i>
+                                    <i class="cap__a11y-content"><b /><span><s /><s class="is-focused" /><s /></span></i>
+                                </span>
+                                <span class="cap__a11y-link"><i /><ArrowRight :size="13" /></span>
+                                <span class="cap__a11y-tree">
+                                    <i><b>button</b><s>role</s></i>
+                                    <i><b>Send</b><s>name</s></i>
+                                    <i><b>press</b><s>action</s></i>
+                                </span>
                             </template>
                             <template v-else-if="cap.icon === 'test'">
                                 <i v-for="label in ['render', 'input', 'assert']" :key="label" class="cap__test-row"><Check :size="13" /><span>{{ label }}</span><b /></i>
@@ -672,6 +690,7 @@ html[lang^="zh"] .section-kicker { letter-spacing: 0.04em; }
 
 .cap__head { display: flex; align-items: center; gap: 0.6rem; }
 .cap__head h3 { margin: 0; font-size: 1rem; font-weight: 620; letter-spacing: -0.015em; }
+.cap__head-wasm { width: 1.05rem; height: 1.05rem; fill: currentColor; }
 
 .cap p { margin: 0.7rem 0 auto; color: var(--muted-foreground); font-size: 0.875rem; line-height: 1.65; }
 
@@ -767,30 +786,84 @@ html[lang^="zh"] .section-kicker { letter-spacing: 0.04em; }
     color: var(--muted-foreground);
 }
 
-.cap__platform {
-    padding: 0.35rem 0.55rem;
+.cap__wasm-logo {
+    width: 2.8rem;
+    height: 2.8rem;
+    flex: 0 0 auto;
+    filter: drop-shadow(0 0.18rem 0.35rem color-mix(in srgb, var(--foreground) 14%, transparent));
+}
+
+.cap__wasm-source,
+.cap__wasm-browser {
+    box-sizing: border-box;
+    width: 4.15rem;
+    height: 3.45rem;
+}
+
+.cap__wasm-source {
+    display: flex;
+    flex-direction: column;
     border: 1px solid var(--border);
-    border-radius: 0.35rem;
     background: var(--background);
     color: var(--foreground);
-    font: 0.72rem/1 var(--font-mono);
 }
 
-.cap__wasm-logo {
-    width: 2.6rem;
-    height: 2.6rem;
-    flex: 0 0 auto;
+.cap__wasm-source-bar { display: flex; align-items: center; gap: 0.15rem; height: 0.78rem; padding-inline: 0.28rem; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--data-2) 9%, var(--secondary)); }
+.cap__wasm-source-bar s { width: 0.19rem; height: 0.19rem; border-radius: 50%; background: color-mix(in srgb, var(--foreground) 25%, transparent); text-decoration: none; }
+.cap__wasm-source-bar b { margin-left: auto; color: var(--muted-foreground); font: 600 0.48rem/1 var(--font-mono); }
+.cap__wasm-code { display: grid; flex: 1; align-content: center; gap: 0.27rem; padding: 0.48rem; }
+.cap__wasm-code s { display: block; height: 0.18rem; background: var(--input); text-decoration: none; }
+.cap__wasm-code s:nth-child(2) { width: 72%; background: color-mix(in srgb, var(--data-2) 55%, var(--input)); }
+.cap__wasm-code s:nth-child(3) { width: 84%; }
+
+.cap__wasm-link { display: flex; align-items: center; width: 1.25rem; margin-inline: -0.16rem; color: color-mix(in srgb, var(--foreground) 52%, var(--muted-foreground)); }
+.cap__wasm-link i { flex: 1; border-top: 1px dashed currentColor; }
+.cap__wasm-logo + .cap__wasm-link { color: var(--success); }
+
+.cap__wasm-browser { position: relative; display: flex; padding-top: 0.72rem; border: 1px solid var(--border); background: var(--background); }
+.cap__wasm-web-label { position: absolute; top: 0.12rem; left: 0.38rem; color: var(--success); font: 600 0.48rem/1 var(--font-mono); }
+.cap__wasm-ui { display: flex; flex: 1; gap: 0.3rem; padding: 0.38rem; }
+.cap__wasm-ui > b { width: 0.75rem; border-radius: 0.1rem; background: color-mix(in srgb, var(--success) 18%, var(--secondary)); }
+.cap__wasm-ui span { display: flex; flex: 1; flex-direction: column; gap: 0.24rem; }
+.cap__wasm-ui s { flex: 1; border: 1px solid var(--border); border-radius: 0.1rem; background: var(--sidebar); text-decoration: none; }
+.cap__wasm-ui s:first-child { border-color: color-mix(in srgb, var(--success) 55%, var(--border)); background: color-mix(in srgb, var(--success) 8%, var(--sidebar)); }
+
+.cap__a11y-ui,
+.cap__a11y-tree {
+    box-sizing: border-box;
+    height: 3.7rem;
+    border: 1px solid var(--border);
+    background: var(--background);
 }
 
-.cap__a11y-tree { display: grid; gap: 0.28rem; }
+.cap__a11y-ui { display: flex; width: 5.2rem; flex-direction: column; }
+.cap__a11y-bar { display: flex; align-items: center; gap: 0.16rem; height: 0.75rem; padding-inline: 0.32rem; border-bottom: 1px solid var(--border); background: var(--secondary); }
+.cap__a11y-bar b { width: 0.2rem; height: 0.2rem; border-radius: 50%; background: color-mix(in srgb, var(--foreground) 24%, transparent); }
+.cap__a11y-content { display: flex; flex: 1; gap: 0.35rem; padding: 0.4rem; }
+.cap__a11y-content > b { width: 0.85rem; border-radius: 0.12rem; background: var(--secondary); }
+.cap__a11y-content span { display: flex; flex: 1; flex-direction: column; gap: 0.25rem; }
+.cap__a11y-content s { flex: 1; border-radius: 0.1rem; background: var(--input); text-decoration: none; }
+.cap__a11y-content .is-focused { outline: 1px solid var(--data-2); outline-offset: 1px; background: color-mix(in srgb, var(--data-2) 18%, var(--input)); }
+.cap__a11y-link { display: flex; align-items: center; width: 1.5rem; margin-inline: -0.1rem; color: var(--data-2); }
+.cap__a11y-link i { flex: 1; border-top: 1px dashed currentColor; }
+.cap__a11y-tree { display: grid; width: 6.5rem; align-content: center; gap: 0.28rem; padding: 0.42rem; }
 .cap__a11y-tree i {
-    padding: 0.2rem 0.45rem;
+    box-sizing: border-box;
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    justify-content: space-between;
+    gap: 0.35rem;
+    padding: 0.18rem 0.32rem;
     border-left: 2px solid var(--data-2);
-    background: color-mix(in srgb, var(--data-2) 8%, transparent);
+    background: color-mix(in srgb, var(--data-2) 9%, var(--secondary));
     color: var(--foreground);
-    font: 0.68rem/1.2 var(--font-mono);
     font-style: normal;
 }
+.cap__a11y-tree i:nth-child(2) { border-left-color: var(--success); background: color-mix(in srgb, var(--success) 9%, var(--secondary)); }
+.cap__a11y-tree i:nth-child(3) { border-left-color: var(--warning); background: color-mix(in srgb, var(--warning) 9%, var(--secondary)); }
+.cap__a11y-tree b { overflow: hidden; font: 0.6rem/1.2 var(--font-mono); text-overflow: ellipsis; }
+.cap__a11y-tree s { color: var(--muted-foreground); font: 0.53rem/1.2 var(--font-mono); text-decoration: none; }
 
 .cap__preview--test { flex-direction: column; justify-content: center; }
 .cap__test-row { display: flex; align-items: center; gap: 0.45rem; color: var(--success); font-style: normal; }
