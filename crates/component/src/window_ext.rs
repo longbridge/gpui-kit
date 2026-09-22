@@ -99,7 +99,6 @@ pub trait WindowExt: Sized {
     fn has_text_selection(&mut self, cx: &mut App) -> bool;
 
     /// Clears the window text selection and all registered renderer-local selections.
-    #[deprecated(note = "use gpui_base::TextSelection::clear instead")]
     fn clear_text_selection(&mut self, cx: &mut App);
 
     /// Ends the in-progress window-level text selection drag (if any).
