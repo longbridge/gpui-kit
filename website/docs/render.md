@@ -1,7 +1,7 @@
 ---
 title: Render
 description: Render a stateful GPUI Entity into an element tree.
-order: -6.3
+order: -2.5
 ---
 
 # Render

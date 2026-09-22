@@ -1,7 +1,7 @@
 ---
 title: Element
 description: 了解 GPUI 的 Element 树与底层渲染生命周期。
-order: -6.5
+order: -2.7
 ---
 
 # Element

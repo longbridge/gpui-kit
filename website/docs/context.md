@@ -1,7 +1,7 @@
 ---
 title: Context
 description: Understand how GPUI provides application, Entity, Window, and async access.
-order: -4
+order: -2.3
 ---
 
 # Context

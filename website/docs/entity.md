@@ -1,7 +1,7 @@
 ---
 title: Entity
 description: Create, share, read, update, and observe state with GPUI Entity.
-order: -6.1
+order: -2.1
 ---
 
 # Entity

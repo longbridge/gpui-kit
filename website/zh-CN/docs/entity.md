@@ -1,7 +1,7 @@
 ---
 title: Entity
 description: 使用 GPUI Entity 创建、共享、读取、更新和观察状态。
-order: -6.1
+order: -2.1
 ---
 
 # Entity

@@ -1,7 +1,7 @@
 ---
 title: RenderOnce
 description: 使用持有数据的方式构建可复用、声明式的 GPUI 组件。
-order: -6.4
+order: -2.6
 ---
 
 # RenderOnce

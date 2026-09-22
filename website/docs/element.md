@@ -1,7 +1,7 @@
 ---
 title: Element
 description: Understand GPUI's element tree and low-level rendering lifecycle.
-order: -6.5
+order: -2.7
 ---
 
 # Element

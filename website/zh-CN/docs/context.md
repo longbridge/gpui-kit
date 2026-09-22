@@ -1,7 +1,7 @@
 ---
 title: Context
 description: 了解 GPUI 如何提供应用、Entity、Window 与异步访问能力。
-order: -4
+order: -2.3
 ---
 
 # Context

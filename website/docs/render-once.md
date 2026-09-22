@@ -1,7 +1,7 @@
 ---
 title: RenderOnce
 description: Build reusable, declarative GPUI components from owned data.
-order: -6.4
+order: -2.6
 ---
 
 # RenderOnce
