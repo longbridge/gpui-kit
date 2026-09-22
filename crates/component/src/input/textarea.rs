@@ -7,7 +7,7 @@ use gpui::{
 
 use super::{Input, TextareaState};
 use crate::native_menu::NativeMenu;
-use crate::{RoleOverride, StyledExt as _};
+use crate::{RoleOverride, Sizable, Size, StyledExt as _};
 
 /// A styled ordinary multi-line text field.
 #[derive(IntoElement)]
@@ -16,6 +16,7 @@ pub struct Textarea {
     token_click_listener: Option<gpui_base::input::InlineTokenClickListener>,
     state: Entity<TextareaState>,
     style: StyleRefinement,
+    size: Size,
     height: Option<DefiniteLength>,
     appearance: bool,
     bordered: bool,
@@ -60,6 +61,7 @@ impl Textarea {
         Self {
             state: state.clone(),
             style: StyleRefinement::default(),
+            size: Size::default(),
             height: None,
             appearance: true,
             bordered: true,
@@ -154,6 +156,13 @@ impl Textarea {
     }
 }
 
+impl Sizable for Textarea {
+    fn with_size(mut self, size: impl Into<Size>) -> Self {
+        self.size = size.into();
+        self
+    }
+}
+
 impl Styled for Textarea {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
@@ -177,6 +186,7 @@ impl Textarea {
             .readonly(self.readonly)
             .tab_index(self.tab_index)
             .role(self.role)
+            .with_size(self.size)
             .when_some(self.height, |this, height| this.h(height))
             .when_some(self.accessibility_id, |this, id| this.accessibility_id(id))
             .when_some(self.aria_label, |this, label| this.aria_label(label))

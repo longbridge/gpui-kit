@@ -61,6 +61,18 @@ cx.subscribe(&notes, |this, state, event: &InputEvent, cx| {
 `insert`, `replace`, `cursor_position`, `soft_wrap`, `searchable`, and
 `submit_on_enter` are available on `TextareaState`.
 
+## Sizes
+
+```rust
+Textarea::new(&notes).large()
+Textarea::new(&notes) // medium (default)
+Textarea::new(&notes).small()
+```
+
+The size changes the text size and the padding around the text together. It does
+not set the height: use `h` for a fixed height, and let `rows` or `auto_grow`
+decide the height of a growing textarea.
+
 ## Appearance
 
 ```rust

@@ -59,6 +59,16 @@ cx.subscribe(&notes, |this, state, event: &InputEvent, cx| {
 `TextareaState` 还提供 `insert`、`replace`、`cursor_position`、
 `soft_wrap`、`searchable` 和 `submit_on_enter`。
 
+## 尺寸
+
+```rust
+Textarea::new(&notes).large()
+Textarea::new(&notes) // medium（默认）
+Textarea::new(&notes).small()
+```
+
+尺寸会同时改变文字大小和文本四周的内边距，但不决定高度：固定高度用 `h` 设置，随内容增高的 Textarea 由 `rows` 或 `auto_grow` 决定高度。
+
 ## 外观
 
 ```rust
