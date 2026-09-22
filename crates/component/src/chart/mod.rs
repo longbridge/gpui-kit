@@ -167,6 +167,14 @@ mod tests {
         assert_eq!(Plot::id(&chart()), Plot::id(&chart()));
     }
 
+    /// The escape hatch: no id means no hitbox, so nothing above the chart has
+    /// to fight it for the cursor.
+    #[test]
+    fn a_chart_turned_off_has_no_id_to_key_anything_on() {
+        assert!(Plot::id(&chart().interactive(false)).is_none());
+        assert!(Plot::id(&chart().id("pie").interactive(false)).is_none());
+    }
+
     #[test]
     fn a_named_id_replaces_the_default() {
         assert_eq!(

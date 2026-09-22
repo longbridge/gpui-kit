@@ -1126,6 +1126,18 @@
     },
     {
       "source": "ui",
+      "name": "toolbar",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Toolbar",
+        "exports": [
+          "Toolbar"
+        ]
+      }
+    },
+    {
+      "source": "ui",
       "name": "tooltip",
       "classification": "component",
       "registration": {
@@ -2449,6 +2461,18 @@
         "descriptor": "Toggle",
         "exports": [
           "Toggle"
+        ]
+      }
+    },
+    {
+      "source": "story",
+      "name": "toolbar",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Toolbar",
+        "exports": [
+          "Toolbar"
         ]
       }
     },

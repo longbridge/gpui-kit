@@ -136,6 +136,7 @@ impl Gallery {
                 StoryContainer::panel::<TextareaStory>(window, cx),
                 StoryContainer::panel::<ThemeColorsStory>(window, cx),
                 StoryContainer::panel::<ToggleStory>(window, cx),
+                StoryContainer::panel::<ToolbarStory>(window, cx),
                 StoryContainer::panel::<TooltipStory>(window, cx),
                 StoryContainer::panel::<TreeStory>(window, cx),
                 StoryContainer::panel::<VirtualListStory>(window, cx),

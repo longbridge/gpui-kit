@@ -32,8 +32,8 @@ use gpui_base::{
     Sheet, Slider, SliderIndicator, SliderThumb, SliderTrack, Switch, SwitchThumb, SwitchTrack,
     Tab, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Tabs, TextSelectionEvent,
     TextSelectionHandle, TextSelectionLayer, TextViewState, Textarea, Toast, ToastTransitionStatus,
-    Toggle, ToggleGroup, Tooltip, Tree, TreeItem, TreeState, VirtualListScrollHandle,
-    v_virtual_list,
+    Toggle, ToggleGroup, Toolbar, ToolbarGroup, Tooltip, Tree, TreeItem, TreeState,
+    VirtualListScrollHandle, v_virtual_list,
 };
 use palette::{activate as activate_palette, canvas as example_canvas, example_rgb};
 #[cfg(target_family = "wasm")]
@@ -118,6 +118,7 @@ pub const COMPONENTS: &[&str] = &[
     "toast",
     "toggle",
     "toggle-group",
+    "toolbar",
     "tooltip",
     "tree",
     "virtual-list",
@@ -132,6 +133,8 @@ pub struct BaseShowcase {
     switch_checked: bool,
     toggle_pressed: bool,
     toggle_group_selection: u8,
+    toolbar_action: gpui::SharedString,
+    toolbar_search: gpui::Entity<InputState>,
     selected_tab: usize,
     select_open: bool,
     select_index: usize,
@@ -184,6 +187,17 @@ impl BaseShowcase {
                 } else {
                     "Hello GPUI"
                 });
+            state.set_editor_style(InputEditorStyle {
+                foreground: example_rgb(0x171717).into(),
+                muted_foreground: example_rgb(0x737373).into(),
+                selection: gpui::hsla(0.6, 0.8, 0.7, 0.45),
+                caret: example_rgb(0x171717).into(),
+                ..InputEditorStyle::default()
+            });
+            state
+        });
+        let toolbar_search = cx.new(|cx| {
+            let mut state = InputState::new(window, cx).placeholder("Search");
             state.set_editor_style(InputEditorStyle {
                 foreground: example_rgb(0x171717).into(),
                 muted_foreground: example_rgb(0x737373).into(),
@@ -322,6 +336,8 @@ impl BaseShowcase {
             switch_checked: true,
             toggle_pressed: true,
             toggle_group_selection: 0,
+            toolbar_action: "No command yet".into(),
+            toolbar_search,
             selected_tab: 0,
             select_open: false,
             select_index: 0,
@@ -487,7 +503,7 @@ impl Render for BaseShowcase {
             .bg(example_canvas())
             .text_color(example_rgb(0x171717))
             .text_xs()
-            .font_family("Inter Variable")
+            .font_family(".SystemUIFont")
             .child(TextSelectionLayer)
             .when(show_bar, |this| {
                 this.child(
@@ -582,6 +598,7 @@ impl BaseShowcase {
             "toast" => self.toast(cx).into_any_element(),
             "toggle" => self.toggle(cx).into_any_element(),
             "toggle-group" => self.toggle_group(cx).into_any_element(),
+            "toolbar" => self.toolbar(cx).into_any_element(),
             "tooltip" => self.tooltip(cx).into_any_element(),
             "tree" => self.tree().into_any_element(),
             "dock" => self.dock(cx).into_any_element(),

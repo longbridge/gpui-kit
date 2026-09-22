@@ -43,6 +43,7 @@ mod textarea;
 mod toast;
 mod toggle;
 mod toggle_group;
+mod toolbar;
 mod tooltip;
 mod tree;
 mod virtual_list;
