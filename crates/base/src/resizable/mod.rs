@@ -404,7 +404,7 @@ mod tests {
     use gpui::{
         App, AppContext as _, Context, InteractiveElement as _, IntoElement, Modifiers,
         MouseButton, ParentElement as _, Pixels, Render, Styled as _, TestAppContext,
-        VisualTestContext, Window, div, point, px, size,
+        VisualTestContext, Window, div, point, prelude::FluentBuilder as _, px, size,
     };
 
     use super::{
@@ -634,33 +634,78 @@ mod tests {
 
     /// Reports every state its divider is rendered in, so a drag can be watched
     /// from outside the handle.
+    ///
+    /// `covered` lays an occluding overlay over the whole group after it, the
+    /// way a sheet's backdrop or a toast would sit over a dock.
     struct HandleStateHarness {
         seen: Rc<RefCell<Vec<ResizeHandleState>>>,
+        covered: bool,
     }
 
     impl Render for HandleStateHarness {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             let seen = self.seen.clone();
-            div().w(px(400.)).h(px(100.)).child(
-                h_resizable("handle-state")
-                    .with_handle_appearance(Rc::new(
-                        move |handle: &ResizeHandleContext, _: &mut Window, _: &mut App| {
-                            let mut seen = seen.borrow_mut();
-                            if seen.last() != Some(&handle.state()) {
-                                seen.push(handle.state());
-                            }
-                            // Nothing painted: this renderer is here to watch.
-                            None
-                        },
-                    ))
-                    .child(resizable_panel().size(px(150.)).child(div().size_full()))
-                    .child(
-                        resizable_panel()
-                            .size(px(250.))
-                            .child(div().size_full().debug_selector(|| "hs-second".into())),
-                    ),
-            )
+            div()
+                .relative()
+                .w(px(400.))
+                .h(px(100.))
+                .child(
+                    h_resizable("handle-state")
+                        .with_handle_appearance(Rc::new(
+                            move |handle: &ResizeHandleContext, _: &mut Window, _: &mut App| {
+                                let mut seen = seen.borrow_mut();
+                                if seen.last() != Some(&handle.state()) {
+                                    seen.push(handle.state());
+                                }
+                                // Nothing painted: this renderer is here to watch.
+                                None
+                            },
+                        ))
+                        .child(resizable_panel().size(px(150.)).child(div().size_full()))
+                        .child(
+                            resizable_panel()
+                                .size(px(250.))
+                                .child(div().size_full().debug_selector(|| "hs-second".into())),
+                        ),
+                )
+                .when(self.covered, |this| {
+                    this.child(div().absolute().inset_0().occlude())
+                })
         }
+    }
+
+    /// A handle under something else does not answer the pointer.
+    ///
+    /// The listeners used to test the pointer against the handle's bounds,
+    /// which read true through anything painted over it: a divider under a
+    /// sheet's backdrop lit up as the pointer crossed where it lay, and a
+    /// press there counted as a press on the handle. They ask the hitbox now,
+    /// and an occluding element in front of it answers for it.
+    #[gpui::test]
+    fn a_covered_handle_stays_idle(cx: &mut TestAppContext) {
+        let seen: Rc<RefCell<Vec<ResizeHandleState>>> = Rc::new(RefCell::new(Vec::new()));
+        let (_, cx) = cx.add_window_view({
+            let seen = seen.clone();
+            move |_, _| HandleStateHarness {
+                seen,
+                covered: true,
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let boundary = cx.debug_bounds("hs-second").unwrap().left();
+        let on_handle = point(boundary - px(2.), px(50.));
+        let draw = |cx: &mut VisualTestContext| cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        cx.simulate_mouse_move(on_handle, None, Modifiers::default());
+        draw(cx);
+        cx.simulate_mouse_down(on_handle, MouseButton::Left, Modifiers::default());
+        draw(cx);
+        cx.simulate_mouse_up(on_handle, MouseButton::Left, Modifiers::default());
+        draw(cx);
+
+        assert_eq!(*seen.borrow(), vec![ResizeHandleState::Idle]);
     }
 
     #[gpui::test]
@@ -668,7 +713,10 @@ mod tests {
         let seen: Rc<RefCell<Vec<ResizeHandleState>>> = Rc::new(RefCell::new(Vec::new()));
         let (_, cx) = cx.add_window_view({
             let seen = seen.clone();
-            move |_, _| HandleStateHarness { seen }
+            move |_, _| HandleStateHarness {
+                seen,
+                covered: false,
+            }
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
         cx.update(|window, cx| window.draw(cx).clear(cx));
