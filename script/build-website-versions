@@ -19,12 +19,15 @@ fi
 # and tagged snapshots live directly below work_dir, so expose the repository's
 # crates directory at the location those paths resolve to.
 ln -s "$repo_root/crates" "$work_dir/crates"
+# ThemePalette and theme token routes import the catalogue from ../../../themes
+# relative to website/src/lib. All temporary website copies share work_dir.
+ln -s "$repo_root/themes" "$work_dir/themes"
 version_cache_dir=${WEBSITE_VERSION_CACHE_DIR:-$repo_root/website/.version-cache}
 version_fingerprint=${WEBSITE_VERSION_BUILD_FINGERPRINT:-$(
   git -C "$repo_root" ls-files -z -- \
     website/astro.config.mjs website/package.json website/src/components \
     website/src/layouts website/src/lib website/src/pages website/src/styles \
-    website/public script/build-website-versions script/snapshot-website \
+    website/public themes script/build-website-versions script/snapshot-website \
     script/normalize-website-frontmatter.mjs \
     | xargs -0 git -C "$repo_root" hash-object \
     | git hash-object --stdin
@@ -83,6 +86,10 @@ echo "Building $latest_release at /"
   SITE_OUT_DIR="$repo_root/website/dist" \
   bunx --bun astro build
 )
+if ! grep -Fq 'html[data-theme=' "$repo_root/website/dist/theme-tokens.css"; then
+  echo 'Custom themes are missing from the built website' >&2
+  exit 1
+fi
 bunx pagefind --site "$repo_root/website/dist"
 
 main_dir="$work_dir/main-site"

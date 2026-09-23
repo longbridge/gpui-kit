@@ -40,6 +40,10 @@ than compete with them.
    the task benefits from them.
 5. **State must be visible.** Hover, focus, selection, disabled, loading,
    validation, and destructive states need distinct and consistent treatment.
+6. **Geometry explains containment.** Radii, insets, and boundaries should
+   describe one coherent hierarchy, even where surfaces overlap.
+7. **Feedback reflects reality.** Loading, tooltips, and motion should clarify
+   a real state or transition, not add ceremony to an immediate action.
 
 ## Learning from Shadcn
 
@@ -158,9 +162,32 @@ or in audited data/raster content whose color is itself the data.
 
 ### Radius, spacing, and density
 
-Derive corner radii from the active theme. This preserves a product's ability
-to become square or more rounded as one coherent system. Use `radius_full()`
-for circles and pills rather than a literal maximum radius.
+Use a finite radius scale, as with type and control sizes. Choose from the
+theme's named tiers (`sm`, `md`, `lg`, `xl`, and larger surface tiers) instead
+of inventing a radius for each element. Large containers may use a softer tier
+than the controls they contain; compact controls and overlays use tighter
+tiers. For an ordinary rectangle, the radius should remain visibly smaller
+than half its shorter side. Use `radius_full()` only for intentional circles
+and pills; a tooltip must not become a capsule by accident.
+
+Nested surfaces should read as concentric shapes. Use
+`inner radius ≈ max(0, outer radius − gap)` to choose the closest suitable
+theme tier; the visible band should remain even through the turn. Add a
+named application token if a repeated composition needs an intermediate
+value. A segmented control is one silhouette: its end segments follow the container's inner
+corners, its middle segments remain square, and each boundary has one divider
+of consistent thickness.
+
+<img class="alignment-light" src="/radius-hierarchy.svg" alt="Light theme chat composer: the inset surface, both buttons, and placeholder spacing change together; red guide circles show their shared corner center.">
+<img class="alignment-dark" src="/radius-hierarchy-dark.svg" alt="Dark theme chat composer: the inset surface, both buttons, and placeholder spacing change together; red guide circles show their shared corner center.">
+
+A radius must govern the entire visible surface, not just its border. Exposed
+corners remain transparent to the surface behind them; child backgrounds,
+selection fills, and scrolling content must also follow the boundary. In GPUI,
+do not assume a rounded parent clips its descendants. Give inner surfaces their
+own radius or an appropriate clip, then inspect the composition against a
+contrasting background in both themes. Preserve outward focus rings when
+choosing a clip.
 
 Use a compact spacing scale and repeat it. Related label/control pairs should
 be closer than separate groups; separate groups should be closer than separate
@@ -414,9 +441,10 @@ identifiers, shortcuts, and aligned numeric data. Keep body text readable and
 avoid excessive uppercase or letter spacing, especially for CJK text.
 
 Use one icon family in a product. Icons supplement labels; they should not
-replace unfamiliar actions with guesswork. Icon-only buttons require a tooltip
-and an accessible name. Use filled or colored icons to communicate a state,
-not merely to make a toolbar lively.
+replace unfamiliar actions with guesswork. Icon-only buttons always need an
+accessible name. Their visual explanation follows the tooltip policy below.
+Use filled or colored icons to communicate a state, not merely to make a
+toolbar lively.
 
 ## Layout patterns
 
@@ -435,6 +463,10 @@ the remaining space with `flex_1()` and `min_w_0()` / `min_h_0()` where
 overflowing children must shrink. Use `Scrollable`, `VirtualList`, `Table`, or
 `DockArea` for their intended behavior instead of rebuilding scrolling or pane
 management from nested `div`s.
+
+The title bar is window chrome first. Preserve its drag region and avoid
+binding ordinary title clicks to infrequent editing commands. Rename belongs
+behind an explicit object command, with a keyboard path where appropriate.
 
 ### Responsive desktop windows
 
@@ -466,6 +498,10 @@ choices, `RadioGroup` for a small visible set, `Select` for a longer set, and
 Disable submission while an operation is in flight, keep the user's input, and
 show the result near the action. Reserve dialogs for short, focused decisions;
 use a full page or sheet for workflows that need exploration or many fields.
+
+A loading treatment must represent actual waiting. Switching between settings
+panels whose content is already available should be immediate; a skeleton is
+appropriate only while content is genuinely loading and its shape is known.
 
 ## Components and composition
 
@@ -535,6 +571,10 @@ show a persistent selected state. A Button that owns a dropdown must remain
 visibly pressed or open until the popup closes; hover alone cannot explain the
 relationship between trigger and surface.
 
+In a segmented control, the selected fill and unselected surface must share
+the container's silhouette. Neither may square off an end corner or make a
+boundary appear heavier than its peers.
+
 For destructive actions, distinguish between reversible and irreversible work.
 Prefer undo or a temporary notification for reversible changes. Use an
 `AlertDialog` when the consequence is serious and cannot be undone; name the
@@ -596,7 +636,8 @@ hierarchy:
 - default Button for ordinary visible actions;
 - outline Button when an action needs a clear boundary with less emphasis;
 - ghost Button for familiar, low-emphasis toolbar and inline actions;
-- icon Button only for a well-known symbol, with an accessible name and tooltip.
+- icon Button only for a well-known symbol, with an accessible name and a
+  tooltip when meaning or scope is unclear.
 
 Do not assign primary because a Button is the only action on screen, because it
 is placed at the top right, or because the team wants more clicks. Primary
@@ -634,6 +675,12 @@ Choose the smallest surface that fits the decision:
 - alert dialog: explicit confirmation of a consequential action;
 - sheet: supplementary work that benefits from more persistent space.
 
+A tooltip supplies missing meaning; it does not restate an obvious action.
+Reserve it for an unfamiliar symbol, ambiguous scope, or a useful shortcut
+that is otherwise hidden. Repeated, recognizable commands such as Copy and
+Download in a message footer need accessible names and keyboard access, but
+their hover labels add interruption rather than clarity.
+
 An Alert interrupts the visual hierarchy even when it does not open a modal.
 Use it for important, exceptional information that needs attention in the
 current task, not as a decorated container for ordinary descriptions, tips, or
@@ -669,6 +716,11 @@ lifecycle mechanism or geometry needed for a transition, but it should not
 decide that every product fades or slides. Give independently animated values
 stable identity, and make interruption reverse smoothly from the currently
 sampled value rather than restarting from an old endpoint.
+
+Motion follows the continuity of the interaction. While a pointer or scroll
+position moves among related targets, keep the preview surface stable and
+update its content or position in place. Dismiss it only after the interaction
+ends; repeated fade-out and re-entry on each update reads as flicker.
 
 ## Designing data-heavy interfaces
 
@@ -852,7 +904,8 @@ Before considering a screen complete, verify that:
 - every action is reachable and operable by keyboard;
 - focus order follows visual and task order;
 - focus remains visible and is restored after overlays;
-- controls have names, and icon-only controls have tooltips;
+- controls have accessible names; icon-only controls use tooltips when their
+  meaning, scope, or shortcut needs explanation;
 - text and meaningful boundaries have sufficient contrast;
 - status is not communicated by color alone;
 - disabled and read-only states are distinguishable;

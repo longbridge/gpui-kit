@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - "website/**"
+      - "themes/**"
       - "script/build-website-versions"
       - "script/snapshot-website"
       - "script/test-snapshot-website"
