@@ -6,20 +6,15 @@ use gpui_kit::component::{
     dock::{
         BasePanel, DockArea, DockLayout, DockPlacement, DockSkin, Panel, PanelEvent, panel_handle,
     },
+    menu::PopupMenuItem,
     v_flex,
 };
 use gpui_kit::{
-    Action, App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString, Styled as _,
-    Window, div, px,
+    App, AppContext as _, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    ParentElement as _, Render, SharedString, Styled as _, Window, div, px,
 };
-use serde::Deserialize;
 
 use crate::story_toolbar_group;
-
-#[derive(Action, Clone, PartialEq, Eq, Deserialize)]
-#[action(namespace = dock_story, no_json)]
-struct ToggleCloseButtons;
 
 struct DemoPanel {
     name: &'static str,
@@ -163,23 +158,32 @@ impl super::Story for DockStory {
 impl Render for DockStory {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let show_close_buttons = self.skin.is_close_button_visible();
+        let story = cx.entity();
         v_flex()
             .size_full()
-            .on_action(cx.listener(|this, _: &ToggleCloseButtons, _, cx| {
-                this.skin
-                    .set_close_button_visible(!this.skin.is_close_button_visible(), cx);
-                cx.notify();
-            }))
             .child(story_toolbar_group().p_2().dropdown_child(
                 Button::new("dock-options").label("Options"),
-                move |menu, _, _| {
-                    menu.menu_with_check(
-                        "Tab close buttons",
-                        show_close_buttons,
-                        Box::new(ToggleCloseButtons),
+                move |menu, window, _| {
+                    menu.item(
+                        PopupMenuItem::new("Tab close buttons")
+                            .checked(show_close_buttons)
+                            .on_click(window.listener_for(&story, |this, _, _, cx| {
+                                this.skin.set_close_button_visible(
+                                    !this.skin.is_close_button_visible(),
+                                    cx,
+                                );
+                                cx.notify();
+                            })),
                     )
                 },
             ))
-            .child(div().flex_1().min_h_0().child(self.dock_area.clone()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .border_t_1()
+                    .border_color(cx.theme().border)
+                    .child(self.dock_area.clone()),
+            )
     }
 }

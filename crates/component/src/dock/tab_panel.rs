@@ -519,6 +519,9 @@ impl TabGroupSkin {
                                             .icon(IconName::Close)
                                             .xsmall()
                                             .ghost()
+                                            // The tab already adds a 4px gap after
+                                            // the label's 12px right padding.
+                                            .ml(-px(4.))
                                             .mr_3()
                                             .tab_stop(false)
                                             .tooltip(t!("Dock.Close"))
