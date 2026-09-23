@@ -50,6 +50,9 @@ pub(super) enum InlineFlowItem {
         text: SharedString,
         links: Vec<(Range<usize>, LinkMark)>,
         highlights: Vec<(Range<usize>, InlineHighlight)>,
+        /// Range highlight backgrounds, in this item's byte space. They are
+        /// only painted, so unlike `highlights` they take no part in layout.
+        backgrounds: Vec<(Range<usize>, Hsla)>,
     },
     Image {
         source: ImageSource,
@@ -492,6 +495,7 @@ impl Element for InlineFlow {
                 } => {
                     let InlineFlowItem::Text {
                         state: source_state,
+                        backgrounds,
                         ..
                     } = &self.items[*item_ix]
                     else {
@@ -530,6 +534,12 @@ impl Element for InlineFlow {
                         self.link_click_handler.clone(),
                     )
                     .selection_source(source_state.clone(), source_range.clone())
+                    .range_backgrounds(slice_ranges(
+                        backgrounds,
+                        source_range.start,
+                        source_range.end,
+                        |range, color| (range, *color),
+                    ))
                     .text_style(fragment_style.clone())
                     .selection_bounds(Bounds::new(
                         point(bounds.left(), bounds.top() + selection_bounds.top()),

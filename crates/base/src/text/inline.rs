@@ -10,9 +10,10 @@ use std::{
 
 use gpui::{
     App, BorderStyle, Bounds, ClickEvent, CursorStyle, Edges, Element, ElementId, GlobalElementId,
-    Half, HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
+    Half, HighlightStyle, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId,
     MouseButton, MouseClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    SharedString, StyledText, TextLayout, TextRun, TextStyle, Window, point, px, quad, size,
+    SharedString, StyledText, TextAlign, TextLayout, TextRun, TextStyle, Window, point, px, quad,
+    size,
 };
 
 use crate::{
@@ -203,6 +204,8 @@ pub(super) struct Inline {
     paint_origin: Option<Point<Pixels>>,
     selection_bounds: Option<Bounds<Pixels>>,
     selection_source: Option<(Arc<Mutex<InlineState>>, Range<usize>)>,
+    /// Range highlight backgrounds, painted behind the text.
+    range_backgrounds: Vec<(Range<usize>, Hsla)>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     /// What this frame's layout was shaped with, to hand the shaped text to
     /// the next frame (see [`RetainedLayout`]).
@@ -363,6 +366,7 @@ impl Inline {
             paint_origin: None,
             selection_bounds: None,
             selection_source: None,
+            range_backgrounds: Vec::new(),
             link_click_handler,
             retained_key: None,
             handed_over: false,
@@ -393,6 +397,13 @@ impl Inline {
         range: Range<usize>,
     ) -> Self {
         self.selection_source = Some((state, range));
+        self
+    }
+
+    /// Paint `backgrounds` behind the text. They are not part of the text
+    /// runs, so changing them does not shape the text again.
+    pub(super) fn range_backgrounds(mut self, backgrounds: Vec<(Range<usize>, Hsla)>) -> Self {
+        self.range_backgrounds = backgrounds;
         self
     }
 
@@ -710,6 +721,28 @@ impl Inline {
             ));
         }
     }
+
+    /// Paint each range highlight behind the text of its range.
+    fn paint_range_highlights(&self, text_layout: &TextLayout, window: &mut Window) {
+        let glyphs = glyph_boxes(
+            text_layout,
+            window.text_style().text_align,
+            text_layout.bounds().size.width,
+        );
+        let origin = text_layout.bounds().origin;
+        let line_height = text_layout.line_height();
+        for (range, color) in &self.range_backgrounds {
+            for (row, left, right) in range_boxes(&glyphs, range.clone()) {
+                window.paint_quad(gpui::fill(
+                    Bounds::from_corners(
+                        point(origin.x + left, origin.y + line_height * row as f32),
+                        point(origin.x + right, origin.y + line_height * (row + 1) as f32),
+                    ),
+                    *color,
+                ));
+            }
+        }
+    }
 }
 
 impl IntoElement for Inline {
@@ -818,6 +851,9 @@ impl Element for Inline {
             return;
         }
         let text_layout = self.styled_text.layout().clone();
+        if !self.range_backgrounds.is_empty() {
+            self.paint_range_highlights(&text_layout, window);
+        }
         self.styled_text
             .paint(global_id, None, bounds, &mut (), &mut (), window, cx);
 
@@ -1027,6 +1063,132 @@ impl Element for Inline {
         drop(state);
         self.retain_styled_text();
     }
+}
+
+/// Where one glyph of laid-out text paints: its row, and its horizontal
+/// extent past the text's origin, alignment applied. `text` is the byte range
+/// of the text it draws.
+#[derive(Clone, Debug, PartialEq)]
+struct GlyphBox {
+    text: Range<usize>,
+    row: usize,
+    left: Pixels,
+    right: Pixels,
+}
+
+/// The glyphs of `text_layout`, sorted by the text they draw, each placed
+/// the way GPUI paints it: every row aligned in `align_width` by `align`,
+/// and a glyph reaching to the next one on its row, or to the row's end.
+///
+/// Glyphs are read in the order they paint, so right-to-left text, whose
+/// glyphs paint in the reverse order of its text, is placed as it shows.
+fn glyph_boxes(text_layout: &TextLayout, align: TextAlign, align_width: Pixels) -> Vec<GlyphBox> {
+    let mut boxes = Vec::new();
+    let mut row = 0;
+    let mut line_start = 0;
+    for line in text_layout.line_layouts() {
+        let layout = &line.unwrapped_layout;
+        let glyphs = layout
+            .runs
+            .iter()
+            .flat_map(|run| run.glyphs.iter())
+            .collect::<Vec<_>>();
+        // Each row starts at a wrap boundary glyph, and ends where the next
+        // row starts, or at the end of the line.
+        let run_offsets = layout
+            .runs
+            .iter()
+            .scan(0, |offset, run| {
+                let start = *offset;
+                *offset += run.glyphs.len();
+                Some(start)
+            })
+            .collect::<Vec<_>>();
+        let row_starts = line
+            .wrap_boundaries
+            .iter()
+            .map(|boundary| run_offsets[boundary.run_ix] + boundary.glyph_ix)
+            .collect::<Vec<_>>();
+        let line_boxes = boxes.len();
+        let mut from = 0;
+        for (row_in_line, to) in row_starts.iter().copied().chain([glyphs.len()]).enumerate() {
+            let start_x = if row_in_line == 0 {
+                Pixels::ZERO
+            } else {
+                glyphs[from].position.x
+            };
+            let end_x = glyphs
+                .get(to)
+                .map_or(layout.width, |glyph| glyph.position.x);
+            let shift = aligned_row_left(align, align_width, end_x - start_x) - start_x;
+            for ix in from..to {
+                let glyph = glyphs[ix];
+                let right = if ix + 1 < to {
+                    glyphs[ix + 1].position.x
+                } else {
+                    end_x
+                };
+                boxes.push(GlyphBox {
+                    text: line_start + glyph.index..line_start + glyph.index,
+                    row: row + row_in_line,
+                    left: shift + glyph.position.x,
+                    right: shift + right,
+                });
+            }
+            from = to;
+        }
+
+        // A glyph draws its text up to where the next glyph's text starts.
+        let line_boxes = &mut boxes[line_boxes..];
+        line_boxes.sort_by_key(|glyph| glyph.text.start);
+        let line_end = line_start + line.len();
+        for ix in 0..line_boxes.len() {
+            let start = line_boxes[ix].text.start;
+            line_boxes[ix].text.end = line_boxes[ix + 1..]
+                .iter()
+                .map(|glyph| glyph.text.start)
+                .find(|next| *next > start)
+                .unwrap_or(line_end);
+        }
+
+        row += line.wrap_boundaries.len() + 1;
+        line_start = line_end + 1;
+    }
+    boxes
+}
+
+fn aligned_row_left(align: TextAlign, align_width: Pixels, width: Pixels) -> Pixels {
+    match align {
+        TextAlign::Left => Pixels::ZERO,
+        TextAlign::Center => (align_width - width) / 2.,
+        TextAlign::Right => align_width - width,
+    }
+}
+
+/// The boxes behind the text of `range`, as a row and the horizontal extent
+/// on it, from `glyphs` sorted by the text they draw: every glyph drawing
+/// some of that text, joined where they touch on a row.
+fn range_boxes(glyphs: &[GlyphBox], range: Range<usize>) -> Vec<(usize, Pixels, Pixels)> {
+    let first = glyphs.partition_point(|glyph| glyph.text.end <= range.start);
+    let mut hits = glyphs[first..]
+        .iter()
+        .take_while(|glyph| glyph.text.start < range.end)
+        .map(|glyph| (glyph.row, glyph.left, glyph.right))
+        .collect::<Vec<_>>();
+    hits.sort_by(|a, b| {
+        (a.0, a.1)
+            .partial_cmp(&(b.0, b.1))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut boxes: Vec<(usize, Pixels, Pixels)> = Vec::with_capacity(hits.len());
+    for (row, left, right) in hits {
+        match boxes.last_mut() {
+            Some(last) if last.0 == row && left <= last.2 => last.2 = last.2.max(right),
+            _ => boxes.push((row, left, right)),
+        }
+    }
+    boxes
 }
 
 fn selection_for_multi_click(
@@ -1275,6 +1437,118 @@ mod line_bounds_tests {
     }
 }
 
+#[cfg(test)]
+mod range_highlight_tests {
+    use super::*;
+    use super::{
+        test_draw::in_prepaint,
+        test_fonts::{BODY, WideMonoTextSystem},
+    };
+    use gpui::{AvailableSpace, TestApp, size};
+
+    /// Lays `text` out at `wrap_width` and returns the highlight boxes of
+    /// `range` with rows aligned by `align`: the left and right edges past
+    /// the text's origin, and the row.
+    fn boxes(
+        text: &'static str,
+        wrap_width: f32,
+        align: TextAlign,
+        range: Range<usize>,
+    ) -> Vec<(Pixels, Pixels, usize)> {
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        in_prepaint(&mut app, move |window, cx| {
+            let style = TextStyle {
+                font_family: BODY.into(),
+                font_size: px(16.).into(),
+                ..Default::default()
+            };
+            let styled = StyledText::new(SharedString::from(text)).with_runs(text_runs(
+                text.len(),
+                &style,
+                &[],
+            ));
+            let layout = styled.layout().clone();
+            let mut element = styled.into_any_element();
+            element.layout_as_root(
+                size(
+                    AvailableSpace::Definite(px(wrap_width)),
+                    AvailableSpace::MinContent,
+                ),
+                window,
+                cx,
+            );
+            let origin = point(px(7.), px(11.));
+            element.prepaint_at(origin, window, cx);
+            let glyphs = glyph_boxes(&layout, align, layout.bounds().size.width);
+            range_boxes(&glyphs, range)
+                .into_iter()
+                .map(|(row, left, right)| (left, right, row))
+                .collect()
+        })
+    }
+
+    #[test]
+    fn a_highlight_starting_a_wrapped_row_paints_only_that_row() {
+        // Three rows of "aaaa ", "bbbb ", "cccc".
+        let text = "aaaa bbbb cccc";
+        let rows = boxes(text, 45., TextAlign::Left, 0..text.len());
+        assert_eq!(rows.len(), 3, "{rows:?}");
+
+        let bbbb = text.find("bbbb").unwrap();
+        let highlight = boxes(text, 45., TextAlign::Left, bbbb..bbbb + 4);
+        assert_eq!(highlight.len(), 1, "{highlight:?}");
+        assert_eq!(highlight[0].0, px(0.));
+        assert_eq!(highlight[0].2, 1);
+
+        // Across the wrap, each row only as far as its text.
+        let across = boxes(text, 45., TextAlign::Left, 2..7);
+        assert_eq!(across.len(), 2, "{across:?}");
+        assert_eq!(across[0].1, rows[0].1);
+        assert_eq!((across[1].0, across[1].2), (px(0.), 1));
+    }
+
+    #[test]
+    fn highlights_after_a_hard_line_break_start_on_its_row() {
+        // Rows "aa", "bbb cc": the break is one byte of the text, not a glyph.
+        let text = "aa\nbbb cc";
+        let bbb = text.find("bbb").unwrap();
+        let aa = boxes(text, 1000., TextAlign::Left, 0..2);
+        let highlight = boxes(text, 1000., TextAlign::Left, bbb..bbb + 3);
+        assert_eq!(highlight.len(), 1, "{highlight:?}");
+        assert_eq!(highlight[0].0, px(0.));
+        assert_eq!(highlight[0].2, 1);
+        // Three glyphs as wide as the two of "aa" and a half.
+        assert_eq!(highlight[0].1, (aa[0].1 - aa[0].0) * 1.5);
+    }
+
+    #[test]
+    fn highlights_follow_centered_and_right_aligned_rows() {
+        // Rows "aaaa ", "bbbb ", "cc": the last is narrower than the text, so
+        // alignment moves it.
+        let text = "aaaa bbbb cc";
+        let cc = text.find("cc").unwrap()..text.len();
+        let widest = boxes(text, 45., TextAlign::Left, 0..5)[0].1;
+        let left = boxes(text, 45., TextAlign::Left, cc.clone())[0];
+        let center = boxes(text, 45., TextAlign::Center, cc.clone())[0];
+        let right = boxes(text, 45., TextAlign::Right, cc)[0];
+        let width = left.1 - left.0;
+        assert!(width > px(0.) && width < widest, "{left:?} in {widest:?}");
+        // GPUI aligns each row in the width of the laid-out text, the wrap
+        // width here.
+        let align_width = px(45.);
+        assert_eq!(left.0, px(0.));
+        assert_eq!(
+            center,
+            (
+                (align_width - width) / 2.,
+                (align_width + width) / 2.,
+                left.2
+            )
+        );
+        assert_eq!(right, (align_width - width, align_width, left.2));
+    }
+}
+
 /// A platform text system for tests where the `Mono` family shapes twice as
 /// wide as every other family, so a measurement that ignores the family of a
 /// run comes out visibly short.
@@ -1513,8 +1787,12 @@ pub(super) mod test_fonts {
 
 #[cfg(test)]
 mod tests {
-    use super::{InlineHighlight, combine_highlights, point_in_text_selection, text_runs};
-    use gpui::{FontWeight, HighlightStyle, SharedString, TextStyle, point, px};
+    use super::{
+        GlyphBox, InlineHighlight, aligned_row_left, combine_highlights, point_in_text_selection,
+        range_boxes, text_runs,
+    };
+    use gpui::{FontWeight, HighlightStyle, SharedString, TextAlign, TextStyle, point, px};
+    use std::ops::Range;
 
     fn mono(style: HighlightStyle) -> InlineHighlight {
         InlineHighlight {
@@ -1539,6 +1817,61 @@ mod tests {
             .map(|run| (run.len, run.font.family.as_ref()))
             .collect::<Vec<_>>();
         assert_eq!(families, vec![(4, "Body"), (4, "Mono"), (4, "Body")]);
+    }
+
+    #[test]
+    fn rows_align_the_way_gpui_paints_them() {
+        let width = px(100.);
+        assert_eq!(aligned_row_left(TextAlign::Left, width, px(40.)), px(0.));
+        assert_eq!(aligned_row_left(TextAlign::Center, width, px(40.)), px(30.));
+        assert_eq!(aligned_row_left(TextAlign::Right, width, px(40.)), px(60.));
+    }
+
+    fn glyph(text: Range<usize>, row: usize, left: f32, right: f32) -> GlyphBox {
+        GlyphBox {
+            text,
+            row,
+            left: px(left),
+            right: px(right),
+        }
+    }
+
+    #[test]
+    fn range_boxes_join_the_glyphs_of_a_range_on_each_row() {
+        // "ab cd" wrapped after the space, glyphs 8px wide.
+        let glyphs = [
+            glyph(0..1, 0, 0., 8.),
+            glyph(1..2, 0, 8., 16.),
+            glyph(2..3, 0, 16., 24.),
+            glyph(3..4, 1, 0., 8.),
+            glyph(4..5, 1, 8., 16.),
+        ];
+        let boxes = |range| range_boxes(&glyphs, range);
+        assert_eq!(boxes(1..2), [(0, px(8.), px(16.))]);
+        assert_eq!(boxes(0..5), [(0, px(0.), px(24.)), (1, px(0.), px(16.))]);
+        // Starting at the wrap paints the next row only.
+        assert_eq!(boxes(3..5), [(1, px(0.), px(16.))]);
+        assert!(boxes(2..2).is_empty());
+    }
+
+    #[test]
+    fn range_boxes_follow_right_to_left_glyphs() {
+        // Three two-byte letters painted right to left: the first letter's
+        // glyph is the rightmost.
+        let glyphs = [
+            glyph(0..2, 0, 16., 24.),
+            glyph(2..4, 0, 8., 16.),
+            glyph(4..6, 0, 0., 8.),
+        ];
+        assert_eq!(range_boxes(&glyphs, 0..2), [(0, px(16.), px(24.))]);
+        assert_eq!(range_boxes(&glyphs, 2..6), [(0, px(0.), px(16.))]);
+    }
+
+    #[test]
+    fn range_boxes_cover_a_glyph_drawing_part_of_the_range() {
+        // A ligature drawing "fi" in one glyph.
+        let glyphs = [glyph(0..2, 0, 0., 10.), glyph(2..3, 0, 10., 15.)];
+        assert_eq!(range_boxes(&glyphs, 1..2), [(0, px(0.), px(10.))]);
     }
 
     #[test]
