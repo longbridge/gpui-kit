@@ -87,6 +87,32 @@ let range_slider = cx.new(|_| {
 Slider::new(&range_slider)
 ```
 
+### Segmented Slider
+
+Color half-open value ranges with semantic theme colors. The start is included and the end is excluded, so `1.0..4.0` classifies `3.9999` as bad and `4.0` as okay. Use `f32::NEG_INFINITY` for the first range's start and `f32::INFINITY` for the final range's end to extend them to the slider limits:
+
+```rust
+let score = cx.new(|_| {
+    SliderState::new()
+        .min(1.0)
+        .max(17.0)
+        .step(1.0)
+        .default_value(8.0)
+});
+
+Slider::new(&score).segments([
+    (f32::NEG_INFINITY..4.0, cx.theme().danger),
+    (4.0..7.0, cx.theme().warning),
+    (7.0..11.0, cx.theme().success),
+    (11.0..14.0, cx.theme().warning),
+    (14.0..f32::INFINITY, cx.theme().danger),
+])
+.show_limits(true)
+.show_bar(true)
+```
+
+Ranges should be ordered and non-overlapping. Ticks mark each internal range boundary, making segment extents easy to read. `.show_limits(true)` adds the numeric boundary values beneath the ticks (beside a vertical slider). It defaults to `false`. `.show_bar(bool)` controls the filled value bar; by default it is shown for regular sliders and hidden when segments are configured. Segment positions are linear across the slider's min/max range. Colors come from the active theme, so the segments adapt to light, dark, and custom themes.
+
 ### Vertical Slider
 
 ```rust

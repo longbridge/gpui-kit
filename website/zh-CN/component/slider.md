@@ -87,6 +87,32 @@ let range_slider = cx.new(|_| {
 Slider::new(&range_slider)
 ```
 
+### 分段 Slider
+
+使用主题语义色为左闭右开数值范围着色。起始值包含在范围内，结束值不包含；因此 `1.0..4.0` 会将 `3.9999` 归为差，将 `4.0` 归为一般。首段可用 `f32::NEG_INFINITY` 作为起点，末段可用 `f32::INFINITY` 作为终点，使其延伸至滑块边界：
+
+```rust
+let score = cx.new(|_| {
+    SliderState::new()
+        .min(1.0)
+        .max(17.0)
+        .step(1.0)
+        .default_value(8.0)
+});
+
+Slider::new(&score).segments([
+    (f32::NEG_INFINITY..4.0, cx.theme().danger),
+    (4.0..7.0, cx.theme().warning),
+    (7.0..11.0, cx.theme().success),
+    (11.0..14.0, cx.theme().warning),
+    (14.0..f32::INFINITY, cx.theme().danger),
+])
+.show_limits(true)
+.show_bar(true)
+```
+
+范围应按顺序排列且互不重叠。刻度线会标记各范围的内部边界，便于查看每段的起止位置和长度。`.show_limits(true)` 会在刻度线下方显示数值（纵向滑块则显示在刻度线旁），默认关闭。`.show_bar(bool)` 用于控制当前值的填充条；默认情况下，普通滑块会显示填充条，配置分段后则隐藏。分段位置按滑块最小值到最大值线性映射。颜色取自当前主题，因此会适配浅色、深色和自定义主题。
+
 ### 纵向 Slider
 
 ```rust

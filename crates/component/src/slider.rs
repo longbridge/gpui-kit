@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::{ops::Range, sync::Arc};
 
-use crate::{ActiveTheme, AxisExt, StyledExt, ThemeStyled as _};
+use crate::{ActiveTheme, AxisExt, Sizable, Size, StyledExt, ThemeStyled as _};
 pub use gpui_base::slider::{SliderEvent, SliderScale, SliderState, SliderValue};
 use gpui_base::{Slider as BaseSlider, SliderIndicator, SliderThumb, SliderTrack, spring};
 
@@ -89,6 +89,10 @@ pub struct Slider {
     style: StyleRefinement,
     disabled: bool,
     reverse: bool,
+    size: Size,
+    segments: Vec<(Range<f32>, Hsla)>,
+    show_limits: bool,
+    show_bar: bool,
 }
 
 impl Slider {
@@ -100,6 +104,10 @@ impl Slider {
             style: StyleRefinement::default(),
             disabled: false,
             reverse: false,
+            size: Size::Medium,
+            segments: Vec::new(),
+            show_limits: false,
+            show_bar: true,
         }
     }
 
@@ -134,6 +142,35 @@ impl Slider {
         self.reverse = true;
         self
     }
+
+    /// Color half-open value ranges along the track.
+    ///
+    /// The start is included and the end is excluded, so `1.0..4.0` includes
+    /// `3.9999` but not `4.0`. Use `f32::NEG_INFINITY` for the first range's
+    /// start or `f32::INFINITY` for the final range's end to extend them to the
+    /// slider limits. Ranges should be ordered and non-overlapping.
+    /// Internal range boundaries are marked with ticks. Segment positions are
+    /// linear across the slider's min/max range. Colors are resolved by the
+    /// caller, typically from semantic theme tokens.
+    pub fn segments(mut self, segments: impl IntoIterator<Item = (Range<f32>, Hsla)>) -> Self {
+        self.segments = segments.into_iter().collect();
+        self
+    }
+
+    /// Show numeric values beneath the range boundary indicators.
+    pub fn show_limits(mut self, show_limits: bool) -> Self {
+        self.show_limits = show_limits;
+        self
+    }
+
+    /// Set whether to show the filled bar from the minimum to the current value.
+    ///
+    /// By default, the bar is shown for regular sliders and hidden when segments
+    /// are configured. This setting overrides that behavior.
+    pub fn show_bar(mut self, show_bar: bool) -> Self {
+        self.show_bar = show_bar;
+        self
+    }
 }
 
 impl Styled for Slider {
@@ -142,10 +179,28 @@ impl Styled for Slider {
     }
 }
 
+impl Sizable for Slider {
+    fn with_size(mut self, size: impl Into<Size>) -> Self {
+        self.size = size.into();
+        self
+    }
+}
+
 impl RenderOnce for Slider {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let axis = self.axis;
         let state = self.state.read(cx);
+        let (thumb_size, track_size) = match self.size {
+            Size::XSmall => (px(12.), px(4.)),
+            Size::Small => (px(14.), px(5.)),
+            Size::Medium => (px(16.), px(6.)),
+            Size::Large => (px(20.), px(8.)),
+            Size::Size(size) => (size, (size / 3.).max(px(2.))),
+        };
+        let show_limits = self.show_limits && !self.segments.is_empty();
+        let track_extent = thumb_size + px(8.) + if show_limits { px(18.) } else { px(0.) };
+        let thumb_offset = (thumb_size - track_size) / 2.;
+        let thumb_half_size = thumb_size / 2.;
         let is_range = state.value().is_range();
         let percentage = state.percentage();
         let (bar_start, bar_end) = if self.reverse && !is_range {
@@ -190,6 +245,143 @@ impl RenderOnce for Slider {
                 .map(|v| v.to_pixels(rem_size))
                 .unwrap_or(default_radius),
         };
+        let min_value = state.min_value();
+        let max_value = state.max_value();
+        let segment_elements = self
+            .segments
+            .iter()
+            .filter_map(|(range, color)| {
+                let segment_range = clamp_segment_range(range, min_value, max_value)?;
+                let start = linear_percentage(segment_range.start, min_value, max_value);
+                let end = linear_percentage(segment_range.end, min_value, max_value);
+                let starts_at_min = segment_range.start <= min_value;
+                let ends_at_max = segment_range.end >= max_value;
+                let segment_radius = Corners {
+                    top_left: if (axis.is_horizontal() && starts_at_min)
+                        || (axis.is_vertical() && ends_at_max)
+                    {
+                        radius.top_left
+                    } else {
+                        px(0.)
+                    },
+                    top_right: if (axis.is_horizontal() && ends_at_max)
+                        || (axis.is_vertical() && ends_at_max)
+                    {
+                        radius.top_right
+                    } else {
+                        px(0.)
+                    },
+                    bottom_left: if (axis.is_horizontal() && starts_at_min)
+                        || (axis.is_vertical() && starts_at_min)
+                    {
+                        radius.bottom_left
+                    } else {
+                        px(0.)
+                    },
+                    bottom_right: if (axis.is_horizontal() && ends_at_max)
+                        || (axis.is_vertical() && starts_at_min)
+                    {
+                        radius.bottom_right
+                    } else {
+                        px(0.)
+                    },
+                };
+
+                Some(
+                    div()
+                        .absolute()
+                        .when(axis.is_horizontal(), |this| {
+                            this.top_0()
+                                .bottom_0()
+                                .left(relative(start))
+                                .right(relative(1. - end))
+                        })
+                        .when(axis.is_vertical(), |this| {
+                            this.left_0()
+                                .right_0()
+                                .bottom(relative(start))
+                                .top(relative(1. - end))
+                        })
+                        .bg(color.opacity(0.55))
+                        .corner_radii(segment_radius)
+                        .into_any_element(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut boundary_values = Vec::new();
+        for value in self
+            .segments
+            .iter()
+            .flat_map(|(range, _)| [range.start, range.end])
+        {
+            if value.is_finite()
+                && value > min_value
+                && value < max_value
+                && boundary_values.last() != Some(&value)
+            {
+                boundary_values.push(value);
+            }
+        }
+
+        let boundary_color = cx.theme().foreground.opacity(0.7);
+        let boundary_indicators = boundary_values
+            .iter()
+            .map(|value| {
+                let position = linear_percentage(*value, min_value, max_value);
+                div()
+                    .absolute()
+                    .when(axis.is_horizontal(), |this| {
+                        this.top(-px(5.))
+                            .bottom(-px(5.))
+                            .left(relative(position))
+                            .ml(-px(0.5))
+                            .w(px(1.))
+                    })
+                    .when(axis.is_vertical(), |this| {
+                        this.left(-px(5.))
+                            .right(-px(5.))
+                            .bottom(relative(position))
+                            .mb(-px(0.5))
+                            .h(px(1.))
+                    })
+                    .bg(boundary_color)
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        let limit_labels = boundary_values
+            .iter()
+            .filter(|_| show_limits)
+            .map(|value| {
+                let position = linear_percentage(*value, min_value, max_value);
+                let label = value.to_string();
+                let vertical_label = label.clone();
+                div()
+                    .absolute()
+                    .when(axis.is_horizontal(), |this| {
+                        this.top_full()
+                            .mt_1()
+                            .left(relative(position))
+                            .ml(-px(20.))
+                            .w(px(40.))
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .text_center()
+                            .child(label)
+                    })
+                    .when(axis.is_vertical(), |this| {
+                        this.left_full()
+                            .ml_2()
+                            .bottom(relative(position))
+                            .mb(-px(6.))
+                            .w(px(40.))
+                            .text_xs()
+                            .text_color(cx.theme().muted_foreground)
+                            .text_center()
+                            .child(vertical_label)
+                    })
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
 
         let ring_color = cx.theme().ring;
         let entity_id = self.state.entity_id();
@@ -204,10 +396,12 @@ impl RenderOnce for Slider {
                 .when(!self.disabled, |this| {
                     this.absolute()
                         .when(axis.is_horizontal(), |this| {
-                            this.top(px(-5.)).left(position).ml(-px(8.))
+                            this.top(-thumb_offset).left(position).ml(-thumb_half_size)
                         })
                         .when(axis.is_vertical(), |this| {
-                            this.bottom(position).left(px(-5.)).mb(-px(8.))
+                            this.bottom(position)
+                                .left(-thumb_offset)
+                                .mb(-thumb_half_size)
                         })
                         .flex()
                         .items_center()
@@ -215,7 +409,7 @@ impl RenderOnce for Slider {
                         .flex_shrink_0()
                         .rounded_full_style(cx)
                         .bg(bar_color.opacity(0.5))
-                        .size_4()
+                        .size(thumb_size)
                         .p(px(1.))
                         .on_hover({
                             let interaction = ring.interaction.clone();
@@ -276,38 +470,62 @@ impl RenderOnce for Slider {
                     .disabled(self.disabled)
                     .flex()
                     .when(axis.is_horizontal(), |this| {
-                        this.items_center().h_6().w_full()
+                        this.items_center().h(track_extent).w_full()
                     })
                     .when(axis.is_vertical(), |this| {
-                        this.justify_center().w_6().h_full()
+                        this.justify_center().w(track_extent).h_full()
                     })
                     .flex_shrink_0()
                     .child(
                         SliderIndicator::new(&self.state)
                             .relative()
-                            .when(axis.is_horizontal(), |this| this.w_full().h_1p5())
-                            .when(axis.is_vertical(), |this| this.h_full().w_1p5())
+                            .when(axis.is_horizontal(), |this| this.w_full().h(track_size))
+                            .when(axis.is_vertical(), |this| this.h_full().w(track_size))
                             .bg(bar_color.opacity(0.2))
                             .active(|this| this.bg(bar_color.opacity(0.4)))
                             .corner_radii(radius)
-                            .child(
-                                div()
-                                    .absolute()
-                                    .when(axis.is_horizontal(), |this| {
-                                        this.h_full().left(bar_start).right(bar_end)
-                                    })
-                                    .when(axis.is_vertical(), |this| {
-                                        this.w_full().bottom(bar_start).top(bar_end)
-                                    })
-                                    .bg(bar_color)
-                                    .rounded_full_style(cx),
-                            )
+                            .children(segment_elements)
+                            .when(self.show_bar, |this| {
+                                this.child(
+                                    div()
+                                        .absolute()
+                                        .when(axis.is_horizontal(), |this| {
+                                            this.h_full().left(bar_start).right(bar_end)
+                                        })
+                                        .when(axis.is_vertical(), |this| {
+                                            this.w_full().bottom(bar_start).top(bar_end)
+                                        })
+                                        .bg(bar_color)
+                                        .rounded_full_style(cx),
+                                )
+                            })
+                            .children(boundary_indicators)
+                            .children(limit_labels)
                             .when_some(start_ring, |this, ring| {
                                 this.child(thumb(relative(percentage.start), true, ring))
                             })
                             .child(thumb(relative(percentage.end), false, end_ring)),
                     ),
             )
+    }
+}
+
+fn clamp_segment_range(range: &Range<f32>, min: f32, max: f32) -> Option<Range<f32>> {
+    if range.start.is_nan() || range.end.is_nan() || range.start >= range.end {
+        return None;
+    }
+
+    let start = range.start.max(min);
+    let end = range.end.min(max);
+    (start < end).then_some(start..end)
+}
+
+fn linear_percentage(value: f32, min: f32, max: f32) -> f32 {
+    let range = max - min;
+    if range <= 0.0 {
+        0.0
+    } else {
+        ((value - min) / range).clamp(0.0, 1.0)
     }
 }
 
@@ -329,6 +547,27 @@ mod tests {
                 .h(px(24.))
                 .child(Slider::new(&self.state).disabled(self.disabled))
         }
+    }
+
+    #[test]
+    fn segment_ranges_clamp_infinite_endpoints_to_slider_limits() {
+        assert_eq!(
+            clamp_segment_range(&(f32::NEG_INFINITY..4.0), 1.0, 17.0),
+            Some(1.0..4.0)
+        );
+        assert_eq!(
+            clamp_segment_range(&(14.0..f32::INFINITY), 1.0, 17.0),
+            Some(14.0..17.0)
+        );
+    }
+
+    #[gpui::test]
+    fn test_slider_builder(cx: &mut TestAppContext) {
+        let state = cx.new(|_| SliderState::new());
+        let slider = Slider::new(&state).small().show_bar(true);
+
+        assert_eq!(slider.size, Size::Small);
+        assert_eq!(slider.show_bar, true);
     }
 
     fn harness(

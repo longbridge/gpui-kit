@@ -26,6 +26,8 @@ pub struct SliderStory {
     slider_hsl_value: Hsla,
     slider_logarithmic: Entity<SliderState>,
     slider_reverse: Entity<SliderState>,
+    slider_segment: Entity<SliderState>,
+    slider_segment_value: f32,
     disabled: bool,
     _subscritions: Vec<Subscription>,
 }
@@ -114,6 +116,14 @@ impl SliderStory {
                 .default_value(5.)
         });
 
+        let slider_segment = cx.new(|_| {
+            SliderState::new()
+                .min(1.)
+                .max(17.)
+                .step(1.)
+                .default_value(8.)
+        });
+
         let mut _subscritions = vec![
             cx.subscribe(&slider1, |this, _, event: &SliderEvent, cx| match event {
                 SliderEvent::Change(value) => {
@@ -129,6 +139,12 @@ impl SliderStory {
                 SliderEvent::Change(_) => {}
                 SliderEvent::Release(value) => {
                     this.slider3_released_value = *value;
+                    cx.notify();
+                }
+            }),
+            cx.subscribe(&slider_segment, |this, _, event: &SliderEvent, cx| {
+                if let SliderEvent::Change(value) = event {
+                    this.slider_segment_value = value.start();
                     cx.notify();
                 }
             }),
@@ -169,6 +185,8 @@ impl SliderStory {
             slider_hsl_value: gpui_kit::red(),
             slider_logarithmic,
             slider_reverse,
+            slider_segment,
+            slider_segment_value: 8.,
             disabled: false,
             _subscritions,
         }
@@ -286,6 +304,35 @@ impl Render for SliderStory {
                                     .horizontal()
                                     .reverse()
                                     .disabled(self.disabled),
+                            ),
+                    ),
+            )
+            .child(
+                section("Segmented")
+                    .description("Color discrete value ranges by category.")
+                    .w_128()
+                    .items_center()
+                    .child(
+                        v_flex()
+                            .w(px(360.))
+                            .gap_4()
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(div().font_medium().child("Health score"))
+                                    .child(format!("{}", self.slider_segment_value)),
+                            )
+                            .child(
+                                Slider::new(&self.slider_segment)
+                                    .segments([
+                                        (f32::NEG_INFINITY..4.0, cx.theme().danger),
+                                        (4.0..7.0, cx.theme().warning),
+                                        (7.0..11.0, cx.theme().success),
+                                        (11.0..14.0, cx.theme().warning),
+                                        (14.0..f32::INFINITY, cx.theme().danger),
+                                    ])
+                                    .show_limits(true),
                             ),
                     ),
             )
