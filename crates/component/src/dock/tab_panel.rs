@@ -519,10 +519,14 @@ impl TabGroupSkin {
                                             .icon(IconName::Close)
                                             .xsmall()
                                             .ghost()
-                                            // The tab already adds a 4px gap after
-                                            // the label's 12px right padding.
-                                            .ml(-px(4.))
-                                            .mr_3()
+                                            // The 20px XS button has a 12px icon:
+                                            // 4px inside plus 8px outside matches
+                                            // the label's 12px leading padding.
+                                            // Offset the label's own 12px right
+                                            // padding and the tab's 4px gap so the
+                                            // text-to-icon distance is also 12px.
+                                            .ml(-px(8.))
+                                            .mr_2()
                                             .tab_stop(false)
                                             .tooltip(t!("Dock.Close"))
                                             .debug_selector(|| CLOSE_BUTTON_SELECTOR.to_string())
@@ -1662,7 +1666,15 @@ mod tests {
         });
         cx.run_until_parked();
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_some()
+        let button = cx.debug_bounds(CLOSE_BUTTON_SELECTOR);
+        if enabled && closable {
+            assert_eq!(
+                button.as_ref().map(|bounds| bounds.size.width),
+                Some(px(20.)),
+                "the close button keeps the standard XS hover target"
+            );
+        }
+        button.is_some()
     }
 
     /// A closable panel's tab carries a close (X) button.
