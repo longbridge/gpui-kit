@@ -29,7 +29,7 @@ use rust_i18n::t;
 
 use crate::{
     ActiveTheme as _, IconName, Selectable as _, Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::{Button, ButtonCustomVariant, ButtonVariants as _},
     dock::{ClosePanel, PanelControl, PanelHandle, PanelStyle, SkinShared, ToggleZoom},
     h_flex,
     menu::DropdownMenu as _,
@@ -518,7 +518,17 @@ impl TabGroupSkin {
                                         Button::new(("close-tab", ix))
                                             .icon(IconName::Close)
                                             .xsmall()
-                                            .ghost()
+                                            // The regular ghost hover matches the
+                                            // inactive tab bar background in the
+                                            // default theme. Use a stronger theme
+                                            // surface while keeping a transparent
+                                            // idle background and no border.
+                                            .custom(
+                                                ButtonCustomVariant::new(cx)
+                                                    .foreground(cx.theme().secondary_foreground)
+                                                    .hover(*cx.theme().tokens.secondary_hover)
+                                                    .active(*cx.theme().tokens.secondary_active),
+                                            )
                                             // The 20px XS button has a 12px icon:
                                             // 4px inside plus 8px outside matches
                                             // the label's 12px leading padding.
@@ -528,7 +538,6 @@ impl TabGroupSkin {
                                             .ml(-px(8.))
                                             .mr_2()
                                             .tab_stop(false)
-                                            .tooltip(t!("Dock.Close"))
                                             .debug_selector(|| CLOSE_BUTTON_SELECTOR.to_string())
                                             .on_click({
                                                 let group = group.clone();
