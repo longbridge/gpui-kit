@@ -178,8 +178,8 @@ value. A segmented control is one silhouette: its end segments follow the contai
 corners, its middle segments remain square, and each boundary has one divider
 of consistent thickness.
 
-<img class="alignment-light" src="/radius-hierarchy.svg" alt="Light theme chat composer: the inset surface, both buttons, and placeholder spacing change together; red guide circles show their shared corner center.">
-<img class="alignment-dark" src="/radius-hierarchy-dark.svg" alt="Dark theme chat composer: the inset surface, both buttons, and placeholder spacing change together; red guide circles show their shared corner center.">
+<img class="alignment-light" src="/radius-hierarchy.svg?v=20260923-easing" alt="Light theme chat composer: the inset surface, both buttons, and placeholder spacing change together; red guide circles show their shared corner center.">
+<img class="alignment-dark" src="/radius-hierarchy-dark.svg?v=20260923-easing" alt="Dark theme chat composer: the inset surface, both buttons, and placeholder spacing change together; red guide circles show their shared corner center.">
 
 A radius must govern the entire visible surface, not just its border. Exposed
 corners remain transparent to the surface behind them; child backgrounds,
