@@ -1642,7 +1642,7 @@ mod tests {
         });
         let skin = skin.expect("skin constructed with the area");
         if enabled {
-            cx.update(|_, cx| skin.set_tab_close_buttons_enabled(true, cx));
+            cx.update(|_, cx| skin.set_close_buttons(true, cx));
         }
         cx.update(|window, cx| {
             let under_test = TabProbe::new(closable, cx);
@@ -1713,7 +1713,7 @@ mod tests {
         });
 
         for (visible, expected) in [(false, false), (true, true), (false, false)] {
-            cx.update(|_, cx| skin.set_tab_close_buttons_enabled(visible, cx));
+            cx.update(|_, cx| skin.set_close_buttons(visible, cx));
             cx.run_until_parked();
             cx.update(|window, cx| window.draw(cx).clear(cx));
             assert_eq!(cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_some(), expected);
@@ -1732,7 +1732,7 @@ mod tests {
             skin = Some(renderer.clone());
             DockArea::new("skin", None, window, cx).with_renderer(renderer)
         });
-        cx.update(|_, cx| skin.unwrap().set_tab_close_buttons_enabled(true, cx));
+        cx.update(|_, cx| skin.unwrap().set_close_buttons(true, cx));
 
         let (closable_id, filler_id, activated) = cx.update(|window, cx| {
             let filler = TabProbe::new(false, cx);
@@ -1790,7 +1790,7 @@ mod tests {
             skin = Some(renderer.clone());
             DockArea::new("skin", None, window, cx).with_renderer(renderer)
         });
-        cx.update(|_, cx| skin.unwrap().set_tab_close_buttons_enabled(true, cx));
+        cx.update(|_, cx| skin.unwrap().set_close_buttons(true, cx));
         // Two closable panels so the group is draggable (not on its last
         // visible panel) and offers close buttons while open.
         cx.update(|window, cx| {

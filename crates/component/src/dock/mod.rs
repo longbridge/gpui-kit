@@ -192,7 +192,7 @@ impl DockSkin {
 
     /// Enable close buttons on closable tabs. Disabled by default; a panel's
     /// own close constraints still decide whether its button appears.
-    pub fn set_tab_close_buttons_enabled(&self, enabled: bool, cx: &mut App) {
+    pub fn set_close_buttons(&self, enabled: bool, cx: &mut App) {
         self.shared.tab_close_buttons_enabled.set(enabled);
         self.shared.notify(cx);
     }

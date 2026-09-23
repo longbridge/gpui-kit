@@ -174,8 +174,7 @@ impl Render for DockStory {
                             .checked(show_close_buttons)
                             .on_click(window.listener_for(&story, |this, _, _, cx| {
                                 this.show_close_buttons = !this.show_close_buttons;
-                                this.skin
-                                    .set_tab_close_buttons_enabled(this.show_close_buttons, cx);
+                                this.skin.set_close_buttons(this.show_close_buttons, cx);
                                 cx.notify();
                             })),
                     )
