@@ -227,6 +227,14 @@ impl Focusable for SliderStory {
 impl Render for SliderStory {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rgb = SharedString::from(self.slider_hsl_value.to_hex());
+        let neutral_temperature = if cx.theme().mode.is_dark() {
+            cx.theme().foreground
+        } else {
+            cx.theme().background
+        };
+        let warm_temperature = neutral_temperature.blend(cx.theme().warning.opacity(0.85));
+        let cool_temperature = neutral_temperature.blend(cx.theme().info.opacity(0.65));
+        let temperature_radius = cx.theme().radius_full();
 
         v_flex()
             .w_full()
@@ -409,11 +417,43 @@ impl Render for SliderStory {
                                             .child(format!("{:.0} K", self.temperature_kelvin)),
                                     ),
                             )
-                            .child(div().w_full().h_3().rounded_full().bg(linear_gradient(
-                                90.,
-                                linear_color_stop(gpui_kit::rgb(0xff994a), 0.),
-                                linear_color_stop(gpui_kit::rgb(0xb8d4ff), 1.),
-                            )))
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .h_3()
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .h_full()
+                                            .corner_radii(Corners {
+                                                top_left: temperature_radius,
+                                                top_right: px(0.),
+                                                bottom_right: px(0.),
+                                                bottom_left: temperature_radius,
+                                            })
+                                            .bg(linear_gradient(
+                                                90.,
+                                                linear_color_stop(warm_temperature, 0.),
+                                                linear_color_stop(neutral_temperature, 1.),
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .h_full()
+                                            .corner_radii(Corners {
+                                                top_left: px(0.),
+                                                top_right: temperature_radius,
+                                                bottom_right: temperature_radius,
+                                                bottom_left: px(0.),
+                                            })
+                                            .bg(linear_gradient(
+                                                90.,
+                                                linear_color_stop(neutral_temperature, 0.),
+                                                linear_color_stop(cool_temperature, 1.),
+                                            )),
+                                    ),
+                            )
                             .child(Slider::new(&self.slider_temperature).disabled(self.disabled)),
                     ),
             )
