@@ -143,7 +143,13 @@ struct State {
     physics: Physics,
     sampled_at: Option<Instant>,
     ongoing_scroll: OngoingScroll,
+    short_drag_distance: Option<f32>,
 }
+
+// GPUI starts a normal touch pan only after its 8 px touch slop, but a touch
+// catching a fling starts at zero displacement. A short catch should stop the
+// old fling rather than turn a few fast pixels into a new one.
+const CATCH_DRAG_SLOP: f32 = 8.;
 
 /// `ScrollbarHandle` has no `max_offset`; recover it from the definition
 /// `content_size = viewport + max_offset`. Both dispatch phases clamp against
@@ -244,6 +250,7 @@ impl Element for ScrollBounce {
             let view = window.current_view();
             let on_scroll = self.on_scroll.clone();
             let mut before = 0.;
+            let mut allow_end_bounce = false;
             window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
                 let ScrollDelta::Pixels(mut delta) = event.delta else {
                     return;
@@ -268,8 +275,23 @@ impl Element for ScrollBounce {
                 if phase == DispatchPhase::Capture {
                     before = handle.offset().y.as_f32();
                     if event.touch_phase == TouchPhase::Started {
+                        state.short_drag_distance = (delta.y == px(0.)).then_some(0.);
                         state.physics.begin(bounds.size.height.as_f32());
+                    } else if let Some(distance) = state.short_drag_distance.as_mut() {
+                        *distance += delta.y.as_f32().abs();
+                        if *distance > CATCH_DRAG_SLOP {
+                            state.short_drag_distance = None;
+                        }
                     }
+                    let suppress_short_drag_momentum = if ended {
+                        state.short_drag_distance.take().is_some()
+                            && event.touch_phase == TouchPhase::Ended
+                    } else {
+                        false
+                    };
+                    // The current Ended packet may still cross an edge; only
+                    // momentum packets after it should be suppressed.
+                    allow_end_bounce = suppress_short_drag_momentum;
                     if state.physics.suppress_momentum {
                         cx.stop_propagation();
                         return;
@@ -290,6 +312,9 @@ impl Element for ScrollBounce {
                         cx.stop_propagation();
                     } else if ended {
                         state.physics.release();
+                    }
+                    if suppress_short_drag_momentum {
+                        state.physics.suppress_momentum = true;
                     }
                 } else {
                     // Div applies deltas immediately but clamps during its next
@@ -312,7 +337,9 @@ impl Element for ScrollBounce {
                         || (requested < 0. && offset.y == -max);
                     let residual =
                         (requested - (after - before)).clamp(requested.min(0.), requested.max(0.));
-                    if at_outward_edge && residual.abs() > 0.01 && !state.physics.suppress_momentum
+                    if at_outward_edge
+                        && residual.abs() > 0.01
+                        && (!state.physics.suppress_momentum || allow_end_bounce)
                     {
                         let dragging = state.physics.dragging;
                         if !dragging {
@@ -644,6 +671,98 @@ mod tests {
         draw(cx);
         assert!(handle.offset().y < px(0.));
         assert_eq!(handle.bounds().origin.y, origin);
+    }
+
+    #[gpui::test]
+    fn tiny_drag_catching_momentum_does_not_start_a_reverse_fling(cx: &mut TestAppContext) {
+        let handle = ScrollHandle::new();
+        let (_, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            move |_, _| ScrollTest {
+                handle,
+                enabled: true,
+            }
+        });
+        draw(cx);
+        handle.set_offset(point(px(0.), px(-200.)));
+        draw(cx);
+
+        // GPUI ends the old momentum stream, then starts a drag at zero
+        // displacement when a finger catches the moving content.
+        scroll(cx, -60., TouchPhase::Started);
+        scroll(cx, 0., TouchPhase::Ended);
+        draw(cx);
+        scroll(cx, -100., TouchPhase::Moved);
+        draw(cx);
+        scroll(cx, 0., TouchPhase::Ended);
+        draw(cx);
+        let before_catch = handle.offset().y;
+        assert!(before_catch < px(0.));
+        scroll(cx, 0., TouchPhase::Started);
+        scroll(cx, 8., TouchPhase::Moved);
+        scroll(cx, 0., TouchPhase::Ended);
+        draw(cx);
+        let stopped = handle.offset().y;
+        assert_eq!(stopped, before_catch + px(8.));
+
+        // The recognizer can synthesize a large reverse momentum packet from
+        // that 8 px movement. It must not move the logical viewport.
+        scroll(cx, 100., TouchPhase::Moved);
+        draw(cx);
+        assert_eq!(handle.offset().y, stopped);
+
+        // A fresh gesture restores ordinary scrolling and momentum.
+        scroll(cx, -20., TouchPhase::Started);
+        scroll(cx, 0., TouchPhase::Ended);
+        scroll(cx, -10., TouchPhase::Moved);
+        draw(cx);
+        assert_eq!(handle.offset().y, stopped - px(30.));
+    }
+
+    #[gpui::test]
+    fn deliberate_drag_after_catching_momentum_can_fling(cx: &mut TestAppContext) {
+        let handle = ScrollHandle::new();
+        let (_, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            move |_, _| ScrollTest {
+                handle,
+                enabled: true,
+            }
+        });
+        draw(cx);
+        handle.set_offset(point(px(0.), px(-200.)));
+        draw(cx);
+
+        scroll(cx, 0., TouchPhase::Started);
+        scroll(cx, 24., TouchPhase::Moved);
+        scroll(cx, 0., TouchPhase::Ended);
+        draw(cx);
+        assert_eq!(handle.offset().y, px(-176.));
+        scroll(cx, 40., TouchPhase::Moved);
+        draw(cx);
+        assert_eq!(handle.offset().y, px(-136.));
+    }
+
+    #[gpui::test]
+    fn short_catch_release_still_stretches_past_the_edge(cx: &mut TestAppContext) {
+        let handle = ScrollHandle::new();
+        let (_, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            move |_, _| ScrollTest {
+                handle,
+                enabled: true,
+            }
+        });
+        draw(cx);
+        handle.set_offset(point(px(0.), px(-4.)));
+        draw(cx);
+        let origin = handle.bounds().origin.y;
+
+        scroll(cx, 0., TouchPhase::Started);
+        scroll(cx, 8., TouchPhase::Ended);
+        draw(cx);
+        assert_eq!(handle.offset().y, px(0.));
+        assert!(handle.bounds().origin.y > origin);
     }
 
     #[gpui::test]
