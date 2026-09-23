@@ -1,6 +1,7 @@
 ---
 import { SITE_URL } from '../lib/site';
 import { currentVersion, currentVersionPath, isLatestVersion, versionHref } from '../lib/versions';
+import { themeModes } from '../lib/theme-catalog';
 
 export interface Props {
   title?: string;
@@ -67,6 +68,7 @@ const jsonLd = JSON.stringify(structuredData ?? defaultStructuredData).replace(/
 
     <!-- Favicon -->
     <link rel="icon" href={`${base}logo.svg`} />
+    <link rel="stylesheet" href={`${base}theme-tokens.css`} />
 
     <!-- OG / Twitter -->
     <meta property="og:type" content="website" />
@@ -90,11 +92,13 @@ const jsonLd = JSON.stringify(structuredData ?? defaultStructuredData).replace(/
     <script type="application/ld+json" set:html={jsonLd} />
 
     <!-- Theme: apply before paint to avoid FOUC -->
-    <script is:inline>
+    <script is:inline define:vars={{ themeModes }}>
       (function () {
         const stored = localStorage.getItem('theme');
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-        if (stored === 'dark' || (!stored && prefersDark)) {
+        const mode = themeModes[stored];
+        if (mode) document.documentElement.dataset.theme = stored;
+        if (mode === 'dark' || stored === 'dark' || (!stored && prefersDark)) {
           document.documentElement.classList.add('dark');
         }
       })();

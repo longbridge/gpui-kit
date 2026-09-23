@@ -1138,6 +1138,70 @@ html.dark .astro-code span {
 .theme-toggle:hover { background: var(--secondary); }
 .theme-toggle svg { width: 1rem; height: 1rem; }
 
+#theme-palette { display: none; }
+#theme-palette[open] {
+  display: flex;
+  flex-direction: column;
+  width: min(30rem, calc(100% - 2rem));
+  max-height: min(36rem, calc(100vh - 4rem));
+  margin: 8vh auto auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--popover);
+  color: var(--foreground);
+  box-shadow: var(--shadow-dialog);
+}
+#theme-palette::backdrop {
+  background: color-mix(in srgb, var(--background) 45%, transparent);
+  backdrop-filter: blur(6px);
+}
+.theme-palette__search {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+.theme-palette__search input {
+  flex: 1;
+  min-width: 0;
+  outline: none;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+}
+.theme-palette__search input::placeholder { color: var(--muted-foreground); }
+.theme-palette__list { min-height: 0; overflow-y: auto; padding: 0.4rem; }
+.theme-palette__option {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--radius-control);
+  text-align: left;
+  cursor: pointer;
+}
+.theme-palette__option[hidden], .theme-palette__empty[hidden] { display: none; }
+.theme-palette__option:hover, .theme-palette__option:focus-visible { background: var(--secondary); }
+.theme-palette__swatch {
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.4rem;
+  background: linear-gradient(135deg, var(--swatch-bg) 50%, var(--swatch-accent) 50%);
+}
+.theme-palette__name { flex: 1; min-width: 0; font-size: 0.85rem; font-weight: 580; }
+.theme-palette__name small { display: block; color: var(--muted-foreground); font-size: 0.72rem; font-weight: 400; }
+.theme-palette__mode { color: var(--muted-foreground); font-size: 0.7rem; text-transform: capitalize; }
+.theme-palette__check { width: 1rem; color: var(--primary); visibility: hidden; }
+.theme-palette__option[aria-pressed="true"] .theme-palette__check { visibility: visible; }
+.theme-palette__empty { margin: 1.5rem; color: var(--muted-foreground); text-align: center; }
+
 /* ====================================================================
    Pagefind search UI overrides
    ==================================================================== */

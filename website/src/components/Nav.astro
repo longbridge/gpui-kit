@@ -1,5 +1,6 @@
 ---
 import DocSearch from './DocSearch.astro';
+import ThemePalette from './ThemePalette.astro';
 import { currentVersion, currentVersionPath, latestVersion, siteVersions, versionHref } from '../lib/versions';
 
 export interface Props {
@@ -168,6 +169,7 @@ const currentVersionLabel = siteVersions.find((version) => version.id === curren
       </a>
 
       <!-- Theme toggle -->
+      <ThemePalette lang={lang} />
       <button
         id="theme-toggle"
         class="theme-toggle"
@@ -254,10 +256,13 @@ const currentVersionLabel = siteVersions.find((version) => version.id === curren
   updateIcon();
 
   toggle?.addEventListener('click', () => {
-    const isDark = document.documentElement.classList.toggle('dark');
+    const isDark = !document.documentElement.classList.contains('dark');
+    document.documentElement.classList.toggle('dark', isDark);
+    delete document.documentElement.dataset.theme;
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
     updateIcon();
   });
+  document.addEventListener('themechange', updateIcon);
 
 
   // Mobile nav drawer
