@@ -166,7 +166,9 @@ pub trait PanelView: gpui_base::dock::PanelView {
     fn zoom_control(&self, cx: &App) -> Option<PanelControl>;
     fn inner_padding(&self, cx: &App) -> bool;
     fn title_bar(&self, cx: &App) -> bool;
-    fn render_tab(&self, tab: Tab, window: &mut Window, cx: &App) -> Tab;
+    fn render_tab(&self, tab: Tab, _window: &mut Window, _cx: &App) -> Tab {
+        tab
+    }
 }
 
 impl<T: Panel> PanelView for Entity<T> {

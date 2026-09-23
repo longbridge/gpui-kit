@@ -451,8 +451,14 @@ mod tests {
             area.update(cx, |area, cx| {
                 area.set_center(
                     DockLayout::h_split()
-                        .child(DockLayout::tabs().panel(MeasuredProbe::new(Rc::default(), cx)), None)
-                        .child(DockLayout::tabs().panel(MeasuredProbe::new(Rc::default(), cx)), None),
+                        .child(
+                            DockLayout::tabs().panel(MeasuredProbe::new(Rc::default(), cx)),
+                            None,
+                        )
+                        .child(
+                            DockLayout::tabs().panel(MeasuredProbe::new(Rc::default(), cx)),
+                            None,
+                        ),
                     window,
                     cx,
                 );
@@ -474,16 +480,27 @@ mod tests {
         let (left, right) = cx.update(|_, cx| {
             let area = area.read(cx);
             (
-                area.node_bounds(left_id).expect("left leaf rect captured during paint"),
-                area.node_bounds(right_id).expect("right leaf rect captured during paint"),
+                area.node_bounds(left_id)
+                    .expect("left leaf rect captured during paint"),
+                area.node_bounds(right_id)
+                    .expect("right leaf rect captured during paint"),
             )
         });
 
         // Two leaves side by side: a shared top edge and height, tiled along x.
-        assert_eq!(left.origin.y, right.origin.y, "the two leaves share a top edge");
-        assert_eq!(left.size.height, right.size.height, "the two leaves are the same height");
+        assert_eq!(
+            left.origin.y, right.origin.y,
+            "the two leaves share a top edge"
+        );
+        assert_eq!(
+            left.size.height, right.size.height,
+            "the two leaves are the same height"
+        );
         assert!(left.size.height > px(0.), "the leaf has a real height");
-        assert!(left.origin.x < right.origin.x, "the left leaf sits left of the right");
+        assert!(
+            left.origin.x < right.origin.x,
+            "the left leaf sits left of the right"
+        );
 
         // Top-anchored: the probe recorded the wrapper's origin, not a static
         // position below the content. The regression set `origin.y` to the pane
@@ -501,6 +518,64 @@ mod tests {
         );
     }
 
+    /// A zoom redraws one group at the full window size and leaves its sibling
+    /// unpainted. Bounds for the previous layout must not survive that frame.
+    #[gpui::test]
+    fn node_bounds_follow_the_visible_group_after_zoom(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let (area, cx) = cx.add_window_view(|window, cx| {
+            DockArea::new("test", None, window, cx).with_renderer(DockSkin::new(cx))
+        });
+        cx.simulate_resize(size(px(800.), px(600.)));
+        cx.update(|window, cx| {
+            area.update(cx, |area, cx| {
+                area.set_center(
+                    DockLayout::h_split()
+                        .child(
+                            DockLayout::tabs().panel(MeasuredProbe::new(Rc::default(), cx)),
+                            None,
+                        )
+                        .child(
+                            DockLayout::tabs().panel(MeasuredProbe::new(Rc::default(), cx)),
+                            None,
+                        ),
+                    window,
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let (left_id, right_id) = cx.update(|_, cx| {
+            let tree = area
+                .read(cx)
+                .layout(DockPlacement::Center)
+                .expect("a center tree");
+            let PaneRef::Split { children, .. } = tree.root().kind() else {
+                panic!("the center root is a horizontal split");
+            };
+            (children[0].id(), children[1].id())
+        });
+        assert!(cx.update(|_, cx| area.read(cx).node_bounds(right_id).is_some()));
+
+        cx.update(|window, cx| {
+            area.update(cx, |area, cx| area.set_zoomed_in(left_id, window, cx));
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let (left, right) = cx.update(|_, cx| {
+            let area = area.read(cx);
+            (area.node_bounds(left_id), area.node_bounds(right_id))
+        });
+        assert_eq!(
+            left.expect("zoomed group is painted").size,
+            size(px(800.), px(600.))
+        );
+        assert_eq!(right, None, "the hidden sibling is not painted");
+    }
+
     /// A removed leaf reports `None`, not the rect it was last drawn with.
     #[gpui::test]
     fn node_bounds_drops_a_removed_leaf(cx: &mut TestAppContext) {
@@ -513,8 +588,14 @@ mod tests {
             area.update(cx, |area, cx| {
                 area.set_center(
                     DockLayout::h_split()
-                        .child(DockLayout::tabs().panel(MeasuredProbe::new(Rc::default(), cx)), None)
-                        .child(DockLayout::tabs().panel(MeasuredProbe::new(Rc::default(), cx)), None),
+                        .child(
+                            DockLayout::tabs().panel(MeasuredProbe::new(Rc::default(), cx)),
+                            None,
+                        )
+                        .child(
+                            DockLayout::tabs().panel(MeasuredProbe::new(Rc::default(), cx)),
+                            None,
+                        ),
                     window,
                     cx,
                 );

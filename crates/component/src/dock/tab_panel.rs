@@ -1783,7 +1783,9 @@ mod tests {
         // Collapse the bottom dock: its strip stays clickable, but the close
         // buttons on it must not.
         cx.update(|window, cx| {
-            area.update(cx, |area, cx| area.toggle_dock(DockPlacement::Bottom, window, cx));
+            area.update(cx, |area, cx| {
+                area.toggle_dock(DockPlacement::Bottom, window, cx)
+            });
         });
         cx.run_until_parked();
         cx.update(|window, cx| window.draw(cx).clear(cx));

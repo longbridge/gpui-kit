@@ -109,8 +109,8 @@ pub struct DockArea {
     splits: HashMap<NodeId, CachedSplit>,
     panels: HashMap<PanelId, Arc<dyn PanelView>>,
 
-    /// Tab-group leaf rects, recorded in `on_prepaint`, for host-painted
-    /// spatial overlays. Pruned to live nodes on `reconcile`.
+    /// Tab-group leaf rects from the most recent paint, for host-painted
+    /// spatial overlays.
     node_bounds: HashMap<NodeId, Bounds<Pixels>>,
 
     locked: bool,
@@ -719,9 +719,9 @@ impl DockArea {
     ///
     /// The container, not the panel inside it: this is what keeps a zoomed
     /// group's tab bar on screen.
-    fn zoomed_view(&self) -> Option<AnyView> {
+    fn zoomed_view(&self) -> Option<(NodeId, AnyView)> {
         match self.zoomed? {
-            Zoomed::Group(node) => Some(self.groups.get(&node)?.entity.clone().into()),
+            Zoomed::Group(node) => Some((node, self.groups.get(&node)?.entity.clone().into())),
         }
     }
 }
@@ -989,7 +989,7 @@ impl DockArea {
 
         self.groups.retain(|node, _| live_nodes.contains(node));
         self.splits.retain(|node, _| live_nodes.contains(node));
-        // A removed leaf must report no bounds, not a stale rect.
+        // A removed leaf must report no bounds even before the next paint.
         self.node_bounds.retain(|node, _| live_nodes.contains(node));
 
         let departed: Vec<Arc<dyn PanelView>> = self
@@ -1241,6 +1241,19 @@ impl DockArea {
 
 /// Rendering.
 impl DockArea {
+    fn group_with_bounds(&self, node: NodeId, view: AnyView) -> AnyElement {
+        let area = self.this.clone();
+        div()
+            .size_full()
+            .on_prepaint(move |bounds, _, cx| {
+                _ = area.update(cx, |area, _| {
+                    area.node_bounds.insert(node, bounds);
+                });
+            })
+            .child(view)
+            .into_any_element()
+    }
+
     /// Lower one container to an element.
     fn render_node(&self, node: &PaneNode, window: &mut Window, cx: &mut App) -> AnyElement {
         match node.kind() {
@@ -1322,23 +1335,7 @@ impl DockArea {
                     .into_any_element()
             }
             PaneRef::Tabs { .. } => match self.groups.get(&node.id()) {
-                Some(cached) => {
-                    // Wrapper records the group's rect for spatial overlays; it
-                    // only holds bounds, so sizing stays on `resizable_panel`.
-                    let node_id = node.id();
-                    let area = self.this.clone();
-                    // The probe must precede the content child so it measures
-                    // the wrapper's origin, not a point below it.
-                    div()
-                        .size_full()
-                        .on_prepaint(move |bounds, _, cx| {
-                            _ = area.update(cx, |area, _| {
-                                area.node_bounds.insert(node_id, bounds);
-                            });
-                        })
-                        .child(cached.entity.clone())
-                        .into_any_element()
-                }
+                Some(cached) => self.group_with_bounds(node.id(), cached.entity.clone().into()),
                 None => Empty.into_any_element(),
             },
         }
@@ -1439,11 +1436,14 @@ impl Render for DockArea {
             .flex()
             .flex_row()
             .on_prepaint(move |bounds, _, cx| {
-                area.update(cx, |area, _| area.bounds = bounds);
+                area.update(cx, |area, _| {
+                    area.bounds = bounds;
+                    area.node_bounds.clear();
+                });
             })
             .track_focus(&self.focus_handle)
             .map(|frame| match self.zoomed_view() {
-                Some(view) => frame.child(view),
+                Some((node, view)) => frame.child(self.group_with_bounds(node, view)),
                 None => frame
                     .when_some(
                         self.render_dock(DockPlacement::Left, window, cx),
@@ -2465,7 +2465,10 @@ mod tests {
         move_panel_into(&area, PanelId::from_u64(9_999_999), group, None, true, cx);
 
         let after = cx.read(|cx| area.read(cx).dump(cx));
-        assert_eq!(before, after, "an unowned panel move must not touch the tree");
+        assert_eq!(
+            before, after,
+            "an unowned panel move must not touch the tree"
+        );
     }
 
     /// The other drop geometry: a placement whose axis differs from the
