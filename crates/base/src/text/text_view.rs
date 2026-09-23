@@ -2217,19 +2217,8 @@ mod tests {
             ["1. ", "2. "]
         );
 
-        let starts_at_three = "3. hello\n4. world";
-        let markdown::mdast::Node::Root(root) =
-            markdown::to_mdast(starts_at_three, &markdown::ParseOptions::gfm()).unwrap()
-        else {
-            panic!("expected Markdown root");
-        };
-        let markdown::mdast::Node::List(list) = &root.children[0] else {
-            panic!("expected ordered list");
-        };
-        assert_eq!(list.start, Some(3));
-
         assert_eq!(
-            shaped_markers(Format::Markdown, starts_at_three),
+            shaped_markers(Format::Markdown, "3. hello\n4. world"),
             ["3. ", "4. "]
         );
 

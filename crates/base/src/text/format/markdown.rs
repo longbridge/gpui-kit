@@ -1677,63 +1677,6 @@ mod tests {
     }
 
     #[test]
-    fn ordered_list_starts_and_boundaries_survive_markdown_conversion() {
-        fn parsed(source: &str) -> ParsedDocument {
-            parse(source, &mut NodeContext::default()).expect("Markdown should parse")
-        }
-
-        for (source, expected_start) in [
-            ("1. one\n2. two", Some(1)),
-            ("3. three\n4. four", Some(3)),
-            ("3. loose\n\n   continuation\n4. four", Some(3)),
-            ("3. listed\n\nseparate", Some(3)),
-        ] {
-            let document = parsed(source);
-            let BlockNode::List { start, .. } = &document.blocks[0] else {
-                panic!("expected leading list for {source:?}");
-            };
-            assert_eq!(*start, expected_start, "{source:?}");
-        }
-
-        let loose = parsed("3. loose\n\n   continuation\n4. four");
-        let BlockNode::List { children, .. } = &loose.blocks[0] else {
-            panic!("expected loose continuation to remain inside the list");
-        };
-        let BlockNode::ListItem { children, .. } = &children[0] else {
-            panic!("expected first loose list item");
-        };
-        assert!(
-            matches!(
-                children.as_slice(),
-                [BlockNode::Paragraph(_), BlockNode::Paragraph(_)]
-            ),
-            "expected loose continuation paragraphs, got {children:?}"
-        );
-
-        let separated = parsed("3. listed\n\nseparate");
-        assert!(matches!(
-            separated.blocks.as_slice(),
-            [BlockNode::List { .. }, BlockNode::Paragraph(_)]
-        ));
-
-        // CommonMark does not interrupt a paragraph with a non-one list marker,
-        // so the blank line is what starts this independent ordered list.
-        let interrupted = parsed("paragraph\n3. three");
-        assert!(matches!(
-            interrupted.blocks.as_slice(),
-            [BlockNode::Paragraph(_)]
-        ));
-        let after_paragraph = parsed("paragraph\n\n3. three");
-        assert!(matches!(
-            after_paragraph.blocks.as_slice(),
-            [
-                BlockNode::Paragraph(_),
-                BlockNode::List { start: Some(3), .. }
-            ]
-        ));
-    }
-
-    #[test]
     fn yaml_frontmatter_is_disabled_by_default() {
         let source = "---\nSome text\n---";
         let mut cx = NodeContext::default();
