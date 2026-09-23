@@ -7,7 +7,7 @@ use gpui::{
 
 use crate::{
     ActiveTheme, StyledExt,
-    group_box::{GroupBox, GroupBoxVariants},
+    group_box::{GroupBox, GroupBoxVariant, GroupBoxVariants},
     label::Label,
     setting::{RenderOptions, SettingItem},
     v_flex,
@@ -18,6 +18,7 @@ use crate::{
 pub struct SettingGroup {
     style: StyleRefinement,
     footer: Option<Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>>,
+    variant: Option<GroupBoxVariant>,
 
     pub(super) title: Option<SharedString>,
     pub(super) description: Option<SharedString>,
@@ -36,6 +37,7 @@ impl SettingGroup {
         Self {
             style: StyleRefinement::default(),
             footer: None,
+            variant: None,
             title: None,
             description: None,
             items: Vec::new(),
@@ -51,6 +53,18 @@ impl SettingGroup {
     /// Set the description of the setting group, default is None.
     pub fn description(mut self, description: impl Into<SharedString>) -> Self {
         self.description = Some(description.into());
+        self
+    }
+
+    /// Set the variant of the group surface, overriding the variant set via
+    /// `Settings::with_group_variant` for this group, default is None (use the
+    /// settings-level variant).
+    ///
+    /// For example, `GroupBoxVariant::Normal` presents the items directly,
+    /// without the card surface a global `Outline` or `Fill` default draws
+    /// around the group.
+    pub fn variant(mut self, variant: GroupBoxVariant) -> Self {
+        self.variant = Some(variant);
         self
     }
 
@@ -106,7 +120,7 @@ impl SettingGroup {
     ) -> impl IntoElement {
         GroupBox::new()
             .id(SharedString::from(format!("group-{}", options.group_ix())))
-            .with_variant(options.group_variant())
+            .with_variant(self.variant.unwrap_or(options.group_variant()))
             .when_some(self.title.clone(), |this, title| {
                 this.title(v_flex().gap_1().child(title).when_some(
                     self.description.clone(),

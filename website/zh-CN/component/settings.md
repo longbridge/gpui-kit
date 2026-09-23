@@ -105,6 +105,15 @@ Settings::new("my-settings")
     .pages(vec![...])
 ```
 
+单个分组可以覆盖全局分组样式，例如让某一页的内容直接呈现，而其他页面
+保留全局的卡片外观：
+
+```rust
+SettingGroup::new()
+    .variant(GroupBoxVariant::Normal)
+    .items(vec![...])
+```
+
 ## Setting Page
 
 ### 基础页面

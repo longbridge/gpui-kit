@@ -108,6 +108,15 @@ Settings::new("my-settings")
     .pages(vec![...])
 ```
 
+A group can override the settings-level variant, for example to present one
+page's items directly while the other pages keep the global card surface:
+
+```rust
+SettingGroup::new()
+    .variant(GroupBoxVariant::Normal)
+    .items(vec![...])
+```
+
 ## Setting Page
 
 ### Basic Page

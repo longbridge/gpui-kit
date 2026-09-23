@@ -11,6 +11,17 @@ layers above application content. Opening a dialog, sheet or notification no
 longer depends on the application's view rendering its layer. Notifications use
 the Root's full bounds, and cached content does not duplicate or suppress layers.
 
+#### Added: `SettingGroup::variant`
+
+```rust
+pub fn variant(self, variant: GroupBoxVariant) -> Self
+```
+
+Overrides, for one group, the variant that `Settings::with_group_variant`
+applies to every group. Use it when a single page should present its items
+directly — `GroupBoxVariant::Normal` removes the card surface the global
+default draws — while the other pages keep the global variant.
+
 #### Breaking changes
 
 The following `gpui-component` APIs have been removed:
