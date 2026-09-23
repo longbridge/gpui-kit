@@ -229,7 +229,8 @@ impl TextViewSelectionAdapter {
             .with_scroll_offset(scroll_offset)
             .with_document_order(document_order)
             .with_text_bounds(self.text_bounds.clone())
-            .with_self_scroll(self_scroll);
+            .with_self_scroll(self_scroll)
+            .with_rendered_element(&self.selection, window, cx);
         let registration = match self.selection_edges {
             Some((start, end)) => registration.with_selection_edges(start, end),
             None => registration,

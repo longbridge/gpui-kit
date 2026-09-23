@@ -15,7 +15,7 @@ mod tests {
     use gpui_base::{
         AutoScroll, TextSelection, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun,
     };
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::time::Duration;
 
@@ -1447,6 +1447,174 @@ mod tests {
             shift: true,
             ..Modifiers::default()
         }
+    }
+
+    struct CachedPanelRoot {
+        inner: Entity<CachedInnerPanel>,
+    }
+
+    /// Samples, from inside the panel and before the TextView paints, whether
+    /// the window still holds the selection the TextView is about to draw from.
+    /// That is exactly what its inlines read, so a `false` sample is a frame
+    /// painted without the highlight.
+    struct SelectionPaintProbe {
+        samples: Rc<RefCell<Vec<bool>>>,
+    }
+
+    impl IntoElement for SelectionPaintProbe {
+        type Element = Self;
+
+        fn into_element(self) -> Self::Element {
+            self
+        }
+    }
+
+    impl Element for SelectionPaintProbe {
+        type RequestLayoutState = ();
+        type PrepaintState = ();
+
+        fn id(&self) -> Option<ElementId> {
+            None
+        }
+
+        fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+            None
+        }
+
+        fn request_layout(
+            &mut self,
+            _: Option<&GlobalElementId>,
+            _: Option<&InspectorElementId>,
+            window: &mut Window,
+            cx: &mut App,
+        ) -> (LayoutId, Self::RequestLayoutState) {
+            (window.request_layout(gpui::Style::default(), None, cx), ())
+        }
+
+        fn prepaint(
+            &mut self,
+            _: Option<&GlobalElementId>,
+            _: Option<&InspectorElementId>,
+            _: Bounds<Pixels>,
+            _: &mut Self::RequestLayoutState,
+            _: &mut Window,
+            _: &mut App,
+        ) -> Self::PrepaintState {
+        }
+
+        fn paint(
+            &mut self,
+            _: Option<&GlobalElementId>,
+            _: Option<&InspectorElementId>,
+            _: Bounds<Pixels>,
+            _: &mut Self::RequestLayoutState,
+            _: &mut Self::PrepaintState,
+            window: &mut Window,
+            cx: &mut App,
+        ) {
+            let has_selection = TextSelection::has_selection(window, cx);
+            self.samples.borrow_mut().push(has_selection);
+        }
+    }
+
+    struct CachedInnerPanel {
+        text_view: Entity<TextViewState>,
+        renders: Rc<Cell<usize>>,
+        samples: Rc<RefCell<Vec<bool>>>,
+    }
+
+    impl Render for CachedInnerPanel {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            self.renders.set(self.renders.get() + 1);
+            div()
+                .size_full()
+                .debug_selector(|| "cached-text-view".into())
+                .child(SelectionPaintProbe {
+                    samples: self.samples.clone(),
+                })
+                .child(TextView::new(&self.text_view).selectable(true))
+        }
+    }
+
+    impl Render for CachedPanelRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                self.inner
+                    .clone()
+                    .cached(gpui::StyleRefinement::default().size_full()),
+            )
+        }
+    }
+
+    /// A dock panel renders its content through `Entity::cached`, which replays
+    /// the recorded frame whenever nothing in it changed: the TextView paints
+    /// the same text at the same place without any of its elements running.
+    /// Sweeping the participant for the generation it could not stamp cleared
+    /// the selection it had just painted, and re-registering it on the next
+    /// frame brought the selection back — it blinked, and the window never
+    /// stopped redrawing.
+    #[gpui::test]
+    fn selection_inside_a_cached_view_survives_replayed_frames(cx: &mut TestAppContext) {
+        let source = (0..20)
+            .map(|ix| format!("Paragraph {ix} with enough text to select"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        cx.update(crate::init);
+        let renders = Rc::new(Cell::new(0));
+        let samples: Rc<RefCell<Vec<bool>>> = Rc::default();
+        let panel_renders = renders.clone();
+        let panel_samples = samples.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let view = cx.new(|cx| CachedPanelRoot {
+                inner: cx.new(|cx| CachedInnerPanel {
+                    text_view: cx.new(|cx| TextViewState::markdown(&source, cx)),
+                    renders: panel_renders,
+                    samples: panel_samples,
+                }),
+            });
+            Root::new(view, window, cx)
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let bounds = cx
+            .debug_bounds("cached-text-view")
+            .expect("cached TextView bounds");
+
+        let start = bounds.origin + point(px(30.), px(8.));
+        drag(cx, start, start + point(px(60.), px(40.)));
+        cx.run_until_parked();
+
+        let selected = window_selected_text(cx);
+        assert!(!selected.is_empty(), "the drag must select text");
+        let settled = renders.get();
+        samples.borrow_mut().clear();
+
+        for frame in 0..8 {
+            cx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            cx.run_until_parked();
+            assert_eq!(
+                window_selected_text(cx),
+                selected,
+                "frame {frame} lost the selection painted inside the cached panel"
+            );
+        }
+        // Every frame the panel did repaint must have had the selection to
+        // paint; a `false` here is the blink itself.
+        assert!(
+            samples.borrow().iter().all(|has_selection| *has_selection),
+            "the panel repainted without a selection: {:?}",
+            samples.borrow()
+        );
+        assert_eq!(
+            renders.get(),
+            settled,
+            "a settled selection must let the cached panel stay cached"
+        );
     }
 
     #[gpui::test]
