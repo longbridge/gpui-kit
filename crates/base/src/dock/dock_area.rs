@@ -115,12 +115,6 @@ pub struct DockArea {
     renderer: Rc<dyn DockAreaRenderer>,
 }
 
-impl<P: Panel> From<Entity<P>> for PanelId {
-    fn from(panel: Entity<P>) -> Self {
-        panel.entity_id().into()
-    }
-}
-
 impl DockArea {
     /// An empty area that draws nothing but its panels.
     ///
@@ -472,23 +466,13 @@ impl DockArea {
     }
 
     /// Remove a panel from wherever it lives, telling it that it was removed.
-    /// Accepts either a panel entity or a [`PanelId`] for a restored panel
-    /// whose entity could not be constructed.
-    pub fn remove_panel(
+    pub fn remove_panel<P: Panel>(
         &mut self,
-        panel: impl Into<PanelId>,
+        panel: Entity<P>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let panel = panel.into();
-        let Some(region) = self.placement_of_panel(panel) else {
-            return;
-        };
-        let Some(tree) = self.tree_mut(region) else {
-            return;
-        };
-        let result = tree.remove_panel(panel);
-        self.commit(result, window, cx);
+        self.remove_panel_id(PanelId::from(panel.entity_id()), window, cx);
     }
 
     /// Move a panel to a new home. The panel never leaves the dock, so it is
@@ -614,6 +598,17 @@ impl DockArea {
             return;
         };
         let result = tree.split(node, panel, placement, None);
+        self.commit(result, window, cx);
+    }
+
+    fn remove_panel_id(&mut self, panel: PanelId, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(region) = self.placement_of_panel(panel) else {
+            return;
+        };
+        let Some(tree) = self.tree_mut(region) else {
+            return;
+        };
+        let result = tree.remove_panel(panel);
         self.commit(result, window, cx);
     }
 }
@@ -1118,7 +1113,7 @@ impl DockArea {
                 item: item.clone(),
                 target: *target,
             }),
-            TabGroupEvent::ClosePanel { panel } => self.remove_panel(*panel, window, cx),
+            TabGroupEvent::ClosePanel { panel } => self.remove_panel_id(*panel, window, cx),
             TabGroupEvent::ActiveChanged { ix } => {
                 let node = group.read(cx).node();
                 let Some(region) = self.placement_of_node(node) else {
@@ -4012,28 +4007,6 @@ mod tests {
         assert!(
             !cx.read(|cx| area.read(cx).is_zoomed()),
             "the area must not fill itself with a group that never zoomed"
-        );
-    }
-
-    /// `remove_panel` also accepts a panel known only by its `PanelId`.
-    #[gpui::test]
-    fn remove_panel_accepts_a_panel_id(cx: &mut TestAppContext) {
-        let log = Log::default();
-        let (area, alpha, cx) = two_groups(&log, cx);
-        let alpha_id = panel_id_of(&alpha);
-        assert!(
-            cx.read(|cx| area.read(cx).panel(alpha_id).is_some()),
-            "alpha starts owned by the area"
-        );
-
-        cx.update(|window, cx| {
-            area.update(cx, |area, cx| area.remove_panel(alpha_id, window, cx));
-        });
-        cx.run_until_parked();
-
-        assert!(
-            cx.read(|cx| area.read(cx).panel(alpha_id).is_none()),
-            "remove_panel removes the panel identified only by its id"
         );
     }
 }
