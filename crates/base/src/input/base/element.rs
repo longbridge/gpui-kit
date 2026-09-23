@@ -48,15 +48,16 @@ fn diagnostic_highlight_style(
 
 const BOTTOM_MARGIN_ROWS: usize = 3;
 pub(super) const RIGHT_MARGIN: Pixels = px(10.);
-pub(super) const LINE_NUMBER_RIGHT_MARGIN: Pixels = px(10.);
+pub(super) const LINE_NUMBER_RIGHT_MARGIN: Pixels = px(6.);
 const FOLD_ICON_WIDTH: Pixels = px(14.);
 const FOLD_ICON_HITBOX_WIDTH: Pixels = px(18.);
 const MAX_HIGHLIGHT_LINE_LENGTH: usize = 10_000;
+const MIN_LINE_NUMBER_DIGITS: usize = 3;
 const MAX_LINE_NUMBER_DIGITS: usize = 7;
 const MAX_DISPLAYED_LINE_NUMBER: usize = 9_999_999;
 
 fn line_number_len(total_lines: usize) -> usize {
-    (total_lines.max(1).ilog10() as usize + 1).min(MAX_LINE_NUMBER_DIGITS) + 1
+    (total_lines.max(1).ilog10() as usize + 1).clamp(MIN_LINE_NUMBER_DIGITS, MAX_LINE_NUMBER_DIGITS)
 }
 
 fn displayed_line_number(number: usize) -> usize {
@@ -1056,8 +1057,8 @@ impl<M: InputModeKind> TextElement<M> {
         window: &mut Window,
     ) -> (Pixels, usize) {
         let total_lines = text.lines_len();
-        // One extra column beyond the widest line number, so right-aligned
-        // numbers keep a gap from the left edge.
+        // Reserve three digits for small documents, then follow the actual
+        // line count up to seven digits.
         let line_number_len = line_number_len(total_lines);
 
         let mut line_number_width = if state.mode.line_number() {
@@ -3421,13 +3422,15 @@ mod tests {
     };
 
     #[test]
-    fn line_number_column_tracks_document_digits_up_to_seven() {
-        assert_eq!(line_number_len(1), 2);
-        assert_eq!(line_number_len(9), 2);
+    fn line_number_column_stays_at_three_digits_then_grows_up_to_seven() {
+        assert_eq!(line_number_len(1), 3);
+        assert_eq!(line_number_len(9), 3);
         assert_eq!(line_number_len(10), 3);
-        assert_eq!(line_number_len(999_999), 7);
-        assert_eq!(line_number_len(9_999_999), 8);
-        assert_eq!(line_number_len(10_000_000), 8);
+        assert_eq!(line_number_len(999), 3);
+        assert_eq!(line_number_len(1_000), 4);
+        assert_eq!(line_number_len(999_999), 6);
+        assert_eq!(line_number_len(9_999_999), 7);
+        assert_eq!(line_number_len(10_000_000), 7);
     }
 
     #[test]
@@ -3481,6 +3484,19 @@ mod tests {
             let longer_text = "x\n".repeat(99);
             editor.update(cx, |state, cx| {
                 state.set_value(longer_text.as_str(), window, cx)
+            });
+            window.draw(cx).clear(cx);
+            let middle = editor
+                .read(cx)
+                .last_layout
+                .as_ref()
+                .unwrap()
+                .line_number_width;
+            assert_eq!(middle, narrow, "one to three digits must share a width");
+
+            let longest_text = "x\n".repeat(999);
+            editor.update(cx, |state, cx| {
+                state.set_value(longest_text.as_str(), window, cx)
             });
             window.draw(cx).clear(cx);
             let wide = editor
@@ -3938,9 +3954,9 @@ mod tests {
 
         assert_eq!(
             layout.bounds,
-            Bounds::new(point(px(47.), px(18.)), size(px(266.), px(87.)))
+            Bounds::new(point(px(51.), px(18.)), size(px(262.), px(87.)))
         );
-        assert_eq!(layout.scroll_size, size(px(976.), px(200.)));
+        assert_eq!(layout.scroll_size, size(px(972.), px(200.)));
 
         let layout_without_gutter =
             EditorScrollbarLayout::new(input_bounds, px(0.), size(px(500.), px(120.)), paddings);

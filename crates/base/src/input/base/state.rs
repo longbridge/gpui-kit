@@ -7362,6 +7362,9 @@ mod tests {
                 };
                 (position(0, 1), position(2, 3))
             });
+            // Land inside the third column instead of exactly on its trailing
+            // glyph boundary, where pixel rounding can select the next column.
+            let end = point(end.x - px(0.5), end.y);
             // A cached Ctrl-hover definition must not steal a column gesture.
             cx.update(|_, cx| {
                 view.input.update(cx, |state, _| {
