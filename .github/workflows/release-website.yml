@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - website-versioned-docs
+      - fix/website-versioned-build
   workflow_run:
     workflows: ["Release Crate"]
     types:

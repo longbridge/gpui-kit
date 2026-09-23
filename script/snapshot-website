@@ -18,8 +18,8 @@ if ((${#snapshot_paths[@]} > 0)); then
     | tar -x --strip-components=1 -C "$target"
 fi
 
-rm -f "$target/src/components/HomeApp.vue"
 if git -C "$repo_root" cat-file -e "$ref:website/src/components/HomeApp.vue" 2>/dev/null; then
+  rm -f "$target/src/components/HomeApp.vue"
   git -C "$repo_root" archive "$ref" website/src/components/HomeApp.vue \
     | tar -x --strip-components=3 -C "$target/src/components"
 fi
