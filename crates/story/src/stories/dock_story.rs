@@ -78,7 +78,7 @@ impl Render for DemoPanel {
 pub struct DockStory {
     dock_area: Entity<DockArea>,
     skin: Rc<DockSkin>,
-    close_buttons_visible: bool,
+    close_button_visible: bool,
 }
 
 impl super::Story for DockStory {
@@ -155,14 +155,14 @@ impl super::Story for DockStory {
         cx.new(|_| Self {
             dock_area,
             skin,
-            close_buttons_visible: false,
+            close_button_visible: false,
         })
     }
 }
 
 impl Render for DockStory {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let close_buttons_visible = self.close_buttons_visible;
+        let close_button_visible = self.close_button_visible;
         let story = cx.entity();
         v_flex()
             .size_full()
@@ -171,11 +171,11 @@ impl Render for DockStory {
                 move |menu, window, _| {
                     menu.item(
                         PopupMenuItem::new("Tab close buttons")
-                            .checked(close_buttons_visible)
+                            .checked(close_button_visible)
                             .on_click(window.listener_for(&story, |this, _, _, cx| {
-                                this.close_buttons_visible = !this.close_buttons_visible;
+                                this.close_button_visible = !this.close_button_visible;
                                 this.skin
-                                    .set_close_button_visible(this.close_buttons_visible, cx);
+                                    .set_close_button_visible(this.close_button_visible, cx);
                                 cx.notify();
                             })),
                     )

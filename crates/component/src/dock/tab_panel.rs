@@ -507,7 +507,7 @@ impl TabGroupSkin {
                             // without also selecting the tab.
                             .when(
                                 !collapsed
-                                    && self.shared.close_buttons_visible.get()
+                                    && self.shared.close_button_visible.get()
                                     && group.is_panel_closable(panel.panel_id(cx), cx),
                                 |this| {
                                     this.suffix(
