@@ -1174,7 +1174,7 @@ html.dark .astro-code span {
   font: inherit;
 }
 .theme-palette__search input::placeholder { color: var(--muted-foreground); }
-.theme-palette__search:focus-within { box-shadow: inset 0 -2px 0 var(--ring); }
+.theme-palette__search:focus-within > svg { color: var(--foreground); }
 .theme-palette__list { min-height: 0; overflow-y: auto; padding: 0.25rem; }
 .theme-palette__group[hidden] { display: none; }
 .theme-palette__heading {
