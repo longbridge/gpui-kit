@@ -18,7 +18,10 @@ use crate::{
     },
 };
 
-use super::{HOVER_DOT_SIZE, build_point_x_labels, caller_id, hover_halo_size, pointer_spring};
+use super::{
+    HOVER_DOT_SIZE, axis_point_count, build_point_x_labels, caller_id, hover_halo_size,
+    pinned_plot_mask, point_range, point_value_scale, pointer_spring,
+};
 
 /// The hover an area chart paints, sampled once per frame in [`Plot::hover`].
 #[derive(Clone)]
@@ -49,7 +52,7 @@ where
     x_axis: bool,
     grid: bool,
     y_domain: Option<(Y, Y)>,
-    slot_count: Option<usize>,
+    point_count: Option<usize>,
     id: ElementId,
     interactive: bool,
     hover: Option<AreaHover>,
@@ -77,7 +80,7 @@ where
             x_axis: true,
             grid: true,
             y_domain: None,
-            slot_count: None,
+            point_count: None,
             id: caller_id(),
             interactive: true,
             hover: None,
@@ -169,12 +172,13 @@ where
         self
     }
 
-    /// Pin the y axis to `min..=max`, mapped onto the full plot height.
+    /// Pin the y axis to `min..=max` instead of fitting every series from zero.
     ///
-    /// By default the axis fits every series from zero and leaves 10px above
-    /// the highest value. Pin it where zero is not a meaningful baseline, such
-    /// as a price line that would otherwise be pressed flat against the top.
-    /// Nothing is drawn when `min` equals `max`.
+    /// Pin it where zero is not a meaningful baseline, such as a price line
+    /// that would otherwise be pressed flat against the top. The range keeps
+    /// the 10px above `max` that the default leaves above the highest value,
+    /// and the series are clipped to the plot, so a value outside the range
+    /// stops at its edge. Nothing is drawn when `min` equals `max`.
     pub fn y_domain(mut self, min: Y, max: Y) -> Self {
         self.y_domain = Some((min, max));
         self
@@ -183,11 +187,13 @@ where
     /// Lay the x axis out for `count` evenly spaced points instead of the
     /// data's own length.
     ///
-    /// Data shorter than `count` fills only the leading part of the axis and
-    /// leaves the rest empty, as an intraday chart does before the close. A
-    /// `count` below the data's length has no effect.
-    pub fn slot_count(mut self, count: usize) -> Self {
-        self.slot_count = Some(count);
+    /// The data takes the leading points in order, the i-th item on the i-th
+    /// point, and the rest stay empty, as an intraday chart does before the
+    /// close. The data has to be contiguous from the first point: a missing
+    /// item shifts every later one a point to the left. A `count` below the
+    /// data's length has no effect.
+    pub fn point_count(mut self, count: usize) -> Self {
+        self.point_count = Some(count);
         self
     }
 
@@ -206,25 +212,17 @@ where
         let height = bounds.size.height.as_f32() - axis_gap;
 
         let len = self.data.len();
-        let slots = self.slot_count.unwrap_or(len).max(len);
-        let x_end = if slots > 1 {
-            width * len.saturating_sub(1) as f32 / (slots - 1) as f32
-        } else {
-            width
-        };
-        let x = ScalePoint::new(self.data.iter().map(|v| x_fn(v)).collect(), vec![0., x_end]);
-        let y = match self.y_domain {
-            Some((min, max)) => ScaleLinear::new(vec![min, max], vec![height, 0.]),
-            None => {
-                let domain = self
-                    .data
-                    .iter()
-                    .flat_map(|v| self.y.iter().map(|y_fn| y_fn(v)))
-                    .chain(Some(Y::zero()))
-                    .collect::<Vec<_>>();
-                ScaleLinear::new(domain, vec![height, 10.])
-            }
-        };
+        let x = ScalePoint::new(
+            self.data.iter().map(|v| x_fn(v)).collect(),
+            point_range(width, len, axis_point_count(self.point_count, len)),
+        );
+        let y = point_value_scale(
+            self.data
+                .iter()
+                .flat_map(|v| self.y.iter().map(|y_fn| y_fn(v))),
+            self.y_domain,
+            height,
+        );
 
         Some((x, y))
     }
@@ -253,6 +251,7 @@ where
                 &self.data,
                 x_fn.as_ref(),
                 &x,
+                axis_point_count(self.point_count, self.data.len()),
                 self.tick_margin,
                 cx.theme().muted_foreground,
             );
@@ -295,22 +294,28 @@ where
                 .fill(fill)
         });
 
-        // Caching hangs off the chart's own id, which only an interactive chart
-        // puts on the stack; without one, siblings would share a slot and thrash
-        // it, so a chart that is off tessellates afresh each paint.
-        if self.interactive {
-            let caches = PathCaches::for_paint("areas", window, cx);
-            caches.update(cx, |caches, _| {
-                for (i, area) in areas.enumerate() {
-                    let (fill, line) = caches.slot_pair(i);
-                    area.paint_cached(&bounds, fill, line, window);
+        let mask = self
+            .y_domain
+            .is_some()
+            .then(|| pinned_plot_mask(bounds, height));
+        window.with_content_mask(mask, |window| {
+            // Caching hangs off the chart's own id, which only an interactive chart
+            // puts on the stack; without one, siblings would share a slot and thrash
+            // it, so a chart that is off tessellates afresh each paint.
+            if self.interactive {
+                let caches = PathCaches::for_paint("areas", window, cx);
+                caches.update(cx, |caches, _| {
+                    for (i, area) in areas.enumerate() {
+                        let (fill, line) = caches.slot_pair(i);
+                        area.paint_cached(&bounds, fill, line, window);
+                    }
+                });
+            } else {
+                for area in areas {
+                    area.paint(&bounds, window);
                 }
-            });
-        } else {
-            for area in areas {
-                area.paint(&bounds, window);
             }
-        }
+        });
     }
 
     fn id(&self) -> Option<ElementId> {
@@ -445,29 +450,29 @@ mod tests {
     }
 
     #[test]
-    fn test_slot_count_fills_the_leading_part() {
+    fn test_point_count_fills_the_leading_part() {
         let (x, _) = chart(vec![1., 2., 3.])
-            .slot_count(5)
+            .point_count(5)
             .scales(bounds())
             .unwrap();
         assert_eq!(x.tick(&"0".to_string()), Some(0.));
         assert_eq!(x.tick(&"2".to_string()), Some(50.));
 
         let (x, _) = chart(vec![1., 2., 3.])
-            .slot_count(2)
+            .point_count(2)
             .scales(bounds())
             .unwrap();
         assert_eq!(x.tick(&"2".to_string()), Some(100.));
     }
 
     #[test]
-    fn test_y_domain_maps_onto_the_full_height() {
+    fn test_y_domain_replaces_the_fit_from_zero() {
         let (_, y) = chart(vec![10., 20.])
             .y_domain(10., 20.)
             .scales(bounds())
             .unwrap();
         assert_eq!(y.tick(&10.), Some(50.));
-        assert_eq!(y.tick(&20.), Some(0.));
+        assert_eq!(y.tick(&20.), Some(10.));
 
         let (_, y) = chart(vec![10., 20.]).scales(bounds()).unwrap();
         assert_eq!(y.tick(&0.), Some(50.));

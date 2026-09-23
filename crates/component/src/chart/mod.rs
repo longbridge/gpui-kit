@@ -16,14 +16,15 @@ pub use sankey_chart::{SankeyChart, SankeyLabel};
 
 use std::{hash::Hash, panic::Location};
 
-use gpui::{App, ElementId, Hsla, Pixels, SharedString, TextAlign, px};
+use gpui::{App, Bounds, ContentMask, ElementId, Hsla, Pixels, SharedString, TextAlign, px};
 use gpui_base::Spring;
+use num_traits::{Num, ToPrimitive};
 
 use crate::{
     ActiveTheme,
     plot::{
         AxisText,
-        scale::{Scale, ScaleBand, ScalePoint},
+        scale::{Scale, ScaleBand, ScaleLinear, ScalePoint, Sealed},
     },
 };
 
@@ -70,21 +71,75 @@ pub(crate) fn hover_halo_size(focus: f32) -> Pixels {
     px(HOVER_HALO_SIZE * focus)
 }
 
+/// How many points the x axis of a point chart (`LineChart`, `AreaChart`) is
+/// laid out for: `point_count`, or the data's own length when that is unset or
+/// smaller.
+pub(crate) fn axis_point_count(point_count: Option<usize>, data_len: usize) -> usize {
+    point_count.unwrap_or(data_len).max(data_len)
+}
+
+/// The x range a point scale spreads `data_len` points over, when the axis is
+/// laid out for `point_count` of them.
+///
+/// The data takes the leading points, so each keeps its place as the data grows.
+pub(crate) fn point_range(width: f32, data_len: usize, point_count: usize) -> Vec<f32> {
+    let end = if point_count > 1 {
+        width * data_len.saturating_sub(1) as f32 / (point_count - 1) as f32
+    } else {
+        width
+    };
+    vec![0., end]
+}
+
+/// The y scale of a point chart, from `height` up to 10px below the top.
+///
+/// A pinned `domain` maps its ends onto that range; otherwise the scale fits
+/// `values` from zero.
+pub(crate) fn point_value_scale<Y>(
+    values: impl IntoIterator<Item = Y>,
+    domain: Option<(Y, Y)>,
+    height: f32,
+) -> ScaleLinear<Y>
+where
+    Y: Copy + PartialOrd + Num + ToPrimitive + Sealed,
+{
+    let domain = match domain {
+        Some((min, max)) => vec![min, max],
+        None => values.into_iter().chain(Some(Y::zero())).collect(),
+    };
+    ScaleLinear::new(domain, vec![height, 10.])
+}
+
+/// The mask a point chart paints its series under once its y axis is pinned,
+/// so a value outside the pinned domain stops at the plot area instead of
+/// running over the x-axis labels. It bleeds by half a hover dot, keeping
+/// strokes and dots on the plot's edges whole.
+pub(crate) fn pinned_plot_mask(bounds: Bounds<Pixels>, height: f32) -> ContentMask<Pixels> {
+    let bleed = HOVER_DOT_SIZE / 2.;
+    ContentMask {
+        bounds: Bounds::from_corners(
+            bounds.origin - gpui::point(bleed, bleed),
+            gpui::point(bounds.right() + bleed, bounds.top() + px(height) + bleed),
+        ),
+    }
+}
+
 /// Build x-axis labels for point-based scales (`LineChart`, `AreaChart`).
 ///
-/// Point scales place items at evenly spaced positions. The first label is
-/// left-aligned, the last is right-aligned, and the rest are centered.
+/// Point scales place items at evenly spaced positions, on an axis laid out for
+/// `point_count` of them. A label on the first point is left-aligned, one on
+/// the last is right-aligned, and the rest are centered.
 pub(crate) fn build_point_x_labels<T, X>(
     data: &[T],
     x_fn: &dyn Fn(&T) -> X,
     x_scale: &ScalePoint<X>,
+    point_count: usize,
     tick_margin: usize,
     color: Hsla,
 ) -> Vec<AxisText>
 where
     X: PartialEq + Into<SharedString>,
 {
-    let data_len = data.len();
     data.iter()
         .enumerate()
         .filter_map(|(i, d)| {
@@ -93,9 +148,9 @@ where
             }
             x_scale.tick(&x_fn(d)).map(|x_tick| {
                 let align = match i {
-                    0 if data_len == 1 => TextAlign::Center,
+                    0 if point_count == 1 => TextAlign::Center,
                     0 => TextAlign::Left,
-                    i if i == data_len - 1 => TextAlign::Right,
+                    i if i == point_count - 1 => TextAlign::Right,
                     _ => TextAlign::Center,
                 };
                 // Call x_fn again to get an owned value for the label text.
@@ -173,6 +228,41 @@ mod tests {
     fn a_chart_turned_off_has_no_id_to_key_anything_on() {
         assert!(Plot::id(&chart().interactive(false)).is_none());
         assert!(Plot::id(&chart().id("pie").interactive(false)).is_none());
+    }
+
+    /// Only a label on the axis's last point hugs the right edge; the last item
+    /// of data laid out for more points sits mid-axis and stays centered.
+    #[test]
+    fn only_the_last_point_right_aligns_its_label() {
+        use gpui::{Hsla, TextAlign};
+
+        use super::{build_point_x_labels, point_range};
+        use crate::plot::scale::ScalePoint;
+
+        let data = ["a", "b", "c"];
+        let align = |point_count| {
+            let x = ScalePoint::new(data.to_vec(), point_range(100., data.len(), point_count));
+            build_point_x_labels(
+                &data,
+                &|d: &&'static str| *d,
+                &x,
+                point_count,
+                1,
+                Hsla::default(),
+            )
+            .into_iter()
+            .map(|label| label.align)
+            .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            align(3),
+            [TextAlign::Left, TextAlign::Center, TextAlign::Right]
+        );
+        assert_eq!(
+            align(5),
+            [TextAlign::Left, TextAlign::Center, TextAlign::Center]
+        );
     }
 
     #[test]

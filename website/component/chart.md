@@ -90,6 +90,9 @@ LineChart::new(data)
     .tick_margin(2)
 ```
 
+`LineChart` also takes `y_domain` and `point_count`; see Pinned Axis and
+Unfinished Series under AreaChart.
+
 ### BarChart
 
 A bar chart uses rectangular bars to show comparisons among categories. Bars can be oriented vertically or horizontally via the `alignment` option.
@@ -248,12 +251,11 @@ BarChart::new(data)
 
 #### Bar Chart Value Axis
 
-Show tick labels for the value scale with `value_axis`, and control how many even
-intervals the scale is divided into with `value_tick_count`. The count drives both
-the grid line spacing and the tick labels, so the two always agree.
-
-Note that `value_tick_count` is a count, whereas `tick_margin` is a stride over
-the band-axis categories — `tick_margin(2)` keeps every second category label.
+Show tick labels for the value scale with `value_axis`, and set how many ticks it
+carries with `value_tick_count`. The ticks are evenly spaced from the baseline to
+the far edge with both ends included, and drive both the grid lines and the tick
+labels, so the two always agree. `tick_margin`, by contrast, is a stride over the
+band-axis categories: `tick_margin(2)` keeps every second category label.
 
 ```rust
 // Value labels left of vertical bars, below horizontal ones
@@ -262,12 +264,12 @@ BarChart::new(data)
     .value(|d| d.value)
     .value_axis(true)
 
-// Divide the value scale into 6 intervals instead of the default 4
+// 7 ticks instead of the default 5
 BarChart::new(data)
     .band(|d| d.category.clone())
     .value(|d| d.value)
     .value_axis(true)
-    .value_tick_count(6)
+    .value_tick_count(7)
 ```
 
 ### AreaChart
@@ -320,21 +322,24 @@ AreaChart::new(data)
 
 #### Pinned Axis and Unfinished Series
 
-By default the y axis starts from zero. `y_domain` pins it to a range instead, so a price or a balance that never nears zero is not pressed flat against the top. `slot_count` lays the x axis out for more points than the data has, so a series still in progress, such as today's intraday prices, fills only the leading part.
+By default the y axis fits the data from zero. `y_domain` pins it to a range instead, so a price or a balance that never nears zero is not pressed flat against the top. `point_count` lays the x axis out for more points than the data has, so a series still in progress, such as today's intraday prices, fills only the leading part. `LineChart` takes both as well.
 
 ```rust
-// An intraday price thumbnail: 390 one-minute slots in a US session.
+// An intraday price thumbnail: 390 one-minute points in a US session.
 AreaChart::new(minutes)
     .x(|d| d.time.clone())
     .y(|d| d.price)
+    .linear()
     .y_domain(low, high)
-    .slot_count(390)
+    .point_count(390)
     .x_axis(false)
     .grid(false)
     .interactive(false)
 ```
 
-A pinned range fills the whole plot height and draws nothing when `min` equals `max`, so widen a flat series before passing it in.
+A pinned range keeps the 10px of headroom the default leaves above the highest value, and the series are clipped to the plot, so a value outside the range stops at its edge. Nothing is drawn when `min` equals `max`, so widen a flat series before passing it in. A natural curve can swing past its highest and lowest points; prefer `linear` when the range is fitted tightly to the data.
+
+The i-th item of data sits on the i-th point, so the data has to be contiguous from the first point: a missing item shifts every later one a point to the left.
 
 ### PieChart
 

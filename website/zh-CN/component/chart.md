@@ -83,6 +83,8 @@ LineChart::new(data)
     .tick_margin(2)
 ```
 
+`LineChart` 同样支持 `y_domain` 和 `point_count`，用法见 AreaChart 下的「固定 Y 轴与未完成的序列」。
+
 ### BarChart
 
 柱状图通过矩形条形对比不同类别的数据，并可通过 `alignment` 选项切换垂直或水平方向。
@@ -239,11 +241,9 @@ BarChart::new(data)
 
 #### 柱状图数值轴
 
-使用 `value_axis` 显示数值刻度标签，并通过 `value_tick_count` 控制数值轴被
-均分为多少个区间。该数量同时决定网格线间距和刻度标签，两者始终保持一致。
-
-注意 `value_tick_count` 是一个数量，而 `tick_margin` 是分类轴上的步长——
-`tick_margin(2)` 表示每隔一个分类保留一个标签。
+使用 `value_axis` 显示数值刻度标签，并通过 `value_tick_count` 设置数值轴上的刻度数。
+刻度从基线到远端均匀分布，两端都算在内，网格线和刻度标签都由它决定，两者始终一致。
+`tick_margin` 则是分类轴上的步长：`tick_margin(2)` 表示每隔一个分类保留一个标签。
 
 ```rust
 // 纵向柱状图的数值标签位于左侧，横向柱状图位于下方
@@ -252,12 +252,12 @@ BarChart::new(data)
     .value(|d| d.value)
     .value_axis(true)
 
-// 将数值轴均分为 6 个区间（默认为 4）
+// 7 个刻度（默认为 5 个）
 BarChart::new(data)
     .band(|d| d.category.clone())
     .value(|d| d.value)
     .value_axis(true)
-    .value_tick_count(6)
+    .value_tick_count(7)
 ```
 
 ### AreaChart
@@ -305,23 +305,26 @@ AreaChart::new(data)
     .linear()
 ```
 
-#### 固定 Y 轴与未走完的序列
+#### 固定 Y 轴与未完成的序列
 
-Y 轴默认从 0 开始。`y_domain` 把它固定在给定区间，价格、资产这类离 0 很远的数值就不会被压成顶部的一条线。`slot_count` 按比数据更多的点数铺开 X 轴，还没走完的序列（比如当天的分时）只占前面一段。
+Y 轴默认从 0 开始拟合数据。`y_domain` 把它固定在给定区间，价格、资产这类离 0 很远的数值就不会被压成顶部的一条线。`point_count` 让 X 轴按比数据更多的点数排布，尚未完成的序列（比如当天的分时）只占前面一段。`LineChart` 同样支持这两个方法。
 
 ```rust
-// 分时缩略图：美股一个交易日 390 个分钟槽位。
+// 分时缩略图：美股一个交易日 390 个分钟点位。
 AreaChart::new(minutes)
     .x(|d| d.time.clone())
     .y(|d| d.price)
+    .linear()
     .y_domain(low, high)
-    .slot_count(390)
+    .point_count(390)
     .x_axis(false)
     .grid(false)
     .interactive(false)
 ```
 
-固定的区间会铺满整个绘图高度；`min` 与 `max` 相等时什么都不画，数值全相同的序列需要先自行放宽区间。
+固定区间和默认一样，在最大值上方留出 10px；序列会被裁剪在绘图区内，超出区间的值止于边缘。`min` 与 `max` 相等时什么都不画，数值全相同的序列需要先自行放宽区间。平滑曲线（natural）会在最高点和最低点附近冲过头，区间贴着数据取值时建议用 `linear`。
+
+第 i 条数据固定落在第 i 个点位，所以数据必须从第一个点位开始连续，中间缺一条会让后面的数据都向左错一位。
 
 ### PieChart
 

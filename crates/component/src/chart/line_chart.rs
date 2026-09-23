@@ -18,7 +18,10 @@ use crate::{
     },
 };
 
-use super::{HOVER_DOT_SIZE, build_point_x_labels, caller_id, hover_halo_size, pointer_spring};
+use super::{
+    HOVER_DOT_SIZE, axis_point_count, build_point_x_labels, caller_id, hover_halo_size,
+    pinned_plot_mask, point_range, point_value_scale, pointer_spring,
+};
 
 /// The hover a line chart paints, sampled once per frame in [`Plot::hover`].
 #[derive(Clone, Copy)]
@@ -45,6 +48,8 @@ where
     tick_margin: usize,
     x_axis: bool,
     grid: bool,
+    y_domain: Option<(Y, Y)>,
+    point_count: Option<usize>,
     id: ElementId,
     interactive: bool,
     name: Option<SharedString>,
@@ -71,6 +76,8 @@ where
             tick_margin: 1,
             x_axis: true,
             grid: true,
+            y_domain: None,
+            point_count: None,
             id: caller_id(),
             interactive: true,
             name: None,
@@ -161,6 +168,31 @@ where
         self
     }
 
+    /// Pin the y axis to `min..=max` instead of fitting the line from zero.
+    ///
+    /// Pin it where zero is not a meaningful baseline, such as a price line
+    /// that would otherwise be pressed flat against the top. The range keeps
+    /// the 10px above `max` that the default leaves above the highest value,
+    /// and the line is clipped to the plot, so a value outside the range stops
+    /// at its edge. Nothing is drawn when `min` equals `max`.
+    pub fn y_domain(mut self, min: Y, max: Y) -> Self {
+        self.y_domain = Some((min, max));
+        self
+    }
+
+    /// Lay the x axis out for `count` evenly spaced points instead of the
+    /// data's own length.
+    ///
+    /// The data takes the leading points in order, the i-th item on the i-th
+    /// point, and the rest stay empty, as an intraday chart does before the
+    /// close. The data has to be contiguous from the first point: a missing
+    /// item shifts every later one a point to the left. A `count` below the
+    /// data's length has no effect.
+    pub fn point_count(mut self, count: usize) -> Self {
+        self.point_count = Some(count);
+        self
+    }
+
     /// Build the x (point) and y (linear) scales for the given bounds.
     ///
     /// Shared by `paint` and `tooltip_state` so the two stay in sync. Returns `None` when the
@@ -172,16 +204,12 @@ where
         let axis_gap = if self.x_axis { AXIS_GAP } else { 0. };
         let height = bounds.size.height.as_f32() - axis_gap;
 
-        let x = ScalePoint::new(self.data.iter().map(|v| x_fn(v)).collect(), vec![0., width]);
-        // Y scale, ensure start from 0.
-        let y = ScaleLinear::new(
-            self.data
-                .iter()
-                .map(|v| y_fn(v))
-                .chain(Some(Y::zero()))
-                .collect(),
-            vec![height, 10.],
+        let len = self.data.len();
+        let x = ScalePoint::new(
+            self.data.iter().map(|v| x_fn(v)).collect(),
+            point_range(width, len, axis_point_count(self.point_count, len)),
         );
+        let y = point_value_scale(self.data.iter().map(|v| y_fn(v)), self.y_domain, height);
 
         Some((x, y))
     }
@@ -210,6 +238,7 @@ where
                 &self.data,
                 x_fn.as_ref(),
                 &x,
+                axis_point_count(self.point_count, self.data.len()),
                 self.tick_margin,
                 cx.theme().muted_foreground,
             );
@@ -242,17 +271,23 @@ where
             line = line.dot().dot_size(8.).dot_fill_color(stroke);
         }
 
-        // Caching hangs off the chart's own id, which only an interactive chart
-        // puts on the stack; without one, siblings would share a slot and thrash
-        // it, so a chart that is off tessellates afresh each paint.
-        if self.interactive {
-            let caches = PathCaches::for_paint("line", window, cx);
-            caches.update(cx, |caches, _| {
-                line.paint_cached(&bounds, caches.slot(0), window);
-            });
-        } else {
-            line.paint(&bounds, window);
-        }
+        let mask = self
+            .y_domain
+            .is_some()
+            .then(|| pinned_plot_mask(bounds, height));
+        window.with_content_mask(mask, |window| {
+            // Caching hangs off the chart's own id, which only an interactive chart
+            // puts on the stack; without one, siblings would share a slot and thrash
+            // it, so a chart that is off tessellates afresh each paint.
+            if self.interactive {
+                let caches = PathCaches::for_paint("line", window, cx);
+                caches.update(cx, |caches, _| {
+                    line.paint_cached(&bounds, caches.slot(0), window);
+                });
+            } else {
+                line.paint(&bounds, window);
+            }
+        });
     }
 
     fn id(&self) -> Option<ElementId> {

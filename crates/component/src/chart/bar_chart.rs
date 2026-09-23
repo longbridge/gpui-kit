@@ -91,7 +91,7 @@ where
             label: None,
             label_axis: true,
             value_axis: false,
-            value_tick_count: 4,
+            value_tick_count: 5,
             grid: true,
             alignment: BarAlignment::default(),
             corner_radii: Corners::all(px(0.)),
@@ -254,15 +254,16 @@ where
         self
     }
 
-    /// Set how many even intervals the value axis is divided into, which drives
-    /// both the grid line spacing and the value-axis tick labels.
+    /// Set how many ticks the value axis carries, evenly spaced from the
+    /// baseline to the far edge with both ends included, which drives both the
+    /// grid lines and the value-axis tick labels.
     ///
-    /// This is a count, unlike [`Self::tick_margin`], which is a stride over the
-    /// band axis categories.
+    /// Unlike [`Self::tick_margin`], a stride over the band axis categories,
+    /// this counts the ticks themselves. Values below 2 are raised to 2.
     ///
-    /// Default is 4.
-    pub fn value_tick_count(mut self, value_tick_count: usize) -> Self {
-        self.value_tick_count = value_tick_count.max(1);
+    /// Default is 5.
+    pub fn value_tick_count(mut self, count: usize) -> Self {
+        self.value_tick_count = count.max(2);
         self
     }
 
@@ -571,8 +572,8 @@ where
             BarAlignment::Right => value_end_gap,
         };
 
-        let steps = self.value_tick_count;
-        let value_ticks = value_tick_positions(far, baseline, steps);
+        let value_ticks = value_tick_positions(far, baseline, self.value_tick_count);
+        let steps = value_ticks.len() - 1;
 
         // Draw grid, excluding the line at the baseline.
         if self.grid {
@@ -890,14 +891,14 @@ fn label_below_zero_line(value: f32, alignment: BarAlignment) -> bool {
     (value < 0.) == (alignment == BarAlignment::Top)
 }
 
-/// Tick positions along the value axis, dividing it into `steps` even intervals.
+/// `count` evenly spaced tick positions along the value axis.
 ///
 /// Runs from `far` (the value domain's maximum) through `baseline` (its minimum)
-/// inclusive, so the result holds `steps + 1` positions and the last one is the
-/// baseline.
-fn value_tick_positions(far: f32, baseline: f32, steps: usize) -> Vec<f32> {
-    (0..=steps)
-        .map(|i| far + (baseline - far) * i as f32 / steps as f32)
+/// inclusive, so the last position is the baseline. `count` is at least 2.
+fn value_tick_positions(far: f32, baseline: f32, count: usize) -> Vec<f32> {
+    let steps = (count - 1) as f32;
+    (0..count)
+        .map(|i| far + (baseline - far) * i as f32 / steps)
         .collect()
 }
 
@@ -920,15 +921,15 @@ mod tests {
 
     #[test]
     fn test_value_tick_positions() {
-        // Both ends are included, so 4 intervals means 5 positions.
+        // Both ends are included, so 5 ticks means 4 intervals.
         assert_eq!(
-            value_tick_positions(10., 110., 4),
+            value_tick_positions(10., 110., 5),
             vec![10., 35., 60., 85., 110.]
         );
 
         // Top-aligned charts have the baseline before the far edge.
-        assert_eq!(value_tick_positions(110., 10., 2), vec![110., 60., 10.]);
+        assert_eq!(value_tick_positions(110., 10., 3), vec![110., 60., 10.]);
 
-        assert_eq!(value_tick_positions(0., 50., 1), vec![0., 50.]);
+        assert_eq!(value_tick_positions(0., 50., 2), vec![0., 50.]);
     }
 }

@@ -1232,7 +1232,7 @@ impl ChartCard {
                             .fill(area_gradient(accent))
                             .linear()
                             .y_domain(low, high)
-                            .slot_count(data.stock_prices.len())
+                            .point_count(data.stock_prices.len())
                             .tick_margin(5)
                             .name("Close")
                             .id("area-chart-in-progress"),
