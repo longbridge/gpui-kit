@@ -509,6 +509,7 @@ impl TabGroupSkin {
                             // without also selecting the tab.
                             .when(
                                 !collapsed
+                                    && self.shared.is_close_button_visible()
                                     && group.is_close_permitted()
                                     && group.is_draggable()
                                     && panel.closable(cx),
@@ -518,6 +519,7 @@ impl TabGroupSkin {
                                             .icon(IconName::Close)
                                             .xsmall()
                                             .ghost()
+                                            .mr_3()
                                             .tab_stop(false)
                                             .tooltip(t!("Dock.Close"))
                                             .debug_selector(|| CLOSE_BUTTON_SELECTOR.to_string())
@@ -1633,11 +1635,20 @@ mod tests {
     /// the first tab drew a close button. The second tab is a non-closable
     /// filler (a lone panel draws no tab bar) that never draws one, so the
     /// probe is unambiguous.
-    fn drew_close_button(cx: &mut TestAppContext, closable: bool) -> bool {
+    fn drew_close_button(cx: &mut TestAppContext, closable: bool, enabled: bool) -> bool {
         cx.update(|cx| crate::init(cx));
+        let mut skin = None;
         let (area, cx) = cx.add_window_view(|window, cx| {
-            DockArea::new("skin", None, window, cx).with_renderer(DockSkin::new(cx))
+            let renderer = DockSkin::new(cx);
+            skin = Some(renderer.clone());
+            DockArea::new("skin", None, window, cx).with_renderer(renderer)
         });
+        let skin = skin.expect("skin constructed with the area");
+        assert!(!skin.is_close_button_visible());
+        if enabled {
+            cx.update(|_, cx| skin.set_close_button_visible(true, cx));
+            assert!(skin.is_close_button_visible());
+        }
         cx.update(|window, cx| {
             let under_test = TabProbe::new(closable, Rc::new(Cell::new(false)), cx);
             let filler = TabProbe::new(false, Rc::new(Cell::new(false)), cx);
@@ -1655,7 +1666,7 @@ mod tests {
     #[gpui::test]
     fn a_closable_panel_gets_a_close_button(cx: &mut TestAppContext) {
         assert!(
-            drew_close_button(cx, true),
+            drew_close_button(cx, true, true),
             "a closable panel's tab must draw a close button"
         );
     }
@@ -1664,9 +1675,46 @@ mod tests {
     #[gpui::test]
     fn a_non_closable_panel_gets_no_close_button(cx: &mut TestAppContext) {
         assert!(
-            !drew_close_button(cx, false),
+            !drew_close_button(cx, false, true),
             "a panel that reports itself non-closable must draw no close button"
         );
+    }
+
+    #[gpui::test]
+    fn close_buttons_are_off_by_default(cx: &mut TestAppContext) {
+        assert!(!drew_close_button(cx, true, false));
+    }
+
+    #[gpui::test]
+    fn close_button_visibility_updates_after_the_skin_setting_changes(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let mut skin = None;
+        let (area, cx) = cx.add_window_view(|window, cx| {
+            let renderer = DockSkin::new(cx);
+            skin = Some(renderer.clone());
+            DockArea::new("skin", None, window, cx).with_renderer(renderer)
+        });
+        let skin = skin.expect("skin constructed with the area");
+        cx.update(|window, cx| {
+            let panel = TabProbe::new(true, Rc::new(Cell::new(false)), cx);
+            let filler = TabProbe::new(false, Rc::new(Cell::new(false)), cx);
+            area.update(cx, |area, cx| {
+                area.set_center(
+                    DockLayout::tabs()
+                        .panel_view(panel_handle(panel), cx)
+                        .panel_view(panel_handle(filler), cx),
+                    window,
+                    cx,
+                )
+            });
+        });
+
+        for (visible, expected) in [(false, false), (true, true), (false, false)] {
+            cx.update(|_, cx| skin.set_close_button_visible(visible, cx));
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_some(), expected);
+        }
     }
 
     /// The skin routes each tab through [`Panel::render_tab`].
@@ -1701,9 +1749,13 @@ mod tests {
     #[gpui::test]
     fn clicking_a_close_button_removes_only_that_tab(cx: &mut TestAppContext) {
         cx.update(|cx| crate::init(cx));
+        let mut skin = None;
         let (area, cx) = cx.add_window_view(|window, cx| {
-            DockArea::new("skin", None, window, cx).with_renderer(DockSkin::new(cx))
+            let renderer = DockSkin::new(cx);
+            skin = Some(renderer.clone());
+            DockArea::new("skin", None, window, cx).with_renderer(renderer)
         });
+        cx.update(|_, cx| skin.unwrap().set_close_button_visible(true, cx));
 
         let (closable_id, filler_id, activated) = cx.update(|window, cx| {
             let filler = TabProbe::new(false, Rc::new(Cell::new(false)), cx);
@@ -1755,9 +1807,13 @@ mod tests {
     #[gpui::test]
     fn a_collapsed_group_draws_no_close_button(cx: &mut TestAppContext) {
         cx.update(|cx| crate::init(cx));
+        let mut skin = None;
         let (area, cx) = cx.add_window_view(|window, cx| {
-            DockArea::new("skin", None, window, cx).with_renderer(DockSkin::new(cx))
+            let renderer = DockSkin::new(cx);
+            skin = Some(renderer.clone());
+            DockArea::new("skin", None, window, cx).with_renderer(renderer)
         });
+        cx.update(|_, cx| skin.unwrap().set_close_button_visible(true, cx));
         // Two closable panels so the group is draggable (not on its last
         // visible panel) and offers close buttons while open.
         cx.update(|window, cx| {
