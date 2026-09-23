@@ -516,6 +516,7 @@ fn parse_node(
                 Some(BlockNode::List {
                     children,
                     ordered,
+                    start: None,
                     span: None,
                 })
             }

@@ -25,6 +25,7 @@ pub(crate) struct NodeRenderOptions {
     pub(crate) in_list: bool,
     pub(crate) todo: bool,
     pub(crate) ordered: bool,
+    pub(crate) list_start: Option<u32>,
     pub(crate) depth: usize,
     pub(crate) is_last: bool,
 }

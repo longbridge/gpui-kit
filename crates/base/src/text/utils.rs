@@ -8,19 +8,33 @@ const NUMBERED_PREFIXES_2: &str = "abcdefghijklmnopqrstuvwxyz";
 
 const BULLETS: [&str; 5] = ["•", "◦", "▪", "‣", "⁃"];
 
+/// Returns an ordered-list item's ordinal, defaulting omitted starts to one.
+pub(super) fn ordered_list_ordinal(start: Option<u32>, ix: usize) -> u32 {
+    start
+        .unwrap_or(1)
+        .saturating_add(u32::try_from(ix).unwrap_or(u32::MAX))
+}
+
 /// Returns the prefix for a list item.
-pub(super) fn list_item_prefix(ix: usize, ordered: bool, depth: usize) -> String {
+pub(super) fn list_item_prefix(
+    ix: usize,
+    start: Option<u32>,
+    ordered: bool,
+    depth: usize,
+) -> String {
     if ordered {
-        if depth == 0 {
-            return format!("{}. ", ix + 1);
+        let ordinal = ordered_list_ordinal(start, ix);
+        if depth == 0 || start == Some(0) {
+            return format!("{ordinal}. ");
         }
 
+        let alpha_ix = ordinal.saturating_sub(1) as usize;
         if depth == 1 {
             return format!(
                 "{}. ",
                 NUMBERED_PREFIXES_1
                     .chars()
-                    .nth(ix % NUMBERED_PREFIXES_1.len())
+                    .nth(alpha_ix % NUMBERED_PREFIXES_1.len())
                     .unwrap()
             );
         } else {
@@ -28,7 +42,7 @@ pub(super) fn list_item_prefix(ix: usize, ordered: bool, depth: usize) -> String
                 "{}. ",
                 NUMBERED_PREFIXES_2
                     .chars()
-                    .nth(ix % NUMBERED_PREFIXES_2.len())
+                    .nth(alpha_ix % NUMBERED_PREFIXES_2.len())
                     .unwrap()
             );
         }
@@ -87,22 +101,25 @@ mod tests {
 
     #[test]
     fn test_list_item_prefix() {
-        assert_eq!(list_item_prefix(0, true, 0), "1. ");
-        assert_eq!(list_item_prefix(1, true, 0), "2. ");
-        assert_eq!(list_item_prefix(2, true, 0), "3. ");
-        assert_eq!(list_item_prefix(10, true, 0), "11. ");
-        assert_eq!(list_item_prefix(0, true, 1), "A. ");
-        assert_eq!(list_item_prefix(1, true, 1), "B. ");
-        assert_eq!(list_item_prefix(2, true, 1), "C. ");
-        assert_eq!(list_item_prefix(0, true, 2), "a. ");
-        assert_eq!(list_item_prefix(1, true, 2), "b. ");
-        assert_eq!(list_item_prefix(6, true, 2), "g. ");
-        assert_eq!(list_item_prefix(0, true, 1), "A. ");
-        assert_eq!(list_item_prefix(0, true, 2), "a. ");
-        assert_eq!(list_item_prefix(0, false, 0), "• ");
-        assert_eq!(list_item_prefix(0, false, 1), "◦ ");
-        assert_eq!(list_item_prefix(0, false, 2), "▪ ");
-        assert_eq!(list_item_prefix(0, false, 3), "‣ ");
-        assert_eq!(list_item_prefix(0, false, 4), "⁃ ");
+        assert_eq!(list_item_prefix(0, Some(1), true, 0), "1. ");
+        assert_eq!(list_item_prefix(1, Some(1), true, 0), "2. ");
+        assert_eq!(list_item_prefix(2, Some(1), true, 0), "3. ");
+        assert_eq!(list_item_prefix(10, Some(1), true, 0), "11. ");
+        assert_eq!(list_item_prefix(0, Some(3), true, 0), "3. ");
+        assert_eq!(list_item_prefix(1, Some(3), true, 0), "4. ");
+        assert_eq!(list_item_prefix(0, Some(1), true, 1), "A. ");
+        assert_eq!(list_item_prefix(1, Some(1), true, 1), "B. ");
+        assert_eq!(list_item_prefix(0, Some(4), true, 1), "D. ");
+        assert_eq!(list_item_prefix(1, Some(4), true, 1), "E. ");
+        assert_eq!(list_item_prefix(0, Some(1), true, 2), "a. ");
+        assert_eq!(list_item_prefix(1, Some(1), true, 2), "b. ");
+        assert_eq!(list_item_prefix(6, Some(1), true, 2), "g. ");
+        assert_eq!(list_item_prefix(0, Some(0), true, 1), "0. ");
+        assert_eq!(list_item_prefix(1, Some(0), true, 1), "1. ");
+        assert_eq!(list_item_prefix(0, None, false, 0), "• ");
+        assert_eq!(list_item_prefix(0, None, false, 1), "◦ ");
+        assert_eq!(list_item_prefix(0, None, false, 2), "▪ ");
+        assert_eq!(list_item_prefix(0, None, false, 3), "‣ ");
+        assert_eq!(list_item_prefix(0, None, false, 4), "⁃ ");
     }
 }

@@ -1654,6 +1654,43 @@ mod tests {
         assert_eq!(content.document.selected_source_range(), Some(17..22));
     }
 
+    #[test]
+    fn streamed_ordered_list_continuation_preserves_start() {
+        let initial = parse_content(
+            TextViewFormat::Markdown,
+            ParsedContent::default(),
+            &UpdateOptions {
+                revision: 1,
+                pending_text: "3. three".to_string(),
+                append: false,
+                mode: ParseMode::Replace,
+                markdown_extensions: Arc::default(),
+            },
+        )
+        .expect("initial list parse");
+        let continued = parse_content(
+            TextViewFormat::Markdown,
+            initial,
+            &UpdateOptions {
+                revision: 2,
+                pending_text: "\n4. four".to_string(),
+                append: true,
+                mode: ParseMode::Compatible,
+                markdown_extensions: Arc::default(),
+            },
+        )
+        .expect("streamed list continuation parse");
+
+        let BlockNode::List {
+            start, children, ..
+        } = &continued.document.blocks[0]
+        else {
+            panic!("expected streamed ordered list");
+        };
+        assert_eq!(*start, Some(3));
+        assert_eq!(children.len(), 2);
+    }
+
     #[gpui::test]
     fn parser_revision_reparses_same_name_inline_configuration(cx: &mut TestAppContext) {
         cx.update(crate::init);

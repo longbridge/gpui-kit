@@ -2163,6 +2163,89 @@ mod tests {
         }
     }
 
+    #[test]
+    fn ordered_markdown_list_start_reaches_layout_marker() {
+        use crate::text::inline::test_fonts::{WideMonoTextSystem, record_shaped_lines};
+        use gpui::TestApp;
+
+        struct MarkdownRoot {
+            text_view: Entity<TextViewState>,
+        }
+
+        impl Render for MarkdownRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(400.)).child(TextView::new(&self.text_view))
+            }
+        }
+
+        #[derive(Clone, Copy)]
+        enum Format {
+            Markdown,
+            Html,
+        }
+
+        fn shaped_markers(format: Format, source: &str) -> Vec<String> {
+            let (_, shaped_lines) = record_shaped_lines(|| {
+                let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+                app.update(crate::init);
+                let mut window = app.open_window(|_, cx| MarkdownRoot {
+                    text_view: cx.new(|cx| match format {
+                        Format::Markdown => TextViewState::markdown(source, cx),
+                        Format::Html => TextViewState::html(source, cx),
+                    }),
+                });
+                window.draw();
+                app.run_until_parked();
+                window.draw();
+            });
+
+            let mut markers = shaped_lines
+                .into_iter()
+                .filter(|line| line.ends_with(". "))
+                .collect::<Vec<_>>();
+            markers.dedup();
+            markers
+        }
+
+        let starts_at_one = "1. one\n2. two";
+        assert_eq!(
+            shaped_markers(Format::Markdown, starts_at_one),
+            ["1. ", "2. "]
+        );
+        assert_eq!(
+            shaped_markers(Format::Html, "<ol><li>one</li><li>two</li></ol>"),
+            ["1. ", "2. "]
+        );
+
+        let starts_at_three = "3. hello\n4. world";
+        let markdown::mdast::Node::Root(root) =
+            markdown::to_mdast(starts_at_three, &markdown::ParseOptions::gfm()).unwrap()
+        else {
+            panic!("expected Markdown root");
+        };
+        let markdown::mdast::Node::List(list) = &root.children[0] else {
+            panic!("expected ordered list");
+        };
+        assert_eq!(list.start, Some(3));
+
+        assert_eq!(
+            shaped_markers(Format::Markdown, starts_at_three),
+            ["3. ", "4. "]
+        );
+
+        let nested_starts_at_four = "1. outer\n\n   4. nested\n   5. again";
+        assert_eq!(
+            shaped_markers(Format::Markdown, nested_starts_at_four),
+            ["1. ", "D. ", "E. "]
+        );
+
+        let nested_starts_at_zero = "1. outer\n\n   0. zero";
+        assert_eq!(
+            shaped_markers(Format::Markdown, nested_starts_at_zero),
+            ["1. ", "0. "]
+        );
+    }
+
     /// The code-bearing list item takes `InlineFlow`; the plain item takes the
     /// ordinary text path. Their first body glyphs must begin at the same row
     /// position relative to their own TextView origins.

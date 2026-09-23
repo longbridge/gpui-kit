@@ -33,7 +33,7 @@ use crate::{
 
 use super::{
     SelectionFormat, TextViewStyle,
-    utils::{data_url_image, list_item_prefix},
+    utils::{data_url_image, list_item_prefix, ordered_list_ordinal},
 };
 
 const CHECK_SVG_LIGHT: &[u8] = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none"><path d="m3.25 8.25 3 3 6.5-7" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>"#;
@@ -61,6 +61,8 @@ pub(crate) enum BlockNode {
         /// Only contains ListItem, others will be ignored
         children: Vec<BlockNode>,
         ordered: bool,
+        /// The first ordinal for an ordered list. HTML lists leave this unset.
+        start: Option<u32>,
         span: Option<Span>,
     },
     ListItem {
@@ -218,12 +220,15 @@ impl BlockNode {
                 }
             }
             BlockNode::List {
-                children, ordered, ..
+                children,
+                ordered,
+                start,
+                ..
             } => {
                 if matches!(kind, BlockTextKind::SelectedSource) {
                     // Reconstruct the list source, indenting nested lists and
                     // restoring list markers and task-list checkboxes.
-                    text.push_str(&list_selected_source(children, *ordered, ""));
+                    text.push_str(&list_selected_source(children, *ordered, *start, ""));
                 } else {
                     text.push_str(&Self::children_text(children, kind));
                 }
@@ -952,7 +957,12 @@ fn table_selected_source(table: &Table) -> String {
 /// and sub-list lines align under the item text. Items with no selected content
 /// are skipped but still consume an ordered number, so the remaining items keep
 /// their original numbering.
-fn list_selected_source(children: &[BlockNode], ordered: bool, indent: &str) -> String {
+fn list_selected_source(
+    children: &[BlockNode],
+    ordered: bool,
+    start: Option<u32>,
+    indent: &str,
+) -> String {
     let mut out = String::new();
     let mut item_ix = 0usize;
 
@@ -967,7 +977,7 @@ fn list_selected_source(children: &[BlockNode], ordered: bool, indent: &str) -> 
         };
 
         let marker = if ordered {
-            format!("{}. ", item_ix + 1)
+            format!("{}. ", ordered_list_ordinal(start, item_ix))
         } else {
             "- ".to_string()
         };
@@ -986,12 +996,14 @@ fn list_selected_source(children: &[BlockNode], ordered: bool, indent: &str) -> 
             if let BlockNode::List {
                 children: sub_children,
                 ordered: sub_ordered,
+                start: sub_start,
                 ..
             } = sub
             {
                 nested.push_str(&list_selected_source(
                     sub_children,
                     *sub_ordered,
+                    *sub_start,
                     &child_indent,
                 ));
             } else {
@@ -2588,13 +2600,16 @@ impl BlockNode {
                     .join("\n")
             }
             BlockNode::List {
-                children, ordered, ..
+                children,
+                ordered,
+                start,
+                ..
             } => children
                 .iter()
                 .enumerate()
                 .map(|(i, child)| {
                     let prefix = if *ordered {
-                        format!("{}. ", i + 1)
+                        format!("{}. ", ordered_list_ordinal(*start, i))
                     } else {
                         "- ".to_string()
                     };
@@ -2672,7 +2687,12 @@ impl BlockNode {
             .items_start()
             .content_start()
             .when(!options.todo && checked.is_none(), |this| {
-                this.child(list_item_prefix(ix, options.ordered, options.depth))
+                this.child(list_item_prefix(
+                    ix,
+                    options.list_start,
+                    options.ordered,
+                    options.depth,
+                ))
             })
             .when_some(checked, |this, checked| {
                 // Todo list checkbox
@@ -3220,7 +3240,10 @@ impl BlockNode {
                 mb,
             ),
             BlockNode::List {
-                children, ordered, ..
+                children,
+                ordered,
+                start,
+                ..
             } => div()
                 .w_full()
                 .min_w_0()
@@ -3237,6 +3260,7 @@ impl BlockNode {
                             NodeRenderOptions {
                                 ix,
                                 ordered: *ordered,
+                                list_start: *start,
                                 ..options
                             },
                             node_cx,
@@ -3700,6 +3724,7 @@ mod tests {
     fn unordered_list_selected_source_prefixes_dash() {
         let list = BlockNode::List {
             ordered: false,
+            start: None,
             span: None,
             children: vec![
                 BlockNode::ListItem {
@@ -3723,19 +3748,67 @@ mod tests {
     }
 
     #[test]
-    fn ordered_list_selected_source_prefixes_numbers() {
+    fn ordered_list_selected_source_preserves_start() {
         let list = BlockNode::List {
             ordered: true,
+            start: Some(3),
             span: None,
             children: vec![
                 BlockNode::ListItem {
-                    children: vec![BlockNode::Paragraph(selected_paragraph("first"))],
+                    children: vec![BlockNode::Paragraph(selected_paragraph("three"))],
                     spread: false,
                     checked: None,
                     span: None,
                 },
                 BlockNode::ListItem {
-                    children: vec![BlockNode::Paragraph(selected_paragraph("second"))],
+                    children: vec![BlockNode::Paragraph(selected_paragraph("four"))],
+                    spread: false,
+                    checked: None,
+                    span: None,
+                },
+            ],
+        };
+        assert_eq!(list.to_markdown(), "3. three\n4. four");
+        assert_eq!(
+            list.selected_text(SelectionFormat::Source),
+            "3. three\n4. four\n"
+        );
+    }
+
+    #[test]
+    fn ordered_list_selected_source_preserves_nested_starts_and_continuations() {
+        let nested = BlockNode::List {
+            ordered: true,
+            start: Some(4),
+            span: None,
+            children: vec![
+                BlockNode::ListItem {
+                    children: vec![BlockNode::Paragraph(selected_paragraph("nested"))],
+                    spread: false,
+                    checked: None,
+                    span: None,
+                },
+                BlockNode::ListItem {
+                    children: vec![BlockNode::Paragraph(selected_paragraph("again"))],
+                    spread: false,
+                    checked: None,
+                    span: None,
+                },
+            ],
+        };
+        let nested_list = BlockNode::List {
+            ordered: true,
+            start: Some(3),
+            span: None,
+            children: vec![
+                BlockNode::ListItem {
+                    children: vec![BlockNode::Paragraph(selected_paragraph("three")), nested],
+                    spread: false,
+                    checked: None,
+                    span: None,
+                },
+                BlockNode::ListItem {
+                    children: vec![BlockNode::Paragraph(selected_paragraph("four"))],
                     spread: false,
                     checked: None,
                     span: None,
@@ -3743,8 +3816,35 @@ mod tests {
             ],
         };
         assert_eq!(
-            list.selected_text(SelectionFormat::Source),
-            "1. first\n2. second\n"
+            nested_list.selected_text(SelectionFormat::Source),
+            "3. three\n   4. nested\n   5. again\n4. four\n"
+        );
+
+        let loose_list = BlockNode::List {
+            ordered: true,
+            start: Some(3),
+            span: None,
+            children: vec![
+                BlockNode::ListItem {
+                    children: vec![
+                        BlockNode::Paragraph(selected_paragraph("loose")),
+                        BlockNode::Paragraph(selected_paragraph("continuation")),
+                    ],
+                    spread: true,
+                    checked: None,
+                    span: None,
+                },
+                BlockNode::ListItem {
+                    children: vec![BlockNode::Paragraph(selected_paragraph("four"))],
+                    spread: false,
+                    checked: None,
+                    span: None,
+                },
+            ],
+        };
+        assert_eq!(
+            loose_list.selected_text(SelectionFormat::Source),
+            "3. loose\n   continuation\n4. four\n"
         );
     }
 
@@ -3755,6 +3855,7 @@ mod tests {
         // - two
         let nested = BlockNode::List {
             ordered: false,
+            start: None,
             span: None,
             children: vec![BlockNode::ListItem {
                 children: vec![BlockNode::Paragraph(selected_paragraph("nested"))],
@@ -3765,6 +3866,7 @@ mod tests {
         };
         let list = BlockNode::List {
             ordered: false,
+            start: None,
             span: None,
             children: vec![
                 BlockNode::ListItem {
@@ -3791,6 +3893,7 @@ mod tests {
     fn task_list_selected_source_restores_checkboxes() {
         let list = BlockNode::List {
             ordered: false,
+            start: None,
             span: None,
             children: vec![
                 BlockNode::ListItem {
@@ -4068,6 +4171,7 @@ mod tests {
                 BlockNode::Paragraph(selected_paragraph("start")),
                 BlockNode::List {
                     ordered: true,
+                    start: Some(3),
                     children: vec![],
                     span: Some(Span {
                         start: list_start,
@@ -4210,6 +4314,7 @@ mod tests {
                 selected_code_block("let x = 1;\n", Some("rust")),
                 BlockNode::List {
                     ordered: true,
+                    start: Some(1),
                     span: None,
                     children: vec![
                         BlockNode::ListItem {

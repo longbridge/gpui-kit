@@ -1333,7 +1333,7 @@ pub(super) mod test_fonts {
         Pixels, PlatformTextSystem, RenderGlyphParams, ShapedGlyph, ShapedRun, Size,
         TextRenderingMode, point, px, size,
     };
-    use std::borrow::Cow;
+    use std::{borrow::Cow, cell::RefCell};
 
     pub(crate) const BODY: &str = "Body";
     pub(crate) const MONO: &str = "Mono";
@@ -1362,6 +1362,28 @@ pub(super) mod test_fonts {
             let font_id = if family == MONO { MONO_ID } else { BODY_ID };
             font_size * (Self::advance_units(font_id) / UNITS_PER_EM) * text.chars().count() as f32
         }
+    }
+
+    thread_local! {
+        static SHAPED_LINE_RECORDER: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+    }
+
+    struct ShapeRecorderGuard;
+
+    impl Drop for ShapeRecorderGuard {
+        fn drop(&mut self) {
+            SHAPED_LINE_RECORDER.with(|recorder| recorder.borrow_mut().take());
+        }
+    }
+
+    /// Runs `f` while recording text submitted to [`PlatformTextSystem::layout_line`].
+    pub(crate) fn record_shaped_lines<R>(f: impl FnOnce() -> R) -> (R, Vec<String>) {
+        SHAPED_LINE_RECORDER.with(|recorder| *recorder.borrow_mut() = Some(Vec::new()));
+        let _guard = ShapeRecorderGuard;
+        let result = f();
+        let shaped_lines =
+            SHAPED_LINE_RECORDER.with(|recorder| recorder.borrow_mut().take().unwrap_or_default());
+        (result, shaped_lines)
     }
 
     impl PlatformTextSystem for WideMonoTextSystem {
@@ -1439,6 +1461,12 @@ pub(super) mod test_fonts {
         }
 
         fn layout_line(&self, text: &str, font_size: Pixels, runs: &[FontRun]) -> LineLayout {
+            SHAPED_LINE_RECORDER.with(|recorder| {
+                if let Some(lines) = recorder.borrow_mut().as_mut() {
+                    lines.push(text.to_string());
+                }
+            });
+
             let mut position = px(0.);
             let mut shaped_runs = Vec::new();
             let mut run_start = 0;
