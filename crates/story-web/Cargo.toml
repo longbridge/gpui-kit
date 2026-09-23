@@ -17,6 +17,7 @@ log.workspace = true
 tracing-wasm = "0.2"
 console_log = "1.0"
 wasm-bindgen = "0.2"
+serde_json.workspace = true
 
 [lints]
 workspace = true

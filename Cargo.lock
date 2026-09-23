@@ -3913,6 +3913,7 @@ dependencies = [
  "gpui-component-story",
  "gpui-kit",
  "log",
+ "serde_json",
  "tracing-wasm",
  "wasm-bindgen",
 ]

@@ -11,9 +11,15 @@ type ThemeFile = { name: string; themes: Variant[] };
 const files = import.meta.glob<ThemeFile>('../../../themes/*.json', { eager: true, import: 'default' });
 const slug = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 
+export const themeSources = Object.entries(files).map(([path, data]) => ({
+  source: path.split('/').pop()!.replace(/\.json$/, ''),
+  data,
+}));
+
 export const themes = Object.entries(files)
   .flatMap(([path, file]) => file.themes.map((variant) => ({
     id: `${path.split('/').pop()!.replace(/\.json$/, '')}-${slug(variant.name)}`,
+    source: path.split('/').pop()!.replace(/\.json$/, ''),
     family: file.name,
     name: variant.name,
     mode: variant.mode,
@@ -22,7 +28,7 @@ export const themes = Object.entries(files)
   })))
   .sort((a, b) => a.name.localeCompare(b.name));
 
-export const themeModes = Object.fromEntries(themes.map(({ id, mode }) => [id, mode]));
+export const themeInfo = Object.fromEntries(themes.map(({ id, mode, name, source }) => [id, { mode, name, source }]));
 
 const tokens: Record<string, string> = {
   background: 'background',
