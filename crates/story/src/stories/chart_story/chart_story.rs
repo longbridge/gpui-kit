@@ -444,6 +444,7 @@ enum ChartCard {
     AreaLinear,
     AreaStepAfter,
     AreaGradient,
+    AreaInProgress,
     Candlestick,
     CandlestickNarrow,
     CandlestickWide,
@@ -1214,6 +1215,33 @@ impl ChartCard {
                     "year over year",
                 )
                 .note("Gradient fills fade to the baseline"),
+            Self::AreaInProgress => {
+                let sessions: Vec<_> = data.stock_prices.iter().take(26).cloned().collect();
+                let (low, high) = sessions
+                    .iter()
+                    .fold((f64::MAX, f64::MIN), |(low, high), d| {
+                        (low.min(d.close), high.max(d.close))
+                    });
+                let last = sessions.last().map_or(0., |d| d.close);
+                Card::new("Closing Price", "Jun - Jul, in progress")
+                    .chart(
+                        AreaChart::new(sessions)
+                            .x(|d| d.date.clone())
+                            .y(|d| d.close)
+                            .stroke(accent)
+                            .fill(area_gradient(accent))
+                            .linear()
+                            .y_domain(low, high)
+                            .slot_count(data.stock_prices.len())
+                            .tick_margin(5)
+                            .name("Close")
+                            .id("area-chart-in-progress"),
+                    )
+                    .headline(format!(
+                        "${last:.2} at the last close, within ${low:.2} - ${high:.2}"
+                    ))
+                    .note("A pinned y axis, and room for the sessions still to come")
+            }
             // Forty sessions do not fit forty labels, so every card thins them.
             Self::Candlestick => self.candlestick(data, "Daily", 0.8, 5, "candlestick-chart"),
             Self::CandlestickNarrow => {
@@ -1550,7 +1578,13 @@ fn sections(sankey_count: usize) -> Vec<ChartSection> {
             BarGradientDiagonal,
         ]),
         ChartSection::after_rule([Line, LineLinear, LineStepAfter, LineDots]),
-        ChartSection::after_rule([Area, AreaLinear, AreaStepAfter, AreaGradient]),
+        ChartSection::after_rule([
+            Area,
+            AreaLinear,
+            AreaStepAfter,
+            AreaGradient,
+            AreaInProgress,
+        ]),
         ChartSection::after_rule([
             Candlestick,
             CandlestickNarrow,

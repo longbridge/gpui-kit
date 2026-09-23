@@ -318,6 +318,24 @@ AreaChart::new(data)
     .linear()  // or .step_after()
 ```
 
+#### Pinned Axis and Unfinished Series
+
+By default the y axis starts from zero. `y_domain` pins it to a range instead, so a price or a balance that never nears zero is not pressed flat against the top. `slot_count` lays the x axis out for more points than the data has, so a series still in progress, such as today's intraday prices, fills only the leading part.
+
+```rust
+// An intraday price thumbnail: 390 one-minute slots in a US session.
+AreaChart::new(minutes)
+    .x(|d| d.time.clone())
+    .y(|d| d.price)
+    .y_domain(low, high)
+    .slot_count(390)
+    .x_axis(false)
+    .grid(false)
+    .interactive(false)
+```
+
+A pinned range fills the whole plot height and draws nothing when `min` equals `max`, so widen a flat series before passing it in.
+
 ### PieChart
 
 A pie chart displays data as slices of a circular chart, ideal for showing proportions.

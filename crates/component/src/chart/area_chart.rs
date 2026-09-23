@@ -48,6 +48,8 @@ where
     tick_margin: usize,
     x_axis: bool,
     grid: bool,
+    y_domain: Option<(Y, Y)>,
+    slot_count: Option<usize>,
     id: ElementId,
     interactive: bool,
     hover: Option<AreaHover>,
@@ -74,6 +76,8 @@ where
             y: vec![],
             x_axis: true,
             grid: true,
+            y_domain: None,
+            slot_count: None,
             id: caller_id(),
             interactive: true,
             hover: None,
@@ -165,6 +169,28 @@ where
         self
     }
 
+    /// Pin the y axis to `min..=max`, mapped onto the full plot height.
+    ///
+    /// By default the axis fits every series from zero and leaves 10px above
+    /// the highest value. Pin it where zero is not a meaningful baseline, such
+    /// as a price line that would otherwise be pressed flat against the top.
+    /// Nothing is drawn when `min` equals `max`.
+    pub fn y_domain(mut self, min: Y, max: Y) -> Self {
+        self.y_domain = Some((min, max));
+        self
+    }
+
+    /// Lay the x axis out for `count` evenly spaced points instead of the
+    /// data's own length.
+    ///
+    /// Data shorter than `count` fills only the leading part of the axis and
+    /// leaves the rest empty, as an intraday chart does before the close. A
+    /// `count` below the data's length has no effect.
+    pub fn slot_count(mut self, count: usize) -> Self {
+        self.slot_count = Some(count);
+        self
+    }
+
     /// Build the x (point) and y (linear) scales for the given bounds.
     ///
     /// Shared by `paint` and `tooltip_state` so the two stay in sync. Returns `None` when there
@@ -179,14 +205,26 @@ where
         let axis_gap = if self.x_axis { AXIS_GAP } else { 0. };
         let height = bounds.size.height.as_f32() - axis_gap;
 
-        let x = ScalePoint::new(self.data.iter().map(|v| x_fn(v)).collect(), vec![0., width]);
-        let domain = self
-            .data
-            .iter()
-            .flat_map(|v| self.y.iter().map(|y_fn| y_fn(v)))
-            .chain(Some(Y::zero()))
-            .collect::<Vec<_>>();
-        let y = ScaleLinear::new(domain, vec![height, 10.]);
+        let len = self.data.len();
+        let slots = self.slot_count.unwrap_or(len).max(len);
+        let x_end = if slots > 1 {
+            width * len.saturating_sub(1) as f32 / (slots - 1) as f32
+        } else {
+            width
+        };
+        let x = ScalePoint::new(self.data.iter().map(|v| x_fn(v)).collect(), vec![0., x_end]);
+        let y = match self.y_domain {
+            Some((min, max)) => ScaleLinear::new(vec![min, max], vec![height, 0.]),
+            None => {
+                let domain = self
+                    .data
+                    .iter()
+                    .flat_map(|v| self.y.iter().map(|y_fn| y_fn(v)))
+                    .chain(Some(Y::zero()))
+                    .collect::<Vec<_>>();
+                ScaleLinear::new(domain, vec![height, 10.])
+            }
+        };
 
         Some((x, y))
     }
@@ -385,5 +423,54 @@ where
         }
 
         Some(tooltip.into_any_element())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{Bounds, point, px, size};
+
+    use super::AreaChart;
+    use crate::plot::scale::Scale;
+
+    fn bounds() -> Bounds<gpui::Pixels> {
+        Bounds::new(point(px(0.), px(0.)), size(px(100.), px(50.)))
+    }
+
+    fn chart(data: Vec<f64>) -> AreaChart<(usize, f64), String, f64> {
+        AreaChart::new(data.into_iter().enumerate())
+            .x(|(i, _)| i.to_string())
+            .y(|(_, v)| *v)
+            .x_axis(false)
+    }
+
+    #[test]
+    fn test_slot_count_fills_the_leading_part() {
+        let (x, _) = chart(vec![1., 2., 3.])
+            .slot_count(5)
+            .scales(bounds())
+            .unwrap();
+        assert_eq!(x.tick(&"0".to_string()), Some(0.));
+        assert_eq!(x.tick(&"2".to_string()), Some(50.));
+
+        let (x, _) = chart(vec![1., 2., 3.])
+            .slot_count(2)
+            .scales(bounds())
+            .unwrap();
+        assert_eq!(x.tick(&"2".to_string()), Some(100.));
+    }
+
+    #[test]
+    fn test_y_domain_maps_onto_the_full_height() {
+        let (_, y) = chart(vec![10., 20.])
+            .y_domain(10., 20.)
+            .scales(bounds())
+            .unwrap();
+        assert_eq!(y.tick(&10.), Some(50.));
+        assert_eq!(y.tick(&20.), Some(0.));
+
+        let (_, y) = chart(vec![10., 20.]).scales(bounds()).unwrap();
+        assert_eq!(y.tick(&0.), Some(50.));
+        assert_eq!(y.tick(&20.), Some(10.));
     }
 }

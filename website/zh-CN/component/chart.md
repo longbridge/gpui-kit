@@ -305,6 +305,24 @@ AreaChart::new(data)
     .linear()
 ```
 
+#### 固定 Y 轴与未走完的序列
+
+Y 轴默认从 0 开始。`y_domain` 把它固定在给定区间，价格、资产这类离 0 很远的数值就不会被压成顶部的一条线。`slot_count` 按比数据更多的点数铺开 X 轴，还没走完的序列（比如当天的分时）只占前面一段。
+
+```rust
+// 分时缩略图：美股一个交易日 390 个分钟槽位。
+AreaChart::new(minutes)
+    .x(|d| d.time.clone())
+    .y(|d| d.price)
+    .y_domain(low, high)
+    .slot_count(390)
+    .x_axis(false)
+    .grid(false)
+    .interactive(false)
+```
+
+固定的区间会铺满整个绘图高度；`min` 与 `max` 相等时什么都不画，数值全相同的序列需要先自行放宽区间。
+
 ### PieChart
 
 饼图适合展示占比关系。
