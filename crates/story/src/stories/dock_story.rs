@@ -174,7 +174,8 @@ impl Render for DockStory {
                             .checked(close_buttons_visible)
                             .on_click(window.listener_for(&story, |this, _, _, cx| {
                                 this.close_buttons_visible = !this.close_buttons_visible;
-                                this.skin.set_close_buttons(this.close_buttons_visible, cx);
+                                this.skin
+                                    .set_close_button_visible(this.close_buttons_visible, cx);
                                 cx.notify();
                             })),
                     )
