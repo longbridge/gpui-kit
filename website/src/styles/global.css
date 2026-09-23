@@ -1137,6 +1137,12 @@ html.dark .astro-code span {
 
 .theme-toggle:hover { background: var(--secondary); }
 .theme-toggle svg { width: 1rem; height: 1rem; }
+.theme-palette__trigger { width: auto; gap: 0.35rem; padding: 0 0.4rem; }
+.theme-palette__trigger kbd { color: var(--muted-foreground); font: 0.7rem/1 var(--font-mono); }
+@media (max-width: 900px) {
+  .theme-palette__trigger { width: 2rem; padding: 0; }
+  .theme-palette__trigger kbd { display: none; }
+}
 
 #theme-palette { display: none; }
 #theme-palette[open] {
@@ -1194,6 +1200,7 @@ html.dark .astro-code span {
   cursor: default;
 }
 .theme-palette__option[hidden], .theme-palette__empty[hidden] { display: none; }
+.theme-palette__option:hover:not([aria-selected="true"]) { background: var(--secondary); }
 .theme-palette__option[aria-selected="true"] {
   background: var(--accent);
   color: var(--accent-foreground);

@@ -16,13 +16,15 @@ const groups = [
 ];
 ---
 
-<button id="theme-palette-open" class="theme-toggle" type="button"
-  aria-label={isZh ? '选择主题' : 'Choose theme'} title={isZh ? '选择主题 (⌘⇧P)' : 'Choose theme (⌘⇧P)'}>
+<button id="theme-palette-open" class="theme-toggle theme-palette__trigger" type="button"
+  aria-label={isZh ? '选择主题，按 T 打开' : 'Choose theme, press T to open'}
+  aria-keyshortcuts="T Meta+Shift+P Control+Shift+P" title={isZh ? '选择主题 (T)' : 'Choose theme (T)'}>
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/>
     <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
     <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
   </svg>
+  <kbd aria-hidden="true">T</kbd>
 </button>
 
 <dialog id="theme-palette" aria-labelledby="theme-palette-title">
@@ -108,11 +110,15 @@ const groups = [
     groups.forEach((group) => { group.hidden = !group.querySelector('.theme-palette__option:not([hidden])'); });
     const visible = options.filter((option) => !option.hidden);
     if (empty) empty.hidden = visible.length !== 0;
-    if (!highlighted || highlighted.hidden) highlight(visible[0]);
+    const original = options.find((option) => option.dataset.themeId === committedId);
     if (!visible.length) {
-      highlight(undefined);
-      const original = options.find((option) => option.dataset.themeId === committedId);
-      if (original) apply(original);
+      highlight(undefined, false);
+      if (original && dialog?.open) apply(original);
+      return;
+    }
+    if (!highlighted || highlighted.hidden) {
+      highlight(visible[0], false);
+      if (original && dialog?.open) apply(original);
     }
   }
 
@@ -134,7 +140,6 @@ const groups = [
   trigger?.addEventListener('click', open);
   query?.addEventListener('input', filter);
   options.forEach((option) => {
-    option.addEventListener('pointerenter', () => highlight(option, true, false));
     option.addEventListener('click', () => {
       committedId = option.dataset.themeId!;
       apply(option);
@@ -160,7 +165,13 @@ const groups = [
     if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'p') {
       event.preventDefault();
       dialog?.open ? dialog.close() : open();
+      return;
     }
+    if (event.key.toLowerCase() !== 't' || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || dialog?.open) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"]')) return;
+    event.preventDefault();
+    open();
   });
 
   dialog?.addEventListener('keydown', (event) => {
