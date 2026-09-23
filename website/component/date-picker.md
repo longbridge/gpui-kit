@@ -11,8 +11,9 @@ A flexible date picker component with calendar interface that supports single da
 
 ```rust
 use gpui_kit::component::{
-    date_picker::{DatePicker, DatePickerState, DateRangePreset, DatePickerEvent},
+    date_picker::{DatePicker, DatePickerState, DateRangePreset, DatePickerEvent, DateTime},
     calendar::{Date, Matcher},
+    time_field::TimePrecision,
 };
 ```
 
@@ -66,6 +67,54 @@ let range_picker = cx.new(|cx| {
 DatePicker::new(&range_picker)
     .number_of_months(2)
 ```
+
+### Date and Time
+
+Set a `time_precision` to edit the time of day as well. The popup then shows a
+time field below the calendar — or a start and an end field in range mode —
+and stays open after a date is picked, so the time can be adjusted next.
+Every edit is reported as it happens; Enter, Escape or a click outside closes
+the popup.
+
+```rust
+use chrono::NaiveTime;
+
+let date_time_picker = cx.new(|cx| {
+    DatePickerState::new(window, cx)
+        .time_precision(TimePrecision::Minute) // or TimePrecision::Second
+        .default_time(NaiveTime::from_hms_opt(9, 0, 0).unwrap())
+});
+
+DatePicker::new(&date_time_picker)
+```
+
+`default_time` is the time a date gets before the user edits it, `00:00`
+unless configured. The display format follows the precision
+(`%Y/%m/%d %H:%M` or `%Y/%m/%d %H:%M:%S`) unless `date_format` is set.
+
+Read and write the whole value with `date_time` and `set_date_time`; `date`
+and `set_date` still address the date part and keep the current times.
+
+```rust
+use chrono::Local;
+
+date_time_picker.update(cx, |state, cx| {
+    state.set_date_time(Local::now().naive_local(), window, cx);
+});
+
+match date_time_picker.read(cx).date_time() {
+    DateTime::Single(Some(at)) => println!("Selected {at}"),
+    DateTime::Range(Some(start), Some(end)) => println!("{start} to {end}"),
+    _ => {}
+}
+```
+
+In range mode, an end before the start on the same day is shown as invalid
+and is not reported; closing the popup then moves the end to the start.
+
+In the time field, Up/Down change the selected segment, Left/Right and
+Tab/Shift-Tab move between segments, digits type a value and advance to the
+next segment, and Backspace resets the segment.
 
 ### With Custom Date Format
 
@@ -280,8 +329,8 @@ let date_picker = cx.new(|cx| DatePickerState::new(window, cx));
 
 cx.subscribe(&date_picker, |view, _, event, _| {
     match event {
-        DatePickerEvent::Change(date) => {
-            match date {
+        DatePickerEvent::Change(value) => {
+            match value.date() {
                 Date::Single(Some(selected_date)) => {
                     println!("Single date selected: {}", selected_date);
                 }
@@ -339,16 +388,18 @@ let max_30_days_picker = cx.new(|cx| DatePickerState::range(window, cx));
 
 cx.subscribe(&max_30_days_picker, |view, picker, event, _| {
     match event {
-        DatePickerEvent::Change(Date::Range(Some(start), Some(end))) => {
-            let duration = end.signed_duration_since(*start).num_days();
+        DatePickerEvent::Change(value) => {
+            let Date::Range(Some(start), Some(end)) = value.date() else {
+                return;
+            };
+            let duration = end.signed_duration_since(start).num_days();
             if duration > 30 {
                 // Reset to start date only if range exceeds 30 days
                 picker.update(cx, |state, cx| {
-                    state.set_date(Date::Range(Some(*start), None), window, cx);
+                    state.set_date(Date::Range(Some(start), None), window, cx);
                 });
             }
         }
-        _ => {}
     }
 });
 

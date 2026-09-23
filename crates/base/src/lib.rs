@@ -69,6 +69,7 @@ mod text_boundary;
 mod text_selection;
 mod theme;
 pub mod theme_tokens;
+mod time_field;
 mod toast;
 mod toggle;
 mod toggle_group;
@@ -189,6 +190,10 @@ pub use theme_tokens::{
     ColorTokens, RadiusTokens, SemanticThemeTokens, ShadowTokens, SpacingTokens, TextStyleToken,
     TypographyTokens,
 };
+pub use time_field::{
+    TimeField, TimeFieldEvent, TimeFieldSegment, TimeFieldState, TimePrecision, TimeSegment,
+    TimeSegmentState,
+};
 pub use toast::{
     Toast, ToastAdvance, ToastManager, ToastMotion, ToastOptions, ToastStack, ToastStackState,
     ToastTransitionStatus,
@@ -229,6 +234,7 @@ pub fn init(cx: &mut App) {
     color_picker::init(cx);
     select::init(cx);
     number_input::init(cx);
+    time_field::init(cx);
     input::init(cx);
     tree::init(cx);
     text::init(cx);

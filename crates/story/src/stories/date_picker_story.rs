@@ -2,6 +2,7 @@ use chrono::{Datelike, Days, Duration, Utc};
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, Size, StyledExt, calendar,
     date_picker::{DatePicker, DatePickerEvent, DatePickerState, DateRangePreset},
+    time_field::TimePrecision,
     v_flex,
 };
 use gpui_kit::{
@@ -21,6 +22,10 @@ pub struct DatePickerStory {
     default_range_mode_picker: Entity<DatePickerState>,
     birthday_picker: Entity<DatePickerState>,
     without_appearance_picker: Entity<DatePickerState>,
+    date_time_picker: Entity<DatePickerState>,
+    date_time_second_picker: Entity<DatePickerState>,
+    date_time_range_picker: Entity<DatePickerState>,
+    date_time_value: Option<String>,
     size: Size,
     _subscriptions: Vec<Subscription>,
 }
@@ -98,6 +103,22 @@ impl DatePickerStory {
 
         let without_appearance_picker = cx.new(|cx| DatePickerState::new(window, cx));
 
+        let date_time_picker = cx.new(|cx| {
+            let mut picker = DatePickerState::new(window, cx).time_precision(TimePrecision::Minute);
+            picker.set_date_time(chrono::Local::now().naive_local(), window, cx);
+            picker
+        });
+        let date_time_second_picker = cx.new(|cx| {
+            DatePickerState::new(window, cx)
+                .time_precision(TimePrecision::Second)
+                .default_time(chrono::NaiveTime::from_hms_opt(9, 0, 0).unwrap())
+        });
+        let date_time_range_picker = cx.new(|cx| {
+            DatePickerState::range(window, cx)
+                .time_precision(TimePrecision::Minute)
+                .default_time(chrono::NaiveTime::from_hms_opt(9, 0, 0).unwrap())
+        });
+
         let _subscriptions = vec![
             cx.subscribe(&date_picker, |this, _, ev, _| match ev {
                 DatePickerEvent::Change(date) => {
@@ -114,6 +135,21 @@ impl DatePickerStory {
                     this.date_picker_value = date.format("%Y-%m-%d").map(|s| s.to_string());
                 }
             }),
+            cx.subscribe(&date_time_picker, |this, _, ev, _| match ev {
+                DatePickerEvent::Change(value) => {
+                    this.date_time_value = value.format("%Y-%m-%d %H:%M:%S").map(|s| s.to_string());
+                }
+            }),
+            cx.subscribe(&date_time_second_picker, |this, _, ev, _| match ev {
+                DatePickerEvent::Change(value) => {
+                    this.date_time_value = value.format("%Y-%m-%d %H:%M:%S").map(|s| s.to_string());
+                }
+            }),
+            cx.subscribe(&date_time_range_picker, |this, _, ev, _| match ev {
+                DatePickerEvent::Change(value) => {
+                    this.date_time_value = value.format("%Y-%m-%d %H:%M:%S").map(|s| s.to_string());
+                }
+            }),
         ];
 
         Self {
@@ -125,6 +161,10 @@ impl DatePickerStory {
             default_range_mode_picker,
             birthday_picker,
             without_appearance_picker,
+            date_time_picker,
+            date_time_second_picker,
+            date_time_range_picker,
+            date_time_value: None,
             size: Size::Medium,
             date_picker_value: None,
             _subscriptions,
@@ -202,6 +242,41 @@ impl Render for DatePickerStory {
                             .text_sm()
                             .text_color(cx.theme().muted_foreground)
                             .child(format!("Value: {:?}", self.date_picker_value)),
+                    ),
+            )
+            .child(
+                section("Date and time")
+                    .description(
+                        "Edit the time of day below the calendar; changes apply as you make them.",
+                    )
+                    .w_128()
+                    .v_flex()
+                    .gap_3()
+                    .child(
+                        DatePicker::new(&self.date_time_picker)
+                            .with_size(self.size)
+                            .w(px(280.)),
+                    )
+                    .child(
+                        DatePicker::new(&self.date_time_second_picker)
+                            .with_size(self.size)
+                            .w(px(280.))
+                            .placeholder("With seconds")
+                            .cleanable(true),
+                    )
+                    .child(
+                        DatePicker::new(&self.date_time_range_picker)
+                            .with_size(self.size)
+                            .w(px(360.))
+                            .number_of_months(2)
+                            .placeholder("Range with times")
+                            .cleanable(true),
+                    )
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!("Value: {:?}", self.date_time_value)),
                     ),
             )
             .child(

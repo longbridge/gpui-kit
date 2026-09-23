@@ -11,8 +11,9 @@ DatePicker 是一个灵活的日期选择组件，内置日历界面，支持单
 
 ```rust
 use gpui_kit::component::{
-    date_picker::{DatePicker, DatePickerState, DateRangePreset, DatePickerEvent},
+    date_picker::{DatePicker, DatePickerState, DateRangePreset, DatePickerEvent, DateTime},
     calendar::{Date, Matcher},
+    time_field::TimePrecision,
 };
 ```
 
@@ -64,6 +65,44 @@ let range_picker = cx.new(|cx| {
 DatePicker::new(&range_picker)
     .number_of_months(2)
 ```
+
+### 日期与时间
+
+设置 `time_precision` 后即可同时编辑具体时间。弹层会在日历下方显示时间字段（范围模式下显示开始和结束两个字段），选择日期后弹层保持打开，方便接着调整时间。每次修改都会立即触发事件；按 Enter、Escape 或点击弹层外部即可关闭。
+
+```rust
+use chrono::NaiveTime;
+
+let date_time_picker = cx.new(|cx| {
+    DatePickerState::new(window, cx)
+        .time_precision(TimePrecision::Minute) // 或 TimePrecision::Second
+        .default_time(NaiveTime::from_hms_opt(9, 0, 0).unwrap())
+});
+
+DatePicker::new(&date_time_picker)
+```
+
+`default_time` 是用户修改前日期所带的时间，默认为 `00:00`。未设置 `date_format` 时，显示格式跟随精度，为 `%Y/%m/%d %H:%M` 或 `%Y/%m/%d %H:%M:%S`。
+
+用 `date_time` 和 `set_date_time` 读写完整的值；`date` 和 `set_date` 仍然只处理日期部分，并保留当前时间。
+
+```rust
+use chrono::Local;
+
+date_time_picker.update(cx, |state, cx| {
+    state.set_date_time(Local::now().naive_local(), window, cx);
+});
+
+match date_time_picker.read(cx).date_time() {
+    DateTime::Single(Some(at)) => println!("Selected {at}"),
+    DateTime::Range(Some(start), Some(end)) => println!("{start} to {end}"),
+    _ => {}
+}
+```
+
+范围模式下，如果同一天的结束时间早于开始时间，结束字段会显示为无效，且不会触发事件；关闭弹层时结束时间会被调整为开始时间。
+
+在时间字段中，Up/Down 调整当前选中的段，Left/Right 和 Tab/Shift-Tab 在段之间移动，输入数字会填入当前段并自动跳到下一段，Backspace 将当前段归零。
 
 ### 自定义日期格式
 
@@ -274,8 +313,8 @@ let date_picker = cx.new(|cx| DatePickerState::new(window, cx));
 
 cx.subscribe(&date_picker, |view, _, event, _| {
     match event {
-        DatePickerEvent::Change(date) => {
-            match date {
+        DatePickerEvent::Change(value) => {
+            match value.date() {
                 Date::Single(Some(selected_date)) => {
                     println!("Single date selected: {}", selected_date);
                 }
@@ -331,15 +370,17 @@ let max_30_days_picker = cx.new(|cx| DatePickerState::range(window, cx));
 
 cx.subscribe(&max_30_days_picker, |view, picker, event, _| {
     match event {
-        DatePickerEvent::Change(Date::Range(Some(start), Some(end))) => {
-            let duration = end.signed_duration_since(*start).num_days();
+        DatePickerEvent::Change(value) => {
+            let Date::Range(Some(start), Some(end)) = value.date() else {
+                return;
+            };
+            let duration = end.signed_duration_since(start).num_days();
             if duration > 30 {
                 picker.update(cx, |state, cx| {
-                    state.set_date(Date::Range(Some(*start), None), window, cx);
+                    state.set_date(Date::Range(Some(start), None), window, cx);
                 });
             }
         }
-        _ => {}
     }
 });
 

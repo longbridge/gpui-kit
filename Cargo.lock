@@ -3938,6 +3938,7 @@ dependencies = [
 name = "gpui-kit"
 version = "0.6.5"
 dependencies = [
+ "chrono",
  "gpui-base",
  "gpui-component",
  "gpui-kit-assets",

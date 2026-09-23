@@ -121,6 +121,24 @@ DatePicker:
     zh-HK: 選擇日期
     zh-TW: 選取日期
     it: "Seleziona data"
+  time:
+    en: Time
+    zh-CN: 时间
+    zh-HK: 時間
+    zh-TW: 時間
+    it: Ora
+  start:
+    en: Start
+    zh-CN: 开始
+    zh-HK: 開始
+    zh-TW: 開始
+    it: Inizio
+  end:
+    en: End
+    zh-CN: 结束
+    zh-HK: 結束
+    zh-TW: 結束
+    it: Fine
 Select:
   placeholder:
     en: "Please select"

@@ -79,6 +79,7 @@ gpui_platform.workspace = true
 gpui_web.workspace = true
 
 [dev-dependencies]
+chrono = "0.4.38"
 gpui = { workspace = true, features = ["test-support"] }
 
 [[test]]

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use chrono::{NaiveDate, Weekday};
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 use gpui::{
     App, AppContext, Bounds, ClickEvent, Context, ElementId, Empty, Entity, EventEmitter,
     FocusHandle, Focusable, InteractiveElement as _, IntoElement, KeyBinding, MouseButton,
@@ -20,6 +20,7 @@ use crate::{
 };
 
 use super::calendar::{Calendar, CalendarEvent, CalendarState, Date, Matcher};
+use super::time_field::{TimeField, TimeFieldEvent, TimeFieldState, TimePrecision};
 use gpui_base::{DatePicker as BaseDatePicker, ElementExt as _};
 
 const CONTEXT: &'static str = "DatePicker";
@@ -35,7 +36,74 @@ pub(crate) fn init(cx: &mut App) {
 /// Events emitted by the DatePicker.
 #[derive(Clone)]
 pub enum DatePickerEvent {
-    Change(Date),
+    /// The user changed the value. With a time precision set, this is emitted
+    /// on every edit while the popup stays open.
+    Change(DateTime),
+}
+
+/// The value of a [`DatePicker`]: the selected date or dates combined with
+/// their times of day.
+///
+/// When the picker has no time precision, every time is the picker's
+/// [`DatePickerState::default_time`], `00:00` unless configured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DateTime {
+    Single(Option<NaiveDateTime>),
+    Range(Option<NaiveDateTime>, Option<NaiveDateTime>),
+}
+
+impl From<NaiveDateTime> for DateTime {
+    fn from(value: NaiveDateTime) -> Self {
+        Self::Single(Some(value))
+    }
+}
+
+impl From<(NaiveDateTime, NaiveDateTime)> for DateTime {
+    fn from((start, end): (NaiveDateTime, NaiveDateTime)) -> Self {
+        Self::Range(Some(start), Some(end))
+    }
+}
+
+impl DateTime {
+    pub fn is_some(&self) -> bool {
+        self.date().is_some()
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.date().is_complete()
+    }
+
+    pub fn start(&self) -> Option<NaiveDateTime> {
+        match self {
+            Self::Single(v) | Self::Range(v, _) => *v,
+        }
+    }
+
+    pub fn end(&self) -> Option<NaiveDateTime> {
+        match self {
+            Self::Range(_, v) => *v,
+            Self::Single(_) => None,
+        }
+    }
+
+    /// The date part of this value.
+    pub fn date(&self) -> Date {
+        match self {
+            Self::Single(v) => Date::Single(v.map(|v| v.date())),
+            Self::Range(a, b) => Date::Range(a.map(|v| v.date()), b.map(|v| v.date())),
+        }
+    }
+
+    /// Format a complete value, joining a range with ` - `.
+    pub fn format(&self, format: &str) -> Option<SharedString> {
+        match self {
+            Self::Single(Some(v)) => Some(v.format(format).to_string().into()),
+            Self::Range(Some(a), Some(b)) => {
+                Some(format!("{} - {}", a.format(format), b.format(format)).into())
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Preset value for DateRangePreset.
@@ -43,6 +111,7 @@ pub enum DatePickerEvent {
 pub enum DateRangePresetValue {
     Single(NaiveDate),
     Range(NaiveDate, NaiveDate),
+    DateTime(DateTime),
 }
 
 /// Preset for date range selection.
@@ -67,6 +136,13 @@ impl DateRangePreset {
             value: DateRangePresetValue::Range(start, end),
         }
     }
+    /// Creates a new DateRangePreset with a date and time, or a range of them.
+    pub fn date_time(label: impl Into<SharedString>, value: impl Into<DateTime>) -> Self {
+        DateRangePreset {
+            label: label.into(),
+            value: DateRangePresetValue::DateTime(value.into()),
+        }
+    }
 }
 
 /// Use to store the state of the date picker.
@@ -75,9 +151,17 @@ pub struct DatePickerState {
     date: Date,
     open: bool,
     calendar: Entity<CalendarState>,
-    date_format: SharedString,
+    date_format: Option<SharedString>,
     number_of_months: usize,
     disabled_matcher: Option<Rc<Matcher>>,
+    /// `None` edits dates only.
+    time_precision: Option<TimePrecision>,
+    default_time: NaiveTime,
+    start_time: NaiveTime,
+    end_time: NaiveTime,
+    start_time_field: Entity<TimeFieldState>,
+    end_time_field: Entity<TimeFieldState>,
+    time_fields_pushed: bool,
     _subscriptions: Vec<Subscription>,
     /// The first day of the week. Defaults to Sunday.
     first_day_of_week: Weekday,
@@ -114,35 +198,91 @@ impl DatePickerState {
             this.set_date(date, window, cx);
             this
         });
+        let start_time_field = cx.new(|cx| TimeFieldState::new(window, cx));
+        let end_time_field = cx.new(|cx| TimeFieldState::new(window, cx));
 
-        let _subscriptions = vec![cx.subscribe_in(
-            &calendar,
-            window,
-            |this, _, ev: &CalendarEvent, window, cx| match ev {
-                CalendarEvent::Selected(date) => {
-                    this.update_date(*date, true, window, cx);
-                    this.focus_handle.focus(window, cx);
-                }
-            },
-        )];
+        let _subscriptions = vec![
+            cx.subscribe_in(
+                &calendar,
+                window,
+                |this, _, ev: &CalendarEvent, window, cx| match ev {
+                    CalendarEvent::Selected(date) => {
+                        this.select_date(*date, window, cx);
+                    }
+                },
+            ),
+            cx.subscribe_in(
+                &start_time_field,
+                window,
+                |this, _, ev: &TimeFieldEvent, _, cx| match ev {
+                    TimeFieldEvent::Change(time) => {
+                        this.start_time = *time;
+                        this.emit_change_if_valid(cx);
+                    }
+                },
+            ),
+            cx.subscribe_in(
+                &end_time_field,
+                window,
+                |this, _, ev: &TimeFieldEvent, _, cx| match ev {
+                    TimeFieldEvent::Change(time) => {
+                        this.end_time = *time;
+                        this.emit_change_if_valid(cx);
+                    }
+                },
+            ),
+        ];
 
         Self {
             focus_handle: cx.focus_handle(),
             date,
             calendar,
             open: false,
-            date_format: "%Y/%m/%d".into(),
+            date_format: None,
             number_of_months: 1,
             disabled_matcher: None,
+            time_precision: None,
+            default_time: NaiveTime::MIN,
+            start_time: NaiveTime::MIN,
+            end_time: NaiveTime::MIN,
+            start_time_field,
+            end_time_field,
+            time_fields_pushed: false,
             _subscriptions,
             first_day_of_week: Weekday::Sun,
             bounds: Bounds::default(),
         }
     }
 
-    /// Set the date format of the date picker to display in Input, default: "%Y/%m/%d".
+    /// Set the format of the value displayed in the picker.
+    ///
+    /// Default: `%Y/%m/%d`, followed by `%H:%M` or `%H:%M:%S` when a time
+    /// precision is set.
     pub fn date_format(mut self, format: impl Into<SharedString>) -> Self {
-        self.date_format = format.into();
+        self.date_format = Some(format.into());
+        self
+    }
+
+    /// Edit the time of day as well as the date, down to `precision`.
+    ///
+    /// Selecting a date then keeps the popup open, and every change to the
+    /// date or time is reported as it happens.
+    pub fn time_precision(mut self, precision: TimePrecision) -> Self {
+        self.time_precision = Some(precision);
+        self.default_time = precision.truncate(self.default_time);
+        self.start_time = precision.truncate(self.start_time);
+        self.end_time = precision.truncate(self.end_time);
+        self.time_fields_pushed = false;
+        self
+    }
+
+    /// Set the time given to a date before the user edits it, default: `00:00`.
+    pub fn default_time(mut self, time: NaiveTime) -> Self {
+        let time = self.truncate_time(time);
+        self.default_time = time;
+        self.start_time = time;
+        self.end_time = time;
+        self.time_fields_pushed = false;
         self
     }
 
@@ -158,14 +298,39 @@ impl DatePickerState {
         self
     }
 
-    /// Get the date of the date picker.
+    /// Get the date part of the value.
     pub fn date(&self) -> Date {
         self.date
     }
 
-    /// Set the date of the date picker.
+    /// Get the value, combining the date with its time of day.
+    pub fn date_time(&self) -> DateTime {
+        match self.date {
+            Date::Single(date) => DateTime::Single(date.map(|d| d.and_time(self.start_time))),
+            Date::Range(start, end) => DateTime::Range(
+                start.map(|d| d.and_time(self.start_time)),
+                end.map(|d| d.and_time(self.end_time)),
+            ),
+        }
+    }
+
+    /// Set the date, keeping the current time of day.
     pub fn set_date(&mut self, date: impl Into<Date>, window: &mut Window, cx: &mut Context<Self>) {
         self.update_date(date.into(), false, window, cx);
+    }
+
+    /// Set the date and the time of day.
+    pub fn set_date_time(
+        &mut self,
+        value: impl Into<DateTime>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let value = value.into();
+        let start = value.start().map_or(self.default_time, |v| v.time());
+        let end = value.end().map_or(start, |v| v.time());
+        self.set_times(start, end, window, cx);
+        self.update_date(value.date(), false, window, cx);
     }
 
     /// Set the disabled match for the calendar.
@@ -184,6 +349,69 @@ impl DatePickerState {
         });
     }
 
+    fn truncate_time(&self, time: NaiveTime) -> NaiveTime {
+        self.time_precision
+            .map_or(time, |precision| precision.truncate(time))
+    }
+
+    fn set_times(
+        &mut self,
+        start: NaiveTime,
+        end: NaiveTime,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.start_time = self.truncate_time(start);
+        self.end_time = self.truncate_time(end);
+        self.push_time_fields(window, cx);
+    }
+
+    /// Push the configured precision and times into the time fields.
+    ///
+    /// User edits flow the other way, through the field subscriptions, so this
+    /// runs only when the picker's own times change. Pushing on every render
+    /// could overwrite an edit whose event has not been delivered yet.
+    fn push_time_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let precision = self.time_precision.unwrap_or_default();
+        for (field, time) in [
+            (&self.start_time_field, self.start_time),
+            (&self.end_time_field, self.end_time),
+        ] {
+            field.update(cx, |field, cx| {
+                field.set_precision(precision, window, cx);
+                field.set_time(time, window, cx);
+            });
+        }
+        self.time_fields_pushed = true;
+    }
+
+    /// Whether a range ends before it starts, which only its times can cause.
+    fn is_range_inverted(&self) -> bool {
+        matches!(
+            self.date_time(),
+            DateTime::Range(Some(start), Some(end)) if end < start
+        )
+    }
+
+    fn emit_change_if_valid(&mut self, cx: &mut Context<Self>) {
+        // Report only values the owner can use: a complete, ordered value.
+        if self.date.is_complete() && !self.is_range_inverted() {
+            cx.emit(DatePickerEvent::Change(self.date_time()));
+        }
+        cx.notify();
+    }
+
+    fn select_date(&mut self, date: Date, window: &mut Window, cx: &mut Context<Self>) {
+        if self.time_precision.is_some() {
+            // Keep the popup open so the time can be adjusted next.
+            self.date = date;
+            self.emit_change_if_valid(cx);
+        } else {
+            self.update_date(date, true, window, cx);
+            self.focus_handle.focus(window, cx);
+        }
+    }
+
     fn update_date(&mut self, date: Date, emit: bool, window: &mut Window, cx: &mut Context<Self>) {
         self.date = date;
         self.calendar.update(cx, |view, cx| {
@@ -191,35 +419,55 @@ impl DatePickerState {
         });
         self.open = false;
         if emit {
-            cx.emit(DatePickerEvent::Change(date));
+            cx.emit(DatePickerEvent::Change(self.date_time()));
         }
         cx.notify();
     }
 
-    /// Set the disabled matcher of the date picker.
-    fn set_canlendar_disabled_matcher(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+    /// Sync the builder configuration into the child states before they render.
+    fn sync_children(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let matcher = self.disabled_matcher.clone();
         self.calendar.update(cx, |state, _| {
             state.set_disabled_matcher_shared(matcher);
         });
+        // Builders cannot reach the fields, so apply them before the first render.
+        if !self.time_fields_pushed {
+            self.push_time_fields(window, cx);
+        }
+    }
+
+    fn set_open(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if !open {
+            self.focus_back_if_need(window, cx);
+            self.close_inverted_range(window, cx);
+        }
+        self.open = open;
+        cx.notify();
+    }
+
+    // An inverted range cannot be reported, so closing the popup ends it where
+    // it starts rather than leaving a value the owner never received.
+    fn close_inverted_range(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.open && self.is_range_inverted() {
+            let start = self.start_time;
+            self.set_times(start, start, window, cx);
+            self.emit_change_if_valid(cx);
+        }
     }
 
     fn on_escape(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
         if !self.open {
             cx.propagate();
         }
-
-        self.focus_back_if_need(window, cx);
-        self.open = false;
-
-        cx.notify();
+        self.set_open(false, window, cx);
     }
 
     fn on_delete(&mut self, _: &Delete, window: &mut Window, cx: &mut Context<Self>) {
         self.clean(&ClickEvent::default(), window, cx);
     }
 
-    // To focus the Picker Input, if current focus in is on the container.
+    // To focus the Picker Input, if current focus in is on the container, or
+    // inside the popup (e.g.: a time field).
     //
     // This is because mouse down out the Calendar, GPUI will move focus to the container.
     // So we need to move focus back to the Picker Input.
@@ -231,7 +479,9 @@ impl DatePickerState {
         }
 
         if let Some(focused) = window.focused(cx) {
-            if focused.contains(&self.focus_handle, window) {
+            if focused.contains(&self.focus_handle, window)
+                || self.focus_handle.contains_focused(window, cx)
+            {
                 self.focus_handle.focus(window, cx);
             }
         }
@@ -239,6 +489,8 @@ impl DatePickerState {
 
     fn clean(&mut self, _: &gpui::ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
         cx.stop_propagation();
+        let default_time = self.default_time;
+        self.set_times(default_time, default_time, window, cx);
         match self.date {
             Date::Single(_) => {
                 self.update_date(Date::Single(None), true, window, cx);
@@ -249,9 +501,14 @@ impl DatePickerState {
         }
     }
 
-    fn toggle_calendar(&mut self, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
-        self.open = !self.open;
-        cx.notify();
+    fn toggle_calendar(
+        &mut self,
+        _: &gpui::ClickEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let open = !self.open;
+        self.set_open(open, window, cx);
     }
 
     fn select_preset(
@@ -267,6 +524,21 @@ impl DatePickerState {
             DateRangePresetValue::Range(start, end) => {
                 self.update_date(Date::Range(Some(start), Some(end)), true, window, cx)
             }
+            DateRangePresetValue::DateTime(value) => {
+                self.set_date_time(value, window, cx);
+                cx.emit(DatePickerEvent::Change(self.date_time()));
+            }
+        }
+        self.focus_handle.focus(window, cx);
+    }
+
+    fn display_format(&self) -> SharedString {
+        if let Some(format) = &self.date_format {
+            return format.clone();
+        }
+        match self.time_precision {
+            Some(precision) => format!("%Y/%m/%d {}", precision.format()).into(),
+            None => "%Y/%m/%d".into(),
         }
     }
 }
@@ -376,12 +648,47 @@ impl DatePicker {
         self.appearance = appearance;
         self
     }
+
+    fn render_time_fields(size: Size, state: &DatePickerState, cx: &App) -> impl IntoElement {
+        let row = |label: SharedString, field: TimeField| {
+            h_flex()
+                .gap_3()
+                .justify_between()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(cx.theme().muted_foreground)
+                        .child(label),
+                )
+                .child(field.with_size(size))
+        };
+        let start = TimeField::new(&state.start_time_field).with_id("start-time");
+
+        v_flex()
+            .mt_3()
+            .pt_3()
+            .gap_2()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .map(|this| match state.date {
+                Date::Single(_) => this.child(row(t!("DatePicker.time").into(), start)),
+                Date::Range(_, _) => {
+                    this.child(row(t!("DatePicker.start").into(), start))
+                        .child(row(
+                            t!("DatePicker.end").into(),
+                            TimeField::new(&state.end_time_field)
+                                .with_id("end-time")
+                                .invalid(state.is_range_inverted()),
+                        ))
+                }
+            })
+    }
 }
 
 impl RenderOnce for DatePicker {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         self.state.update(cx, |state, cx| {
-            state.set_canlendar_disabled_matcher(window, cx);
+            state.sync_children(window, cx);
         });
         let month_count = self.number_of_months.max(1) as f32;
 
@@ -394,8 +701,8 @@ impl RenderOnce for DatePicker {
             .clone()
             .unwrap_or_else(|| t!("DatePicker.placeholder").into());
         let display_title = state
-            .date
-            .format(&state.date_format)
+            .date_time()
+            .format(&state.display_format())
             .unwrap_or(placeholder.clone());
 
         let (bg, fg) = input_style(self.disabled, cx);
@@ -409,13 +716,7 @@ impl RenderOnce for DatePicker {
             })
             .disabled(self.disabled)
             .on_open_change(move |open, window, cx| {
-                picker_state.update(cx, |state, cx| {
-                    if !open {
-                        state.focus_back_if_need(window, cx);
-                    }
-                    state.open = open;
-                    cx.notify();
-                });
+                picker_state.update(cx, |state, cx| state.set_open(open, window, cx));
             })
             .key_context(CONTEXT)
             .on_action(window.listener_for(&self.state, DatePickerState::on_delete))
@@ -532,18 +833,30 @@ impl RenderOnce for DatePicker {
                                         ))
                                     })
                                     .child(
-                                        Calendar::new(&state.calendar)
-                                            .number_of_months(self.number_of_months)
-                                            .first_day_of_week(state.first_day_of_week)
-                                            .border_0()
-                                            .rounded_none()
-                                            .p_0()
-                                            .map(|this| match self.size {
-                                                Size::Small => this.w(px(196.) * month_count),
-                                                Size::Large => this.w(px(280.) * month_count),
-                                                _ => this.w(px(224.) * month_count),
-                                            })
-                                            .with_size(self.size),
+                                        v_flex()
+                                            .child(
+                                                Calendar::new(&state.calendar)
+                                                    .number_of_months(self.number_of_months)
+                                                    .first_day_of_week(state.first_day_of_week)
+                                                    .border_0()
+                                                    .rounded_none()
+                                                    .p_0()
+                                                    .map(|this| match self.size {
+                                                        Size::Small => {
+                                                            this.w(px(196.) * month_count)
+                                                        }
+                                                        Size::Large => {
+                                                            this.w(px(280.) * month_count)
+                                                        }
+                                                        _ => this.w(px(224.) * month_count),
+                                                    })
+                                                    .with_size(self.size),
+                                            )
+                                            .when_some(state.time_precision, |this, _| {
+                                                this.child(Self::render_time_fields(
+                                                    self.size, state, cx,
+                                                ))
+                                            }),
                                     ),
                             ),
                         cx,
