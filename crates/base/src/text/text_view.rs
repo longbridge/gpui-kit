@@ -1,4 +1,4 @@
-use std::{ops::Range, sync::Arc};
+use std::{ops::Range, rc::Rc, sync::Arc};
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -12,6 +12,7 @@ use crate::StyledExt;
 use crate::text::TextViewFormat;
 use crate::text::markdown_ext::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
 use crate::text::node::{CodeBlock, TableData};
+use crate::text::range_highlight::{PendingReveal, RevealProgress};
 use crate::text::state::{LineSpan, SelectionFormat, TextViewState};
 use crate::text::stream_fade::TextViewMotion;
 use crate::{GlobalState, TextSelection, text::TextViewStyle};
@@ -77,6 +78,10 @@ pub(crate) type TableActionsFn =
 pub(crate) type LinkClickHandlerFn =
     dyn Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync;
 
+/// Kept by the element only, so unlike the handlers the state carries, it
+/// may hold a `ScrollHandle`.
+pub(crate) type RevealHandlerFn = dyn Fn(Bounds<Pixels>, &mut Window, &mut App);
+
 pub(crate) fn handle_link_click(
     handler: &Option<Arc<LinkClickHandlerFn>>,
     url: SharedString,
@@ -129,6 +134,7 @@ pub struct TextView {
     code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     table_actions: Option<Arc<TableActionsFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    reveal_handler: Option<Rc<RevealHandlerFn>>,
     markdown_extensions: Arc<MarkdownExtensions>,
     motion: Option<TextViewMotion>,
 }
@@ -174,6 +180,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            reveal_handler: None,
             markdown_extensions: Arc::default(),
             motion: None,
         }
@@ -196,6 +203,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            reveal_handler: None,
             markdown_extensions: Arc::default(),
             motion: None,
         }
@@ -218,6 +226,7 @@ impl TextView {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            reveal_handler: None,
             markdown_extensions: Arc::default(),
             motion: None,
         }
@@ -335,6 +344,22 @@ impl TextView {
         F: Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.link_click_handler = Some(Arc::new(handler));
+        self
+    }
+
+    /// Scroll a container that does not follow scroll requests to the line
+    /// of [`TextViewState::reveal_range`].
+    ///
+    /// A `gpui::list` scrolls to that line by itself; a `div` with
+    /// `overflow_y_scroll`, for one, does not. After a frame in which the
+    /// line was laid out but not visible, the handler receives its bounds in
+    /// window coordinates, to scroll the container, e.g. through its
+    /// `ScrollHandle`, until the line is visible.
+    pub fn on_reveal<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(Bounds<Pixels>, &mut Window, &mut App) + 'static,
+    {
+        self.reveal_handler = Some(Rc::new(handler));
         self
     }
 
@@ -747,6 +772,25 @@ impl Element for TextView {
             request_layout.element.paint(window, cx);
         }
         GlobalState::global_mut(cx).text_view_state_stack.pop();
+
+        // Every list has scrolled by now, so the line of a reveal is where
+        // it ends up this frame.
+        if state.read(cx).pending_reveal.is_some() {
+            let progress = state.update(cx, |state, _| {
+                state.pending_reveal.as_mut().map(PendingReveal::progress)
+            });
+            match progress {
+                Some(RevealProgress::Shown) => {
+                    state.update(cx, |state, _| state.pending_reveal = None);
+                }
+                Some(RevealProgress::Hidden(line)) => {
+                    if let Some(handler) = &self.reveal_handler {
+                        handler(line, window, cx);
+                    }
+                }
+                Some(RevealProgress::NotLaidOut) | None => {}
+            }
+        }
 
         if self.selectable {
             let (adapter, scroll_offset, content_bounds, self_scroll, handle_color) = {

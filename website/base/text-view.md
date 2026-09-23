@@ -248,8 +248,11 @@ something is still fading. Reduced motion skips the fade.
 `TextViewState::set_range_highlights` paints backgrounds behind ranges of
 `rendered_text()`, the text plain copy produces, so an application can show
 its search results or citations without reparsing or restyling the document.
-The ranges are painted, not shaped, so they never change layout; see
-[Highlight ranges](../component/text-view.md#highlight-ranges) for the rules.
+The ranges are painted, not shaped, so they never change layout.
+`reveal_range` scrolls the line a range starts on into view, through the
+view's own list, an enclosing `gpui::list`, or `TextView::on_reveal` for any
+other container; see [Highlight ranges](../component/text-view.md#highlight-ranges)
+and [Scroll to a range](../component/text-view.md#scroll-to-a-range).
 
 Selection can copy rendered text or Markdown source through `SelectionFormat`. Link routing, code-block actions, table actions, images, and custom Markdown plugins use the same builders as the compatibility API documented on the [gpui-component TextView page](../component/text-view.md).
 

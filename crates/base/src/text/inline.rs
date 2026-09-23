@@ -21,6 +21,7 @@ use crate::{
     input::Selection,
     text::TextViewMultiClickKind,
     text::node::LinkMark,
+    text::range_highlight::RevealAt,
     text::selection::word_range_at,
     text::state::LineSpan,
     text::text_view::{LinkClickHandlerFn, handle_link_click},
@@ -206,6 +207,8 @@ pub(super) struct Inline {
     selection_source: Option<(Arc<Mutex<InlineState>>, Range<usize>)>,
     /// Range highlight backgrounds, painted behind the text.
     range_backgrounds: Vec<(Range<usize>, Hsla)>,
+    /// The start of a pending reveal, when it is in this text.
+    reveal: Option<RevealAt>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     /// What this frame's layout was shaped with, to hand the shaped text to
     /// the next frame (see [`RetainedLayout`]).
@@ -367,6 +370,7 @@ impl Inline {
             selection_bounds: None,
             selection_source: None,
             range_backgrounds: Vec::new(),
+            reveal: None,
             link_click_handler,
             retained_key: None,
             handed_over: false,
@@ -405,6 +409,61 @@ impl Inline {
     pub(super) fn range_backgrounds(mut self, backgrounds: Vec<(Range<usize>, Hsla)>) -> Self {
         self.range_backgrounds = backgrounds;
         self
+    }
+
+    /// Scroll the line `reveal` starts on into view during prepaint.
+    pub(super) fn reveal(mut self, reveal: Option<RevealAt>) -> Self {
+        self.reveal = reveal;
+        self
+    }
+
+    /// Ask the enclosing list to scroll the line of the pending reveal into
+    /// view, and report where it is and whether it is inside the visible
+    /// area.
+    fn request_reveal(&self, window: &mut Window) {
+        let Some(reveal) = &self.reveal else {
+            return;
+        };
+        let text_layout = self.styled_text.layout();
+        let bounds = text_layout.bounds();
+        let line_height = text_layout.line_height();
+        let glyphs = glyph_boxes(
+            text_layout,
+            window.text_style().text_align,
+            bounds.size.width,
+        );
+        // The glyph drawing the text at the offset, or, for text with no
+        // glyph of its own such as a line break, the next glyph, or the last.
+        let offset = reveal.offset();
+        let (row, left, right) = range_boxes(&glyphs, offset..offset + 1)
+            .first()
+            .copied()
+            .or_else(|| {
+                glyphs
+                    .iter()
+                    .find(|glyph| glyph.text.start >= offset)
+                    .or(glyphs.last())
+                    .map(|glyph| (glyph.row, glyph.left, glyph.right))
+            })
+            .unwrap_or((0, Pixels::ZERO, Pixels::ZERO));
+        let line = Bounds::from_corners(
+            point(
+                bounds.left() + left,
+                bounds.top() + line_height * row as f32,
+            ),
+            point(
+                bounds.left() + right.max(left + px(1.)),
+                bounds.top() + line_height * (row + 1) as f32,
+            ),
+        );
+        window.request_autoscroll(line);
+        // A list scrolls the line to its edge, which layout may miss by a
+        // fraction of a pixel.
+        let visible = window.content_mask().bounds.dilate(px(0.5));
+        reveal.report(
+            line,
+            line.top() >= visible.top() && line.bottom() <= visible.bottom(),
+        );
     }
 
     /// Get link at given mouse position.
@@ -825,6 +884,8 @@ impl Element for Inline {
                 });
             }
         }
+
+        self.request_reveal(window);
 
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
         self.retain_styled_text();

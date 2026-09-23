@@ -160,6 +160,49 @@ current text. Backgrounds that are part of the text, such as
 background is painted under it), and highlights do not fade in with streamed
 text. HTML views do not support range highlights.
 
+### Scroll to a range
+
+`reveal_range` scrolls to a range of the same text, such as the current
+result when the user steps to the next one:
+
+```rust
+state.reveal_range(current_range, cx)?;
+```
+
+It scrolls the line the range starts on into view, down to a line in the
+middle of a long paragraph, and leaves the view where it is when that line, or
+a whole block revealed, is already visible. An empty range reveals the line of
+its position. A `scrollable` view scrolls itself. A fit-content view scrolls
+the nearest enclosing `gpui::list`, as a chat transcript is, as long as the
+row that holds the view is laid out: scroll to that row first when it may be
+off screen. Any other scroll container, such as a `div` with
+`overflow_y_scroll`, scrolls through `on_reveal`, which receives the line's
+bounds in window coordinates:
+
+```rust
+let scroll = scroll_handle.clone();
+TextView::new(&state).on_reveal(move |line, _, _| {
+    let viewport = scroll.bounds();
+    let mut offset = scroll.offset();
+    if line.bottom() > viewport.bottom() {
+        offset.y -= line.bottom() - viewport.bottom();
+    } else if line.top() < viewport.top() {
+        offset.y += viewport.top() - line.top();
+    }
+    scroll.set_offset(offset);
+})
+```
+
+A range that covers no block's text, such as a custom block's, scrolls its
+whole block into a scrollable view. Only the latest reveal is carried out. It
+follows the content the way highlights do, and it is dropped when its text
+changes, when the view clamps its lines with `max_lines`, or when it cannot be
+shown within a second, so it never scrolls long after it was asked for. Text
+scrolled sideways inside a table stays where it is, a block revealed whole and
+taller than the view shows its end when it comes from below, a scrollable
+view inside an application list scrolls only itself, and views sharing one
+state share one reveal.
+
 ## Touch Selection
 
 On a touch screen, a long press selects the word under the finger and keeps

@@ -20,6 +20,7 @@ use super::{
     inline::{Inline, InlineHighlight, InlineState, text_runs, text_size_ranges},
     inline_object::{InlineObject, MeasuredInlineObject},
     node::LinkMark,
+    range_highlight::RevealAt,
 };
 
 const IMAGE_LEN: usize = 1;
@@ -53,6 +54,8 @@ pub(super) enum InlineFlowItem {
         /// Range highlight backgrounds, in this item's byte space. They are
         /// only painted, so unlike `highlights` they take no part in layout.
         backgrounds: Vec<(Range<usize>, Hsla)>,
+        /// The start of a pending reveal, when it is in this item.
+        reveal: Option<RevealAt>,
     },
     Image {
         source: ImageSource,
@@ -496,6 +499,7 @@ impl Element for InlineFlow {
                     let InlineFlowItem::Text {
                         state: source_state,
                         backgrounds,
+                        reveal,
                         ..
                     } = &self.items[*item_ix]
                     else {
@@ -540,6 +544,11 @@ impl Element for InlineFlow {
                         source_range.end,
                         |range, color| (range, *color),
                     ))
+                    .reveal(
+                        reveal
+                            .as_ref()
+                            .and_then(|reveal| reveal.rebase(source_range.start, source_range.end)),
+                    )
                     .text_style(fragment_style.clone())
                     .selection_bounds(Bounds::new(
                         point(bounds.left(), bounds.top() + selection_bounds.top()),
