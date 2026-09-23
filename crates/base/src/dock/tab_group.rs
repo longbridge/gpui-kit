@@ -279,8 +279,8 @@ impl TabGroup {
             active_ix: self.active_ix,
             zoomed: self.zoomed,
             collapsed: self.constraints.is_collapsed(),
-            closable: self.is_closable(cx),
-            close_permitted: self.constraints.is_closable(),
+            active_panel_closable: self.is_closable(cx),
+            container_allows_close: self.constraints.is_closable(),
             locked: self.is_locked(),
             draggable: self.draggable(cx),
             droppable: self.droppable(),
@@ -777,8 +777,8 @@ pub struct TabGroupContext {
     locked: bool,
     draggable: bool,
     droppable: bool,
-    closable: bool,
-    close_permitted: bool,
+    active_panel_closable: bool,
+    container_allows_close: bool,
     drop_indicator: Option<DropIndicator>,
     on_select_tab: SelectTabHandler,
     on_close: ClosePanelHandler,
@@ -824,13 +824,13 @@ impl TabGroupContext {
 
     /// Whether the active panel can be closed.
     pub fn is_closable(&self) -> bool {
-        self.closable
+        self.active_panel_closable
     }
 
     /// Whether `panel` can be closed from this group. Uses the same constraints
     /// as [`TabGroup::close_panel`], including the panel's own `closable` flag.
     pub fn is_panel_closable(&self, panel: PanelId, cx: &App) -> bool {
-        self.close_permitted
+        self.container_allows_close
             && self.draggable
             && self
                 .panels

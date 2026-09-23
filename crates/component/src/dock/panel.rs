@@ -137,6 +137,7 @@ pub trait Panel: gpui_base::dock::Panel {
     fn inner_padding(&self, cx: &App) -> bool {
         true
     }
+
     /// Whether the tab group draws a title bar above this panel when it is
     /// the only panel in its group.
     ///
@@ -196,6 +197,7 @@ impl<T: Panel> PanelView for Entity<T> {
     fn inner_padding(&self, cx: &App) -> bool {
         self.read(cx).inner_padding(cx)
     }
+
     fn title_bar(&self, cx: &App) -> bool {
         self.read(cx).title_bar(cx)
     }

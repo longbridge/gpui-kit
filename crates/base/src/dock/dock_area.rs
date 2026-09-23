@@ -1407,9 +1407,7 @@ impl Render for DockArea {
             .flex()
             .flex_row()
             .on_prepaint(move |bounds, _, cx| {
-                area.update(cx, |area, _| {
-                    area.bounds = bounds;
-                });
+                area.update(cx, |area, _| area.bounds = bounds);
             })
             .track_focus(&self.focus_handle)
             .map(|frame| match self.zoomed_view() {
