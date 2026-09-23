@@ -118,6 +118,8 @@ const groups = [
 
   function open() {
     if (!dialog || !query) return;
+    const searchDialog = document.querySelector<HTMLDialogElement>('#search-modal');
+    if (searchDialog?.open) searchDialog.close();
     committedId = storedId();
     query.value = '';
     options.forEach((option) => { option.dataset.current = String(option.dataset.themeId === committedId); });
