@@ -79,7 +79,7 @@ pub(crate) struct SkinShared {
     area: WeakEntity<DockArea>,
     panel_style: Cell<PanelStyle>,
     toggle_button_visible: Cell<bool>,
-    close_button_visible: Cell<bool>,
+    tab_close_buttons_enabled: Cell<bool>,
     /// The dock whose resize handle is being dragged, if any. Only one can be.
     resizing_dock: Cell<Option<DockPlacement>>,
 }
@@ -97,8 +97,8 @@ impl SkinShared {
         self.toggle_button_visible.get()
     }
 
-    pub(crate) fn is_close_button_visible(&self) -> bool {
-        self.close_button_visible.get()
+    pub(crate) fn tab_close_buttons_enabled(&self) -> bool {
+        self.tab_close_buttons_enabled.get()
     }
 
     pub(crate) fn resizing_dock(&self) -> &Cell<Option<DockPlacement>> {
@@ -159,7 +159,7 @@ impl DockSkin {
                 area: cx.weak_entity(),
                 panel_style: Cell::new(PanelStyle::default()),
                 toggle_button_visible: Cell::new(true),
-                close_button_visible: Cell::new(false),
+                tab_close_buttons_enabled: Cell::new(false),
                 resizing_dock: Cell::new(None),
             }),
         })
@@ -190,13 +190,10 @@ impl DockSkin {
         self.shared.notify(cx);
     }
 
-    /// Whether closable panels show a close button in their tabs.
-    pub fn is_close_button_visible(&self) -> bool {
-        self.shared.is_close_button_visible()
-    }
-
-    pub fn set_close_button_visible(&self, visible: bool, cx: &mut App) {
-        self.shared.close_button_visible.set(visible);
+    /// Enable close buttons on closable tabs. Disabled by default; a panel's
+    /// own close constraints still decide whether its button appears.
+    pub fn set_tab_close_buttons_enabled(&self, enabled: bool, cx: &mut App) {
+        self.shared.tab_close_buttons_enabled.set(enabled);
         self.shared.notify(cx);
     }
 }

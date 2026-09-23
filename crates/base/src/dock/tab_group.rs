@@ -822,18 +822,20 @@ impl TabGroupContext {
         self.collapsed
     }
 
-    /// Whether the *active* panel can be closed. For a per-tab control use
-    /// [`Self::is_close_permitted`] with the tab's own [`PanelView::closable`].
+    /// Whether the active panel can be closed.
     pub fn is_closable(&self) -> bool {
         self.closable
     }
 
-    /// Whether the container permits closing panels at all -- the group-level
-    /// half of [`TabGroup::close_panel`]'s gate, before the per-panel check.
-    /// False for a dock's last group. Combine with [`Self::is_draggable`] and
-    /// the tab's own `closable` for a per-tab close control.
-    pub fn is_close_permitted(&self) -> bool {
+    /// Whether `panel` can be closed from this group. Uses the same constraints
+    /// as [`TabGroup::close_panel`], including the panel's own `closable` flag.
+    pub fn is_panel_closable(&self, panel: PanelId, cx: &App) -> bool {
         self.close_permitted
+            && self.draggable
+            && self
+                .panels
+                .iter()
+                .any(|candidate| candidate.panel_id(cx) == panel && candidate.closable(cx))
     }
 
     pub fn is_locked(&self) -> bool {
@@ -909,6 +911,8 @@ pub trait TabGroupRenderer: 'static {
     /// Appearance only. The group is laid out as a column that fills its slot
     /// around whatever this returns, because a group that does not is a strip
     /// of tabs with no content under it.
+    /// A renderer that needs the painted group bounds can attach `on_prepaint`
+    /// here and identify the group with [`TabGroupContext::node`].
     fn frame(&self, group: &TabGroupContext, window: &mut Window, cx: &mut App) -> Stateful<Div> {
         div().id("tab-group")
     }

@@ -493,7 +493,7 @@ impl TabGroupSkin {
                         let handle = PanelHandle::of(panel);
                         let drag = tab_drag(group, ix, cx);
 
-                        let tab = Tab::new()
+                        Tab::new()
                             .ix(ix)
                             .tab_bar_prefix(has_leading)
                             .map(|this| match handle.and_then(|handle| handle.tab_name(cx)) {
@@ -501,18 +501,14 @@ impl TabGroupSkin {
                                 None => this.child(panel_title(panel, window, cx)),
                             })
                             // Per-tab close (X) button. The gate mirrors
-                            // `TabGroup::close_panel`: container permits closing
-                            // (not a dock's last group), group is draggable, and
-                            // the panel is closable; plus `!collapsed`, since a
+                            // `TabGroup::close_panel`, plus `!collapsed`, since a
                             // collapsed strip is a way back in, not a place to
                             // close. Stops propagation so the click closes by id
                             // without also selecting the tab.
                             .when(
                                 !collapsed
-                                    && self.shared.is_close_button_visible()
-                                    && group.is_close_permitted()
-                                    && group.is_draggable()
-                                    && panel.closable(cx),
+                                    && self.shared.tab_close_buttons_enabled()
+                                    && group.is_panel_closable(panel.panel_id(cx), cx),
                                 |this| {
                                     this.suffix(
                                         Button::new(("close-tab", ix))
@@ -619,14 +615,7 @@ impl TabGroupSkin {
                                         }
                                     })
                                 })
-                            });
-
-                        // Let the panel tweak its finished tab; no handle keeps
-                        // the default.
-                        match handle {
-                            Some(handle) => handle.render_tab(tab, window, cx),
-                            None => tab,
-                        }
+                            })
                     })
                     .collect::<Vec<_>>(),
             )
@@ -1590,21 +1579,18 @@ mod tests {
         );
     }
 
-    /// Panel with a chosen `closable` that records whether `render_tab` ran
-    /// and whether it was ever made active (i.e. a tab-select fired).
+    /// Panel with a chosen `closable` that records whether it was made active.
     struct TabProbe {
         focus_handle: FocusHandle,
         closable: bool,
-        rendered_tab: Rc<Cell<bool>>,
         activated: Rc<Cell<bool>>,
     }
 
     impl TabProbe {
-        fn new(closable: bool, rendered_tab: Rc<Cell<bool>>, cx: &mut App) -> Entity<Self> {
+        fn new(closable: bool, cx: &mut App) -> Entity<Self> {
             cx.new(|cx| Self {
                 focus_handle: cx.focus_handle(),
                 closable,
-                rendered_tab,
                 activated: Rc::new(Cell::new(false)),
             })
         }
@@ -1626,12 +1612,7 @@ mod tests {
         }
     }
 
-    impl Panel for TabProbe {
-        fn render_tab(&self, tab: Tab, _: &mut Window, _: &App) -> Tab {
-            self.rendered_tab.set(true);
-            tab
-        }
-    }
+    impl Panel for TabProbe {}
 
     impl EventEmitter<PanelEvent> for TabProbe {}
 
@@ -1660,14 +1641,12 @@ mod tests {
             DockArea::new("skin", None, window, cx).with_renderer(renderer)
         });
         let skin = skin.expect("skin constructed with the area");
-        assert!(!skin.is_close_button_visible());
         if enabled {
-            cx.update(|_, cx| skin.set_close_button_visible(true, cx));
-            assert!(skin.is_close_button_visible());
+            cx.update(|_, cx| skin.set_tab_close_buttons_enabled(true, cx));
         }
         cx.update(|window, cx| {
-            let under_test = TabProbe::new(closable, Rc::new(Cell::new(false)), cx);
-            let filler = TabProbe::new(false, Rc::new(Cell::new(false)), cx);
+            let under_test = TabProbe::new(closable, cx);
+            let filler = TabProbe::new(false, cx);
             let layout = DockLayout::tabs()
                 .panel_view(panel_handle(under_test), cx)
                 .panel_view(panel_handle(filler), cx);
@@ -1720,8 +1699,8 @@ mod tests {
         });
         let skin = skin.expect("skin constructed with the area");
         cx.update(|window, cx| {
-            let panel = TabProbe::new(true, Rc::new(Cell::new(false)), cx);
-            let filler = TabProbe::new(false, Rc::new(Cell::new(false)), cx);
+            let panel = TabProbe::new(true, cx);
+            let filler = TabProbe::new(false, cx);
             area.update(cx, |area, cx| {
                 area.set_center(
                     DockLayout::tabs()
@@ -1734,37 +1713,11 @@ mod tests {
         });
 
         for (visible, expected) in [(false, false), (true, true), (false, false)] {
-            cx.update(|_, cx| skin.set_close_button_visible(visible, cx));
+            cx.update(|_, cx| skin.set_tab_close_buttons_enabled(visible, cx));
             cx.run_until_parked();
             cx.update(|window, cx| window.draw(cx).clear(cx));
             assert_eq!(cx.debug_bounds(CLOSE_BUTTON_SELECTOR).is_some(), expected);
         }
-    }
-
-    /// The skin routes each tab through [`Panel::render_tab`].
-    #[gpui::test]
-    fn render_tab_routes_each_tab_through_its_panel(cx: &mut TestAppContext) {
-        cx.update(|cx| crate::init(cx));
-        let rendered = Rc::new(Cell::new(false));
-        let (area, cx) = cx.add_window_view(|window, cx| {
-            DockArea::new("skin", None, window, cx).with_renderer(DockSkin::new(cx))
-        });
-        let flag = rendered.clone();
-        cx.update(|window, cx| {
-            let probe = TabProbe::new(true, flag, cx);
-            let filler = TabProbe::new(false, Rc::new(Cell::new(false)), cx);
-            let layout = DockLayout::tabs()
-                .panel_view(panel_handle(probe), cx)
-                .panel_view(panel_handle(filler), cx);
-            area.update(cx, |area, cx| area.set_center(layout, window, cx));
-        });
-        cx.run_until_parked();
-        cx.update(|window, cx| window.draw(cx).clear(cx));
-
-        assert!(
-            rendered.get(),
-            "the skin must route the panel's tab through Panel::render_tab"
-        );
     }
 
     /// Clicking a non-active tab's close button removes that panel by id and
@@ -1779,11 +1732,11 @@ mod tests {
             skin = Some(renderer.clone());
             DockArea::new("skin", None, window, cx).with_renderer(renderer)
         });
-        cx.update(|_, cx| skin.unwrap().set_close_button_visible(true, cx));
+        cx.update(|_, cx| skin.unwrap().set_tab_close_buttons_enabled(true, cx));
 
         let (closable_id, filler_id, activated) = cx.update(|window, cx| {
-            let filler = TabProbe::new(false, Rc::new(Cell::new(false)), cx);
-            let closable = TabProbe::new(true, Rc::new(Cell::new(false)), cx);
+            let filler = TabProbe::new(false, cx);
+            let closable = TabProbe::new(true, cx);
             let activated = closable.read(cx).activated.clone();
             let filler_handle = panel_handle(filler);
             let closable_handle = panel_handle(closable);
@@ -1837,12 +1790,12 @@ mod tests {
             skin = Some(renderer.clone());
             DockArea::new("skin", None, window, cx).with_renderer(renderer)
         });
-        cx.update(|_, cx| skin.unwrap().set_close_button_visible(true, cx));
+        cx.update(|_, cx| skin.unwrap().set_tab_close_buttons_enabled(true, cx));
         // Two closable panels so the group is draggable (not on its last
         // visible panel) and offers close buttons while open.
         cx.update(|window, cx| {
-            let a = TabProbe::new(true, Rc::new(Cell::new(false)), cx);
-            let b = TabProbe::new(true, Rc::new(Cell::new(false)), cx);
+            let a = TabProbe::new(true, cx);
+            let b = TabProbe::new(true, cx);
             let layout = DockLayout::tabs()
                 .panel_view(panel_handle(a), cx)
                 .panel_view(panel_handle(b), cx);

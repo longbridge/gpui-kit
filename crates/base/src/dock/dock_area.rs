@@ -109,14 +109,16 @@ pub struct DockArea {
     splits: HashMap<NodeId, CachedSplit>,
     panels: HashMap<PanelId, Arc<dyn PanelView>>,
 
-    /// Tab-group leaf rects from the most recent paint, for host-painted
-    /// spatial overlays.
-    node_bounds: HashMap<NodeId, Bounds<Pixels>>,
-
     locked: bool,
     zoomed: Option<Zoomed>,
     focus_handle: FocusHandle,
     renderer: Rc<dyn DockAreaRenderer>,
+}
+
+impl<P: Panel> From<Entity<P>> for PanelId {
+    fn from(panel: Entity<P>) -> Self {
+        panel.entity_id().into()
+    }
 }
 
 impl DockArea {
@@ -145,7 +147,6 @@ impl DockArea {
             groups: HashMap::new(),
             splits: HashMap::new(),
             panels: HashMap::new(),
-            node_bounds: HashMap::new(),
             locked: false,
             zoomed: None,
             focus_handle: cx.focus_handle(),
@@ -183,12 +184,6 @@ impl DockArea {
     /// against it.
     pub fn bounds(&self) -> Bounds<Pixels> {
         self.bounds
-    }
-
-    /// Last-rendered rect of tab-group leaf `node`, or `None` if it is not a
-    /// rendered tab group.
-    pub fn node_bounds(&self, node: NodeId) -> Option<Bounds<Pixels>> {
-        self.node_bounds.get(&node).copied()
     }
 
     /// The tree for one region, or `None` for a dock that does not exist.
@@ -477,13 +472,23 @@ impl DockArea {
     }
 
     /// Remove a panel from wherever it lives, telling it that it was removed.
-    pub fn remove_panel<P: Panel>(
+    /// Accepts either a panel entity or a [`PanelId`] for a restored panel
+    /// whose entity could not be constructed.
+    pub fn remove_panel(
         &mut self,
-        panel: Entity<P>,
+        panel: impl Into<PanelId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.remove_panel_id(PanelId::from(panel.entity_id()), window, cx);
+        let panel = panel.into();
+        let Some(region) = self.placement_of_panel(panel) else {
+            return;
+        };
+        let Some(tree) = self.tree_mut(region) else {
+            return;
+        };
+        let result = tree.remove_panel(panel);
+        self.commit(result, window, cx);
     }
 
     /// Move a panel to a new home. The panel never leaves the dock, so it is
@@ -611,20 +616,6 @@ impl DockArea {
         let result = tree.split(node, panel, placement, None);
         self.commit(result, window, cx);
     }
-
-    /// Remove a panel by id. Unlike [`Self::remove_panel`] this needs no live
-    /// `Entity`, so it can close a panel held only by `PanelId` (e.g. an
-    /// unresolved `InvalidPanel` leaf from a restored layout).
-    pub fn remove_panel_id(&mut self, panel: PanelId, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(region) = self.placement_of_panel(panel) else {
-            return;
-        };
-        let Some(tree) = self.tree_mut(region) else {
-            return;
-        };
-        let result = tree.remove_panel(panel);
-        self.commit(result, window, cx);
-    }
 }
 
 /// Zooming.
@@ -719,9 +710,9 @@ impl DockArea {
     ///
     /// The container, not the panel inside it: this is what keeps a zoomed
     /// group's tab bar on screen.
-    fn zoomed_view(&self) -> Option<(NodeId, AnyView)> {
+    fn zoomed_view(&self) -> Option<AnyView> {
         match self.zoomed? {
-            Zoomed::Group(node) => Some((node, self.groups.get(&node)?.entity.clone().into())),
+            Zoomed::Group(node) => Some(self.groups.get(&node)?.entity.clone().into()),
         }
     }
 }
@@ -989,8 +980,6 @@ impl DockArea {
 
         self.groups.retain(|node, _| live_nodes.contains(node));
         self.splits.retain(|node, _| live_nodes.contains(node));
-        // A removed leaf must report no bounds even before the next paint.
-        self.node_bounds.retain(|node, _| live_nodes.contains(node));
 
         let departed: Vec<Arc<dyn PanelView>> = self
             .panels
@@ -1129,7 +1118,7 @@ impl DockArea {
                 item: item.clone(),
                 target: *target,
             }),
-            TabGroupEvent::ClosePanel { panel } => self.remove_panel_id(*panel, window, cx),
+            TabGroupEvent::ClosePanel { panel } => self.remove_panel(*panel, window, cx),
             TabGroupEvent::ActiveChanged { ix } => {
                 let node = group.read(cx).node();
                 let Some(region) = self.placement_of_node(node) else {
@@ -1241,19 +1230,6 @@ impl DockArea {
 
 /// Rendering.
 impl DockArea {
-    fn group_with_bounds(&self, node: NodeId, view: AnyView) -> AnyElement {
-        let area = self.this.clone();
-        div()
-            .size_full()
-            .on_prepaint(move |bounds, _, cx| {
-                _ = area.update(cx, |area, _| {
-                    area.node_bounds.insert(node, bounds);
-                });
-            })
-            .child(view)
-            .into_any_element()
-    }
-
     /// Lower one container to an element.
     fn render_node(&self, node: &PaneNode, window: &mut Window, cx: &mut App) -> AnyElement {
         match node.kind() {
@@ -1335,7 +1311,7 @@ impl DockArea {
                     .into_any_element()
             }
             PaneRef::Tabs { .. } => match self.groups.get(&node.id()) {
-                Some(cached) => self.group_with_bounds(node.id(), cached.entity.clone().into()),
+                Some(cached) => cached.entity.clone().into_any_element(),
                 None => Empty.into_any_element(),
             },
         }
@@ -1438,12 +1414,11 @@ impl Render for DockArea {
             .on_prepaint(move |bounds, _, cx| {
                 area.update(cx, |area, _| {
                     area.bounds = bounds;
-                    area.node_bounds.clear();
                 });
             })
             .track_focus(&self.focus_handle)
             .map(|frame| match self.zoomed_view() {
-                Some((node, view)) => frame.child(self.group_with_bounds(node, view)),
+                Some(view) => frame.child(view),
                 None => frame
                     .when_some(
                         self.render_dock(DockPlacement::Left, window, cx),
@@ -4040,9 +4015,9 @@ mod tests {
         );
     }
 
-    /// `remove_panel_id` drops the panel named only by its `PanelId`.
+    /// `remove_panel` also accepts a panel known only by its `PanelId`.
     #[gpui::test]
-    fn remove_panel_id_drops_the_panel_it_names(cx: &mut TestAppContext) {
+    fn remove_panel_accepts_a_panel_id(cx: &mut TestAppContext) {
         let log = Log::default();
         let (area, alpha, cx) = two_groups(&log, cx);
         let alpha_id = panel_id_of(&alpha);
@@ -4052,13 +4027,13 @@ mod tests {
         );
 
         cx.update(|window, cx| {
-            area.update(cx, |area, cx| area.remove_panel_id(alpha_id, window, cx));
+            area.update(cx, |area, cx| area.remove_panel(alpha_id, window, cx));
         });
         cx.run_until_parked();
 
         assert!(
             cx.read(|cx| area.read(cx).panel(alpha_id).is_none()),
-            "remove_panel_id removes the panel identified only by its id"
+            "remove_panel removes the panel identified only by its id"
         );
     }
 }
