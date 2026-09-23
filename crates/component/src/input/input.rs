@@ -570,7 +570,11 @@ impl RenderOnce for Input {
                     top: self.size.input_py(),
                     right: self.size.input_px(),
                     bottom: self.size.input_py(),
-                    left: self.size.input_px(),
+                    left: if state.presentation(cx).is_code_editor() {
+                        self.size.input_px().min(px(6.))
+                    } else {
+                        self.size.input_px()
+                    },
                 }
             } else {
                 Edges::default()
