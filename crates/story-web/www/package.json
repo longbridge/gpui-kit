@@ -8,7 +8,7 @@
     "build": "bun --bun vite build",
     "preview": "bun --bun vite preview",
     "fonts": "python3 ../scripts/subset-fonts.py",
-    "wasm": "cargo build --target wasm32-unknown-unknown --release && wasm-bindgen ../../../target/wasm32-unknown-unknown/release/gpui_component_story_web.wasm --out-dir ./src/wasm --target web --no-typescript"
+    "wasm": "../scripts/build-wasm.sh --release"
   },
   "devDependencies": {
     "vite": "^8",
