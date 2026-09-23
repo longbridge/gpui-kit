@@ -1,11 +1,12 @@
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
 use gpui::{
-    AnyElement, App, Axis, ClickEvent, ElementId, ImageSource, InteractiveElement as _,
-    IntoElement, MouseButton, ObjectFit, ParentElement, RenderOnce, SharedString,
+    AnyElement, App, Axis, ClickEvent, ElementId, Hsla, ImageSource, InteractiveElement as _,
+    IntoElement, MouseButton, ObjectFit, ParentElement, RenderOnce, ScrollHandle, SharedString,
     StatefulInteractiveElement as _, StyleRefinement, Styled, StyledImage as _, Window, div, img,
-    prelude::FluentBuilder as _, relative, rems,
+    linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px, relative, rems,
 };
+use gpui_base::motion::{Transition, transition};
 
 use crate::{
     ActiveTheme as _, InteractiveElementExt as _, Sizable, Size, StyledExt as _, h_flex,
@@ -707,11 +708,24 @@ fn attachment_size_style<T: Styled + gpui::prelude::FluentBuilder>(
     }
 }
 
+/// How long an edge fade takes to appear or disappear.
+const EDGE_FADE_TRANSITION: Duration = Duration::from_millis(200);
+
+/// The scroll state a group keeps for itself when the caller passes none.
+struct AttachmentGroupScroll {
+    handle: ScrollHandle,
+    /// Whether the frame after the first layout has been requested: the
+    /// scroll extent is unknown until then, so the fades need one more pass.
+    primed: bool,
+}
+
 /// A horizontally scrollable row of attachments.
 #[derive(IntoElement)]
 pub struct AttachmentGroup {
     id: ElementId,
     style: StyleRefinement,
+    scroll_handle: Option<ScrollHandle>,
+    edge_fade: Option<Hsla>,
     children: Vec<AnyElement>,
 }
 
@@ -721,8 +735,29 @@ impl AttachmentGroup {
         Self {
             id: id.into(),
             style: StyleRefinement::default(),
+            scroll_handle: None,
+            edge_fade: None,
             children: Vec::new(),
         }
+    }
+
+    /// Scroll the row through the caller's handle.
+    ///
+    /// The group keeps its own scroll state otherwise. Pass a handle when the
+    /// application moves the row itself, for example from paging buttons.
+    pub fn track_scroll(mut self, handle: &ScrollHandle) -> Self {
+        self.scroll_handle = Some(handle.clone());
+        self
+    }
+
+    /// Fade the row's edges into `color` while attachments continue past them.
+    ///
+    /// Pass the color of the surface behind the row. Each fade shows only while
+    /// its edge still hides content, so a row that fits shows none; the fades
+    /// sit above the attachments and do not take pointer events.
+    pub fn with_edge_fade(mut self, color: impl Into<Hsla>) -> Self {
+        self.edge_fade = Some(color.into());
+        self
     }
 }
 
@@ -739,17 +774,97 @@ impl Styled for AttachmentGroup {
 }
 
 impl RenderOnce for AttachmentGroup {
-    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-        h_flex()
-            .id(self.id)
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let id = self.id;
+        // Element-local state keyed on the id: the fades read the offset across
+        // frames, and the first layout must be followed by one more render
+        // before the scroll extent is known.
+        let scroll =
+            window.use_keyed_state((id.clone(), "scroll"), cx, |_, _| AttachmentGroupScroll {
+                handle: ScrollHandle::new(),
+                primed: false,
+            });
+        let handle = self
+            .scroll_handle
+            .unwrap_or_else(|| scroll.read(cx).handle.clone());
+        let view_id = window.current_view();
+
+        let fades = self.edge_fade.map(|color| {
+            if !scroll.read(cx).primed {
+                scroll.update(cx, |scroll, _| scroll.primed = true);
+                window.on_next_frame(move |_, cx| cx.notify(view_id));
+            }
+            let max = handle.max_offset().x;
+            // Scrolling right makes the offset negative.
+            let offset = handle.offset().x;
+            let scrollable = max > px(1.);
+            let hides_leading = scrollable && offset < px(-1.);
+            let hides_trailing = scrollable && offset > px(1.) - max;
+            let leading = transition(
+                (id.clone(), "leading-fade"),
+                if hides_leading { 1. } else { 0. },
+                Transition::new(EDGE_FADE_TRANSITION),
+                window,
+                cx,
+            );
+            let trailing = transition(
+                (id.clone(), "trailing-fade"),
+                if hides_trailing { 1. } else { 0. },
+                Transition::new(EDGE_FADE_TRANSITION),
+                window,
+                cx,
+            );
+            (color, leading, trailing)
+        });
+
+        let row = h_flex()
+            .id(id)
             .w_full()
             .min_w_0()
             .gap_3()
             .py_1()
             .overflow_x_scroll()
             .lock_scroll_axis()
+            .track_scroll(&handle)
+            // Scrolling only moves the offset; the fades need a render to follow.
+            .when(fades.is_some(), |this| {
+                this.on_scroll_wheel(move |_, _, cx| cx.notify(view_id))
+            })
             .refine_style(&self.style)
-            .children(self.children)
+            .children(self.children);
+
+        // Gradient angle: 0 points up and increases clockwise, so 90 runs from
+        // the leading edge to the trailing edge.
+        let fade = |color: Hsla, opacity: f32, leading: bool| {
+            let (from, to) = if leading {
+                (color, color.opacity(0.))
+            } else {
+                (color.opacity(0.), color)
+            };
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .when(leading, |this| this.left_0())
+                .when(!leading, |this| this.right_0())
+                .w(rems(1.5))
+                .opacity(opacity)
+                .bg(linear_gradient(
+                    90.,
+                    linear_color_stop(from, 0.),
+                    linear_color_stop(to, 1.),
+                ))
+        };
+
+        div().relative().w_full().min_w_0().child(row).when_some(
+            fades,
+            |this, (color, leading, trailing)| {
+                this.when(leading > 0., |this| this.child(fade(color, leading, true)))
+                    .when(trailing > 0., |this| {
+                        this.child(fade(color, trailing, false))
+                    })
+            },
+        )
     }
 }
 
@@ -786,6 +901,18 @@ mod tests {
         );
         assert!(attachment.content.as_ref().unwrap().vertical_layout);
         assert!(attachment.actions.as_ref().unwrap().vertical_layout);
+
+        let handle = ScrollHandle::new();
+        let group = AttachmentGroup::new("group")
+            .track_scroll(&handle)
+            .with_edge_fade(gpui::black())
+            .child("first")
+            .child("second");
+        assert!(group.scroll_handle.is_some());
+        assert_eq!(group.edge_fade, Some(gpui::black()));
+        assert_eq!(group.children.len(), 2);
+        assert!(AttachmentGroup::new("plain").scroll_handle.is_none());
+        assert!(AttachmentGroup::new("plain").edge_fade.is_none());
     }
 
     #[test]

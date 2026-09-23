@@ -382,6 +382,8 @@ impl Render for AttachmentStory {
                     .max_w(rems(42.5))
                     .child(
                         AttachmentGroup::new("attachment-story-group")
+                            // Fade the row into the page surface while more files hide past an edge.
+                            .with_edge_fade(cx.theme().background)
                             .child(
                                 Attachment::new()
                                     .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))

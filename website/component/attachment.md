@@ -352,6 +352,23 @@ provide selection, snapping, reorder handles, a “+N more” overflow label, or
 preview dialog. Compose those behaviors in an application-owned wrapper. Keep
 the ID stable for the lifetime of the conversation row.
 
+Two builders help a composer or message row that overflows:
+
+```rust
+AttachmentGroup::new("composer-attachments")
+    // Fade each edge into the surface behind the row while it hides content.
+    .with_edge_fade(cx.theme().background)
+    // Drive the scrolling yourself, e.g. from paging buttons.
+    .track_scroll(&self.attachments_scroll)
+    .children(attachments)
+```
+
+`with_edge_fade(color)` draws a short gradient at an edge only while more
+attachments continue past it; a row that fits shows none. The fades sit above
+the attachments and take no pointer events. `track_scroll(&handle)` replaces
+the group's own scroll state with the caller's `ScrollHandle`, so the
+application can move the row and read its offset.
+
 ## Custom styling and theme tokens
 
 `Attachment`, `AttachmentGroup`, and every named slot implement `Styled`.
@@ -471,6 +488,8 @@ These boundaries are deliberate:
 | `AttachmentActions::new()` | empty action layout | Create the action slot. |
 | `.child(element)` | — | Add Button, Link, or another control. |
 | `AttachmentGroup::new(id)` | stable ID required | Create a horizontal scrolling group. |
+| `AttachmentGroup::track_scroll(&ScrollHandle)` | own scroll state | Scroll the row through the caller's handle. |
+| `AttachmentGroup::with_edge_fade(color)` | none | Fade an edge into `color` while it hides attachments. |
 | `AttachmentGroup::child(element)` | — | Add attachments to the group. |
 
 ### Related types

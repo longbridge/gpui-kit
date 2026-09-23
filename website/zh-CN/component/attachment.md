@@ -322,6 +322,19 @@ AttachmentGroup::new("message-attachments")
 
 当附件数量可能超出消息宽度时使用该组件。选择、拖拽排序、snap 或自定义滚动按钮属于应用容器，不由 `AttachmentGroup` 保存。
 
+超出宽度时有两个配套 builder：
+
+```rust
+AttachmentGroup::new("composer-attachments")
+    // 某一侧还有附件没滚出来时，把该侧边缘渐变到底下的表面色。
+    .with_edge_fade(cx.theme().background)
+    // 自己驱动滚动（例如翻页按钮）时传入 handle。
+    .track_scroll(&self.attachments_scroll)
+    .children(attachments)
+```
+
+`with_edge_fade(color)` 只在该侧仍有内容被遮住时画一段短渐变，放得下就不画；渐变盖在附件之上但不接收指针事件。`track_scroll(&handle)` 用调用方的 `ScrollHandle` 取代组内自持的滚动状态，应用因此可以移动这一行、读取它的偏移。
+
 ## 自定义样式与主题 token
 
 根组件和所有公开 slot 都实现 `Styled`，调用方 refinement 会在默认布局后应用：
@@ -427,6 +440,7 @@ Attachment::new()
 | --- | --- | --- |
 | `AttachmentActions` | `new()` / `child(element)` | 创建操作 slot 并组合 Button 或其他控件。 |
 | `AttachmentGroup` | `new(id)` / `child(element)` | 创建带稳定 id 的横向滚动附件组。 |
+| `AttachmentGroup` | `track_scroll(&ScrollHandle)` / `with_edge_fade(color)` | 用调用方的 handle 驱动滚动；某侧遮住内容时把该侧边缘渐变到 `color`。 |
 | 两者 | `Styled` | 调整间距、位置和容器布局。 |
 
 ### 类型链接
