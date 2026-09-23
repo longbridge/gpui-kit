@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Build the latest release at /, main at /versions/main, and every other
+# released tag below /versions/<tag>. Version builds reuse the current site
+# shell but replace the docs and home content with the matching snapshot. App
+# Stories are deliberately produced only by the latest release build because
+# the catalog changes independently of GPUI Kit releases.
+
+repo_root=$(git rev-parse --show-toplevel)
+work_dir=$(mktemp -d "${TMPDIR:-/tmp}/gpui-kit-website.XXXXXX")
+trap 'git -C "$repo_root" worktree prune >/dev/null 2>&1 || true; rm -rf "$work_dir"' EXIT
+# The temporary builds change the working directory, so preserve the showcase
+# checkout location before Astro resolves its default relative to cwd.
+if [[ -z "${SHOWCASES_DIR:-}" ]]; then
+  export SHOWCASES_DIR="$repo_root/../../gpui-kit-showcases"
+fi
+# Historical markdown uses paths relative to the repository root. The latest
+# and tagged snapshots live directly below work_dir, so expose the repository's
+# crates directory at the location those paths resolve to.
+ln -s "$repo_root/crates" "$work_dir/crates"
+version_cache_dir=${WEBSITE_VERSION_CACHE_DIR:-$repo_root/website/.version-cache}
+version_fingerprint=${WEBSITE_VERSION_BUILD_FINGERPRINT:-$(
+  git -C "$repo_root" ls-files -z -- \
+    website/astro.config.mjs website/package.json website/src/components \
+    website/src/layouts website/src/lib website/src/pages website/src/styles \
+    website/public script/build-website-versions script/snapshot-website \
+    script/normalize-website-frontmatter.mjs \
+    | xargs -0 git -C "$repo_root" hash-object \
+    | git hash-object --stdin
+)}
+
+git -C "$repo_root" fetch origin main --depth=1 --tags
+
+release_tags=()
+while IFS= read -r tag; do
+  # Versioned website builds only support stable semver tags from v0.6.0
+  # onward. This deliberately excludes tags such as v0.6.0-preview.1.
+  if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    continue
+  fi
+  version=${tag#v}
+  IFS=. read -r major minor patch <<< "$version"
+  if ((major < 0 || (major == 0 && minor < 6))); then
+    continue
+  fi
+  release_tags+=("$tag")
+  if ((${#release_tags[@]} == 20)); then
+    break
+  fi
+done < <(git -C "$repo_root" tag --list 'v*' --sort=-version:refname)
+versions_json=$(printf '%s\n' main "${release_tags[@]}" | jq -Rsc '
+  split("\n") | map(select(length > 0)) | map({id: ., label: .})
+')
+latest_release=${release_tags[0]}
+
+rm -rf "$repo_root/website/dist"
+mkdir -p "$repo_root/website/dist"
+
+git -C "$repo_root" worktree add --detach "$work_dir/main" origin/main >/dev/null
+
+snapshot_website() {
+  local tag=$1
+  local target=$2
+
+  "$repo_root/script/snapshot-website" "$repo_root" "$tag" "$target"
+  bun "$repo_root/script/normalize-website-frontmatter.mjs" "$target"
+}
+
+latest_dir="$work_dir/latest"
+rsync -a --exclude node_modules --exclude dist "$repo_root/website/" "$latest_dir/"
+snapshot_website "$latest_release" "$latest_dir"
+ln -s "$repo_root/website/node_modules" "$latest_dir/node_modules"
+
+echo "Building $latest_release at /"
+(
+  cd "$latest_dir"
+  PUBLIC_SITE_VERSION="$latest_release" \
+  PUBLIC_SITE_LATEST_VERSION="$latest_release" \
+  PUBLIC_SITE_INDEXABLE=true \
+  PUBLIC_SITE_VERSIONS="$versions_json" \
+  PUBLIC_SITE_BASE=/ \
+  SITE_OUT_DIR="$repo_root/website/dist" \
+  bunx --bun astro build
+)
+bunx pagefind --site "$repo_root/website/dist"
+
+main_dir="$work_dir/main-site"
+rsync -a --exclude node_modules --exclude dist "$repo_root/website/" "$main_dir/"
+snapshot_website origin/main "$main_dir"
+main_output_dir="$repo_root/website/dist/versions/main"
+echo "Building main at /versions/main"
+(
+  cd "$main_dir"
+  ln -s "$repo_root/website/node_modules" node_modules
+  PUBLIC_SITE_VERSION=main \
+  PUBLIC_SITE_LATEST_VERSION="$latest_release" \
+  PUBLIC_SITE_INDEXABLE=false \
+  PUBLIC_SITE_VERSIONS="$versions_json" \
+  PUBLIC_SITE_BASE=/versions/main/ \
+  SITE_OUT_DIR="$main_output_dir" \
+  bunx --bun astro build
+)
+rm -rf "$main_output_dir/apps" "$main_output_dir/zh-CN/apps"
+bunx pagefind --site "$main_output_dir"
+
+for tag in "${release_tags[@]:1}"; do
+  version_dir="$work_dir/$tag"
+  output_dir="$repo_root/website/dist/versions/$tag"
+  cached_dir="$version_cache_dir/$tag/$version_fingerprint"
+
+  if [[ -d "$cached_dir" ]]; then
+    echo "Reusing cached $tag"
+    mkdir -p "$output_dir"
+    rsync -a "$cached_dir/" "$output_dir/"
+    continue
+  fi
+
+  mkdir -p "$version_dir"
+  rsync -a --exclude node_modules --exclude dist "$repo_root/website/" "$version_dir/"
+
+  # Keep the current version-aware shell and build tooling. Only content that
+  # belongs to the released website is taken from the historical checkout.
+  snapshot_website "$tag" "$version_dir"
+  ln -s "$repo_root/website/node_modules" "$version_dir/node_modules"
+
+  echo "Building $tag at /versions/$tag"
+  (
+    cd "$version_dir"
+    PUBLIC_SITE_VERSION="$tag" \
+    PUBLIC_SITE_LATEST_VERSION="$latest_release" \
+    PUBLIC_SITE_INDEXABLE=false \
+    PUBLIC_SITE_VERSIONS="$versions_json" \
+    PUBLIC_SITE_BASE="/versions/$tag/" \
+    SITE_OUT_DIR="$output_dir" \
+    bunx --bun astro build
+  )
+
+  # The current build is the single owner of the continuously updated App
+  # Stories routes. Remove the historical copies and rebuild their search
+  # index so versioned results cannot point at deleted pages.
+  rm -rf "$output_dir/apps" "$output_dir/zh-CN/apps"
+  bunx pagefind --site "$output_dir"
+  mkdir -p "$cached_dir"
+  rsync -a "$output_dir/" "$cached_dir/"
+done

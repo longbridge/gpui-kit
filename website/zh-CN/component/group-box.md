@@ -57,6 +57,19 @@ GroupBox::new()
     .child(Button::new("save").primary().label("Save Changes"))
 ```
 
+### 表面外的底部说明
+
+用 `footer` 在填充背景或边框下方放置辅助内容，而不是将其放进内容区域。
+它与标题左对齐，位于表面下方 8 px 处，并像描述文字一样以小号 muted 文本渲染，直接传入纯文本即可。
+`content_style` 只影响主体内容。
+
+```rust
+GroupBox::new()
+    .fill()
+    .child("Update preferences")
+    .footer("Changes apply to this device only.")
+```
+
 ### 自定义 ID
 
 ```rust

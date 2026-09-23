@@ -11,6 +11,7 @@ use gpui::{
 };
 
 use crate::Placement;
+use std::{cell::Cell, rc::Rc};
 
 /// Alignment of a popup along the side it is placed on.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -61,6 +62,8 @@ pub struct ResolvedPosition {
 /// children.
 pub struct Positioner {
     strategy: Strategy,
+    corner_position: Option<Rc<Cell<Point<Pixels>>>>,
+    on_position: Option<Box<dyn Fn(ResolvedPosition)>>,
     margin: Pixels,
     occlude: bool,
     children: Vec<AnyElement>,
@@ -81,6 +84,8 @@ impl Positioner {
                 align: Align::Center,
                 offset: px(0.),
             },
+            corner_position: None,
+            on_position: None,
             margin: px(4.),
             occlude: false,
             children: Vec::new(),
@@ -95,10 +100,26 @@ impl Positioner {
     pub fn corner(anchor: Anchor, position: Point<Pixels>) -> Self {
         Self {
             strategy: Strategy::Corner { anchor, position },
+            corner_position: None,
+            on_position: None,
             margin: px(4.),
             occlude: false,
             children: Vec::new(),
         }
+    }
+
+    /// Updates the requested corner position.
+    ///
+    /// This is useful when an animation moves an already-composed popup. It
+    /// has no effect on a side-positioned popup.
+    pub fn position(mut self, position: Point<Pixels>) -> Self {
+        if let Strategy::Corner {
+            position: current, ..
+        } = &mut self.strategy
+        {
+            *current = position;
+        }
+        self
     }
 
     /// Sets the preferred side. Only meaningful for [`Positioner::side`].
@@ -127,6 +148,18 @@ impl Positioner {
         if let Strategy::Side { offset: slot, .. } = &mut self.strategy {
             *slot = offset;
         }
+        self
+    }
+
+    // Read after trigger prepaint so an open popup follows a moving trigger.
+    pub(crate) fn tracked_corner_position(mut self, position: Rc<Cell<Point<Pixels>>>) -> Self {
+        self.corner_position = Some(position);
+        self
+    }
+
+    /// Observe resolved geometry before children prepaint.
+    pub fn on_position(mut self, callback: impl Fn(ResolvedPosition) + 'static) -> Self {
+        self.on_position = Some(Box::new(callback));
         self
     }
 
@@ -360,12 +393,21 @@ impl Element for Positioner {
             window.window_decorations(),
             window.client_inset().unwrap_or(px(0.)),
         );
+        let mut strategy = self.strategy;
+        if let (Strategy::Corner { position, .. }, Some(tracked)) =
+            (&mut strategy, &self.corner_position)
+        {
+            *position = tracked.get();
+        }
         let position = resolve(
-            self.strategy,
+            strategy,
             popup_size,
             window.viewport_size(),
             frame.map(|inset| *inset + self.margin),
         );
+        if let Some(callback) = &self.on_position {
+            callback(position);
+        }
         // Ahead of the children so it blocks what is behind the popup without
         // blocking the popup's own content.
         if self.occlude {
@@ -546,6 +588,20 @@ mod tests {
         assert_eq!(position.placement, None);
         assert_eq!(position.bounds.right(), viewport().width - MARGIN);
         assert_eq!(position.bounds.bottom(), viewport().height - MARGIN);
+    }
+
+    #[test]
+    fn corner_position_can_be_updated_without_rebuilding_the_positioner() {
+        let positioner = Positioner::corner(Anchor::TopLeft, point(px(10.), px(20.)))
+            .position(point(px(30.), px(40.)));
+
+        assert!(matches!(
+            positioner.strategy,
+            Strategy::Corner {
+                position,
+                ..
+            } if position == point(px(30.), px(40.))
+        ));
     }
 
     /// A tiled edge draws no shadow, so a popup may run right up to the

@@ -1,7 +1,7 @@
 ---
 title: Coding Guides
 description: Architecture and coding conventions for maintainable GPUI Kit applications
-order: -2.2
+order: -13
 ---
 
 # Coding Guides
@@ -105,14 +105,10 @@ Initialize GPUI Component once, before creating component-backed views, and put
 app.run(move |cx| {
     gpui_kit::init(cx);
 
-    cx.spawn(async move |cx| {
-        cx.open_window(WindowOptions::default(), |window, cx| {
-            let workspace = cx.new(|cx| Workspace::new(window, cx));
-            cx.new(|cx| Root::new(workspace, window, cx))
-        })
-        .expect("failed to open window");
+    gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+        cx.new(|cx| Workspace::new(window, cx))
     })
-    .detach();
+    .expect("failed to open window");
 });
 ```
 
@@ -411,11 +407,12 @@ instead of silently hiding all keyboard focus.
 
 ### Base font is the application zoom control
 
-`Root::render` calls `window.set_rem_size(cx.theme().font_size)`. Therefore the
-theme's base font is not only body typography; it is the reference length for
-the application's rem-based design scale. This deliberately follows the useful
-part of Tailwind's model: named type, spacing, and size steps share one relative
-base instead of becoming unrelated pixel constants.
+The Component Root plugin calls `window.set_rem_size(cx.theme().font_size)` from
+its `prepare` hook before the Root surface is rendered. Therefore the theme's
+base font is not only body typography; it is the reference length for the
+application's rem-based design scale. This deliberately follows the useful part
+of Tailwind's model: named type, spacing, and size steps share one relative base
+instead of becoming unrelated pixel constants.
 
 Change zoom by updating the base font and refreshing the window:
 

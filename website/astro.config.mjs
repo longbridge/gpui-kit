@@ -1,4 +1,5 @@
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { defineConfig } from 'astro/config';
 import vue from '@astrojs/vue';
 import tailwindcss from '@tailwindcss/vite';
@@ -13,12 +14,15 @@ import { rehypeHeadingAnchors } from './src/lib/rehype-heading-anchors.js';
 import { wasmExamplesDevServer } from './src/lib/wasm-middleware.js';
 import { shikiConfig, defaultHighlightLang } from './src/lib/markdown.js';
 
-const BASE = '/';
+const configuredBase = process.env.PUBLIC_SITE_BASE || '/';
+const BASE = configuredBase === '/' ? '/' : `/${configuredBase.replace(/^\/+|\/+$/g, '')}/`;
 
 // GitHub Pages serves static HTML redirects for old component bookmarks.
 const componentRedirects = Object.fromEntries(
   ['', 'zh-CN/'].flatMap((locale) => {
-    const entries = readdirSync(new URL(`./${locale}component/`, import.meta.url))
+    const componentDir = new URL(`./${locale}component/`, import.meta.url);
+    if (!existsSync(componentDir)) return [];
+    const entries = readdirSync(componentDir)
       .filter((name) => name.endsWith('.md'))
       .map((name) => {
         const slug = name.slice(0, -3);
@@ -36,16 +40,19 @@ const componentRedirects = Object.fromEntries(
 // componentRedirects only recognizes the /docs/components/<slug> prefix.
 const legacyDocRedirects = Object.fromEntries(
   ['', 'zh-CN/'].flatMap((locale) =>
-    ['root', 'theme', 'dock'].map((slug) => [
-      `/${locale}docs/${slug}`,
-      `/${locale}component/${slug}`,
-    ]),
+    ['root', 'theme', 'dock']
+      .filter((slug) => existsSync(new URL(`./${locale}component/${slug}.md`, import.meta.url)))
+      .map((slug) => [
+        `/${locale}docs/${slug}`,
+        `/${locale}component/${slug}`,
+      ]),
   ),
 );
 
 export default defineConfig({
   site: 'https://gpui-kit.com',
   base: BASE,
+  outDir: resolve(process.cwd(), process.env.SITE_OUT_DIR || './dist'),
   output: 'static',
   trailingSlash: 'never',
   redirects: {
@@ -72,6 +79,6 @@ export default defineConfig({
   },
 
   vite: {
-    plugins: [tailwindcss(), wasmExamplesDevServer(BASE)],
+    plugins: [tailwindcss(), wasmExamplesDevServer('/')],
   },
 });

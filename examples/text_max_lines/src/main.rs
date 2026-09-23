@@ -250,14 +250,9 @@ fn main() {
             ..Default::default()
         };
 
-        cx.spawn(async move |cx| {
-            cx.open_window(window_options, |window, cx| {
-                let view = cx.new(|cx| MaxLinesExample::new(cx));
-                // The first level view on the window should be a Root.
-                cx.new(|cx| Root::new(view, window, cx))
-            })
-            .expect("Failed to open window");
+        gpui_kit::open_window(window_options, cx, |_, cx| {
+            cx.new(|cx| MaxLinesExample::new(cx))
         })
-        .detach();
+        .expect("Failed to open window");
     });
 }

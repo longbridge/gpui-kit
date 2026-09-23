@@ -20,9 +20,11 @@ The gpui-pre crates provide version-aligned releases of upstream GPUI. They must
 
 The `gpui-pre` crates publish version-aligned snapshots of upstream GPUI, not a separately developed version.
 
-Our automated process checks Zed's crates/gpui* weekly and prepares a release when upstream changes are detected. Before publishing, the snapshot is tested against GPUI Kit. If validation passes, it is published automatically.
+Our automated process checks Zed's crates/gpui* weekly and publishes a new snapshot when upstream changes are detected. Before publishing, the snapshot is built and tested against GPUI Kit; the result is reported on the release, and the snapshot is published either way.
 
-If an upstream API change breaks compatibility, publication is paused and GPUI Kit is updated to support the new API. We adapt GPUI Kit to upstream rather than patching GPUI or maintaining downstream behavior.
+GPUI Kit pins the `gpui-pre` crates to an exact version (`=x.y.z`) in the workspace `Cargo.toml`, and the published `gpui-kit` crates carry that requirement to crates.io. A gpui-kit release therefore keeps building against the snapshot it was tested with, and a new snapshot only reaches applications through a gpui-kit release that bumps the pin. CI rejects a requirement that is not exact (`bun script/check-gpui-pin.ts`).
+
+To move GPUI Kit to a new snapshot, change the `=x.y.z` requirement of every `gpui-pre-*` crate in the workspace `Cargo.toml`, run `cargo update` for those crates, and adapt GPUI Kit to any upstream API change in the same pull request. We adapt GPUI Kit to upstream rather than patching GPUI or maintaining downstream behavior.
 
 This process allows the community to follow GPUI development with tested releases while keeping GPUI Kit aligned with upstream and compatible with official GPUI crates.
 

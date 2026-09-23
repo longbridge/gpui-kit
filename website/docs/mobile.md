@@ -1,7 +1,7 @@
 ---
 title: Mobile
 description: Build an iOS application or embed GPUI Kit in a Swift UIKit container with the experimental gpui-pre-mobile platform.
-order: -2.4
+order: -10
 ---
 
 # Mobile

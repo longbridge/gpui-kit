@@ -429,7 +429,10 @@ impl Tooltip {
     /// Create a tooltip whose box follows the cursor at `cursor` within a `within`-sized plot.
     pub fn new(cursor: Point<Pixels>, within: Size<Pixels>) -> Self {
         Self {
-            base: v_flex(),
+            // The same row rhythm the structured content lays out with, so a
+            // tooltip built from freeform children does not have to rediscover
+            // it — and does not read as one solid block when it forgets.
+            base: v_flex().gap_y_1(),
             gap: px(0.),
             cross_line: None,
             dots: None,
@@ -536,7 +539,6 @@ impl RenderOnce for Tooltip {
         // Structured content (title + rows) takes precedence over freeform `base` children.
         let content = if title.is_some() || !rows.is_empty() {
             v_flex()
-                .text_sm()
                 .gap_1()
                 .when_some(title, |this, title| {
                     this.child(div().font_semibold().child(title))
@@ -567,6 +569,11 @@ impl RenderOnce for Tooltip {
         } else {
             base
         };
+        // One size for every tooltip, structured or freeform, boxed or bare: a
+        // transient overlay over dense data reads at the compact tier, and a
+        // per-call-site size is how a dozen charts end up at a dozen sizes.
+        // Content that wants a hierarchy sets it on its own children.
+        let content = content.text_xs();
 
         div()
             .size_full()

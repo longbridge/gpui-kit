@@ -8,7 +8,7 @@ use gpui::{
 };
 
 use crate::{
-    DeferredPopover, GlobalState, Popup, Selectable,
+    DeferredPopover, GlobalState, Popup, ResolvedPosition, Selectable,
     actions::{Cancel, Confirm},
 };
 
@@ -169,6 +169,8 @@ type ContentBuilder =
 pub struct Popover {
     id: ElementId,
     anchor: Anchor,
+    offset: gpui::Pixels,
+    on_position: Option<Box<dyn Fn(ResolvedPosition, gpui::Bounds<gpui::Pixels>)>>,
     default_open: bool,
     open: Option<bool>,
     tracked_focus_handle: Option<FocusHandle>,
@@ -184,6 +186,8 @@ impl Popover {
         Self {
             id: id.into(),
             anchor: Anchor::TopLeft,
+            offset: gpui::px(0.),
+            on_position: None,
             default_open: false,
             open: None,
             tracked_focus_handle: None,
@@ -197,6 +201,21 @@ impl Popover {
 
     pub fn anchor(mut self, anchor: impl Into<Anchor>) -> Self {
         self.anchor = anchor.into();
+        self
+    }
+
+    /// Gap from the trigger along the anchor's outward direction, zero by default.
+    pub fn offset(mut self, offset: gpui::Pixels) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Observe geometry to supply presentation such as a pointer arrow.
+    pub fn on_position(
+        mut self,
+        callback: impl Fn(ResolvedPosition, gpui::Bounds<gpui::Pixels>) + 'static,
+    ) -> Self {
+        self.on_position = Some(Box::new(callback));
         self
     }
 
@@ -287,6 +306,10 @@ impl RenderOnce for Popover {
         let parent_view_id = window.current_view();
         let popup = Popup::new(self.id, trigger(open, window, cx))
             .anchor(self.anchor)
+            .offset(self.offset)
+            .when_some(self.on_position, |this, callback| {
+                this.on_position(callback)
+            })
             .key_context(CONTEXT)
             .on_action({
                 let state = state.clone();

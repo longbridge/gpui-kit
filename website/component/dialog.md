@@ -16,36 +16,9 @@ use gpui_kit::component::WindowExt;
 
 ## Usage
 
-### Setup application root view for display of dialogs
+### Where dialogs render
 
-You need to set up your application's root view to render the dialog layer. This is typically done in your main application struct's render method.
-
-The [Root::render_dialog_layer](https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html#method.render_dialog_layer) function handles rendering any active dialogs on top of your app content.
-
-```rust
-use gpui_kit::component::TitleBar;
-
-struct MyApp {
-    view: AnyView,
-}
-
-impl Render for MyApp {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let dialog_layer = Root::render_dialog_layer(window, cx);
-
-        div()
-            .size_full()
-            .child(
-                v_flex()
-                    .size_full()
-                    .child(TitleBar::new())
-                    .child(div().flex_1().overflow_hidden().child(self.view.clone())),
-            )
-            // Render the dialog layer on top of the app content
-            .children(dialog_layer)
-    }
-}
-```
+The window's [Root](./root.md) automatically mounts and renders dialogs. Open the window with `gpui_kit::open_window`, or wrap the application view in `Root::new`. Application views do not render overlay layers themselves.
 
 ### Basic Dialog
 

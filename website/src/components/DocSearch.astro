@@ -69,6 +69,8 @@ const copy = isZh
 
   function open() {
     if (!modal) return;
+    const themeDialog = document.querySelector<HTMLDialogElement>('#theme-palette');
+    if (themeDialog?.open) themeDialog.close();
     // Built by the Pagefind CLI after the Astro build, so in `astro dev` there
     // is no index to search; the dialog still opens and says so.
     ui ??= new PagefindUI({
@@ -106,14 +108,9 @@ const copy = isZh
     if (outside) modal.close();
   });
 
-  // ⌘K / Ctrl-K from anywhere, and `/` when not already typing.
+  // `/` opens documentation search when not already typing.
   document.addEventListener('keydown', (event) => {
     const key = event.key.toLowerCase();
-    if ((event.metaKey || event.ctrlKey) && key === 'k') {
-      event.preventDefault();
-      modal?.open ? modal.close() : open();
-      return;
-    }
     if (key === '/' && !modal?.open) {
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;

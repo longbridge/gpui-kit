@@ -1,3 +1,4 @@
+mod common;
 use gpui_kit::component::{
     accordion::Accordion,
     slider::{Slider, SliderState},
@@ -13,6 +14,7 @@ struct Settings {
     step: usize,
     slider: Entity<SliderState>,
     disabled: bool,
+    advanced_disabled: bool,
 }
 impl Render for Settings {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -33,6 +35,7 @@ impl Render for Settings {
                     })
                     .item(|item| {
                         item.title("Advanced")
+                            .disabled(self.advanced_disabled)
                             .open(self.open.contains(&1))
                             .child(div().h_12().child("Advanced options"))
                     })
@@ -72,11 +75,14 @@ impl Render for Settings {
 fn accordion_expands_one_panel_and_stepper_navigates(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     cx.update(|cx| cx.set_reduce_motion(true));
-    let handle = cx.open_window(size(px(640.), px(600.)), |_, cx| Settings {
-        open: vec![],
-        step: 0,
-        disabled: false,
-        slider: cx.new(|_| SliderState::new().default_value(20.)),
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(600.))), |_, cx| {
+        cx.new(|cx| Settings {
+            open: vec![],
+            step: 0,
+            disabled: false,
+            advanced_disabled: false,
+            slider: cx.new(|_| SliderState::new().default_value(20.)),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -128,11 +134,14 @@ fn accordion_expands_one_panel_and_stepper_navigates(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn disabled_disclosures_and_steps_do_not_change_content(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(640.), px(600.)), |_, cx| Settings {
-        open: vec![],
-        step: 0,
-        disabled: true,
-        slider: cx.new(|_| SliderState::new().default_value(20.)),
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(600.))), |_, cx| {
+        cx.new(|cx| Settings {
+            open: vec![],
+            step: 0,
+            disabled: true,
+            advanced_disabled: false,
+            slider: cx.new(|_| SliderState::new().default_value(20.)),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -152,13 +161,63 @@ fn disabled_disclosures_and_steps_do_not_change_content(cx: &mut TestAppContext)
 }
 
 #[gpui_kit::test]
+fn accordion_preserves_disabled_items_when_the_group_is_enabled(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let (handle, handle_content) =
+        common::open_window(cx, Some(size(px(640.), px(600.))), |_, cx| {
+            cx.new(|cx| Settings {
+                open: vec![],
+                step: 0,
+                disabled: false,
+                advanced_disabled: true,
+                slider: cx.new(|_| SliderState::new().default_value(20.)),
+            })
+        });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let settings = handle_content.clone();
+        for group_disabled in [false, true, false] {
+            settings.update(cx, |settings, cx| {
+                settings.disabled = group_disabled;
+                settings.open.clear();
+                cx.notify();
+            });
+            window.render_frame(cx);
+            window.within("sections").click(("trigger", 1usize), cx);
+            assert_eq!(
+                window
+                    .within("sections")
+                    .find(("trigger", 1usize))
+                    .expanded(),
+                Some(false)
+            );
+            assert!(settings.read(cx).open.is_empty());
+
+            window.within("sections").click(("trigger", 0usize), cx);
+            assert_eq!(
+                window
+                    .within("sections")
+                    .find(("trigger", 0usize))
+                    .expanded(),
+                Some(!group_disabled)
+            );
+        }
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn slider_click_and_drag_move_the_actual_thumb(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(640.), px(600.)), |_, cx| Settings {
-        open: vec![],
-        step: 0,
-        disabled: false,
-        slider: cx.new(|_| SliderState::new().default_value(20.)),
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(600.))), |_, cx| {
+        cx.new(|cx| Settings {
+            open: vec![],
+            step: 0,
+            disabled: false,
+            advanced_disabled: false,
+            slider: cx.new(|_| SliderState::new().default_value(20.)),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -184,11 +243,14 @@ fn slider_click_and_drag_move_the_actual_thumb(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn disabled_slider_ignores_pointer_changes(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(640.), px(600.)), |_, cx| Settings {
-        open: vec![],
-        step: 0,
-        disabled: true,
-        slider: cx.new(|_| SliderState::new().default_value(20.)),
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(600.))), |_, cx| {
+        cx.new(|cx| Settings {
+            open: vec![],
+            step: 0,
+            disabled: true,
+            advanced_disabled: false,
+            slider: cx.new(|_| SliderState::new().default_value(20.)),
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);

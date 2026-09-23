@@ -1,5 +1,6 @@
 ---
 title: Fonts
+order: -8
 description: System fonts, theme fonts, per-element overrides, and bundling custom fonts.
 ---
 

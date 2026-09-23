@@ -2,11 +2,14 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import {
     ArrowRight,
+    Accessibility,
     Blocks,
     Braces,
     Check,
     Copy,
     Gauge,
+    FlaskConical,
+    Globe2,
     Layers3,
     LayoutDashboard,
     List,
@@ -66,6 +69,9 @@ const capIcons: Record<string, any> = {
     editor: SquareCode,
     dock: LayoutDashboard,
     theme: Palette,
+    wasm: Globe2,
+    a11y: Accessibility,
+    test: FlaskConical,
 };
 
 // `gpui-kit` is the one dependency an application needs: it pins GPUI and
@@ -93,12 +99,12 @@ const copy = computed(() =>
               copyLabel: "复制安装命令",
               eyebrow: "经过 Longbridge 生产验证",
               title: "构建出色的高性能桌面应用。",
-              lead: "一个综合性的 Rust 桌面开发框架，集完整 UI 系统、数据表格、Dock 布局、图表与代码编辑器于一体，并可用 JavaScript 扩展；从第一天起用于构建 Longbridge Pro。",
+              lead: "生产就绪的 Rust UI 框架，提供 75+ 组件与原语、WebAssembly、无障碍与 UI 集成测试，并集成数据表格、Dock、图表、代码编辑器和 JavaScript 扩展能力。",
               componentsAction: "浏览组件",
               baseAction: "探索 gpui-base",
               signalStars: "GitHub stars",
               signalLicense: "Apache-2.0 许可",
-              signalPlatforms: "macOS / Windows / Linux",
+              signalPlatforms: "macOS / Windows / Linux / WebAssembly",
               capsKicker: "核心能力",
               capsTitle: "为信息密集型软件而生。",
               capsDescription: "复杂桌面应用真正需要的系统能力，都已整合在框架之中。",
@@ -109,16 +115,19 @@ const copy = computed(() =>
                   { icon: "editor", title: "完整代码编辑器", description: "Rope 存储，20 万行仍保持稳定性能；内置 Tree-sitter 高亮与 LSP 诊断、补全、悬浮提示。", apis: ["Rope", "Tree-Sitter", "LSP", "Highlighter"] },
                   { icon: "dock", title: "Dock 自由布局", description: "面板停靠、拖拽重排与缩放，并可序列化保存。", apis: ["DockArea", "DockLayout", "TabGroup"] },
                   { icon: "theme", title: "多主题支持", description: "基于语义化 token 的明暗与多主题切换，而非无尽的样式字段。", apis: ["Theme", "ThemeColor", "ActiveTheme"] },
+                  { icon: "wasm", title: "WebAssembly", description: "应用与组件示例可通过 wasm32-unknown-unknown 在 Web 中运行，并与原生端共享实现。", apis: ["WASM", "Web"] },
+                  { icon: "a11y", title: "无障碍", description: "交互层内置 AccessKit role、name、state、relationship 与 action。", apis: ["AccessKit", "Accessibility"] },
+                  { icon: "test", title: "UI 集成测试", description: "在 headless window 中渲染真实组件，驱动鼠标与键盘，并验证状态、Focus、布局和无障碍。", apis: ["gpui_kit::test", "TestWindowExt"] },
               ],
               chooseKicker: "三个层次，一个生态",
               chooseTitle: "决定由谁掌控视觉系统。",
               chooseDescription: "使用 gpui-component 保持统一风格，基于 gpui-base 构建自己的设计系统，或用 gpui-shell 让应用可以被 JavaScript 扩展。",
               shipTitle: "保持风格统一",
               shipDescription: "gpui-component 提供完整、成熟且开箱即用的视觉与交互系统。",
-              shipPoints: ["60+ 个成品组件", "内置明暗主题", "开箱即用的交互细节"],
+              shipPoints: ["75+ 个组件与原语", "内置明暗主题", "开箱即用的交互细节"],
               startComponent: "开始使用",
               ownTitle: "拥有设计系统",
-              ownDescription: "复用焦点、选择、浮层与虚拟化行为，视觉完全由你决定。",
+              ownDescription: "复用 Focus、选择、浮层与虚拟化行为，视觉完全由你决定。",
               ownPoints: ["零样式原语", "完整可访问性行为", "视觉表达 100% 自主"],
               startBase: "阅读 gpui-base 文档",
               scriptTitle: "用 JavaScript 扩展应用",
@@ -128,7 +137,7 @@ const copy = computed(() =>
               principleKicker: "设计原则",
               principleLead: "行为属于基础层。",
               principleTail: "视觉属于应用。",
-              principleDetail: "gpui-base 处理困难的交互机制：焦点、浮层定位、虚拟化与无障碍；你的产品决定它们最终呈现的样子。",
+              principleDetail: "gpui-base 处理困难的交互机制：Focus、浮层定位、虚拟化与无障碍；你的产品决定它们最终呈现的样子。",
               footerPrefix: "基于 Apache-2.0 许可证开源，由",
               footerSuffix: " 开发。",
               footerBuiltOn: "构建于",
@@ -143,14 +152,14 @@ const copy = computed(() =>
           }
         : {
               copyLabel: "Copy install command",
-              eyebrow: "Proven in production at Longbridge.",
+              eyebrow: "Proven in production at Longbridge",
               title: "Build fantastic, high-performance desktop apps.",
-              lead: "A comprehensive Rust desktop framework with a complete UI system, data tables, docking, charts, and a code editor — extensible in JavaScript, and used to build Longbridge Pro from day one.",
+              lead: "A production-ready Rust UI framework with 75+ components and primitives, WebAssembly, accessibility, UI integration testing, data tables, docking, charts, code editing, and JavaScript extensions.",
               componentsAction: "Browse components",
               baseAction: "Explore gpui-base",
               signalStars: "stars on GitHub",
               signalLicense: "Apache-2.0",
-              signalPlatforms: "macOS, Windows, Linux",
+              signalPlatforms: "macOS, Windows, Linux, WebAssembly",
               capsKicker: "Capabilities",
               capsTitle: "Built for information-dense software.",
               capsDescription: "The systems that real desktop applications need are integrated into one framework.",
@@ -161,13 +170,16 @@ const copy = computed(() =>
                   { icon: "editor", title: "A real code editor", description: "Rope-backed text that stays stable at 200K lines, with Tree-sitter highlighting and LSP diagnostics, completion and hover.", apis: ["Rope", "Tree-Sitter", "LSP", "Highlighter"] },
                   { icon: "dock", title: "Freeform dock layout", description: "Dockable panels with drag-to-rearrange and zooming — all serializable.", apis: ["DockArea", "DockLayout", "TabGroup"] },
                   { icon: "theme", title: "Multi-theme support", description: "Light, dark and custom themes driven by semantic tokens instead of endless style fields.", apis: ["Theme", "ThemeColor", "ActiveTheme"] },
+                  { icon: "wasm", title: "WebAssembly", description: "Applications and component showcases run on the web through wasm32-unknown-unknown while sharing their native implementation.", apis: ["WASM", "Web"] },
+                  { icon: "a11y", title: "Accessibility", description: "AccessKit roles, names, states, relationships and actions are built into the interaction layer.", apis: ["AccessKit", "Accessibility"] },
+                  { icon: "test", title: "UI integration testing", description: "Render real components in headless windows, drive pointer and keyboard input, and assert state, focus, layout and accessibility.", apis: ["gpui_kit::test", "TestWindowExt"] },
               ],
               chooseKicker: "Three layers. One ecosystem.",
               chooseTitle: "Choose who owns the visual system.",
               chooseDescription: "Use gpui-component for a coherent product, build and own your design system on gpui-base, or open the application to JavaScript extensions with gpui-shell.",
               shipTitle: "Keep the product coherent",
               shipDescription: "gpui-component provides a complete, polished visual and interaction system ready to ship.",
-              shipPoints: ["60+ finished components", "Light and dark themes included", "Interaction details already handled"],
+              shipPoints: ["75+ components and primitives", "Light and dark themes included", "Interaction details already handled"],
               startComponent: "Get started",
               ownTitle: "Own the design system",
               ownDescription: "Reuse focus, selection, overlay and virtualization behavior while owning every pixel.",
@@ -272,7 +284,10 @@ const copy = computed(() =>
                 <div class="caps__grid">
                     <article v-for="cap in copy.caps" :key="cap.title" class="cap">
                         <div class="cap__head">
-                            <component :is="capIcons[cap.icon]" :size="17" />
+                            <svg v-if="cap.icon === 'wasm'" class="cap__head-wasm" viewBox="0 0 512 512" aria-hidden="true">
+                                <path d="m159.1 270.1h24l16.5 87.2 19.8-87.2h22.5l17.9 88.3 18.9-88.3h23.5l-30.6 128.2h-23.8L230 311l-19.1 87.3h-24.3zm170.2 0h37.8l37.5 128.2h-24.7l-8.2-28.6h-43.1l-6.3 28.6h-24.1zm14.4 31.6-10.5 47h32.6l-12.1-47zM297.4 75v2c0 22.9-18.6 41.5-41.5 41.5S214.4 99.9 214.4 77v-2H75v362h362V75z" />
+                            </svg>
+                            <component v-else :is="capIcons[cap.icon]" :size="17" />
                             <h3>{{ cap.title }}</h3>
                         </div>
                         <p>{{ cap.description }}</p>
@@ -299,6 +314,40 @@ const copy = computed(() =>
                             </template>
                             <template v-else-if="cap.icon === 'dock'">
                                 <b /><b /><b />
+                            </template>
+                            <template v-else-if="cap.icon === 'wasm'">
+                                <span class="cap__wasm-source">
+                                    <i class="cap__wasm-source-bar"><s /><s /><s /><b>Native</b></i>
+                                    <i class="cap__wasm-code"><s /><s /><s /></i>
+                                </span>
+                                <span class="cap__wasm-link"><i /><ArrowRight :size="13" /></span>
+                                <svg class="cap__wasm-logo" viewBox="0 0 512 512" role="img" aria-label="WebAssembly">
+                                    <rect width="512" height="512" fill="#fff" />
+                                    <path
+                                        fill="#111"
+                                        d="m159.1 270.1h24l16.5 87.2 19.8-87.2h22.5l17.9 88.3 18.9-88.3h23.5l-30.6 128.2h-23.8L230 311l-19.1 87.3h-24.3zm170.2 0h37.8l37.5 128.2h-24.7l-8.2-28.6h-43.1l-6.3 28.6h-24.1zm14.4 31.6-10.5 47h32.6l-12.1-47zM297.4 75v2c0 22.9-18.6 41.5-41.5 41.5S214.4 99.9 214.4 77v-2H75v362h362V75z"
+                                    />
+                                </svg>
+                                <span class="cap__wasm-link"><i /><ArrowRight :size="13" /></span>
+                                <span class="cap__wasm-browser">
+                                    <b class="cap__wasm-web-label">Web</b>
+                                    <i class="cap__wasm-ui"><b /><span><s /><s /><s /></span></i>
+                                </span>
+                            </template>
+                            <template v-else-if="cap.icon === 'a11y'">
+                                <span class="cap__a11y-ui">
+                                    <i class="cap__a11y-bar"><b /><b /><b /></i>
+                                    <i class="cap__a11y-content"><b /><span><s /><s class="is-focused" /><s /></span></i>
+                                </span>
+                                <span class="cap__a11y-link"><i /><ArrowRight :size="13" /></span>
+                                <span class="cap__a11y-tree">
+                                    <i><b>button</b><s>role</s></i>
+                                    <i><b>Send</b><s>name</s></i>
+                                    <i><b>press</b><s>action</s></i>
+                                </span>
+                            </template>
+                            <template v-else-if="cap.icon === 'test'">
+                                <i v-for="label in ['render', 'input', 'assert']" :key="label" class="cap__test-row"><Check :size="13" /><span>{{ label }}</span><b /></i>
                             </template>
                             <template v-else>
                                 <em v-for="t in 6" :key="t" />
@@ -641,6 +690,7 @@ html[lang^="zh"] .section-kicker { letter-spacing: 0.04em; }
 
 .cap__head { display: flex; align-items: center; gap: 0.6rem; }
 .cap__head h3 { margin: 0; font-size: 1rem; font-weight: 620; letter-spacing: -0.015em; }
+.cap__head-wasm { width: 1.05rem; height: 1.05rem; fill: currentColor; }
 
 .cap p { margin: 0.7rem 0 auto; color: var(--muted-foreground); font-size: 0.875rem; line-height: 1.65; }
 
@@ -728,6 +778,97 @@ html[lang^="zh"] .section-kicker { letter-spacing: 0.04em; }
 .cap__preview--dock b:first-child { flex: 0.55; }
 .cap__preview--dock b:nth-child(2) { flex: 1.3; border-color: color-mix(in srgb, var(--data-2) 45%, var(--border)); background: color-mix(in srgb, var(--data-2) 10%, transparent); }
 .cap__preview--dock b:last-child { flex: 0.8; }
+
+.cap__preview--wasm,
+.cap__preview--a11y {
+    align-items: center;
+    justify-content: center;
+    color: var(--muted-foreground);
+}
+
+.cap__wasm-logo {
+    width: 3.2rem;
+    height: 3.2rem;
+    flex: 0 0 auto;
+    filter: drop-shadow(0 0.18rem 0.35rem color-mix(in srgb, var(--foreground) 14%, transparent));
+}
+
+.cap__wasm-source,
+.cap__wasm-browser {
+    box-sizing: border-box;
+    width: 5.4rem;
+    height: 3.75rem;
+}
+
+.cap__wasm-source {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    background: var(--background);
+    color: var(--foreground);
+}
+
+.cap__wasm-source-bar { display: flex; align-items: center; gap: 0.15rem; height: 0.78rem; padding-inline: 0.28rem; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--data-2) 9%, var(--secondary)); }
+.cap__wasm-source-bar s { width: 0.19rem; height: 0.19rem; border-radius: 50%; background: color-mix(in srgb, var(--foreground) 25%, transparent); text-decoration: none; }
+.cap__wasm-source-bar b { margin-left: auto; color: var(--muted-foreground); font: 600 0.48rem/1 var(--font-mono); }
+.cap__wasm-code { display: grid; flex: 1; align-content: center; gap: 0.27rem; padding: 0.48rem; }
+.cap__wasm-code s { display: block; height: 0.18rem; background: var(--input); text-decoration: none; }
+.cap__wasm-code s:nth-child(2) { width: 72%; background: color-mix(in srgb, var(--data-2) 55%, var(--input)); }
+.cap__wasm-code s:nth-child(3) { width: 84%; }
+
+.cap__wasm-link { display: flex; align-items: center; width: 1.9rem; color: color-mix(in srgb, var(--foreground) 52%, var(--muted-foreground)); }
+.cap__wasm-link i { flex: 1; border-top: 1px dashed currentColor; }
+.cap__wasm-logo + .cap__wasm-link { color: var(--success); }
+
+.cap__wasm-browser { position: relative; display: flex; padding-top: 0.72rem; border: 1px solid var(--border); background: var(--background); }
+.cap__wasm-web-label { position: absolute; top: 0.12rem; left: 0.38rem; color: var(--success); font: 600 0.48rem/1 var(--font-mono); }
+.cap__wasm-ui { display: flex; flex: 1; gap: 0.3rem; padding: 0.38rem; }
+.cap__wasm-ui > b { width: 0.75rem; border-radius: 0.1rem; background: color-mix(in srgb, var(--success) 18%, var(--secondary)); }
+.cap__wasm-ui span { display: flex; flex: 1; flex-direction: column; gap: 0.24rem; }
+.cap__wasm-ui s { flex: 1; border: 1px solid var(--border); border-radius: 0.1rem; background: var(--sidebar); text-decoration: none; }
+.cap__wasm-ui s:first-child { border-color: color-mix(in srgb, var(--success) 55%, var(--border)); background: color-mix(in srgb, var(--success) 8%, var(--sidebar)); }
+
+.cap__a11y-ui,
+.cap__a11y-tree {
+    box-sizing: border-box;
+    height: 3.7rem;
+    border: 1px solid var(--border);
+    background: var(--background);
+}
+
+.cap__a11y-ui { display: flex; width: 6.6rem; flex-direction: column; }
+.cap__a11y-bar { display: flex; align-items: center; gap: 0.16rem; height: 0.75rem; padding-inline: 0.32rem; border-bottom: 1px solid var(--border); background: var(--secondary); }
+.cap__a11y-bar b { width: 0.2rem; height: 0.2rem; border-radius: 50%; background: color-mix(in srgb, var(--foreground) 24%, transparent); }
+.cap__a11y-content { display: flex; flex: 1; gap: 0.35rem; padding: 0.4rem; }
+.cap__a11y-content > b { width: 0.85rem; border-radius: 0.12rem; background: var(--secondary); }
+.cap__a11y-content span { display: flex; flex: 1; flex-direction: column; gap: 0.25rem; }
+.cap__a11y-content s { flex: 1; border-radius: 0.1rem; background: var(--input); text-decoration: none; }
+.cap__a11y-content .is-focused { outline: 1px solid var(--data-2); outline-offset: 1px; background: color-mix(in srgb, var(--data-2) 18%, var(--input)); }
+.cap__a11y-link { display: flex; align-items: center; width: 2.2rem; color: var(--data-2); }
+.cap__a11y-link i { flex: 1; border-top: 1px dashed currentColor; }
+.cap__a11y-tree { display: grid; width: 8rem; align-content: center; gap: 0.28rem; padding: 0.42rem; }
+.cap__a11y-tree i {
+    box-sizing: border-box;
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    justify-content: space-between;
+    gap: 0.35rem;
+    padding: 0.18rem 0.32rem;
+    border-left: 2px solid var(--data-2);
+    background: color-mix(in srgb, var(--data-2) 9%, var(--secondary));
+    color: var(--foreground);
+    font-style: normal;
+}
+.cap__a11y-tree i:nth-child(2) { border-left-color: var(--success); background: color-mix(in srgb, var(--success) 9%, var(--secondary)); }
+.cap__a11y-tree i:nth-child(3) { border-left-color: var(--warning); background: color-mix(in srgb, var(--warning) 9%, var(--secondary)); }
+.cap__a11y-tree b { overflow: hidden; font: 0.6rem/1.2 var(--font-mono); text-overflow: ellipsis; }
+.cap__a11y-tree s { color: var(--muted-foreground); font: 0.53rem/1.2 var(--font-mono); text-decoration: none; }
+
+.cap__preview--test { flex-direction: column; justify-content: center; }
+.cap__test-row { display: flex; align-items: center; gap: 0.45rem; color: var(--success); font-style: normal; }
+.cap__test-row span { width: 3.2rem; color: var(--muted-foreground); font: 0.68rem/1 var(--font-mono); }
+.cap__test-row b { flex: 1; height: 0.3rem; border-radius: 999px; background: color-mix(in srgb, var(--success) 24%, var(--border)); }
 
 .cap__preview--theme em { flex: 1; border: 1px solid var(--border); border-radius: 0.3rem; }
 .cap__preview--theme em:nth-child(1) { background: #0a0a0a; }

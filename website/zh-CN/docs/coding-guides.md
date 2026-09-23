@@ -1,7 +1,7 @@
 ---
 title: 编码指南
 description: 构建可维护 GPUI Kit 应用的架构、代码风格与命名规范
-order: -2.2
+order: -13
 ---
 
 # 编码指南
@@ -75,14 +75,10 @@ crate 边界也是工程边界。它让 Cargo 只重编译和测试较小的依�
 app.run(move |cx| {
     gpui_kit::init(cx);
 
-    cx.spawn(async move |cx| {
-        cx.open_window(WindowOptions::default(), |window, cx| {
-            let workspace = cx.new(|cx| Workspace::new(window, cx));
-            cx.new(|cx| Root::new(workspace, window, cx))
-        })
-        .expect("failed to open window");
+    gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+        cx.new(|cx| Workspace::new(window, cx))
     })
-    .detach();
+    .expect("failed to open window");
 });
 ```
 

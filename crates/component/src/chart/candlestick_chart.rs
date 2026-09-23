@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-use super::{build_band_labels, pointer_spring};
+use super::{build_band_labels, caller_id, pointer_spring};
 
 /// The hover a candlestick chart paints, sampled once per frame in [`Plot::hover`].
 #[derive(Clone, Copy)]
@@ -46,7 +46,8 @@ where
     grid: bool,
     bullish: Option<Hsla>,
     bearish: Option<Hsla>,
-    id: Option<ElementId>,
+    id: ElementId,
+    interactive: bool,
     hover: Option<CandlestickHover>,
 }
 
@@ -55,6 +56,7 @@ where
     X: Eq + Hash + Into<SharedString> + 'static,
     Y: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
 {
+    #[track_caller]
     pub fn new<I>(data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -72,18 +74,33 @@ where
             grid: true,
             bullish: None,
             bearish: None,
-            id: None,
+            id: caller_id(),
+            interactive: true,
             hover: None,
         }
     }
 
-    /// Enable an interactive hover tooltip (a highlight band and the open, high,
-    /// low and close of the hovered candle) for this chart.
+    /// Name this chart's [`ElementId`], replacing the default taken from the
+    /// construction site.
     ///
-    /// The `id` must be unique among sibling elements. Without it, the chart stays a
-    /// non-interactive plot.
+    /// Pass one where a single construction site renders several of these
+    /// charts as siblings: they share the default id, and with it one hover
+    /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
-        self.id = Some(id.into());
+        self.id = id.into();
+        self
+    }
+
+    /// Turn this chart's interactive layer on or off. On by default.
+    ///
+    /// The layer is the hitbox under the cursor and what it drives: a highlight
+    /// band marks the hovered candle, and a tooltip shows its open, high, low and
+    /// close. Turn it off for a chart that only decorates, or one an element
+    /// above it wants the cursor for: without a hitbox it neither answers the
+    /// mouse nor takes the hover from what sits over it. A chart that is off also
+    /// drops its path cache, which is keyed on the same id.
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
         self
     }
 
@@ -307,7 +324,7 @@ where
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.id.clone()
+        self.interactive.then(|| self.id.clone())
     }
 
     fn tooltip_state(

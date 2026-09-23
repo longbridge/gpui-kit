@@ -60,14 +60,9 @@ fn main() {
     app.run(move |cx| {
         gpui_kit::init(cx);
 
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| HelloWorld);
-                cx.new(|cx| Root::new(view, window, cx))
-            })
+        // 打开一个以 `Root` 包裹视图为根的窗口，对话框、抽屉、通知和菜单就都能用了。
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| HelloWorld))
             .expect("Failed to open window");
-        })
-        .detach();
     });
 }
 ```
@@ -80,12 +75,12 @@ fn main() {
 
 Input、List 和 DataTable 的状态由持有它们的视图保存。使用 `&mut Window` 创建 `InputState`，在 render 中通过 `Input::new(&self.input)` 渲染组件，不要每帧重新创建状态。事件订阅也必须保存在视图中，不能仅绑定到构造函数的局部变量。
 
-每个窗口以 `Root` 包装，应用内容还需渲染所使用的 dialog、sheet 和 notification 图层。完整实现及验证命令见[可执行应用示例](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes)。
+`gpui_kit::open_window` 把每个窗口的视图包在 `Root` 里，由 `Root` 在视图之上渲染 dialog、sheet 和 notification 图层。完整实现及验证命令见[可执行应用示例](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes)。
 
 <!-- recipe:settings:start -->
 ```rust
 use gpui_kit::component::{
-    ActiveTheme, IconName, Root, WindowExt,
+    ActiveTheme, IconName, WindowExt,
     button::Button,
     checkbox::Checkbox,
     form::{Field, Form},
@@ -143,7 +138,7 @@ impl Settings {
 }
 
 impl Render for Settings {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -201,9 +196,6 @@ impl Render for Settings {
                             }),
                     ),
             )
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
     }
 }
 ```
@@ -213,4 +205,3 @@ impl Render for Settings {
 
 - [组件总览](../component/index)
 - [资源与图标](./assets.md)
-

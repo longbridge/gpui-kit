@@ -131,7 +131,9 @@ Bubble::new()
 ```
 
 `Filled` is the default. `Ghost` removes the surface padding, border, and
-radius, and can occupy the full row. `Destructive` uses the semantic
+radius, can occupy the full row, and does not clip its children: there is no
+surface to clip against, so the shadows and overhanging controls of rich
+content stay visible. `Destructive` uses the semantic
 destructive color with a theme-aware translucent surface; its meaning must
 also be present in text or another non-color cue. All other variants keep the
 regular content surface and derive colors from the active theme.

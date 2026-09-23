@@ -1,6 +1,6 @@
 [package]
 name = "gpui-component-story-web"
-version = "0.6.4"
+version = "0.6.5"
 publish = false
 edition.workspace = true
 
@@ -17,6 +17,7 @@ log.workspace = true
 tracing-wasm = "0.2"
 console_log = "1.0"
 wasm-bindgen = "0.2"
+serde_json.workspace = true
 
 [lints]
 workspace = true

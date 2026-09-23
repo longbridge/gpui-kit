@@ -1,9 +1,9 @@
+use crate::root::WindowState;
 use gpui::{App, Entity, FocusHandle, Focusable as _, SharedString, Window};
 use gpui_base::OtpState;
 use ropey::Rope;
 
 use super::{EditorState, InputState, TextareaState};
-use crate::Root;
 
 /// Any input-like state, regardless of which input element renders it.
 ///
@@ -335,7 +335,7 @@ pub(super) fn sync_focused_input_registry(
 ) {
     let state = state.into();
     let focused = state.focus_handle(cx).is_focused(window);
-    Root::try_update(window, cx, |root, _, cx| {
+    WindowState::try_update(window, cx, |root, _, cx| {
         if focused {
             root.focused_input = Some(state.clone());
         } else if root.focused_input.as_ref() == Some(&state) {

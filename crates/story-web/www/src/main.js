@@ -43,21 +43,33 @@ function watchPlatformInput() {
   }).observe(document.body, { childList: true });
 }
 
-// The gallery is embedded same-origin in the documentation site, so it can read
-// the host page's appearance directly. That keeps the very first frame correct;
-// asking the host to post it to us would paint a light frame first.
-function hostPrefersDark() {
-  if (!embedded) return undefined;
+// Read mode, name, and the source JSON before the first frame. The host sets
+// these on <html> before paint, so a newly added website theme works even if
+// the gallery's embedded fallback themes have not been rebuilt yet.
+function hostTheme() {
+  if (!embedded) return { dark: undefined, name: undefined, source: undefined };
   try {
-    return window.parent.document.documentElement.classList.contains('dark');
+    const root = window.parent.document.documentElement;
+    return { dark: root.classList.contains('dark'), name: root.dataset.themeName, source: root.dataset.themeSource };
   } catch {
     // Cross-origin embedding: fall back to the viewer's own preference.
-    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    return { dark: window.matchMedia('(prefers-color-scheme: dark)').matches, name: undefined, source: undefined };
   }
 }
 
+const themeFiles = new Map();
+function loadThemeSource(source) {
+  if (!source) return Promise.resolve(undefined);
+  if (!themeFiles.has(source)) {
+    themeFiles.set(source, fetch(source)
+      .then((response) => response.ok ? response.text() : undefined)
+      .catch(() => undefined));
+  }
+  return themeFiles.get(source);
+}
+
 // Follow the host page when the reader toggles its theme.
-function watchHostTheme(wasm) {
+function watchHostTheme(wasm, applied) {
   if (!embedded) return;
   let root;
   try {
@@ -66,15 +78,19 @@ function watchHostTheme(wasm) {
     return;
   }
 
-  let current = root.classList.contains('dark');
-  new MutationObserver(() => {
-    const next = root.classList.contains('dark');
-    if (next !== current) {
+  let current = applied;
+  const sync = () => {
+    const next = hostTheme();
+    if (next.dark !== current.dark || next.name !== current.name || next.source !== current.source) {
       current = next;
-      document.documentElement.classList.toggle('dark', next);
-      wasm.set_theme(next);
+      document.documentElement.classList.toggle('dark', next.dark);
+      loadThemeSource(next.source).then((json) => {
+        if (current === next) wasm.set_theme(next.dark, next.name, json);
+      });
     }
-  }).observe(root, { attributes: true, attributeFilter: ['class'] });
+  };
+  new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ['class', 'data-theme-name'] });
+  sync();
 }
 
 async function init() {
@@ -90,8 +106,10 @@ async function init() {
     // A documentation page can deep-link to the matching Rust story while the
     // standalone gallery keeps its normal overview.
     const story = new URLSearchParams(window.location.search).get('story');
-    await wasm.run(story || undefined, hostPrefersDark());
-    watchHostTheme(wasm);
+    const theme = hostTheme();
+    const themeJson = await loadThemeSource(theme.source);
+    await wasm.run(story || undefined, theme.dark, theme.name, themeJson);
+    watchHostTheme(wasm, theme);
 
     // Hide loading indicator
     loadingEl?.remove();

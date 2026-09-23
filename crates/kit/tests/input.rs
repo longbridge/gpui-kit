@@ -1,3 +1,4 @@
+mod common;
 use gpui::{
     AppContext, Context, Entity, TestAppContext, Window, WindowHandle, div, prelude::*, px,
 };
@@ -31,21 +32,23 @@ impl Render for Inputs {
             .child(Input::new(&self.secret).id("secret").w(px(240.)))
     }
 }
-fn inputs(cx: &mut TestAppContext) -> WindowHandle<Inputs> {
+fn inputs(cx: &mut TestAppContext) -> (WindowHandle<gpui_kit::base::Root>, Entity<Inputs>) {
     cx.update(gpui_component::init);
-    cx.add_window(|window, cx| Inputs {
-        first: cx.new(|cx| InputState::new(window, cx)),
-        second: cx.new(|cx| InputState::new(window, cx)),
-        guarded: cx.new(|cx| InputState::new(window, cx).default_value("fixed")),
-        secret: cx.new(|cx| InputState::new(window, cx).masked(true)),
-        disabled: false,
-        readonly: false,
+    common::open_window(cx, None, |window, cx| {
+        cx.new(|cx| Inputs {
+            first: cx.new(|cx| InputState::new(window, cx)),
+            second: cx.new(|cx| InputState::new(window, cx)),
+            guarded: cx.new(|cx| InputState::new(window, cx).default_value("fixed")),
+            secret: cx.new(|cx| InputState::new(window, cx).masked(true)),
+            disabled: false,
+            readonly: false,
+        })
     })
 }
 
 #[gpui::test]
 fn text_goes_only_to_the_focused_input(cx: &mut TestAppContext) {
-    let handle = inputs(cx);
+    let (handle, handle_content) = inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
         window.click("first", cx);
         window.input("A🦀", cx);
@@ -59,25 +62,23 @@ fn text_goes_only_to_the_focused_input(cx: &mut TestAppContext) {
         assert_eq!(previous.focused(), Some(true));
     })
     .unwrap();
-    handle
-        .update(cx, |view, _, cx| {
-            assert_eq!(view.first.read(cx).value(), "A🦀");
-            assert_eq!(view.second.read(cx).value(), "中文");
-        })
-        .unwrap();
+    common::update_content(handle, &handle_content, cx, |view, _, cx| {
+        assert_eq!(view.first.read(cx).value(), "A🦀");
+        assert_eq!(view.second.read(cx).value(), "中文");
+    })
+    .unwrap();
 }
 
 #[gpui::test]
 fn readonly_and_disabled_inputs_reject_native_typing(cx: &mut TestAppContext) {
-    let handle = inputs(cx);
+    let (handle, handle_content) = inputs(cx);
     for disabled in [false, true] {
-        handle
-            .update(cx, |view, _, cx| {
-                view.disabled = disabled;
-                view.readonly = !disabled;
-                cx.notify();
-            })
-            .unwrap();
+        common::update_content(handle, &handle_content, cx, |view, _, cx| {
+            view.disabled = disabled;
+            view.readonly = !disabled;
+            cx.notify();
+        })
+        .unwrap();
         cx.update_window(handle.into(), |_, window, cx| {
             window.click("guarded", cx);
             window.input("ignored", cx);
@@ -86,17 +87,16 @@ fn readonly_and_disabled_inputs_reject_native_typing(cx: &mut TestAppContext) {
             assert_eq!(input.value(), Some("fixed"));
         })
         .unwrap();
-        handle
-            .update(cx, |view, _, cx| {
-                assert_eq!(view.guarded.read(cx).value(), "fixed")
-            })
-            .unwrap();
+        common::update_content(handle, &handle_content, cx, |view, _, cx| {
+            assert_eq!(view.guarded.read(cx).value(), "fixed")
+        })
+        .unwrap();
     }
 }
 
 #[gpui::test]
 fn masked_input_handles_typing_without_reporting_secret_value(cx: &mut TestAppContext) {
-    let handle = inputs(cx);
+    let (handle, handle_content) = inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
         window.click("secret", cx);
         window.input("secret", cx);
@@ -105,16 +105,15 @@ fn masked_input_handles_typing_without_reporting_secret_value(cx: &mut TestAppCo
         assert_eq!(secret.value(), None);
     })
     .unwrap();
-    handle
-        .update(cx, |view, _, cx| {
-            assert_eq!(view.secret.read(cx).value(), "secret")
-        })
-        .unwrap();
+    common::update_content(handle, &handle_content, cx, |view, _, cx| {
+        assert_eq!(view.secret.read(cx).value(), "secret")
+    })
+    .unwrap();
 }
 
 #[gpui::test]
 fn existing_gpui_keyboard_editing_updates_observed_value(cx: &mut TestAppContext) {
-    let handle = inputs(cx);
+    let (handle, handle_content) = inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
         window.click("first", cx);
         window.input("ab", cx);
@@ -127,11 +126,10 @@ fn existing_gpui_keyboard_editing_updates_observed_value(cx: &mut TestAppContext
         assert_eq!(window.find("first").value(), Some("a"));
     })
     .unwrap();
-    handle
-        .update(cx, |view, _, cx| {
-            assert_eq!(view.first.read(cx).value(), "a")
-        })
-        .unwrap();
+    common::update_content(handle, &handle_content, cx, |view, _, cx| {
+        assert_eq!(view.first.read(cx).value(), "a")
+    })
+    .unwrap();
 }
 
 struct ScopedInputs {
@@ -157,17 +155,21 @@ impl Render for ScopedInputs {
             )
     }
 }
-fn scoped_inputs(cx: &mut TestAppContext) -> WindowHandle<ScopedInputs> {
+fn scoped_inputs(
+    cx: &mut TestAppContext,
+) -> (WindowHandle<gpui_kit::base::Root>, Entity<ScopedInputs>) {
     cx.update(gpui_component::init);
-    cx.add_window(|window, cx| ScopedInputs {
-        left: cx.new(|cx| InputState::new(window, cx)),
-        right: cx.new(|cx| InputState::new(window, cx)),
+    common::open_window(cx, None, |window, cx| {
+        cx.new(|cx| ScopedInputs {
+            left: cx.new(|cx| InputState::new(window, cx)),
+            right: cx.new(|cx| InputState::new(window, cx)),
+        })
     })
 }
 
 #[gpui::test]
 fn scoped_keyboard_uses_the_focused_input_in_the_selected_scope(cx: &mut TestAppContext) {
-    let handle = scoped_inputs(cx);
+    let (handle, _) = scoped_inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
         let mut dialog = window.within("right");
@@ -182,7 +184,7 @@ fn scoped_keyboard_uses_the_focused_input_in_the_selected_scope(cx: &mut TestApp
 
 #[gpui::test]
 fn scoped_keyboard_rejects_focus_outside_the_selected_scope(cx: &mut TestAppContext) {
-    let handle = scoped_inputs(cx);
+    let (handle, _) = scoped_inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
         window.within("left").click("name", cx);

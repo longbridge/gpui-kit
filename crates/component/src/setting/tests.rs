@@ -180,6 +180,33 @@ fn search_preserves_group_and_item_identity(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn footer_follows_group_search_visibility(cx: &mut TestAppContext) {
+    let (host, cx) = setup(cx);
+    cx.update(|_, cx| {
+        host.update(cx, |host, cx| {
+            host.pages[1].groups[2] = host.pages[1].groups[2].clone().footer(|_, _| {
+                div()
+                    .child("Changes apply to this device only.")
+                    .debug_selector(|| "font-footer".into())
+            });
+            cx.notify();
+        });
+    });
+    search(&host, "font", cx);
+    assert!(cx.debug_bounds("setting-1-2-1").is_some());
+    assert!(cx.debug_bounds("font-footer").is_some());
+
+    // Footer copy does not independently make a group match the query.
+    search(&host, "colors", cx);
+    assert!(cx.debug_bounds("setting-1-1-0").is_some());
+    assert!(cx.debug_bounds("font-footer").is_none());
+
+    search(&host, "font", cx);
+    assert!(cx.debug_bounds("font-footer").is_some());
+    assert_eq!(selection(&host, cx), (1, None));
+}
+
+#[gpui::test]
 fn resetting_search_results_leaves_hidden_settings_unchanged(cx: &mut TestAppContext) {
     use std::{cell::Cell, rc::Rc};
 

@@ -3,10 +3,7 @@ use std::cell::RefCell;
 
 use gpui_component_story::{Gallery, StoryRoot};
 use gpui_kit::assets::Assets;
-use gpui_kit::component::{
-    Root,
-    theme::{Theme, ThemeMode},
-};
+use gpui_kit::component::theme::{Theme, ThemeMode, ThemeRegistry, ThemeSet};
 use gpui_kit::{prelude::*, *};
 use wasm_bindgen::prelude::*;
 
@@ -14,26 +11,38 @@ thread_local! {
     static APPLICATION: RefCell<Option<ApplicationHandle>> = const { RefCell::new(None) };
 }
 
-/// Applies a theme mode and restores the bundled web fonts.
-///
-/// `Theme::change` reapplies the theme config, which can carry its own font
-/// family; the host system fonts are unavailable in wasm, so the bundled ones
-/// are put back afterwards.
-fn apply_theme(mode: ThemeMode, cx: &mut App) {
-    Theme::change(mode, None, cx);
+/// Applies the selected theme and restores the bundled web fonts. Theme files
+/// may name system fonts that are unavailable in wasm.
+fn apply_theme(mode: ThemeMode, name: Option<&str>, source_json: Option<&str>, cx: &mut App) {
+    let registry = ThemeRegistry::global(cx);
+    let source_config = source_json
+        .and_then(|json| serde_json::from_str::<ThemeSet>(json).ok())
+        .and_then(|set| {
+            set.themes
+                .into_iter()
+                .find(|theme| Some(theme.name.as_ref()) == name)
+        })
+        .map(std::rc::Rc::new);
+    let config = source_config
+        .or_else(|| name.and_then(|name| registry.themes().get(name).cloned()))
+        .unwrap_or_else(|| match mode {
+            ThemeMode::Dark => registry.default_dark_theme().clone(),
+            ThemeMode::Light => registry.default_light_theme().clone(),
+        });
     Theme::update(cx, |theme| {
+        theme.apply_config(&config);
         theme.font_family = "Inter Variable".into();
         theme.mono_font_family = "JetBrains Mono".into();
     });
 }
 
-/// Switches the gallery between light and dark after it is running.
+/// Applies the host website's selected theme after the gallery is running.
 ///
 /// The embedding documentation page calls this when its own appearance
 /// changes, so the gallery never sits in a dark page wearing a light theme.
 #[cfg(target_family = "wasm")]
 #[wasm_bindgen]
-pub fn set_theme(dark: bool) {
+pub fn set_theme(dark: bool, name: Option<String>, source_json: Option<String>) {
     let mode = if dark {
         ThemeMode::Dark
     } else {
@@ -42,8 +51,7 @@ pub fn set_theme(dark: bool) {
     APPLICATION.with(|application| {
         if let Some(handle) = application.borrow().as_ref() {
             handle.update(|cx| {
-                apply_theme(mode, cx);
-                cx.refresh_windows();
+                apply_theme(mode, name.as_deref(), source_json.as_deref(), cx);
             });
         }
     });
@@ -75,7 +83,12 @@ fn web_application() -> Application {
 }
 
 #[wasm_bindgen]
-pub fn run(story: Option<String>, dark: Option<bool>) -> Result<(), JsValue> {
+pub fn run(
+    story: Option<String>,
+    dark: Option<bool>,
+    theme_name: Option<String>,
+    theme_json: Option<String>,
+) -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
 
     // Initialize logging to browser console
@@ -123,23 +136,24 @@ pub fn run(story: Option<String>, dark: Option<bool>) -> Result<(), JsValue> {
                 Some(true) => ThemeMode::Dark,
                 _ => ThemeMode::Light,
             },
+            theme_name.as_deref(),
+            theme_json.as_deref(),
             cx,
         );
 
-        cx.open_window(WindowOptions::default(), move |window, cx| {
+        gpui_kit::open_window(WindowOptions::default(), cx, move |window, cx| {
             let embedded = story.is_some();
             let view = match story.as_deref() {
                 Some(story) => Gallery::embedded_view(story, window, cx),
                 None => Gallery::view(None, window, cx),
             };
-            let story_root = cx.new(|cx| {
+            cx.new(|cx| {
                 if embedded {
                     StoryRoot::embedded(view, window, cx)
                 } else {
                     StoryRoot::new("GPUI Component", view, window, cx)
                 }
-            });
-            cx.new(|cx| Root::new(story_root, window, cx))
+            })
         })
         .expect("Failed to open window");
         cx.activate(true);

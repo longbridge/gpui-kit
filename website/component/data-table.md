@@ -325,6 +325,44 @@ let state = cx.new(|cx| {
 });
 ```
 
+### Reading and Writing the Selection
+
+A table holds one selection at a time: nothing, a row, a column, or a cell.
+`selection()` returns it as a single `TableSelection` value, and
+`set_selection()` writes one back, so persisting and restoring the selection
+is one read and one write:
+
+```rust
+use gpui_component::table::TableSelection;
+
+match state.read(cx).selection() {
+    TableSelection::None => {}
+    TableSelection::Row(row_ix) => println!("Row {row_ix}"),
+    TableSelection::Column(col_ix) => println!("Column {col_ix}"),
+    TableSelection::Cell(row_ix, col_ix) => println!("Cell ({row_ix}, {col_ix})"),
+}
+
+state.update(cx, |state, cx| {
+    // Scrolls and emits exactly as `set_selected_cell(5, 3, cx)` would.
+    state.set_selection(TableSelection::Cell(5, 3), cx);
+});
+```
+
+The positional getters `selected_row()`, `selected_col()` and `selected_cell()`
+each answer only for their own kind of selection. `selected_row()` is `Some`
+only when a row itself is selected; a selected cell does not surface through it,
+and selecting a row clears what `selected_cell()` reports. When you need the row
+a selected cell sits in, map it from the cell:
+
+```rust
+let row_ix = state.read(cx).selected_cell().map(|(row_ix, _)| row_ix);
+```
+
+Keyboard navigation remembers the last row and column position across mode
+changes. Pressing `Down` after selecting a column continues from the row that
+was selected before, even though `selected_row()` returned `None` in column
+mode.
+
 ### Column Resizing and Moving
 
 Enable dynamic column management:
@@ -533,7 +571,8 @@ When cell selection is enabled:
 #### Programmatic Cell Selection
 
 ```rust
-// Get the currently selected cell
+// Get the currently selected cell. `None` while a row or column is
+// selected instead; see "Reading and Writing the Selection" above.
 if let Some((row_ix, col_ix)) = state.read(cx).selected_cell() {
     println!("Current cell: ({}, {})", row_ix, col_ix);
 }
@@ -620,6 +659,7 @@ impl TableDelegate for MyTableDelegate {
 - [TableDelegate] - Trait for implementing table data source
 - [Column] - Column configuration
 - [TableEvent] - Table events (selection, clicks, etc.)
+- [TableSelection] - The current selection as one value: `None`, `Row`, `Column`, or `Cell`
 
 ### Column Types
 
@@ -634,10 +674,12 @@ impl TableDelegate for MyTableDelegate {
 - `cell_selectable(bool)` - Enable/disable cell selection
 - `row_selectable(bool)` - Enable/disable row selection
 - `col_selectable(bool)` - Enable/disable column selection
-- `selected_cell()` - Get currently selected cell
+- `selection()` - Get the current selection as a `TableSelection`
+- `set_selection(selection, cx)` - Set the selection from a `TableSelection`; `TableSelection::None` clears it
+- `selected_cell()` - Get the selected cell; `None` unless a cell is selected
 - `set_selected_cell(row_ix, col_ix, cx)` - Select a specific cell
-- `selected_row()` - Get currently selected row
-- `selected_col()` - Get currently selected column
+- `selected_row()` - Get the selected row; `None` unless a row itself is selected
+- `selected_col()` - Get the selected column; `None` unless a column itself is selected
 - `clear_selection(cx)` - Clear all selections
 - `scroll_to_row(row_ix, cx)` - Scroll to specific row
 - `scroll_to_col(col_ix, cx)` - Scroll to specific column
@@ -676,5 +718,6 @@ impl TableDelegate for MyTableDelegate {
 [TableDelegate]: https://docs.rs/gpui-component/latest/gpui_component/table/trait.TableDelegate.html
 [Column]: https://docs.rs/gpui-component/latest/gpui_component/table/struct.Column.html
 [TableEvent]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.TableEvent.html
+[TableSelection]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.TableSelection.html
 [ColumnSort]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.ColumnSort.html
 [ColumnFixed]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.ColumnFixed.html

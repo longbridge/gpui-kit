@@ -1,7 +1,7 @@
 ---
 title: Design Guides
 description: Product and interaction design guidance for GPUI Kit applications
-order: -2.1
+order: -12
 ---
 
 # Design Guides

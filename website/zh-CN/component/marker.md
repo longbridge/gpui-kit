@@ -22,7 +22,9 @@ description: 用于会话状态、通知边界和分隔标记的紧凑组合行�
 use gpui_kit::{ParentElement as _, StyleRefinement, Styled as _};
 use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
-    marker::{Marker, MarkerContent, MarkerIcon, MarkerLoadingStyle, MarkerVariant},
+    marker::{
+        Marker, MarkerAlignment, MarkerContent, MarkerIcon, MarkerLoadingStyle, MarkerVariant,
+    },
     shimmer::{ShimmerStyle, ShimmerText},
     spinner::Spinner,
     ActiveTheme as _, Colorize as _, Icon, IconName, Sizable as _, StyledExt as _,
@@ -64,6 +66,23 @@ Marker::new()
 ```
 
 Separator 的装饰线是内部实现，不携带语义内容。文本本身应说明它代表的日期、边界或状态。
+
+## 对齐
+
+Marker 占满整行，`alignment(...)` 决定 child 在行内的位置，以及折行文字的对齐方式：
+
+```rust
+Marker::new()
+    .alignment(MarkerAlignment::Center)
+    .icon(MarkerIcon::new().child(Icon::new(IconName::Info)))
+    .content(MarkerContent::new().text("消息已端到端加密"));
+
+Marker::new()
+    .alignment(MarkerAlignment::End)
+    .content(MarkerContent::new().text("已送达"))
+```
+
+不设置时，`Separator` 的文字居中在两条装饰线之间，其余 variant 从起始侧开始；显式设置对任何 variant 都生效，此时 `Separator` 只保留文字远端那一侧的线：`Start` 只画后面的线，`End` 只画前面的线。会话里的系统提示行（已停止回答、请求失败并附带重试）通常居中；`End` 适合挂在发出消息下方的送达状态。
 
 ## 状态内容与图标
 
@@ -269,6 +288,7 @@ Marker::new()
 | --- | --- |
 | `new()` | 创建默认的 plain marker。 |
 | `with_variant(MarkerVariant)` | 设置 `Plain`、`Separator` 或 `Border`。 |
+| `alignment(MarkerAlignment)` | 设置 child 在行内的位置：起始侧、居中或结束侧。不设置时 `Separator` 居中、其余起始侧。 |
 | `loading(bool)` | 开启或关闭 loading。默认关闭。 |
 | `with_loading_style(MarkerLoadingStyle)` | 选择 `Spinner` 或 `Shimmer`。 |
 | `with_shimmer_style(ShimmerStyle)` | 配置文字 shimmer。 |
@@ -292,6 +312,7 @@ Marker::new()
 
 - [Marker]
 - [MarkerVariant]
+- [MarkerAlignment]
 - [MarkerLoadingStyle]
 - [MarkerIcon]
 - [MarkerContent]
@@ -300,6 +321,7 @@ Marker::new()
 
 [Marker]: https://docs.rs/gpui-component/latest/gpui_component/marker/struct.Marker.html
 [MarkerVariant]: https://docs.rs/gpui-component/latest/gpui_component/marker/enum.MarkerVariant.html
+[MarkerAlignment]: https://docs.rs/gpui-component/latest/gpui_component/marker/enum.MarkerAlignment.html
 [MarkerLoadingStyle]: https://docs.rs/gpui-component/latest/gpui_component/marker/enum.MarkerLoadingStyle.html
 [MarkerIcon]: https://docs.rs/gpui-component/latest/gpui_component/marker/struct.MarkerIcon.html
 [MarkerContent]: https://docs.rs/gpui-component/latest/gpui_component/marker/struct.MarkerContent.html

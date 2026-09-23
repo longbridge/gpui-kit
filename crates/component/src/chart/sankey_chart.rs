@@ -9,6 +9,7 @@ use gpui::{
 };
 use gpui_component_macros::IntoPlot;
 
+use super::caller_id;
 use crate::{
     ActiveTheme,
     plot::{
@@ -128,7 +129,10 @@ pub struct SankeyChart<T: 'static> {
     link_opacity: f32,
     min_link_width: f32,
     label_gap: f32,
-    id: Option<ElementId>,
+    tooltip_name: Option<Rc<dyn Fn(&T) -> SharedString + 'static>>,
+    tooltip_value: Option<Rc<dyn Fn(&T, f64) -> SharedString + 'static>>,
+    id: ElementId,
+    interactive: bool,
     /// The placement for this frame, resolved in `prepaint` (measuring labels
     /// needs the window) and read by `tooltip_state` and `paint`.
     frame: Option<Rc<SankeyFrame>>,
@@ -138,6 +142,7 @@ pub struct SankeyChart<T: 'static> {
 impl<T> SankeyChart<T> {
     /// Create a chart from nodes and links; links reference nodes by their
     /// index in `nodes` (map string ids to indices before constructing).
+    #[track_caller]
     pub fn new<I, L>(nodes: I, links: L) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -159,20 +164,36 @@ impl<T> SankeyChart<T> {
             link_opacity: DEFAULT_LINK_OPACITY,
             min_link_width: DEFAULT_MIN_LINK_WIDTH,
             label_gap: DEFAULT_LABEL_GAP,
-            id: None,
+            tooltip_name: None,
+            tooltip_value: None,
+            id: caller_id(),
+            interactive: true,
             frame: None,
             hover: None,
         }
     }
 
-    /// Enable an interactive hover tooltip for this chart: the links of the
-    /// hovered node stand out from the rest and the tooltip shows its label and
-    /// throughput.
+    /// Name this chart's [`ElementId`], replacing the default taken from the
+    /// construction site.
     ///
-    /// The `id` must be unique among sibling elements. Without it, the chart
-    /// stays a non-interactive plot.
+    /// Pass one where a single construction site renders several of these
+    /// charts as siblings: they share the default id, and with it one hover
+    /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
-        self.id = Some(id.into());
+        self.id = id.into();
+        self
+    }
+
+    /// Turn this chart's interactive layer on or off. On by default.
+    ///
+    /// The layer is the hitbox under the cursor and what it drives: the hovered
+    /// node's links stand out from the rest, and a tooltip shows its label and
+    /// throughput. Turn it off for a chart that only decorates, or one an element
+    /// above it wants the cursor for: without a hitbox it neither answers the
+    /// mouse nor takes the hover from what sits over it. A chart that is off also
+    /// drops its path cache, which is keyed on the same id.
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
         self
     }
 
@@ -252,6 +273,29 @@ impl<T> SankeyChart<T> {
     /// (max of incoming and outgoing flow, in unscaled units).
     pub fn labels(mut self, labels: impl Fn(&T, f64) -> Vec<SankeyLabel> + 'static) -> Self {
         self.labels = Some(Rc::new(labels));
+        self
+    }
+
+    /// Name the node under the cursor in the hover tooltip's row, beside its
+    /// throughput. Unset, the row carries no name at all.
+    ///
+    /// A sankey shows one number per node, so the node's own name is what the
+    /// row wants; without it the row reads as a swatch and a number with a gap
+    /// between them. The alternative was to title the tooltip from
+    /// `node_label`, but that also draws the name beside the node — and a chart
+    /// drawing its text through `labels` sets neither.
+    pub fn tooltip_name(mut self, name: impl Fn(&T) -> SharedString + 'static) -> Self {
+        self.tooltip_name = Some(Rc::new(name));
+        self
+    }
+
+    /// Set the text of the hover tooltip's row, the node's throughput.
+    ///
+    /// `value_label` supplies it when this is unset, and the raw number when
+    /// neither is set — which is what a chart drawing its text through `labels`
+    /// gets, however carefully it formats the value it draws.
+    pub fn tooltip_value(mut self, value: impl Fn(&T, f64) -> SharedString + 'static) -> Self {
+        self.tooltip_value = Some(Rc::new(value));
         self
     }
 
@@ -479,9 +523,10 @@ impl<T> Plot for SankeyChart<T> {
 
         let node_labels = self.node_labels(cx);
 
-        // An identified chart keeps its placement across frames; without an id,
-        // sibling charts would share one cache and thrash it.
-        self.frame = if self.id.is_some() {
+        // Caching hangs off the chart's own id, which only an interactive chart
+        // puts on the stack; without one, siblings would share a slot and thrash
+        // it, so a chart that is off places itself afresh each paint.
+        self.frame = if self.interactive {
             let key = self.frame_key(bounds, &node_labels);
             let cache =
                 window.use_keyed_state("sankey-frame", cx, |_, _| SankeyFrameCache::default());
@@ -639,7 +684,7 @@ impl<T> Plot for SankeyChart<T> {
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.id.clone()
+        self.interactive.then(|| self.id.clone())
     }
 
     fn tooltip_state(
@@ -686,9 +731,9 @@ impl<T> Plot for SankeyChart<T> {
                 palette[state.index % palette.len()]
             }
         };
-        let value_text = match &self.value_label {
-            Some(value_label) => value_label(datum, value),
-            None => format!("{}", value).into(),
+        let value_text = match self.tooltip_value.as_ref().or(self.value_label.as_ref()) {
+            Some(value_text) => value_text(datum, value),
+            None => format!("{value}").into(),
         };
 
         Some(
@@ -698,7 +743,14 @@ impl<T> Plot for SankeyChart<T> {
                 .when_some(self.node_label.as_ref(), |this, label| {
                     this.title(label(datum))
                 })
-                .row(color, SharedString::default(), value_text)
+                .row(
+                    color,
+                    match self.tooltip_name.as_ref() {
+                        Some(tooltip_name) => tooltip_name(datum),
+                        None => SharedString::default(),
+                    },
+                    value_text,
+                )
                 .into_any_element(),
         )
     }
@@ -811,5 +863,18 @@ mod tests {
             SankeyLink::new(1, 2, 20.),
             SankeyLink::new(1, 3, 10.),
         ]
+    }
+
+    /// A chart drawing its text through `labels` sets neither `node_label` nor
+    /// `value_label`, so its tooltip row had no name and an unformatted number.
+    #[test]
+    fn test_tooltip_text_is_settable_without_drawing_labels() {
+        let chart = SankeyChart::new(vec!["Revenue"], Vec::<SankeyLink>::new())
+            .tooltip_name(|_| "Revenue".into())
+            .tooltip_value(|_, value| format!("{value:.0}M").into());
+        assert!(chart.tooltip_name.is_some());
+        assert!(chart.tooltip_value.is_some());
+        assert!(chart.node_label.is_none());
+        assert!(chart.value_label.is_none());
     }
 }

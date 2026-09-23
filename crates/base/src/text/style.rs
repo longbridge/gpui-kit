@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use gpui::{HighlightStyle, Hsla, Pixels, Rems, StyleRefinement, px, rems};
+use gpui::{HighlightStyle, Hsla, Rems, StyleRefinement, rems};
 
 use crate::ColorTokens;
 
@@ -19,8 +19,7 @@ pub struct TextViewStyle {
     code_background: Hsla,
     border: Hsla,
     paragraph_gap: Rems,
-    heading_base_font_size: Pixels,
-    heading_font_size: Option<Arc<dyn Fn(u8, Pixels) -> Pixels + Send + Sync + 'static>>,
+    heading: Arc<dyn Fn(u8) -> StyleRefinement + Send + Sync + 'static>,
     code_block: StyleRefinement,
     table: StyleRefinement,
     table_head: StyleRefinement,
@@ -38,15 +37,7 @@ impl PartialEq for TextViewStyle {
             && self.selection == other.selection
             && self.code_background == other.code_background
             && self.border == other.border
-            && self.heading_base_font_size == other.heading_base_font_size
-            && match (&self.heading_font_size, &other.heading_font_size) {
-                (Some(left), Some(right)) => (1..=6).all(|level| {
-                    left(level, self.heading_base_font_size)
-                        == right(level, other.heading_base_font_size)
-                }),
-                (None, None) => true,
-                _ => false,
-            }
+            && (1..=6).all(|level| (self.heading)(level) == (other.heading)(level))
             && self.code_block == other.code_block
             && self.table == other.table
             && self.table_head == other.table_head
@@ -85,8 +76,7 @@ impl TextViewStyle {
             code_background: colors.accent,
             border: colors.border,
             paragraph_gap: rems(1.),
-            heading_base_font_size: px(14.),
-            heading_font_size: None,
+            heading: Arc::new(|_| StyleRefinement::default()),
             code_block: StyleRefinement::default(),
             table: StyleRefinement::default(),
             table_head: StyleRefinement::default(),
@@ -144,21 +134,12 @@ impl TextViewStyle {
         self
     }
 
-    /// Sets the base font size headings are derived from. Defaults to 14px.
-    pub fn with_heading_base_font_size(mut self, size: Pixels) -> Self {
-        self.heading_base_font_size = size;
-        self
-    }
-
-    /// Sets the function that resolves a heading's font size.
-    ///
-    /// The first parameter is the heading level (1-6), the second is
-    /// [`Self::heading_base_font_size`].
-    pub fn with_heading_font_size<F>(mut self, f: F) -> Self
+    /// Sets the style refinement for headings, selected by heading level (1-6).
+    pub fn with_heading<F>(mut self, heading: F) -> Self
     where
-        F: Fn(u8, Pixels) -> Pixels + Send + Sync + 'static,
+        F: Fn(u8) -> StyleRefinement + Send + Sync + 'static,
     {
-        self.heading_font_size = Some(Arc::new(f));
+        self.heading = Arc::new(heading);
         self
     }
 
@@ -247,20 +228,9 @@ impl TextViewStyle {
         self.paragraph_gap
     }
 
-    /// The base font size headings are derived from.
-    pub fn heading_base_font_size(&self) -> Pixels {
-        self.heading_base_font_size
-    }
-
-    /// The size this style gives a heading of `level`, when it resolves
-    /// heading sizes itself.
-    ///
-    /// `None` means the caller keeps whatever size it had already derived from
-    /// [`Self::heading_base_font_size`].
-    pub fn heading_font_size(&self, level: u8) -> Option<Pixels> {
-        self.heading_font_size
-            .as_ref()
-            .map(|f| f(level, self.heading_base_font_size))
+    /// The style refinement for a heading at `level` (1-6).
+    pub fn heading(&self, level: u8) -> StyleRefinement {
+        (self.heading)(level)
     }
 
     /// The style refinement for code blocks.
@@ -307,14 +277,28 @@ impl TextViewStyle {
 
 #[cfg(test)]
 mod tests {
+    use gpui::{Styled as _, px};
+
     use super::*;
 
     #[test]
     fn selection_layout_fingerprint_covers_callback_table_and_theme_fields() {
         let base = TextViewStyle::default();
-        let heading = base.clone().with_heading_font_size(|_, size| size);
-        assert!(heading == base.clone().with_heading_font_size(|_, size| size));
-        assert!(heading != base.clone().with_heading_font_size(|_, size| size * 2.));
+        let heading = base
+            .clone()
+            .with_heading(|_| StyleRefinement::default().text_size(px(14.)));
+        assert!(
+            heading
+                == base
+                    .clone()
+                    .with_heading(|_| StyleRefinement::default().text_size(px(14.)))
+        );
+        assert!(
+            heading
+                != base
+                    .clone()
+                    .with_heading(|_| StyleRefinement::default().text_size(px(28.)))
+        );
 
         let mut table = StyleRefinement::default();
         table.text.white_space = Some(gpui::WhiteSpace::Nowrap);
@@ -325,7 +309,8 @@ mod tests {
 
     #[test]
     fn cloning_preserves_the_same_heading_callback_fingerprint() {
-        let style = TextViewStyle::default().with_heading_font_size(|_, size| size);
+        let style = TextViewStyle::default()
+            .with_heading(|_| StyleRefinement::default().text_size(px(14.)));
         assert!(style == style.clone());
     }
 
@@ -346,13 +331,21 @@ mod tests {
     }
 
     #[test]
-    fn heading_font_size_resolves_through_the_installed_callback() {
-        let style = TextViewStyle::default();
-        assert_eq!(style.heading_font_size(1), None);
+    fn heading_refinement_defaults_empty_and_resolves_by_level() {
+        let base = TextViewStyle::default();
+        assert_eq!(base.heading(1), StyleRefinement::default());
 
-        let style = style.with_heading_font_size(|level, base| base * (7. - level as f32));
-        assert_eq!(style.heading_font_size(1), Some(px(14.) * 6.));
-        assert_eq!(style.heading_font_size(6), Some(px(14.)));
+        let style = base.clone().with_heading(|level| match level {
+            1 => StyleRefinement::default().pt(rems(1.)).pb(rems(0.5)),
+            _ => StyleRefinement::default().pb(rems(0.25)),
+        });
+
+        assert_eq!(
+            style.heading(1),
+            StyleRefinement::default().pt(rems(1.)).pb(rems(0.5))
+        );
+        assert_eq!(style.heading(2), StyleRefinement::default().pb(rems(0.25)));
+        assert!(style != base);
     }
 
     #[test]

@@ -9,16 +9,21 @@ GPUI Kit 是一个基于 GPUI 的综合性 Rust 桌面应用开发框架。
 
 它将完整 UI 系统与应用级数据、布局、内容和编辑能力整合在一起，并以三个层层递进的 crate 交付，只需依赖 `gpui-kit` 一个包即可全部获得：
 
-- **`gpui-base`**：无样式的行为、受控状态、焦点、浮层、虚拟列表、Dock 基础设施与语义化设计 token。
-- **`gpui-component`**：即 GPUI Component，完整的带样式组件库，提供 60+ 控件、主题、数据表格、Dock 布局和代码编辑器。
+- **`gpui-base`**：无样式的行为、受控状态、Focus、浮层、虚拟列表、Dock 基础设施与语义化设计 token。
+- **`gpui-component`**：即 GPUI Component，完整的带样式组件库，提供 75+ 个有完整文档的组件与原语，以及主题、数据表格、Dock 布局和代码编辑器。
 - **`gpui-shell`**：让 Rust 宿主可以被 JavaScript 扩展，能力逐项授予。
 
 使用 `gpui-component` 可以获得统一、成熟的视觉风格；基于 `gpui-base` 则可以复用可靠的行为与基础设施，同时创建并拥有自己的设计系统。本节文档介绍 GPUI Kit 的入门配置、公共设计与编码指南，以及应用开发。各层 API 请参阅 [GPUI Component](/zh-CN/component)、[GPUI Base](/zh-CN/base) 与 [GPUI Shell](/zh-CN/shell)。
 
+阅读 [Action](./action)，理解 GPUI 的 Focus、`track_focus`、Key Context、KeyBinding 与命令派发；再阅读 [Event](./event)，理解类型化通知以及 Action 与 Event 的关系。
+
 ## 特性
 
-- **60+ 组件**：覆盖表单、导航、浮层、反馈和布局等场景
+- **75+ 组件与原语**：覆盖表单、导航、浮层、数据展示、编辑、反馈和布局等场景
 - **生产就绪**：从第一天起用于构建 Longbridge Pro，并在公开发布的商业桌面应用中持续打磨
+- **WebAssembly**：应用与组件示例可通过 `wasm32-unknown-unknown` 在 Web 中运行
+- **无障碍**：交互层内置 AccessKit role、name、state、relationship 与 action
+- **UI 集成测试**：在 headless window 中驱动真实鼠标、键盘、Focus、布局与无障碍行为
 - **原生体验**：设计灵感来自 macOS 与 Windows 的现代桌面控件
 - **120 FPS**：GPU 加速界面，在高负载下依然保持流畅
 - **数据表格**：虚拟滚动、固定列、列宽调整、排序与单元格选择，可承载数十万行数据

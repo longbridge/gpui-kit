@@ -1,7 +1,7 @@
 ---
 title: 移动端
 description: 使用实验性的 gpui-pre-mobile 平台构建 iOS 应用，或将 GPUI Kit 嵌入 Swift UIKit 容器。
-order: -2.4
+order: -10
 ---
 
 # 移动端
@@ -128,7 +128,7 @@ if gpui_kit::is_mobile() {
 - 使用短段落和有意义的标题。代码、表格和图片应服务于对话，不必在每条回复中罗列所有 Markdown 格式。
 - 一致使用 Kit 的主题颜色、字号和间距。在真实设备宽度下检查长回复、宽代码、图片加载和中文等不同文字。
 
-GPUI Base 在 iOS 和 Android 上禁用其 tooltip overlay。这只覆盖通过该 overlay 显示的 Kit 提示，不影响直接调用 GPUI `.tooltip()` 的代码。上述固定依赖基线尚不包含这一修改。移动视图中不要添加 GPUI 原生悬停提示。
+GPUI Base 在 iOS 和 Android 上禁用其 tooltip overlay。这只覆盖通过该 overlay 显示的 Kit 提示，不影响直接调用 GPUI `.tooltip()` 的代码。上述固定依赖基线尚不包含这一修改。移动视图中不要添加 GPUI 悬停提示。
 
 ## 验证与当前限制
 

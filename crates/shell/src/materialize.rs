@@ -827,6 +827,7 @@ fn materialize_node(
             snapshot,
             arena,
             node,
+            element_id(id, behavior.key.clone()),
             component,
             inherited,
             Box::new(RegisteredMaterializeParts {
@@ -868,6 +869,7 @@ fn materialize_registered_component(
     snapshot: Option<&RenderSnapshot>,
     arena: &SpecArena,
     node: &SpecNode,
+    identity: gpui::ElementId,
     component: crate::spec::RegisteredComponentSpec,
     inherited: gpui::Hsla,
     parts: Box<RegisteredMaterializeParts>,
@@ -941,6 +943,7 @@ fn materialize_registered_component(
     let mut request =
         crate::MaterializeRequest::new(crate::component_registry::MaterializeRequestInit {
             component_name: component.name(),
+            element_id: identity,
             payload: component.payload(),
             operations: node.ops(),
             runtime,

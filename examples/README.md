@@ -20,6 +20,14 @@ not enable the gallery's test-support development dependency.
 
 Shared sample documents live in `fixtures/`.
 
+## Opening windows
+
+Examples use `gpui_kit::open_window(options, cx, build)` after
+`gpui_kit::init(cx)`. The helper mounts the Base Root and returns the window
+handle and content entity. The native and web story galleries share this path.
+
+Headless test fixtures may construct Root directly through GPUI's test harness.
+
 ## Contributing
 
 Feel free to contribute more examples to this folder!

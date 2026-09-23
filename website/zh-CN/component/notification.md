@@ -18,33 +18,9 @@ use gpui_kit::component::{
 
 ## 用法
 
-### 在根视图中渲染通知层
+### 通知的渲染位置
 
-如果你想显示通知，需要在应用根视图中渲染 notification layer。
-
-[Root::render_notification_layer](https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html#method.render_notification_layer) 会将当前激活的通知渲染在应用内容之上。
-
-```rust
-use gpui_kit::component::{TitleBar, Root};
-
-struct Example {}
-
-impl Render for Example {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let notification_layer = Root::render_notification_layer(window, cx);
-
-        div()
-            .size_full()
-            .child(
-                v_flex()
-                    .size_full()
-                    .child(TitleBar::new())
-                    .child(div().flex_1().child("Hello world!")),
-            )
-            .children(notification_layer)
-    }
-}
-```
+窗口的 [Root](./root.md) 会自动挂载并渲染通知层。使用 `gpui_kit::open_window` 打开窗口，或将应用视图包裹在 `Root::new` 中即可，无需在视图中手动渲染浮层。
 
 ### 基础通知
 

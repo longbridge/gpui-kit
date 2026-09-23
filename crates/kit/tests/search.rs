@@ -1,4 +1,5 @@
 //! Real searchable controls: native input, filtering, selection and owner callbacks.
+mod common;
 use gpui_kit::component::{
     Disableable, IndexPath, Root,
     command::{Command, CommandGroup, CommandItem, CommandState},
@@ -63,8 +64,7 @@ impl Render for Palette {
 }
 fn palette(cx: &mut TestAppContext) -> (gpui_kit::WindowHandle<Root>, Entity<Palette>) {
     cx.update(gpui_kit::init);
-    let mut view = None;
-    let window = cx.open_window(size(px(640.), px(480.)), |window, cx| {
+    let (window, view) = common::open_window(cx, Some(size(px(640.), px(480.))), |window, cx| {
         let entity = cx.new(|cx| Palette {
             state: cx.new(|cx| CommandState::new(window, cx)),
             confirmed: vec![],
@@ -72,10 +72,8 @@ fn palette(cx: &mut TestAppContext) -> (gpui_kit::WindowHandle<Root>, Entity<Pal
             saves: 0,
             queries: vec![],
         });
-        view = Some(entity.clone());
-        Root::new(entity, window, cx)
+        entity
     });
-    let view = view.unwrap();
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         let state = view.read(cx).state.clone();
@@ -225,8 +223,7 @@ fn languages(
     disabled: bool,
 ) -> (gpui_kit::WindowHandle<Root>, Entity<Languages>) {
     cx.update(gpui_kit::init);
-    let mut view = None;
-    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
+    let (handle, view) = common::open_window(cx, Some(size(px(640.), px(480.))), |window, cx| {
         let entity = cx.new(|cx| {
             let state = cx.new(|cx| {
                 ComboboxState::new(
@@ -251,10 +248,9 @@ fn languages(
                 _subscription: subscription,
             }
         });
-        view = Some(entity.clone());
-        Root::new(entity, window, cx)
+        entity
     });
-    (handle, view.unwrap())
+    (handle, view)
 }
 
 #[gpui_kit::test]

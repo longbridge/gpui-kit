@@ -32,6 +32,16 @@ The authoritative module is [`components/popover.rs`](https://github.com/longbri
 
 ## State and events
 
+Use `.anchor(Anchor::TopCenter).offset(px(8.))` to open below the trigger,
+centered, with an eight-pixel gap. The Base offset defaults to zero.
+`Top*` anchors open below, `Bottom*` above, `LeftCenter` to the right,
+and `RightCenter` to the left. The anchor names the popup's own point.
+Window-edge clamping does not flip the popup or change its anchor.
+
+`on_position` observes resolved popup and trigger bounds before content
+prepaint for custom presentation. Base does not draw an arrow; styled Component
+Popover provides `.arrow(true)` directly (default `false`), aligned to its anchor.
+
 Open state can be parent-controlled; activation, outside click, and Escape request lifecycle changes.
 
 Keep controlled state on the parent render type or in a GPUI entity. Update it in callbacks and call `cx.notify()`; do not recreate persistent entities during every render.

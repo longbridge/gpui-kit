@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Root, h_flex,
+    ActiveTheme as _, h_flex,
     input::{Input, InputEvent, InputState},
     v_flex,
 };
@@ -138,13 +138,9 @@ fn main() {
         // This must be called before using any GPUI Component features.
         gpui_kit::init(cx);
 
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = Example::new(window, cx);
-                cx.new(|cx| Root::new(view, window, cx))
-            })
-            .expect("Failed to open window");
+        gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            Example::new(window, cx)
         })
-        .detach();
+        .expect("Failed to open window");
     });
 }

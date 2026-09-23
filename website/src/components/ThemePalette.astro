@@ -1,0 +1,186 @@
+---
+import { themes } from '../lib/theme-catalog';
+
+export interface Props { lang?: 'en' | 'zh-CN' }
+const { lang = 'en' } = Astro.props;
+const isZh = lang === 'zh-CN';
+const base = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/`;
+const choices = [
+  { id: 'light', name: isZh ? '默认浅色' : 'Default Light', family: 'GPUI Kit', mode: 'light' },
+  { id: 'dark', name: isZh ? '默认深色' : 'Default Dark', family: 'GPUI Kit', mode: 'dark' },
+  ...themes,
+];
+const groups = [
+  { mode: 'light', label: isZh ? '浅色' : 'Light' },
+  { mode: 'dark', label: isZh ? '深色' : 'Dark' },
+];
+---
+
+<button id="theme-palette-open" class="theme-toggle" type="button"
+  aria-label={isZh ? '选择主题，按 ⌘K 打开' : 'Choose theme, press Cmd+K to open'}
+  aria-keyshortcuts="Meta+K Control+K" title={isZh ? '选择主题 (⌘K / Ctrl+K)' : 'Choose theme (Cmd+K / Ctrl+K)'}>
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/>
+    <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+    <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+  </svg>
+</button>
+
+<dialog id="theme-palette" aria-labelledby="theme-palette-title">
+  <h2 id="theme-palette-title" class="sr-only">{isZh ? '选择主题' : 'Choose theme'}</h2>
+  <label class="theme-palette__search">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+    </svg>
+    <input id="theme-palette-query" type="search" autocomplete="off" aria-controls="theme-palette-list"
+      placeholder={isZh ? '搜索主题…' : 'Search themes…'} aria-label={isZh ? '搜索主题' : 'Search themes'} />
+  </label>
+  <div id="theme-palette-list" class="theme-palette__list" role="listbox" aria-label={isZh ? '可用主题' : 'Available themes'}>
+    {groups.map((group) => (
+      <div class="theme-palette__group" data-theme-group={group.mode} role="group" aria-label={group.label}>
+        <div class="theme-palette__heading" aria-hidden="true">{group.label}</div>
+        {choices.filter((theme) => theme.mode === group.mode).map((theme) => (
+          <button id={`theme-option-${theme.id}`} class="theme-palette__option" type="button" role="option"
+            data-theme-id={theme.id} data-theme-name={theme.name} data-mode={theme.mode}
+            data-theme-source={'source' in theme ? `${base}theme-data/${theme.source}.json` : undefined}
+            data-search={`${theme.name} ${theme.family} ${theme.mode}`.toLowerCase()} aria-selected="false">
+            <svg class="theme-palette__item-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/>
+              <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
+              <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
+            </svg>
+            <span class="theme-palette__name">{theme.name}</span>
+            <svg class="theme-palette__check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m20 6-11 11-5-5"/></svg>
+          </button>
+        ))}
+      </div>
+    ))}
+    <p class="theme-palette__empty" hidden>{isZh ? '没有匹配的主题' : 'No matching themes'}</p>
+  </div>
+</dialog>
+
+<script>
+  const dialog = document.querySelector<HTMLDialogElement>('#theme-palette');
+  const trigger = document.querySelector<HTMLButtonElement>('#theme-palette-open');
+  const query = document.querySelector<HTMLInputElement>('#theme-palette-query');
+  const options = [...(dialog?.querySelectorAll<HTMLButtonElement>('.theme-palette__option') ?? [])];
+  const groups = [...(dialog?.querySelectorAll<HTMLElement>('.theme-palette__group') ?? [])];
+  const empty = dialog?.querySelector<HTMLElement>('.theme-palette__empty');
+  let committedId = '';
+  let highlighted: HTMLButtonElement | undefined;
+
+  function storedId() {
+    const stored = localStorage.getItem('theme');
+    return options.some((option) => option.dataset.themeId === stored)
+      ? stored! : document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+  }
+
+  function apply(option: HTMLButtonElement) {
+    const id = option.dataset.themeId!;
+    const root = document.documentElement;
+    root.classList.toggle('dark', option.dataset.mode === 'dark');
+    if (id === 'light' || id === 'dark') {
+      delete root.dataset.theme;
+      delete root.dataset.themeName;
+      delete root.dataset.themeSource;
+    } else {
+      root.dataset.theme = id;
+      root.dataset.themeName = option.dataset.themeName;
+      root.dataset.themeSource = option.dataset.themeSource;
+    }
+    document.dispatchEvent(new Event('themechange'));
+  }
+
+  function highlight(option: HTMLButtonElement | undefined, preview = true, scroll = true) {
+    highlighted = option;
+    options.forEach((item) => item.setAttribute('aria-selected', String(item === option)));
+    if (option) {
+      query?.setAttribute('aria-activedescendant', option.id);
+      if (scroll) option.scrollIntoView({ block: 'nearest' });
+      if (preview) apply(option);
+    } else {
+      query?.removeAttribute('aria-activedescendant');
+    }
+  }
+
+  function filter() {
+    const term = query?.value.trim().toLowerCase() ?? '';
+    options.forEach((option) => { option.hidden = !option.dataset.search?.includes(term); });
+    groups.forEach((group) => { group.hidden = !group.querySelector('.theme-palette__option:not([hidden])'); });
+    const visible = options.filter((option) => !option.hidden);
+    if (empty) empty.hidden = visible.length !== 0;
+    const original = options.find((option) => option.dataset.themeId === committedId);
+    if (!visible.length) {
+      highlight(undefined, false);
+      if (original && dialog?.open) apply(original);
+      return;
+    }
+    if (!highlighted || highlighted.hidden) {
+      highlight(visible[0], false);
+      if (original && dialog?.open) apply(original);
+    }
+  }
+
+  function open() {
+    if (!dialog || !query) return;
+    const searchDialog = document.querySelector<HTMLDialogElement>('#search-modal');
+    if (searchDialog?.open) searchDialog.close();
+    committedId = storedId();
+    query.value = '';
+    options.forEach((option) => { option.dataset.current = String(option.dataset.themeId === committedId); });
+    const current = options.find((option) => option.dataset.themeId === committedId) ?? options[0];
+    highlighted = current;
+    filter();
+    if (!dialog.open) dialog.showModal();
+    highlight(current, false);
+    query.focus();
+  }
+
+  trigger?.addEventListener('click', open);
+  query?.addEventListener('input', filter);
+  options.forEach((option) => {
+    option.addEventListener('click', () => {
+      committedId = option.dataset.themeId!;
+      apply(option);
+      localStorage.setItem('theme', committedId);
+      dialog?.close();
+    });
+  });
+
+  dialog?.addEventListener('close', () => {
+    const original = options.find((option) => option.dataset.themeId === committedId);
+    if (original) apply(original);
+    trigger?.focus();
+  });
+  dialog?.addEventListener('cancel', (event) => {
+    if (!query?.value) return;
+    event.preventDefault();
+    query.value = '';
+    filter();
+    query.focus();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'k') return;
+    event.preventDefault();
+    dialog?.open ? dialog.close() : open();
+  });
+
+  dialog?.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp' && event.key !== 'Enter') return;
+    const visible = options.filter((option) => !option.hidden);
+    if (!visible.length) return;
+    event.preventDefault();
+    if (event.key === 'Enter') {
+      (highlighted ?? visible[0]).click();
+      return;
+    }
+    const at = visible.indexOf(highlighted!);
+    const next = event.key === 'ArrowDown'
+      ? (at + 1) % visible.length
+      : (at < 0 ? visible.length - 1 : at + visible.length - 1) % visible.length;
+    highlight(visible[next]);
+    query?.focus();
+  });
+
+</script>

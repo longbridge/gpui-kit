@@ -1,4 +1,5 @@
-use gpui_kit::component::{Root, button::Button, menu::DropdownMenu};
+mod common;
+use gpui_kit::component::{button::Button, menu::DropdownMenu};
 use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
 use gpui_kit::{AppContext, Context, TestAppContext, Window, actions, div, prelude::*, px, size};
 use std::time::Duration;
@@ -42,13 +43,13 @@ impl Render for Commands {
 #[gpui_kit::test]
 async fn menu_skips_disabled_commands_confirms_and_restores_focus(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(480.))), |window, cx| {
         let view = cx.new(|cx| Commands {
             saved: false,
             focus: cx.focus_handle(),
         });
         view.read(cx).focus.clone().focus(window, cx);
-        Root::new(view, window, cx)
+        view
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -83,13 +84,13 @@ async fn menu_skips_disabled_commands_confirms_and_restores_focus(cx: &mut TestA
 #[gpui_kit::test]
 async fn hovering_submenu_opens_and_clicking_item_dismisses_the_chain(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(480.))), |window, cx| {
         let view = cx.new(|cx| Commands {
             saved: false,
             focus: cx.focus_handle(),
         });
         view.read(cx).focus.clone().focus(window, cx);
-        Root::new(view, window, cx)
+        view
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -158,12 +159,12 @@ impl Render for ScrollableCommands {
 #[gpui_kit::test]
 async fn submenu_opens_unclipped_from_a_scrollable_menu(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(480.))), |window, cx| {
         let view = cx.new(|cx| ScrollableCommands {
             focus: cx.focus_handle(),
         });
         view.read(cx).focus.clone().focus(window, cx);
-        Root::new(view, window, cx)
+        view
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);

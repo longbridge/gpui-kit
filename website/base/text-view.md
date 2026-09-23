@@ -34,7 +34,7 @@ impl Render for AppView {
 }
 ```
 
-If the application already calls `gpui_kit::component::init`, Base initialization is included. `gpui-component::Root` also installs the window selection layer.
+If the application already calls `gpui_kit::component::init`, Base initialization is included. A window using `gpui_base::Root`—including one opened by `gpui_kit::open_window`—installs the selection layer automatically; do not render a second layer in its content.
 
 TextView is selectable by default. While dragging a selection near a viewport edge, the shared selection layer scrolls the related `overflow_*_scroll` region automatically; no TextView scroll or selection parameter is required. Use `.selectable(false)` only to disable selection explicitly.
 
@@ -71,6 +71,18 @@ let style = TextViewStyle::default()
     .with_selection(app_colors.selection);
 
 TextView::markdown("themed", source).style(style)
+```
+
+Heading refinements receive the Markdown heading level (1-6) and are applied
+on top of the built-in size, weight, and spacing for that level:
+
+```rust
+use gpui_kit::{StyleRefinement, Styled as _, rems};
+
+let style = TextViewStyle::default().with_heading(|level| match level {
+    1 => StyleRefinement::default().pt(rems(1.)).pb(rems(0.75)),
+    _ => StyleRefinement::default(),
+});
 ```
 
 `TextViewStyle::from_theme(&theme)` maps the semantic colors from a `gpui_kit::base::Theme`. Applications using the higher-level component theme can use `gpui_kit::component::text::text_view_style(cx.theme())`.

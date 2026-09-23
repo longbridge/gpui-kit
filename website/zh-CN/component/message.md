@@ -286,7 +286,7 @@ Message::new()
     ))
 ```
 
-推荐使用 `cx.theme()` 的语义颜色、圆角和共享 design scale。Message 的外层、inner stack、avatar、header、content 和 footer 都有独立的样式入口，调用方可以调整表面、间距、文字层级和对齐，而不需要复制 Message 的布局实现。
+推荐使用 `cx.theme()` 的语义颜色、圆角和共享 design scale。Message 的外层、inner stack、avatar、header、content 和 footer 都有独立的样式入口，调用方可以调整表面、间距、文字层级和对齐，而不需要复制 Message 的布局实现。`Message` 自身不设字号与行高：Header、Footer 各有自己的排版，内容的排版归 Bubble 或调用方，放进 Ghost Bubble 的 Markdown 等富内容保持其渲染器的排版。
 
 ## 组件边界
 
@@ -298,6 +298,7 @@ Message::new()
 ## 可访问性
 
 - Avatar 是身份辅助信息，不应是唯一的发送者标识；Header 应提供可读发送者或系统来源。
+- Message 默认是纯展示元素。会话里的每条消息可设置 `.id(...)` 加 `.role(Role::ListItem)`，让辅助技术能在消息之间移动；role 依赖 id 提供的稳定标识。
 - 时间、送达状态、失败状态和未读信息应作为可读文本提供，不能只用颜色、位置或 icon 表达。
 - Footer 中的 icon-only Button 应提供可见的 `.label(...)` 或其他可读名称，tooltip 只作为补充提示；发送者操作应使用明确的 Button/Link 语义。
 - Bubble、Attachment 和富文本 child 的键盘行为由各自组件负责；Message 不会自动为普通 `div` 增加焦点。
@@ -312,6 +313,8 @@ Message::new()
 | --- | --- |
 | `new()` | 创建默认起始侧对齐的消息。 |
 | `alignment(MessageAlignment)` | 设置起始侧或结束侧对齐。 |
+| `id(ElementId)` | 设置稳定标识，供元素状态与无障碍树使用。 |
+| `role(Role)` | 设置辅助技术播报的 role，如 `Role::ListItem`；需要配合 `id(...)`，默认纯展示。 |
 | `with_stack_style(StyleRefinement)` | 调整 Header、Content、Footer 内部 stack。 |
 | `avatar(element)` | 将任意 element 包装进 `MessageAvatar`。 |
 | `avatar_slot(MessageAvatar)` | 设置完整的 avatar slot。 |

@@ -24,7 +24,6 @@ initializes the enabled layers:
 
 ```rust
 use gpui_kit::component::button::*;
-use gpui_kit::component::Root;
 use gpui_kit::*;
 
 struct Hello;
@@ -38,14 +37,8 @@ impl Render for Hello {
 fn main() {
     gpui_kit::application().run(|cx| {
         gpui_kit::init(cx);
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| Hello);
-                cx.new(|cx| Root::new(view, window, cx))
-            })
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| Hello))
             .expect("failed to open window");
-        })
-        .detach();
     });
 }
 ```

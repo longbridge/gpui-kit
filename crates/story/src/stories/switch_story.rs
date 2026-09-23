@@ -17,6 +17,7 @@ pub struct SwitchStory {
     switch3: bool,
     switch4: bool,
     switch5: bool,
+    long_label_checked: bool,
     size: Size,
 }
 
@@ -47,6 +48,7 @@ impl SwitchStory {
             switch3: true,
             switch4: true,
             switch5: false,
+            long_label_checked: false,
             size: Size::default(),
         }
     }
@@ -137,6 +139,37 @@ impl Render for SwitchStory {
                                                 cx.notify();
                                             })),
                                     ),
+                            ),
+                    ),
+            )
+            .child(
+                section("Long labels")
+                    .description("Long setting names wrap while the track keeps its size.")
+                    .child(
+                        v_flex()
+                            .w(px(320.))
+                            .border_1()
+                            .border_color(theme.border)
+                            .rounded(theme.radius_lg)
+                            .child(
+                                Switch::new("long-label")
+                                    .p_4()
+                                    .with_size(self.size)
+                                    .label("Automatically transcribe downloaded episodes")
+                                    .checked(self.long_label_checked)
+                                    .on_change(cx.listener(|this, checked, _, cx| {
+                                        this.long_label_checked = *checked;
+                                        cx.notify();
+                                    })),
+                            )
+                            .child(Separator::horizontal())
+                            .child(
+                                Switch::new("long-label-disabled")
+                                    .p_4()
+                                    .with_size(self.size)
+                                    .label("Automatically download new episodes")
+                                    .checked(true)
+                                    .disabled(true),
                             ),
                     ),
             )

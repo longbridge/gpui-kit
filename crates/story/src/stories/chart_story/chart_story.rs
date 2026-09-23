@@ -347,7 +347,10 @@ impl Card {
                     .justify_between()
                     .when(centered, |this| this.justify_center())
                     .child(
+                        // The heading holds its width; the legend beside it is
+                        // what gives way and wraps.
                         v_flex()
+                            .flex_shrink_0()
                             .when(centered, |this| this.text_center())
                             .child(div().font_semibold().child(self.title))
                             .child(
@@ -385,15 +388,20 @@ impl Card {
 }
 
 /// A row of swatch-and-label pairs.
+///
+/// It shares the heading row with the title, so it has to yield width rather
+/// than hold its own: shrinking lets `flex_wrap` fold a long series list onto a
+/// second line instead of running out past the card.
 fn legend(entries: Vec<(Hsla, SharedString)>, cx: &App) -> gpui_kit::Div {
     h_flex()
-        .flex_shrink_0()
         .flex_wrap()
+        .justify_end()
         .gap_3()
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .children(entries.into_iter().map(|(color, label)| {
             h_flex()
+                .flex_shrink_0()
                 .gap_1p5()
                 .items_center()
                 .child(div().size_2().rounded_sm().bg(color))
@@ -656,6 +664,7 @@ impl ChartCard {
                             .outer_radius(76.)
                             .color(move |d| shade(mid, color_index(&d.region)))
                             .label(|d| d.region.clone())
+                            .tooltip_name(|d| d.region.clone())
                             .name("Revenue")
                             .id("pie-chart-label"),
                     )
@@ -1240,21 +1249,28 @@ impl ChartCard {
                     let up = cx.theme().success;
                     let down = cx.theme().danger;
                     let muted = cx.theme().muted_foreground;
-                    chart.labels(move |d: &TslaNode, _| {
-                        let mut lines = vec![SankeyLabel::new(format!(
-                            "${:.2}B",
-                            d.value / 1_000_000_000.
-                        ))];
-                        if let Some(growth) = d.growth {
-                            let arrow = if growth >= 0. { "▲" } else { "▼" };
-                            lines.push(
-                                SankeyLabel::new(format!("{} {:+.2}%", arrow, growth))
-                                    .color(if growth >= 0. { up } else { down }),
-                            );
-                        }
-                        lines.push(SankeyLabel::new(d.name.clone()).color(muted));
-                        lines
-                    })
+                    // `labels` draws the node text but never reaches the tooltip,
+                    // so the tooltip needs its own name and value.
+                    chart
+                        .tooltip_name(|d: &TslaNode| d.name.clone())
+                        .tooltip_value(|d: &TslaNode, _| {
+                            format!("${:.2}B", d.value / 1_000_000_000.).into()
+                        })
+                        .labels(move |d: &TslaNode, _| {
+                            let mut lines = vec![SankeyLabel::new(format!(
+                                "${:.2}B",
+                                d.value / 1_000_000_000.
+                            ))];
+                            if let Some(growth) = d.growth {
+                                let arrow = if growth >= 0. { "▲" } else { "▼" };
+                                lines.push(
+                                    SankeyLabel::new(format!("{} {:+.2}%", arrow, growth))
+                                        .color(if growth >= 0. { up } else { down }),
+                                );
+                            }
+                            lines.push(SankeyLabel::new(d.name.clone()).color(muted));
+                            lines
+                        })
                 } else {
                     chart
                         .node_label(|d| d.name.clone())

@@ -789,7 +789,7 @@ mod tests {
         AppContext as _, Bounds, ClickEvent, Context, Entity, InteractiveElement as _, IntoElement,
         Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Overflow, ParentElement as _, Pixels,
         Render, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled as _,
-        TestAppContext, VisualTestContext, Window, div, point, px,
+        TestAppContext, VisualTestContext, Window, div, point, px, rems,
     };
 
     struct TextViewTestRoot {
@@ -1916,6 +1916,62 @@ mod tests {
         let cx: &mut VisualTestContext = cx;
 
         assert!(!root.read_with(cx, |root, cx| root.text_view.read(cx).is_clamped()));
+    }
+
+    #[gpui::test]
+    fn heading_refinement_changes_rendered_heading_geometry(cx: &mut TestAppContext) {
+        struct HeadingStyleRoot;
+
+        impl Render for HeadingStyleRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .flex()
+                    .items_start()
+                    .child(
+                        div()
+                            .debug_selector(|| "default-h1".into())
+                            .child(TextView::markdown("default-h1-view", "# Heading")),
+                    )
+                    .child(div().debug_selector(|| "custom-h1".into()).child(
+                        TextView::markdown("custom-heading-view", "# Heading").style(
+                            TextViewStyle::default().with_heading(|level| {
+                                if level == 1 {
+                                    StyleRefinement::default().pb(rems(2.))
+                                } else {
+                                    StyleRefinement::default()
+                                }
+                            }),
+                        ),
+                    ))
+                    .child(
+                        div()
+                            .debug_selector(|| "default-h2".into())
+                            .child(TextView::markdown("default-h2-view", "## Heading")),
+                    )
+                    .child(div().debug_selector(|| "custom-h2".into()).child(
+                        TextView::markdown("custom-h2-view", "## Heading").style(
+                            TextViewStyle::default().with_heading(|level| {
+                                if level == 1 {
+                                    StyleRefinement::default().pb(rems(2.))
+                                } else {
+                                    StyleRefinement::default()
+                                }
+                            }),
+                        ),
+                    ))
+            }
+        }
+
+        cx.update(crate::init);
+        let (_, cx) = cx.add_window_view(|_, _| HeadingStyleRoot);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let default_h1 = cx.debug_bounds("default-h1").unwrap();
+        let custom_h1 = cx.debug_bounds("custom-h1").unwrap();
+        let default_h2 = cx.debug_bounds("default-h2").unwrap();
+        let custom_h2 = cx.debug_bounds("custom-h2").unwrap();
+        assert!(custom_h1.size.height > default_h1.size.height);
+        assert_eq!(custom_h2.size.height, default_h2.size.height);
     }
 
     #[gpui::test]

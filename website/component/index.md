@@ -1,6 +1,6 @@
 ---
 title: Components
-description: Browse more than 60 production-ready Rust UI components for forms, navigation, data, feedback, and desktop application layouts.
+description: Browse 75+ production-ready Rust UI components and primitives for forms, navigation, data, feedback, editing, and application layouts.
 order: 2
 collapsed: false
 ---
@@ -68,6 +68,7 @@ collapsed: false
 - [Sheet](sheet) - Slide-in panel from edges
 - [Sidebar](sidebar) - Navigation sidebar
 - [StatusBar](status-bar) - Bottom status bar with left/center/right regions
+- [Toolbar](toolbar) - Top toolbar with left/right regions and sizes
 
 ### Advanced Components
 

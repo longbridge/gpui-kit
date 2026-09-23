@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-use super::{HOVER_DOT_SIZE, build_point_x_labels, hover_halo_size, pointer_spring};
+use super::{HOVER_DOT_SIZE, build_point_x_labels, caller_id, hover_halo_size, pointer_spring};
 
 /// The hover an area chart paints, sampled once per frame in [`Plot::hover`].
 #[derive(Clone)]
@@ -48,7 +48,8 @@ where
     tick_margin: usize,
     x_axis: bool,
     grid: bool,
-    id: Option<ElementId>,
+    id: ElementId,
+    interactive: bool,
     hover: Option<AreaHover>,
 }
 
@@ -57,6 +58,7 @@ where
     X: Clone + PartialEq + Into<SharedString> + 'static,
     Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
 {
+    #[track_caller]
     pub fn new<I>(data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -72,17 +74,33 @@ where
             y: vec![],
             x_axis: true,
             grid: true,
-            id: None,
+            id: caller_id(),
+            interactive: true,
             hover: None,
         }
     }
 
-    /// Enable an interactive hover tooltip (crosshair + a dot and row per series).
+    /// Name this chart's [`ElementId`], replacing the default taken from the
+    /// construction site.
     ///
-    /// The `id` must be unique among sibling elements. Without it, the chart stays a
-    /// non-interactive plot.
+    /// Pass one where a single construction site renders several of these
+    /// charts as siblings: they share the default id, and with it one hover
+    /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
-        self.id = Some(id.into());
+        self.id = id.into();
+        self
+    }
+
+    /// Turn this chart's interactive layer on or off. On by default.
+    ///
+    /// The layer is the hitbox under the cursor and what it drives: a crosshair
+    /// and a dot per series mark the hovered point, and a tooltip shows a row
+    /// each. Turn it off for a chart that only decorates, or one an element above
+    /// it wants the cursor for: without a hitbox it neither answers the mouse nor
+    /// takes the hover from what sits over it. A chart that is off also drops its
+    /// path cache, which is keyed on the same id.
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
         self
     }
 
@@ -239,9 +257,10 @@ where
                 .fill(fill)
         });
 
-        // An identified chart keeps its fills and strokes tessellated across
-        // frames; without an id, sibling charts would share one cache and thrash it.
-        if self.id.is_some() {
+        // Caching hangs off the chart's own id, which only an interactive chart
+        // puts on the stack; without one, siblings would share a slot and thrash
+        // it, so a chart that is off tessellates afresh each paint.
+        if self.interactive {
             let caches = PathCaches::for_paint("areas", window, cx);
             caches.update(cx, |caches, _| {
                 for (i, area) in areas.enumerate() {
@@ -257,7 +276,7 @@ where
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.id.clone()
+        self.interactive.then(|| self.id.clone())
     }
 
     fn tooltip_state(

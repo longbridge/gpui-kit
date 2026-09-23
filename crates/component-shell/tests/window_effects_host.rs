@@ -40,15 +40,10 @@ struct Host(gpui::Entity<gpui_shell::ScriptView>);
 impl gpui::Render for Host {
     fn render(
         &mut self,
-        window: &mut gpui::Window,
-        cx: &mut gpui::Context<Self>,
+        _: &mut gpui::Window,
+        _: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
-        gpui::div()
-            .size_full()
-            .child(self.0.clone())
-            .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
+        gpui::div().size_full().child(self.0.clone())
     }
 }
 

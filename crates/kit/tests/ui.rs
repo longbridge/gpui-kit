@@ -1,8 +1,8 @@
+mod common;
 use gpui_kit::test::{TestSupportExt, TestWindowExt};
 use gpui_kit::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window,
     component::{
-        Root,
         button::Button,
         input::{Input, InputState},
     },
@@ -51,16 +51,14 @@ impl Render for Profile {
 #[gpui_kit::test]
 fn saves_a_profile_through_the_ui(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let mut profile = None;
-    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
-        let view = cx.new(|cx| Profile {
-            name: cx.new(|cx| InputState::new(window, cx)),
-            submitted: None,
+    let (handle, profile) =
+        common::open_window(cx, Some(size(px(640.), px(480.))), |window, cx| {
+            let view = cx.new(|cx| Profile {
+                name: cx.new(|cx| InputState::new(window, cx)),
+                submitted: None,
+            });
+            view
         });
-        profile = Some(view.clone());
-        Root::new(view, window, cx)
-    });
-    let profile = profile.unwrap();
 
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);

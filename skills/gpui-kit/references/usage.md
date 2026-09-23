@@ -22,17 +22,15 @@ fn main() {
         .run(move |cx| {
             gpui_kit::init(cx); // MUST be first
 
-            cx.spawn(async move |cx| {
-                cx.open_window(WindowOptions::default(), |window, cx| {
-                    let view = cx.new(|_| MyApp);
-                    cx.new(|cx| Root::new(view, window, cx)) // Root wraps first view
-                }).expect("Failed to open window");
-            }).detach();
+            // Wraps the view in a `Root`, which enables dialogs, sheets,
+            // notifications, tooltips and menus in this window.
+            gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| MyApp))
+                .expect("Failed to open window");
         });
 }
 ```
 
-**`Root` is required** as the first-level child of every window — it enables dialogs, sheets, and notifications.
+Use `gpui_kit::open_window` for application windows; it mounts `Root` as the window's root view.
 
 ---
 
@@ -383,20 +381,9 @@ v_flex().gap_4().p_4()
 
 ## Overlay Layers (Dialogs, Sheets, Notifications)
 
-To render overlays, add these to your first-level view's render. The complete tested consumer recipe is [`examples/ai_recipes/src/bootstrap.rs`](../../../examples/ai_recipes/src/bootstrap.rs):
+The window's `Root` renders dialogs, sheets and notifications above the view, so a window opened with `gpui_kit::open_window` needs nothing else — `window.open_dialog(..)` just works. Applications define their own quit and close-window actions, key bindings, and confirmation flows. `open_window` returns `(AnyWindowHandle, Entity<V>)`. The complete tested consumer recipe is [`examples/ai_recipes/src/bootstrap.rs`](../../../examples/ai_recipes/src/bootstrap.rs).
 
-```rust
-impl Render for MyApp {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .size_full()
-            .child(self.main_content(window, cx))
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
-    }
-}
-```
+Root always mounts all three layers. The former `Root::render_*_layer` methods have been removed; delete their calls from application views when migrating to 0.7.0.
 
 ---
 

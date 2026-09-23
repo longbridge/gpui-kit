@@ -1,6 +1,7 @@
 //! A long press leaves a selection with grab handles and an edit menu, in an
 //! `Input` and in a `TextView`.
 
+mod common;
 use gpui::{
     AppContext, Context, DispatchPhase, Entity, InputEvent as _, LongPressEvent, Modifiers,
     MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent,
@@ -41,13 +42,14 @@ impl Render for Screen {
 
 fn screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
     cx.update(gpui_component::init);
-    cx.add_window(|window, cx| {
+    common::open_window(cx, None, |window, cx| {
         let view = cx.new(|cx| Screen {
             input: cx.new(|cx| InputState::new(window, cx).default_value("quick select value")),
             text: cx.new(|cx| TextViewState::markdown("quick select value", cx)),
         });
-        Root::new(view, window, cx)
+        view
     })
+    .0
 }
 
 /// The text alone, for a screen that caches it.
@@ -106,14 +108,15 @@ impl Render for TallScreen {
 
 fn tall_screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
     cx.update(gpui_component::init);
-    cx.add_window(|window, cx| {
+    common::open_window(cx, None, |_window, cx| {
         let view = cx.new(|cx| TallScreen {
             text: cx.new(|cx| {
                 TextViewState::markdown("first line\n\nsecond line\n\nthird line\n\nlast line", cx)
             }),
         });
-        Root::new(view, window, cx)
+        view
     })
+    .0
 }
 
 /// A finger's double tap: the touch is offered as a drag first, as GPUI
@@ -189,24 +192,26 @@ impl Render for SwallowingScreen {
 
 fn swallowing_screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
     cx.update(gpui_component::init);
-    cx.add_window(|window, cx| {
+    common::open_window(cx, None, |_window, cx| {
         let view = cx.new(|cx| SwallowingScreen {
             text: cx.new(|cx| TextViewState::markdown("quick select value", cx)),
         });
-        Root::new(view, window, cx)
+        view
     })
+    .0
 }
 
 fn cached_screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
     cx.update(gpui_component::init);
-    cx.add_window(|window, cx| {
+    common::open_window(cx, None, |_window, cx| {
         let view = cx.new(|cx| CachedScreen {
             text: cx.new(|cx| Text {
                 text: cx.new(|cx| TextViewState::markdown("quick select value", cx)),
             }),
         });
-        Root::new(view, window, cx)
+        view
     })
+    .0
 }
 
 /// A frame as the app draws one: what is not dirty is replayed from the

@@ -4856,6 +4856,12 @@ mod tests {
         cx.run_until_parked();
         let input = input.unwrap();
         let before = input.read_with(cx, |state, _| state.cursor_layout());
+        // The caret geometry only exists once the input has painted, and a
+        // notify sent from inside a draw marks the view dirty without asking
+        // for another frame, so the consumer reads the geometry on the next
+        // invalidation rather than during the paint that produced it.
+        input.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
         assert_eq!(observed.get(), before);
         window
             .update(cx, |_, _, cx| {
@@ -4932,6 +4938,46 @@ mod tests {
             notifications.get(),
             3,
             "a smaller scroll range must clamp and notify"
+        );
+    }
+
+    #[gpui::test]
+    fn test_set_value_on_unfocused_input_stays_quiet(cx: &mut TestAppContext) {
+        use std::{cell::Cell, rc::Rc};
+
+        cx.update(crate::init);
+        let mut input = None;
+        let window = cx.open_window(size(px(400.), px(100.)), |window, cx| {
+            input = Some(cx.new(|cx| crate::input::InputState::new(window, cx)));
+            gpui::EmptyView
+        });
+        let input = input.unwrap();
+        cx.run_until_parked();
+
+        let notifications = Rc::new(Cell::new(0));
+        let count = notifications.clone();
+        let _subscription =
+            cx.update(|cx| cx.observe(&input, move |_, _| count.set(count.get() + 1)));
+        cx.run_until_parked();
+
+        // Seeding a form is a write, so it notifies once. The input is not
+        // focused and draws no caret, so nothing may notify after that.
+        window
+            .update(cx, |_, window, cx| {
+                input.update(cx, |state, cx| state.set_value("seeded", window, cx));
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let settled = notifications.get();
+
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(3));
+        cx.run_until_parked();
+
+        assert_eq!(
+            notifications.get(),
+            settled,
+            "an unfocused input is blinking, and every blink repaints the view it is in"
         );
     }
 
@@ -5150,6 +5196,68 @@ mod tests {
             input.read_with(cx, |state, _| {
                 assert!(state.is_editable());
                 assert_eq!(state.value(), "!changed");
+            });
+        });
+    }
+
+    /// Regression test: editing at a caret that sits far outside the viewport
+    /// must reveal it in one frame. The cursor-follow in `layout_cursors` runs
+    /// only on the frame the selection changes, so its old one-line step left
+    /// the caret offscreen after typing at the end of a long paste.
+    #[gpui::test]
+    fn test_edit_reveals_far_offscreen_caret(cx: &mut TestAppContext) {
+        let mut input = None;
+        let window = cx.open_window(size(px(720.), px(400.)), |window, cx| {
+            cx.set_global(Theme::default());
+            super::super::init(cx);
+            let state = cx.new(|cx| crate::input::TextareaState::new(window, cx).auto_grow(1, 6));
+            input = Some(state.clone());
+            TestRoot(state)
+        });
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let input = input.unwrap();
+
+        let text: String = (1..=100)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value(text, window, cx);
+                let end = state.text.len();
+                state.set_selection(end, end);
+            });
+        });
+        cx.run_until_parked();
+
+        // The user scrolled back to the top to read the pasted text.
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                state.scroll_handle.set_offset(point(px(0.), px(0.)));
+                cx.notify();
+            });
+        });
+        cx.run_until_parked();
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "X", window, cx);
+            });
+        });
+        cx.run_until_parked();
+
+        cx.update(|_, cx| {
+            input.read_with(cx, |state, _| {
+                assert!(state.value().ends_with("line 100X"));
+                let (caret, _) = state.cursor_layout().expect("caret painted");
+                let viewport = state.input_bounds();
+                let scroll_y = state.scroll_handle.offset().y;
+                let top = caret.origin.y - viewport.origin.y + scroll_y;
+                assert!(
+                    top >= px(0.) && top + caret.size.height <= viewport.size.height,
+                    "caret top {top:?} outside viewport height {:?} (scroll {scroll_y:?})",
+                    viewport.size.height,
+                );
             });
         });
     }
@@ -7421,13 +7529,25 @@ mod tests {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
         setup_cursors(&mut cx, &view.input, "ab\na|b\nab");
-        cx.update(|window, cx| {
-            view.input.update(cx, |state, cx| {
-                // Start each action in the hidden phase without depending on a
-                // key-down listener: actions and text input also arrive directly.
-                for action in 0..6 {
+        // Start each action in the hidden phase without depending on a
+        // key-down listener: actions and text input also arrive directly.
+        for action in 0..6 {
+            cx.update(|_, cx| {
+                view.input.update(cx, |state, cx| {
                     state.blink_cursor = cx.new(|_| BlinkCursor::new());
-                    assert!(!state.blink_cursor.read(cx).visible());
+                    state.blink_cursor.update(cx, |cursor, cx| cursor.start(cx));
+                });
+            });
+            cx.run_until_parked();
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(500));
+            cx.run_until_parked();
+            view.input.read_with(&cx, |state, cx| {
+                assert!(!state.blink_cursor.read(cx).visible(), "action {action}");
+            });
+
+            cx.update(|window, cx| {
+                view.input.update(cx, |state, cx| {
                     match action {
                         0 => state.add_cursor_above(&AddCursorAbove, window, cx),
                         1 => state.add_cursor_below(&AddCursorBelow, window, cx),
@@ -7437,9 +7557,9 @@ mod tests {
                         _ => state.backspace(&Backspace, window, cx),
                     }
                     assert!(state.blink_cursor.read(cx).visible(), "action {action}");
-                }
+                });
             });
-        });
+        }
     }
 
     #[gpui::test]

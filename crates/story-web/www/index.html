@@ -74,14 +74,14 @@
       }
     </style>
     <script>
-      // Adopt the embedding page's appearance before the first paint, so the
-      // loading screen matches the theme the gallery is about to render.
+      // Adopt the embedding page's appearance before the first paint.
       try {
-        if (
-          window.parent !== window &&
-          window.parent.document.documentElement.classList.contains('dark')
-        ) {
-          document.documentElement.classList.add('dark');
+        if (window.parent !== window) {
+          const host = window.parent.document.documentElement;
+          document.documentElement.classList.toggle('dark', host.classList.contains('dark'));
+          const style = window.parent.getComputedStyle(host);
+          document.documentElement.style.setProperty('--loading-bg', style.getPropertyValue('--background'));
+          document.documentElement.style.setProperty('--loading-fg', style.getPropertyValue('--foreground'));
         }
       } catch (error) {
         // Cross-origin embedding: keep the default light loading screen.

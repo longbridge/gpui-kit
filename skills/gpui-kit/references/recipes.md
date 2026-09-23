@@ -2,12 +2,12 @@
 
 This complete view comes from `examples/ai_recipes/src/settings.rs`. That consumer crate depends only on `gpui-kit`; the same source is compiled and tested by `cargo test -p gpui-kit-recipes`, and `script/check-ai-recipes` keeps this copy identical to it. Pair it with that example's `src/bootstrap.rs`, which installs assets, initializes the library, and wraps the window in `Root`.
 
-The view owns both input state and subscriptions. Rendering creates only elements. Application content renders each overlay layer once; `Root` alone does not render dialog, sheet, or notification content.
+The view owns both input state and subscriptions. Rendering creates only elements. The window's `Root` renders the dialog, sheet and notification layers above the view.
 
 <!-- recipe:settings:start -->
 ```rust
 use gpui_kit::component::{
-    ActiveTheme, IconName, Root, WindowExt,
+    ActiveTheme, IconName, WindowExt,
     button::Button,
     checkbox::Checkbox,
     form::{Field, Form},
@@ -65,7 +65,7 @@ impl Settings {
 }
 
 impl Render for Settings {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -123,9 +123,6 @@ impl Render for Settings {
                             }),
                     ),
             )
-            .children(Root::render_dialog_layer(window, cx))
-            .children(Root::render_sheet_layer(window, cx))
-            .children(Root::render_notification_layer(window, cx))
     }
 }
 ```

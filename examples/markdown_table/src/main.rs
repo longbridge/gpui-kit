@@ -135,16 +135,11 @@ fn main() {
             ..Default::default()
         };
 
-        cx.spawn(async move |cx| {
-            cx.open_window(window_options, |window, cx| {
-                let view = cx.new(|_| Example {
-                    mode: TableMode::initial(),
-                });
-                // The first level view on the window should be a Root.
-                cx.new(|cx| Root::new(view, window, cx).bg(cx.theme().background))
+        gpui_kit::open_window(window_options, cx, |_, cx| {
+            cx.new(|_| Example {
+                mode: TableMode::initial(),
             })
-            .expect("Failed to open window");
         })
-        .detach();
+        .expect("Failed to open window");
     });
 }

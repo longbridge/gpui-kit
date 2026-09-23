@@ -165,11 +165,11 @@ html.dark .alignment-dark { display: block; }
   --scrollbar-thumb: rgb(250 250 250 / 22%);
   --scrollbar-thumb-hover: rgb(250 250 250 / 40%);
 
-  --shadow-hairline: 0 0 0 0.5px rgb(0 0 0 / 70%);
+  --shadow-hairline: 0 0 0 0.5px rgb(0 0 0 / 32%);
   --shadow-raise: 0 1px 2px rgb(0 0 0 / 45%);
   --shadow-window:
-    0 1px 1px rgb(0 0 0 / 40%), 0 10px 24px -8px rgb(0 0 0 / 55%),
-    0 40px 72px -28px rgb(0 0 0 / 70%);
+    0 1px 1px rgb(0 0 0 / 12%), 0 10px 24px -8px rgb(0 0 0 / 20%),
+    0 40px 72px -28px rgb(0 0 0 / 26%);
   --shadow-panel: 0 20px 50px -24px rgb(0 0 0 / 65%);
   --shadow-dialog: 0 25px 50px -12px rgb(0 0 0 / 55%);
 
@@ -287,7 +287,7 @@ html.dark .astro-code span {
   gap: 0.75rem;
   height: 2.35rem;
   padding: 0 0.85rem;
-  box-shadow: inset 0 -1px 0 var(--border);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--border) 45%, transparent);
   background: linear-gradient(
     to bottom,
     color-mix(in srgb, var(--sidebar) 55%, var(--background)),
@@ -598,6 +598,53 @@ html.dark .astro-code span {
   .callout--important { --callout-accent: var(--warning); }
   .callout--danger { --callout-accent: var(--destructive); }
 
+  .doc-tabs {
+    margin-block: 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+  }
+
+  .doc-tabs__input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .doc-tabs__list {
+    display: flex;
+    gap: 0.25rem;
+    padding: 0.35rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--muted);
+  }
+
+  .doc-tabs__list label {
+    padding: 0.45rem 0.85rem;
+    border-radius: calc(var(--radius-card) - 3px);
+    color: var(--muted-foreground);
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .doc-tabs__input:nth-of-type(1):checked ~ .doc-tabs__list label:nth-child(1),
+  .doc-tabs__input:nth-of-type(2):checked ~ .doc-tabs__list label:nth-child(2),
+  .doc-tabs__input:nth-of-type(3):checked ~ .doc-tabs__list label:nth-child(3) {
+    color: var(--foreground);
+    background: var(--background);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 10%, transparent);
+  }
+
+  .doc-tabs__panel { display: none; padding: 0.25rem 1.1rem; }
+  .doc-tabs__panel > :first-child { margin-top: 0.8rem; }
+  .doc-tabs__panel > :last-child { margin-bottom: 0.8rem; }
+  .doc-tabs__input:nth-of-type(1):checked ~ .doc-tabs__panels .doc-tabs__panel:nth-child(1),
+  .doc-tabs__input:nth-of-type(2):checked ~ .doc-tabs__panels .doc-tabs__panel:nth-child(2),
+  .doc-tabs__input:nth-of-type(3):checked ~ .doc-tabs__panels .doc-tabs__panel:nth-child(3) { display: block; }
+
   /* GFM footnotes. The markdown pipeline emits `<h2 class="sr-only">` as the
      section's accessible name, but Tailwind only generates classes it finds in
      source, and this one comes out of rendered markdown — so without a rule
@@ -838,6 +885,7 @@ html.dark .astro-code span {
 }
 
 .site-nav__dropdown-item:hover { background: var(--secondary); }
+.site-nav__dropdown-item.is-current { color: var(--brand); font-weight: 650; }
 
 /* ====================================================================
    Sidebar (docs layout)
@@ -1089,6 +1137,76 @@ html.dark .astro-code span {
 
 .theme-toggle:hover { background: var(--secondary); }
 .theme-toggle svg { width: 1rem; height: 1rem; }
+#theme-palette { display: none; }
+#theme-palette[open] {
+  display: flex;
+  flex-direction: column;
+  width: min(30rem, calc(100% - 2rem));
+  max-height: min(36rem, calc(100vh - 4rem));
+  margin: 8vh auto auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
+  background: var(--popover);
+  color: var(--foreground);
+  box-shadow: var(--shadow-dialog);
+}
+#theme-palette::backdrop {
+  background: color-mix(in srgb, var(--background) 45%, transparent);
+  backdrop-filter: blur(6px);
+}
+.theme-palette__search {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted-foreground);
+}
+.theme-palette__search input {
+  flex: 1;
+  min-width: 0;
+  outline: none;
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+}
+.theme-palette__search input::placeholder { color: var(--muted-foreground); }
+.theme-palette__search:focus-within > svg { color: var(--foreground); }
+.theme-palette__list { min-height: 0; overflow-y: auto; padding: 0.25rem; }
+.theme-palette__group[hidden] { display: none; }
+.theme-palette__heading {
+  padding: 0.45rem 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.theme-palette__option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border-radius: var(--radius-control);
+  text-align: left;
+  cursor: pointer;
+}
+.theme-palette__option[hidden], .theme-palette__empty[hidden] { display: none; }
+.theme-palette__option:hover:not([aria-selected="true"]) {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.theme-palette__option[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
+.theme-palette__item-icon { flex: none; color: var(--muted-foreground); }
+.theme-palette__option:is(:hover, [aria-selected="true"]) .theme-palette__item-icon { color: inherit; }
+.theme-palette__name { flex: 1; min-width: 0; font-size: 0.875rem; }
+.theme-palette__check { flex: none; visibility: hidden; }
+.theme-palette__option[data-current="true"] .theme-palette__check { visibility: visible; }
+.theme-palette__empty { margin: 1.5rem; color: var(--muted-foreground); text-align: center; }
 
 /* ====================================================================
    Pagefind search UI overrides

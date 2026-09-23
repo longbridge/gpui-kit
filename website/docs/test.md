@@ -1,7 +1,7 @@
 ---
 title: Testing
 description: Test GPUI Kit applications and GPUI behavior with Rust unit tests, TestAppContext, native UI interactions, layout assertions and CI.
-order: -2.3
+order: -11
 example: false
 ---
 
@@ -345,10 +345,9 @@ suites remain in place. Pure presentation components need geometry or pixel asse
 not invented interaction state. Custom parts register their existing native elements;
 unsupported properties remain unavailable, with no manual test-only override.
 
-Views that open dialogs, sheets or notifications through `WindowExt` must render the
-corresponding `Root::render_dialog_layer`, `Root::render_sheet_layer` and
-`Root::render_notification_layer` children, just as the production application does.
-Constructing `Root` alone does not mount those overlay layers.
+Views that open dialogs, sheets or notifications through `WindowExt` need a `Root`
+as the window's root view. `Root` always renders all three overlay layers above
+application content, including cached views. No manual layer mounting is needed.
 
 Use `within` for repeated controls. A Sheet's `"sheet"` host scope contains its
 `"sheet-content"` surface; Dialog's `"dialog"` scope contains the layer-indexed surface.

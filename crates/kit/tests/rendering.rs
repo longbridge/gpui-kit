@@ -67,15 +67,29 @@ mod macos {
 
     fn checkbox_pixels(assets: Arc<dyn AssetSource>) -> Vec<u8> {
         let mut cx = context(assets);
-        let handle = cx
-            .open_window(size(px(80.), px(60.)), |_, cx| cx.new(|_| Checked))
+        let (handle, _) = cx
+            .update(|cx| {
+                gpui_kit::open_window(
+                    gpui_kit::WindowOptions {
+                        window_bounds: Some(gpui_kit::WindowBounds::Windowed(gpui_kit::Bounds {
+                            origin: Default::default(),
+                            size: size(px(80.), px(60.)),
+                        })),
+                        focus: false,
+                        show: false,
+                        ..Default::default()
+                    },
+                    cx,
+                    |_, cx| cx.new(|_| Checked),
+                )
+            })
             .unwrap();
-        cx.update_window(handle.into(), |_, window, cx| {
+        cx.update_window(handle, |_, window, cx| {
             window.render_frame(cx);
             assert_eq!(window.find("agree").checked(), Some(true));
         })
         .unwrap();
-        cx.capture_screenshot(handle.into())
+        cx.capture_screenshot(handle)
             .expect("Metal rendering must be available")
             .into_raw()
     }
@@ -110,17 +124,31 @@ mod macos {
 
     fn pixels_detect_missing_input_text_even_when_value_is_correct() {
         let mut cx = context(Arc::new(Assets));
-        let handle = cx
-            .open_window(size(px(240.), px(70.)), |window, cx| {
-                cx.new(|cx| Editor {
-                    input: cx.new(|cx| InputState::new(window, cx)),
-                })
+        let (handle, _) = cx
+            .update(|cx| {
+                gpui_kit::open_window(
+                    gpui_kit::WindowOptions {
+                        window_bounds: Some(gpui_kit::WindowBounds::Windowed(gpui_kit::Bounds {
+                            origin: Default::default(),
+                            size: size(px(240.), px(70.)),
+                        })),
+                        focus: false,
+                        show: false,
+                        ..Default::default()
+                    },
+                    cx,
+                    |window, cx| {
+                        cx.new(|cx| Editor {
+                            input: cx.new(|cx| InputState::new(window, cx)),
+                        })
+                    },
+                )
             })
             .unwrap();
-        cx.update_window(handle.into(), |_, window, cx| window.render_frame(cx))
+        cx.update_window(handle, |_, window, cx| window.render_frame(cx))
             .unwrap();
-        let empty = cx.capture_screenshot(handle.into()).unwrap();
-        cx.update_window(handle.into(), |_, window, cx| {
+        let empty = cx.capture_screenshot(handle).unwrap();
+        cx.update_window(handle, |_, window, cx| {
             window.click("name", cx);
             window.input("Ada", cx);
             window.blur(cx);
@@ -128,9 +156,9 @@ mod macos {
             assert_eq!(window.find("name").value(), Some("Ada"));
         })
         .unwrap();
-        let populated = cx.capture_screenshot(handle.into()).unwrap();
+        let populated = cx.capture_screenshot(handle).unwrap();
         assert!(empty != populated, "typing must change the rendered input");
-        cx.update_window(handle.into(), |_, window, cx| {
+        cx.update_window(handle, |_, window, cx| {
             // Inject a production styling defect without changing the editor value.
             let transparent = cx.theme().transparent;
             Theme::update(cx, |theme| theme.foreground = transparent);
@@ -138,7 +166,7 @@ mod macos {
             assert_eq!(window.find("name").value(), Some("Ada"));
         })
         .unwrap();
-        let hidden = cx.capture_screenshot(handle.into()).unwrap();
+        let hidden = cx.capture_screenshot(handle).unwrap();
         assert!(
             populated != hidden,
             "value() alone cannot detect invisible text"

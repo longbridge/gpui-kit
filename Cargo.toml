@@ -33,7 +33,6 @@ members = [
     "examples/text_max_lines",
     "examples/text_selection",
     "examples/touch_selection",
-    "examples/root_borderless",
     "examples/table_in_scrollable",
     "examples/markdown_table",
     "examples/ai_recipes",
@@ -48,24 +47,31 @@ publish = false
 edition = "2024"
 
 [workspace.dependencies]
-gpui-kit = { path = "crates/kit", version = "0.6.4" }
-gpui-component = { path = "crates/component", version = "0.6.4" }
-gpui-base = { path = "crates/base", version = "0.6.4" }
-gpui-component-macros = { path = "crates/component-macros", version = "0.6.4" }
-gpui-kit-assets = { path = "crates/assets", version = "0.6.4" }
-gpui-fps = { path = "crates/fps", version = "0.6.4" }
-gpui-shell = { path = "crates/shell", version = "0.6.4" }
-gpui-wry = { path = "crates/webview", version = "0.6.4" }
-gpui-component-shell = { path = "crates/component-shell", version = "0.6.4" }
+gpui-kit = { path = "crates/kit", version = "0.6.5" }
+gpui-component = { path = "crates/component", version = "0.6.5" }
+gpui-base = { path = "crates/base", version = "0.6.5" }
+gpui-component-macros = { path = "crates/component-macros", version = "0.6.5" }
+gpui-kit-assets = { path = "crates/assets", version = "0.6.5" }
+gpui-fps = { path = "crates/fps", version = "0.6.5" }
+gpui-shell = { path = "crates/shell", version = "0.6.5" }
+gpui-wry = { path = "crates/webview", version = "0.6.5" }
+gpui-component-shell = { path = "crates/component-shell", version = "0.6.5" }
 story = { path = "crates/story" }
 
-gpui = { package = "gpui-pre", version = "0.3.5" }
-gpui_platform = { package = "gpui-pre-platform", version = "0.3.5", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { package = "gpui-pre-web", version = "0.3.5" }
-gpui_macros = { package = "gpui-pre-macros", version = "0.3.5" }
-reqwest_client = { package = "gpui-pre-reqwest-client", version = "0.3.5" }
-sum-tree = { package = "gpui-pre-sum-tree", version = "0.3.5" }
-reqwest = { package = "gpui-pre-reqwest", version = "0.12.15", default-features = false, features = [
+# GPUI comes from the `gpui-pre-*` snapshots of Zed's crates, and any snapshot
+# may change GPUI's API. These requirements are what the published gpui-kit
+# crates carry to crates.io, so they pin the exact snapshot the release was
+# built against: a caret requirement let the weekly release move applications
+# onto a newer snapshot that gpui-component did not compile with (#3156). Bump
+# every snapshot crate together with its Cargo.lock entry; `script/check-gpui-pin.ts`
+# fails CI when a pin is not exact.
+gpui = { package = "gpui-pre", version = "=0.3.6" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.6", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { package = "gpui-pre-web", version = "=0.3.6" }
+gpui_macros = { package = "gpui-pre-macros", version = "=0.3.6" }
+reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.6" }
+sum-tree = { package = "gpui-pre-sum-tree", version = "=0.3.6" }
+reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false, features = [
     "charset",
     "http2",
     "macos-system-configuration",

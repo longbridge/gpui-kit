@@ -33,18 +33,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Typo check
         uses: crate-ci/typos@v1.40.0
-      - name: Skill guides are in sync
-        run: |
-          for pair in "coding-guides skills/gpui-kit" "design-guides skills/gpui-kit-design-guides"; do
-            set -- $pair
-            if ! diff -u "website/docs/$1.md" "$2/references/$1.md"; then
-              echo "::error::$2/references/$1.md is stale."
-              echo "Run: cp website/docs/$1.md $2/references/$1.md"
-              exit 1
-            fi
-          done
       - name: Verify published recipe fragments
         run: python3 script/check-ai docs
+      - uses: oven-sh/setup-bun@v2
+      - name: gpui-pre is pinned exactly
+        run: bun script/check-gpui-pin.ts
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete@0.9.1

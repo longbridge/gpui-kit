@@ -1,5 +1,7 @@
 ---
 import DocSearch from './DocSearch.astro';
+import ThemePalette from './ThemePalette.astro';
+import { currentVersion, currentVersionPath, latestVersion, siteVersions, versionHref } from '../lib/versions';
 
 export interface Props {
   lang?: 'en' | 'zh-CN';
@@ -14,11 +16,16 @@ export interface Props {
 }
 
 const { lang = 'en', currentPath = '', starCount = 0, langSwitchHref: langSwitchOverride } = Astro.props;
-const base = import.meta.env.BASE_URL;
+const base = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/`;
 const isZh = lang === 'zh-CN';
+const versionPath = currentVersionPath(currentPath, base);
 
 function url(path: string) {
   return `${base}${path}`.replace(/\/+/g, '/');
+}
+
+function sharedUrl(path: string) {
+  return `/${path.replace(/^\/+/, '')}`;
 }
 
 const starLabel = starCount >= 1000 ? `${(starCount / 1000).toFixed(1)}k` : `${starCount}`;
@@ -29,14 +36,14 @@ const navLinks = isZh
       { text: '组件', href: url('zh-CN/component') },
       { text: 'Base', href: url('zh-CN/base') },
       { text: 'Shell', href: url('zh-CN/shell') },
-      { text: '应用案例', href: url('zh-CN/apps') },
+      { text: '应用案例', href: sharedUrl('zh-CN/apps') },
     ]
   : [
       { text: 'Docs', href: url('docs') },
       { text: 'Component', href: url('component') },
       { text: 'Base', href: url('base') },
       { text: 'Shell', href: url('shell') },
-      { text: 'App Stories', href: url('apps') },
+      { text: 'App Stories', href: sharedUrl('apps') },
     ];
 
 const resourceLinks = isZh
@@ -74,6 +81,8 @@ function swapLocale(path: string) {
 const langSwitchHref = langSwitchOverride ?? swapLocale(currentPath);
 const langLabel = isZh ? 'EN' : '中';
 const resourcesLabel = isZh ? '资源' : 'Resources';
+const versionsLabel = isZh ? '版本' : 'Versions';
+const currentVersionLabel = siteVersions.find((version) => version.id === currentVersion)?.label ?? currentVersion;
 ---
 
 <nav class="site-nav" aria-label="Primary">
@@ -113,6 +122,26 @@ const resourcesLabel = isZh ? '资源' : 'Resources';
           ))}
         </div>
       </div>
+
+      <div class="site-nav__dropdown site-nav__version-dropdown">
+        <button class="site-nav__dropdown-btn site-nav__link" type="button" aria-haspopup="true" aria-expanded="false">
+          {currentVersionLabel}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
+        <div class="site-nav__dropdown-menu" aria-label={versionsLabel}>
+          {siteVersions.map((version) => (
+            <a
+              href={versionHref(version, versionPath)}
+              class:list={["site-nav__dropdown-item", { "is-current": version.id === currentVersion }]}
+              aria-current={version.id === currentVersion ? 'page' : undefined}
+            >
+              {version.label}{version.id === latestVersion ? ` (${isZh ? '最新' : 'latest'})` : ''}
+            </a>
+          ))}
+        </div>
+      </div>
     </div>
 
     <div class="site-nav__actions">
@@ -140,6 +169,7 @@ const resourcesLabel = isZh ? '资源' : 'Resources';
       </a>
 
       <!-- Theme toggle -->
+      <ThemePalette lang={lang} />
       <button
         id="theme-toggle"
         class="theme-toggle"
@@ -226,10 +256,15 @@ const resourcesLabel = isZh ? '资源' : 'Resources';
   updateIcon();
 
   toggle?.addEventListener('click', () => {
-    const isDark = document.documentElement.classList.toggle('dark');
+    const isDark = !document.documentElement.classList.contains('dark');
+    document.documentElement.classList.toggle('dark', isDark);
+    delete document.documentElement.dataset.theme;
+    delete document.documentElement.dataset.themeName;
+    delete document.documentElement.dataset.themeSource;
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
     updateIcon();
   });
+  document.addEventListener('themechange', updateIcon);
 
 
   // Mobile nav drawer

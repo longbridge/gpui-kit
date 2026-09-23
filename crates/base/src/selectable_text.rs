@@ -188,13 +188,11 @@ impl Element for SelectableText {
         self.styled_text
             .prepaint(global_id, inspector_id, bounds, &mut (), window, cx);
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
-        handle.register(
-            TextSelectionRegistration::new(hitbox.clone(), bounds)
-                .with_document_order(self.document_order)
-                .with_text_bounds(vec![bounds]),
-            window,
-            cx,
-        );
+        let registration = TextSelectionRegistration::new(hitbox.clone(), bounds)
+            .with_document_order(self.document_order)
+            .with_text_bounds(vec![bounds])
+            .with_rendered_element(handle, window, cx);
+        handle.register(registration, window, cx);
         hitbox
     }
 

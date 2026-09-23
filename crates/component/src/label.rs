@@ -151,6 +151,10 @@ impl Label {
         length: usize,
         cx: &mut App,
     ) -> Option<Vec<(Range<usize>, HighlightStyle)>> {
+        if self.masked {
+            return None;
+        }
+
         let ranges = self.highlight_ranges(length);
         if ranges.is_empty() {
             return None;
@@ -215,6 +219,40 @@ impl RenderOnce for Label {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct MaskedLabels;
+
+    impl gpui::Render for MaskedLabels {
+        fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+            div()
+                .child(Label::new("Hello").secondary("World").masked(true))
+                .child(Label::new("Hello").highlights("ell").masked(true))
+                .child(
+                    Label::new("é🙂")
+                        .secondary("世界")
+                        .highlights("🙂 世")
+                        .masked(true),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn masked_secondary_text_and_highlights_render(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        cx.update(|cx| {
+            let label = Label::new("é🙂")
+                .secondary("世界")
+                .highlights("🙂 世")
+                .masked(true);
+            assert!(
+                label
+                    .measure_highlights(label.full_text().len(), cx)
+                    .is_none()
+            );
+        });
+        let (_, cx) = cx.add_window_view(|_, _| MaskedLabels);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
 
     #[test]
     fn test_highlight_ranges() {

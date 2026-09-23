@@ -115,15 +115,10 @@ fn main() {
             ..Default::default()
         };
 
-        cx.spawn(async move |cx| {
-            cx.open_window(window_options, |window, cx| {
-                window.set_window_title("Table in Scrollable");
-                let view = cx.new(|cx| Example::new(window, cx));
-                // This first level on the window, should be a Root.
-                cx.new(|cx| Root::new(view, window, cx).bg(cx.theme().background))
-            })
-            .expect("Failed to open window");
+        gpui_kit::open_window(window_options, cx, |window, cx| {
+            window.set_window_title("Table in Scrollable");
+            cx.new(|cx| Example::new(window, cx))
         })
-        .detach();
+        .expect("Failed to open window");
     });
 }

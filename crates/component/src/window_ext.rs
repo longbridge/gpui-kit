@@ -1,5 +1,6 @@
+use crate::root::WindowState;
 use crate::{
-    Placement, Root,
+    Placement,
     dialog::{AlertDialog, Dialog},
     input::AnyInputState,
     notification::Notification,
@@ -86,24 +87,6 @@ pub trait WindowExt: Sized {
     fn focused_input(&mut self, cx: &mut App) -> Option<AnyInputState>;
     /// Returns true if there is a focused Input entity.
     fn has_focused_input(&mut self, cx: &mut App) -> bool;
-
-    /// Returns the merged selected text across registered selectable regions
-    /// in this window, in logical document order and joined with `\n`.
-    #[deprecated(note = "use gpui_base::TextSelection::selected_text instead")]
-    fn selected_text(&mut self, cx: &mut App) -> String;
-
-    /// Returns true if any registered region has an active text selection in
-    /// this window, including renderer-local selections such as select-all.
-    #[deprecated(note = "use gpui_base::TextSelection::has_selection instead")]
-    fn has_text_selection(&mut self, cx: &mut App) -> bool;
-
-    /// Clears the window text selection and all registered renderer-local selections.
-    #[deprecated(note = "use gpui_base::TextSelection::clear instead")]
-    fn clear_text_selection(&mut self, cx: &mut App);
-
-    /// Ends the in-progress window-level text selection drag (if any).
-    #[deprecated(note = "use gpui_base::TextSelection::end instead")]
-    fn end_text_selection(&mut self, cx: &mut App);
 }
 
 impl WindowExt for Window {
@@ -120,19 +103,19 @@ impl WindowExt for Window {
     where
         F: Fn(Sheet, &mut Window, &mut App) -> Sheet + 'static,
     {
-        Root::update(self, cx, move |root, window, cx| {
+        WindowState::update(self, cx, move |root, window, cx| {
             root.open_sheet_at(placement, build, window, cx);
         })
     }
 
     #[inline]
     fn has_active_sheet(&mut self, cx: &mut App) -> bool {
-        Root::read(self, cx).active_sheet.is_some()
+        WindowState::read(self, cx).active_sheet.is_some()
     }
 
     #[inline]
     fn close_sheet(&mut self, cx: &mut App) {
-        Root::update(self, cx, |root, window, cx| {
+        WindowState::update(self, cx, |root, window, cx| {
             root.close_sheet(window, cx);
         })
     }
@@ -142,7 +125,7 @@ impl WindowExt for Window {
     where
         F: Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static,
     {
-        Root::update(self, cx, move |root, window, cx| {
+        WindowState::update(self, cx, move |root, window, cx| {
             root.open_dialog(build, window, cx);
         })
     }
@@ -159,19 +142,19 @@ impl WindowExt for Window {
 
     #[inline]
     fn has_active_dialog(&mut self, cx: &mut App) -> bool {
-        Root::read(self, cx).active_dialogs.len() > 0
+        !WindowState::read(self, cx).active_dialogs.is_empty()
     }
 
     #[inline]
     fn close_dialog(&mut self, cx: &mut App) {
-        Root::update(self, cx, |root, window, cx| {
+        WindowState::update(self, cx, |root, window, cx| {
             root.close_dialog(window, cx);
         })
     }
 
     #[inline]
     fn close_all_dialogs(&mut self, cx: &mut App) {
-        Root::update(self, cx, |root, window, cx| {
+        WindowState::update(self, cx, |root, window, cx| {
             root.close_all_dialogs(window, cx);
         })
     }
@@ -179,14 +162,14 @@ impl WindowExt for Window {
     #[inline]
     fn push_notification(&mut self, note: impl Into<Notification>, cx: &mut App) {
         let note = note.into();
-        Root::update(self, cx, |root, window, cx| {
+        WindowState::update(self, cx, |root, window, cx| {
             root.push_notification(note, window, cx);
         })
     }
 
     #[inline]
     fn remove_notification<T: Sized + 'static>(&mut self, cx: &mut App) {
-        Root::update(self, cx, |root, window, cx| {
+        WindowState::update(self, cx, |root, window, cx| {
             root.remove_notification::<T>(window, cx);
         })
     }
@@ -198,21 +181,26 @@ impl WindowExt for Window {
         cx: &mut App,
     ) {
         let key = key.into();
-        Root::update(self, cx, |root, window, cx| {
+        WindowState::update(self, cx, |root, window, cx| {
             root.remove_notification1::<T>(key, window, cx);
         })
     }
 
     #[inline]
     fn clear_notifications(&mut self, cx: &mut App) {
-        Root::update(self, cx, |root, window, cx| {
+        WindowState::update(self, cx, |root, window, cx| {
             root.clear_notifications(window, cx);
         })
     }
 
     #[inline]
     fn notifications(&mut self, cx: &mut App) -> Rc<Vec<Entity<Notification>>> {
-        Rc::new(Root::read(self, cx).notification.read(cx).notifications())
+        Rc::new(
+            WindowState::read(self, cx)
+                .notification
+                .read(cx)
+                .notifications(),
+        )
     }
 
     #[inline]
@@ -221,39 +209,19 @@ impl WindowExt for Window {
     }
 
     fn focused_input(&mut self, cx: &mut App) -> Option<AnyInputState> {
-        let state = Root::read(self, cx).focused_input.clone()?;
+        let state = WindowState::read(self, cx).focused_input.clone()?;
         if state.focus_handle(cx).is_focused(self) {
             return Some(state);
         }
 
         // An input removed from the tree while focused never re-renders to
         // unregister itself; drop the stale registration lazily.
-        Root::try_update(self, cx, |root, _, cx| {
+        WindowState::try_update(self, cx, |root, _, cx| {
             if root.focused_input.as_ref() == Some(&state) {
                 root.focused_input = None;
                 cx.notify();
             }
         });
         None
-    }
-
-    #[inline]
-    fn selected_text(&mut self, cx: &mut App) -> String {
-        gpui_base::TextSelection::selected_text(self, cx)
-    }
-
-    #[inline]
-    fn has_text_selection(&mut self, cx: &mut App) -> bool {
-        gpui_base::TextSelection::has_selection(self, cx)
-    }
-
-    #[inline]
-    fn clear_text_selection(&mut self, cx: &mut App) {
-        gpui_base::TextSelection::clear(self, cx);
-    }
-
-    #[inline]
-    fn end_text_selection(&mut self, cx: &mut App) {
-        gpui_base::TextSelection::end(self, cx);
     }
 }

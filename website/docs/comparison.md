@@ -1,7 +1,7 @@
 ---
 title: Comparison
 description: How GPUI Kit compares with Iced, egui and Qt 6.
-order: 10
+order: -14
 ---
 
 # Comparison

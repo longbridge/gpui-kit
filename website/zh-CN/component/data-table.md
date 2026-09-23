@@ -261,6 +261,7 @@ let state = cx.new(|cx| {
 - 可以程序化设置当前选中单元格
 
 ```rust
+// 只有在选中单元格时才有值；选中行或列时返回 `None`
 if let Some((row_ix, col_ix)) = state.read(cx).selected_cell() {
     println!("Current cell: ({}, {})", row_ix, col_ix);
 }
@@ -269,6 +270,34 @@ state.update(cx, |state, cx| {
     state.set_selected_cell(5, 3, cx);
 });
 ```
+
+### 读取和写入选中状态
+
+表格同一时刻只有一个选中状态：未选中、选中一行、选中一列或选中一个单元格。`selection()` 把它作为一个 `TableSelection` 值返回，`set_selection()` 则整体写回，保存和恢复选中状态只需一读一写：
+
+```rust
+use gpui_component::table::TableSelection;
+
+match state.read(cx).selection() {
+    TableSelection::None => {}
+    TableSelection::Row(row_ix) => println!("Row {row_ix}"),
+    TableSelection::Column(col_ix) => println!("Column {col_ix}"),
+    TableSelection::Cell(row_ix, col_ix) => println!("Cell ({row_ix}, {col_ix})"),
+}
+
+state.update(cx, |state, cx| {
+    // 滚动和事件与 `set_selected_cell(5, 3, cx)` 完全一致
+    state.set_selection(TableSelection::Cell(5, 3), cx);
+});
+```
+
+`selected_row()`、`selected_col()`、`selected_cell()` 三个方法各自只回答自己那一类选中。`selected_row()` 只有在行本身被选中时才返回 `Some`，选中单元格不会通过它体现；选中一行之后，`selected_cell()` 也会变回 `None`。需要知道选中单元格所在的行时，从单元格映射：
+
+```rust
+let row_ix = state.read(cx).selected_cell().map(|(row_ix, _)| row_ix);
+```
+
+键盘导航会在模式切换后记住上一次的行列位置。选中一列后按 `Down`，会从之前选中的那一行继续移动，即使列模式下 `selected_row()` 返回的是 `None`。
 
 ## 列宽调整与列移动
 
@@ -361,6 +390,7 @@ DataTable::new(&state)
 - [TableDelegate] - 数据源和渲染协议
 - [Column] - 列定义
 - [TableEvent] - 表格事件
+- [TableSelection] - 当前选中状态的单一值：`None`、`Row`、`Column` 或 `Cell`
 
 ### 常见方法
 
@@ -370,8 +400,12 @@ DataTable::new(&state)
 - `cell_selectable(bool)`
 - `row_selectable(bool)`
 - `col_selectable(bool)`
-- `selected_cell()`
+- `selection()` - 以 `TableSelection` 返回当前选中状态
+- `set_selection(selection, cx)` - 以 `TableSelection` 设置选中状态，`TableSelection::None` 表示清除
+- `selected_cell()` - 仅在选中单元格时有值
 - `set_selected_cell(row_ix, col_ix, cx)`
+- `selected_row()` - 仅在行本身被选中时有值
+- `selected_col()` - 仅在列本身被选中时有值
 - `clear_selection(cx)`
 - `scroll_to_row(row_ix, cx)`
 - `scroll_to_col(col_ix, cx)`
@@ -395,5 +429,6 @@ DataTable::new(&state)
 [TableDelegate]: https://docs.rs/gpui-component/latest/gpui_component/table/trait.TableDelegate.html
 [Column]: https://docs.rs/gpui-component/latest/gpui_component/table/struct.Column.html
 [TableEvent]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.TableEvent.html
+[TableSelection]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.TableSelection.html
 [ColumnSort]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.ColumnSort.html
 [ColumnFixed]: https://docs.rs/gpui-component/latest/gpui_component/table/enum.ColumnFixed.html

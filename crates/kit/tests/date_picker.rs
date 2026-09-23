@@ -1,3 +1,4 @@
+mod common;
 use gpui_kit::component::{
     Disableable,
     date_picker::{DatePicker, DatePickerState, DateRangePreset},
@@ -28,13 +29,15 @@ impl Render for Schedule {
 async fn date_picker_opens_selects_preset_clears_and_cancels(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let mut id: Option<ElementId> = None;
-    let handle = cx.open_window(size(px(640.), px(600.)), |window, cx| {
-        let date = cx.new(|cx| DatePickerState::new(window, cx));
-        id = Some(("date-picker", date.entity_id()).into());
-        Schedule {
-            date,
-            disabled: false,
-        }
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(600.))), |window, cx| {
+        cx.new(|cx| {
+            let date = cx.new(|cx| DatePickerState::new(window, cx));
+            id = Some(("date-picker", date.entity_id()).into());
+            Schedule {
+                date,
+                disabled: false,
+            }
+        })
     });
     let id = id.unwrap();
     cx.update_window(handle.into(), |_, window, cx| {
@@ -83,13 +86,15 @@ async fn date_picker_opens_selects_preset_clears_and_cancels(cx: &mut TestAppCon
 fn disabled_date_picker_does_not_open(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let mut id: Option<ElementId> = None;
-    let handle = cx.open_window(size(px(640.), px(600.)), |window, cx| {
-        let date = cx.new(|cx| DatePickerState::new(window, cx));
-        id = Some(("date-picker", date.entity_id()).into());
-        Schedule {
-            date,
-            disabled: true,
-        }
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(600.))), |window, cx| {
+        cx.new(|cx| {
+            let date = cx.new(|cx| DatePickerState::new(window, cx));
+            id = Some(("date-picker", date.entity_id()).into());
+            Schedule {
+                date,
+                disabled: true,
+            }
+        })
     });
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);

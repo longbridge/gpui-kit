@@ -1,7 +1,7 @@
 ---
 title: 设计指南
 description: 面向 GPUI Kit 客户端应用的产品、视觉与交互设计规范
-order: -2.1
+order: -12
 ---
 
 # 设计指南
@@ -36,7 +36,7 @@ GPUI Kit 通过 Rust 库以及 `gpui-base` / `gpui-component` 分层来实现这
 
 以下网页习惯不应直接复制：
 
-| 网页习惯 | GPUI 原生默认方式 |
+| 网页习惯 | GPUI 默认方式 |
 | --- | --- |
 | 所有按钮都显示手形光标 | 按钮使用箭头，只有链接使用手形 |
 | 以页面跳转为主要结构 | 使用持久窗口、pane、sidebar、tab 与 menu |

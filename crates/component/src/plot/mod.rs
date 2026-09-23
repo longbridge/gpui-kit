@@ -47,9 +47,12 @@ pub trait Plot: IntoElement {
 
     /// A stable element id that enables interactive tooltip support for this plot.
     ///
-    /// Return `Some(id)` to opt in to tooltips; the id must be unique among sibling
-    /// elements. Returning `None` (the default) disables all tooltip behavior, leaving
-    /// the plot a pure, non-interactive element identical to the pre-tooltip behavior.
+    /// Return `Some(id)` to opt in to tooltips and hover motion; the id must be unique
+    /// among sibling elements. Returning `None` (the default for a hand-written plot)
+    /// disables all tooltip behavior, leaving the plot a pure, non-interactive element.
+    ///
+    /// The charts in [`crate::chart`] always return `Some`: their id defaults to the
+    /// source location they were constructed at, and `id` renames it.
     fn id(&self) -> Option<ElementId> {
         None
     }

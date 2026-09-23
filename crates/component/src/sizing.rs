@@ -182,6 +182,14 @@ pub trait Sizable: Sized {
     /// Or a `Pixels` to set a custom size: `px(30.)`
     fn with_size(mut self, size: impl Into<Size>) -> Self;
 
+    /// Apply control-specific presentation when this element is hosted by a
+    /// toolbar. Most controls keep their normal presentation; command buttons
+    /// override this hook to use the toolbar's quiet, compact treatment.
+    #[doc(hidden)]
+    fn prepare_for_toolbar(self) -> Self {
+        self
+    }
+
     /// Set to Size::XSmall
     #[inline(always)]
     fn xsmall(self) -> Self {

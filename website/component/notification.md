@@ -18,34 +18,9 @@ use gpui_kit::component::{
 
 ## Usage
 
-### Setup application root view for display of notifications
+### Where notifications render
 
-You need to set up your application's root view to render the notification layer. This is typically done in your main application struct's render method.
-
-The [Root::render_notification_layer](https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html#method.render_notification_layer) function handles rendering any active modals on top of your app content.
-
-```rust
-use gpui_kit::component::{TitleBar, Root};
-
-struct Example {}
-
-impl Render for Example {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let notification_layer = Root::render_notification_layer(window, cx);
-
-        div()
-            .size_full()
-            .child(
-                v_flex()
-                    .size_full()
-                    .child(TitleBar::new())
-                    .child(div().flex_1().child("Hello world!")),
-            )
-            // Render the notification layer on top of the app content
-            .children(notification_layer)
-    }
-}
-```
+The window's [Root](./root.md) automatically mounts and renders notifications. Open the window with `gpui_kit::open_window`, or wrap the application view in `Root::new`. Application views do not render overlay layers themselves.
 
 ### Basic Notification
 

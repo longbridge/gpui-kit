@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_root=$(git rev-parse --show-toplevel)
+test_root=$(mktemp -d "$project_root/.test-snapshot-website.XXXXXX")
+trap 'rm -rf "$test_root"' EXIT
+
+fixture_repo="$test_root/repo"
+target="$test_root/target"
+mkdir -p "$fixture_repo/website/docs" "$fixture_repo/website/src/components"
+
+git -C "$fixture_repo" init -q
+git -C "$fixture_repo" config user.email test@example.com
+git -C "$fixture_repo" config user.name Test
+
+printf '%s\n' 'released documentation' > "$fixture_repo/website/docs/existing.md"
+git -C "$fixture_repo" add website
+git -C "$fixture_repo" commit -qm 'early release without Astro home'
+git -C "$fixture_repo" tag v0.6.0
+
+printf '%s\n' 'released home' > "$fixture_repo/website/src/components/HomeApp.vue"
+git -C "$fixture_repo" add website
+git -C "$fixture_repo" commit -qm 'release content'
+git -C "$fixture_repo" tag v1.0.0
+
+printf '%s\n' 'main documentation' > "$fixture_repo/website/docs/existing.md"
+printf '%s\n' 'main-only documentation' > "$fixture_repo/website/docs/main-only.md"
+printf '%s\n' 'main home' > "$fixture_repo/website/src/components/HomeApp.vue"
+mkdir -p "$target"
+cp -R "$fixture_repo/website/." "$target/"
+
+"$project_root/script/snapshot-website" "$fixture_repo" v1.0.0 "$target"
+
+test "$(cat "$target/docs/existing.md")" = 'released documentation'
+test ! -e "$target/docs/main-only.md"
+test "$(cat "$target/src/components/HomeApp.vue")" = 'released home'
+
+printf '%s\n' 'current home fallback' > "$target/src/components/HomeApp.vue"
+"$project_root/script/snapshot-website" "$fixture_repo" v0.6.0 "$target"
+test "$(cat "$target/src/components/HomeApp.vue")" = 'current home fallback'
+
+echo 'snapshot-website test passed'

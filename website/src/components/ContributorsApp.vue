@@ -48,7 +48,7 @@ const moreText = computed(() =>
     isZh.value ? "这里没有展示全部贡献者，完整列表请查看 GitHub 上的 " : "More contributors not shown here. See the full ",
 );
 const contributorsLinkText = computed(() => (isZh.value ? "贡献者列表" : "Contributors"));
-const bgUrl = `${import.meta.env.BASE_URL}contributors.svg`.replace(/\/+/g, '/');
+const bgUrl = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/contributors.svg`.replace(/\/+/g, '/');
 const suffixText = computed(() => (isZh.value ? "。" : " on GitHub."));
 </script>
 

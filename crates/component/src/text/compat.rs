@@ -12,11 +12,23 @@ use super::{
 };
 use gpui_base::{Easing, text::CodeBlock};
 
-/// How long each streamed chunk takes to reach full color. Measured from
-/// claude.ai, whose chunks fade as a whole over roughly 300–400 ms on a
-/// near-linear curve; longer than a model's 50–300 ms chunk cadence, so
-/// consecutive chunks overlap into one gradient tail instead of blinking in.
-const STREAM_FADE: Duration = Duration::from_millis(350);
+/// How long a word of streamed text takes to reach full color, and how much later each further
+/// word of the same chunk starts. Measured frame by frame from claude.ai: a chunk lands as
+/// ~6 words every ~100 ms and goes from transparent to solid in ~250-300 ms, its words lighting
+/// up a few milliseconds apart rather than all at once.
+///
+/// The two pull in opposite directions and both matter.
+///
+/// `stagger × words` is how long a chunk takes to light up end to end, and it has to stay well
+/// under the interval between chunks: let it reach that and chunks overlap into one continuous
+/// drip of single words, which is what staggering was meant to avoid. At 10 ms a 6-word chunk
+/// lights up in 60 ms -- one gesture, with a visible gradient inside it.
+///
+/// The fade has to outlast that interval instead. How many words are visibly mid-fade at any
+/// moment is the reveal rate times the fade, so a short fade leaves a couple of grey glyphs on
+/// the tail and no gradient to speak of.
+const STREAM_FADE: Duration = Duration::from_millis(280);
+const STREAM_FADE_STAGGER: Duration = Duration::from_millis(10);
 
 /// The component-level rich text element.
 ///
@@ -94,11 +106,12 @@ impl TextView {
         self.inner = self.inner.scrollable(value);
         self
     }
-    /// Fades streamed text in the way Claude reveals a reply: each chunk a
-    /// `set_text` or `push_str` adds starts transparent and reaches full
-    /// color over 350 ms. Text that replaces rather than extends the current
-    /// content shows at once, and reduced motion disables the fade. Use
-    /// [`Self::motion`] for other timing or a word-by-word stagger.
+    /// Fades streamed text in the way Claude reveals a reply: the words a `set_text` or
+    /// `push_str` adds start transparent and light up one after another, each reaching full
+    /// color over 280 ms. A chunk far larger than one keystroke burst -- a backfill, a replay --
+    /// fades as a whole instead, since nobody typed it. Text that replaces rather than extends
+    /// the current content shows at once, and reduced motion disables the fade. Use
+    /// [`Self::motion`] for other timing.
     pub fn stream_fade(mut self, value: bool) -> Self {
         self.stream_fade = Some(value);
         self
@@ -246,6 +259,7 @@ impl Element for TextView {
                 }
                 TextViewMotion::default()
                     .with_stream_fade(STREAM_FADE)
+                    .with_stream_fade_stagger(STREAM_FADE_STAGGER)
                     .with_stream_fade_easing(Easing::EaseOut)
             })
         });
@@ -313,18 +327,30 @@ pub(super) fn resolve_component_style(
     // a dark theme.
     let is_dark = themed.is_dark() || legacy.is_dark;
 
-    let mut style = themed
+    let heading_base_font_size = legacy.heading_base_font_size;
+    let heading_font_size = legacy.heading_font_size;
+    let style = themed
         .with_paragraph_gap(legacy.paragraph_gap)
-        .with_heading_base_font_size(legacy.heading_base_font_size)
+        .with_heading(move |level| {
+            let default_size = match level {
+                1 => gpui::rems(2.),
+                2 => gpui::rems(1.5),
+                3 => gpui::rems(1.25),
+                4 => gpui::rems(1.125),
+                _ => gpui::rems(1.),
+            }
+            .to_pixels(heading_base_font_size);
+            let text_size = heading_font_size.as_ref().map_or(default_size, |resolve| {
+                resolve(level, heading_base_font_size)
+            });
+            StyleRefinement::default().text_size(text_size)
+        })
         .with_code_block(code_block)
         .with_table(table)
         .with_table_head(table_head)
         .with_table_cell(table_cell)
         .with_inline_code(inline_code)
         .with_dark(is_dark);
-    if let Some(heading_font_size) = legacy.heading_font_size {
-        style = style.with_heading_font_size(move |level, base| heading_font_size(level, base));
-    }
     style
 }
 

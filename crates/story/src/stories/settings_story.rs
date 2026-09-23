@@ -250,6 +250,7 @@ impl SettingsStory {
                     ]),
                     SettingGroup::new()
                         .title("Font")
+                        .footer(|_, _| "Font preferences apply to this story only.")
                         .item(
                             SettingItem::new(
                                 "Font Family",

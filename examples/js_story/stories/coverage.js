@@ -71,6 +71,7 @@ export const coveredBy = [
   { route: "tag", registrations: ["Tag"] },
   { route: "textarea", registrations: ["Textarea"] },
   { route: "toggle", registrations: ["Toggle"] },
+  { route: "toolbar", registrations: ["Toolbar"] },
   { route: "tooltip", registrations: ["Tooltip"] },
   { route: "tree", registrations: ["Tree"] },
   { route: "virtual-list", registrations: [] },

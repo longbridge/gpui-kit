@@ -23,7 +23,7 @@ use crate::{
     },
 };
 
-use super::{HOVER_DOT_SIZE, hover_halo_size, pointer_spring};
+use super::{HOVER_DOT_SIZE, caller_id, hover_halo_size, pointer_spring};
 
 const HALF_PI: f32 = PI / 2.;
 
@@ -96,7 +96,8 @@ where
     grid: bool,
     grid_levels: usize,
     dot: bool,
-    id: Option<ElementId>,
+    id: ElementId,
+    interactive: bool,
     /// The hover, sampled once per frame in [`Plot::hover`].
     hover: Option<RadarHover>,
 }
@@ -114,6 +115,7 @@ impl<T, Y> RadarChart<T, Y>
 where
     Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
 {
+    #[track_caller]
     pub fn new<I>(data: I) -> Self
     where
         I: IntoIterator<Item = T>,
@@ -133,18 +135,33 @@ where
             grid: true,
             grid_levels: DEFAULT_GRID_LEVELS,
             dot: false,
-            id: None,
+            id: caller_id(),
+            interactive: true,
             hover: None,
         }
     }
 
-    /// Enable an interactive hover tooltip (a dot and row per series at the
-    /// hovered dimension).
+    /// Name this chart's [`ElementId`], replacing the default taken from the
+    /// construction site.
     ///
-    /// The `id` must be unique among sibling elements. Without it, the chart
-    /// stays a non-interactive plot.
+    /// Pass one where a single construction site renders several of these
+    /// charts as siblings: they share the default id, and with it one hover
+    /// state and one path cache. The id must be unique among those siblings.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
-        self.id = Some(id.into());
+        self.id = id.into();
+        self
+    }
+
+    /// Turn this chart's interactive layer on or off. On by default.
+    ///
+    /// The layer is the hitbox under the cursor and what it drives: a dot per
+    /// series marks the hovered dimension, and a tooltip shows a row each. Turn
+    /// it off for a chart that only decorates, or one an element above it wants
+    /// the cursor for: without a hitbox it neither answers the mouse nor takes
+    /// the hover from what sits over it. A chart that is off also drops its path
+    /// cache, which is keyed on the same id.
+    pub fn interactive(mut self, interactive: bool) -> Self {
+        self.interactive = interactive;
         self
     }
 
@@ -509,7 +526,7 @@ where
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.id.clone()
+        self.interactive.then(|| self.id.clone())
     }
 
     fn tooltip_state(
@@ -684,7 +701,7 @@ mod tests {
         assert!(!chart.grid);
         assert_eq!(chart.grid_levels, 5);
         assert!(chart.dot);
-        assert!(chart.id.is_some());
+        assert_eq!(chart.id, gpui::ElementId::Name("radar".into()));
 
         let values = (chart.values[0](&data[0]), chart.values[1](&data[0]));
         assert_eq!(values, (80., 60.));

@@ -14,7 +14,8 @@ all reachable through the single `gpui-kit` dependency:
 - **`gpui-base`**: Unstyled behavior, controlled state, focus, overlays,
   virtual lists, dock infrastructure, and semantic design tokens.
 - **`gpui-component`**: GPUI Component, the complete styled component library
-  with 60+ controls, themes, data tables, dock layout, and a code editor.
+  with 75+ documented components and primitives, themes, data tables, dock
+  layout, and a code editor.
 - **`gpui-shell`**: Opens a Rust host to JavaScript extensions, one granted
   capability at a time.
 
@@ -24,10 +25,17 @@ or build your own design system on the reusable behavior and infrastructure in
 application development. For library APIs, see [GPUI Component](/component),
 [GPUI Base](/base), and [GPUI Shell](/shell).
 
+Read [Action](./action) for GPUI Focus, `track_focus`, Key Contexts,
+KeyBindings, and command dispatch. Continue with [Event](./event) for typed
+notifications and the relationship between Actions and Events.
+
 ## Features
 
-- **60+ UI Components**: Forms, navigation, overlays, feedback, layout, and more.
+- **75+ Components and Primitives**: Forms, navigation, overlays, data display, editing, feedback, layout, and more.
 - **Production Ready**: Used to build Longbridge Pro from day one and refined in a publicly shipped commercial desktop application.
+- **WebAssembly**: Applications and component showcases run on the web through `wasm32-unknown-unknown`.
+- **Accessibility**: AccessKit roles, names, states, relationships, and actions are built into the interaction layer.
+- **UI Integration Testing**: Headless windows exercise real pointer, keyboard, focus, layout, and accessibility behavior.
 - **Native Feel**: Modern controls inspired by macOS and Windows.
 - **120 FPS**: GPU-accelerated interfaces that remain smooth under load.
 - **Data Tables**: Virtual scrolling, fixed and resizable columns, sorting, and cell selection across hundreds of thousands of rows.
@@ -79,15 +87,10 @@ fn main() {
         // This must be called before using any GPUI Component features.
         gpui_kit::init(cx);
 
-        cx.spawn(async move |cx| {
-            cx.open_window(WindowOptions::default(), |window, cx| {
-                let view = cx.new(|_| HelloWorld);
-                // This first level on the window, should be a Root.
-                cx.new(|cx| Root::new(view, window, cx))
-            })
-            .expect("Failed to open window");
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| HelloWorld)
         })
-        .detach();
+        .expect("Failed to open window");
     });
 }
 ```

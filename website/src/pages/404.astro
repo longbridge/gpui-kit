@@ -6,7 +6,7 @@ import { fetchStarCount } from '../lib/github';
 let starCount = 0;
 try { starCount = await fetchStarCount(); } catch {}
 
-const base = import.meta.env.BASE_URL;
+const base = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/`;
 ---
 
 <BaseLayout title="404 — Page Not Found" description="The page you are looking for does not exist." robots="noindex, nofollow" alternates={false}>
