@@ -108,14 +108,9 @@ const copy = isZh
     if (outside) modal.close();
   });
 
-  // ⌘K / Ctrl-K from anywhere, and `/` when not already typing.
+  // `/` opens documentation search when not already typing.
   document.addEventListener('keydown', (event) => {
     const key = event.key.toLowerCase();
-    if ((event.metaKey || event.ctrlKey) && key === 'k') {
-      event.preventDefault();
-      modal?.open ? modal.close() : open();
-      return;
-    }
     if (key === '/' && !modal?.open) {
       const target = event.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;

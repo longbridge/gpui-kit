@@ -16,15 +16,14 @@ const groups = [
 ];
 ---
 
-<button id="theme-palette-open" class="theme-toggle theme-palette__trigger" type="button"
-  aria-label={isZh ? '选择主题，按 T 打开' : 'Choose theme, press T to open'}
-  aria-keyshortcuts="T Meta+Shift+P Control+Shift+P" title={isZh ? '选择主题 (T)' : 'Choose theme (T)'}>
+<button id="theme-palette-open" class="theme-toggle" type="button"
+  aria-label={isZh ? '选择主题，按 ⌘K 打开' : 'Choose theme, press Cmd+K to open'}
+  aria-keyshortcuts="Meta+K Control+K" title={isZh ? '选择主题 (⌘K / Ctrl+K)' : 'Choose theme (Cmd+K / Ctrl+K)'}>
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/>
     <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
     <circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/>
   </svg>
-  <kbd aria-hidden="true">T</kbd>
 </button>
 
 <dialog id="theme-palette" aria-labelledby="theme-palette-title">
@@ -162,16 +161,9 @@ const groups = [
   });
 
   document.addEventListener('keydown', (event) => {
-    if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key.toLowerCase() === 'p') {
-      event.preventDefault();
-      dialog?.open ? dialog.close() : open();
-      return;
-    }
-    if (event.key.toLowerCase() !== 't' || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || dialog?.open) return;
-    const target = event.target as HTMLElement | null;
-    if (target?.closest('input, textarea, select, [contenteditable], [role="textbox"]')) return;
+    if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'k') return;
     event.preventDefault();
-    open();
+    dialog?.open ? dialog.close() : open();
   });
 
   dialog?.addEventListener('keydown', (event) => {

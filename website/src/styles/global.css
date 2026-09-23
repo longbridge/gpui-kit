@@ -1137,13 +1137,6 @@ html.dark .astro-code span {
 
 .theme-toggle:hover { background: var(--secondary); }
 .theme-toggle svg { width: 1rem; height: 1rem; }
-.theme-palette__trigger { width: auto; gap: 0.35rem; padding: 0 0.4rem; }
-.theme-palette__trigger kbd { color: var(--muted-foreground); font: 0.7rem/1 var(--font-mono); }
-@media (max-width: 900px) {
-  .theme-palette__trigger { width: 2rem; padding: 0; }
-  .theme-palette__trigger kbd { display: none; }
-}
-
 #theme-palette { display: none; }
 #theme-palette[open] {
   display: flex;
@@ -1197,16 +1190,19 @@ html.dark .astro-code span {
   padding: 0.375rem 0.5rem;
   border-radius: var(--radius-control);
   text-align: left;
-  cursor: default;
+  cursor: pointer;
 }
 .theme-palette__option[hidden], .theme-palette__empty[hidden] { display: none; }
-.theme-palette__option:hover:not([aria-selected="true"]) { background: var(--secondary); }
+.theme-palette__option:hover:not([aria-selected="true"]) {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}
 .theme-palette__option[aria-selected="true"] {
   background: var(--accent);
   color: var(--accent-foreground);
 }
 .theme-palette__item-icon { flex: none; color: var(--muted-foreground); }
-.theme-palette__option[aria-selected="true"] .theme-palette__item-icon { color: inherit; }
+.theme-palette__option:is(:hover, [aria-selected="true"]) .theme-palette__item-icon { color: inherit; }
 .theme-palette__name { flex: 1; min-width: 0; font-size: 0.875rem; }
 .theme-palette__check { flex: none; visibility: hidden; }
 .theme-palette__option[data-current="true"] .theme-palette__check { visibility: visible; }
