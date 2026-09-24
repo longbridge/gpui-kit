@@ -627,6 +627,10 @@ impl TextViewState {
     /// cannot be shown within a second, so it never scrolls long after it
     /// was asked for. A whole block taller than the view, scrolled to from
     /// below, shows its end.
+    ///
+    /// Revealing is best effort: `Ok(())` means the range is valid for the
+    /// current text and the request was taken, not that the view has
+    /// scrolled. A dropped request is not reported.
     pub fn reveal_range(
         &mut self,
         range: Range<usize>,

@@ -203,6 +203,10 @@ taller than the view shows its end when it comes from below, a scrollable
 view inside an application list scrolls only itself, and views sharing one
 state share one reveal.
 
+Revealing is best effort. `Ok(())` means the range is valid for the current
+text and the request was taken, not that the view has scrolled, and a dropped
+request is not reported.
+
 ## Touch Selection
 
 On a touch screen, a long press selects the word under the finger and keeps
