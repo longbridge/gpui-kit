@@ -6,6 +6,7 @@ use std::{
     pin::Pin,
     sync::{Arc, Mutex},
     task::Poll,
+    time::Duration,
 };
 #[cfg(target_family = "wasm")]
 use web_time::Instant;
@@ -38,6 +39,8 @@ const MAX_COALESCED_UPDATES_PER_PARSE: usize = 64;
 // Preserve exact first-layout height for small documents while bounding the
 // amount of source parsed synchronously on the UI thread.
 const MAX_SYNC_FULL_REPLACE_BYTES: usize = 4 * 1024;
+// Repaint a streamed fade at about 30 fps, not at the display refresh rate.
+const STREAM_FADE_TICK: Duration = Duration::from_millis(33);
 
 pub(crate) fn init(cx: &mut App) {
     cx.bind_keys(vec![
@@ -122,6 +125,7 @@ pub struct TextViewState {
 
     pub(super) parsed_content: ParsedContent,
     pub(super) stream_fade: StreamFadeTracker,
+    fade_tick: Option<Task<()>>,
     /// Content format (markdown / html), used for bounded synchronous parsing
     /// of small full-replace updates.
     format: TextViewFormat,
@@ -231,6 +235,7 @@ impl TextViewState {
             selection_adapter,
             parsed_content: Default::default(),
             stream_fade: StreamFadeTracker::default(),
+            fade_tick: None,
             format,
             parsed_error: None,
             text: text.to_string(),
@@ -777,8 +782,14 @@ impl Render for TextViewState {
         self.layout_text_style = Some(typography);
         let state = cx.entity();
         let stream_fade = self.stream_fade.frame(Instant::now(), cx.reduce_motion());
-        if stream_fade.is_some() {
-            window.request_animation_frame();
+        if stream_fade.is_some() && self.fade_tick.is_none() {
+            self.fade_tick = Some(cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(STREAM_FADE_TICK).await;
+                _ = this.update(cx, |state, cx| {
+                    state.fade_tick = None;
+                    cx.notify();
+                });
+            }));
         }
         // Built every frame, so everything in it is shared, not copied.
         let node_cx = NodeContext {
@@ -1030,7 +1041,7 @@ mod tests {
     use gpui::TestAppContext;
 
     mod stream_fade {
-        use std::{ops::Range, time::Duration};
+        use std::{cell::Cell, ops::Range, rc::Rc, time::Duration};
 
         use gpui::{Entity, TestAppContext};
 
@@ -1225,6 +1236,51 @@ mod tests {
                 assert!(state.stream_fade.frame(Instant::now(), true).is_none());
                 assert!(state.stream_fade.frame(Instant::now(), false).is_none());
             });
+        }
+
+        #[gpui::test]
+        fn a_fade_repaints_on_a_timer_until_nothing_fades(cx: &mut TestAppContext) {
+            struct FadeRoot(Entity<TextViewState>);
+            impl Render for FadeRoot {
+                fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                    crate::text::TextView::new(&self.0)
+                }
+            }
+
+            let state = fading_state("hello", cx);
+            let (_, cx) = cx.add_window_view(|_, _| FadeRoot(state.clone()));
+            let notifies = Rc::new(Cell::new(0));
+            let _subscription = cx.update(|_, cx| {
+                let notifies = notifies.clone();
+                cx.observe(&state, move |_, _| notifies.set(notifies.get() + 1))
+            });
+
+            state.update(cx, |state, cx| state.push_str(" world", cx));
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let before = notifies.get();
+
+            cx.executor().advance_clock(STREAM_FADE_TICK / 2);
+            cx.run_until_parked();
+            assert_eq!(notifies.get(), before);
+
+            // Each tick repaints once, and that frame schedules the next tick.
+            for tick in 1..=3 {
+                cx.executor().advance_clock(STREAM_FADE_TICK);
+                cx.run_until_parked();
+                assert_eq!(notifies.get(), before + tick);
+            }
+
+            // Replacing the text drops the fade, so the ticks stop.
+            state.update(cx, |state, cx| state.set_text("other", cx));
+            cx.run_until_parked();
+            cx.executor().advance_clock(STREAM_FADE_TICK);
+            cx.run_until_parked();
+            let after = notifies.get();
+            cx.executor().advance_clock(STREAM_FADE_TICK * 10);
+            cx.run_until_parked();
+            assert_eq!(notifies.get(), after);
+            assert!(state.read_with(cx, |state, _| state.fade_tick.is_none()));
         }
     }
 
