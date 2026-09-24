@@ -52,6 +52,16 @@ export const stories = [
     api: "NumberInput",
   }),
   pendingStory({
+    id: "time-field",
+    title: "TimeField",
+    group: "Inputs",
+    rustStory: "TimeFieldStory",
+    description: "Segmented time-of-day input.",
+    states: ["default", "disabled"],
+    availability: "pending",
+    api: "TimeField",
+  }),
+  pendingStory({
     id: "otp-input",
     title: "OtpInput",
     group: "Inputs",

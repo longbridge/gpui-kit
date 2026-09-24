@@ -141,6 +141,8 @@ import {
   Text,
   Textarea,
   TextareaState,
+  TimeField,
+  TimeFieldState,
   Stepper,
   StepperItem,
   SuccessAlert,
@@ -272,6 +274,8 @@ export function initializeRegisteredExamples() {
   retained("slider-disabled", () => SliderState(24));
   retained("color-picker", () => ColorPickerState());
   retained("date-picker", () => DatePickerState());
+  retained("time-field", () => TimeFieldState());
+  retained("time-field-disabled", () => TimeFieldState());
   retained("calendar-one", () => CalendarState());
   retained("calendar-two", () => CalendarState());
   retained("carousel-basic", () => CarouselState(3));
@@ -1321,6 +1325,19 @@ export function registeredExamples(surface, cx) {
         {
           label: "Four digits, ungrouped",
           element: asElement(new OtpInput(retained("otp-four", () => OtpState(4)))),
+        },
+      ];
+    case "TimeField":
+      return [
+        {
+          label: "Hours and minutes",
+          element: asElement(new TimeField(retained("time-field", () => TimeFieldState()))),
+        },
+        {
+          label: "Disabled",
+          element: asElement(
+            new TimeField(retained("time-field-disabled", () => TimeFieldState())).disabled(true),
+          ),
         },
       ];
     case "Textarea":

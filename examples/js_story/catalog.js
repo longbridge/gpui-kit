@@ -98,6 +98,7 @@ const RUST_STORY_ORDER = [
   "TabsStory",
   "TagStory",
   "TextareaStory",
+  "TimeFieldStory",
   "ToggleStory",
   "ToolbarStory",
   "TooltipStory",

@@ -2454,6 +2454,25 @@
     },
     {
       "source": "story",
+      "name": "time_field",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "TimeField",
+        "exports": [
+          "TimeField"
+        ],
+        "states": [
+          {
+            "export": "TimeFieldState",
+            "kind": "TimeFieldState",
+            "role": "retained-control-state"
+          }
+        ]
+      }
+    },
+    {
+      "source": "story",
       "name": "toggle",
       "classification": "component",
       "registration": {

@@ -71,6 +71,7 @@ export const REGISTERED_SURFACES = [
   "Table",
   "Text",
   "Textarea",
+  "TimeField",
   "Stepper",
   "Toggle",
   "Toolbar",
