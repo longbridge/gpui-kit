@@ -575,50 +575,27 @@ impl TextViewState {
 
     /// Replace the range highlights, whose ranges index the current rendered text.
     ///
-    /// Use this when ranges are computed from this state during the same update.
-    /// For ranges computed earlier, use [`Self::set_range_highlights_for_snapshot`]
-    /// to reject results from a stale or foreign snapshot.
+    /// Compute ranges from the current [`Self::rendered_text`] and set them in
+    /// the same update. Search the new text again after its content changes.
+    /// A range crossing blocks paints in both, skipping their separator.
+    /// Text outside every block (separators, custom blocks, HTML blocks, and
+    /// inline objects) is left unpainted. Any invalid range rejects the set.
+    ///
+    /// Highlights follow unchanged text through updates. Text appended while
+    /// streaming keeps earlier highlights; after a table edit, cells in and
+    /// after the edited row lose theirs because cells are known by position.
+    /// Text backgrounds such as `<mark>` paint over a highlight; inline code
+    /// backgrounds paint under it.
     pub fn set_range_highlights(
         &mut self,
         highlights: impl IntoIterator<Item = RangeHighlight>,
         cx: &mut Context<Self>,
     ) -> Result<(), RangeHighlightError> {
         let text = self.rendered_text();
-        self.set_range_highlights_for_snapshot(&text, highlights, cx)
-    }
-
-    /// Replace the range highlights computed from `text` if it is still current.
-    ///
-    /// A highlight crossing from one block into another is painted in both,
-    /// skipping the separator between them; text outside every block's text
-    /// (those separators, custom blocks, HTML blocks, inline objects) is left
-    /// unpainted. The whole set is rejected when `text` is out of date or any
-    /// range is not a range of it.
-    ///
-    /// When the content changes, a highlight follows its block and stays as
-    /// far as the block's text is unchanged, and the view notifies: text
-    /// appended while streaming keeps the highlights before it, and an edit
-    /// keeps those before and after it. After an edit inside a table, the
-    /// cells in and after the edited row lose theirs, as a cell is only known
-    /// by its place. Backgrounds that are part of the text, such as `<mark>`,
-    /// paint over a highlight; inline code's paints under it.
-    /// Search the new [`Self::rendered_text`] again to highlight the new text.
-    pub fn set_range_highlights_for_snapshot(
-        &mut self,
-        text: &RenderedTextSnapshot,
-        highlights: impl IntoIterator<Item = RangeHighlight>,
-        cx: &mut Context<Self>,
-    ) -> Result<(), RangeHighlightError> {
         if self.format != TextViewFormat::Markdown {
             return Err(RangeHighlightError::Unsupported);
         }
-        if text.owner() != self.entity_id {
-            return Err(RangeHighlightError::ForeignText);
-        }
-        if text.revision() != self.committed_revision {
-            return Err(RangeHighlightError::StaleText);
-        }
-        self.range_highlights = RangeHighlightFrame::new(text, highlights)?.map(Arc::new);
+        self.range_highlights = RangeHighlightFrame::new(&text, highlights)?.map(Arc::new);
         cx.notify();
         Ok(())
     }
@@ -2026,38 +2003,12 @@ mod tests {
         }
 
         #[gpui::test]
-        fn stale_foreign_and_html_text_is_rejected(cx: &mut TestAppContext) {
-            let state = state("one", cx);
-            let other = self::state("one", cx);
-            let text = state.read_with(cx, |state, _| state.rendered_text());
-            other.update(cx, |other, cx| {
-                assert_eq!(
-                    other.set_range_highlights_for_snapshot(&text, [highlight(0..3)], cx),
-                    Err(RangeHighlightError::ForeignText)
-                );
-            });
-            assert_eq!(state.read_with(cx, |state, _| state.rendered_text()), text);
-            assert_ne!(other.read_with(cx, |other, _| other.rendered_text()), text);
-            state.update(cx, |state, cx| state.set_text("two", cx));
-            cx.run_until_parked();
-            assert_ne!(state.read_with(cx, |state, _| state.rendered_text()), text);
-            state.update(cx, |state, cx| {
-                assert_eq!(
-                    state.set_range_highlights_for_snapshot(&text, [highlight(0..3)], cx),
-                    Err(RangeHighlightError::StaleText)
-                );
-            });
-
+        fn html_text_is_unsupported(cx: &mut TestAppContext) {
             let html = cx.update(|cx| cx.new(|cx| TextViewState::html("<p>one</p>", cx)));
             cx.run_until_parked();
             html.update(cx, |html, cx| {
-                let text = html.rendered_text();
                 assert_eq!(
                     html.set_range_highlights([highlight(0..3)], cx),
-                    Err(RangeHighlightError::Unsupported)
-                );
-                assert_eq!(
-                    html.set_range_highlights_for_snapshot(&text, [highlight(0..3)], cx),
                     Err(RangeHighlightError::Unsupported)
                 );
             });
@@ -2093,7 +2044,6 @@ mod tests {
         #[gpui::test]
         fn push_str_keeps_earlier_blocks_and_clips_the_changed_tail(cx: &mut TestAppContext) {
             let state = state("first\n\na **b", cx);
-            let text = state.read_with(cx, |state, _| state.rendered_text());
             // "first\na **b\n"
             set(&state, [0..5, 6..11], cx).unwrap();
 
@@ -2103,12 +2053,6 @@ mod tests {
 
             assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..5]);
             assert_eq!(painted(&state, TextLeafKey::block(7), cx), [0..2]);
-            state.update(cx, |state, cx| {
-                assert_eq!(
-                    state.set_range_highlights_for_snapshot(&text, [highlight(0..5)], cx),
-                    Err(RangeHighlightError::StaleText)
-                );
-            });
         }
 
         #[gpui::test]
@@ -2270,7 +2214,7 @@ mod tests {
                 let text = state.rendered_text();
                 let some = text.as_str().find("some").unwrap();
                 state
-                    .set_range_highlights_for_snapshot(&text, [highlight(some..some + 4)], cx)
+                    .set_range_highlights([highlight(some..some + 4)], cx)
                     .unwrap();
                 state.push_str("\n\n[foo]: https://example.com", cx);
             });
@@ -2340,9 +2284,8 @@ mod tests {
                 .chain([0..len])
                 .filter(|range| !text[range.clone()].trim().is_empty());
             state.update(cx, |state, cx| {
-                let rendered = state.rendered_text();
                 state
-                    .set_range_highlights_for_snapshot(&rendered, ranges.map(highlight), cx)
+                    .set_range_highlights(ranges.map(highlight), cx)
                     .unwrap();
             });
             cx.update(|window, cx| window.draw(cx).clear(cx));

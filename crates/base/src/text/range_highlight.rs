@@ -90,14 +90,6 @@ impl RenderedTextSnapshot {
         self.index().text.is_empty()
     }
 
-    pub(super) fn owner(&self) -> EntityId {
-        self.owner
-    }
-
-    pub(super) fn revision(&self) -> usize {
-        self.revision
-    }
-
     pub(super) fn index(&self) -> &RenderedIndex {
         self.index
             .get_or_init(|| RenderedIndex::new(&self.document))
@@ -144,11 +136,6 @@ impl RangeHighlight {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum RangeHighlightError {
-    /// The text was taken before the view's content last changed; take it
-    /// again and search the new text.
-    StaleText,
-    /// The text was taken from another view.
-    ForeignText,
     /// The view renders HTML, which records no source positions to address
     /// its text by.
     Unsupported,
@@ -160,8 +147,6 @@ pub enum RangeHighlightError {
 impl std::fmt::Display for RangeHighlightError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::StaleText => f.write_str("the rendered text changed since it was taken"),
-            Self::ForeignText => f.write_str("the rendered text belongs to another view"),
             Self::Unsupported => f.write_str("HTML views do not support range highlights"),
             Self::InvalidRange(ix) => write!(f, "highlight {ix} is not a range of the text"),
         }

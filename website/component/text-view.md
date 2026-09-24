@@ -153,9 +153,9 @@ the block's text is unchanged. Text appended while streaming, through
 those before and after it. After an edit inside a table, the cells in and
 after the edited row lose theirs, since a cell is only known by its place in
 the table. The view notifies when its text changes: observe the state and
-search the new `rendered_text()` again. For asynchronous searches, pass the
-snapshot used to calculate the ranges to `set_range_highlights_for_snapshot`;
-it rejects results from a stale or different view. Backgrounds that are part of the text, such as
+search the new `rendered_text()` again. Compute ranges and call
+`set_range_highlights` in the same state update so the ranges address the
+current text. Backgrounds that are part of the text, such as
 `<mark>` and syntax highlighting, paint over a range highlight (inline code's
 background is painted under it), and highlights do not fade in with streamed
 text. HTML views do not support range highlights.
