@@ -43,23 +43,23 @@ use super::{
 ///
 /// [`rendered_text`]: super::TextViewState::rendered_text
 #[derive(Clone)]
-pub struct RenderedTextSnapshot {
+pub struct RenderedText {
     owner: EntityId,
     revision: usize,
     document: ParsedDocument,
     index: Arc<OnceLock<RenderedIndex>>,
 }
 
-impl std::fmt::Debug for RenderedTextSnapshot {
+impl std::fmt::Debug for RenderedText {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RenderedTextSnapshot")
+        f.debug_struct("RenderedText")
             .field("owner", &self.owner)
             .field("revision", &self.revision)
             .finish_non_exhaustive()
     }
 }
 
-impl RenderedTextSnapshot {
+impl RenderedText {
     /// The text of `document`, whose index `index` holds once built.
     pub(super) fn new(
         owner: EntityId,
@@ -96,15 +96,15 @@ impl RenderedTextSnapshot {
     }
 }
 
-impl PartialEq for RenderedTextSnapshot {
+impl PartialEq for RenderedText {
     fn eq(&self, other: &Self) -> bool {
         self.owner == other.owner && self.revision == other.revision
     }
 }
 
-impl Eq for RenderedTextSnapshot {}
+impl Eq for RenderedText {}
 
-/// A background painted behind one range of a [`RenderedTextSnapshot`].
+/// A background painted behind one range of a [`RenderedText`].
 ///
 /// It is painted under the text and under the selection, and never changes
 /// layout. Where highlights overlap, the later one paints over the earlier. A
@@ -115,7 +115,7 @@ pub struct RangeHighlight {
 }
 
 impl RangeHighlight {
-    /// A highlight over `range`, in byte offsets of a [`RenderedTextSnapshot`].
+    /// A highlight over `range`, in byte offsets of a [`RenderedText`].
     pub fn new(range: Range<usize>, background: impl Into<Hsla>) -> Self {
         Self {
             range,
@@ -385,7 +385,7 @@ pub(crate) struct RangeHighlightFrame {
 impl RangeHighlightFrame {
     /// Validates `highlights` against `text` and resolves them to leaves.
     pub(super) fn new(
-        text: &RenderedTextSnapshot,
+        text: &RenderedText,
         highlights: impl IntoIterator<Item = RangeHighlight>,
     ) -> Result<Option<Self>, RangeHighlightError> {
         let mut pieces = Vec::new();

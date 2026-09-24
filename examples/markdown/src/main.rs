@@ -25,8 +25,8 @@ use gpui_kit::component::{
     status_bar::StatusBar,
     text::{
         InlineElement, InlineRenderContext, MarkdownNode, MarkdownParseContext, MarkdownPlugin,
-        RangeHighlight, RenderedTextSnapshot, SelectionFormat, TextView, TextViewState,
-        TextViewStyle, markdown_ast,
+        RangeHighlight, RenderedText, SelectionFormat, TextView, TextViewState, TextViewStyle,
+        markdown_ast,
     },
     v_flex,
 };
@@ -1185,7 +1185,7 @@ pub struct Example {
     selection_format: SelectionFormat,
     find_state: Entity<InputState>,
     /// The preview text the find query was last highlighted in.
-    searched: Option<RenderedTextSnapshot>,
+    searched: Option<RenderedText>,
     match_count: usize,
     _subscriptions: Vec<Subscription>,
 }
