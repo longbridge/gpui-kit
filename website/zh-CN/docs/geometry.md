@@ -6,7 +6,7 @@ order: -2.8
 
 # 几何与颜色
 
-GPUI 用类型说明数字的*含义*：坐标是 `Point<T>`，尺寸是 `Size<T>`，矩形是 `Bounds<T>`；`T` 指明各分量的单位。布局阶段可以使用尚需父容器尺寸才能确定的长度，绘制与命中通常使用已确定的 `Pixels`。颜色也分为直接表达通道的 `Rgba` 与便于调整色相的 `Hsla`。GPUI Kit 会重新导出 GPUI，应用示例可以从 `use gpui_kit::*;` 开始。
+GPUI 用类型说明数字的*含义*：坐标是 `Point<T>`，尺寸是 `Size<T>`，矩形是 `Bounds<T>`；`T` 指明各分量的单位。布局阶段可以使用尚需父容器尺寸才能确定的长度，绘制与命中通常使用已确定的 `Pixels`。颜色则区分便于调整色相的 `Hsla` 与直接表达通道的 `Rgba`。GPUI Kit 会重新导出 GPUI，应用示例可以从 `use gpui_kit::*;` 开始。
 
 ## Point、Size 与 Bounds
 
@@ -76,23 +76,23 @@ let panel = div()
 
 `Percentage` 是另一个独立的 `Percentage(f32)` 包装类型，可用 `percentage(0.25)` 构造。这个辅助函数期望 `0.0` 到 `1.0` 的比例（调试构建中会断言）；GPUI 可把它转换为一整圈中相同比例的 `Radians`。它**不是** `relative(0.25)` 用来表示 25% 布局宽度的类型。布局比例使用 `relative`，圆周比例使用 `percentage`。
 
-## RGBA 与 HSLA
+## HSLA 与 RGBA
 
-[`Rgba`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Rgba.html) 保存红、绿、蓝及 alpha 通道，分量是 0 到 1 的 `f32`。`rgb(0x3366CC)` 读取六位 RGB 十六进制值，alpha 为 1；`rgba(0x3366CC80)` 读取 **RRGGBBAA** 顺序的八位值，其中 alpha 为 `128 / 255`（约 0.502）。GPUI 的 [`Hsla`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Hsla.html) 保存色相、饱和度、亮度及 alpha，分量同样归一化到 0 至 1。其 `hsla(0.6, 0.8, 0.5, 1.)` 构造函数使用色相比例，而不是角度，也会把四个输入限制在这个范围内。主题色及其交互状态默认使用 `Hsla`；需要处理 RGB 通道或读取十六进制颜色时再使用 `Rgba`。
+GPUI 的 [`Hsla`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Hsla.html) 保存色相、饱和度、亮度及 alpha，分量是 0 到 1 的 `f32`。其 `hsla(0.6, 0.8, 0.5, 1.)` 构造函数使用色相比例，而不是角度，也会把四个输入限制在这个范围内。主题色及其交互状态默认使用 `Hsla`。[`Rgba`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Rgba.html) 保存红、绿、蓝及 alpha 通道，分量也为 0 到 1。`rgb(0x3366CC)` 读取六位 RGB 十六进制值，alpha 为 1；`rgba(0x3366CC80)` 读取 **RRGGBBAA** 顺序的八位值，其中 alpha 为 `128 / 255`（约 0.502）。需要处理 RGB 通道或读取十六进制颜色时再使用 `Rgba`。
 
 ```rust
 use gpui_kit::*;
 
-let source: Rgba = rgb(0x3366CC);
-let tint: Hsla = source.into();
+let tint: Hsla = hsla(0.6, 0.8, 0.5, 1.);
 let translucent = tint.opacity(0.5); // 乘以当前 alpha。
 let exact_alpha = tint.alpha(0.5);   // 替换 alpha。
 let again: Rgba = translucent.to_rgb();
+let source: Rgba = rgb(0x3366CC);
 let from_hex_alpha: Rgba = rgba(0x3366CC80);
 let red_channel: f32 = from_hex_alpha.r;
 ```
 
-十六进制资源、通道数值和颜色合成用 RGBA 更直接；想单独调整色相、饱和度或亮度时，HSLA 更方便。GPUI 可以在两者之间转换，但浮点运算可能产生舍入差异，不能保证逐字节完全往返。HSL 的亮度也不等于人眼感知亮度：不同色相即使 `l` 相同，看起来也可能一明一暗。需要按感知方式插值时，GPUI Kit 提供 `Colorize::mix_oklab`。
+想单独调整色相、饱和度或亮度时，HSLA 更方便；十六进制资源、通道数值和颜色合成用 RGBA 更直接。GPUI 可以在两者之间转换，但浮点运算可能产生舍入差异，不能保证逐字节完全往返。HSL 的亮度也不等于人眼感知亮度：不同色相即使 `l` 相同，看起来也可能一明一暗。需要按感知方式插值时，GPUI Kit 提供 `Colorize::mix_oklab`。
 
 GPUI 的 `Hsla::blend(other)` 通过 RGBA 转换把 `other` 叠到 `self` 上。其中 `Rgba::blend` 按上层颜色的 alpha 插值 RGB，并保留接收方的 alpha；它适合不透明背景的情形，不应当作两个半透明图层的一般 alpha 合成公式。
 
