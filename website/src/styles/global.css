@@ -12,13 +12,21 @@ html.dark .alignment-light { display: none; }
 html.dark .alignment-dark { display: block; }
 
 /* Comparison matrix status markers */
-.comparison-yes { color: #15803d; }
-.comparison-partial { color: #a16207; }
-.comparison-no { color: #b91c1c; }
-html.dark .comparison-yes { color: #4ade80; }
-html.dark .comparison-partial { color: #facc15; }
-html.dark .comparison-no { color: #f87171; }
-.comparison-yes, .comparison-partial, .comparison-no { font-size: 1.15em; line-height: 1; }
+.comparison-yes { background-color: #15803d; }
+.comparison-partial { background-color: #a16207; }
+.comparison-no { background-color: #b91c1c; }
+html.dark .comparison-yes { background-color: #4ade80; }
+html.dark .comparison-partial { background-color: #facc15; }
+html.dark .comparison-no { background-color: #f87171; }
+.comparison-yes, .comparison-partial, .comparison-no {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  font-size: 0;
+  line-height: 0;
+  vertical-align: middle;
+}
 
 /* ====================================================================
    CSS Design Tokens, light + dark. Do NOT change values — ported as-is

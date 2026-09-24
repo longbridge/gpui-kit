@@ -12,7 +12,7 @@ order: -14
 
 | 选型维度 | GPUI Kit | Iced | egui | Qt 6 | Slint |
 | --- | --- | --- | --- | --- | --- |
-| UI 架构 | Retained Entity + 重建元素 | Retained 状态 + view | Immediate 模式 | Retained 控件/场景 | Retained 响应式元素 |
+| 渲染模式 | Immediate + 部分 Retained | Retained 状态 + 声明式 View | Immediate mode | Retained 控件/场景 | Retained 响应式树 |
 | macOS、Windows、Linux | <span class="comparison-yes" role="img" aria-label="支持">●</span> | <span class="comparison-yes" role="img" aria-label="支持">●</span> | <span class="comparison-yes" role="img" aria-label="支持">●</span> | <span class="comparison-yes" role="img" aria-label="支持">●</span> | <span class="comparison-yes" role="img" aria-label="支持">●</span> |
 | 多窗口桌面应用 | <span class="comparison-yes" role="img" aria-label="支持">●</span> | <span class="comparison-yes" role="img" aria-label="支持">●</span> | <span class="comparison-yes" role="img" aria-label="支持">●</span> | <span class="comparison-yes" role="img" aria-label="支持">●</span> | <span class="comparison-yes" role="img" aria-label="支持">●</span> |
 | 键盘快捷键 | <span class="comparison-yes" role="img" aria-label="支持">●</span> | <span class="comparison-yes" role="img" aria-label="支持">●</span> | <span class="comparison-yes" role="img" aria-label="支持">●</span> | <span class="comparison-yes" role="img" aria-label="支持">●</span> | <span class="comparison-yes" role="img" aria-label="支持">●</span> |
@@ -36,7 +36,7 @@ order: -14
 
 ## 如何理解这些判断
 
-**UI 模型。** GPUI Kit 将状态保存在 [Entity](/zh-CN/docs/entity) 中，在 View 渲染时构造元素值；发生失效后会重新构造元素树，因此它结合了持久状态与声明式渲染。Iced 将自身描述为 [state/message/update/view 架构](https://book.iced.rs/architecture.html)。egui 明确使用[立即模式](https://docs.rs/egui/latest/egui/#understanding-immediate-mode)。Qt Quick [在帧间保留场景图](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html)，Slint 使用[响应式属性绑定](https://docs.slint.dev/latest/docs/slint/guide/language/concepts/reactivity/)。这些术语指向不同层面，不能强行归入单一的二元标签。
+**渲染模式。** GPUI Kit 在每次 [render](./render) 时，按当前输入以 immediate 风格构造元素描述；需要跨次保留状态或复用结果时，则使用 [Entity](./entity)、带 ID 的元素状态以及可选的 [View Cache](./view-cache)。“Immediate + 部分 Retained”同时描述这两层，并不意味着每次屏幕刷新都要重建整个 UI。Iced 将自身描述为 [state/message/update/view 架构](https://book.iced.rs/architecture.html)。egui 明确使用 [immediate mode](https://docs.rs/egui/latest/egui/#understanding-immediate-mode)。Qt Quick [在帧间保留场景图](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html)，Slint 使用[响应式属性绑定](https://docs.slint.dev/latest/docs/slint/guide/language/concepts/reactivity/)。
 
 **桌面基础能力。** 五种方案都能构建多窗口桌面应用、处理键盘快捷键并定制主题；实现方式不同。例如 Iced 有[窗口打开 API](https://docs.rs/iced/latest/iced/window/fn.open.html)，eframe 使用[原生 viewport](https://docs.rs/eframe/latest/eframe/trait.App.html)，Slint 提供[按键绑定](https://docs.slint.dev/latest/docs/slint/reference/keyboard-input/overview/)和[标准组件样式](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/style/)。输入法、剪贴板和拖放还应按目标平台实际测试。
 
