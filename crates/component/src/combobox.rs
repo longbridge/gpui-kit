@@ -1049,7 +1049,7 @@ fn render_popup_shell<D: SearchableListDelegate + 'static>(
         v_flex()
             .occlude()
             .map(|this| match menu_width {
-                Length::Auto => this.w(bounds.size.width + px(2.)),
+                Length::Auto => this.w(bounds.size.width),
                 Length::Definite(w) => this.w(w),
             })
             .popover_style(cx)
