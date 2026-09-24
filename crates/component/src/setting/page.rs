@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Entity, InteractiveElement as _, IntoElement, ListAlignment, ListState,
-    ParentElement as _, SharedString, StyleRefinement, Styled, Window, div, list,
+    AnyElement, App, Entity, InteractiveElement as _, IntoElement, ListAlignment, ListOffset,
+    ListState, ParentElement as _, SharedString, StyleRefinement, Styled, Window, div, list,
     prelude::FluentBuilder as _, px,
 };
 use rust_i18n::t;
@@ -171,7 +171,12 @@ impl SettingPage {
         if let Some(group_ix) = scroll_group_ix
             && let Some(visible_ix) = group_indices.iter().position(|&ix| ix == group_ix)
         {
-            list_state.scroll_to_reveal_item(visible_ix);
+            // Scroll by index: after a page switch the list is rebuilt unmeasured,
+            // and `scroll_to_reveal_item` would resolve to the top.
+            list_state.scroll_to(ListOffset {
+                item_ix: visible_ix,
+                offset_in_item: px(0.),
+            });
         }
 
         v_flex()

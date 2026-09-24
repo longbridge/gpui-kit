@@ -301,3 +301,33 @@ fn group_variant_overrides_the_settings_default(cx: &mut TestAppContext) {
         "groups without an override must keep the settings-level variant"
     );
 }
+
+#[gpui::test]
+fn selecting_a_group_from_another_page_scrolls_to_it(cx: &mut TestAppContext) {
+    let (host, cx) = setup(cx);
+    // Push Fonts below the viewport.
+    cx.update(|_, cx| {
+        host.update(cx, |host, cx| {
+            host.pages[1].groups[1].items = vec![item_with_height("theme colors", 900.)];
+            cx.notify();
+        });
+    });
+    draw(cx);
+    let select = |page_ix, group_ix: Option<usize>, cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            let state = host.read(cx).state.clone().unwrap();
+            state.update(cx, |state, cx| {
+                state.selected_index = SelectIndex { page_ix, group_ix };
+                state.deferred_scroll_group_ix = group_ix;
+                cx.notify();
+            });
+        });
+        draw(cx);
+    };
+
+    // Leaving the page drops its list state; the jump back must not land at the top.
+    select(0, None, cx);
+    select(1, Some(2), cx);
+    let target = cx.debug_bounds("setting-1-2-1").unwrap();
+    assert!(target.top() >= px(0.) && target.bottom() <= px(700.));
+}
