@@ -237,6 +237,10 @@ where
 
     /// Label `count` of the x values, spread evenly from the first to the
     /// last, instead of every `tick_margin`-th.
+    ///
+    /// With [`Self::point_count`] set, the labels spread over all the points the
+    /// axis is laid out for, so they keep their places as the data grows; one
+    /// that falls past the data is not drawn yet.
     pub fn x_tick_count(mut self, count: usize) -> Self {
         self.axes.x_tick_count = Some(count);
         self
@@ -318,6 +322,21 @@ where
     X: PartialEq + Into<SharedString> + 'static,
     Y: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
 {
+    fn prepaint(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        window: &mut Window,
+        _cx: &mut App,
+    ) -> Vec<AnyElement> {
+        // The y labels' gutter is measured before the x scale is laid out past it.
+        if let Some((_, _, extent)) = self.scales(bounds) {
+            let axis_gap = if self.x_axis { AXIS_GAP } else { 0. };
+            let height = bounds.size.height.as_f32() - axis_gap;
+            self.axes.measure_y_labels(extent, height, window);
+        }
+        vec![]
+    }
+
     fn paint(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         let (Some(x_fn), Some(y_fn)) = (self.x.as_ref(), self.y.as_ref()) else {
             return;
@@ -339,7 +358,11 @@ where
         };
         let mut axis = PlotAxis::new().stroke(cx.theme().border);
         if self.x_axis {
-            let labeled = labeled_items(self.data.len(), self.axes.x_tick_count, self.tick_margin);
+            let labeled = labeled_items(
+                axis_point_count(self.point_count, self.data.len()),
+                self.axes.x_tick_count,
+                self.tick_margin,
+            );
             let labels = build_point_x_labels(
                 &self.data,
                 x_fn.as_ref(),

@@ -27,7 +27,7 @@ use crate::{
     ActiveTheme,
     plot::{
         AxisLabelPlacement, AxisText, Grid, PlotLabel,
-        label::{TEXT_GAP, TEXT_HEIGHT, TEXT_SIZE, Text},
+        label::{TEXT_GAP, TEXT_HEIGHT, TEXT_SIZE, Text, measure_text_width},
         scale::{Scale, ScaleBand, ScaleLinear, ScalePoint, Sealed},
     },
 };
@@ -157,13 +157,24 @@ where
     (ScaleLinear::new(domain, vec![height - bottom, top]), extent)
 }
 
-/// Space kept beside the plot for value-axis tick labels drawn outside it, in pixels.
-///
-/// Like [`AXIS_GAP`](crate::plot::AXIS_GAP) this is a fixed budget rather than a
-/// measured one: the scales are also rebuilt during hit-testing, where no
-/// [`Window`] is available to shape text. Values wider than this (very large
-/// numbers) will overflow it.
+/// The least space kept beside the plot for value-axis tick labels drawn
+/// outside it, in pixels; wider labels widen it (see [`value_axis_gap`]).
 pub(crate) const VALUE_AXIS_GAP: f32 = 32.;
+
+/// The gutter value-axis tick `labels` drawn outside the plot need: the widest
+/// label and the gap before the plot, and never less than [`VALUE_AXIS_GAP`].
+///
+/// Measured in `prepaint`, which runs before `tooltip_state` and `paint`, so
+/// hit-testing and painting share one gutter.
+pub(crate) fn value_axis_gap(
+    labels: impl IntoIterator<Item = SharedString>,
+    window: &mut Window,
+) -> f32 {
+    labels
+        .into_iter()
+        .map(|label| measure_text_width(&label, px(TEXT_SIZE), window) + TEXT_GAP * 2.)
+        .fold(VALUE_AXIS_GAP, f32::max)
+}
 
 /// A caller's tick label text for a value.
 pub(crate) type TickFormat = Rc<dyn Fn(f64) -> SharedString>;
@@ -217,6 +228,8 @@ pub(crate) struct PointAxes {
     pub(crate) grid_dashed: bool,
     pub(crate) y_padding: (f32, f32),
     pub(crate) reference_lines: Vec<f64>,
+    /// The value-axis gutter measured in `prepaint`; see [`value_axis_gap`].
+    y_label_gap: f32,
 }
 
 impl Default for PointAxes {
@@ -231,6 +244,7 @@ impl Default for PointAxes {
             grid_dashed: true,
             y_padding: (10., 0.),
             reference_lines: vec![],
+            y_label_gap: VALUE_AXIS_GAP,
         }
     }
 }
@@ -240,10 +254,42 @@ impl PointAxes {
     /// sit outside it.
     pub(crate) fn plot_left(&self) -> f32 {
         if self.y_axis && self.y_axis_label_placement == AxisLabelPlacement::Outside {
-            VALUE_AXIS_GAP
+            self.y_label_gap
         } else {
             0.
         }
+    }
+
+    /// Measure the gutter the y labels need outside the plot, before the x
+    /// scale is laid out past it.
+    pub(crate) fn measure_y_labels(
+        &mut self,
+        extent: ValueExtent,
+        height: f32,
+        window: &mut Window,
+    ) {
+        if self.y_axis && self.y_axis_label_placement == AxisLabelPlacement::Outside {
+            let labels = self
+                .y_tick_labels(extent, height)
+                .into_iter()
+                .map(|(_, text)| text);
+            self.y_label_gap = value_axis_gap(labels, window);
+        }
+    }
+
+    /// Each y tick's position and the label text for the value there.
+    fn y_tick_labels(&self, extent: ValueExtent, height: f32) -> Vec<(f32, SharedString)> {
+        self.tick_positions(height)
+            .into_iter()
+            .map(|y| {
+                let value = extent.value_at(y);
+                let text = match self.y_tick_format.as_ref() {
+                    Some(format) => format(value),
+                    None => format_tick(value),
+                };
+                (y, text)
+            })
+            .collect()
     }
 
     /// The plot area within `bounds`: past the value-axis gutter and above the
@@ -290,7 +336,8 @@ impl PointAxes {
         grid.paint(&plot, window);
     }
 
-    /// Paint a dashed line across the plot at each reference value.
+    /// Paint a dashed line across the plot at each reference value, darker than
+    /// the grid so it reads apart from a dashed grid line.
     pub(crate) fn paint_reference_lines(
         &self,
         extent: ValueExtent,
@@ -310,7 +357,7 @@ impl PointAxes {
         }
         Grid::new()
             .y(rows)
-            .stroke(cx.theme().border)
+            .stroke(cx.theme().muted_foreground)
             .dash_array(&[px(4.), px(2.)])
             .paint(&self.plot_bounds(bounds, height), window);
     }
@@ -329,14 +376,9 @@ impl PointAxes {
         }
         let color = cx.theme().muted_foreground;
         let labels = self
-            .tick_positions(height)
+            .y_tick_labels(extent, height)
             .into_iter()
-            .map(|y| {
-                let value = extent.value_at(y);
-                let text = match self.y_tick_format.as_ref() {
-                    Some(format) => format(value),
-                    None => format_tick(value),
-                };
+            .map(|(y, text)| {
                 match self.y_axis_label_placement {
                     // Beside its grid line, above it but for the top one, which
                     // would leave the plot.
@@ -350,7 +392,7 @@ impl PointAxes {
                     }
                     AxisLabelPlacement::Outside => {
                         let top = (y - TEXT_SIZE / 2.).clamp(0., (height - TEXT_SIZE).max(0.));
-                        Text::new(text, point(VALUE_AXIS_GAP - TEXT_GAP * 2., top), color)
+                        Text::new(text, point(self.y_label_gap - TEXT_GAP * 2., top), color)
                             .align(TextAlign::Right)
                     }
                 }

@@ -87,9 +87,9 @@ LineChart::new(data)
 
 #### 坐标轴与辅助线
 
-以下选项 `LineChart` 和 `AreaChart` 通用。`y_axis` 在 Y 轴刻度处显示标签，默认放在绘图区左侧的标签栏里，用 `y_axis_label_placement(AxisLabelPlacement::Inside)` 可以改为叠在绘图区内。`y_tick_count` 设置刻度数，刻度从基线到顶边均匀分布，两端都算在内；横向网格线也画在这些刻度上，每个标签显示比例尺在该高度对应的数值。默认的 5 个刻度就是图表一直以来的网格。`y_tick_format` 根据这个数值生成标签文字。
+以下选项 `LineChart` 和 `AreaChart` 通用。`y_axis` 在 Y 轴刻度处显示标签，默认放在绘图区左侧的标签栏里，标签栏会按最宽的标签自动加宽，用 `y_axis_label_placement(AxisLabelPlacement::Inside)` 可以改为叠在绘图区内。`y_tick_count` 设置刻度数，刻度从基线到顶边均匀分布，两端都算在内；横向网格线也画在这些刻度上，每个标签显示比例尺在该高度对应的数值。默认的 5 个刻度就是图表一直以来的网格。`y_tick_format` 根据这个数值生成标签文字。
 
-`x_tick_count` 只给这么多个 X 值标注，从第一个到最后一个均匀挑选，不再按 `tick_margin` 每隔几个标一个。`grid_columns` 增加纵向网格线，`grid_dashed(false)` 把网格改为实线，`reference_line` 在某个数值处画一条贯穿绘图区的虚线，`y_padding` 设置最大值上方和最小值下方保留的空白，默认上方 10px、下方 0。
+`x_tick_count` 只给这么多个 X 值标注，从第一个到最后一个均匀挑选，不再按 `tick_margin` 每隔几个标一个；设置了 `point_count` 时按轴上的全部点位挑选，数据增长时标签位置不变。`grid_columns` 增加纵向网格线，`grid_dashed(false)` 把网格改为实线，`reference_line` 在某个数值处画一条贯穿绘图区的虚线，颜色比网格深，`y_padding` 设置最大值上方和最小值下方保留的空白，默认上方 10px、下方 0。
 
 ```rust
 use gpui_kit::component::plot::AxisLabelPlacement;
@@ -285,7 +285,7 @@ BarChart::new(data)
     .value_tick_count(7)
 ```
 
-`value_axis_label_placement(AxisLabelPlacement::Inside)` 把标签叠在绘图区内、紧挨各自的网格线，柱子不必让出标签栏的空间；`value_tick_format` 生成标签文字。`band_count` 让分类轴按比数据更多的格位数铺开，数据较少时每根柱保持原有宽度，只占前面几格。`band_tick_count` 只给这么多个分类标注，从第一个到最后一个均匀挑选；`grid_dashed(false)` 把网格改为实线。
+`value_axis_label_placement(AxisLabelPlacement::Inside)` 把标签叠在绘图区内、紧挨各自的网格线，柱子不必让出标签栏的空间；`value_tick_format` 生成标签文字。`band_count` 让分类轴按比数据更多的格位数铺开，数据较少时每根柱保持原有宽度，只占前面几格。`band_tick_count` 只给这么多个分类标注，从第一个到最后一个均匀挑选（设置了 `band_count` 时按全部格位挑选）；`grid_dashed(false)` 把网格改为实线。
 
 ```rust
 use gpui_kit::component::plot::AxisLabelPlacement;

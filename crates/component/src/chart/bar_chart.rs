@@ -21,7 +21,7 @@ use crate::{
 
 use super::{
     TickFormat, VALUE_AXIS_GAP, build_band_labels, caller_id, format_tick, labeled_items,
-    pointer_spring,
+    pointer_spring, value_axis_gap,
 };
 
 /// How much the bars away from the hovered one fade, as a share of their opacity.
@@ -73,6 +73,9 @@ where
     /// The label gaps of horizontal bars, measured in `prepaint` for the frame,
     /// so `tooltip_state` (which has no window) can keep the hover off the labels.
     horizontal_gaps: (f32, f32),
+    /// The value-axis gutter of vertical bars, measured in `prepaint`; see
+    /// [`value_axis_gap`].
+    value_label_gap: f32,
     hover: Option<BarHover>,
 }
 
@@ -113,6 +116,7 @@ where
             interactive: true,
             name: None,
             horizontal_gaps: (0., 0.),
+            value_label_gap: VALUE_AXIS_GAP,
             hover: None,
         }
     }
@@ -328,6 +332,10 @@ where
 
     /// Label `count` of the bands, spread evenly from the first to the last,
     /// instead of every `tick_margin`-th.
+    ///
+    /// With [`Self::band_count`] set, the labels spread over all the bands, so
+    /// they keep their places as the data grows; one that falls on an empty band
+    /// is not drawn yet.
     pub fn band_tick_count(mut self, count: usize) -> Self {
         self.band_tick_count = Some(count);
         self
@@ -432,11 +440,43 @@ where
     /// The gutter the value-axis labels take along the band axis: none unless
     /// they are shown outside the plot.
     fn value_axis_gap(&self) -> f32 {
-        if self.value_axis && self.value_axis_label_placement == AxisLabelPlacement::Outside {
+        if !self.value_axis || self.value_axis_label_placement != AxisLabelPlacement::Outside {
+            0.
+        } else if self.alignment.is_horizontal() {
+            // Below the plot, where the gap is a line of text tall.
             VALUE_AXIS_GAP
         } else {
-            0.
+            self.value_label_gap
         }
+    }
+
+    /// The bands the band axis is laid out for: the data's, or the
+    /// [`Self::band_count`] when larger.
+    fn band_slots(&self) -> usize {
+        self.band_count.unwrap_or(0).max(self.data.len())
+    }
+
+    /// The value-axis tick label text, from the domain maximum at the far end
+    /// down to the minimum at the baseline, matching the value scale.
+    fn value_tick_labels(&self) -> Vec<SharedString> {
+        let Some(value_fn) = self.value.as_ref() else {
+            return vec![];
+        };
+        // The data plus zero, as `value_scale` spans.
+        let (lo, hi) = self.data.iter().fold((0.0_f32, 0.0_f32), |(lo, hi), v| {
+            let f = value_fn(v).to_f32().unwrap_or(0.);
+            (lo.min(f), hi.max(f))
+        });
+        let steps = (self.value_tick_count - 1) as f32;
+        (0..self.value_tick_count)
+            .map(|i| {
+                let value = (hi - (hi - lo) * i as f32 / steps) as f64;
+                match self.value_tick_format.as_ref() {
+                    Some(format) => format(value),
+                    None => format_tick(value),
+                }
+            })
+            .collect()
     }
 
     /// Label gaps `(band_side, value_end_side)` reserved along the value axis for
@@ -526,6 +566,9 @@ where
         } else {
             (0., 0.)
         };
+        if self.value_axis && !self.alignment.is_horizontal() {
+            self.value_label_gap = value_axis_gap(self.value_tick_labels(), window);
+        }
         vec![]
     }
 
@@ -618,13 +661,6 @@ where
             }
         };
 
-        // Value domain, matching `value_scale`'s (which is the data plus zero).
-        // `far` maps to the maximum and `baseline` to the minimum.
-        let (domain_lo, domain_hi) = self.data.iter().fold((0.0_f32, 0.0_f32), |(lo, hi), v| {
-            let f = value_fn(v).to_f32().unwrap_or(0.);
-            (lo.min(f), hi.max(f))
-        });
-
         // Draw band axis (with categorical labels).
         let mut axis = PlotAxis::new().stroke(cx.theme().border);
         if self.label_axis {
@@ -637,7 +673,7 @@ where
                     // on either side of the zero line: each label goes on the side
                     // its own bar leaves empty.
                     let labeled =
-                        labeled_items(self.data.len(), self.band_tick_count, self.tick_margin);
+                        labeled_items(self.band_slots(), self.band_tick_count, self.tick_margin);
                     let labels = self
                         .data
                         .iter()
@@ -670,7 +706,7 @@ where
                         band_fn.as_ref(),
                         &band_scale,
                         band_width,
-                        &labeled_items(self.data.len(), self.band_tick_count, self.tick_margin),
+                        &labeled_items(self.band_slots(), self.band_tick_count, self.tick_margin),
                         cx.theme().muted_foreground,
                     );
                     let (side, align) = if matches!(alignment, BarAlignment::Left) {
@@ -721,14 +757,10 @@ where
             // Ticks run from `far` (the domain maximum) to `baseline` (the minimum),
             // so the labels walk the domain in the same direction.
             let color = cx.theme().muted_foreground;
-            let texts = value_ticks.iter().enumerate().map(|(i, &tick)| {
-                let value = domain_hi - (domain_hi - domain_lo) * i as f32 / steps as f32;
-                let text = match self.value_tick_format.as_ref() {
-                    Some(format) => format(value as f64),
-                    None => format_tick(value as f64),
-                };
-                (text, tick)
-            });
+            let texts = self
+                .value_tick_labels()
+                .into_iter()
+                .zip(value_ticks.iter().copied());
 
             match self.value_axis_label_placement {
                 // The labels go in the gap `band_scale` kept clear for them,
@@ -744,7 +776,7 @@ where
                     } else {
                         PlotAxis::new()
                             .y_axis(false)
-                            .y(px(VALUE_AXIS_GAP - TEXT_GAP * 2.))
+                            .y(px(value_axis_gap - TEXT_GAP * 2.))
                             .y_label(labels.map(|t| t.align(TextAlign::Right)))
                     };
                     value_axis.paint(&bounds, window, cx);
@@ -1152,6 +1184,23 @@ mod tests {
             extend_to_min_length(40., 100., false, BarAlignment::Bottom, 2.),
             40.
         );
+    }
+
+    #[test]
+    fn value_tick_labels_walk_the_domain_from_the_far_end() {
+        use super::BarChart;
+
+        let chart = BarChart::new([10., 20.])
+            .band(|v| format!("{v}"))
+            .value(|v| *v)
+            .value_tick_count(3);
+        assert_eq!(chart.value_tick_labels(), vec!["20", "10", "0"]);
+
+        let money = chart.value_tick_format(|v| format!("${v:.0}"));
+        assert_eq!(money.value_tick_labels(), vec!["$20", "$10", "$0"]);
+
+        // Labels spread over every band, so they stay put as the data grows.
+        assert_eq!(money.band_count(12).band_slots(), 12);
     }
 
     #[test]
