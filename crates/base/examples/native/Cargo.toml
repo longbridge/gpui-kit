@@ -20,6 +20,6 @@ gpui = { workspace = true, features = ["test-support"] }
 workspace = true
 
 # The shared showcase is included with `#[path]`, which cargo-machete cannot
-# follow when detecting its `gpui`, `gpui_base`, and `syntect` imports.
+# follow when detecting its `chrono`, `gpui`, `gpui_base`, and `syntect` imports.
 [package.metadata.cargo-machete]
-ignored = ["gpui", "gpui-base", "syntect"]
+ignored = ["chrono", "gpui", "gpui-base", "syntect"]
