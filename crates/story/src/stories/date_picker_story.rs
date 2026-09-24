@@ -2,7 +2,7 @@ use chrono::{Datelike, Days, Duration, Utc};
 use gpui_kit::component::{
     ActiveTheme as _, Sizable as _, Size, StyledExt, calendar,
     date_picker::{DatePicker, DatePickerEvent, DatePickerState, DateRangePreset},
-    time_field::TimePrecision,
+    time_field::{HourCycle, TimePrecision},
     v_flex,
 };
 use gpui_kit::{
@@ -24,7 +24,7 @@ pub struct DatePickerStory {
     without_appearance_picker: Entity<DatePickerState>,
     date_time_picker: Entity<DatePickerState>,
     date_time_second_picker: Entity<DatePickerState>,
-    date_time_range_picker: Entity<DatePickerState>,
+    date_time_12h_picker: Entity<DatePickerState>,
     date_time_value: Option<String>,
     size: Size,
     _subscriptions: Vec<Subscription>,
@@ -113,9 +113,10 @@ impl DatePickerStory {
                 .time_precision(TimePrecision::Second)
                 .default_time(chrono::NaiveTime::from_hms_opt(9, 0, 0).unwrap())
         });
-        let date_time_range_picker = cx.new(|cx| {
-            DatePickerState::range(window, cx)
+        let date_time_12h_picker = cx.new(|cx| {
+            DatePickerState::new(window, cx)
                 .time_precision(TimePrecision::Minute)
+                .hour_cycle(HourCycle::H12)
                 .default_time(chrono::NaiveTime::from_hms_opt(9, 0, 0).unwrap())
         });
 
@@ -145,7 +146,7 @@ impl DatePickerStory {
                     this.date_time_value = value.format("%Y-%m-%d %H:%M:%S").map(|s| s.to_string());
                 }
             }),
-            cx.subscribe(&date_time_range_picker, |this, _, ev, _| match ev {
+            cx.subscribe(&date_time_12h_picker, |this, _, ev, _| match ev {
                 DatePickerEvent::Change(value) => {
                     this.date_time_value = value.format("%Y-%m-%d %H:%M:%S").map(|s| s.to_string());
                 }
@@ -163,7 +164,7 @@ impl DatePickerStory {
             without_appearance_picker,
             date_time_picker,
             date_time_second_picker,
-            date_time_range_picker,
+            date_time_12h_picker,
             date_time_value: None,
             size: Size::Medium,
             date_picker_value: None,
@@ -265,11 +266,10 @@ impl Render for DatePickerStory {
                             .cleanable(true),
                     )
                     .child(
-                        DatePicker::new(&self.date_time_range_picker)
+                        DatePicker::new(&self.date_time_12h_picker)
                             .with_size(self.size)
-                            .w(px(360.))
-                            .number_of_months(2)
-                            .placeholder("Range with times")
+                            .w(px(280.))
+                            .placeholder("12-hour clock")
                             .cleanable(true),
                     )
                     .child(

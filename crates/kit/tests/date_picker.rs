@@ -2,7 +2,7 @@ mod common;
 use gpui_kit::component::{
     Disableable,
     date_picker::{DatePicker, DatePickerEvent, DatePickerState, DateRangePreset, DateTime},
-    time_field::TimePrecision,
+    time_field::{HourCycle, TimePrecision},
 };
 use gpui_kit::test::{TestAppContextExt, TestWindowExt};
 use gpui_kit::{
@@ -165,7 +165,7 @@ fn date_time_picker_reports_each_edit_and_stays_open(cx: &mut TestAppContext) {
         window.render_frame(cx);
         // Picking a date keeps the popup open so the time can be edited next.
         assert_eq!(window.find(id.clone()).expanded(), Some(true));
-        window.within("start-time").click("minute", cx);
+        window.within("time").click("minute", cx);
         window.press("4", cx);
         window.press("5", cx);
         // The minute is complete, so the seconds segment is selected next.
@@ -195,7 +195,50 @@ fn date_time_picker_reports_each_edit_and_stays_open(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn inverted_time_range_is_not_reported_and_closes_ordered(cx: &mut TestAppContext) {
+fn twelve_hour_picker_types_the_period(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let mut id: Option<ElementId> = None;
+    let (handle, view) = common::open_window(cx, Some(size(px(800.), px(600.))), |window, cx| {
+        cx.new(|cx| {
+            let date = cx.new(|cx| {
+                let mut state = DatePickerState::new(window, cx)
+                    .time_precision(TimePrecision::Minute)
+                    .hour_cycle(HourCycle::H12);
+                state.set_date_time(at("2026-09-15 00:00:00"), window, cx);
+                state
+            });
+            id = Some(("date-picker", date.entity_id()).into());
+            TimedSchedule::new(date, cx)
+        })
+    });
+    let id = id.unwrap();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        // Midnight reads as 12 AM.
+        assert_eq!(window.find(id.clone()).value(), Some("2026/09/15 12:00 AM"));
+        window.click(id.clone(), cx);
+        window.within("time").click("hour", cx);
+        for key in ["0", "9", "3", "0", "p"] {
+            window.press(key, cx);
+        }
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find(id.clone()).value(), Some("2026/09/15 09:30 PM"));
+    })
+    .unwrap();
+    view.read_with(cx, |view, _| {
+        assert_eq!(
+            view.changes.last(),
+            Some(&DateTime::Single(Some(at("2026-09-15 21:30:00"))))
+        );
+    });
+}
+
+#[gpui_kit::test]
+fn range_picker_edits_dates_only(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let mut id: Option<ElementId> = None;
     let (handle, view) = common::open_window(cx, Some(size(px(800.), px(600.))), |window, cx| {
@@ -217,35 +260,30 @@ fn inverted_time_range_is_not_reported_and_closes_ordered(cx: &mut TestAppContex
     let id = id.unwrap();
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
-        window.click(id.clone(), cx);
-        window.within("end-time").click("hour", cx);
-        window.press("0", cx);
-        window.press("8", cx);
-    })
-    .unwrap();
-    cx.run_until_parked();
-    view.read_with(cx, |view, _| assert!(view.changes.is_empty()));
-    cx.update_window(handle.into(), |_, window, cx| {
-        window.render_frame(cx);
-        window.press("enter", cx);
-    })
-    .unwrap();
-    cx.run_until_parked();
-    cx.update_window(handle.into(), |_, window, cx| {
-        window.render_frame(cx);
-        assert_eq!(window.find(id.clone()).expanded(), Some(false));
         assert_eq!(
             window.find(id.clone()).value(),
-            Some("2026/09/15 09:00 - 2026/09/15 09:00")
+            Some("2026/09/15 - 2026/09/15")
         );
+        window.click(id.clone(), cx);
+        assert!(window.try_find("time").is_none());
+        window.click("calendar-2026-09-16-0-2", cx);
+        window.click("calendar-2026-09-18-0-2", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        // A complete range closes the popup, as in any date-only picker.
+        assert_eq!(window.find(id.clone()).expanded(), Some(false));
     })
     .unwrap();
     view.read_with(cx, |view, _| {
+        // The times set by the owner are kept.
         assert_eq!(
             view.changes,
             [DateTime::Range(
-                Some(at("2026-09-15 09:00:00")),
-                Some(at("2026-09-15 09:00:00"))
+                Some(at("2026-09-16 09:00:00")),
+                Some(at("2026-09-18 18:00:00"))
             )]
         );
     });

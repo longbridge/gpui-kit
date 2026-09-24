@@ -21,7 +21,7 @@ use crate::{
 
 use super::calendar::{Calendar, CalendarEvent, CalendarState, Date, Matcher};
 use super::time_field::{
-    TimeField, TimeFieldEvent, TimeFieldState, TimePrecision, tabular_figures,
+    HourCycle, TimeField, TimeFieldEvent, TimeFieldState, TimePrecision, tabular_figures,
 };
 use gpui_base::{DatePicker as BaseDatePicker, ElementExt as _};
 
@@ -139,6 +139,8 @@ impl DateRangePreset {
         }
     }
     /// Creates a new DateRangePreset with a date and time, or a range of them.
+    ///
+    /// Times are kept as given, even though a range picker edits dates only.
     pub fn date_time(label: impl Into<SharedString>, value: impl Into<DateTime>) -> Self {
         DateRangePreset {
             label: label.into(),
@@ -158,12 +160,14 @@ pub struct DatePickerState {
     disabled_matcher: Option<Rc<Matcher>>,
     /// `None` edits dates only.
     time_precision: Option<TimePrecision>,
+    hour_cycle: HourCycle,
     default_time: NaiveTime,
     start_time: NaiveTime,
+    /// The time of a range's end. Only [`DatePickerState::set_date_time`]
+    /// sets it, since a range picker edits dates only.
     end_time: NaiveTime,
-    start_time_field: Entity<TimeFieldState>,
-    end_time_field: Entity<TimeFieldState>,
-    time_fields_pushed: bool,
+    time_field: Entity<TimeFieldState>,
+    time_field_pushed: bool,
     _subscriptions: Vec<Subscription>,
     /// The first day of the week. Defaults to Sunday.
     first_day_of_week: Weekday,
@@ -200,8 +204,7 @@ impl DatePickerState {
             this.set_date(date, window, cx);
             this
         });
-        let start_time_field = cx.new(|cx| TimeFieldState::new(window, cx));
-        let end_time_field = cx.new(|cx| TimeFieldState::new(window, cx));
+        let time_field = cx.new(|cx| TimeFieldState::new(window, cx));
 
         let _subscriptions = vec![
             cx.subscribe_in(
@@ -214,22 +217,12 @@ impl DatePickerState {
                 },
             ),
             cx.subscribe_in(
-                &start_time_field,
+                &time_field,
                 window,
                 |this, _, ev: &TimeFieldEvent, _, cx| match ev {
                     TimeFieldEvent::Change(time) => {
                         this.start_time = *time;
-                        this.emit_change_if_valid(cx);
-                    }
-                },
-            ),
-            cx.subscribe_in(
-                &end_time_field,
-                window,
-                |this, _, ev: &TimeFieldEvent, _, cx| match ev {
-                    TimeFieldEvent::Change(time) => {
-                        this.end_time = *time;
-                        this.emit_change_if_valid(cx);
+                        this.emit_change(cx);
                     }
                 },
             ),
@@ -244,12 +237,12 @@ impl DatePickerState {
             number_of_months: 1,
             disabled_matcher: None,
             time_precision: None,
+            hour_cycle: HourCycle::default(),
             default_time: NaiveTime::MIN,
             start_time: NaiveTime::MIN,
             end_time: NaiveTime::MIN,
-            start_time_field,
-            end_time_field,
-            time_fields_pushed: false,
+            time_field,
+            time_field_pushed: false,
             _subscriptions,
             first_day_of_week: Weekday::Sun,
             bounds: Bounds::default(),
@@ -258,8 +251,8 @@ impl DatePickerState {
 
     /// Set the format of the value displayed in the picker.
     ///
-    /// Default: `%Y/%m/%d`, followed by `%H:%M` or `%H:%M:%S` when a time
-    /// precision is set.
+    /// Default: `%Y/%m/%d`, followed by the time in the configured precision
+    /// and hour cycle when the picker edits times, e.g. `%H:%M` or `%I:%M %p`.
     pub fn date_format(mut self, format: impl Into<SharedString>) -> Self {
         self.date_format = Some(format.into());
         self
@@ -269,12 +262,22 @@ impl DatePickerState {
     ///
     /// Selecting a date then keeps the popup open, and every change to the
     /// date or time is reported as it happens.
+    ///
+    /// A range picker edits dates only; for a range with times, place two
+    /// single pickers side by side.
     pub fn time_precision(mut self, precision: TimePrecision) -> Self {
         self.time_precision = Some(precision);
         self.default_time = precision.truncate(self.default_time);
         self.start_time = precision.truncate(self.start_time);
         self.end_time = precision.truncate(self.end_time);
-        self.time_fields_pushed = false;
+        self.time_field_pushed = false;
+        self
+    }
+
+    /// Set how the time field counts hours, default: [`HourCycle::H23`].
+    pub fn hour_cycle(mut self, hour_cycle: HourCycle) -> Self {
+        self.hour_cycle = hour_cycle;
+        self.time_field_pushed = false;
         self
     }
 
@@ -284,7 +287,7 @@ impl DatePickerState {
         self.default_time = time;
         self.start_time = time;
         self.end_time = time;
-        self.time_fields_pushed = false;
+        self.time_field_pushed = false;
         self
     }
 
@@ -351,6 +354,11 @@ impl DatePickerState {
         });
     }
 
+    /// The precision the popup edits times at, or `None` when it edits dates only.
+    fn edited_time_precision(&self) -> Option<TimePrecision> {
+        self.time_precision.filter(|_| self.date.is_single())
+    }
+
     fn truncate_time(&self, time: NaiveTime) -> NaiveTime {
         self.time_precision
             .map_or(time, |precision| precision.truncate(time))
@@ -365,49 +373,37 @@ impl DatePickerState {
     ) {
         self.start_time = self.truncate_time(start);
         self.end_time = self.truncate_time(end);
-        self.push_time_fields(window, cx);
+        self.push_time_field(window, cx);
     }
 
-    /// Push the configured precision and times into the time fields.
+    /// Push the configuration and the time into the time field.
     ///
-    /// User edits flow the other way, through the field subscriptions, so this
-    /// runs only when the picker's own times change. Pushing on every render
+    /// User edits flow the other way, through the field subscription, so this
+    /// runs only when the picker's own time changes. Pushing on every render
     /// could overwrite an edit whose event has not been delivered yet.
-    fn push_time_fields(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn push_time_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let precision = self.time_precision.unwrap_or_default();
-        for (field, time) in [
-            (&self.start_time_field, self.start_time),
-            (&self.end_time_field, self.end_time),
-        ] {
-            field.update(cx, |field, cx| {
-                field.set_precision(precision, window, cx);
-                field.set_time(time, window, cx);
-            });
-        }
-        self.time_fields_pushed = true;
+        let (hour_cycle, time) = (self.hour_cycle, self.start_time);
+        self.time_field.update(cx, |field, cx| {
+            field.set_precision(precision, window, cx);
+            field.set_hour_cycle(hour_cycle, window, cx);
+            field.set_time(time, window, cx);
+        });
+        self.time_field_pushed = true;
     }
 
-    /// Whether a range ends before it starts, which only its times can cause.
-    fn is_range_inverted(&self) -> bool {
-        matches!(
-            self.date_time(),
-            DateTime::Range(Some(start), Some(end)) if end < start
-        )
-    }
-
-    fn emit_change_if_valid(&mut self, cx: &mut Context<Self>) {
-        // Report only values the owner can use: a complete, ordered value.
-        if self.date.is_complete() && !self.is_range_inverted() {
+    fn emit_change(&mut self, cx: &mut Context<Self>) {
+        if self.date.is_complete() {
             cx.emit(DatePickerEvent::Change(self.date_time()));
         }
         cx.notify();
     }
 
     fn select_date(&mut self, date: Date, window: &mut Window, cx: &mut Context<Self>) {
-        if self.time_precision.is_some() {
+        if self.edited_time_precision().is_some() {
             // Keep the popup open so the time can be adjusted next.
             self.date = date;
-            self.emit_change_if_valid(cx);
+            self.emit_change(cx);
         } else {
             self.update_date(date, true, window, cx);
             self.focus_handle.focus(window, cx);
@@ -432,29 +428,18 @@ impl DatePickerState {
         self.calendar.update(cx, |state, _| {
             state.set_disabled_matcher_shared(matcher);
         });
-        // Builders cannot reach the fields, so apply them before the first render.
-        if !self.time_fields_pushed {
-            self.push_time_fields(window, cx);
+        // Builders cannot reach the field, so apply them before the first render.
+        if !self.time_field_pushed {
+            self.push_time_field(window, cx);
         }
     }
 
     fn set_open(&mut self, open: bool, window: &mut Window, cx: &mut Context<Self>) {
         if !open {
             self.focus_back_if_need(window, cx);
-            self.close_inverted_range(window, cx);
         }
         self.open = open;
         cx.notify();
-    }
-
-    // An inverted range cannot be reported, so closing the popup ends it where
-    // it starts rather than leaving a value the owner never received.
-    fn close_inverted_range(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.open && self.is_range_inverted() {
-            let start = self.start_time;
-            self.set_times(start, start, window, cx);
-            self.emit_change_if_valid(cx);
-        }
     }
 
     fn on_escape(&mut self, _: &Cancel, window: &mut Window, cx: &mut Context<Self>) {
@@ -469,7 +454,7 @@ impl DatePickerState {
     }
 
     // To focus the Picker Input, if current focus in is on the container, or
-    // inside the popup (e.g.: a time field).
+    // inside the popup (e.g.: the time field).
     //
     // This is because mouse down out the Calendar, GPUI will move focus to the container.
     // So we need to move focus back to the Picker Input.
@@ -538,8 +523,8 @@ impl DatePickerState {
         if let Some(format) = &self.date_format {
             return format.clone();
         }
-        match self.time_precision {
-            Some(precision) => format!("%Y/%m/%d {}", precision.format()).into(),
+        match self.edited_time_precision() {
+            Some(precision) => format!("%Y/%m/%d {}", precision.format(self.hour_cycle)).into(),
             None => "%Y/%m/%d".into(),
         }
     }
@@ -651,44 +636,30 @@ impl DatePicker {
         self
     }
 
-    fn render_time_fields(size: Size, state: &DatePickerState, cx: &App) -> impl IntoElement {
-        let row = |label: SharedString, field: TimeField| {
-            h_flex()
-                .gap_3()
-                .justify_between()
-                .child(
-                    div()
-                        .map(|this| match size {
-                            Size::Small => this.text_xs(),
-                            _ => this.text_sm(),
-                        })
-                        .text_color(cx.theme().muted_foreground)
-                        .child(label),
-                )
-                .child(field.with_size(size))
-        };
-        let start = TimeField::new(&state.start_time_field).with_id("start-time");
-
-        v_flex()
+    fn render_time_field(size: Size, state: &DatePickerState, cx: &App) -> impl IntoElement {
+        h_flex()
             .map(|this| match size {
                 Size::Small => this.mt_2().pt_2(),
                 _ => this.mt_3().pt_3(),
             })
-            .gap_2()
+            .gap_3()
+            .justify_between()
             .border_t_1()
             .border_color(cx.theme().border)
-            .map(|this| match state.date {
-                Date::Single(_) => this.child(row(t!("DatePicker.time").into(), start)),
-                Date::Range(_, _) => {
-                    this.child(row(t!("DatePicker.start").into(), start))
-                        .child(row(
-                            t!("DatePicker.end").into(),
-                            TimeField::new(&state.end_time_field)
-                                .with_id("end-time")
-                                .invalid(state.is_range_inverted()),
-                        ))
-                }
-            })
+            .child(
+                div()
+                    .map(|this| match size {
+                        Size::Small => this.text_xs(),
+                        _ => this.text_sm(),
+                    })
+                    .text_color(cx.theme().muted_foreground)
+                    .child(SharedString::from(t!("DatePicker.time"))),
+            )
+            .child(
+                TimeField::new(&state.time_field)
+                    .with_id("time")
+                    .with_size(size),
+            )
     }
 }
 
@@ -782,7 +753,7 @@ impl RenderOnce for DatePicker {
                                     .whitespace_nowrap()
                                     .truncate()
                                     // The value updates live while its time is typed.
-                                    .when(state.time_precision.is_some(), |this| {
+                                    .when(state.edited_time_precision().is_some(), |this| {
                                         this.font_features(tabular_figures())
                                     })
                                     .when(!state.date.is_some(), |this| {
@@ -863,8 +834,8 @@ impl RenderOnce for DatePicker {
                                                     })
                                                     .with_size(self.size),
                                             )
-                                            .when_some(state.time_precision, |this, _| {
-                                                this.child(Self::render_time_fields(
+                                            .when_some(state.edited_time_precision(), |this, _| {
+                                                this.child(Self::render_time_field(
                                                     self.size, state, cx,
                                                 ))
                                             }),

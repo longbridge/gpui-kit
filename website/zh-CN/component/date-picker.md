@@ -13,7 +13,7 @@ DatePicker 是一个灵活的日期选择组件，内置日历界面，支持单
 use gpui_kit::component::{
     date_picker::{DatePicker, DatePickerState, DateRangePreset, DatePickerEvent, DateTime},
     calendar::{Date, Matcher},
-    time_field::TimePrecision,
+    time_field::{HourCycle, TimePrecision},
 };
 ```
 
@@ -68,7 +68,7 @@ DatePicker::new(&range_picker)
 
 ### 日期与时间
 
-设置 `time_precision` 后即可同时编辑具体时间。弹层会在日历下方显示时间字段（范围模式下显示开始和结束两个字段），选择日期后弹层保持打开，方便接着调整时间。每次修改都会立即触发事件；按 Enter、Escape 或点击弹层外部即可关闭。
+设置 `time_precision` 后即可同时编辑具体时间。弹层会在日历下方显示时间字段，选择日期后弹层保持打开，方便接着调整时间。每次修改都会立即触发事件；按 Enter、Escape 或点击弹层外部即可关闭。
 
 ```rust
 use chrono::NaiveTime;
@@ -82,7 +82,15 @@ let date_time_picker = cx.new(|cx| {
 DatePicker::new(&date_time_picker)
 ```
 
-`default_time` 是用户修改前日期所带的时间，默认为 `00:00`。未设置 `date_format` 时，显示格式跟随精度，为 `%Y/%m/%d %H:%M` 或 `%Y/%m/%d %H:%M:%S`。
+时间默认使用 24 小时制。通过 `hour_cycle` 可以切换为带上午/下午（AM/PM）段的 12 小时制：
+
+```rust
+DatePickerState::new(window, cx)
+    .time_precision(TimePrecision::Minute)
+    .hour_cycle(HourCycle::H12) // 09:30 PM
+```
+
+`default_time` 是用户修改前日期所带的时间，默认为 `00:00`。未设置 `date_format` 时，显示格式跟随精度和小时制，例如 `%Y/%m/%d %H:%M` 或 `%Y/%m/%d %I:%M %p`。
 
 用 `date_time` 和 `set_date_time` 读写完整的值；`date` 和 `set_date` 仍然只处理日期部分，并保留当前时间。
 
@@ -93,16 +101,22 @@ date_time_picker.update(cx, |state, cx| {
     state.set_date_time(Local::now().naive_local(), window, cx);
 });
 
-match date_time_picker.read(cx).date_time() {
-    DateTime::Single(Some(at)) => println!("Selected {at}"),
-    DateTime::Range(Some(start), Some(end)) => println!("{start} to {end}"),
-    _ => {}
+if let DateTime::Single(Some(at)) = date_time_picker.read(cx).date_time() {
+    println!("Selected {at}");
 }
 ```
 
-范围模式下，如果同一天的结束时间早于开始时间，结束字段会显示为无效，且不会触发事件；关闭弹层时结束时间会被调整为开始时间。
+范围模式即使设置了 `time_precision` 也只编辑日期。需要带时间的范围时，把两个 picker 并排放置，由业务层校验先后顺序：
 
-在时间字段中，Up/Down 调整当前选中的段，Left/Right 和 Tab/Shift-Tab 在段之间移动，输入数字会填入当前段并自动跳到下一段，Backspace 将当前段归零。
+```rust
+h_flex()
+    .gap_2()
+    .child(DatePicker::new(&start_picker))
+    .child("–")
+    .child(DatePicker::new(&end_picker))
+```
+
+在时间字段中，Up/Down 调整当前选中的段，Left/Right 和 Tab/Shift-Tab 在段之间移动，输入数字会填入当前段并自动跳到下一段，`a`/`p` 切换上午或下午，Backspace 重置当前段。
 
 ### 自定义日期格式
 

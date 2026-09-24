@@ -11,7 +11,7 @@ use crate::{
 };
 
 use gpui_base::TimeField as BaseTimeField;
-pub use gpui_base::{TimeFieldEvent, TimeFieldState, TimePrecision, TimeSegment};
+pub use gpui_base::{HourCycle, TimeFieldEvent, TimeFieldState, TimePrecision, TimeSegment};
 
 /// Digits of equal width (OpenType `tnum`), so a value that changes while it
 /// is edited keeps its width instead of shifting with each digit.
@@ -19,7 +19,7 @@ pub(crate) fn tabular_figures() -> FontFeatures {
     FontFeatures(Arc::new(vec![("tnum".into(), 1)]))
 }
 
-/// A segmented time editor, e.g. `09:30` or `09:30:15`.
+/// A segmented time editor, e.g. `09:30`, `09:30:15` or `09:30 PM`.
 ///
 /// The value lives in [`TimeFieldState`]; see it for the keyboard model.
 #[derive(IntoElement)]
@@ -103,16 +103,48 @@ impl RenderOnce for TimeField {
             .child(
                 BaseTimeField::new(self.id, &self.state)
                     .disabled(self.disabled)
+                    .flex()
                     .h_full()
                     .items_center()
                     .segment(move |segment, state, _, cx| {
                         segment
                             .px_0p5()
+                            .when(state.segment() == TimeSegment::Period, |this| this.ml_1())
                             .rounded(segment_radius)
                             .when(state.is_selected(), |this| this.bg(cx.theme().selection))
                             .into_any_element()
                     }),
             )
             .refine_style(&self.style)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{AppContext as _, px};
+
+    use super::*;
+
+    #[gpui::test]
+    fn test_time_field_builder(cx: &mut gpui::TestAppContext) {
+        let window = cx.add_empty_window();
+        let state = window.update(|window, cx| {
+            cx.new(|cx| {
+                TimeFieldState::new(window, cx)
+                    .precision(TimePrecision::Second)
+                    .hour_cycle(HourCycle::H12)
+            })
+        });
+        let field = TimeField::new(&state)
+            .with_id("start")
+            .large()
+            .disabled(true)
+            .invalid(true)
+            .w(px(120.));
+
+        assert_eq!(field.id, "start".into());
+        assert_eq!(field.size, Size::Large);
+        assert!(field.disabled);
+        assert!(field.invalid);
     }
 }

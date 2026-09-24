@@ -13,7 +13,7 @@ A flexible date picker component with calendar interface that supports single da
 use gpui_kit::component::{
     date_picker::{DatePicker, DatePickerState, DateRangePreset, DatePickerEvent, DateTime},
     calendar::{Date, Matcher},
-    time_field::TimePrecision,
+    time_field::{HourCycle, TimePrecision},
 };
 ```
 
@@ -71,10 +71,9 @@ DatePicker::new(&range_picker)
 ### Date and Time
 
 Set a `time_precision` to edit the time of day as well. The popup then shows a
-time field below the calendar — or a start and an end field in range mode —
-and stays open after a date is picked, so the time can be adjusted next.
-Every edit is reported as it happens; Enter, Escape or a click outside closes
-the popup.
+time field below the calendar and stays open after a date is picked, so the
+time can be adjusted next. Every edit is reported as it happens; Enter, Escape
+or a click outside closes the popup.
 
 ```rust
 use chrono::NaiveTime;
@@ -88,12 +87,22 @@ let date_time_picker = cx.new(|cx| {
 DatePicker::new(&date_time_picker)
 ```
 
+The time uses a 24-hour clock by default. Use `hour_cycle` for a 12-hour clock
+with an AM/PM segment:
+
+```rust
+DatePickerState::new(window, cx)
+    .time_precision(TimePrecision::Minute)
+    .hour_cycle(HourCycle::H12) // 09:30 PM
+```
+
 `default_time` is the time a date gets before the user edits it, `00:00`
-unless configured. The display format follows the precision
-(`%Y/%m/%d %H:%M` or `%Y/%m/%d %H:%M:%S`) unless `date_format` is set.
+unless configured. The display format follows the precision and hour cycle
+(for example `%Y/%m/%d %H:%M` or `%Y/%m/%d %I:%M %p`) unless `date_format` is
+set.
 
 Read and write the whole value with `date_time` and `set_date_time`; `date`
-and `set_date` still address the date part and keep the current times.
+and `set_date` still address the date part and keep the current time.
 
 ```rust
 use chrono::Local;
@@ -102,19 +111,26 @@ date_time_picker.update(cx, |state, cx| {
     state.set_date_time(Local::now().naive_local(), window, cx);
 });
 
-match date_time_picker.read(cx).date_time() {
-    DateTime::Single(Some(at)) => println!("Selected {at}"),
-    DateTime::Range(Some(start), Some(end)) => println!("{start} to {end}"),
-    _ => {}
+if let DateTime::Single(Some(at)) = date_time_picker.read(cx).date_time() {
+    println!("Selected {at}");
 }
 ```
 
-In range mode, an end before the start on the same day is shown as invalid
-and is not reported; closing the popup then moves the end to the start.
+A range picker edits dates only, even with a `time_precision`. For a range
+with times, place two pickers side by side and validate the order in the
+owner:
+
+```rust
+h_flex()
+    .gap_2()
+    .child(DatePicker::new(&start_picker))
+    .child("–")
+    .child(DatePicker::new(&end_picker))
+```
 
 In the time field, Up/Down change the selected segment, Left/Right and
 Tab/Shift-Tab move between segments, digits type a value and advance to the
-next segment, and Backspace resets the segment.
+next segment, `a`/`p` set AM or PM, and Backspace resets the segment.
 
 ### With Custom Date Format
 

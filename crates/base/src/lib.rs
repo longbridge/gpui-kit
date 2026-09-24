@@ -191,8 +191,8 @@ pub use theme_tokens::{
     TypographyTokens,
 };
 pub use time_field::{
-    TimeField, TimeFieldEvent, TimeFieldSegment, TimeFieldState, TimePrecision, TimeSegment,
-    TimeSegmentState,
+    HourCycle, TimeField, TimeFieldEvent, TimeFieldSegment, TimeFieldState, TimePrecision,
+    TimeSegment, TimeSegmentState,
 };
 pub use toast::{
     Toast, ToastAdvance, ToastManager, ToastMotion, ToastOptions, ToastStack, ToastStackState,
