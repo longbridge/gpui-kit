@@ -1509,7 +1509,12 @@ impl Render for Example {
                             .left(
                                 h_flex()
                                     .gap_2()
-                                    .child(Input::new(&self.find_state).xsmall().w(px(200.)))
+                                    .child(
+                                        Input::new(&self.find_state)
+                                            .xsmall()
+                                            .w(px(200.))
+                                            .focus_bordered(false),
+                                    )
                                     .when(!self.find_state.read(cx).value().is_empty(), |this| {
                                         this.child(
                                             div()
