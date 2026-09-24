@@ -404,18 +404,12 @@ where
         // Value-axis labels eat into the band extent at one end; `band_offset`
         // shifts the bands away from that end when it is the leading one.
         let extent = (band_extent - self.value_axis_gap()).max(0.);
-        let len = self.data.len();
-        let bands = self.band_count.unwrap_or(len).max(len);
-        let end = if bands > 0 {
-            extent * len as f32 / bands as f32
-        } else {
-            extent
-        };
         Some(
             ScaleBand::new(
                 self.data.iter().map(|v| band_fn(v)).collect(),
-                vec![0., end],
+                vec![0., extent],
             )
+            .band_count(self.band_count.unwrap_or(0))
             .padding_inner(self.padding_inner)
             .padding_outer(self.padding_outer),
         )
@@ -1075,7 +1069,6 @@ fn clip_stops_to_bar(stops: [LinearColorStop; 2]) -> [LinearColorStop; 2] {
     [new_a, new_b]
 }
 
-/// Format a tick value for display on the value axis.
 /// Whether a vertical bar's category label belongs below the zero line.
 ///
 /// A bar grows away from the zero line, so its label goes on the side the bar
@@ -1169,22 +1162,27 @@ mod tests {
         use crate::plot::{AxisLabelPlacement, scale::Scale};
 
         let bounds = Bounds::new(point(px(0.), px(0.)), size(px(40.), px(100.)));
-        let chart = |count| {
-            BarChart::new([1., 2.])
+        let chart = |data: &[f64], count| {
+            BarChart::new(data.to_vec())
                 .band(|v| format!("{v}"))
                 .value(|v| *v)
                 .band_count(count)
         };
 
         // Two bars laid out for four bands take the first half of the width.
-        let wide = chart(2).band_scale(bounds).unwrap();
-        let narrow = chart(4).band_scale(bounds).unwrap();
+        let wide = chart(&[1., 2.], 2).band_scale(bounds).unwrap();
+        let narrow = chart(&[1., 2.], 4).band_scale(bounds).unwrap();
         assert_eq!(narrow.band_width() * 2., wide.band_width());
         assert!(narrow.tick(&"2".to_string()).unwrap() < 20.);
 
+        // A bar keeps its place as the data grows into the empty bands.
+        let grown = chart(&[1., 2., 3.], 4).band_scale(bounds).unwrap();
+        assert_eq!(grown.tick(&"2".to_string()), narrow.tick(&"2".to_string()));
+        assert_eq!(grown.band_width(), narrow.band_width());
+
         // Labels inside the plot leave the bars their full width.
-        let outside = chart(2).value_axis(true);
-        let inside = chart(2)
+        let outside = chart(&[1., 2.], 2).value_axis(true);
+        let inside = chart(&[1., 2.], 2)
             .value_axis(true)
             .value_axis_placement(AxisLabelPlacement::Inside);
         assert_eq!(outside.value_axis_gap(), super::VALUE_AXIS_GAP);
