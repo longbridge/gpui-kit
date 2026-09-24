@@ -1,5 +1,5 @@
 ---
-title: 样式
+title: Styling
 description: 流式样式接口、长度与颜色语法、语义主题 token，以及 hover / active / focus 状态样式。
 order: 5
 ---

@@ -1,5 +1,5 @@
 ---
-title: Icon
+title: Icons & Assets
 description: 为 GPUI Component 应用配置内置图标、自定义 SVG 与资源加载方式。
 order: -7
 ---
@@ -56,7 +56,7 @@ GPUI Component 中的 [IconName] 和 [Icon] 提供了一套可直接在 GPUI 应
 `.view(cx)` 调用均无需改动，也无需新增 trait 导入。`Icon::new(...)` 同时接受
 两种类型；旧名称可以通过 `.into()` 转为共享名称。
 
-对于新的共享枚举，需要组件实体时使用 `Icon::new(name).view(cx)`，也可导入
+对于新的共享枚举，需要组件 [Entity](./entity) 时使用 `Icon::new(name).view(cx)`，也可导入
 `gpui_kit::component::IconNameExt` 后使用 `name.view(cx)`。
 
 `IconName::ALL` 列出完整的 1,830 个名称，`IconName::Accessibility.path()` 返回

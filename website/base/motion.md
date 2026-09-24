@@ -107,7 +107,7 @@ let delay = stagger.delay(index, item_count);
 
 `Sequence` chains transitions so each step starts when the previous one ends. It begins at `from` on the first frame it is sampled and plays once per ID; its sample reports the value, the step being played, and a `MotionStatus` that reads `Finished` only after the last step.
 
-```rust,ignore
+```rust
 let opacity = Sequence::new(("toast", "opacity"), 0.0)
     .with_step(1.0, Transition::new(Duration::from_millis(160)))
     .with_step(0.0, Transition::new(Duration::from_millis(200)).delay(Duration::from_secs(3)))
@@ -120,7 +120,7 @@ A step ends at an absolute instant and the next one starts there, not on the fra
 
 `Stagger` composes with a sequence as a delay on its first step:
 
-```rust,ignore
+```rust
 Sequence::new(("row", index), px(12.))
     .with_step(px(0.), Transition::new(Duration::from_millis(120)).delay(stagger.delay(index, count)))
     .sample(window, cx)

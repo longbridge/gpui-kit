@@ -1,10 +1,10 @@
 ---
-title: 安装
+title: Installation
 description: 安装 GPUI Kit，并准备在 macOS、Windows 和 Linux 上构建 Rust 桌面应用所需的平台依赖。
 order: -1
 ---
 
-# 安装
+# Installation
 
 在开始使用 `gpui-component` 构建应用之前，需要先准备对应的开发环境并安装依赖。
 
@@ -52,6 +52,8 @@ gpui-kit = "0.6"
 ```
 
 `gpui-kit` 会替你引入配套的 GPUI crate，应用无需再单独声明 GPUI。`use gpui_kit::*;` 就是 GPUI 本身，各层按名访问：`gpui_kit::component`（带样式的组件）、`gpui_kit::base`、`gpui_kit::assets`、`gpui_kit::platform`。
+
+接着阅读[开始使用](./getting-started)，创建 Window 并渲染第一个 View。
 
 ## 提升开发模式运行性能
 

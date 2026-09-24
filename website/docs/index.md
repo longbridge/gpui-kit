@@ -29,10 +29,15 @@ Read [Action](./action) for GPUI Focus, `track_focus`, Key Contexts,
 KeyBindings, and command dispatch. Continue with [Event](./event) for typed
 notifications and the relationship between Actions and Events.
 
+For the core rendering model, start with [Entity](./entity) and
+[Context](./context), then read [RenderOnce](./render-once) and
+[ElementId](./element_id). [Task](./task) covers work that continues after
+a callback returns.
+
 ## Features
 
 - **75+ Components and Primitives**: Forms, navigation, overlays, data display, editing, feedback, layout, and more.
-- **Production Ready**: Used to build Longbridge Pro from day one and refined in a publicly shipped commercial desktop application.
+- **Production Ready**: Refined through production desktop applications and continuously tested across GPUI Kit's components and examples.
 - **WebAssembly**: Applications and component showcases run on the web through `wasm32-unknown-unknown`.
 - **Accessibility**: AccessKit roles, names, states, relationships, and actions are built into the interaction layer.
 - **UI Integration Testing**: Headless windows exercise real pointer, keyboard, focus, layout, and accessibility behavior.

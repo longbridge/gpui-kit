@@ -1,10 +1,10 @@
 ---
-title: 原语
+title: Primitives
 description: gpui-base 面向用户的完整原语目录。
 order: 4
 ---
 
-# 原语
+# Primitives
 
 GPUI Base 原语只提供行为，不规定视觉表现。每个页面都会说明公开导入路径和最小可用组合。页面上方的在线示例由 `crates/base/examples` 构建，也可以作为原生 GPUI 应用运行。
 

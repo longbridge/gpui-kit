@@ -27,6 +27,8 @@ html.dark .alignment-dark { display: block; }
   --brand-contrast: #fafafa;
   --brand-subtle: #f5f5f5;
   --brand-line: color-mix(in srgb, var(--foreground) 24%, transparent);
+  --doc-link: #1d4ed8;
+  --doc-link-hover: #2563eb;
   --border-hover: color-mix(in srgb, var(--foreground) 11%, var(--border));
 
   --data-1: #93c5fd;
@@ -150,6 +152,8 @@ html.dark .alignment-dark { display: block; }
   --brand-contrast: #171717;
   --brand-subtle: #262626;
   --brand-line: color-mix(in srgb, var(--foreground) 26%, transparent);
+  --doc-link: #bfdbfe;
+  --doc-link-hover: #93c5fd;
   --border-hover: color-mix(in srgb, var(--foreground) 13%, var(--border));
 
   --data-1: #93c5fd;
@@ -561,12 +565,14 @@ html.dark .astro-code span {
   > h1:first-child + h2 { margin-top: 2.25rem; }
 
   a {
-    text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+    color: var(--doc-link);
+    text-decoration-line: underline;
+    text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
     text-decoration-thickness: 1px;
     text-underline-offset: 0.18em;
     transition: text-decoration-color 140ms ease;
   }
-  a:hover { text-decoration-color: currentColor; }
+  a:hover, a:focus-visible { text-decoration-color: var(--doc-link-hover); }
 
   /* VitePress-style containers (`:::tip`), turned into asides by
      `remark-callouts`. One shape, tinted by kind. */
@@ -645,6 +651,118 @@ html.dark .astro-code span {
   .doc-tabs__input:nth-of-type(2):checked ~ .doc-tabs__panels .doc-tabs__panel:nth-child(2),
   .doc-tabs__input:nth-of-type(3):checked ~ .doc-tabs__panels .doc-tabs__panel:nth-child(3) { display: block; }
 
+  .doc-tabs__input:nth-of-type(1):focus-visible ~ .doc-tabs__list label:nth-child(1),
+  .doc-tabs__input:nth-of-type(2):focus-visible ~ .doc-tabs__list label:nth-child(2),
+  .doc-tabs__input:nth-of-type(3):focus-visible ~ .doc-tabs__list label:nth-child(3) {
+    outline: 2px solid var(--ring);
+    outline-offset: 1px;
+  }
+
+  .path-preview {
+    display: grid;
+    justify-items: center;
+    gap: 0.5rem;
+    margin-block: 1rem 2rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    color: var(--primary);
+  }
+
+  .path-preview svg { width: 100px; height: 128px; }
+  .path-preview figcaption { color: var(--muted-foreground); font-size: 0.875rem; }
+
+  .shared-string-memory { margin-block: 1.25rem 2rem; }
+  .shared-string-memory svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--background);
+    font-family: var(--font-sans);
+  }
+  .shared-string-memory .memory-panel { fill: var(--background); stroke: var(--border); }
+  .shared-string-memory .memory-heading { fill: var(--foreground); font-size: 17px; font-weight: 700; }
+  .shared-string-memory .memory-subtitle,
+  .shared-string-memory .memory-detail { fill: var(--muted-foreground); font-size: 12px; }
+  .shared-string-memory .memory-owner { fill: var(--secondary); stroke: var(--border); }
+  .shared-string-memory .memory-label { fill: var(--foreground); font-size: 12px; }
+  .shared-string-memory .memory-buffer-copy {
+    fill: color-mix(in srgb, var(--warning) 10%, var(--background));
+    stroke: var(--warning);
+  }
+  .shared-string-memory .memory-buffer-share {
+    fill: color-mix(in srgb, var(--data-3) 10%, var(--background));
+    stroke: var(--data-3);
+    animation: shared-memory-highlight 3s ease-in-out infinite;
+  }
+  .shared-string-memory .memory-flow {
+    fill: none;
+    stroke-width: 2;
+    stroke-dasharray: 8 6;
+    animation: shared-memory-flow 2s linear infinite;
+  }
+  .shared-string-memory .memory-flow-copy { stroke: var(--warning); }
+  .shared-string-memory .memory-flow-share { stroke: var(--data-3); }
+  .shared-string-memory marker path { fill: var(--muted-foreground); }
+  .shared-string-memory .memory-total { font-size: 13px; font-weight: 650; }
+  .shared-string-memory .memory-total-copy { fill: var(--warning); }
+  .shared-string-memory .memory-total-share { fill: var(--data-3); }
+  .shared-string-memory figcaption { color: var(--muted-foreground); font-size: 0.875rem; line-height: 1.6; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .shared-string-memory .memory-flow,
+    .shared-string-memory .memory-buffer-share { animation: none; }
+  }
+
+  .element-lifecycle {
+    display: grid;
+    gap: 0;
+    padding: 0;
+    margin-block: 1.25rem 1.75rem;
+    list-style: none;
+  }
+
+  .element-lifecycle li {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(9rem, 0.42fr) 1fr;
+    gap: 0.75rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid var(--border);
+    background: var(--background);
+  }
+
+  .element-lifecycle li + li { border-top: 0; }
+  .element-lifecycle li:not(:last-child)::after {
+    content: '↓';
+    position: absolute;
+    z-index: 1;
+    bottom: -0.7rem;
+    left: 0.75rem;
+    display: grid;
+    place-items: center;
+    width: 1.4rem;
+    height: 1.4rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--background);
+    color: var(--foreground);
+    font-size: 0.8rem;
+  }
+  .element-lifecycle li:first-child { border-radius: var(--radius-card) var(--radius-card) 0 0; }
+  .element-lifecycle li:last-child { border-radius: 0 0 var(--radius-card) var(--radius-card); }
+  .element-lifecycle li strong { color: var(--foreground); }
+  .element-lifecycle li span { color: var(--muted-foreground); }
+  .element-lifecycle li:nth-child(2),
+  .element-lifecycle li:nth-child(4),
+  .element-lifecycle li:nth-child(5) { border-left: 3px solid var(--primary); }
+
+  @media (max-width: 640px) {
+    .element-lifecycle li { grid-template-columns: 1fr; gap: 0.25rem; }
+  }
+
   /* GFM footnotes. The markdown pipeline emits `<h2 class="sr-only">` as the
      section's accessible name, but Tailwind only generates classes it finds in
      source, and this one comes out of rendered markdown — so without a rule
@@ -694,7 +812,8 @@ html.dark .astro-code span {
   }
 
   tr { border-top: 0; }
-  thead tr { background: color-mix(in srgb, var(--secondary) 10%, transparent); }
+  thead tr { background: var(--secondary); }
+  tbody tr:nth-child(even) { background: color-mix(in srgb, var(--secondary) 55%, var(--background)); }
 
   th {
     color: var(--muted-foreground);
@@ -757,6 +876,9 @@ html.dark .astro-code span {
     font: 0.78em/1.5 var(--font-mono);
   }
 }
+
+@keyframes shared-memory-flow { to { stroke-dashoffset: -28; } }
+@keyframes shared-memory-highlight { 50% { stroke-width: 3; } }
 
 /* ====================================================================
    Nav bar (docs layout)
@@ -995,6 +1117,20 @@ html.dark .astro-code span {
   padding: 3rem 3.5rem 4rem;
   max-width: 860px;
 }
+
+.docs-license {
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.docs-license p { margin: 0.4rem 0; }
+.docs-license strong { color: var(--foreground); }
+.docs-license a { color: inherit; text-decoration: underline; text-underline-offset: 0.15em; }
+.docs-license a:hover { color: var(--foreground); }
 
 /* ====================================================================
    On-this-page (docs layout)

@@ -1,64 +1,91 @@
 ---
 title: Action
-description: 理解 GPUI 如何路由 Focus、快捷键、Action 与 Event。
-order: -5
+description: 定义有类型的命令，并通过 Focus、Key Context 和 GPUI Dispatch Path 路由。
+order: -2.62
 ---
 
 # Action
 
-GPUI 提供 **Focus**、**Key Context**、**Action**、**KeyBinding** 与 [**Event**](./event)，它们是 GPUI 的核心交互机制。应用通过这些机制，把操作命令路由到窗口中当前活跃的区域，并在 Entity 之间传递类型明确的状态变化。
+**Action** 表达应用可以执行的操作。快捷键、菜单项、命令面板、按钮或另一个 Action handler 都可以派发同一个有类型的值。GPUI 把它路由到 [Element](./element) 树中负责该命令的区域。[Event](./event) 则沿另一个方向工作：状态改变后，它报告已经发生的事情。
 
-这篇 Guide 说明如何配合使用这些机制：
+本页说明命令定义与派发。按键写法、Context 匹配和 Keymap 设置见 [KeyBinding](./keybinding)。
 
-- **Focus** 表示键盘交互此刻发生在哪里；
-- **`track_focus`** 在 Element 上注册稳定的 `FocusHandle`，让鼠标交互与命令路由可以使用它；
-- **Action** 表示一条命令，可以来自快捷键、菜单、按钮或代码；
-- [**Event**](./event) 表示某个 Entity 已经发生了什么，并通知它的订阅者。
+## 一条命令，多个入口
 
-## 快捷键怎样生效
-
-<img class="architecture-light" src="/focus-action-flow.svg?v=20260922-3" alt="GPUI 从 Focus 组成 Dispatch Path，用路径上的 Key Context 匹配 KeyBinding，再把 Action 派发给最具体的 handler">
-<img class="architecture-dark" src="/focus-action-flow-dark.svg?v=20260922-3" alt="GPUI 从 Focus 组成 Dispatch Path，用路径上的 Key Context 匹配 KeyBinding，再把 Action 派发给最具体的 handler">
-
-假设窗口左侧是 Sidebar，右侧是 Chat。点击 Sidebar 后，Focus Path 包含 `Sidebar`；点击聊天输入区后，Focus Path 包含 `Chat`。因此绑定到 `Chat` 的快捷键只会在右侧区域激活。
-
-可以在同一段布局代码中明确声明两个键盘交互区域：
+使用 namespace 定义 unit Action。`actions!` 会生成类型，并注册稳定名称，这里的名称是 `chat::SendMessage`：
 
 ```rust
-h_flex()
-    .size_full()
-    .child(
-        // 左侧：点击后激活 Sidebar Key Context。
-        div()
-            .w_64()
-            .track_focus(&self.sidebar_focus)
-            .key_context("Sidebar")
-            .child("Sidebar"),
-    )
-    .child(
-        // 右侧：点击后激活 Chat Key Context。
-        div()
-            .flex_1()
-            .track_focus(&self.chat_focus)
-            .key_context("Chat")
-            .on_action(cx.listener(Self::on_action_send_message))
-            .child("Chat"),
-    )
+use gpui_kit::*;
+
+actions!(chat, [SendMessage]);
 ```
 
-两个区域各自拥有稳定的 `FocusHandle` 与 Key Context。点击 Chat 后，Focus 移到 `chat_focus`，`Chat` 进入当前 Dispatch Path，`SendMessage` handler 才能收到匹配后的 Action。点击 Sidebar 则会激活 `Sidebar`，此时只属于 Chat 的 binding 不会匹配。
+元素 handler 接收有类型的 Action、窗口和所属实体的 [Context](./context)。`cx.listener` 将方法适配成元素 callback：
 
-按下一个键时，GPUI 会：
+```rust
+impl Chat {
+    fn on_action_send_message(
+        &mut self,
+        _: &SendMessage,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.submit_draft();
+        cx.notify();
+    }
+}
 
-1. 从获得 Focus 的元素出发，沿祖先节点组成 Dispatch Path；
-2. 收集路径上的 `key_context`，用它们匹配 `KeyBinding`；
-3. 把匹配到的 Action 沿同一条路径派发，最具体的 handler 最先处理。
+// 在 Chat::render 中：
+div()
+    .track_focus(&self.focus_handle)
+    .key_context("Chat")
+    .on_action(cx.listener(Self::on_action_send_message))
+    .child("Chat")
+```
 
-活跃的 Focus Path 让同一个按键可以在窗口的不同区域表达不同含义，不需要额外维护一套全局快捷键分发开关。
+把快捷键绑定到 `SendMessage`，其他入口也使用同一个 Action：
 
-## Focus 是位置
+```rust
+window.dispatch_action(Box::new(SendMessage), cx); // 按钮或命令面板
+MenuItem::action("Send Message", SendMessage)      // 原生应用菜单
+```
 
-`FocusHandle` 是键盘目标的稳定身份。让拥有这段交互的 Entity 保存它：
+命令逻辑只保存在一个 handler 中。直接调用 `window.dispatch_action(...)` **不需要** KeyBinding，也不会匹配 Key Context；按键要先转换为 Action，才会用到这两项。绑定方法见 [KeyBinding](./keybinding)。
+
+## 定义携带数据的 Action
+
+Action 可以携带数据。derive `Action` 时需要 `Clone` 和 `PartialEq`。如果还要通过有名称的 JSON Keymap 项构造它，则同时 derive `Deserialize` 和 `JsonSchema`：
+
+```rust
+#[derive(Action, Clone, PartialEq, serde::Deserialize, schemars::JsonSchema)]
+#[action(namespace = chat)]
+struct InsertPrompt {
+    text: String,
+}
+```
+
+Action registry 根据 namespace 和类型名，用 Action 名称及可选 JSON payload 构造有类型的值。这样，可配置的 Keymap 与命令界面可以引用同一命令。名称必须唯一；重复注册会在创建应用时 panic。
+
+上面的 JSON 示例还要求应用依赖启用了 `derive` 功能的 `serde` 以及 `schemars`，供这两个 derive 使用。
+
+运行时命令的 payload 不应来自 JSON 时，`no_json` 保留有类型的派发，但不允许从 JSON 构造：
+
+```rust
+#[derive(Action, Clone, PartialEq)]
+#[action(namespace = workspace, no_json)]
+struct OpenConversation {
+    conversation_id: ConversationId,
+}
+```
+
+给命令选择稳定的动词型名称。含义相同的各个入口应共用一个 Action 类型；状态改变由命令 owner 实现，而不是散落在不同的输入 callback 中。
+
+## Focus 决定路由
+
+<img class="architecture-light" src="/focus-action-flow.svg?v=20260922-3" alt="Focus 决定 Dispatch Path；Key Context 将快捷键匹配为 Action，再向获得 Focus 的元素派发">
+<img class="architecture-dark" src="/focus-action-flow-dark.svg?v=20260922-3" alt="Focus 决定 Dispatch Path；Key Context 将快捷键匹配为 Action，再向获得 Focus 的元素派发">
+
+[FocusHandle](./window) 标识一个键盘目标。由负责交互的实体保存 handle，并在每次渲染时将它附加到元素：
 
 ```rust
 struct Chat {
@@ -76,105 +103,54 @@ impl Focusable for Chat {
         self.focus_handle.clone()
     }
 }
-```
 
-- `handle.is_focused(window)`：Focus 正好在这个目标上；
-- `handle.contains_focused(window, cx)`：Focus 也可以在它的子树里；
-- `handle.focus(window, cx)`：主动把 Focus 移到这里。
-
-输入光标、选中的控件通常检查 exact Focus；当子控件获得 Focus 时整个面板仍应保持激活，则检查 containment。
-
-## `track_focus` 到底做了什么
-
-`track_focus` 把 handle 绑定到当前帧里的具体元素：
-
-```rust
+// 在 Chat::render 中：
 div()
     .track_focus(&self.focus_handle)
     .key_context("Chat")
     .on_action(cx.listener(Self::on_action_send_message))
 ```
 
-调用 `track_focus` 会把 `FocusHandle` 注册到这个 Element 对应的 dispatch node，并把该 Element 标记为可以接收 Focus。这会产生几项关联行为：
+`track_focus` 把 handle 注册在元素的 dispatch node 上。默认情况下，元素内部的 mouse down 会让此 handle 获得 Focus。内层控件需要保留自己的 Focus 时，可在它的 mouse down handler 中调用 `window.prevent_default()`，阻止祖先的默认 Focus 转移。注册 handle 不会在 render 时立即聚焦；打开视图或用户进入视图时调用 `self.focus_handle.focus(window, cx)`。
 
-- 在 Element 内按下鼠标时，GPUI 默认把 Focus 移到这个 handle；
-- `focus`、`in_focus` 与 `focus_visible` style 可以读取它的状态；
-- GPUI 可以计算 Focus containment 与 Focus Path；
-- 这条路径上的 Key Context 和 Action handler 会参与按键匹配与 Action 派发。
+`handle.is_focused(window)` 检查当前目标是否正好获得 Focus；`handle.contains_focused(window, cx)` 也接受获得 Focus 的子元素，适合子控件活动时保持面板激活。注册的 handle 不会自动成为 Tab stop：创建它时可配置 `cx.focus_handle().tab_stop(true)`。Stateless component 可用 `window.use_keyed_state(...)` 在多次 render 间保留 handle。
 
-嵌套控件需要保留自己的 Focus 时，可以通过 `cx.prevent_default()` 阻止父元素在 mouse down 时接管 Focus。
+GPUI 从获得 Focus 的元素经过各级祖先组成 **Dispatch Path**。路径上的 `key_context("Chat")` 让相应的上下文快捷键有资格匹配；匹配的按键生成 Action。随后 Action 沿这条路径派发。Sibling 上的 handler 无法从这条路径到达。
 
-`track_focus` **不会在 render 时立刻让 Element 获得 Focus**。打开视图或进入交互时，调用 `focus_handle.focus(window, cx)`。不要在 `render` 里无条件请求 Focus，否则每次渲染都会把 Focus 抢回来。
+## Handler 顺序与传播
 
-### Focus 与 Tab 顺序是两件事
+Action 派发分为两个阶段：
 
-被 track 的 handle 不会自动成为 Tab stop。Tab 行为要声明在 handle 本身：
+1. **Capture**：从根节点到目标节点调用匹配的 `.capture_action(...)` listener。
+2. **Bubble**：从目标节点到根节点调用匹配的 `.on_action(...)` listener；如果继续传播，最后调用全局 `cx.on_action(...)` listener。
 
-```rust
-let focus_handle = cx.focus_handle().tab_stop(true);
-```
-
-需要明确顺序时使用 `tab_index(...)`。在元素上调用 `.tab_stop(...)` 不会改变传给 `track_focus` 的 handle。
-
-Stateless component 可以用 keyed state 让 handle 跨 render 保持稳定：
+因此，离目标最近的 bubble handler 先处理命令。Action handler 默认会停止 bubble 传播。如果当前 handler 不处理该 Action，应该调用 `cx.propagate()`，让父级或全局 handler 继续尝试：
 
 ```rust
-let focus_handle = window.use_keyed_state(id, cx, |_, cx| {
-    cx.focus_handle().tab_stop(true)
-});
-```
-
-## Action 是命令协议
-
-Action 是 GPUI 表达应用操作的核心方式：它是一个有类型的命令值，sender 无需耦合 receiver 就能 dispatch，GPUI 再沿当前 Focus Path 路由。同一个 Action 同时服务三个层次：
-
-1. **输入映射**：`KeyBinding` 把按键映射为 Action；
-2. **命令派发**：命令面板、按钮、Popup Menu 或其他 handler dispatch 这个 Action；
-3. **配置**：Keymap 把命令序列化为稳定的 Action name 与可选 JSON payload，GPUI 的 Action registry 再将其反序列化为有类型的 Action；这是 Zed 风格用户 Keymap 的基础。
-
-例如，命令面板保存 Action，而不是为每一行各存一份 callback：
-
-```rust
-let commands: Vec<(&str, Box<dyn Action>)> = vec![
-    ("发送消息", Box::new(SendMessage)),
-    ("切换侧边栏", Box::new(ToggleSidebar)),
-];
-
-// 用户确认当前命令时：
-window.dispatch_action(commands[selected].1.boxed_clone(), cx);
-```
-
-应用可以按自己的模型保存 owned 或 cloneable command entry；这里的关键边界是：选择命令后得到一个 Action 并 dispatch，当前 focused owner 仍然负责如何处理它。
-
-Native application menu 也使用同一套协议。在 macOS 上，菜单命令通过 Action 接入，而不是普通 element click callback：
-
-```rust
-MenuItem::action("发送消息", SendMessage)
-```
-
-通过 `actions!` 声明的 unit Action 会按名称注册。Action 需要携带配置数据时，derive `Action` 与 `Deserialize`，并设置 namespace：
-
-```rust
-#[derive(Action, Clone, PartialEq, Deserialize)]
-#[action(namespace = chat)]
-struct InsertPrompt {
-    text: SharedString,
+fn on_action_close(
+    &mut self,
+    _: &ClosePanel,
+    _: &mut Window,
+    cx: &mut Context<Self>,
+) {
+    if !self.can_close() {
+        cx.propagate();
+        return;
+    }
+    self.close();
+    cx.notify();
 }
 ```
 
-Keymap 因此可以用稳定的 Action name 标识命令，并在需要时附带 JSON payload。`#[action(no_json)]` 会明确禁止从 JSON 构造该 Action，适用于不应该出现在用户配置中的 runtime-only command。
+Capture listener 可以调用 `cx.stop_propagation()`，阻止派发到达目标。全局 bubble handler 默认也会停止传播，因此不处理命令的全局 fallback 应调用 `cx.propagate()`。这些方法控制 Action 派发；`window.prevent_default()` 控制 mouse Focus 转移等默认输入行为。Pointer 与 keyboard Event 的传播见 [Event](./event)。
 
-### 通过共同 owner 协调并列组件
+`window.dispatch_action(Box::new(action), cx)` 记录调用时的 Focus 目标，并把派发延迟到已渲染的帧。明确要派发到某个 owner 时，`focus_handle.dispatch_action(&action, window, cx)` 从渲染该 handle 的元素开始，前提是它仍在当前帧中。`cx.dispatch_action(&action)` 派发到活跃窗口；没有活跃窗口时则派发到全局 handler。Popup 或点击改变 Focus 后，这些方法的区别尤其重要。
 
-假设用户在 Sidebar 选择一条会话后，Chat 需要打开这条会话。Sidebar 只需要用 `OpenConversation` 表达这个意图，不需要持有 Chat 的 callback 或引用。二者最近的共同 owner `Workspace` 负责处理 Action，再更新 Chat：
+## 通过共同 owner 协调并列区域
+
+假设在 Sidebar 选中会话后，Chat 需要打开它。Sidebar 用 `OpenConversation` 描述意图；共同 owner `Workspace` 处理 Action，再更新 Chat Entity：
 
 ```rust
-#[derive(Action, Clone, PartialEq)]
-#[action(namespace = workspace, no_json)]
-struct OpenConversation {
-    conversation_id: ConversationId,
-}
-
 impl Workspace {
     fn on_action_open_conversation(
         &mut self,
@@ -188,109 +164,28 @@ impl Workspace {
     }
 }
 
-// Workspace 是 Sidebar 与 Chat 的共同祖先。
+// Workspace 在自己的 handler 下渲染两个区域。
 h_flex()
     .on_action(cx.listener(Self::on_action_open_conversation))
     .child(self.sidebar.clone())
     .child(self.chat.clone())
 
-// Sidebar 中的会话行派发命令。
-window.dispatch_action(
-    Box::new(OpenConversation { conversation_id }),
-    cx,
-);
+// Sidebar 交互期间，其 Focus Path 仍然活跃：
+window.dispatch_action(Box::new(OpenConversation { conversation_id }), cx);
 ```
 
-现在路由关系很明确：**Sidebar → Workspace → Chat**。Action 从 Sidebar 当前的 Dispatch Path 向上走，由 `Workspace` 接收；`Workspace` 再通过 Entity API 调用 Chat。Action 本身不会从 Sidebar 横向跳到 Chat。
+路由是 **Sidebar → Workspace**。然后 `Workspace` 通过 [Entity](./entity) API 更新 Chat。若只把 handler 挂在 Chat 上，来自 Sidebar 的 Action 无法到达它：Chat 是 sibling，位于 Sidebar 的 Dispatch Path 之外。必须无视当前 Focus、明确派发到某个已渲染区域时，可保留该区域的 `FocusHandle`，使用它的 `dispatch_action` 方法。
 
-:::info INFO — sibling 不在当前 Dispatch Path 上
+GPUI Kit 的 Command palette 和 Popup Menu 也使用这种方式：选中项提供一个 boxed Action，窗口再派发它。Command palette 还在自身元素上持有 Focus handle、Key Context 与导航 Action handler。框架组件负责选择与键盘交互机制；应用 owner 负责命令的具体含义。
 
-如果只把 `on_action_open_conversation` handler 挂在 Chat 上，当 Sidebar 拥有 Focus 时派发的 Action 无法到达它：Chat 是 sibling，不是当前 Dispatch Path 上的祖先。同一种错误也会导致快捷键看起来没有响应——`on_action` handler 位于 Focus 选中的路径之外。跨区域 handler 应放在最近的共同 owner 上；注册 `KeyBinding` 后，还要把对应的 `key_context` 与 handler 放在快捷键应该生效的路径上。
+## 排查丢失的命令
 
-:::
+快捷键只有点击某个区域之后才生效时，按顺序检查路由：
 
-只有真正属于整个应用的命令才使用 global handler。
+1. 哪个 `FocusHandle` 获得 Focus？它是否通过 `track_focus` 附加在已渲染树上？
+2. 所需的 `key_context` 是否在该元素或祖先上？绑定匹配见 [KeyBinding](./keybinding)。
+3. 有类型的 `.on_action(...)` handler 是否在生成的 Dispatch Path 上？
+4. 是否被更近的 handler 消费了 Action？不处理的 handler 是否忘了调用 `cx.propagate()`？
+5. 如果直接派发前 Focus 已改变，是否需要用明确的 `FocusHandle` 指定目标？
 
-## 完整实现一条键盘命令
-
-先定义并绑定一次命令：
-
-```rust
-actions!(chat, [SendMessage]);
-const CHAT_CONTEXT: &str = "Chat";
-
-fn init(cx: &mut App) {
-    cx.bind_keys([
-        #[cfg(target_os = "macos")]
-        KeyBinding::new("cmd-enter", SendMessage, Some(CHAT_CONTEXT)),
-        #[cfg(not(target_os = "macos"))]
-        KeyBinding::new("ctrl-enter", SendMessage, Some(CHAT_CONTEXT)),
-    ]);
-}
-```
-
-把 Focus、Key Context 和 handler 放在同一个 owner region：
-
-```rust
-impl Chat {
-    fn on_action_send_message(
-        &mut self,
-        _: &SendMessage,
-        _: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.submit_draft();
-        cx.notify();
-    }
-}
-
-impl Render for Chat {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .track_focus(&self.focus_handle)
-            .key_context(CHAT_CONTEXT)
-            .on_action(cx.listener(Self::on_action_send_message))
-            .child("Chat")
-    }
-}
-```
-
-所有入口都派发同一个 `SendMessage` Action：`KeyBinding` 负责快捷键，按钮在 click handler 中调用 `window.dispatch_action(...)`，Popup Menu 与 macOS native menu 保存同一个 Action。真正的消息提交逻辑只实现一次。
-
-Action handler 默认停止冒泡。如果内层 handler 不处理，希望父级继续尝试，调用 `cx.propagate()`。使用 `cx.on_action(...)` 注册的全局 handler 在不适用时也必须 propagate。
-
-先执行 `cx.bind_keys(...)`，再执行 `cx.set_menus(...)`。Native menu 创建时会固定当时的快捷键显示；之后只改 binding，不会自动更新已有菜单。
-
-## Action 与 Event 如何配合
-
-Action 与 Event 描述同一次交互中的两个相反方向：
-
-```text
-⌘ Enter → SendMessage Action → Chat 发送 → MessageSent Event → Workspace 更新
-```
-
-Action 把“**想做什么**”向内传给 command owner；操作改变状态后，Event 再把“**发生了什么**”向外传给感兴趣的 owner。阅读 [Event](./event)，继续了解 `EventEmitter`、`emit`、订阅生命周期，以及完整的 Action/Event 选择方法。
-
-## 全局与上下文快捷键
-
-编辑和导航快捷键通常都应有 Key Context。它们只在特定区域包含 Focus 时有意义，也应该让更具体的 child 优先处理。
-
-真正的全局 fallback 或 service command 才使用 `cx.on_action(...)`。危险的全局快捷键还要在 owner 中检查运行时状态。Longbridge Pro 的交易快捷键既限制在 Workspace Key Context，又会在输入框或对话框获得 Focus 时拒绝执行。Key Context 决定“**命令在哪里有资格匹配**”，handler 决定“**它现在是否允许执行**”。
-
-## 排查“点击以后才生效”
-
-如果快捷键只有点击某个区域以后才生效，通常是这次点击把 Focus 移进了包含目标 Key Context 和 handler 的路径。把它当作路由问题，沿 GPUI 使用的同一条链路检查。
-
-按整条链路依次检查：
-
-1. **Binding**：按键是否绑定到预期的 Action 和 Key Context？
-2. **Focus**：点击前后，究竟哪个 `FocusHandle` 获得 Focus？
-3. **Tracking**：同一个 handle 是否在已渲染元素上调用 `track_focus`？
-4. **Context**：目标 `key_context` 是否位于 focused element 或其祖先上？
-5. **Handler**：`on_action` 是否也在同一条 Dispatch Path 上？
-6. **Propagation**：是否有更具体的 handler 提前吞掉 Action？
-7. **Lifetime**：全局 handler 或 Event subscription 是否已释放？过期 handler 是否忘了 propagate？
-
-最常见的修复，是让同一个 region 一起拥有稳定 handle、`track_focus`、`key_context` 与 `on_action`，然后在用户进入该区域时把 Focus 移进去。
-
-这些模式来自 GPUI 的 dispatch 实现，并在 GPUI Kit 的 Menu、Tree、Input、Dialog、Color Picker，Zed 的 panel 与 editor，以及 Longbridge Pro 的 workspace 和交易快捷键中得到实际验证。
+让负责命令的区域同时持有 handle、context 和 handler。全局 handler 只用于真正适用于整个应用的操作。

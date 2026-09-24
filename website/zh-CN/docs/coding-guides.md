@@ -1,5 +1,5 @@
 ---
-title: 编码指南
+title: Coding Guides
 description: 构建可维护 GPUI Kit 应用的架构、代码风格与命名规范
 order: -13
 ---
@@ -9,6 +9,10 @@ order: -13
 本指南总结 GPUI Kit 中经过长期实践验证的应用架构与代码模式，面向工程师和 coding agent。请先阅读[设计指南](./design-guides.md)：代码结构的职责是保存产品意图，而不是替代产品设计。
 
 本文是一份规范性指南：**必须**表示生命周期、正确性或生态约束；**应该**表示默认架构，偏离时需要有具体理由。精确方法签名以当前源码和 API 文档为准。
+
+### 让常见用法自然低成本
+
+**设计原则：框架类型与所有权安排，应让组件的常见用法默认就低成本。** 开发者应能构建、复用 UI，而不必在每个调用处手写缓存。持久 UI 文本使用 [SharedString](./shared-string)、轻量组件值使用 [RenderOnce](./render-once)，都是这种设计的例子：API 把所有权放在恰当位置，使常见路径避免重复工作。微小成本仍会随元素数和渲染次数放大；只有测到特殊热点后才添加缓存。这两种类型都不承诺零成本。具体机制见下文的[文本所有权规范](#用-sharedstring-保存持久化-ui-文本)与渲染章节。
 
 ## 架构总览
 
@@ -27,7 +31,7 @@ order: -13
 
 ### 大型应用按业务能力组织 crate
 
-在大型 Rust 应用中，一个完整 Feature 通常应该成为独立 crate，而不是继续向全局`views`、`models` 或 `modals` 目录添加文件。同一能力的 model、view、command、dialog 与 workflow 应该放在一起。编辑 Workspace 的 dialog 属于 Workspace Feature；只有可复用的 Dialog 基础组件属于 UI library。
+在大型 Rust 应用中，当复杂业务能力的状态、生命周期与公开边界值得独立维护时，通常将它拆成 feature crate。把它的 model [Entity](./entity)、service、[`Render`](./render) View、command、dialog 与 workflow 放在一起。编辑 Workspace 的 dialog 属于 Workspace Feature；只有可复用的 Dialog 基础组件属于 UI library。小能力可以先留在 module 中，等 crate 边界有具体收益再拆分。
 
 ```text
 crates/
@@ -61,11 +65,44 @@ crates/
 
 不要反过来建立全局 `models/`、`views/`、`modals/` 与 `commands/` 目录。这种方式只是按实现角色给文件分类，却会把每个 Feature 拆散到整个应用中。
 
-App Shell 只组合 Feature Crate，尽量不承载 Feature 逻辑。Feature 可以依赖稳定的共享能力与 UI 基础设施，但不能反向依赖 App Shell，也不能进入另一个 Feature 的内部实现。两个 Feature 需要协作时，优先使用明确的 command、event、数据类型或小型共享 service，而不是让彼此的 view 形成依赖。只有一项能力已有清晰名称和两个以上真实使用方时，才提取共享 crate。
+App Shell 只组合 Feature Crate，尽量不承载 Feature 逻辑。每个 Feature 拥有自己的 model Entity 和渲染它们的 View。只有确实属于整个应用的 service 或 registry 才在 Feature 内使用私有 [`Global`](./global)；仅供一个 Feature 使用的 model 不应自动成为 Global。同一 Feature 内的协作者传递 clone 后的 `Entity<T>` handle，避免反复复制大型 `Vec` 或 collection。跨 Feature 边界只暴露有意公开的 Entity 类型，或小型 handle、领域 ID、command、event、interface；model 字段和实现 module 保持私有。
 
-crate 边界也是工程边界。它让 Cargo 只重编译和测试较小的依赖子图，让所有权直接体现在`Cargo.toml` 中，并收紧一次修改需要评审和回归验证的范围。它还让删除 Feature 成为真实的架构检验：如果删除一个 Feature 仍需在全局 view 与 modal 目录中到处搜索，它从未真正解耦。
+例如 Workspace crate 可以导出可 clone 的 handle，把可变 model 留在公开 API 之后：
 
-不要为每个页面或 helper 创建 crate。只有当一项能力拥有独立状态与生命周期、稳定的公开边界，或已经大到值得独立编译和测试时才拆分。依赖必须无环，并始终指向更小、更稳定的 crate。
+```rust
+// 简化的 workspace/src/lib.rs；model 变大后可移到私有的 model.rs。
+use gpui_kit::{App, Entity, SharedString};
+
+struct WorkspaceModel {
+    name: SharedString,
+}
+
+#[derive(Clone)]
+pub struct WorkspaceHandle {
+    model: Entity<WorkspaceModel>,
+}
+
+impl WorkspaceHandle {
+    pub fn rename(&self, name: SharedString, cx: &mut App) {
+        self.model.update(cx, |model, cx| {
+            model.name = name;
+            cx.notify();
+        });
+    }
+}
+```
+
+应用可以保存这个 handle，并把 Workspace ID 传给 Search；Search 无须拿到 Workspace 的整个 collection 或私有 View。一个简单的无环依赖关系是：
+
+```text
+app ──▶ workspace ──▶ shared contracts
+ └────▶ search ─────▶ shared contracts
+workspace, search ──▶ gpui-kit
+```
+
+Feature 可以依赖稳定的共享能力和 UI 基础设施，但不能反向依赖 App Shell，也不能访问另一个 Feature 的私有 module。如果一个 Feature 必须调用另一个 Feature，应让依赖显式且单向，或把真正共享的契约放在两者下层。共享 crate 要有清晰用途和真实 owner，避免循环依赖与无所不包的 `shared` crate。
+
+这些边界让不同工程师或多个 AI agent 可以并行处理不同能力，减少文件冲突与共享状态耦合；共享契约仍需要协调。Cargo 也可能复用已缓存的依赖，在局部变更后只重编译较小的依赖子图，但增量编译速度取决于依赖图、公开 API 改动、feature 与构建配置；增加 crate 自身也有成本，不能保证每次修改都编译更快。按所有权和协作需要拆分，不要为每个页面或 helper 建 crate。
 
 ## 初始化与 Root 所有权
 
@@ -86,7 +123,7 @@ app.run(move |cx| {
 
 ## 理解 GPUI 阶段与上下文
 
-GPUI 使用 retained state 与 declarative rendering。`Entity` 跨 frame 存活；`render` 返回的 element tree 只描述当前 frame。必须始终区分持久状态与一次 render 的输出。
+GPUI 使用 retained state 与 declarative rendering。[Entity](./entity) 跨 frame 存活；`render` 返回的 [Element](./element) tree 只描述当前 frame。必须始终区分持久状态与一次 render 的输出。[Context](./context) 解释 `Context<T>`、`App` 与 `Window` 的作用范围。
 
 - `Context<Self>`：修改当前 entity，建立 listener，emit event，并通知 observer；
 - `App`：访问 global 以及读取或更新 entity，不表示当前 element 拥有这些状态；
@@ -99,7 +136,7 @@ GPUI 使用 retained state 与 declarative rendering。`Entity` 跨 frame 存活
 
 ### 值类型 UI 使用 `RenderOnce`
 
-当所有输入都由 caller 提供，且 element 不需要跨 frame 保存 application state 时，使用`RenderOnce` 或 `IntoElement`。纯 presentation wrapper 和小控件通常属于此类。
+**默认优先用 [`RenderOnce`](./render-once) 构造轻量、可复用的组件值。** caller 传入当前 props 和 handler，GPUI 消费这个值生成元素，此后该值即可丢弃。GPUI Kit 的 `Button` 和 `Checkbox` 就遵循这一模式：显示的 label、checked 或 selected 值与 callback 来自 caller 当前持有的状态。`RenderOnce` 组件仍可使用少量带 key 的交互状态，例如 focus handle；它没有独立的 View 生命周期。不要因此认为它的 render 方法在每个显示帧都必定调用：显示一帧并不一定需要重建这个组件的元素树。
 
 ```rust
 #[derive(IntoElement)]
@@ -121,7 +158,7 @@ impl RenderOnce for EmptyState {
 
 ### 跨 frame 行为使用 `Entity<T>`
 
-行为需要 observation、subscription、focus、async、history、measurement 或增量更新时，使用 entity-backed `Render` view。Entity 存在 owning view 中，不能在每次 `render`里重建。
+组件需要持久的复杂状态或独立生命周期，例如 subscription、异步工作、history、子 Entity 或增量更新时，使用由 Entity 支撑的 [`Render`](./render) View。Entity 存在 owning view 中，不能在每次 `render` 里重建。
 
 ```rust
 struct SearchView {
@@ -151,6 +188,14 @@ Element 内部可以很复杂，但对 caller 仍是值。Stateful system 可以
 
 ## 状态所有权
 
+### 用 `SharedString` 保存持久化 UI 文本
+
+**跨 frame 或 callback 闭包保存的 UI 文本必须优先使用 [`SharedString`](./shared-string)**，包括组件的 label、title 和 placeholder。把稳定文本存在所属 View 或 Entity 中，构建元素时 clone 这个 handle；不要在每次 render 时反复 clone `String`。可变编辑缓冲、格式化构建阶段使用 `String`，完成后再转换；单次调用内临时只读则使用 `&str`。
+
+API 或 JSON 响应中若有供 UI 长期持有的不可变文本，应在反序列化边界就把响应字段定义为 `SharedString`。保留收到的 transport 值；派生或格式化后的展示文本放在单独的领域或 View model 中，不要改写响应字段，也不要反复把 `String` clone 进 UI。真正可变的缓冲区或仅供非 UI 短期解析的文本不受此规则约束。见 [API 响应示例](./shared-string#从-api-响应进入-view)。
+
+这是所有权与性能规范，并不表示文本总是零分配。短值可以内联；较长的动态文本使用共享存储，clone 不复制文本字节。但首次构造仍可能分配，堆上文本的 clone 也有引用计数成本。具体存储方式与取舍见 [SharedString](./shared-string)。
+
 状态应放在能够保持其正确性的最窄 owner 中：
 
 - domain state 属于 model 或 feature view；
@@ -171,7 +216,15 @@ Checkbox::new("show-hidden")
     }))
 ```
 
-改变渲染结果后调用 `cx.notify()`；owner 需要处理语义事件时使用 `cx.emit(...)`；生命周期跟随 Entity 时使用 `cx.subscribe(...)` / `cx.observe(...)`。API 要求时必须保留返回的 Subscription。
+改变渲染结果后调用 `cx.notify()`；owner 需要处理语义事件时使用 `cx.emit(...)`；生命周期跟随 Entity 时使用 `cx.subscribe(...)` / `cx.observe(...)`。返回的 Subscription 必须有明确的生命周期 owner。
+
+### 限定所有权关系与订阅生命周期
+
+父级用强 `Entity<T>` handle 持有子级时，子级回指父级必须使用 `WeakEntity<T>`；强回指会闭合所有权环。`WeakEntity::upgrade()` 返回 `Option`，其 `update` 返回 `Result`，所以父级已释放应作为正常生命周期结果处理。所有权和弱引用访问模式见 [Entity](./entity)。
+
+把返回的 `Subscription` 保存在需要 callback 的 View 或 Entity 上，通常是 `_subscriptions: Vec<Subscription>`。owner 释放时 handle 随之 drop，订阅也会取消。仅存于初始化函数的局部 handle 会过早 drop；`Subscription::detach()` 则会放弃取消订阅的 handle，让 callback 持续到被订阅的 Entity 释放。默认不要 detach 随 View 存续的重复订阅；在长寿命 emitter 上反复 detach 可能使 callback 持续累积。GPUI 的 `observe` 和 `subscribe` 内部使用订阅者的弱 handle，但 callback 如果额外捕获了自己 View 的强 handle，仍可能闭合所有权环。
+
+View 意外无法释放时，先检查强 Entity 环、捕获强 View handle 的 callback，以及生命周期超出预期的已 detach 订阅或 [Task](./task)。drop Task handle 会取消尚未完成的工作，本身不会继续保留 View。这些是优先排查点，并非所有内存泄漏原因。
 
 读取或派生值不能触发 notify。禁止在 `render` 中无条件 notify，否则会永久重绘。形成同一 invariant 的字段应一次更新，只 notify 一次。无法获得 context 的 reusable state API 必须明确让 owner 负责 emit/notify。
 
@@ -181,7 +234,7 @@ Checkbox::new("show-hidden")
 
 ## 稳定标识
 
-`ElementId` 是行为契约的一部分。它为元素提供稳定标识，并作为元素局部状态或组件状态的键。组件也可以将它用于自身的焦点、测量或动画标识；焦点与滚动通常仍由各自的 handle 管理。
+[`ElementId`](./element_id) 是行为契约的一部分。它为元素提供稳定标识，并作为元素局部状态或组件状态的键。组件也可以将它用于自身的焦点、测量或动画标识；焦点与滚动通常仍由各自的 handle 管理。
 
 - row、tab、tree node、重复 control 使用稳定 domain ID；
 - 同一 control 重复出现时，以 owning object namespace child ID；
@@ -288,7 +341,7 @@ Application UI 中每个直接 `px(...)` 和 raw color constructor 都应视为 
 
 ## 事件、Action 与焦点
 
-Pointer-specific 行为使用 pointer callback；需要 key binding、menu 或多输入来源的 command 使用 GPUI Action。Action handler 靠近拥有 command 的 view。
+Pointer-specific 行为使用 pointer callback；需要 key binding、menu 或多输入来源的 command 使用 GPUI [Action](./action)。Action handler 靠近拥有 command 的 view。
 
 一个 logical desktop command 只建模一次。Toolbar Button、`DropdownMenu` item、`ContextMenu` item、menu-bar item 与 key binding 应 dispatch 同一个 Action 或调用同一 owner method，不能复制五份 mutation。条件允许时，label、icon、shortcut、enabled state 来自同一 command policy，避免不同入口互相矛盾。Menu 拥有 navigation 与 dismiss；feature owner 仍然拥有 command 是否允许以及实际执行内容。
 
@@ -314,7 +367,9 @@ Modal 必须 trap focus，并在关闭后恢复到仍有效的原目标。Nested
 
 ## 异步任务与副作用
 
-Async work 从 event、lifecycle hook 或具名 method 启动，不能作为 `render` 的无条件副作用。不应让 task 延长已关闭 view 生命周期时 capture weak entity。完成后通过正确 GPUI context 更新，并处理 entity/window 已不存在的情况；完成 coherent update 后只 notify 一次。
+异步 [Task](./task) 从 event、lifecycle hook 或具名 method 启动，不能作为 `render` 的无条件副作用。不应让 task 延长已关闭 view 生命周期时 capture weak entity。完成后通过正确 GPUI context 更新，并处理 entity/window 已不存在的情况；完成 coherent update 后只 notify 一次。
+
+重复运行的任务应将 handle 保存在 owner 上，使 owner 释放时任务取消；默认不要 detach。确实必须独立完成的一次性任务可以调用 `Task::detach()`，但之后不再持有取消 handle。错误与弱 Entity 更新失败都需要明确处理。
 
 用 idle/loading/loaded/failed 等明确状态表示 async operation。Refresh 时尽量保留可用旧数据；防止重复破坏性提交；可恢复错误要显示在 UI，而不是只写 log。
 
@@ -322,8 +377,8 @@ Async work 从 event、lifecycle hook 或具名 method 启动，不能作为 `re
 
 ## 布局、测量与滚动
 
-`h_flex` 会让子元素在交叉轴上居中；`v_flex` 保持 flexbox 的默认值 `stretch`。这与 Zed 的 `h_flex` 一致，
-也是一排控件想要的效果，所以图标加文字的一行什么都不用写。但一排等高的列不是这样：直接放进 `h_flex` 的列不会
+`h_flex` 会让子元素在交叉轴上居中；`v_flex` 保持 flexbox 的默认值 `stretch`。
+交叉轴居中正是一排控件想要的效果，所以图标加文字的一行什么都不用写。但一排等高的列不是这样：直接放进 `h_flex` 的列不会
 填满行的高度，比行更高的列会被居中，于是它的顶部（通常是 header）被裁到窗口之外，而列附近的代码看不出原因。
 子元素是列的一行，请显式写 `items_stretch()`：
 

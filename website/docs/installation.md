@@ -51,6 +51,8 @@ gpui-kit = "0.6"
 
 `gpui-kit` depends on the matching GPUI crates for you, so your application never lists GPUI itself. `use gpui_kit::*;` is GPUI, and the layers are reachable by name: `gpui_kit::component` (the styled components), `gpui_kit::base`, `gpui_kit::assets` and `gpui_kit::platform`.
 
+Continue with [Getting Started](./getting-started) to create a Window and render your first View.
+
 For experimental iOS support and Swift UIView embedding, see [Mobile](/docs/mobile). Mobile uses `gpui-pre-mobile` and a different application bootstrap from the desktop setup above.
 
 ## Improve development runtime performance

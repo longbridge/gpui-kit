@@ -59,7 +59,7 @@ compatibility enum: existing imports, exhaustive matches and `.view(cx)` calls
 continue to work without a new trait import. `Icon::new(...)` accepts either
 type. A legacy name converts into the shared name with `.into()`.
 
-For the new shared enum, use `Icon::new(name).view(cx)` when a component entity
+For the new shared enum, use `Icon::new(name).view(cx)` when a component [Entity](./entity)
 is needed, or import `gpui_kit::component::IconNameExt` to call `name.view(cx)`.
 
 `IconName::ALL` enumerates all 1,830 names; `IconName::Accessibility.path()`

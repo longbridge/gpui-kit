@@ -1,315 +1,104 @@
 ---
 title: Getting Started
-description: Learn how to set up and use GPUI Component in your project
+description: Build your first GPUI Kit desktop application with one dependency and one view.
 order: -2
 ---
 
 # Getting Started
 
-## Installation
+This guide builds a small desktop window with a GPUI Kit button. You need Rust and Cargo plus the system libraries for your platform; see [Installation](./installation.md) for macOS, Windows and Linux requirements. For a browser target, start with [WebAssembly](./webassembly.md) after learning the view model here.
 
-Add dependencies to your `Cargo.toml`:
+## Create a project
+
+```sh
+cargo new gpui-hello
+cd gpui-hello
+```
+
+Add GPUI Kit to the generated `Cargo.toml`:
 
 ```toml
 [dependencies]
 gpui-kit = "0.6"
-anyhow = "1.0"
 ```
 
-:::tip
-`gpui-kit` always pulls in GPUI and `gpui-base`, and by default `gpui-component` and the default icon set. To manage your own assets, keep only the features you need:
+This single dependency includes GPUI, GPUI Base, the styled GPUI Component library and its default icon assets. Application code accesses GPUI through `use gpui_kit::*;` and components through `gpui_kit::component`. You can change the feature selection later; see [Icons & Assets](./assets.md).
 
-```toml
-gpui-kit = { version = "0.6", default-features = false, features = ["component"] }
-```
+## Add a view
 
-See [Icons & Assets](./assets.md) for more details.
-:::
-
-## Quick Start
-
-Here's a simple example to get you started:
+Replace `src/main.rs` with:
 
 ```rust
-use gpui_kit::component::button::*;
-use gpui_kit::component::*;
+use gpui_kit::component::button::Button;
 use gpui_kit::*;
 
-pub struct HelloWorld;
+struct HelloWorld;
 
 impl Render for HelloWorld {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
-            .v_flex()
-            .gap_2()
+            .flex()
+            .flex_col()
             .size_full()
             .items_center()
             .justify_center()
+            .gap_2()
             .child("Hello, World!")
             .child(
-                Button::new("ok")
+                Button::new("hello")
                     .primary()
-                    .label("Let's Go!")
+                    .label("Click me")
                     .on_click(|_, _, _| println!("Clicked!")),
             )
     }
 }
 
 fn main() {
-    let app = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
+    application()
+        .with_assets(assets::Assets)
+        .run(|cx| {
+            init(cx);
 
-    app.run(move |cx| {
-        // This must be called before using any GPUI Component features.
-        gpui_kit::init(cx);
-
-        // Opens a window with a `Root` wrapping the view, so dialogs, sheets,
-        // notifications and menus work in it.
-        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| HelloWorld))
+            open_window(WindowOptions::default(), cx, |_, cx| {
+                cx.new(|_| HelloWorld)
+            })
             .expect("Failed to open window");
-    });
-}
-```
-
-:::info
-Make sure to call `gpui_kit::init(cx);` at first line inside the `app.run` closure. This initializes the GPUI Component system.
-
-This is required for theming and other global settings to work correctly.
-:::
-
-## Basic Concepts
-
-### Stateless Elements
-
-GPUI Component uses stateless [RenderOnce] elements, making them simple and predictable. State management is handled at the view level, not in individual components.
-
-They are all implemented [IntoElement] types.
-
-For example:
-
-```rs
-struct MyView;
-
-impl Render for MyView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .child(Button::new("btn").label("Click Me"))
-            .child(Tag::secondary().child("Secondary"))
-    }
-}
-```
-
-### Stateful Components
-
-See the [tested application recipes](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes) for a complete window with retained subscriptions, icons, and overlay layers. `gpui_kit::open_window` wraps each window's view in a `Root`, which renders the dialog, sheet and notification layers above it.
-
-Controls such as Input, List, and DataTable use retained state entities. Store that state on the owning view and construct the styled element from it during render.
-
-Create the [Entity] once, outside render:
-
-<!-- recipe:settings:start -->
-```rust
-use gpui_kit::component::{
-    ActiveTheme, IconName, WindowExt,
-    button::Button,
-    checkbox::Checkbox,
-    form::{Field, Form},
-    input::{Input, InputEvent, InputState},
-    radio::RadioGroup,
-    switch::Switch,
-};
-use gpui_kit::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
-    Styled as _, Subscription, Window, div,
-};
-
-pub struct Settings {
-    name: Entity<InputState>,
-    preview: SharedString,
-    changes: usize,
-    enabled: bool,
-    remember: bool,
-    delivery: Option<usize>,
-    _subscriptions: Vec<Subscription>,
-}
-
-impl Settings {
-    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder("Name"));
-        let subscription = cx.subscribe_in(&name, window, |this, state, event, _, cx| {
-            if matches!(event, InputEvent::Change) {
-                this.preview = state.read(cx).value().to_string().into();
-                this.changes += 1;
-                cx.notify();
-            }
         });
-        Self {
-            name,
-            preview: "".into(),
-            changes: 0,
-            enabled: false,
-            remember: false,
-            delivery: Some(0),
-            _subscriptions: vec![subscription],
-        }
-    }
-
-    pub fn input(&self) -> Entity<InputState> {
-        self.name.clone()
-    }
-
-    pub fn preview(&self) -> &SharedString {
-        &self.preview
-    }
-
-    pub fn changes(&self) -> usize {
-        self.changes
-    }
-}
-
-impl Render for Settings {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .p_4()
-            .gap_3()
-            .bg(cx.theme().background)
-            .text_color(cx.theme().foreground)
-            .child("Profile")
-            .child(
-                Form::new()
-                    .child(Field::new().label("Name").child(Input::new(&self.name)))
-                    .child(Field::new().label("Preview").child(self.preview.clone()))
-                    .child(
-                        Field::new().label_indent(false).child(
-                            Checkbox::new("remember")
-                                .label("Remember name")
-                                .checked(self.remember)
-                                .on_change(cx.listener(|this, value, _, cx| {
-                                    this.remember = *value;
-                                    cx.notify();
-                                })),
-                        ),
-                    )
-                    .child(
-                        Field::new().label_indent(false).child(
-                            Switch::new("enabled")
-                                .label("Enable notifications")
-                                .checked(self.enabled)
-                                .on_change(cx.listener(|this, value, _, cx| {
-                                    this.enabled = *value;
-                                    cx.notify();
-                                })),
-                        ),
-                    )
-                    .child(
-                        Field::new().label("Delivery").child(
-                            RadioGroup::new("delivery")
-                                .children(["Immediately", "Daily summary"])
-                                .selected_index(self.delivery)
-                                .on_change(cx.listener(|this, value, _, cx| {
-                                    this.delivery = Some(*value);
-                                    cx.notify();
-                                })),
-                        ),
-                    )
-                    .footer(
-                        Button::new("about")
-                            .label("About…")
-                            .icon(IconName::Info)
-                            .on_click(|_, window, cx| {
-                                window.open_dialog(cx, |dialog, _, _| {
-                                    dialog.title("About").child("A complete GPUI Kit window")
-                                });
-                            }),
-                    ),
-            )
-    }
 }
 ```
-<!-- recipe:settings:end -->
 
-### Theming
+Run `cargo run` from the project directory. A window shows the label and button; clicking the button prints `Clicked!` in the terminal.
 
-All components support theming through the built-in `Theme` system:
+The startup sequence has three parts:
 
-```rust
-use gpui_kit::component::{ActiveTheme, Theme};
+1. `gpui_kit::application()` creates the desktop application; `.with_assets(...)` registers the default icon source.
+2. `gpui_kit::init(cx)` initializes the enabled Kit layers, including component themes. Call it once before opening application windows or constructing components.
+3. `gpui_kit::open_window(...)` creates an `Entity<HelloWorld>` from the closure and wraps it in a [`Root`](./window). `Root` owns the window's overlay layers, including dialogs, sheets and notifications. Return your content view from the closure, not another `Root`.
 
-// Access theme colors in your components
-cx.theme().primary
-cx.theme().background
-cx.theme().foreground
+`HelloWorld` implements GPUI's [`Render`](./render) trait. When GPUI renders the view, `render` returns an [element tree](./element): a `div` containing text and a `Button`. The button is a value built for that render; when a control needs lasting state, such as an input's text, the owning view keeps an `Entity` for that state instead of recreating it in `render`.
+
+## A small mental model
+
+An [Entity<T>](./entity) holds state across frames. It can own a model without drawing anything; when `T` implements `Render` and is mounted, the entity is a persistent **View** that builds a fresh element tree each time it renders. A [RenderOnce](./render-once) component takes its inputs as a value and describes a reusable piece of that tree. Use one where the caller supplies its state and handlers; it can still use small keyed element state. Give complex state, subscriptions, and tasks a lasting owner.
+
+```text
+app shell → feature (model, commands, view)
+              ├─ Entity<Model>        retained state
+              └─ Entity<View>         retained view; View implements Render
+                    └─ element tree   rebuilt for each render
+                         └─ RenderOnce values for reusable pieces
 ```
 
-### Sizing
+As an app grows, a feature with its own workflow can keep its model and views together in a feature crate, with a private `Global` only when it needs truly application-wide state. Let features cooperate through small public interfaces, events, or `Entity` handles. This keeps reusable pieces inexpensive to adopt and gives teammates or AI agents a clear boundary for parallel changes. The [Coding Guides](./coding-guides) explain when to make that split and how to keep ownership and dependencies clear.
 
-Most components support multiple sizes:
+## Where to go next
 
-```rust
-Button::new("btn").small()
-Button::new("btn").medium() // default
-Button::new("btn").large()
-Button::new("btn").xsmall()
-```
+Read these in order as your app grows:
 
-### Variants
+1. [Element](./element.md) and [RenderOnce](./render-once.md): understand the frame's tree and value-like components.
+2. [Entity](./entity.md) and [Context](./context.md): retain state and update it outside rendering.
+3. [Window](./window.md): open windows and use the `Root` overlay layer.
+4. [Event](./event.md) and [Action](./action.md): connect state changes, keyboard shortcuts and commands.
+5. [Component catalog](../component/index.md): choose controls; then read [Icons & Assets](./assets.md) and [Fonts](./fonts.md) as your interface needs them.
 
-Components offer different visual variants:
-
-```rust
-Button::new("btn").primary()
-Button::new("btn").danger()
-Button::new("btn").warning()
-Button::new("btn").success()
-Button::new("btn").ghost()
-Button::new("btn").outline()
-```
-
-## Icons
-
-:::info
-Icons are not bundled with GPUI Component to keep the library lightweight.
-
-Continue read [Icons & Assets](./assets.md) to learn how to add icons to your project.
-:::
-
-GPUI Component has an `Icon` element, but does not include SVG files by default.
-
-The examples use [Lucide](https://lucide.dev) icons. You can use any icons you like by naming the SVG files as defined in `IconName`. Add the icons you need to your project.
-
-```rust
-use gpui_kit::component::{Icon, IconName};
-
-Icon::new(IconName::Check)
-Icon::new(IconName::Search).small()
-```
-
-## Next Steps
-
-Explore the component documentation to learn more about each component:
-
-- [Button](../component/button) - Interactive button component
-- [Input](../component/input) - Text input with validation
-- [Dialog](../component/dialog) - Dialog and modal windows
-- [DataTable](../component/data-table) - High-performance data tables
-- [More components...](../component/index)
-
-## Development
-
-To run the component gallery:
-
-```bash
-cargo run
-```
-
-More examples can be found in the `examples` directory:
-
-```bash
-cargo run --example <example_name>
-```
-
-[RenderOnce]: https://docs.rs/gpui/latest/gpui/trait.RenderOnce.html
-[IntoElement]: https://docs.rs/gpui/latest/gpui/trait.IntoElement.html
-[Render]: https://docs.rs/gpui/latest/gpui/trait.Render.html
+For a complete application with retained input state and subscriptions, use the [application recipes](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes). The [Coding Guides](./coding-guides.md) explain the conventions behind those examples.

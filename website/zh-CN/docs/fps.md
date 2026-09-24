@@ -6,7 +6,7 @@ order: -15
 
 # FPS Monitor
 
-`gpui-fps` 在窗口上叠加一个性能 HUD：一个主读数、一条滚动的帧耗时曲线，以及本进程的
+`gpui-fps` 在 [Window](./window) 上叠加一个性能 HUD：一个主读数、一条滚动的帧耗时曲线，以及本进程的
 CPU、GPU 与内存。它只依赖 `gpui`，任何 GPUI 应用都能用。
 
 ```rs
@@ -40,7 +40,7 @@ fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoEl
 要让帧计数器读出"这个 UI 能跑多快"，最直接的做法是像游戏里的帧数器那样不停地要帧。但在
 这里这件事并不免费：标脏任意一个 view 排的是一次**窗口**绘制，GPUI 会重新 render 该窗口中
 除 [`Entity::cached`] 边界后面之外的所有 view —— 于是 HUD 每要一帧，代价就是应用的一次
-完整 layout 与 paint，而下面那行 CPU 报的正是 HUD 自己制造出来的开销。在 story gallery 的
+完整 layout 与 [paint](./paint)，而下面那行 CPU 报的正是 HUD 自己制造出来的开销。在 story gallery 的
 Table 页上，这意味着没人碰窗口时也有约 62% 的 CPU。
 
 而帧耗时本身已经回答了这个问题。`FRAME` 就是一次完整重绘的成本，取倒数就是这种重绘能撑住

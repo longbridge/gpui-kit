@@ -1,12 +1,12 @@
 ---
-title: 动画与动效
+title: Motion
 description: gpui-base 的类型化 transition、spring、keyframes、presence、stagger 与 reduced-motion 行为。
 order: 4
 example: motion
 exampleKind: base
 ---
 
-# 动画与动效
+# Motion
 
 `gpui-base` 负责确定性的动效采样与生命周期，并把视觉选择留给应用。它提供稳定 keyed state、中断与反向、animation frame 请求和 reduced-motion 处理，不强加产品级时长或样式。
 
@@ -85,7 +85,7 @@ offset 必须从 `0` 开始、以 `1` 结束并保持单调。不可插值属性
 
 `Sequence` 把多个 transition 串成链，每一步在前一步结束时开始。它在首次采样的那一帧从 `from` 出发，每个 ID 只播放一次；采样结果包含当前值、正在播放的 step 序号，以及一个只在最后一步完成后才为 `Finished` 的 `MotionStatus`。
 
-```rust,ignore
+```rust
 let opacity = Sequence::new(("toast", "opacity"), 0.0)
     .with_step(1.0, Transition::new(Duration::from_millis(160)))
     .with_step(0.0, Transition::new(Duration::from_millis(200)).delay(Duration::from_secs(3)))
@@ -98,7 +98,7 @@ div().opacity(*opacity.value())
 
 `Stagger` 可以作为第一步的 delay 与 sequence 组合：
 
-```rust,ignore
+```rust
 Sequence::new(("row", index), px(12.))
     .with_step(px(0.), Transition::new(Duration::from_millis(120)).delay(stagger.delay(index, count)))
     .sample(window, cx)

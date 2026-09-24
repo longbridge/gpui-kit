@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { bodyWithoutFrontmatter, expandSnippets } from './llms';
+import { bodyWithoutFrontmatter, documentationLicenseNotice, expandSnippets } from './llms';
 import { isLatestVersion } from './versions';
 
 /**
@@ -23,7 +23,9 @@ export function markdownResponse(options: {
   if (options.description) front.push(`description: ${options.description}`);
 
   const body = expandSnippets(bodyWithoutFrontmatter(source), dirname(absolute));
-  const text = `---\n${front.join('\n')}\n---\n\n${body}\n`;
+  const lang = options.route.startsWith('/zh-CN/') ? 'zh-CN' : 'en';
+  const notice = documentationLicenseNotice(lang, `https://gpui-kit.com${options.route}`);
+  const text = `---\n${front.join('\n')}\n---\n\n> ${notice}\n\n${body}\n`;
 
   return new Response(text, {
     headers: {

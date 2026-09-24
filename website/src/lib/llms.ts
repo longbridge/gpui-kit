@@ -22,6 +22,20 @@ interface RecipeInventoryEntry {
 
 const TESTED_RECIPE_LABEL = 'Tested consumer recipe';
 
+/** Keep the machine-readable documentation exports in step with the HTML footer. */
+export function documentationLicenseNotice(lang: 'en' | 'zh-CN', source: string): string {
+  if (lang === 'zh-CN') {
+    return `文档许可：GPUI Kit 有权授权的原创正文与图示另以 CC BY 4.0 提供。复制或改编时请署名 GPUI Kit，链接原文（${source}）及 https://creativecommons.org/licenses/by/4.0/，并注明修改。代码示例与软件源码采用 Apache-2.0；第三方内容保留原许可；既有 Apache-2.0 使用权不受影响。`;
+  }
+  return `Documentation license: original prose and illustrations for which GPUI Kit holds licensing rights are also offered under CC BY 4.0. When copying or adapting, credit GPUI Kit, link the source (${source}) and https://creativecommons.org/licenses/by/4.0/, and indicate changes. Code examples and software source use Apache-2.0; third-party material retains its terms; existing Apache-2.0 permissions remain.`;
+}
+
+function documentationLicenseSummary(lang: 'en' | 'zh-CN', source: string): string {
+  return lang === 'zh-CN'
+    ? `许可：GPUI Kit 有权授权的正文与原创图示另适用 CC BY 4.0；引用请署名 GPUI Kit、链接 ${source} 与 https://creativecommons.org/licenses/by/4.0/ 并注明修改。代码示例适用 Apache-2.0。`
+    : `License: GPUI Kit-authorized prose and original illustrations are also CC BY 4.0; credit GPUI Kit, link ${source} and https://creativecommons.org/licenses/by/4.0/, and indicate changes. Code examples use Apache-2.0.`;
+}
+
 function recipeDestinations(websiteRoot: string): Map<string, string[]> {
   const destinations = new Map<string, string[]>();
   try {
@@ -197,7 +211,7 @@ export function buildLlmsIndex(websiteRoot: string): string {
       }`,
     );
 
-  return `# ${SITE_TITLE}\n\n> ${SITE_DESCRIPTION}\n\n## Table of Contents\n\n${lines.join('\n')}\n`;
+  return `# ${SITE_TITLE}\n\n> ${SITE_DESCRIPTION}\n\n${documentationLicenseNotice('en', 'https://gpui-kit.com')}\n\n## Table of Contents\n\n${lines.join('\n')}\n`;
 }
 
 export function buildLlmsContent(websiteRoot: string): string {
@@ -213,7 +227,7 @@ export function buildLlmsContent(websiteRoot: string): string {
     { dir: join(websiteRoot, 'zh-CN/base'), prefix: 'zh-CN/base' },
   ];
 
-  const header = `# ${SITE_TITLE}\n\n> ${SITE_DESCRIPTION}\n\n---\n`;
+  const header = `# ${SITE_TITLE}\n\n> ${SITE_DESCRIPTION}\n\n${documentationLicenseNotice('en', 'https://gpui-kit.com')}\n\n---\n`;
 
   const pages: string[] = [];
   for (const { dir, prefix } of sections) {
@@ -223,7 +237,9 @@ export function buildLlmsContent(websiteRoot: string): string {
       const provenance = entry.recipes.length
         ? `\n\n${TESTED_RECIPE_LABEL}: ${entry.recipes.join(', ')}`
         : '';
-      pages.push(`# ${entry.title}\n\nSource: ${entry.url}${provenance}\n\n${body}`);
+      const lang = entry.url.startsWith(`${BASE_URL}/zh-CN/`) ? 'zh-CN' : 'en';
+      const source = `https://gpui-kit.com${entry.url}`;
+      pages.push(`# ${entry.title}\n\nSource: ${entry.url}${provenance}\n\n${documentationLicenseSummary(lang, source)}\n\n${body}`);
     }
   }
 

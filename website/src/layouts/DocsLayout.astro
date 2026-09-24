@@ -3,11 +3,13 @@ import BaseLayout from './BaseLayout.astro';
 import Nav from '../components/Nav.astro';
 import Sidebar from '../components/Sidebar.astro';
 import SiteFooter from '../components/SiteFooter.astro';
+import DocsLicense from '../components/DocsLicense.astro';
 import Toc from '../components/Toc.astro';
 import type { Heading } from '../components/Toc.astro';
 import type { SidebarItem } from '../lib/sidebar';
 import { fetchStarCount } from '../lib/github';
 import { SITE_URL } from '../lib/site';
+import { currentVersionPath } from '../lib/versions';
 
 export interface Props {
   title?: string;
@@ -24,6 +26,8 @@ const pathname = Astro.url.pathname;
 const base = import.meta.env.BASE_URL;
 
 const canonical = `${SITE_URL}${pathname}`;
+const contentPath = currentVersionPath(pathname, base);
+const isDocumentationPage = /^\/(?:zh-CN\/)?(?:docs|base|component|shell)(?:\/|$)/.test(contentPath);
 
 let starCount = 0;
 try {
@@ -69,6 +73,7 @@ const structuredData = [
       <article class="doc-content" data-pagefind-body>
         <slot />
       </article>
+      {isDocumentationPage && <DocsLicense lang={lang} sourceUrl={canonical} />}
     </main>
 
     {hasSidebar && <Toc headings={headings} lang={lang} />}

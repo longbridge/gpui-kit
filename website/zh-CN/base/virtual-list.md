@@ -1,12 +1,12 @@
 ---
-title: 虚拟列表
+title: VirtualList
 description: 只绘制屏幕内项目，流畅呈现十万条不同尺寸的行。
 order: 5
 example: virtual-list
 exampleKind: base
 ---
 
-# 虚拟列表
+# VirtualList
 
 Virtual List 只绘制当前屏幕内的项目，因此可处理任意长度的列表。不同于 `gpui_kit::uniform_list`，每一项可以有不同尺寸，适合可变行高表格、聊天记录和大纲树。它属于基础设施而不是带外观的组件：你预先提供尺寸，再提供渲染范围的闭包。
 

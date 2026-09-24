@@ -6,6 +6,8 @@ description: 系统字体、主题字体、元素级覆盖与自定义字体打�
 
 # Fonts
 
+本文说明应用应提供哪些字体。GPUI 如何解析、塑形、测量并绘制字形，见 [TextSystem](./text-system)。
+
 ## 默认字体
 
 每个应用都从主题自带的一套 UI 字体和等宽字体开始：
@@ -72,6 +74,8 @@ div()
 用户系统中没有的字体必须打包，并在**首帧之前**注册到文本系统：
 
 ```rust
+use std::borrow::Cow;
+
 cx.text_system()
     .add_fonts(vec![Cow::Borrowed(
         include_bytes!("../fonts/MyFont-Regular.ttf").as_slice(),
@@ -85,8 +89,7 @@ cx.text_system()
 Theme::update(cx, |theme| theme.font_family = "MyFont".into());
 ```
 
-Web 版画廊就是这样打包 `Inter`、`JetBrains Mono`、`Noto Sans SC` 和
-`IBM Plex Sans` 的，参见 `crates/story-web/src/lib.rs`。
+[GPUI Kit Web 画廊](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)就这样打包 `Inter`、`JetBrains Mono`、`Noto Sans SC` 子集和 `IBM Plex Sans`。`include_bytes!` 会把这些字体字节放入 WebAssembly 下载包。画廊所用的 CJK 子集约 25 KB，源字体约 1.2 MB：已知界面文案可以制作子集来控制初始体积，但用户任意输入的文字需要另行安排字体来源。分发字体文件时还要遵守相应许可。
 
 ## 主题 JSON 配置
 
@@ -113,20 +116,43 @@ ThemeRegistry::watch_dir(PathBuf::from("./themes"), cx, move |cx| {
 
 完整配置说明参见 [Theme](../component/theme.md)。
 
-## WebAssembly 说明
+## WebAssembly：选择字体来源
 
-浏览器不会向 WASM 应用暴露系统字体。在 `gpui-kit.com/gallery/` 运行的
-`story-web` 画廊必须打包它用到的每一种字体，并在 `Theme::change` 之后重新
-声明，否则文本系统会 panic。桌面应用完全不需要这一步。
+GPUI 的 Web 文本系统**不会把浏览器已安装字体枚举、加载为主要字体集合**。必须在创建窗口或测量第一段文字前，注册所有需要稳定塑形的字体族，包括初始文本样式使用的字体。在这个 Web 平台上，`.SystemUIFont` 映射到 `IBM Plex Sans`；如果主题生效前可能使用这个别名，也要注册该字体。先注册字体，**之后**再应用或切换主题，并让主题的 `font_family` 与 `mono_font_family` 指向已加载的字体。主题文件若指定 Web 中不可用的桌面字体，字体解析可能失败。[画廊初始化代码](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)依次初始化 GPUI Kit、注册字体字节、应用主题，最后打开窗口；之后切换主题也会重新指定已加载的字体族。
 
-打包字体画不出来的文字仍然可以交给浏览器绘制。Web 平台会用 Canvas 2D
-和访问者本机的字体渲染 emoji，应用不必再打包 emoji 字体。回退策略在构造
-平台时选定，之后不能更改：
+常用的来源有三种：
+
+| 选择 | 初始下载 | 覆盖与取舍 |
+| --- | --- | --- |
+| 通过 `include_bytes!` 打包完整字体 | WebAssembly 包体较大 | 可离线使用，对字体覆盖范围内的用户输入也有稳定效果。 |
+| 只打包已知界面文字的子集 | 包体较小 | 其他 CJK 字符和新增输入需要其他来源。 |
+| 需要时再请求字体文件 | 初始包体较小，稍后增加网络请求 | 运行时注册，并刷新窗口以重新塑形文字；需要处理加载和失败状态。 |
+
+下载后的字体字节仍交给**同一个** `TextSystem::add_fonts(&self, Vec<Cow<'static, [u8]>>) -> Result<()>` API，但使用 owned 数据。HTTP 下载可以通过应用的 `cx.http_client()` 或其他客户端完成；注册步骤如下：
+
+```rust
+use std::borrow::Cow;
+use gpui_kit::*;
+
+fn install_downloaded_font(cx: &mut App, bytes: Vec<u8>) -> Result<()> {
+    cx.text_system().add_fonts(vec![Cow::Owned(bytes)])?;
+    cx.refresh_windows();
+    Ok(())
+}
+```
+
+`add_fonts` 会使字体解析和行布局缓存失效，但已经显示的窗口仍需 `refresh_windows()` 才能显示重新塑形后的文字。注册前应确认 HTTP 响应成功且内容非空。应提供文本系统支持的实际字体文件，例如原始 TTF；字体服务的 CSS 地址可能返回样式表或 WOFF2 子集，而不是此文本系统接受的字节。外部请求仍受浏览器跨源规则约束。只下载当前内容需要的字体，并对并发请求去重。
+
+`App::on_missing_glyphs(callback) -> Subscription` 可以在塑形后报告仍无法解析的字素簇。保存 subscription，检查 `MissingGlyph::grapheme()` 与 `font_class()`，即可按文字系统请求一次相应字体。新注册会替换之前的 callback；报告有去重和队列上限，因此它适合作为加载提示，不保证是完整缺字清单。如果 Canvas fallback 已能绘制某个 CJK 字素，它**不会**触发缺字报告。需要准确 CJK 排版时，应根据用户选择的语言或已知内容覆盖范围主动加载，不能只依赖缺字事件。
+
+## 浏览器 Canvas 回退
+
+已加载字体无法绘制的文字，有时仍可由浏览器提供。Web 平台可以借助访问者本机字体，通过 Canvas 2D 绘制符合条件的 emoji，因此不必为它们打包字体。构造平台时选择回退策略，之后不能更改：
 
 | `CanvasFontFallback` | 由浏览器绘制的内容 |
 | --- | --- |
 | `Emoji`（默认） | emoji，包括肤色、旗帜、键帽和 ZWJ 序列 |
-| `EmojiAndCjk` | emoji，外加横排的汉字、假名和现代谚文 |
+| `EmojiAndCjk` | emoji，以及符合条件的横排汉字、假名、现代谚文和相关标点 |
 | `Disabled` | 不回退，只使用打包字体 |
 
 `gpui_kit::application()` 和 `gpui_kit::platform::single_threaded_web()`
@@ -144,7 +170,4 @@ let http_client = Arc::new(platform.fetch_http_client());
 let app = Application::with_platform(platform).with_http_client(http_client);
 ```
 
-只要打包字体里有对应字形，就仍然优先使用打包字体。回退是逐个字素独立绘制的，
-所以这样渲染的 CJK 文字以可读为先，不保证精确的间距和字体特性，外观也取决于
-访问者机器上安装的字体。画廊选择了 `EmojiAndCjk`：它打包的字体只包含
-故事本身用到的字形，访问者在输入框里键入的其他文字否则都会显示成方块。
+已加载字体只要有对应字形和所需呈现形式，就仍然优先使用已加载字体。Canvas 回退只处理符合条件的**单个完整字素簇**；它不是通用系统字体 API，也不保证浏览器一定有相应字形。CJK 回退逐个独立绘制符合条件的横排字素，因此优先保证可读性，不保证精确的字距、塑形或字体特性；外观取决于访问者机器上的字体。需要准确度量、换行或视觉一致性时，应加载真正的 CJK 字体。画廊选择 `EmojiAndCjk`，因为打包的 CJK 子集覆盖已知文案，而访问者还可能在输入框中键入其他字符。

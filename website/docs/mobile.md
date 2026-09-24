@@ -6,9 +6,9 @@ order: -10
 
 # Mobile
 
-Mobile support builds on [gpui-mobile](https://github.com/itsbalamurali/gpui-mobile), created by [itsbalamurali](https://github.com/itsbalamurali) and developed with the community. Credit for the original mobile platform belongs to that project and its contributors. The platform supplies the window, touch input, text system, and GPU surface; GPUI and GPUI Kit still own the Rust view tree and components.
+Mobile support builds on [gpui-mobile](https://github.com/itsbalamurali/gpui-mobile), created by [itsbalamurali](https://github.com/itsbalamurali) and developed with the community. Credit for the original mobile platform belongs to that project and its contributors. The platform supplies the [Window](./window), touch input, text system, and GPU surface; GPUI and GPUI Kit still own the Rust view tree and components.
 
-GPUI Kit currently uses `gpui-pre-mobile`, a temporary compatibility package maintained in the [Longbridge fork](https://github.com/longbridge/gpui-mobile). It adapts the original project for crate packaging and publication alongside `gpui-pre`, and tracks newer GPUI versions to keep the integration compatible. Once the community `gpui-mobile` completes the integration and GPUI is published as a crate, we plan to switch this guide and its dependencies to the community `gpui-mobile`.
+GPUI Kit currently uses `gpui-pre-mobile`, a temporary compatibility package maintained in a [compatibility fork](https://github.com/longbridge/gpui-mobile). It adapts the original project for crate packaging and publication alongside `gpui-pre`, and tracks newer GPUI versions to keep the integration compatible. Once the community `gpui-mobile` completes the integration and GPUI is published as a crate, we plan to switch this guide and its dependencies to the community `gpui-mobile`.
 
 The current integration is experimental. The Swift-hosted iOS example has been built and exercised in the iOS simulator. Android has a platform implementation, but the GPUI Kit integration described here has not been validated on Android or a physical iPhone.
 

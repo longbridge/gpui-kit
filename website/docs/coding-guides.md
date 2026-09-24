@@ -16,6 +16,10 @@ constraints; **should** is the default architecture and requires a concrete
 reason to depart from it. Current source and API docs remain authoritative for
 exact signatures.
 
+### Make the common path inexpensive
+
+**Design principle: choose framework types and ownership so ordinary component use is inexpensive by default.** Developers should be able to build and reuse UI without adding a cache at every call site. [SharedString](./shared-string) for retained UI text and [RenderOnce](./render-once) for lightweight component values are examples: the API places ownership where it belongs and avoids repeated work in the common path. Small costs still multiply across elements and renders; measure exceptional hot paths before adding caches. Neither type promises zero cost. The [text ownership rule](#own-persistent-ui-text-with-sharedstring) and later rendering sections explain the mechanics.
+
 ## Architecture at a glance
 
 <img class="architecture-light" src="/application-layers-light.svg?v=20260822-16" alt="GPUI application architecture layers">
@@ -37,11 +41,13 @@ Use these boundaries:
 
 ### Organize large applications by capability
 
-In a large Rust application, a feature should usually be a crate, not another
-file in a global `views`, `models`, or `modals` directory. Keep the model,
-views, commands, dialogs, and workflow for one capability together. A dialog
-that edits a workspace belongs to the workspace feature; only the reusable
-dialog primitive belongs to the UI library.
+In a large Rust application, a complex capability often merits its own crate
+once its state, lifecycle, and public boundary are worth maintaining
+independently. Keep its model [Entity](./entity), services, [Render](./render)
+Views, commands, dialogs, and workflow together. A dialog that edits a
+workspace belongs to the workspace feature; only the reusable dialog
+primitive belongs to the UI library. A small capability can remain a module
+until a crate boundary has a concrete benefit.
 
 ```text
 crates/
@@ -78,23 +84,65 @@ directories. Those folders classify files by implementation role while
 scattering every feature across the application.
 
 The application shell composes feature crates but contains little feature
-logic. A feature may depend on stable shared capabilities and UI foundations;
-it must not depend on the shell or reach into a sibling feature's internals.
-When two features need to communicate, prefer an explicit command, event, data
-type, or small shared service over a dependency between their views. Extract a
-shared crate only after the capability has a coherent name and more than one
-real owner.
+logic. Each feature owns its model Entities and the Views that render them. Keep a
+feature's [`Global`](./global) private if it is needed for a genuinely application-wide
+service or registry; a model used by one feature is not automatically a
+Global. Within a feature, pass cloned `Entity<T>` handles to cooperating
+owners instead of repeatedly copying a large `Vec` or collection. Across a
+feature boundary, expose only a deliberately public Entity type or a small
+handle, domain ID, command, event, or interface. Keep model fields and
+implementation modules private.
 
-Crate boundaries are engineering boundaries. They let Cargo rebuild and test a
-smaller dependency subgraph, make ownership visible in `Cargo.toml`, and limit
-the review and regression surface of a change. They also make removal honest:
-a feature that cannot be detached without searching through global view and
-modal directories was never isolated.
+For example, the workspace crate can export a cloneable handle while retaining
+the mutable model behind its public API:
 
-Do not create a crate for every screen or helper. Split where a capability has
-its own state and lifecycle, a stable public seam, or enough implementation to
-benefit from independent compilation and tests. Keep dependencies acyclic and
-pointing toward smaller, more stable crates.
+```rust
+// Condensed workspace/src/lib.rs; move the private model to model.rs as it grows.
+use gpui_kit::{App, Entity, SharedString};
+
+struct WorkspaceModel {
+    name: SharedString,
+}
+
+#[derive(Clone)]
+pub struct WorkspaceHandle {
+    model: Entity<WorkspaceModel>,
+}
+
+impl WorkspaceHandle {
+    pub fn rename(&self, name: SharedString, cx: &mut App) {
+        self.model.update(cx, |model, cx| {
+            model.name = name;
+            cx.notify();
+        });
+    }
+}
+```
+
+An application may hold this handle and pass a workspace ID to search; search
+does not need the workspace's entire collection or its private View. A simple
+acyclic dependency shape is:
+
+```text
+app ──▶ workspace ──▶ shared contracts
+ └────▶ search ─────▶ shared contracts
+workspace, search ──▶ gpui-kit
+```
+
+Features may depend on stable shared capabilities and UI foundations, but not
+on the shell or a sibling's private modules. If one feature must call another,
+make that dependency explicit and one-way, or move a genuinely shared contract
+below both. Extract a shared crate only after it has a coherent purpose and
+real owners; avoid cycles and a catch-all `shared` crate.
+
+These boundaries let different engineers or AI agents work on separate
+capabilities in parallel with fewer file conflicts and less shared-state
+coupling. Shared contracts still require coordination. Cargo may also reuse
+cached dependencies and rebuild a smaller subgraph after a local change, but
+incremental build speed depends on the dependency graph, public API changes,
+features, and build configuration; adding crates has overhead and does not
+guarantee a faster edit-build cycle. Split where ownership and collaboration
+justify the boundary, not for every screen or helper.
 
 ## Bootstrap and root ownership
 
@@ -120,9 +168,10 @@ correct at rest but fails when overlays nest or focus changes quickly.
 
 ## Understand GPUI's phases and contexts
 
-GPUI is retained state with declarative rendering. An entity survives across
-frames; the element tree returned by `render` is a fresh description of the
-current frame. Keep that distinction explicit.
+GPUI is retained state with declarative rendering. An [Entity](./entity) survives across
+frames; the [Element](./element) tree returned by `render` is a fresh description of the
+current frame. Keep that distinction explicit. See [Context](./context) for the
+scopes of `Context<T>`, `App`, and `Window`.
 
 - `Context<Self>` mutates the current entity, creates listeners tied to it,
   emits its events, and notifies its observers.
@@ -141,10 +190,15 @@ which it is provided. Retain typed handles—`Entity`, `WeakEntity`,
 
 ### Use `RenderOnce` for value-like elements
 
-Use a `RenderOnce`/`IntoElement` component when all inputs can be supplied by
-the caller and the element does not need to retain application state between
-frames. This is the normal choice for presentational wrappers and small
-controls.
+**Default to [`RenderOnce`](./render-once) for lightweight, reusable component values.**
+The caller supplies current props and handlers, GPUI consumes the value to
+produce elements, and the value can then be discarded. GPUI Kit's `Button`
+and `Checkbox` follow this pattern: their displayed label, checked or selected
+value, and callbacks come from the caller's current state. A `RenderOnce`
+component may still use small keyed interaction state, such as a focus handle;
+it does not own an independent View lifecycle. Do not infer that its render
+method runs on every displayed frame: a displayed frame need not rebuild that
+component's element tree.
 
 ```rust
 #[derive(IntoElement)]
@@ -166,10 +220,10 @@ impl RenderOnce for EmptyState {
 
 ### Use `Entity<T>` for retained behavior
 
-Use an entity-backed `Render` view when behavior spans frames or needs
-observation, subscriptions, focus, async work, history, measurement, or
-incremental updates. Store entities in an owning view rather than recreating
-them in `render`.
+Use an entity-backed [`Render`](./render) view when a component owns persistent,
+complex state or an independent lifecycle: subscriptions, async work, history,
+child entities, or incremental updates. Store entities in an owning view rather
+than recreating them in `render`.
 
 ```rust
 struct SearchView {
@@ -204,6 +258,14 @@ not from how many `div`s appear in its renderer.
 
 ## State ownership
 
+### Own persistent UI text with `SharedString`
+
+**Must prefer [`SharedString`](./shared-string) for UI text retained across frames or callback closures**, including component labels, titles, and placeholders. Store a stable value in the owning View or Entity and clone that handle when building elements; do not repeatedly clone a `String` on every render. For a mutable editing buffer or text being assembled with formatting, use `String` and convert when the result is ready. For temporary read-only access during one call, use `&str`.
+
+For immutable API or JSON response text that the UI will retain, make the response field a `SharedString` at the deserialization boundary. Keep the received transport value intact; put derived or formatted presentation text in a separate domain or View model instead of rewriting the response or repeatedly cloning a `String` into UI. This rule does not require `SharedString` for a truly mutable buffer or a narrow, non-UI parsing step. See the [API response example](./shared-string#from-an-api-response-to-a-view).
+
+This is an ownership and performance rule, not a claim that text is always allocation-free. Short values can live inline; longer dynamic values use shared storage, so cloning them does not copy the text bytes. Constructing a value can still allocate, and cloning a heap-backed value updates a reference count. See [SharedString](./shared-string) for the storage details and tradeoffs.
+
 Put each state in the narrowest owner that can keep it correct:
 
 - domain state belongs to a model or feature view;
@@ -230,7 +292,32 @@ Checkbox::new("show-hidden")
 Call `cx.notify()` after a mutation that changes rendering. Use `cx.emit(...)`
 for a semantic event that an owner should handle, and `cx.subscribe(...)` or
 `cx.observe(...)` when the lifetime should follow an entity. Keep returned
-subscriptions alive when the API requires it.
+subscriptions in an explicit lifetime owner.
+
+### Keep ownership links and subscriptions bounded
+
+When a parent strongly owns a child `Entity<T>`, a child reference back to
+that parent must be a `WeakEntity<T>`; a strong back-reference would close an
+ownership cycle. `WeakEntity::upgrade()` returns `Option`, and its `update`
+returns `Result`, so treat a missing parent as a normal lifecycle outcome.
+See [Entity](./entity) for the ownership and weak-access patterns.
+
+Store returned `Subscription` handles on the View or Entity that needs the
+callbacks, commonly in `_subscriptions: Vec<Subscription>`. Dropping that
+owner then drops the handles and unsubscribes. A local handle dropped at the
+end of setup stops the subscription early; `Subscription::detach()` instead
+discards the unsubscribe handle and lets the callback continue until its
+subscribed Entity goes away. Do not detach a recurring View subscription by
+default; repeated detaches against a long-lived emitter can accumulate
+callbacks. GPUI's `observe` and `subscribe` use weak subscriber handles
+internally, but a callback that additionally captures a strong handle to its
+own View can still close a cycle.
+
+When a View remains alive unexpectedly, first inspect strong Entity cycles,
+callbacks that capture strong View handles, and detached subscriptions or
+[Task](./task)s that outlive their intended owner. A dropped Task handle cancels
+unfinished work; it does not itself keep the View alive. These are common places
+to start, not an exhaustive list of leak causes.
 
 Do not notify merely because a value was read or derived. Avoid unconditional
 notification from `render`; it schedules another render and can create a
@@ -249,7 +336,7 @@ close, replace, or update the component that invoked it.
 
 ## Stable identity
 
-An `ElementId` is part of behavior. It gives an element stable identity and keys
+An [`ElementId`](./element_id) is part of behavior. It gives an element stable identity and keys
 element-local or component state. A component may also use it as one input to
 its own focus, measurement, or animation identity; focus and scrolling are
 otherwise owned by their dedicated handles.
@@ -446,7 +533,7 @@ window rem size.
 
 ## Events, actions, and focus
 
-Use pointer callbacks for pointer-specific behavior. Use GPUI Actions for
+Use pointer callbacks for pointer-specific behavior. Use GPUI [Actions](./action) for
 commands that should support key bindings, menus, or dispatch from multiple
 inputs. Keep action handlers close to the view that owns the command.
 
@@ -508,11 +595,16 @@ surface.
 
 ## Async work and side effects
 
-Start async work from an event, lifecycle hook, or named method—not as an
+Start asynchronous work through a [Task](./task) from an event, lifecycle hook, or named method—not as an
 unconditional side effect of `render`. Capture weak entities when work should
 not keep a closed view alive. When the task completes, update state through the
 GPUI context, handle the case where the entity or window no longer exists, and
 notify once after the coherent state change.
+
+Keep a recurring task's handle on its owner so dropping the owner cancels it;
+do not detach recurring work by default. A one-shot task may call
+`Task::detach()` when it must finish independently, but that gives up its
+cancellation handle. Handle errors and failed weak-Entity updates explicitly.
 
 Represent async operations with explicit states such as idle, loading, loaded,
 and failed. Preserve usable previous data during refresh when possible. Prevent
@@ -527,7 +619,7 @@ or identity and reject stale work rather than applying it to new state.
 ## Layout, measurement, and scrolling
 
 `h_flex` centres its children on the cross axis; `v_flex` leaves flexbox's
-default, `stretch`. This matches Zed's `h_flex`, and it is what a row of
+default, `stretch`. This is what a row of
 controls wants, so a row of icon and label says nothing. It is not what a row
 of full-height columns wants: a column placed in a bare `h_flex` does not fill
 the row's height, so a column taller than the row is centred and its top —

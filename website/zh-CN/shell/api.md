@@ -1,5 +1,5 @@
 ---
-title: API 参考
+title: API Reference
 description: 脚本能 import 或触及的每个名字——四个内置模块、cx 与 window 全局对象，以及那些不是样式的元素方法。
 order: 10
 ---

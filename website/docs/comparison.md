@@ -1,54 +1,30 @@
 ---
 title: Comparison
-description: How GPUI Kit compares with Iced, egui and Qt 6.
+description: Compare GPUI Kit with Iced, egui, Qt 6, and Slint by platform and capability.
 order: -14
 ---
 
 # Comparison
 
-How GPUI Kit compares with other desktop UI frameworks. The table is
-maintained by hand; please open an issue or a pull request if you spot a
-mistake or something outdated.
+This is a capability guide, not a benchmark. It compares GPUI Kit with current public APIs in Iced, egui, Qt 6, and Slint. A library, optional feature, platform backend, or third-party crate can change what an application can do. Check the linked documentation for the version and target you plan to ship.
 
-| Features              | GPUI Kit                       | [Iced]             | [egui]                | [Qt 6]                                            |
-| --------------------- | ------------------------------ | ------------------ | --------------------- | ------------------------------------------------- |
-| Language              | Rust                           | Rust               | Rust                  | C++/QML                                           |
-| Core Render           | GPUI                           | wgpu               | wgpu                  | QT                                                |
-| License               | Apache 2.0                     | MIT                | MIT/Apache 2.0        | [Commercial/LGPL](https://www.qt.io/qt-licensing) |
-| Min Binary Size [^1]  | 12MB                           | 11MB               | 5M                    | 20MB [^2]                                         |
-| Cross-Platform        | Yes                            | Yes                | Yes                   | Yes                                               |
-| Documentation         | Simple                         | Simple             | Simple                | Good                                              |
-| Web                   | Yes (WASM)                     | Yes                | Yes                   | Yes                                               |
-| UI Style              | Modern                         | Basic              | Basic                 | Basic                                             |
-| CJK Support           | Yes                            | Yes                | Bad                   | Yes                                               |
-| Chart                 | Yes                            | No                 | No                    | Yes                                               |
-| Table (Large dataset) | Yes<br>(Virtual Rows, Columns) | No                 | Yes<br>(Virtual Rows) | Yes<br>(Virtual Rows, Columns)                    |
-| Table Column Resize   | Yes                            | No                 | Yes                   | Yes                                               |
-| Text base             | Rope                           | [COSMIC Text] [^3] | trait TextBuffer [^4] | [QTextDocument]                                   |
-| CodeEditor            | Simple                         | Simple             | Simple                | Basic API                                         |
-| Dock Layout           | Yes                            | Yes                | Yes                   | Yes                                               |
-| Syntax Highlight      | [Tree Sitter]                  | [Syntect]          | [Syntect]             | [QSyntaxHighlighter]                              |
-| Markdown Rendering    | Yes                            | Yes                | Basic                 | No                                                |
-| Markdown mix HTML     | Yes                            | No                 | No                    | No                                                |
-| HTML Rendering        | Basic                          | No                 | No                    | Basic                                             |
-| Text Selection        | TextView                       | No                 | Any Label             | Yes                                               |
-| Custom Theme          | Yes                            | Yes                | Yes                   | Yes                                               |
-| Built Themes          | Yes                            | No                 | No                    | No                                                |
-| I18n                  | Yes                            | Yes                | Yes                   | Yes                                               |
+| Area | GPUI Kit | Iced | egui | Qt 6 | Slint |
+| --- | --- | --- | --- | --- | --- |
+| UI model | Rust, retained [Entities](/docs/entity) and elements | Rust, state/update/view [architecture](https://book.iced.rs/architecture.html) | Rust, [immediate mode](https://docs.rs/egui/latest/egui/#the-immediate-mode-paradigm) | C++ and QML; [Widgets and Qt Quick](https://doc.qt.io/qt-6/topics-ui.html) | Declarative `.slint` UI with [Rust, C++, JavaScript, or Python integration](https://docs.slint.dev/latest/docs/slint/) |
+| Desktop | macOS, Windows, Linux | [Desktop](https://github.com/iced-rs/iced) | [Native through eframe](https://github.com/emilk/egui/blob/main/README.md#official-integrations) | [Desktop platforms](https://doc.qt.io/qt-6/supported-platforms.html) | [Desktop and embedded](https://docs.slint.dev/latest/docs/slint/) |
+| WebAssembly | [Browser applications](/docs/webassembly) | [Web example](https://github.com/iced-rs/iced/blob/master/examples/README.md#tour) | [eframe web target](https://github.com/emilk/egui/blob/main/README.md#official-integrations) | [Qt for WebAssembly](https://doc.qt.io/qt-6/wasm.html), with module and browser limits | [Rust to Wasm](https://docs.slint.dev/latest/docs/slint/guide/platforms/web/); canvas rendering, with no browser screen-reader support |
+| Native mobile | [Experimental iOS integration](/docs/mobile) | No official mobile platform guide; [mobile support issue](https://github.com/iced-rs/iced/issues/302) remains open | [eframe supports Android and iOS](https://github.com/emilk/egui/issues/2066); test platform integrations | [Android and iOS](https://doc.qt.io/qt-6/supported-platforms.html) | [Android and iOS](https://docs.slint.dev/latest/docs/slint/guide/platforms/mobile/general/); iOS uses Rust |
+| Charts and plots | Built-in [chart and plot components](/component/chart) | [Canvas](https://docs.rs/iced/latest/iced/widget/struct.Canvas.html) for custom drawing | Separate [egui_plot](https://docs.rs/egui_plot/latest/egui_plot/) crate | [Qt Graphs](https://doc.qt.io/qt-6/qtgraphs-index.html) for 2D and 3D | [Path](https://docs.slint.dev/latest/docs/slint/reference/elements/path/) for custom drawing; no chart in [standard widgets](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/overview/) |
+| Tables and large data | [DataTable](/component/data-table) and [VirtualList](/component/virtual-list) | [Table widget](https://docs.rs/iced/latest/iced/widget/table/fn.table.html) | [egui_extras TableBuilder](https://docs.rs/egui_extras/latest/egui_extras/struct.TableBuilder.html) with visible-row rendering | [Model/view tables](https://doc.qt.io/qt-6/modelview.html); Qt Quick [TableView reuses cells](https://doc.qt.io/qt-6/qml-qtquick-tableview.html) | [StandardTableView](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/views/standardtableview/) |
+| Animation and motion | [Transitions, springs, and reduced motion](/docs/animation) | [Animation API](https://docs.rs/iced/latest/iced/animation/struct.Animation.html) | [Context animation helpers](https://docs.rs/egui/latest/egui/struct.Context.html#method.animate_bool) | [Qt Quick animations](https://doc.qt.io/qt-6/qtquick-statesanimations-animations.html) and [QObject animation framework](https://doc.qt.io/qt-6/animation-overview.html) | [Declarative property animations](https://docs.slint.dev/latest/docs/slint/reference/language/animations/) |
+| Markdown and rich text | [TextView Markdown and HTML](/component/text-view) | Built-in [Markdown widget](https://docs.rs/iced/latest/iced/widget/markdown/) behind a feature | Community [egui_commonmark](https://docs.rs/egui_commonmark/latest/egui_commonmark/) or similar crates | [QTextDocument Markdown and HTML](https://doc.qt.io/qt-6/qtextdocument.html#setMarkdown) | Compose [Text and custom elements](https://docs.slint.dev/latest/docs/slint/reference/elements/text/); no standard Markdown widget |
+| Accessibility | Semantic roles and labels in [GPUI Kit components](/docs/design-guides#accessibility-checklist); verify each target | [Native accessibility integration is tracked as open work](https://github.com/iced-rs/iced/issues/552) | [AccessKit on supported native platforms](https://github.com/emilk/egui/blob/main/docs/accessibility.md); experimental web screen reader | [Platform accessibility APIs and accessible controls](https://doc.qt.io/qt-6/accessible.html); [basic Wasm support](https://doc.qt.io/qt-6/wasm.html#accessibility-and-screen-readers) | [Accessible properties](https://docs.slint.dev/latest/docs/slint/reference/common/#accessibility-properties); [unavailable in Wasm canvas output](https://docs.slint.dev/latest/docs/slint/guide/platforms/web/) |
+| Licensing | Apache-2.0 | [MIT](https://github.com/iced-rs/iced/blob/master/LICENSE) | [MIT or Apache-2.0](https://github.com/emilk/egui/blob/main/LICENSE-MIT) | [Commercial, LGPLv3, or GPLv3 by module](https://doc.qt.io/qt-6/licensing.html); Qt Graphs is commercial/GPLv3 | [GPLv3 or Slint commercial/royalty-free terms](https://slint.dev/pricing) |
 
-[Iced]: https://github.com/iced-rs/iced
-[egui]: https://github.com/emilk/egui
-[QT 6]: https://www.qt.io/product/qt6
-[Tree Sitter]: https://tree-sitter.github.io/tree-sitter/
-[Syntect]: https://github.com/trishume/syntect
-[QSyntaxHighlighter]: https://doc.qt.io/qt-6/qsyntaxhighlighter.html
-[QTextDocument]: https://doc.qt.io/qt-6/qtextdocument.html
-[COSMIC Text]: https://github.com/pop-os/cosmic-text
+### Reading the table
 
-[^1]: Release builds by use simple hello world example.
+- **Web means a canvas-based Wasm application, not an HTML application.** Browser input, accessibility, bundle size, and module availability differ. In particular, [Slint explicitly does not recommend its Wasm backend for general-purpose web applications](https://docs.slint.dev/latest/docs/slint/guide/platforms/web/), and [Qt documents WebAssembly module and feature limits](https://doc.qt.io/qt-6/wasm.html).
+- **Mobile support has different maturity.** GPUI Kit's iOS path is experimental; [Slint documents both mobile targets](https://docs.slint.dev/latest/docs/slint/guide/platforms/mobile/general/), [Qt lists Android and iOS as supported platforms](https://doc.qt.io/qt-6/supported-platforms.html), and eframe has Android/iOS builds but still needs app-specific platform testing.
+- **Qt has the broadest mature toolkit in this list.** Its [model/view framework](https://doc.qt.io/qt-6/modelview.html), [Qt Graphs](https://doc.qt.io/qt-6/qtgraphs-index.html), [animation APIs](https://doc.qt.io/qt-6/qtquick-statesanimations-animations.html), and [accessibility integration](https://doc.qt.io/qt-6/accessible.html) are substantial strengths. Licensing depends on the modules you use; [Qt Graphs is GPLv3 or commercial](https://doc.qt.io/qt-6/licensing.html).
 
-[^2]: [Reducing Binary Size of Qt Applications](https://www.qt.io/blog/reducing-binary-size-of-qt-applications-part-3-more-platforms)
-
-[^3]: Iced Editor: <https://github.com/iced-rs/iced/blob/db5a1f6353b9f8520c4f9633d1cdc90242c2afe1/graphics/src/text/editor.rs#L65-L68>
-
-[^4]: egui TextBuffer: <https://github.com/emilk/egui/blob/0a81372cfd3a4deda640acdecbbaf24bf78bb6a2/crates/egui/src/widgets/text_edit/text_buffer.rs#L20>
+The old binary-size and subjective style ratings have been removed: build features, fonts, renderers, link settings, and packaging change the result. Measure the application and target platform you intend to distribute.

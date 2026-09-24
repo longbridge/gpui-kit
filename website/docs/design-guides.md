@@ -34,7 +34,8 @@ than compete with them.
    compose them into product-specific workflows. Create a new primitive only
    when its behavior is genuinely new.
 3. **Tokens before values.** Colors, radii, typography, and spacing should form
-   a system. Avoid isolated literals that cannot respond to themes.
+   a system. Avoid isolated literals that cannot respond to themes. See
+   [Style](./style) for GPUI's styling API.
 4. **Desktop before web convention.** Preserve keyboard access, window chrome,
    menus, dense data views, resizable regions, and persistent navigation where
    the task benefits from them.

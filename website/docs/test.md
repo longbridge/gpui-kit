@@ -34,7 +34,7 @@ use gpui_kit::test::TestWindowExt;
 
 Use these tests when a behavior depends on components working together, such as
 entering a value, saving a dialog and checking the result in the parent view.
-Find controls by `ElementId`, dispatch real GPUI events and assert the outcome
+Find controls by [`ElementId`](./element_id), dispatch real GPUI events and assert the outcome
 with ordinary Rust assertions.
 
 This guide covers in-process behavior and layout automation. Element snapshots do not inspect pixels or launch your packaged application.

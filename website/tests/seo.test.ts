@@ -8,6 +8,9 @@ const read = (path) => readFileSync(new URL(path, dist), 'utf8');
 
 function htmlFiles(directory) {
   return readdirSync(directory).flatMap((name) => {
+    // The versioned build writes under dist/versions; it is a separate site
+    // with repeated page titles, not part of the root site's SEO inventory.
+    if (directory === dist.pathname && name === 'versions') return [];
     const path = join(directory, name);
     return statSync(path).isDirectory() ? htmlFiles(path) : path.endsWith('.html') ? [path] : [];
   });

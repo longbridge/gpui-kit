@@ -212,7 +212,9 @@ cargo run -p window_title
 
 ## 许可证
 
-Apache-2.0
+软件源码与文档中的代码示例适用 [Apache-2.0](LICENSE-APACHE)。
+
+Docs、Base、Component、Shell 各章节（含中文译文）中 GPUI Kit 有权授权的文档正文与原创图示，另以 [CC BY 4.0](LICENSE-DOCS.md) 提供。复制或改编这些内容时，请署名 **GPUI Kit**、链接到原文页面及 [CC BY 4.0 许可](https://creativecommons.org/licenses/by/4.0/)，并注明修改。既有 Apache-2.0 使用权持续有效；较早版本仍遵循当时的许可，第三方贡献未经权利人另外授权时保留原许可。仅学习概念或使用事实、未复制受版权保护的表达时，不因 CC BY 4.0 产生署名要求。
 
 - 基于 Zed Industries 的 [GPUI](https://github.com/zed-industries/zed) 构建，GPUI 同样采用 Apache-2.0。`gpui-pre-*` 是它的快照，发布时保留 Zed 的许可证与声明。
 - UI 设计基于 [shadcn/ui](https://ui.shadcn.com)，部分来自 [Reui](https://reui.io)。

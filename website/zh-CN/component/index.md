@@ -1,11 +1,11 @@
 ---
-title: 组件
+title: Components
 description: 浏览 75+ 个生产就绪的 Rust UI 组件与原语，覆盖表单、导航、数据、反馈、编辑与应用布局。
 order: 2
 collapsed: false
 ---
 
-# 组件
+# Components
 
 ## 基础组件
 

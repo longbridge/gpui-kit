@@ -6,7 +6,7 @@ order: -15
 
 # FPS Monitor
 
-`gpui-fps` overlays a performance HUD on a window: a headline rate, a rolling
+`gpui-fps` overlays a performance HUD on a [Window](./window): a headline rate, a rolling
 frame time trace, and this process' CPU, GPU and memory. It depends only on
 `gpui`, so any GPUI application can use it.
 
@@ -46,7 +46,7 @@ The obvious way to make a frame counter read "as fast as this UI can go" is to
 keep asking for frames, the way an in-game counter does. That is not free here.
 Marking any view dirty schedules a **window** draw, and GPUI re-renders every
 view in that window outside an [`Entity::cached`] boundary — so each frame the
-HUD asked for would be a full layout and paint of the application, and the CPU
+HUD asked for would be a full layout and [paint](./paint) of the application, and the CPU
 row underneath would be reporting work the HUD itself was causing. On the story
 gallery's Table page that was ~62% CPU with nobody touching the window.
 
