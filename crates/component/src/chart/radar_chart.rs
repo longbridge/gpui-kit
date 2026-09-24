@@ -7,7 +7,6 @@ use gpui::{
     AnyElement, App, AvailableSpace, Background, Bounds, ElementId, Hsla, IntoElement, Pixels,
     Point, SharedString, TextAlign, Window, point, px,
 };
-use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
 use num_traits::{Num, ToPrimitive, Zero};
 
@@ -19,11 +18,11 @@ use crate::{
         polygon,
         scale::{Scale, ScaleLinear, Sealed},
         shape::RadialLine,
-        tooltip::{Dot, PlotHover, Tooltip, TooltipState},
+        tooltip::{Dot, Tooltip, TooltipState},
     },
 };
 
-use super::{HOVER_DOT_SIZE, caller_id, hover_halo_size, pointer_spring};
+use super::{HOVER_DOT_SIZE, HOVER_HALO_SIZE, caller_id};
 
 const HALF_PI: f32 = PI / 2.;
 
@@ -98,17 +97,6 @@ where
     dot: bool,
     id: ElementId,
     interactive: bool,
-    /// The hover, sampled once per frame in [`Plot::hover`].
-    hover: Option<RadarHover>,
-}
-
-/// The hover a radar chart paints.
-struct RadarHover {
-    /// Where each series' dot has slid to; the dots travel along their
-    /// polygon's edge between spokes.
-    dots: Vec<Point<Pixels>>,
-    /// How far the hover has faded in.
-    focus: f32,
 }
 
 impl<T, Y> RadarChart<T, Y>
@@ -137,7 +125,6 @@ where
             dot: false,
             id: caller_id(),
             interactive: true,
-            hover: None,
         }
     }
 
@@ -563,43 +550,6 @@ where
         Some(TooltipState::new(index, position, dots))
     }
 
-    fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
-        self.hover = hover.map(|hover| {
-            // Each series' dot slides to the hovered spoke's vertex; on the first
-            // hovered frame it adopts the vertex instead of travelling from where
-            // the last hover ended.
-            let policy = pointer_spring(cx).with_travel(!hover.is_entering());
-            let dots = hover
-                .state()
-                .dots
-                .iter()
-                .enumerate()
-                .map(|(i, dot)| {
-                    point(
-                        spring(
-                            ElementId::named_usize("radar-dot-x", i),
-                            dot.x,
-                            policy,
-                            window,
-                            cx,
-                        ),
-                        spring(
-                            ElementId::named_usize("radar-dot-y", i),
-                            dot.y,
-                            policy,
-                            window,
-                            cx,
-                        ),
-                    )
-                })
-                .collect();
-            RadarHover {
-                dots,
-                focus: hover.focus(),
-            }
-        });
-    }
-
     fn tooltip(
         &self,
         state: &TooltipState,
@@ -612,22 +562,15 @@ where
 
         let dot_stroke = cx.theme().background;
 
-        // Where the dots have slid to this frame; the vertices themselves, in full
-        // focus, before the first `hover` sample.
-        let (dots, focus) = match self.hover.as_ref() {
-            Some(hover) => (&hover.dots, hover.focus),
-            None => (&state.dots, 1.),
-        };
-
         // No crosshair: a radar has no cartesian axis to snap to; the dots mark
         // the hovered dimension's vertices instead.
         let mut tooltip =
             Tooltip::new(cursor, bounds.size)
                 .gap(px(8.))
-                .dots(dots.iter().enumerate().map(|(i, p)| {
+                .dots(state.dots.iter().enumerate().map(|(i, p)| {
                     Dot::new(*p)
                         .size(HOVER_DOT_SIZE)
-                        .halo(hover_halo_size(focus))
+                        .halo(HOVER_HALO_SIZE)
                         .stroke(dot_stroke)
                         .fill(self.series_stroke(i, cx))
                 }));

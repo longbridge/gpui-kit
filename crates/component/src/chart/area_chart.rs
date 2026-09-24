@@ -4,7 +4,6 @@ use gpui::{
     AnyElement, App, Background, Bounds, ElementId, Hsla, IntoElement, Pixels, Point, SharedString,
     Size, Window, point, px,
 };
-use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
 use num_traits::{Num, ToPrimitive};
 
@@ -14,26 +13,15 @@ use crate::{
         AXIS_GAP, AxisLabelPlacement, PathCaches, Plot, PlotAxis, StrokeStyle,
         scale::{Scale, ScaleLinear, ScalePoint, Sealed},
         shape::Area,
-        tooltip::{CrossLine, Dot, PlotHover, Tooltip, TooltipState},
+        tooltip::{CrossLine, Dot, Tooltip, TooltipState},
     },
 };
 
 use super::{
-    HOVER_DOT_SIZE, PointAxes, ValueExtent, axis_point_count, build_point_x_labels, caller_id,
-    hover_halo_size, labeled_items, pinned_plot_mask, point_range, point_value_scale,
-    pointer_spring,
+    HOVER_DOT_SIZE, HOVER_HALO_SIZE, PointAxes, ValueExtent, axis_point_count,
+    build_point_x_labels, caller_id, labeled_items, pinned_plot_mask, point_range,
+    point_value_scale,
 };
-
-/// The hover an area chart paints, sampled once per frame in [`Plot::hover`].
-#[derive(Clone)]
-struct AreaHover {
-    /// Where the crosshair has slid to along the x axis.
-    x: Pixels,
-    /// Where each series' dot has slid to; the dots follow their series.
-    dots: Vec<Point<Pixels>>,
-    /// How far the hover has faded in.
-    focus: f32,
-}
 
 #[derive(IntoPlot)]
 pub struct AreaChart<T, X, Y>
@@ -57,7 +45,6 @@ where
     axes: PointAxes,
     id: ElementId,
     interactive: bool,
-    hover: Option<AreaHover>,
 }
 
 impl<T, X, Y> AreaChart<T, X, Y>
@@ -86,7 +73,6 @@ where
             axes: PointAxes::default(),
             id: caller_id(),
             interactive: true,
-            hover: None,
         }
     }
 
@@ -486,31 +472,6 @@ where
         ))
     }
 
-    fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
-        self.hover = hover.map(|hover| {
-            // The crosshair and each series' dot slide to the hovered point; on the
-            // first hovered frame they adopt it instead of travelling from where the
-            // last hover ended.
-            let state = hover.state();
-            let policy = pointer_spring(cx).with_travel(!hover.is_entering());
-            let x = spring(("area-chart", "x"), state.cross_line.x, policy, window, cx);
-            let dots = state
-                .dots
-                .iter()
-                .enumerate()
-                .map(|(i, dot)| {
-                    let id = ElementId::named_usize("area-chart-dot", i);
-                    point(x, spring(id, dot.y, policy, window, cx))
-                })
-                .collect();
-            AreaHover {
-                x,
-                dots,
-                focus: hover.focus(),
-            }
-        });
-    }
-
     fn tooltip(
         &self,
         state: &TooltipState,
@@ -527,25 +488,18 @@ where
         let dot_stroke = cx.theme().background;
         let color = |i: usize| *self.strokes.get(i).unwrap_or(&default_color);
 
-        // Where the hover has slid to this frame; the data points themselves, in
-        // full focus, before the first `hover` sample.
-        let (x, dots, focus) = match self.hover.as_ref() {
-            Some(hover) => (hover.x, &hover.dots, hover.focus),
-            None => (state.cross_line.x, &state.dots, 1.),
-        };
-
-        // Follow the cursor; the crosshair and dots stay snapped to the data point.
+        // Follow the cursor; the crosshair and dots glide to the data point.
         let mut tooltip = Tooltip::new(cursor, bounds.size)
             .gap(px(8.))
             // Confine the crosshair to the plot area so it doesn't cross the x-axis.
             .cross_line(
-                CrossLine::new(point(x, state.cross_line.y))
+                CrossLine::new(state.cross_line)
                     .height(bounds.size.height.as_f32() - if self.x_axis { AXIS_GAP } else { 0. }),
             )
-            .dots(dots.iter().enumerate().map(|(i, p)| {
+            .dots(state.dots.iter().enumerate().map(|(i, p)| {
                 Dot::new(*p)
                     .size(HOVER_DOT_SIZE)
-                    .halo(hover_halo_size(focus))
+                    .halo(HOVER_HALO_SIZE)
                     .stroke(dot_stroke)
                     .fill(color(i))
             }))

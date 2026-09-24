@@ -100,7 +100,8 @@ pub trait Plot: IntoElement {
     ///
     /// Also called while the hover fades out, with the lingering `state` and the
     /// last `cursor`; a [`tooltip::Tooltip`] returned here fades with the hover
-    /// on its own.
+    /// and glides its crosshair and dots between data on its own
+    /// ([`tooltip::Tooltip::glide`]).
     fn tooltip(
         &self,
         _state: &TooltipState,

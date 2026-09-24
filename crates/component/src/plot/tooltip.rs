@@ -1,8 +1,12 @@
 use gpui::{
-    AnyElement, App, Div, Half as _, Hsla, IntoElement, ParentElement, Pixels, Point, RenderOnce,
-    SharedString, Size, StyleRefinement, Styled, Window, deferred, div, prelude::FluentBuilder, px,
+    AnyElement, App, Div, ElementId, Half as _, Hsla, IntoElement, ParentElement, Pixels, Point,
+    RenderOnce, SharedString, Size, StyleRefinement, Styled, Window, deferred, div, point,
+    prelude::FluentBuilder, px,
 };
-use gpui_base::motion::{Transition, transition};
+use gpui_base::{
+    Spring,
+    motion::{Transition, TransitionId, spring, transition},
+};
 
 use crate::ThemeStyled as _;
 use crate::{ActiveTheme, Colorize, StyledExt, h_flex, v_flex};
@@ -211,6 +215,9 @@ impl Dot {
     /// Draw a translucent ring of the fill color, `size` across, behind the dot,
     /// which marks the hovered point the way a chart marks its emphasized
     /// symbol.
+    ///
+    /// `size` is the ring at full focus: in a [`Tooltip`] the ring grows out of
+    /// the dot as the hover fades in.
     pub fn halo(mut self, size: impl Into<Pixels>) -> Self {
         self.halo = Some(size.into());
         self
@@ -319,6 +326,38 @@ impl PlotHover {
     pub fn is_entering(&self) -> bool {
         self.hovered && self.focus == 0.
     }
+
+    /// Follow `target` the way a [`Tooltip`] glides its crosshair and dots:
+    /// on the pointer spring, adopting the target on the entering frame
+    /// instead of travelling from where the last hover ended.
+    ///
+    /// For a position a plot also paints with, such as the center of a
+    /// highlighted band the other bars fade by. Hand the result to the
+    /// tooltip's [`CrossLine`] and turn its own glide off with
+    /// [`Tooltip::glide`], so the position springs once.
+    pub fn glide(
+        &self,
+        id: impl Into<TransitionId>,
+        target: Pixels,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Pixels {
+        let policy = pointer_spring(cx).with_travel(!self.is_entering());
+        spring(id, target, policy, window, cx)
+    }
+}
+
+/// The spring a hover pointer — the crosshair, highlight band or hover dot —
+/// follows the hovered datum with.
+///
+/// A pointer chases the cursor across neighbouring data, so it has to arrive
+/// well within the time the cursor takes to reach the next datum: ECharts moves
+/// its axis pointer over 200 ms on an exponential ease-out, which is most of
+/// the way there in the first third. The fast tier as a critically damped
+/// response lands in the same place, and the tolerance is sub-pixel so the
+/// spring rests once nothing visible moves.
+pub(crate) fn pointer_spring(cx: &App) -> Spring {
+    Spring::new(cx.theme().motion_tokens().duration_fast).with_epsilon(0.1)
 }
 
 /// The last datum the cursor resolved to, where the cursor was and how far the
@@ -329,6 +368,9 @@ struct HoverMemory {
     state: Option<TooltipState>,
     cursor: Point<Pixels>,
     focus: f32,
+    /// Whether this frame is the first the cursor is on a datum; see
+    /// [`PlotHover::is_entering`].
+    entering: bool,
 }
 
 impl Default for HoverMemory {
@@ -338,6 +380,7 @@ impl Default for HoverMemory {
             cursor: Point::default(),
             // A tooltip rendered outside the derive's tracking is fully opaque.
             focus: 1.,
+            entering: false,
         }
     }
 }
@@ -383,6 +426,7 @@ pub fn track_hover(
             memory.cursor = cursor;
         }
         memory.focus = focus;
+        memory.entering = hovered && focus == 0.;
         if !hovered && focus <= 0. {
             memory.state = None;
         }
@@ -423,6 +467,8 @@ pub struct Tooltip {
     within: Size<Pixels>,
     /// Opacity of the whole overlay when set; see [`Self::focus`].
     focus: Option<f32>,
+    /// Whether the crosshair and dots glide between data; see [`Self::glide`].
+    glide: bool,
 }
 
 impl Tooltip {
@@ -442,7 +488,23 @@ impl Tooltip {
             cursor,
             within,
             focus: None,
+            glide: true,
         }
+    }
+
+    /// Glide the crosshair and dots between data, or snap them to each datum.
+    ///
+    /// A tooltip returned from [`Plot::tooltip`](super::Plot::tooltip) slides
+    /// them to the hovered datum on the pointer spring, adopting it on the
+    /// frame the cursor lands instead of travelling from where the last hover
+    /// ended. A crosshair glides along the axis it marks only, so a line that
+    /// also follows the cursor keeps up with it. Turn this off for positions
+    /// the plot already springs itself ([`PlotHover::glide`]).
+    ///
+    /// Default is true.
+    pub fn glide(mut self, glide: bool) -> Self {
+        self.glide = glide;
+        self
     }
 
     /// Fade the whole overlay — crosshair, dots and box — to `focus` (`0..=1`).
@@ -518,23 +580,60 @@ impl RenderOnce for Tooltip {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         // Rendered within the plot's element scope, so this is the fade the
         // derive tracked for it this frame; fully opaque outside a plot.
-        let tracked_focus = window
-            .use_keyed_state(HOVER_MEMORY, cx, |_, _| HoverMemory::default())
-            .read(cx)
-            .focus;
+        let (tracked_focus, entering) = {
+            let memory = window
+                .use_keyed_state(HOVER_MEMORY, cx, |_, _| HoverMemory::default())
+                .read(cx);
+            (memory.focus, memory.entering)
+        };
         let Tooltip {
             base,
             gap,
-            cross_line,
-            dots,
+            mut cross_line,
+            mut dots,
             appearance,
             title,
             rows,
             cursor,
             within,
             focus,
+            glide,
         } = self;
         let focus = focus.unwrap_or(tracked_focus);
+
+        if glide {
+            let policy = pointer_spring(cx).with_travel(!entering);
+            if let Some(line) = cross_line.as_mut() {
+                if line.direction.show_vertical() {
+                    line.point.x = spring((HOVER_MEMORY, "x"), line.point.x, policy, window, cx);
+                }
+                if line.direction.show_horizontal() {
+                    line.point.y = spring((HOVER_MEMORY, "y"), line.point.y, policy, window, cx);
+                }
+            }
+            for (i, dot) in dots.iter_mut().flatten().enumerate() {
+                dot.point = point(
+                    spring(
+                        ElementId::named_usize("__plot-hover-dot-x", i),
+                        dot.point.x,
+                        policy,
+                        window,
+                        cx,
+                    ),
+                    spring(
+                        ElementId::named_usize("__plot-hover-dot-y", i),
+                        dot.point.y,
+                        policy,
+                        window,
+                        cx,
+                    ),
+                );
+            }
+        }
+        // The ring grows out of the dot as the hover fades in.
+        for dot in dots.iter_mut().flatten() {
+            dot.halo = dot.halo.map(|halo| halo * focus);
+        }
 
         // Structured content (title + rows) takes precedence over freeform `base` children.
         let content = if title.is_some() || !rows.is_empty() {

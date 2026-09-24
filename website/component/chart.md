@@ -750,28 +750,13 @@ A chart also keeps its heavy geometry across frames, since it repaints on every 
 
 ### Custom Plots
 
-A custom [`Plot`] opts in by hand — `Plot::id` defaults to `None` there: return an id from it, resolve the datum under the cursor in `Plot::tooltip_state`, and build the overlay in `Plot::tooltip`. To animate the emphasis, implement `Plot::hover`, which runs each frame before `tooltip` and `paint` with the [`PlotHover`] in focus — it carries the `TooltipState` and lingers after the cursor leaves while `hover.focus()` eases back to zero, so sample the motion there and keep the result on `self` for the other two methods. A `Tooltip` returned from `tooltip` fades with the hover on its own:
+A custom [`Plot`] opts in by hand — `Plot::id` defaults to `None` there: return an id from it, resolve the datum under the cursor in `Plot::tooltip_state`, and build the overlay in `Plot::tooltip`. The `Tooltip` returned there animates the hover on its own, the same way the built-in charts do: the whole overlay fades with the hover, the crosshair and dots glide to each hovered datum on the pointer spring, adopting it on the frame the cursor lands, and a dot's `halo` grows as the hover fades in. A crosshair glides along the axis it marks only, so a line that also follows the cursor keeps up with it. Pass the data point itself; the tooltip does the rest:
 
 ```rust
-fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
-    self.band_center = hover.map(|hover| {
-        spring(
-            ("my-plot", "band"),
-            hover.state().cross_line.x,
-            // Adopt the datum on the first hovered frame instead of travelling
-            // from where the last hover ended.
-            cx.theme().motion_tokens().spring_control.with_travel(!hover.is_entering()),
-            window,
-            cx,
-        )
-    });
-}
-
 fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pixels>, _: &mut Window, cx: &mut App) -> Option<AnyElement> {
-    let center = self.band_center.unwrap_or(state.cross_line.x);
     Some(
         Tooltip::new(cursor, bounds.size)
-            .cross_line(CrossLine::new(point(center, state.cross_line.y)).band(px(24.)))
+            .cross_line(CrossLine::new(state.cross_line).band(px(24.)))
             .title("Title")
             .row(cx.theme().chart_1, "Series", "42")
             .into_any_element(),
@@ -779,7 +764,14 @@ fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pi
 }
 ```
 
-`Dot::halo(size)` draws the translucent ring the built-in charts put behind a hovered dot.
+To emphasize the plot's own graphics as well — fade the bars around the hovered one, lift a slice — implement `Plot::hover`, which runs each frame before `tooltip` and `paint` with the [`PlotHover`] in focus. It carries the `TooltipState` and lingers after the cursor leaves while `hover.focus()` eases back to zero, so sample the motion there and keep the result on `self`. `hover.glide` follows a position on the same spring the tooltip uses; hand the result to the crosshair and turn the tooltip's own glide off with `Tooltip::glide(false)`, so it springs once:
+
+```rust
+fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
+    self.band_center =
+        hover.map(|hover| hover.glide(("my-plot", "band"), hover.state().cross_line.x, window, cx));
+}
+```
 
 ## Data Structures
 

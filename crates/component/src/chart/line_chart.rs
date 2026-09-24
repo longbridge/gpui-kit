@@ -4,7 +4,6 @@ use gpui::{
     AnyElement, App, Bounds, ElementId, Hsla, IntoElement, Pixels, Point, SharedString, Size,
     Window, point, px,
 };
-use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
 use num_traits::{Num, ToPrimitive};
 
@@ -14,24 +13,15 @@ use crate::{
         AXIS_GAP, AxisLabelPlacement, PathCaches, Plot, PlotAxis, StrokeStyle,
         scale::{Scale, ScaleLinear, ScalePoint, Sealed},
         shape::Line,
-        tooltip::{CrossLine, Dot, PlotHover, Tooltip, TooltipState},
+        tooltip::{CrossLine, Dot, Tooltip, TooltipState},
     },
 };
 
 use super::{
-    HOVER_DOT_SIZE, PointAxes, ValueExtent, axis_point_count, build_point_x_labels, caller_id,
-    hover_halo_size, labeled_items, pinned_plot_mask, point_range, point_value_scale,
-    pointer_spring,
+    HOVER_DOT_SIZE, HOVER_HALO_SIZE, PointAxes, ValueExtent, axis_point_count,
+    build_point_x_labels, caller_id, labeled_items, pinned_plot_mask, point_range,
+    point_value_scale,
 };
-
-/// The hover a line chart paints, sampled once per frame in [`Plot::hover`].
-#[derive(Clone, Copy)]
-struct LineHover {
-    /// Where the crosshair and the dot have slid to; the dot follows the line.
-    dot: Point<Pixels>,
-    /// How far the hover has faded in.
-    focus: f32,
-}
 
 #[derive(IntoPlot)]
 pub struct LineChart<T, X, Y>
@@ -55,7 +45,6 @@ where
     id: ElementId,
     interactive: bool,
     name: Option<SharedString>,
-    hover: Option<LineHover>,
 }
 
 impl<T, X, Y> LineChart<T, X, Y>
@@ -84,7 +73,6 @@ where
             id: caller_id(),
             interactive: true,
             name: None,
-            hover: None,
         }
     }
 
@@ -456,24 +444,6 @@ where
         ))
     }
 
-    fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
-        self.hover = hover.and_then(|hover| {
-            // The crosshair and dot slide along the line to the hovered point; on the
-            // first hovered frame they adopt it instead of travelling from where the
-            // last hover ended.
-            let target = *hover.state().dots.first()?;
-            let policy = pointer_spring(cx).with_travel(!hover.is_entering());
-            let dot = point(
-                spring(("line-chart", "x"), target.x, policy, window, cx),
-                spring(("line-chart", "y"), target.y, policy, window, cx),
-            );
-            Some(LineHover {
-                dot,
-                focus: hover.focus(),
-            })
-        });
-    }
-
     fn tooltip(
         &self,
         state: &TooltipState,
@@ -488,28 +458,22 @@ where
         let value = y_fn(d).to_f64()?;
         let stroke = self.stroke.unwrap_or(cx.theme().chart_2);
         let name = self.name.clone().unwrap_or_default();
-
-        // Where the hover has slid to this frame; the data point itself, in full
-        // focus, before the first `hover` sample.
-        let (dot, focus) = match self.hover {
-            Some(hover) => (hover.dot, hover.focus),
-            None => (*state.dots.first()?, 1.),
-        };
+        let dot = *state.dots.first()?;
 
         Some(
-            // Follow the cursor; the crosshair and dot stay snapped to the data point.
+            // Follow the cursor; the crosshair and dot glide to the data point.
             Tooltip::new(cursor, bounds.size)
                 .gap(px(8.))
                 // Confine the crosshair to the plot area so it doesn't cross the x-axis.
                 .cross_line(
-                    CrossLine::new(point(dot.x, state.cross_line.y)).height(
+                    CrossLine::new(state.cross_line).height(
                         bounds.size.height.as_f32() - if self.x_axis { AXIS_GAP } else { 0. },
                     ),
                 )
                 .dots(Some(
                     Dot::new(dot)
                         .size(HOVER_DOT_SIZE)
-                        .halo(hover_halo_size(focus))
+                        .halo(HOVER_HALO_SIZE)
                         .stroke(cx.theme().background)
                         .fill(stroke),
                 ))

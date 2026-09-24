@@ -4,7 +4,6 @@ use gpui::{
     AnyElement, App, Bounds, ElementId, Hsla, IntoElement, PathBuilder, Pixels, Point,
     SharedString, Window, fill, point, px,
 };
-use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
 use num_traits::{Num, ToPrimitive};
 use rust_i18n::t;
@@ -14,18 +13,11 @@ use crate::{
     plot::{
         AXIS_GAP, Grid, Plot, PlotAxis, origin_point,
         scale::{Scale, ScaleBand, ScaleLinear, Sealed},
-        tooltip::{CrossLine, PlotHover, Tooltip, TooltipState},
+        tooltip::{CrossLine, Tooltip, TooltipState},
     },
 };
 
-use super::{build_band_labels, caller_id, labeled_items, pointer_spring};
-
-/// The hover a candlestick chart paints, sampled once per frame in [`Plot::hover`].
-#[derive(Clone, Copy)]
-struct CandlestickHover {
-    /// Center of the highlight band along the x axis, springing between candles.
-    center: Pixels,
-}
+use super::{build_band_labels, caller_id, labeled_items};
 
 #[derive(IntoPlot)]
 pub struct CandlestickChart<T, X, Y>
@@ -48,7 +40,6 @@ where
     bearish: Option<Hsla>,
     id: ElementId,
     interactive: bool,
-    hover: Option<CandlestickHover>,
 }
 
 impl<T, X, Y> CandlestickChart<T, X, Y>
@@ -76,7 +67,6 @@ where
             bearish: None,
             id: caller_id(),
             interactive: true,
-            hover: None,
         }
     }
 
@@ -352,21 +342,6 @@ where
         ))
     }
 
-    fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
-        self.hover = hover.map(|hover| {
-            // The band slides to the hovered candle; on the first hovered frame it
-            // adopts the candle instead of travelling from where the last hover ended.
-            let center = spring(
-                ("candlestick-chart", "band"),
-                hover.state().cross_line.x,
-                pointer_spring(cx).with_travel(!hover.is_entering()),
-                window,
-                cx,
-            );
-            CandlestickHover { center }
-        });
-    }
-
     fn tooltip(
         &self,
         state: &TooltipState,
@@ -389,11 +364,10 @@ where
         let color = if close > open { bullish } else { bearish };
 
         // Highlight the hovered candle with a translucent band the width of its
-        // slot, centered where the band spring has reached rather than snapped to
-        // the candle, and confined to the plot area above the axis labels.
-        let center = self.hover.map_or(state.cross_line.x, |hover| hover.center);
+        // slot, which glides between candles, confined to the plot area above the
+        // axis labels.
         let band_width = self.x_scale(bounds)?.band_width();
-        let cross_line = CrossLine::new(point(center, state.cross_line.y))
+        let cross_line = CrossLine::new(state.cross_line)
             .span(0., self.plot_height(bounds))
             .band(px(band_width));
 

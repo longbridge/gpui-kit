@@ -20,7 +20,6 @@ use gpui::{
     App, Bounds, ContentMask, ElementId, Hsla, Pixels, SharedString, Size, TextAlign, Window,
     point, px,
 };
-use gpui_base::Spring;
 use num_traits::{Num, ToPrimitive};
 
 use crate::{
@@ -51,29 +50,14 @@ pub(crate) fn caller_id() -> ElementId {
     ElementId::CodeLocation(*Location::caller())
 }
 
-/// The spring a chart's pointer — the crosshair, highlight band or hover dot —
-/// follows the hovered datum with.
-///
-/// A pointer chases the cursor across neighbouring data, so it has to arrive
-/// well within the time the cursor takes to reach the next datum: ECharts moves
-/// its axis pointer over 200 ms on an exponential ease-out, which is most of
-/// the way there in the first third. The fast tier as a critically damped
-/// response lands in the same place, and the tolerance is sub-pixel so the
-/// spring rests once nothing visible moves.
-pub(crate) fn pointer_spring(cx: &App) -> Spring {
-    Spring::new(cx.theme().motion_tokens().duration_fast).with_epsilon(0.1)
-}
-
 /// The size of the dot marking the hovered data point.
 pub(crate) const HOVER_DOT_SIZE: Pixels = px(8.);
 
-/// The ring behind the hovered dot at full focus.
-const HOVER_HALO_SIZE: f32 = 20.;
-
-/// The ring behind a hovered dot, growing out of the dot as the hover fades in.
-pub(crate) fn hover_halo_size(focus: f32) -> Pixels {
-    px(HOVER_HALO_SIZE * focus)
-}
+/// The ring behind the hovered dot at full focus; a [`Tooltip`] grows it out
+/// of the dot as the hover fades in.
+///
+/// [`Tooltip`]: crate::plot::tooltip::Tooltip
+pub(crate) const HOVER_HALO_SIZE: Pixels = px(20.);
 
 /// How many points the x axis of a point chart (`LineChart`, `AreaChart`) is
 /// laid out for: `point_count`, or the data's own length when that is unset or

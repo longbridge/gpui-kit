@@ -4,7 +4,6 @@ use gpui::{
     AnyElement, App, Background, Bounds, Corners, ElementId, Hsla, IntoElement, LinearColorStop,
     Pixels, Point, SharedString, Size, TextAlign, Window, linear_gradient, point, px,
 };
-use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
 use num_traits::{Num, ToPrimitive};
 
@@ -21,7 +20,7 @@ use crate::{
 
 use super::{
     TickFormat, VALUE_AXIS_GAP, build_band_labels, caller_id, format_tick, labeled_items,
-    pointer_spring, value_axis_gap,
+    value_axis_gap,
 };
 
 /// How much the bars away from the hovered one fade, as a share of their opacity.
@@ -30,7 +29,7 @@ const HOVER_DIM: f32 = 0.45;
 /// The hover a bar chart paints, sampled once per frame in [`Plot::hover`].
 #[derive(Clone, Copy)]
 struct BarHover {
-    /// Cross-axis center of the highlight band, springing between bars.
+    /// Cross-axis center of the highlight band, gliding between bars.
     center: f32,
     /// How far the hover has faded in.
     focus: f32,
@@ -969,13 +968,7 @@ where
             } else {
                 hover.state().cross_line.x
             };
-            let center = spring(
-                ("bar-chart", "band"),
-                target,
-                pointer_spring(cx).with_travel(!hover.is_entering()),
-                window,
-                cx,
-            );
+            let center = hover.glide(("bar-chart", "band"), target, window, cx);
             BarHover {
                 center: center.as_f32(),
                 focus: hover.focus(),
@@ -999,7 +992,7 @@ where
 
         // Highlight the hovered bar with a translucent band the width of the bar, instead
         // of a hairline. Confined to the plot area so it doesn't cover the axis labels,
-        // and centered where the band spring has reached rather than snapped to the bar.
+        // and centered where the band has glided to, which the other bars also fade by.
         let band_width = self.band_scale(bounds)?.band_width();
         let center = self.hover.map_or(state.cross_line, |hover| {
             if self.alignment.is_horizontal() {
@@ -1021,8 +1014,9 @@ where
         };
 
         Some(
-            // Follow the cursor; the highlight band stays snapped to the bar.
+            // Follow the cursor; `hover` already glides the band.
             Tooltip::new(cursor, bounds.size)
+                .glide(false)
                 .gap(px(8.))
                 .cross_line(cross_line)
                 .title(title)

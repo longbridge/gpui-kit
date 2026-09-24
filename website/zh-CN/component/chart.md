@@ -724,27 +724,13 @@ AreaChart::new(range).interactive(false)       // 拖拽手柄下面的底图
 
 ### 自定义 Plot
 
-自定义 [`Plot`] 需要手动接入——那里的 `Plot::id` 仍默认返回 `None`：在 `Plot::id` 返回 id，在 `Plot::tooltip_state` 解析光标所在的数据，在 `Plot::tooltip` 构建覆盖层。要为强调效果加动画，实现 `Plot::hover`——它在每帧的 `tooltip` 与 `paint` 之前运行，收到当前聚焦的 [`PlotHover`]；它携带 `TooltipState`，光标离开后会保留一段时间，`hover.focus()` 逐渐回到零，因此在这里采样动效并把结果存到 `self` 供另外两个方法使用。`tooltip` 返回的 `Tooltip` 会自动随悬停淡入淡出：
+自定义 [`Plot`] 需要手动接入——那里的 `Plot::id` 仍默认返回 `None`：在 `Plot::id` 返回 id，在 `Plot::tooltip_state` 解析光标所在的数据，在 `Plot::tooltip` 构建覆盖层。这里返回的 `Tooltip` 会自己为悬停加动画，和内置图表一样：整个覆盖层随悬停淡入淡出；十字线和圆点按指针 spring 滑到每个悬停的数据点，光标落下的那一帧直接就位；圆点的 `halo` 随悬停淡入逐渐放大。十字线只沿它标记的那条轴滑动，所以同时跟随光标的那条线不会滞后。传入数据点本身即可，其余交给 tooltip：
 
 ```rust
-fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
-    self.band_center = hover.map(|hover| {
-        spring(
-            ("my-plot", "band"),
-            hover.state().cross_line.x,
-            // 悬停的第一帧直接采用该数据，而不是从上次悬停结束处滑过来。
-            cx.theme().motion_tokens().spring_control.with_travel(!hover.is_entering()),
-            window,
-            cx,
-        )
-    });
-}
-
 fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pixels>, _: &mut Window, cx: &mut App) -> Option<AnyElement> {
-    let center = self.band_center.unwrap_or(state.cross_line.x);
     Some(
         Tooltip::new(cursor, bounds.size)
-            .cross_line(CrossLine::new(point(center, state.cross_line.y)).band(px(24.)))
+            .cross_line(CrossLine::new(state.cross_line).band(px(24.)))
             .title("Title")
             .row(cx.theme().chart_1, "Series", "42")
             .into_any_element(),
@@ -752,7 +738,14 @@ fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pi
 }
 ```
 
-`Dot::halo(size)` 绘制内置图表放在悬停圆点后面的半透明光晕。
+如果还要强调 plot 自己的图形——让悬停柱子周围的柱子变淡、让扇区弹出——就实现 `Plot::hover`。它在每帧的 `tooltip` 与 `paint` 之前运行，收到当前聚焦的 [`PlotHover`]；它携带 `TooltipState`，光标离开后会保留一段时间，`hover.focus()` 逐渐回到零，因此在这里采样动效并把结果存到 `self`。`hover.glide` 让一个位置按 tooltip 所用的同一个 spring 移动；把结果交给十字线，并用 `Tooltip::glide(false)` 关掉 tooltip 自己的滑动，避免重复做 spring：
+
+```rust
+fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {
+    self.band_center =
+        hover.map(|hover| hover.glide(("my-plot", "band"), hover.state().cross_line.x, window, cx));
+}
+```
 
 ## 数据结构示例
 
