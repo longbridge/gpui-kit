@@ -62,7 +62,6 @@ pub struct MonthlyMetric {
     pub subscriptions: f64,
     pub active_users: f64,
     pub sessions: f64,
-    pub storage_tb: f64,
     pub deploys: f64,
     pub downloads: f64,
 }
@@ -118,6 +117,13 @@ pub struct ProductScore {
     pub dimension: SharedString,
     pub alpha: f64,
     pub beta: f64,
+}
+
+/// One minute of a trading day's price, for the in-progress area card.
+#[derive(Clone, Deserialize)]
+pub struct IntradayPrice {
+    pub time: SharedString,
+    pub price: f64,
 }
 
 #[derive(Clone, Deserialize)]
@@ -186,6 +192,7 @@ struct ChartData {
     pages: Vec<PageViews>,
     product_scores: Vec<ProductScore>,
     stock_prices: Vec<StockPrice>,
+    intraday_prices: Vec<IntradayPrice>,
     tsla_statements: Vec<(SharedString, Vec<TslaNode>, Vec<SankeyLink>)>,
 }
 
@@ -442,7 +449,6 @@ enum ChartCard {
     LineDots,
     Area,
     AreaLinear,
-    AreaStepAfter,
     AreaGradient,
     AreaInProgress,
     Candlestick,
@@ -1186,23 +1192,6 @@ impl ChartCard {
                     "this month",
                 )
                 .note("Straight segments between months"),
-            Self::AreaStepAfter => Card::new("Storage Used", "Terabytes, 2025")
-                .chart(
-                    AreaChart::new(data.metrics.clone())
-                        .x(|d| d.month.clone())
-                        .y(|d| d.storage_tb)
-                        .stroke(mid)
-                        .fill(mid.opacity(0.3))
-                        .step_after()
-                        .name("TB")
-                        .id("area-chart-step-after"),
-                )
-                .headline(format!(
-                    "{:.1} TB provisioned, from {:.1} TB in January",
-                    data.metrics[data.metrics.len() - 1].storage_tb,
-                    data.metrics[0].storage_tb
-                ))
-                .note("Capacity is added in steps"),
             Self::AreaGradient => Card::new("Revenue vs Last Year", "2025")
                 .legend(accent, "2025")
                 .legend(cx.theme().chart_1, "2024")
@@ -1228,31 +1217,34 @@ impl ChartCard {
                 )
                 .note("Gradient fills fade to the baseline"),
             Self::AreaInProgress => {
-                let sessions = data.stock_prices.clone();
-                let (low, high) = sessions
+                let total = data.intraday_prices.len();
+                let minutes: Vec<_> = data
+                    .intraday_prices
                     .iter()
-                    .fold((f64::MAX, f64::MIN), |(low, high), d| {
-                        (low.min(d.close), high.max(d.close))
-                    });
-                let last = sessions.last().map_or(0., |d| d.close);
-                Card::new("Closing Price", "Jun - Nov, in progress")
+                    .take(total * 4 / 5)
+                    .cloned()
+                    .collect();
+                let (low, high) = minutes.iter().fold((f64::MAX, f64::MIN), |(low, high), d| {
+                    (low.min(d.price), high.max(d.price))
+                });
+                let open = minutes.first().map_or(0., |d| d.price);
+                let last = minutes.last().map_or(0., |d| d.price);
+                Card::new("Intraday Price", "Today, in progress")
                     .chart(
-                        AreaChart::new(sessions)
-                            .x(|d| d.date.clone())
-                            .y(|d| d.close)
+                        AreaChart::new(minutes)
+                            .x(|d| d.time.clone())
+                            .y(|d| d.price)
                             .stroke(accent)
                             .fill(area_gradient(accent))
                             .linear()
-                            .y_domain(low, high)
-                            .point_count(180)
-                            .x_tick_count(2)
-                            .name("Close")
+                            .y_domain(low - (high - low) / 4., high)
+                            .point_count(total)
+                            .x_tick_count(4)
+                            .name("Price")
                             .id("area-chart-in-progress"),
                     )
-                    .headline(format!(
-                        "${last:.2} at the last close, within ${low:.2} - ${high:.2}"
-                    ))
-                    .note("A pinned y axis, and room for the sessions still to come")
+                    .trend(change_percent(last, open), "since the open")
+                    .note("A pinned y axis, and room for the minutes still to come")
             }
             // Forty sessions do not fit forty labels, so every card thins them.
             Self::Candlestick => self.candlestick(data, "Daily", 0.8, 5, "candlestick-chart"),
@@ -1537,6 +1529,7 @@ impl ChartStory {
                 pages: fixture(include_str!("../../fixtures/pages.json")),
                 product_scores: fixture(include_str!("../../fixtures/product-scores.json")),
                 stock_prices,
+                intraday_prices: fixture(include_str!("../../fixtures/intraday-prices.json")),
                 tsla_statements,
             }),
             sections,
@@ -1590,13 +1583,7 @@ fn sections(sankey_count: usize) -> Vec<ChartSection> {
             BarGradientDiagonal,
         ]),
         ChartSection::after_rule([Line, LineLinear, LineStepAfter, LineDots]),
-        ChartSection::after_rule([
-            Area,
-            AreaLinear,
-            AreaStepAfter,
-            AreaGradient,
-            AreaInProgress,
-        ]),
+        ChartSection::after_rule([Area, AreaLinear, AreaGradient, AreaInProgress]),
         ChartSection::after_rule([
             Candlestick,
             CandlestickNarrow,
