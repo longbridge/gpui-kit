@@ -10,10 +10,7 @@ use gpui_kit::component::{
     },
     dock::PanelControl,
     h_flex,
-    plot::{
-        AxisLabelPlacement,
-        shape::{BarAlignment, SankeyAlign, SankeyLink, SankeyValueScale},
-    },
+    plot::shape::{BarAlignment, SankeyAlign, SankeyLink, SankeyValueScale},
     scroll::ScrollableElement as _,
     separator::Separator,
     v_flex,
@@ -1231,15 +1228,14 @@ impl ChartCard {
                 )
                 .note("Gradient fills fade to the baseline"),
             Self::AreaInProgress => {
-                let sessions: Vec<_> = data.stock_prices.iter().take(26).cloned().collect();
+                let sessions = data.stock_prices.clone();
                 let (low, high) = sessions
                     .iter()
                     .fold((f64::MAX, f64::MIN), |(low, high), d| {
                         (low.min(d.close), high.max(d.close))
                     });
-                let average = sessions.iter().map(|d| d.close).sum::<f64>() / sessions.len() as f64;
                 let last = sessions.last().map_or(0., |d| d.close);
-                Card::new("Closing Price", "Jun - Jul, in progress")
+                Card::new("Closing Price", "Jun - Nov, in progress")
                     .chart(
                         AreaChart::new(sessions)
                             .x(|d| d.date.clone())
@@ -1248,22 +1244,15 @@ impl ChartCard {
                             .fill(area_gradient(accent))
                             .linear()
                             .y_domain(low, high)
-                            .point_count(data.stock_prices.len())
-                            .tick_margin(5)
-                            .y_axis(true)
-                            .y_axis_label_placement(AxisLabelPlacement::Inside)
-                            .y_tick_count(3)
-                            .y_tick_format(|v| format!("${v:.0}"))
-                            .grid_columns(4)
-                            .grid_dashed(false)
-                            .reference_line(average)
+                            .point_count(180)
+                            .x_tick_count(2)
                             .name("Close")
                             .id("area-chart-in-progress"),
                     )
                     .headline(format!(
                         "${last:.2} at the last close, within ${low:.2} - ${high:.2}"
                     ))
-                    .note("A pinned y axis, the average close marked, and room for the sessions to come")
+                    .note("A pinned y axis, and room for the sessions still to come")
             }
             // Forty sessions do not fit forty labels, so every card thins them.
             Self::Candlestick => self.candlestick(data, "Daily", 0.8, 5, "candlestick-chart"),
