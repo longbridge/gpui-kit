@@ -6,7 +6,7 @@ order: -2.632
 
 # Global
 
-`Global` 是标记 trait，让 GPUI 按具体 Rust 类型在每个 [`App`](./context) 中保存一份值。多个功能和窗口共同使用的设置或服务适合放在这里。`AppSettings` 与 `Theme` 使用不同的存储位置。`Global` 本身只有 `'static` 约束，不会让值成为 View，也不会自动建立事件流。
+`Global` 是标记 trait，让 GPUI 按具体 Rust 类型在每个 [`App`](./context) 中保存一份值。多个功能和窗口共同使用的设置或服务适合放在这里。`AppSettings` 与 [`Theme`](../component/theme) 使用不同的存储位置。`Global` 本身只有 `'static` 约束，不会让值成为 View，也不会自动建立事件流。
 
 ```rust
 use gpui_kit::*;
@@ -18,7 +18,7 @@ struct AppSettings {
 impl Global for AppSettings {}
 ```
 
-这份值属于当前 `App`，不属于某个 `Window` 或 `Entity`。应在应用启动时、View 读取之前初始化。对相同类型再次调用 `set_global` 会替换旧值，不会合并字段。
+这份值属于当前 `App`，不属于某个 [`Window`](./window) 或 [`Entity`](./entity)。应在应用启动时、View 读取之前初始化。对相同类型再次调用 `set_global` 会替换旧值，不会合并字段。
 
 ## 读取与修改全局值
 
@@ -44,13 +44,13 @@ cx.update_global::<AppSettings, _>(|settings, _cx| {
 });
 ```
 
-`Context<T>` 可以调用这些应用级 API，因为它会解引用到 `App`。应用初始化等不属于某个 Entity 的代码直接接收 `&mut App`。
+[`Context<T>`](./context) 可以调用这些应用级 API，因为它会解引用到 `App`。应用初始化等不属于某个 Entity 的代码直接接收 `&mut App`。
 
 ## App 范围与 Window 范围
 
 当所有窗口都应看到同一个值时，使用 Global，例如应用偏好、主题或共享服务的句柄。Focus、输入派发、窗口尺寸等行为应交给 [Window](./window)。Global 在整个应用中只有一份；把各窗口独立的选择状态放入同一个 Global，会增加所有权与清理的难度。
 
-业务功能的状态应保存在由该功能的 crate 或 View 拥有的 [Entity](./entity) 中。`Global` 只适合真正由整个应用共享的服务、设置与协调状态；不能因为跨模块传值不便，就把庞大的业务数据集合搬进应用级存储。功能之间需要协作时，若所有权边界允许，可以传递轻量的 Entity 句柄；否则使用明确的接口、command 或 event。[编码指南](./coding-guides) 进一步说明如何把每项功能的 model 与 workflow 留在其模块边界内。
+业务功能的状态应保存在由该功能的 crate 或 View 拥有的 Entity 中。`Global` 只适合真正由整个应用共享的服务、设置与协调状态；不能因为跨模块传值不便，就把庞大的业务数据集合搬进应用级存储。功能之间需要协作时，若所有权边界允许，可以传递轻量的 Entity 句柄；否则使用明确的接口、command 或 event。[编码指南](./coding-guides) 进一步说明如何把每项功能的 model 与 workflow 留在其模块边界内。
 
 GPUI Kit 的 `Theme` 展示了应用级所有权。调用 `gpui_kit::init(cx)` 后，组件通过 `cx.theme()` 读取当前主题。GPUI Kit 还需要同步供底层使用的主题数据，并在主题变化后刷新窗口。切换模式使用 `Theme::change(...)`，编辑主题使用 `Theme::update(cx, |theme| { … })`。直接通过 `Theme::global_mut(cx)` 编辑字段，不会完成这些同步，也不会刷新所有窗口。这是 GPUI Kit 主题在普通 GPUI `Global` 行为之上的专门规则。
 

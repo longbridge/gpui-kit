@@ -17,7 +17,7 @@ and **may** is an optional technique. Component API documentation remains the
 authority for individual methods.
 
 The rules build on behavior in `gpui-base`, the GPUI Component theme and
-component system, and familiar desktop interaction. Shadcn contributes useful
+component system, and familiar desktop interaction. <a href="https://ui.shadcn.com/docs" target="_blank" rel="noopener noreferrer">shadcn/ui</a> contributes useful
 methods—open code, composition, and dependable defaults—but does not determine
 how a GPUI application should look. When influences conflict, preserve GPUI's
 lifecycle constraints and the interaction people already understand.
@@ -386,7 +386,7 @@ Zoom is successful when the relationship between title and body, control and
 icon, inner and outer spacing, primary and secondary regions still feels the
 same at every scale—not merely when every object becomes larger.
 
-GPUI Component adopts the relative-scale idea familiar from Tailwind. The
+GPUI Component adopts the relative-scale idea familiar from <a href="https://tailwindcss.com/docs/theme" target="_blank" rel="noopener noreferrer">Tailwind CSS</a>. The
 theme's base `font_size` becomes the window's `rem` through `Root`, and GPUI
 scale helpers such as `text_sm()`, `gap_2()`, `p_4()`, `h_8()`, and `size_4()`
 resolve against it. This gives typography, spacing, controls, and icons one
@@ -603,7 +603,7 @@ Use command frequency and scope to choose where an action lives:
 - put secondary actions for the current region behind a visible
   `DropdownMenu` trigger;
 - put commands that act on the object under the pointer in a `ContextMenu`;
-- expose the same important command through an Action/key binding when it has a
+- expose the same important command through an [Action](./action)/[key binding](./keybinding) when it has a
   natural keyboard form;
 - use a hover-revealed icon only as a shortcut to a command that remains
   reachable elsewhere.

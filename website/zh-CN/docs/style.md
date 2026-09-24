@@ -6,7 +6,7 @@ order: -2.61
 
 # Style
 
-GPUI 在构建元素时设置样式。`Styled` trait 提供布局、间距、颜色、边框和文字的链式方法。许多名称有意对应 [Tailwind CSS utility](https://tailwindcss.com/docs/styling-with-utility-classes)：`flex items-center gap-2 px-3` 在 Rust 中写成 `.flex().items_center().gap_2().px_3()`。可以借助这套词汇阅读和编写 GPUI 布局，但传入的是带类型的 Rust 值，而非 CSS class。
+GPUI 在构建 [Element](./element) 时设置样式。`Styled` trait 提供布局、间距、颜色、边框和文字的链式方法。许多名称有意对应 <a href="https://tailwindcss.com/docs/styling-with-utility-classes" target="_blank" rel="noopener noreferrer">Tailwind CSS utility</a>：`flex items-center gap-2 px-3` 在 Rust 中写成 `.flex().items_center().gap_2().px_3()`。可以借助这套词汇阅读和编写 GPUI 布局，但传入的是带类型的 Rust 值，而非 CSS class。
 
 ```rust
 use gpui_kit::*;
@@ -344,7 +344,7 @@ Styled 调用 → StyleRefinement → 解析后的 Style
                                       └─ 颜色、文字、阴影、光标 → GPUI 绘制与交互
 ```
 
-在元素的 `request_layout` 阶段，GPUI 将 display、size、padding、gap、Flex 对齐、position 和 Grid 位置等布局字段连同子元素的布局 ID 交给 Taffy。Taffy 计算几何尺寸与位置。GPUI 随后在 `prepaint` 和 `paint` 使用所得 bounds 绘制并进行命中测试。Taffy 不实现 GPUI 的文字 shaping、hover listener、Action 或绘制。完整生命周期见 [Element](./element)，自定义绘制见 [Paint](./paint)。
+在元素的 `request_layout` 阶段，GPUI 将 display、size、padding、gap、Flex 对齐、position 和 Grid 位置等布局字段连同子元素的布局 ID 交给 Taffy。Taffy 计算几何尺寸与位置。GPUI 随后在 `prepaint` 和 [Paint](./paint) 阶段使用所得 bounds 绘制并进行命中测试。Taffy 不实现 GPUI 的文字 shaping、hover listener、[Action](./action) 或绘制。
 
 `StyleRefinement` 本身也实现了 `Styled`，因此状态样式闭包可以使用相同的 utility 方法。`.hover(|style| style.bg(...))` 这样的交互变体属于 `InteractiveElement`，需要交互型元素。条件构建方法有所不同：`.when(...)` 在构建本帧时决定是否追加链式步骤。
 

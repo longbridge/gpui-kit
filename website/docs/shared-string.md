@@ -8,7 +8,7 @@ order: -2.45
 
 Small costs add up. In UI code, a cost built into an ordinary component call is repeated wherever that component appears and redraws. GPUI and GPUI Kit treat that as an API design constraint: retained text should be easy to own and pass around without making every caller copy its full contents. `SharedString` is one concrete choice that gives component authors this default.
 
-`SharedString` is GPUI's owned, immutable text type. GPUI Kit uses it for labels, placeholders, titles, and other text that an element or component keeps after the builder call returns. Use it by default for **UI text** held across [render](./render) calls, component boundaries, or task closures. Borrow temporarily with `&str`. Import `SharedString` with `use gpui_kit::*;` or `use gpui_kit::SharedString;`.
+`SharedString` is GPUI's owned, immutable text type. GPUI Kit uses it for labels, placeholders, titles, and other text that an element or component keeps after the builder call returns. Use it by default for **UI text** held across [render](./render) calls, component boundaries, or task closures. Borrow temporarily with [`&str`](https://doc.rust-lang.org/std/primitive.str.html). Import `SharedString` with `use gpui_kit::*;` or `use gpui_kit::SharedString;`.
 
 ## Small costs add up
 
@@ -18,7 +18,7 @@ This default avoids repeated **full text** copies, not all work: cloning inline 
 
 ## Why use it instead of `String` for UI text?
 
-Consider a title passed from a workspace View through a header and tab component to a final label. Each layer that keeps the title after its caller returns needs a valid ownership choice: move the value and give up the caller's copy, borrow it with a lifetime tied to the source, or clone it. Rust's `String` owns a mutable buffer, so cloning a nonempty `String` at each boundary creates independent buffers and copies the title's bytes. Rebuilding the title with `format!` at each layer repeats formatting and allocation instead.
+Consider a title passed from a workspace View through a header and tab component to a final label. Each layer that keeps the title after its caller returns needs a valid ownership choice: move the value and give up the caller's copy, borrow it with a lifetime tied to the source, or clone it. Rust's [`String`](https://doc.rust-lang.org/std/string/struct.String.html) owns a mutable buffer, so cloning a nonempty `String` at each boundary creates independent buffers and copies the title's bytes. Rebuilding the title with `format!` at each layer repeats formatting and allocation instead.
 
 `SharedString` represents that immutable value in a form that is cheap to clone. The workspace can retain one value while each layer takes an owned clone; for long heap-backed text, the clones share its bytes instead of copying them at every handoff. This is why GPUI and GPUI Kit expose it in many text properties and accept `impl Into<SharedString>` at component boundaries. The tradeoff is immutability: changing the text means constructing a new value. Sharing helps while the value stays unchanged; it is not a promise of zero cost.
 
@@ -132,7 +132,7 @@ let heading = Label::new(title.clone());
 let button = Button::new("open-downloads").label(title);
 ```
 
-For text kept in a view and used on many renders, store one `SharedString` in the view and clone it into each element:
+For text kept in a view and used on many renders, store one `SharedString` in the view and clone it into each element. The view's [Context](./context) is available alongside `Window` in `Render::render`:
 
 ```rust
 use gpui_kit::*;
@@ -175,7 +175,7 @@ To reproduce the count, scan `*.rs` named struct bodies under those four `src` d
 
 ## Related: `Cow<str>`
 
-Rust's `Cow<'a, str>` can avoid a copy by borrowing existing text, but its `Borrowed` variant is tied to the source's lifetime. Its `Owned` variant contains a `String`; cloning a nonempty owned value copies those bytes. Calling `to_mut()` on a borrowed value copies it into an owned `String` before editing:
+Rust's [`Cow<'a, str>`](https://doc.rust-lang.org/std/borrow/enum.Cow.html) can avoid a copy by borrowing existing text, but its `Borrowed` variant is tied to the source's lifetime. Its `Owned` variant contains a `String`; cloning a nonempty owned value copies those bytes. Calling `to_mut()` on a borrowed value copies it into an owned `String` before editing:
 
 ```rust
 use std::borrow::Cow;

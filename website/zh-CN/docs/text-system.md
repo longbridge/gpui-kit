@@ -42,7 +42,7 @@ GPUI Kit 的 [TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/
 
 ## 塑形单行文本
 
-`TextRun::len` 以 **UTF-8 字节**计数，所有 run 合起来应覆盖要绘制的文本。每个 run 指定其字节范围内的字体、颜色、背景、下划线和删除线。下面的例子沿用 [GPUI Kit Plot 标签](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/label.rs)的做法：
+`TextRun::len` 以 **UTF-8 字节**计数，所有 run 合起来应覆盖要绘制的文本。每个 run 指定其字节范围内的字体、颜色、背景、下划线和删除线。文本参数是 [SharedString](./shared-string)。下面的例子沿用 [GPUI Kit Plot 标签](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/label.rs)的做法：
 
 ```rust
 use gpui_kit::*;
@@ -65,7 +65,7 @@ let width = shape_label(label, color, window).width();
 
 `shape_line(text, font_size, runs, force_width)` 返回 `ShapedLine`：`width()` 是塑形后的 advance，结果还包含原文、带位置的字形、字体 ID、ascent、descent 和装饰 run。除非自定义布局有意指定宽度，否则 `force_width` 传 `None`。`shape_line` 只处理**一行**，不要传入包含 `\n` 的文本。只需要几何信息时，`layout_line(&str, size, runs, force_width)` 返回 `Arc<LineLayout>`；如果还要绘制，直接选用 `shape_line`。
 
-`LineLayout::x_for_index(byte_index)`、`index_for_x(x)` 与 `closest_index_for_x(x)` 可用于光标和命中测试。索引是原始文本中的 UTF-8 字节位置，不是 Unicode 字符数，也不是视觉列数。选择边界应保持在合法文本边界上；测量、光标定位和绘制应使用同一份塑形布局，结果才能一致。
+`LineLayout::x_for_index(byte_index)`、`index_for_x(x)` 与 `closest_index_for_x(x)` 可用于光标和命中测试。索引是原始文本中的 UTF-8 字节位置，不是 Unicode 字符数，也不是视觉列数。x 位置使用 GPUI 的[逻辑像素几何](./geometry)。选择边界应保持在合法文本边界上；测量、光标定位和绘制应使用同一份塑形布局，结果才能一致。
 
 ## 多行换行
 
@@ -74,6 +74,8 @@ let width = shape_label(label, color, window).width();
 普通段落应交给 GPUI 文本元素或 GPUI Kit `TextView`。只有现有元素无法满足字形级定位、绘制或命中测试需求时，自定义元素才应直接塑形。
 
 ## 对齐 GPUI 渲染阶段
+
+GPUI 的[渲染流程](./render)分开布局、prepaint 和 paint；自定义文本工作应放在对应阶段：
 
 | 阶段 | 文本工作 | 原因 |
 | --- | --- | --- |

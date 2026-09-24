@@ -45,7 +45,7 @@ performance problem.
 The obvious way to make a frame counter read "as fast as this UI can go" is to
 keep asking for frames, the way an in-game counter does. That is not free here.
 Marking any view dirty schedules a **window** draw, and GPUI re-renders every
-view in that window outside an [`Entity::cached`] boundary — so each frame the
+view in that window outside an [`Entity::cached`] boundary (see [View Cache](./view-cache)) — so each frame the
 HUD asked for would be a full layout and [paint](./paint) of the application, and the CPU
 row underneath would be reporting work the HUD itself was causing. On the story
 gallery's Table page that was ~62% CPU with nobody touching the window.
@@ -135,4 +135,4 @@ frame trace unless something else is holding it. The next render starts it all
 again from an empty sampler: the trace buffer was cleared with the switch, and
 the frames the window drew meanwhile were nobody's to report.
 
-[`Entity::cached`]: https://docs.rs/gpui/latest/gpui/struct.Entity.html
+[`Entity::cached`]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.Entity.html#method.cached

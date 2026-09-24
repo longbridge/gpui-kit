@@ -38,7 +38,7 @@ sudo apt install -y gcc g++ clang libfontconfig-dev libwayland-dev \
 
 ## Rust and Cargo
 
-We use Rust programming language to build the `gpui-component` library. Make sure you have Rust and Cargo installed on your system.
+GPUI Kit is written in Rust. Install Rust and Cargo using the [official Rust installer](https://rust-lang.org/tools/install/) before adding the dependency.
 
 - Rust 1.90 or later
 - Cargo (comes with Rust)
@@ -51,7 +51,7 @@ gpui-kit = "0.6"
 
 `gpui-kit` depends on the matching GPUI crates for you, so your application never lists GPUI itself. `use gpui_kit::*;` is GPUI, and the layers are reachable by name: `gpui_kit::component` (the styled components), `gpui_kit::base`, `gpui_kit::assets` and `gpui_kit::platform`.
 
-Continue with [Getting Started](./getting-started) to create a Window and render your first View.
+Continue with [Getting Started](./getting-started) to create a [Window](./window) and render your first [View](./render).
 
 For experimental iOS support and Swift UIView embedding, see [Mobile](/docs/mobile). Mobile uses `gpui-pre-mobile` and a different application bootstrap from the desktop setup above.
 
@@ -66,7 +66,7 @@ Debug mode and keeps its normal debugging workflow.
 This setting does **not** make compilation faster. Compiling the optimized
 dependencies can take longer, especially on the first build; the benefit is
 better runtime performance while developing and running the application.
-Package profiles only take effect in the root `Cargo.toml` of your application
+Cargo's [package profile overrides](https://doc.rust-lang.org/cargo/reference/profiles.html#overrides) only take effect in the root `Cargo.toml` of your application
 or workspace:
 
 ```toml

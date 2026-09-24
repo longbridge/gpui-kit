@@ -6,7 +6,7 @@ order: -2.1
 
 # Entity
 
-当一份状态需要由多个 View、handler 或异步任务共同使用时，把它放进 GPUI 提供的 `Entity<T>`。例如，Chat 可以用 `Entity<Chat>` 保存消息；任何持有其 clone 的代码都能通过 GPUI Context 访问同一份 Chat。
+当一份状态需要由多个 View、handler 或异步任务共同使用时，把它放进 GPUI 提供的 [`Entity<T>`][Entity]。例如，Chat 可以用 `Entity<Chat>` 保存消息；任何持有其 clone 的代码都能通过 GPUI [Context](./context) 访问同一份 Chat。
 
 使用 `cx.new` 创建 Entity，使用 `read` 读取状态，使用 `update` 修改状态。当 `Chat` 实现 [`Render`](./render) 时，`Entity<Chat>` 还可以直接作为 View 渲染；不需要渲染时，它就是一个共享状态 model。
 
@@ -207,7 +207,7 @@ clone `Entity<T>` 会创建另一个强句柄，并让 Entity 继续存活。若
                  └──────强引用────────┘
 ```
 
-外部 owner 被释放后，环中的强句柄仍然存在，所以两个 Entity 都不会释放。把父级句柄传给子级临时使用没有问题；当子级长期保存强句柄、父级又长期持有子级时才形成环。反向引用应保存为 `WeakEntity<ParentView>`：
+外部 owner 被释放后，环中的强句柄仍然存在，所以两个 Entity 都不会释放。把父级句柄传给子级临时使用没有问题；当子级长期保存强句柄、父级又长期持有子级时才形成环。反向引用应保存为 [`WeakEntity<ParentView>`][WeakEntity]：
 
 ```rust
 use gpui_kit::*;
@@ -285,7 +285,7 @@ cx.spawn(async move |_, cx| {
 
 它们是两种独立的信号：`notify()` 不会发送 Event，`emit(event)` 本身也不会通知渲染者。某次状态变化如果既需要重绘，又需要语义事件，可以明确地各触发一次。观察者可以用收到的句柄读取目标 Entity，但仍须避免重入回调链中已被借用的 Entity。
 
-应把 `observe` 或 `subscribe` 返回的 `Subscription` 保存在发起订阅的 Entity 上，放在 `_subscription` 字段或 `_subscriptions: Vec<Subscription>` 字段中：
+应把 `observe` 或 `subscribe` 返回的 [`Subscription`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Subscription.html) 保存在发起订阅的 Entity 上，放在 `_subscription` 字段或 `_subscriptions: Vec<Subscription>` 字段中：
 
 ```rs
 enum ChatEvent {
@@ -357,7 +357,7 @@ impl Workspace {
 - 把 View 级 Subscription 放在同一个 View 的 `_subscription` 或 `_subscriptions` 字段中；
 - View 被 drop 时，一并释放订阅及 callback 捕获的资源。
 
-如果集成代码必须在状态被 drop 前立即执行操作，GPUI 还提供了 `cx.on_release(...)` 来观察当前 Entity，以及 `cx.observe_release(...)` 来观察另一个 Entity。它们返回的 Subscription 也应该只保存到 release callback 所需的生命周期结束为止。
+如果集成代码必须在状态被 drop 前立即执行操作，[Context](./context) 还提供了 `cx.on_release(...)` 来观察当前 Entity，以及 `cx.observe_release(...)` 来观察另一个 Entity。它们返回的 Subscription 也应该只保存到 release callback 所需的生命周期结束为止。
 
 ## Entity 身份与 View 缓存
 
@@ -365,6 +365,6 @@ impl Workspace {
 
 对于父级频繁重绘、自己却经常不变的昂贵子 View，GPUI 还提供 `child.clone().cached(style)` 和等价的 `AnyView::cached(style)`。父级必须保留同一个子 Entity，`style` 也必须给出确定的外层尺寸，因为 GPUI 在布局阶段可能跳过内容的 render。未变化的缓存子级可以重放先前的子树；通知、边界尺寸或继承的绘图上下文变化则会触发重建。缓存边界与元素状态、虚拟列表的区别，见 [View Cache](./view-cache)。
 
-[Entity]: https://docs.rs/gpui/latest/gpui/struct.Entity.html
-[WeakEntity]: https://docs.rs/gpui/latest/gpui/struct.WeakEntity.html
+[Entity]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.Entity.html
+[WeakEntity]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.WeakEntity.html
 [Event]: /zh-CN/docs/event

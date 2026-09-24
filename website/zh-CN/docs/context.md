@@ -20,6 +20,8 @@ GPUI callback 中经常出现 `window: &mut Window, cx: &mut Context<Self>`。�
 
 `Context<T>` 会解引用为 `App`，所以拿到 `cx: &mut Context<T>` 时已经可以调用 App API，不需要再传一个 `&mut App`。它还知道当前是哪一个 Entity；普通的 `App` 不知道。`Window` 必须单独传入，因为同一个 Entity 可能显示在不同窗口中，而纯数据更新也可能不属于任何窗口。Window 还管理由 [ElementId](./element_id) 标识的窗口内状态。异步 context 是句柄，不是可以长期持有的 `&mut App` 或 `&mut Window` 引用。
 
+下文使用的 Entity 专用方法定义在 [GPUI `Context<T>` 源码](https://github.com/zed-industries/zed/blob/main/crates/gpui/src/app/context.rs)中。
+
 GPUI Kit 应用只依赖 `gpui-kit`，通过 `use gpui_kit::*;` 导入 GPUI API。创建基于组件的 View 之前调用 `gpui_kit::init(cx)`。应用级 [Global](./global) 属于 `App`；组件或功能 View 的持久状态放在 [Entity] 中。
 
 ## `window, cx` 与只有 `cx`
@@ -29,7 +31,7 @@ View 的状态属于 Entity，窗口交互属于 Window。一个方法既要修�
 ```rust
 fn focus_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     self.composer_open = true;
-    self.input_focus.focus(window);
+    self.input_focus.focus(window, cx);
     cx.notify();
 }
 ```
@@ -62,7 +64,7 @@ fn clear_messages(&mut self, cx: &mut Context<Self>) {
 
 ## 需要访问 View 的 callback
 
-GPUI Kit `Button` 的点击 handler 接收 `(&ClickEvent, &mut Window, &mut App)`，不会直接收到 View 的 `&mut Self`。在 View 的渲染代码中用 `cx.listener` 创建 handler；GPUI 随后会更新该 View，并把它的 `Context<Self>` 交给内层闭包。组件还提供键盘与[无障碍](./accessibility)行为：
+GPUI Kit `Button` 的点击 handler 接收 `(&ClickEvent, &mut Window, &mut App)`，不会直接收到 View 的 `&mut Self`。在 View 的[渲染](./render)代码中用 `cx.listener` 创建 handler；GPUI 随后会更新该 View，并把它的 `Context<Self>` 交给内层闭包。组件还提供键盘与[无障碍](./accessibility)行为：
 
 ```rust
 use gpui_kit::*;
@@ -170,7 +172,7 @@ cx.spawn_in(window, async move |this, cx| {
     let message = send_to_server().await?;
     this.update_in(cx, |chat, window, cx| {
         chat.messages.push(message);
-        chat.input_focus.focus(window);
+        chat.input_focus.focus(window, cx);
         cx.notify();
     })?;
     anyhow::Ok(())
@@ -184,7 +186,7 @@ cx.spawn_in(window, async move |this, cx| {
 
 ## Task 生命周期
 
-GPUI 的 `Task` handle 被 drop 时，任务会取消：
+GPUI 的 [Task](./task) handle 被 drop 时，任务会取消：
 
 ```rs
 struct Chat {

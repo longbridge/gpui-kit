@@ -6,7 +6,7 @@ order: -2.631
 
 # Task
 
-In GPUI, a `Task<T>` is the handle to work scheduled by a GPUI executor. Its most important property is **ownership**: dropping the handle cancels unfinished work. A task runs only while its handle is stored, awaited, or explicitly detached. This makes the task's lifetime part of the View's state design, not just a detail of Rust's `Future` trait.
+In GPUI, a [`Task<T>`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Task.html) is the handle to work scheduled by a GPUI executor. Its most important property is **ownership**: dropping the handle cancels unfinished work. A task runs only while its handle is stored, awaited, or explicitly detached. This makes the task's lifetime part of the View's state design, not just a detail of Rust's `Future` trait.
 
 The **spawn API** chooses where work runs; the returned `Task` controls its lifetime. A foreground task can re-enter GPUI through an async [Context](./context) and update an [Entity]. A background task runs away from the UI thread and returns owned data; it cannot mutate Entity state there.
 
@@ -19,7 +19,7 @@ The **spawn API** chooses where work runs; the returned `Task` controls its life
 
 ## Start work from an owner
 
-Start a task in a named method, event handler, or lifecycle hook. Do not start one unconditionally in `render`: every render could launch another copy. Extract the input before spawning, so no borrow of `self` or `cx` crosses an `await`.
+Start a task in a named method, event handler, or lifecycle hook. Do not start one unconditionally in [`render`](./render): every render could launch another copy. Extract the input before spawning, so no borrow of `self` or `cx` crosses an `await`.
 
 ```rust
 struct SearchView {
@@ -106,7 +106,7 @@ The background closure has no `App`, `Window`, or `Context<T>`. Clone only the i
 
 ## A GPUI Kit streaming example
 
-GPUI Kit's streaming Markdown example uses two owned tasks and a channel. A background producer generates text chunks. A foreground receiver owns the Entity update, checks a replay ID, and pushes accepted chunks into `TextViewState`. The View keeps both `Task<()>` handles, so closing it cancels the stream; starting another replay replaces the producer task. The replay ID also rejects chunks already queued by an older producer.
+GPUI Kit's [streaming Markdown example](https://github.com/longbridge/gpui-kit/blob/main/examples/stream-markdown/src/main.rs) uses two owned tasks and a channel. A background producer generates text chunks. A foreground receiver owns the Entity update, checks a replay ID, and pushes accepted chunks into `TextViewState`. The View keeps both `Task<()>` handles, so closing it cancels the stream; starting another replay replaces the producer task. The replay ID also rejects chunks already queued by an older producer.
 
 ```rust
 // From the View's receiver task:

@@ -32,7 +32,7 @@ fn paint_triangle(bounds: Bounds<Pixels>, color: Hsla, window: &mut Window) {
 
 ### From SVG paths to GPUI
 
-`PathBuilder` was introduced to GPUI for candlestick chart drawing needs. It uses Lyon's SVG path builder internally, so its segment vocabulary is familiar from SVG. If you know SVG `d` commands, the segment concepts transfer directly:
+`PathBuilder` was introduced to GPUI for candlestick chart drawing needs. It uses Lyon's SVG path builder internally, so its segment vocabulary is familiar from SVG. If you know [SVG `d` path commands](https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Attribute/d), the segment concepts transfer directly:
 
 | SVG path | GPUI builder | Meaning |
 | --- | --- | --- |
@@ -105,7 +105,7 @@ if let Ok(path) = builder.build() {
 
 For a small decorative shape, `canvas(prepaint, paint)` is enough. [GPUI Kit's Plot line](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/shape/line.rs) builds a stroke from data points and paints it into the chart. The [input element](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) uses paths for selections and text range decorations; it paints blinking carets as quads. Both use `PathBuilder`, but the input must also coordinate text metrics and hit testing.
 
-The scene can clip drawing with `window.with_content_mask`. Clipping, input hitboxes, and accessibility are separate contracts: a painted path is not automatically clickable or announced to assistive technology. A chart with point interaction must also establish hitboxes or an equivalent pointer mapping, and a semantic chart needs an accessible representation.
+The scene can clip drawing with `window.with_content_mask`. Clipping, input hitboxes, and [accessibility](./accessibility) are separate contracts: a painted path is not automatically clickable or announced to assistive technology. A chart with point interaction must also establish hitboxes or an equivalent pointer mapping, and a semantic chart needs an accessible representation.
 
 ## Avoid unnecessary tessellation
 
@@ -117,11 +117,11 @@ The drawing primitives are the same, but each GPUI Kit feature keeps its work at
 
 ### A model-owned gauge: an Entity keeps geometry
 
-A gauge driven by an `Entity` can keep separate `Option<Path<Pixels>>` values for its background, value arc, and needle. On a value change, clear only the value arc and needle. On an origin change, clear all paths if they contain absolute window coordinates. A `canvas` callback can build missing paths from its bounds during prepaint, then paint them with current theme colors. This keeps geometry invalidation separate from color selection. This pattern fits a view that already owns model subscriptions; avoid calling `cx.notify()` unconditionally from prepaint, because that can schedule an extra render every frame.
+A gauge driven by an [Entity](./entity) can keep separate `Option<Path<Pixels>>` values for its background, value arc, and needle. On a value change, clear only the value arc and needle. On an origin change, clear all paths if they contain absolute window coordinates. A `canvas` callback can build missing paths from its bounds during prepaint, then paint them with current theme colors. This keeps geometry invalidation separate from color selection. This pattern fits a view that already owns model subscriptions; avoid calling `cx.notify()` unconditionally from prepaint, because that can schedule an extra render every frame.
 
 ### Plot: a value-like element uses keyed window state
 
-[`Line`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/shape/line.rs) is recreated as a value during render. Storing a cache on that value would lose it on the next frame. [`PathCaches::for_paint`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/path_cache.rs) instead uses `window.use_keyed_state` under the plot's current element ID. `Line::paint_cached` hashes the projected points, stroke width, and curve style; `PathCache::get` tessellates only when the key changes. It builds the path relative to zero, then clones and translates cached vertices to this frame's origin, so scrolling does not trigger tessellation, although translation still costs work. Dots remain cheap quads painted at the new origin. This pattern depends on stable element identity and benefits from using the same slot for the same series across frames; reordering series by index causes avoidable cache misses when their shape keys differ.
+This cache depends on a stable [ElementId](./element_id) across frames. [`Line`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/shape/line.rs) is recreated as a value during render. Storing a cache on that value would lose it on the next frame. [`PathCaches::for_paint`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/path_cache.rs) instead uses `window.use_keyed_state` under the plot's current element ID. `Line::paint_cached` hashes the projected points, stroke width, and curve style; `PathCache::get` tessellates only when the key changes. It builds the path relative to zero, then clones and translates cached vertices to this frame's origin, so scrolling does not trigger tessellation, although translation still costs work. Dots remain cheap quads painted at the new origin. This pattern depends on stable element identity and benefits from using the same slot for the same series across frames; reordering series by index causes avoidable cache misses when their shape keys differ.
 
 ### Input: a text editor owns the whole Element pipeline
 

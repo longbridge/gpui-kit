@@ -15,10 +15,11 @@ GPUI Kit 是一个基于 GPUI 的综合性 Rust 桌面应用开发框架。
 
 使用 `gpui-component` 可以获得统一、成熟的视觉风格；基于 `gpui-base` 则可以复用可靠的行为与基础设施，同时创建并拥有自己的设计系统。本节文档介绍 GPUI Kit 的入门配置、公共设计与编码指南，以及应用开发。各层 API 请参阅 [GPUI Component](/zh-CN/component)、[GPUI Base](/zh-CN/base) 与 [GPUI Shell](/zh-CN/shell)。
 
-阅读 [Action](./action)，理解 GPUI 的 Focus、`track_focus`、Key Context、KeyBinding 与命令派发；再阅读 [Event](./event)，理解类型化通知以及 Action 与 Event 的关系。
+阅读 [Action](./action)，理解 GPUI 的 Focus、`track_focus`、Key Context 与命令派发；[KeyBinding](./keybinding) 介绍 Action 的绑定与当前快捷键的展示。再阅读 [Event](./event)，理解类型化通知以及 Action 与 Event 的关系。
 
 理解核心渲染模型，可先阅读 [Entity](./entity) 和 [Context](./context)，
-再阅读 [RenderOnce](./render-once) 与 [ElementId](./element_id)。
+再阅读 [Render](./render)、[RenderOnce](./render-once) 与 [ElementId](./element_id)。
+[Style](./style) 介绍 GPUI 的 fluent 样式方法；[Element](./element) 与 [Paint](./paint) 解释更底层的绘制。
 [Task](./task) 介绍 callback 返回后仍继续运行的工作。
 
 ## 特性

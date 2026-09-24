@@ -8,6 +8,8 @@ order: -2.62
 
 An **Action** represents an operation the application can perform. A shortcut, menu item, command palette, button, or another Action handler can all dispatch the same typed value. GPUI routes it to the part of the [Element](./element) tree that owns the command. An [Event](./event) serves the other direction: it reports something that happened after state changed.
 
+The [GPUI Action source](https://github.com/zed-industries/zed/blob/main/crates/gpui/src/action.rs) defines the macro, trait, and registry described here.
+
 This page explains command definition and dispatch. See [KeyBinding](./keybinding) for key notation, context matching, and keymap setup.
 
 ## One command, several entry points
@@ -174,7 +176,7 @@ h_flex()
 window.dispatch_action(Box::new(OpenConversation { conversation_id }), cx);
 ```
 
-The route is **Sidebar → Workspace**. `Workspace` then updates Chat through the [Entity](./entity) API. Attaching the handler only to Chat would not work for an Action dispatched from Sidebar because Chat is a sibling, outside Sidebar's dispatch path. For commands that must target a specific rendered region regardless of current focus, retain that region's `FocusHandle` and use its `dispatch_action` method.
+The route is **Sidebar → Workspace**. `Workspace` then updates Chat through the [Entity](./entity) API. Attaching the handler only to Chat would not work for an Action dispatched from Sidebar because Chat is a sibling, outside Sidebar's dispatch path. For commands that must target a specific rendered region regardless of current focus, retain that region's `FocusHandle` and use its `dispatch_action` method. See [Coding Guides](./coding-guides) for larger feature ownership patterns.
 
 GPUI Kit uses the same pattern in its Command palette and Popup Menu: a selected item supplies a boxed Action, then the window dispatches it. The Command palette also keeps its own focus handle, key context, and navigation Action handlers on the palette element. The framework component owns selection and keyboard mechanics; the application owner handles the command's meaning.
 

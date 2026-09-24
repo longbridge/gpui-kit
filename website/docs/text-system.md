@@ -42,7 +42,7 @@ The displayed result depends on installed families and platform font fallback. D
 
 ## Shape one line
 
-`TextRun::len` is a **UTF-8 byte length**, and all runs together should cover the text they style. A run selects the font, color, background, underline, and strikethrough for its byte range. This example follows the [GPUI Kit Plot label](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/label.rs):
+`TextRun::len` is a **UTF-8 byte length**, and all runs together should cover the text they style. A run selects the font, color, background, underline, and strikethrough for its byte range. The text argument is a [SharedString](./shared-string). This example follows the [GPUI Kit Plot label](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/label.rs):
 
 ```rust
 use gpui_kit::*;
@@ -65,7 +65,7 @@ let width = shape_label(label, color, window).width();
 
 `shape_line(text, font_size, runs, force_width)` returns a `ShapedLine`: its `width()` is the shaped advance, and it carries the original text, positioned glyphs, font IDs, ascent, descent, and decoration runs. Pass `None` for `force_width` unless a custom layout intentionally supplies a width. `shape_line` is for **one** line; do not pass text with `\n`. `layout_line(&str, size, runs, force_width)` returns an `Arc<LineLayout>` when geometry is enough, but `shape_line` is the direct choice if it will be painted.
 
-`LineLayout::x_for_index(byte_index)`, `index_for_x(x)`, and `closest_index_for_x(x)` support cursor and hit-test calculations. Indices refer to UTF-8 bytes in the original text, not Unicode scalar values or visual columns. Keep selection boundaries on valid text boundaries, and use the same shaped layout for measurement, caret placement, and painting so they agree.
+`LineLayout::x_for_index(byte_index)`, `index_for_x(x)`, and `closest_index_for_x(x)` support cursor and hit-test calculations. Indices refer to UTF-8 bytes in the original text, not Unicode scalar values or visual columns. Their x positions use GPUI's [logical pixel geometry](./geometry). Keep selection boundaries on valid text boundaries, and use the same shaped layout for measurement, caret placement, and painting so they agree.
 
 ## Wrap multiple lines
 
@@ -74,6 +74,8 @@ Use `window.text_system().shape_text(text, font_size, runs, wrap_width, line_cla
 For ordinary paragraphs, let a GPUI text element or GPUI Kit `TextView` perform this work. A custom element should only shape text directly when it needs glyph-aware placement, drawing, or hit testing that existing elements cannot supply.
 
 ## Match GPUI's rendering phases
+
+GPUI's [rendering pipeline](./render) separates layout, prepaint, and paint. Place custom text work in the matching phase:
 
 | Phase | Text work | Why |
 | --- | --- | --- |

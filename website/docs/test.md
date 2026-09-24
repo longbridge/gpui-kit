@@ -10,8 +10,8 @@ example: false
 This guide covers testing GPUI Kit applications and GPUI behavior. Choose the test level from the behavior you need to verify:
 
 - Use ordinary Rust `#[test]` for pure data transformations, validation and state transitions.
-- Use `#[gpui_kit::test]` and `TestAppContext` for entities, actions, subscriptions and async tasks, creating a window when needed.
-- For UI integration tests, render the production application view, dispatch events through `gpui_kit::test`, and check control state, layout and the application result.
+- Use `#[gpui_kit::test]` and `TestAppContext` for [entities](./entity), [actions](./action), [subscriptions](./event) and async [tasks](./task), creating a window when needed.
+- For UI integration tests, render the production application view, dispatch [events](./event) through `gpui_kit::test`, and check control state, layout and the application result.
 - Use the separate offscreen renderer for pixel checks, and retain native-window and platform integration tests for those behaviors.
 
 GPUI Kit exposes its types and `#[gpui_kit::test]` through the Kit root; applications do not need an additional GPUI dependency. In test modules, import the types you use explicitly: `use gpui_kit::*;` also imports the GPUI `test` macro and can shadow Rust’s ordinary `#[test]`. The complete example below uses explicit imports.

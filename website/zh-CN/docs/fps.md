@@ -39,7 +39,7 @@ fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoEl
 
 要让帧计数器读出"这个 UI 能跑多快"，最直接的做法是像游戏里的帧数器那样不停地要帧。但在
 这里这件事并不免费：标脏任意一个 view 排的是一次**窗口**绘制，GPUI 会重新 render 该窗口中
-除 [`Entity::cached`] 边界后面之外的所有 view —— 于是 HUD 每要一帧，代价就是应用的一次
+除 [`Entity::cached`] 边界（见 [View Cache](./view-cache)）后面之外的所有 view —— 于是 HUD 每要一帧，代价就是应用的一次
 完整 layout 与 [paint](./paint)，而下面那行 CPU 报的正是 HUD 自己制造出来的开销。在 story gallery 的
 Table 页上，这意味着没人碰窗口时也有约 62% 的 CPU。
 
@@ -105,4 +105,4 @@ Table 页上，这意味着没人碰窗口时也有约 62% 的 CPU。
 frame trace 也会放掉（除非别处还持有）。下一次渲染再从一个空的采样器重新开始：trace 缓冲区随开关被清空了，
 中间那些帧也本来就不归谁报告。
 
-[`Entity::cached`]: https://docs.rs/gpui/latest/gpui/struct.Entity.html
+[`Entity::cached`]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.Entity.html#method.cached

@@ -26,7 +26,7 @@ Command owner 处理 Action 并改变状态，再发出 Event，让 owner 或 se
 
 ## 定义并发出 Event
 
-先定义 Entity 可以报告的事实，并实现 `EventEmitter`：
+先定义 Entity 可以报告的事实，并实现 [`EventEmitter`](https://docs.rs/gpui-pre/0.3.6/gpui/trait.EventEmitter.html)：
 
 ```rust
 #[derive(Clone, Debug)]
@@ -101,7 +101,7 @@ Event 只发送给 source Entity 的订阅者。移动 Focus 或改变 Key Conte
 
 `MouseDownEvent`、`MouseUpEvent`、`MouseMoveEvent`、`ScrollWheelEvent`、`KeyDownEvent` 和 `KeyUpEvent` 表示原始输入，与上文由 `EventEmitter` 发出的业务通知不同。普通 `div()` 可以用 `.on_mouse_down(MouseButton::Left, ...)`、`.on_key_down(...)` 注册处理函数；其 `InteractiveElement` 实现负责标准命中区域和派发机制。需要快捷键或菜单入口的命令使用 [Action](./action)；需要位置、按钮、修饰键或手势位移时使用原始输入事件。原始输入 callback 不会自动创建 Entity Event，除非 owner 主动调用 `cx.emit(...)`。
 
-例如，GPUI Kit 的 TimeField 把方向键绑定为自己 Key Context 中的 **Action**，用 `KeyDownEvent` 处理数字输入，并且只有时间值发生变化时才发出 `TimeFieldEvent::Change`。Owner 可以订阅这个 Event，无须知道变化来自键盘还是其他控件。匹配的 KeyBinding 可能先消费按键，使原始 `on_key_down` handler 收不到它；命令应交给 Action，而不是再写一套重复的原始按键 handler。数字输入 handler 的结构如下：
+例如，[GPUI Kit 的 TimeField](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/time_field.rs) 把方向键绑定为自己 Key Context 中的 **Action**，用 `KeyDownEvent` 处理数字输入，并且只有时间值发生变化时才发出 `TimeFieldEvent::Change`。Owner 可以订阅这个 Event，无须知道变化来自键盘还是其他控件。匹配的 KeyBinding 可能先消费按键，使原始 `on_key_down` handler 收不到它；命令应交给 Action，而不是再写一套重复的原始按键 handler。数字输入 handler 的结构如下：
 
 ```rust
 fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -125,7 +125,7 @@ fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Co
 
 原始输入有两个派发阶段。**键盘** listener 沿 Focus 对应的路径运行：capture 从根节点走向 focused node，bubble 从 focused node 返回根节点。**鼠标** listener 按绘制顺序注册，而不是沿祖先路径运行：capture 从后向前，bubble 从前向后。派发器会按这个顺序调用匹配类型的鼠标 listener；底层 listener 必须自行检查 hitbox，确认输入是否落在自身区域。普通 `.on_mouse_down(...)` 和 `.on_key_down(...)` callback 在 bubble 阶段运行；`.capture_any_mouse_down(...)` 是元素级的 capture 接口。
 
-编写自定义 `Element` 时，可在 `paint` 中用 `window.on_mouse_event` 注册 listener，再检查 `DispatchPhase`：
+编写自定义 [`Element`](./element#三个阶段) 时，可在 `paint` 中用 `window.on_mouse_event` 注册 listener，再检查 `DispatchPhase`：
 
 ```rust
 window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
@@ -137,7 +137,7 @@ window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
 });
 ```
 
-这里的 `Hitbox` 应在 `prepaint` 插入。listener 在 `paint` 注册，下次渲染时会重新建立。GPUI Kit 的 Carousel scroll mask 使用 capture 处理指针与滚轮手势：在 carousel 的轴上消费移动，另一方向则交给外层滚动容器。`Hitbox::is_hovered` 用于普通指针命中，`should_handle_scroll` 还会考虑滚动遮挡。普通控件优先使用元素提供的 fluent handler；需要自己的 hitbox 或阶段处理时，再使用 `window.on_mouse_event`。
+这里的 `Hitbox` 应在 `prepaint` 插入。listener 在 `paint` 注册，下次渲染时会重新建立。GPUI Kit 的 [Carousel scroll mask](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/carousel/scroll_mask.rs) 使用 capture 处理指针与滚轮手势：在 carousel 的轴上消费移动，另一方向则交给外层滚动容器。`Hitbox::is_hovered` 用于普通指针命中，`should_handle_scroll` 还会考虑滚动遮挡。普通控件优先使用元素提供的 fluent handler；需要自己的 hitbox 或阶段处理时，再使用 `window.on_mouse_event`。
 
 ### `stop_propagation` 与 `prevent_default`
 

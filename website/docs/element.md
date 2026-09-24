@@ -6,7 +6,7 @@ order: -2.7
 
 # Element
 
-An **Element** is a node in the element tree that GPUI builds for one frame. Elements perform layout, prepare hit testing, and paint pixels into a Window. GPUI drops the tree and its frame-local callbacks before the next frame, then builds a new tree from the application's current state.
+An **Element** is a node in the element tree that GPUI builds for one frame. Elements perform layout, prepare hit testing, and [paint](./paint) pixels into a Window. GPUI drops the tree and its frame-local callbacks before the next frame, then builds a new tree from the application's current state.
 
 Most application code should compose the elements provided by GPUI and GPUI Kit:
 
@@ -61,7 +61,7 @@ The tree and frame-local listeners are discarded before the next frame. `Request
 
 ### `request_layout`
 
-Register the element's `Style` and child layout nodes with `window.request_layout`. GPUI's Taffy layout engine resolves their sizes and positions after layout has been requested.
+Register the element's [Style](./style) and child layout nodes with `window.request_layout`. GPUI's Taffy layout engine resolves their sizes and positions after layout has been requested.
 
 Return a `LayoutId` and any `RequestLayoutState` needed by the later phases. Do not assume the final `Bounds` are available here.
 
@@ -147,7 +147,7 @@ The element is intentionally invisible and has no handler. A hitbox is geometry 
 
 ### Text is a specialized low-level element
 
-The `TextSystem` owns font lookup, shaping, glyph metrics, and caches. `cx.text_system()` exposes it; a window also has a window-specific text system. Text width depends on font, size, shaping, and available width, so a custom text element may need `request_measured_layout` or a measured line during layout. Its `prepaint` can then compute line geometry, selections, and hitboxes; `paint` draws the prepared text. Keep the same font parameters through measurement and paint, or caret and selection positions will drift. Use GPUI's `text(...)` and GPUI Kit's text components unless you need selection, inline objects, or a specialized editor. [GPUI Base's TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/text/text_view.rs) shows measured layout, an element-owned hitbox, and painting tied to the resolved bounds. [GPUI Kit's input element](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) shows the same pipeline for editing.
+The [TextSystem](./text-system) owns font lookup, shaping, glyph metrics, and caches. `cx.text_system()` exposes it; a window also has a window-specific text system. Text width depends on font, size, shaping, and available width, so a custom text element may need `request_measured_layout` or a measured line during layout. Its `prepaint` can then compute line geometry, selections, and hitboxes; `paint` draws the prepared text. Keep the same font parameters through measurement and paint, or caret and selection positions will drift. Use GPUI's `text(...)` and GPUI Kit's text components unless you need selection, inline objects, or a specialized editor. [GPUI Base's TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/text/text_view.rs) shows measured layout, an element-owned hitbox, and painting tied to the resolved bounds. [GPUI Kit's input element](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) shows the same pipeline for editing.
 
 ## When to implement `Element`
 
@@ -160,7 +160,7 @@ Implement `Element` when existing elements cannot express the work, for example:
 
 GPUI Kit's input element uses a custom `Element` because it must shape text, register an input handler, and paint selections and cursors. GPUI's `Svg`, `Img`, lists, and canvas use the same lifecycle. Most application UI can instead compose existing elements and convert differing branches to `AnyElement`.
 
-For a reusable UI component, start with [`RenderOnce`](./render). For stateful UI owned by an Entity, use [`Render`](./render). Drop down to `Element` only when you need to control the rendering pipeline itself.
+For a reusable UI component, start with [`RenderOnce`](./render-once). For stateful UI owned by an Entity, use [`Render`](./render). Drop down to `Element` only when you need to control the rendering pipeline itself.
 
 ### Decisions visible in GPUI Kit source
 
@@ -245,7 +245,7 @@ canvas(
 .h(px(1.))
 ```
 
-The `prepaint` result here is `Option<Path<Pixels>>`; it exists only for this frame. [GPUI Kit's dashed Separator](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/separator.rs) uses `canvas` to draw a path in its resolved bounds, and the [circular Progress](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/progress/progress_circle.rs) returns measured radii from prepaint to paint. Use this for a focused drawing callback inside `Render` or `RenderOnce`. It has no built-in children, hitbox, focus tracking, or stable Element ID. When those responsibilities need to work together, implement `Element` or compose a standard interactive element around the canvas.
+The `prepaint` result here is `Option<Path<Pixels>>`; it exists only for this frame. [GPUI Kit's dashed Separator](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/separator.rs) uses `canvas` to draw a path in its resolved bounds, and the [circular Progress](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/progress/progress_circle.rs) returns measured radii from prepaint to paint. Use this for a focused drawing callback inside `Render` or `RenderOnce`. See [Paint](./paint) for `PathBuilder`, SVG path notation, and path caching examples. It has no built-in children, hitbox, focus tracking, or stable Element ID. When those responsibilities need to work together, implement `Element` or compose a standard interactive element around the canvas.
 
 When an existing interactive element such as `div()` already provides the behavior you need, compose it. If a custom primitive needs standard interaction, embed or delegate to GPUI's `Interactivity`, as GPUI's built-in elements do. Implementing raw hitboxes and event registration yourself also makes you responsible for dispatch, clipping, cursor behavior, and accessibility.
 
@@ -253,6 +253,6 @@ When an existing interactive element such as `div()` already provides the behavi
 `Element::id()` returning an `ElementId` does more than label pixels: it creates stable identity across frames. Keep IDs unique within their nearest keyed ancestor, and do not add an ID unless the element or an attached behavior needs identity.
 :::
 
-[Element]: https://docs.rs/gpui/latest/gpui/trait.Element.html
-[IntoElement]: https://docs.rs/gpui/latest/gpui/trait.IntoElement.html
-[AnyElement]: https://docs.rs/gpui/latest/gpui/struct.AnyElement.html
+[Element]: https://docs.rs/gpui-pre/0.3.6/gpui/trait.Element.html
+[IntoElement]: https://docs.rs/gpui-pre/0.3.6/gpui/trait.IntoElement.html
+[AnyElement]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.AnyElement.html

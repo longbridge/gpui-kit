@@ -6,7 +6,7 @@ order: -2.3
 
 # Window
 
-GPUI 提供 `Window` 作为单个平台窗口的上下文。它把渲染后的 Element 树与平台输入、Focus、Action 派发、绘制和窗口控制连接起来。GPUI 只会在更新或渲染这个窗口时，把它传给 View：
+GPUI 提供 [`Window`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Window.html) 作为单个平台窗口的上下文。它把渲染后的 Element 树与[平台输入](./event#鼠标与键盘输入事件)、Focus、Action 派发、绘制和窗口控制连接起来。GPUI 只会在更新或渲染这个窗口时，把它传给 View：
 
 ```rust
 impl Render for Chat {
@@ -23,7 +23,7 @@ impl Render for Chat {
 
 应用状态应保存在 [Entity](./entity) 中。一个操作属于当前窗口，或者依赖窗口当前的交互状态时，才使用 `Window`。
 
-`App` 提供应用级服务、[全局状态](./global)和 Entity 访问。[`Context<Self>`](./context) 增加当前 Entity 的操作，包括 `cx.notify()`、listener、event 和 task。`Window` 则保存**单个**窗口的 Focus、派发、输入、元素 keyed state、测量与绘制。这些都是 callback 执行期间临时提供的上下文；稍后需要继续工作时，保存 `Entity`、`FocusHandle`、task、subscription 或 window handle，不要保存 `&mut Window` 或 `&mut Context<_>`。
+`App` 提供应用级服务、[全局状态](./global)和 Entity 访问。[`Context<Self>`](./context) 增加当前 Entity 的操作，包括 `cx.notify()`、listener、event 和 task。`Window` 则保存**单个**窗口的 Focus、派发、输入、[元素 keyed state](./element_id)、测量与绘制。这些都是 callback 执行期间临时提供的上下文；稍后需要继续工作时，保存 `Entity`、`FocusHandle`、task、subscription 或 window handle，不要保存 `&mut Window` 或 `&mut Context<_>`。
 
 ## 打开并持有窗口
 
@@ -45,7 +45,7 @@ application().run(|cx| {
 });
 ```
 
-`WindowOptions` 控制初始位置和尺寸、Focus、是否显示、窗口类型、最小尺寸等平台选项。builder 只在构造期间获得 `Window`。window handle 可供稍后的代码发起更新，但窗口关闭后，基于 handle 的更新可能失败。多窗口应用要使用目标窗口的 handle 来操作其 Focus 或几何信息；只有 Entity handle 并不能确定窗口。
+[`WindowOptions`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.WindowOptions.html) 控制初始位置和尺寸、Focus、是否显示、窗口类型、最小尺寸等平台选项。builder 只在构造期间获得 `Window`。window handle 可供稍后的代码发起更新，但窗口关闭后，基于 handle 的更新可能失败。多窗口应用要使用目标窗口的 handle 来操作其 Focus 或几何信息；只有 Entity handle 并不能确定窗口。
 
 ## Window 负责什么
 
@@ -72,7 +72,7 @@ application().run(|cx| {
 
 ## Focus 与 Action 派发
 
-Focus 属于某个具体的 Window。`window.focus(...)` 选择一个 `FocusHandle`，`window.focused(cx)` 返回当前 handle。还需通过 `.track_focus(&handle)` 将它附着到渲染后的 Element，才能在 Dispatch Path 中找到对应节点；仅创建 handle 并不会形成键盘目标。被跟踪的 handle 也不会自动进入 Tab 顺序，创建时需通过 `cx.focus_handle().tab_stop(true)` 显式加入。键盘输入随后从获得 Focus 的 Element 建立 Dispatch Path，用它匹配 KeyBinding 并派发 Action。
+Focus 属于某个具体的 Window。`window.focus(...)` 选择一个 `FocusHandle`，`window.focused(cx)` 返回当前 handle。还需通过 `.track_focus(&handle)` 将它附着到渲染后的 Element，才能在 Dispatch Path 中找到对应节点；仅创建 handle 并不会形成键盘目标。被跟踪的 handle 也不会自动进入 Tab 顺序，创建时需通过 `cx.focus_handle().tab_stop(true)` 显式加入。键盘输入随后从获得 Focus 的 Element 建立 Dispatch Path，用它匹配 [KeyBinding](./keybinding) 并派发 Action。
 
 ```rust
 fn focus_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {

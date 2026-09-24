@@ -1,16 +1,12 @@
 ---
 title: Icons & Assets
-description: 为 GPUI Component 应用配置内置图标、自定义 SVG 与资源加载方式。
+description: 为 GPUI Kit 应用配置内置图标、自定义 SVG 与资源加载方式。
 order: -7
 ---
 
-# Icon
+# Icons & Assets
 
-GPUI Component 中的 [IconName] 和 [Icon] 提供了一套可直接在 GPUI 应用中使用的图标接口。
-
-但为了尽量减小应用体积，`gpui-component` 默认 **不会内置任何图标资源**。
-
-因此仓库把图标资源拆分到了独立的 [gpui-kit-assets] crate 中。这样你可以自行决定：
+GPUI Kit 通过 `gpui_kit::assets` 和 `gpui_kit::component` 提供 [IconName] 与 [Icon]。`gpui-kit` 默认 feature 会启用这两层，但应用仍需注册 `AssetSource` 才能按路径加载图标。底层的 [gpui-kit-assets] crate 将 SVG 资源与组件代码分开，因此你可以：
 
 - 直接使用默认内置图标资源
 - 完全不引入图标资源
@@ -44,7 +40,7 @@ GPUI Component 中的 [IconName] 和 [Icon] 提供了一套可直接在 GPUI 应
 
 二进制大小不等于内存占用。按需资源借用静态字节，不复制或创建缓存；实际渲染仍有
 解析、栅格化和渲染缓存的开销。运行时共享名称查找可能保留名称映射表，Cargo 下载包
-和构建产物也仍包含完整目录。WASM 的 `Assets::new(endpoint)` 和
+和构建产物也仍包含完整目录。[WebAssembly](./webassembly) 的 `Assets::new(endpoint)` 和
 `AllAssets::new(endpoint)` 沿用按需下载的 CDN 加载器，不嵌入完整资源包。
 
 :::
@@ -65,14 +61,13 @@ GPUI Component 中的 [IconName] 和 [Icon] 提供了一套可直接在 GPUI 应
 
 ## 使用默认内置资源
 
-[gpui-kit-assets] 提供了一个默认的资源实现，包含 `crates/assets/default-icons.txt` 中列出的原有 101 个组件图标。
+`gpui_kit::assets::Assets` 是默认资源源，包含 [`default-icons.txt`](https://github.com/longbridge/gpui-kit/blob/main/crates/assets/default-icons.txt) 中列出的原有 101 个组件图标。
 
-如果要使用默认资源，需要在 `Cargo.toml` 中添加：
+在 `Cargo.toml` 中添加总入口 crate；它的默认 feature 包含 `component` 与 `assets`：
 
 ```toml
 [dependencies]
-gpui-component = { git = "https://github.com/longbridge/gpui-kit" }
-gpui-kit-assets = { git = "https://github.com/longbridge/gpui-kit" }
+gpui-kit = "0.6"
 ```
 
 然后在创建 GPUI 应用时，通过 `with_assets` 注册资源源：
@@ -99,12 +94,12 @@ let app = gpui_kit::application().with_assets(Assets);
 - 直接从 [assets] 目录拷贝需要的 SVG
 - 或按 [IconName] 的命名规则准备自己的 SVG 文件
 
-在 GPUI 应用中，通常可以结合 [rust-embed] 将这些 SVG 嵌入可执行文件，并通过 `AssetSource` 提供加载能力。
+下面的自定义资源源需要额外加入 `rust-embed = "8.7"` 依赖；用 [rust-embed] 将 SVG 嵌入可执行文件，并通过 `AssetSource` 提供加载能力。
 
 ```rs
 use gpui_kit::*;
 use gpui_kit::assets::Assets as ComponentAssets;
-use gpui_kit::component::{v_flex, IconName, Root};
+use gpui_kit::component::{v_flex, IconName};
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
 
@@ -144,7 +139,7 @@ fn main() {
     let app = gpui_kit::application().with_assets(Assets);
 
     app.run(move |cx| {
-        // We must initialize gpui_component before using it.
+        // 创建窗口和组件前，先初始化 GPUI Kit。
         gpui_kit::init(cx);
 
         gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
@@ -194,10 +189,10 @@ Button::new("search")
 
 ## 参考资源
 
-- [Lucide Icons](https://lucide.dev/) - GPUI Component 的图标集主要基于 Lucide 开源图标库
+- [Lucide Icons](https://lucide.dev/) - GPUI Kit 的图标目录主要基于 Lucide 开源图标库。
 
 [rust-embed]: https://docs.rs/rust-embed/latest/rust_embed/
-[IconName]: https://docs.rs/gpui-kit-assets/latest/gpui_kit_assets/enum.IconName.html
-[Icon]: https://docs.rs/gpui_component/latest/gpui_component/icon/struct.Icon.html
-[assets]: https://github.com/longbridge/gpui-kit/tree/main/crates/assets/assets/
-[gpui-kit-assets]: https://crates.io/crates/gpui-kit-assets
+[IconName]: https://docs.rs/gpui-kit-assets/0.6.5/gpui_kit_assets/enum.IconName.html
+[Icon]: https://docs.rs/gpui-component/0.6.5/gpui_component/struct.Icon.html
+[assets]: https://github.com/longbridge/gpui-kit/tree/main/crates/assets/assets/icons
+[gpui-kit-assets]: https://docs.rs/crate/gpui-kit-assets/0.6.5

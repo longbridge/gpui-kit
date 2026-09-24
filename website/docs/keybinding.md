@@ -28,7 +28,7 @@ fn init_keys(cx: &mut App) {
 
 Call `gpui_kit::init(cx)` once before `init_keys(cx)` and before opening windows. GPUI Kit registers its component bindings during initialization; the application can then add its own bindings in a deliberate order.
 
-Keep a [FocusHandle](./window) in the owning [Entity](./entity) and register it with the context and handler on the rendered region:
+Keep a [FocusHandle](./window) in the owning [Entity](./entity) and register it with the context and handler in its [Render](./render) implementation:
 
 ```rust
 impl Render for Editor {
@@ -97,7 +97,7 @@ With focus in an Editor inside Workspace, `CloseEditorSearch` has the more speci
 
 ## Look up a shortcut from its Action
 
-An Action is also the key for **reverse lookup**: ask the window which binding currently invokes that Action. Use the focus handle of the command's intended target when rendering a button, menu, or command palette. This matters when another control or an overlay currently owns Focus.
+An Action is also the key for **reverse lookup**: ask the window which binding currently invokes that Action. GPUI Kit's [Kbd component](../component/kbd) displays the result. Use the focus handle of the command's intended target when rendering a button, menu, or command palette. This matters when another control or an overlay currently owns Focus.
 
 ```rust
 use gpui_kit::component::kbd::Kbd;

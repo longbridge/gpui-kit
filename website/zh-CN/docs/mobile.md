@@ -6,7 +6,7 @@ order: -10
 
 # 移动端
 
-移动端支持基于 [gpui-mobile](https://github.com/itsbalamurali/gpui-mobile)，由 [itsbalamurali](https://github.com/itsbalamurali) 创建并与社区共同开发。原始移动平台的成果归功于该项目的作者和贡献者。移动平台负责 [Window](./window)、触摸输入、文本系统和 GPU 渲染表面，GPUI 与 GPUI Kit 继续管理 Rust 视图树和组件。
+移动端支持基于 [gpui-mobile](https://github.com/itsbalamurali/gpui-mobile)，由 [itsbalamurali](https://github.com/itsbalamurali) 创建并与社区共同开发。原始移动平台的成果归功于该项目的作者和贡献者。移动平台负责 [Window](./window)、触摸输入、[TextSystem](./text-system) 和 GPU 渲染表面，GPUI 与 GPUI Kit 继续管理 Rust 视图树和组件。
 
 GPUI Kit 目前使用 `gpui-pre-mobile`，这是在[兼容性 fork](https://github.com/longbridge/gpui-mobile) 中维护的临时兼容包。它基于原项目进行打包适配，用于配合 `gpui-pre` 发布 crate，并持续跟进最新的 GPUI 版本、保持集成兼容。待社区 `gpui-mobile` 完成接入、GPUI 也发布 crate 后，我们计划将本文及相关依赖更新为社区的 `gpui-mobile`。
 

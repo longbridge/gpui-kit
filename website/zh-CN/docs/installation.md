@@ -40,7 +40,7 @@ sudo apt install -y gcc g++ clang libfontconfig-dev libwayland-dev \
 
 ## Rust 和 Cargo
 
-`gpui-component` 使用 Rust 构建，因此请确保系统已经安装 Rust 和 Cargo。
+GPUI Kit 使用 Rust 开发。添加依赖前，请通过 [Rust 官方安装页面](https://rust-lang.org/tools/install/)安装 Rust 和 Cargo。
 
 - Rust 1.90 或更高版本
 - Cargo（通常随 Rust 一起安装）
@@ -53,13 +53,13 @@ gpui-kit = "0.6"
 
 `gpui-kit` 会替你引入配套的 GPUI crate，应用无需再单独声明 GPUI。`use gpui_kit::*;` 就是 GPUI 本身，各层按名访问：`gpui_kit::component`（带样式的组件）、`gpui_kit::base`、`gpui_kit::assets`、`gpui_kit::platform`。
 
-接着阅读[开始使用](./getting-started)，创建 Window 并渲染第一个 View。
+接着阅读[Getting Started](./getting-started)，创建 [Window](./window) 并渲染第一个 [View](./render)。
 
 ## 提升开发模式运行性能
 
 Rust Debug 构建下，GPUI、组件库、布局和文字渲染相关 crate 基本没有优化，因此通过 `cargo run` 启动的应用，其渲染与交互性能会明显低于 release build。下面的配置只优化这些框架依赖，应用自身代码仍保持 Debug mode，可以继续使用正常的调试流程。
 
-这个配置**不会加快编译**。启用优化后，这些依赖的编译时间可能更长，尤其是首次构建；它改善的是开发过程中运行 GPUI 应用时的性能。Package profile 只在应用或 workspace 根目录的 `Cargo.toml` 中生效：
+这个配置**不会加快编译**。启用优化后，这些依赖的编译时间可能更长，尤其是首次构建；它改善的是开发过程中运行 GPUI 应用时的性能。Cargo 的[package profile override](https://doc.rust-lang.org/cargo/reference/profiles.html#overrides) 只在应用或 workspace 根目录的 `Cargo.toml` 中生效：
 
 ```toml
 [profile.dev.package]

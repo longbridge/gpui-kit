@@ -8,6 +8,8 @@ order: -2.62
 
 **Action** 表达应用可以执行的操作。快捷键、菜单项、命令面板、按钮或另一个 Action handler 都可以派发同一个有类型的值。GPUI 把它路由到 [Element](./element) 树中负责该命令的区域。[Event](./event) 则沿另一个方向工作：状态改变后，它报告已经发生的事情。
 
+[GPUI Action 源码](https://github.com/zed-industries/zed/blob/main/crates/gpui/src/action.rs)定义了本页介绍的宏、trait 和 registry。
+
 本页说明命令定义与派发。按键写法、Context 匹配和 Keymap 设置见 [KeyBinding](./keybinding)。
 
 ## 一条命令，多个入口
@@ -174,7 +176,7 @@ h_flex()
 window.dispatch_action(Box::new(OpenConversation { conversation_id }), cx);
 ```
 
-路由是 **Sidebar → Workspace**。然后 `Workspace` 通过 [Entity](./entity) API 更新 Chat。若只把 handler 挂在 Chat 上，来自 Sidebar 的 Action 无法到达它：Chat 是 sibling，位于 Sidebar 的 Dispatch Path 之外。必须无视当前 Focus、明确派发到某个已渲染区域时，可保留该区域的 `FocusHandle`，使用它的 `dispatch_action` 方法。
+路由是 **Sidebar → Workspace**。然后 `Workspace` 通过 [Entity](./entity) API 更新 Chat。若只把 handler 挂在 Chat 上，来自 Sidebar 的 Action 无法到达它：Chat 是 sibling，位于 Sidebar 的 Dispatch Path 之外。必须无视当前 Focus、明确派发到某个已渲染区域时，可保留该区域的 `FocusHandle`，使用它的 `dispatch_action` 方法。更大的功能模块如何安排 owner，见 [Coding Guides](./coding-guides)。
 
 GPUI Kit 的 Command palette 和 Popup Menu 也使用这种方式：选中项提供一个 boxed Action，窗口再派发它。Command palette 还在自身元素上持有 Focus handle、Key Context 与导航 Action handler。框架组件负责选择与键盘交互机制；应用 owner 负责命令的具体含义。
 

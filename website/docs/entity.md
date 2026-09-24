@@ -6,7 +6,7 @@ order: -2.1
 
 # Entity
 
-When several Views, handlers, or async tasks need the same state, put that state in GPUI's `Entity<T>`. A Chat, for example, can keep its messages in an `Entity<Chat>`; any code holding a clone can access the same Chat through a GPUI context.
+When several Views, handlers, or async tasks need the same state, put that state in GPUI's [`Entity<T>`][Entity]. A Chat, for example, can keep its messages in an `Entity<Chat>`; any code holding a clone can access the same Chat through a GPUI [Context](./context).
 
 Create the Entity with `cx.new`, read it with `read`, and change it with `update`. If `Chat` implements [`Render`](./render), its `Entity<Chat>` can also render directly as a View. Otherwise, it works as a shared state model.
 
@@ -207,7 +207,7 @@ outside owner → ParentView ──strong──→ ChildView
                   └──────strong────────┘
 ```
 
-Dropping the outside owner does not remove either remaining strong handle, so neither Entity is released. Passing a parent handle to a child is safe when the child only uses it temporarily; the cycle appears when the child retains that strong handle while the parent retains the child. Store a `WeakEntity<ParentView>` for the back reference instead:
+Dropping the outside owner does not remove either remaining strong handle, so neither Entity is released. Passing a parent handle to a child is safe when the child only uses it temporarily; the cycle appears when the child retains that strong handle while the parent retains the child. Store a [`WeakEntity<ParentView>`][WeakEntity] for the back reference instead:
 
 ```rust
 use gpui_kit::*;
@@ -285,7 +285,7 @@ An Entity can coordinate with another Entity in two related ways:
 
 They are separate signals: `notify()` does not emit an Event, and `emit(event)` does not by itself notify renderers. A state change that needs both a redraw and a semantic event can do both deliberately, usually once each. An observer can inspect the observed Entity with the handle it receives; it must still avoid re-entering an Entity already borrowed by the callback chain.
 
-Store the `Subscription` returned by `observe` or `subscribe` on the subscribing Entity, in a `_subscription` field or a `_subscriptions: Vec<Subscription>` field:
+Store the [`Subscription`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Subscription.html) returned by `observe` or `subscribe` on the subscribing Entity, in a `_subscription` field or a `_subscriptions: Vec<Subscription>` field:
 
 ```rs
 enum ChatEvent {
@@ -357,7 +357,7 @@ Most cleanup should follow normal ownership:
 - keep View-level subscriptions in the same View's `_subscription` or `_subscriptions` field;
 - let dropping the View release its subscriptions and captured resources.
 
-For integration code that must react immediately before state is dropped, GPUI also provides `cx.on_release(...)` for the current Entity and `cx.observe_release(...)` for another Entity. Store those returned subscriptions for exactly as long as the release callback is needed.
+For integration code that must react immediately before state is dropped, [Context](./context) also provides `cx.on_release(...)` for the current Entity and `cx.observe_release(...)` for another Entity. Store those returned subscriptions for exactly as long as the release callback is needed.
 
 ## Entity identity and view caching
 
@@ -365,6 +365,6 @@ An `Entity<T: Render>` can be embedded directly as a child View. Its `EntityId` 
 
 For an expensive child that often stays unchanged while its parent redraws, GPUI also exposes `child.clone().cached(style)` and the equivalent `AnyView::cached(style)`. The parent must retain the same child Entity, and `style` must provide a definite outer size because GPUI can skip rendering the contents during layout. A clean cached child may replay its previous subtree; notifications, changed bounds or inherited drawing context cause a rebuild. See [View Cache](./view-cache) for the exact boundary and how it differs from element state and virtualization.
 
-[Entity]: https://docs.rs/gpui/latest/gpui/struct.Entity.html
-[WeakEntity]: https://docs.rs/gpui/latest/gpui/struct.WeakEntity.html
+[Entity]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.Entity.html
+[WeakEntity]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.WeakEntity.html
 [Event]: /docs/event

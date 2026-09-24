@@ -53,7 +53,7 @@ Theme::update(cx, |theme| {
 ```
 
 `font_size` 同时是应用缩放控制——`Root` 会调用
-`window.set_rem_size(cx.theme().font_size)`，因此基于 `rem` 的间距会跟随缩放。详见[编码指南](./coding-guides.md)。
+`window.set_rem_size(cx.theme().font_size)`，因此基于 [`rem` 的间距](./geometry)会跟随缩放。详见[编码指南](./coding-guides.md)。
 
 ## 元素级覆盖
 
@@ -66,7 +66,7 @@ div()
     .font_weight(FontWeight::BOLD)
 ```
 
-这些就是普通的 [`Styled`](https://docs.rs/gpui/latest/gpui/trait.Styled.html)
+这些就是普通的 [`Styled`](https://docs.rs/gpui-pre/0.3.6/gpui/trait.Styled.html)
 方法，与样式链的其余部分组合使用。
 
 ## 打包自定义字体
@@ -89,7 +89,7 @@ cx.text_system()
 Theme::update(cx, |theme| theme.font_family = "MyFont".into());
 ```
 
-[GPUI Kit Web 画廊](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)就这样打包 `Inter`、`JetBrains Mono`、`Noto Sans SC` 子集和 `IBM Plex Sans`。`include_bytes!` 会把这些字体字节放入 WebAssembly 下载包。画廊所用的 CJK 子集约 25 KB，源字体约 1.2 MB：已知界面文案可以制作子集来控制初始体积，但用户任意输入的文字需要另行安排字体来源。分发字体文件时还要遵守相应许可。
+[GPUI Kit Web 画廊](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)就这样打包 `Inter`、`JetBrains Mono`、`Noto Sans SC` 子集和 `IBM Plex Sans`。Rust 的 [`include_bytes!`](https://doc.rust-lang.org/std/macro.include_bytes.html) 会把这些字体字节放入 WebAssembly 下载包。画廊所用的 CJK 子集约 25 KB，源字体约 1.2 MB：已知界面文案可以制作子集来控制初始体积，但用户任意输入的文字需要另行安排字体来源。分发字体文件时还要遵守相应许可。
 
 ## 主题 JSON 配置
 
@@ -117,6 +117,8 @@ ThemeRegistry::watch_dir(PathBuf::from("./themes"), cx, move |cx| {
 完整配置说明参见 [Theme](../component/theme.md)。
 
 ## WebAssembly：选择字体来源
+
+浏览器构建及字体初始化流程见 [WebAssembly 指南](./webassembly)。
 
 GPUI 的 Web 文本系统**不会把浏览器已安装字体枚举、加载为主要字体集合**。必须在创建窗口或测量第一段文字前，注册所有需要稳定塑形的字体族，包括初始文本样式使用的字体。在这个 Web 平台上，`.SystemUIFont` 映射到 `IBM Plex Sans`；如果主题生效前可能使用这个别名，也要注册该字体。先注册字体，**之后**再应用或切换主题，并让主题的 `font_family` 与 `mono_font_family` 指向已加载的字体。主题文件若指定 Web 中不可用的桌面字体，字体解析可能失败。[画廊初始化代码](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)依次初始化 GPUI Kit、注册字体字节、应用主题，最后打开窗口；之后切换主题也会重新指定已加载的字体族。
 

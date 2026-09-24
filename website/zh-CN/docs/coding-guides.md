@@ -285,7 +285,7 @@ Base 的长期规则是：
 
 ## 主题与样式
 
-从 active theme 读取 semantic value，使用 GPUI `Styled` method 布局：
+从 active theme 读取 semantic value，使用 GPUI 的 [`Styled` method](./style) 布局：
 
 ```rust
 div()
@@ -323,7 +323,7 @@ div()
 
 ### 基础字号控制应用缩放
 
-`Root::render` 会调用 `window.set_rem_size(cx.theme().font_size)`。因此 theme base font 不只是 body typography，也是 application rem-based design scale 的 reference length。这有意沿用 Tailwind 中有价值的模型：具名 type、spacing、size step 共享一个 relative base，而不是变成互不相关的 pixel constant。
+`Root::render` 会调用 `window.set_rem_size(cx.theme().font_size)`。因此 theme base font 不只是 body typography，也是 application rem-based design scale 的 reference length。这有意沿用 [Tailwind CSS 的主题模型](https://tailwindcss.com/docs/theme)中有价值的部分：具名 type、spacing、size step 共享一个 relative base，而不是变成互不相关的 pixel constant。GPUI 方法名称与布局行为见 [Style](./style)。
 
 通过更新 base font 并 refresh window 改变 zoom：
 

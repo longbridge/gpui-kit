@@ -6,7 +6,7 @@ order: -2.625
 
 # KeyBinding
 
-**KeyBinding** 把一个或多个按键映射为有类型的 [Action](./action)。GPUI Kit 使用 GPUI 的 keymap：在应用上注册 binding，再把匹配的 Key Context 与 Action handler 放在当前 Focus 对应 [Element](./element) 的 Dispatch Path 上。[Action](./action) 介绍完整的 Focus 与派发流程；本页重点说明 binding 的写法与匹配规则。
+**KeyBinding** 把一个或多个按键映射为有类型的 [Action](./action)。GPUI Kit 使用 GPUI 的 keymap：在应用上注册 binding，再把匹配的 Key Context 与 Action handler 放在当前 Focus 对应 [Element](./element) 的 Dispatch Path 上。Action 文档介绍完整的 Focus 与派发流程；本页重点说明 binding 的写法与匹配规则。
 
 ## 绑定一条命令
 
@@ -28,7 +28,7 @@ fn init_keys(cx: &mut App) {
 
 打开窗口之前，先调用一次 `gpui_kit::init(cx)`，再调用 `init_keys(cx)`。GPUI Kit 会在初始化时注册组件 binding，应用随后可按明确顺序追加自己的 binding。
 
-拥有这段交互的 [Entity](./entity) 应保留 [FocusHandle](./window)，并在渲染区域上一起注册 handle、context 和 handler：
+拥有这段交互的 [Entity](./entity) 应保留 [FocusHandle](./window)，并在其 [Render](./render) 实现中一起注册 handle、context 和 handler：
 
 ```rust
 impl Render for Editor {
@@ -97,7 +97,7 @@ Focus 位于 Workspace 内的 Editor 时，`CloseEditorSearch` 更具体；Focus
 
 ## 从 Action 反查快捷键
 
-Action 也是**反向查找**快捷键的依据：向 window 查询当前由哪个 binding 触发该 Action。渲染按钮、菜单或命令面板时，应传入命令目标的 focus handle；因为此时可能是其他控件或 overlay 拥有 Focus。
+Action 也是**反向查找**快捷键的依据：向 window 查询当前由哪个 binding 触发该 Action。GPUI Kit 的 [Kbd 组件](../component/kbd)可显示查询结果。渲染按钮、菜单或命令面板时，应传入命令目标的 focus handle；因为此时可能是其他控件或 overlay 拥有 Focus。
 
 ```rust
 use gpui_kit::component::kbd::Kbd;

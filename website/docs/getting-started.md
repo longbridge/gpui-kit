@@ -75,7 +75,7 @@ The startup sequence has three parts:
 2. `gpui_kit::init(cx)` initializes the enabled Kit layers, including component themes. Call it once before opening application windows or constructing components.
 3. `gpui_kit::open_window(...)` creates an `Entity<HelloWorld>` from the closure and wraps it in a [`Root`](./window). `Root` owns the window's overlay layers, including dialogs, sheets and notifications. Return your content view from the closure, not another `Root`.
 
-`HelloWorld` implements GPUI's [`Render`](./render) trait. When GPUI renders the view, `render` returns an [element tree](./element): a `div` containing text and a `Button`. The button is a value built for that render; when a control needs lasting state, such as an input's text, the owning view keeps an `Entity` for that state instead of recreating it in `render`.
+`HelloWorld` implements GPUI's [`Render`](./render) trait. When GPUI renders the view, `render` returns an [element tree](./element): a `div` containing text and a `Button`. The button is a value built for that render; when a control needs lasting state, such as an input's text, the owning view keeps an [Entity](./entity) for that state instead of recreating it in `render`.
 
 ## A small mental model
 
@@ -89,7 +89,7 @@ app shell → feature (model, commands, view)
                          └─ RenderOnce values for reusable pieces
 ```
 
-As an app grows, a feature with its own workflow can keep its model and views together in a feature crate, with a private `Global` only when it needs truly application-wide state. Let features cooperate through small public interfaces, events, or `Entity` handles. This keeps reusable pieces inexpensive to adopt and gives teammates or AI agents a clear boundary for parallel changes. The [Coding Guides](./coding-guides) explain when to make that split and how to keep ownership and dependencies clear.
+As an app grows, a feature with its own workflow can keep its model and views together in a feature crate, with a private [Global](./global) only when it needs truly application-wide state. Let features cooperate through small public interfaces, events, or `Entity` handles. This keeps reusable pieces inexpensive to adopt and gives teammates or AI agents a clear boundary for parallel changes. The [Coding Guides](./coding-guides) explain when to make that split and how to keep ownership and dependencies clear.
 
 ## Where to go next
 

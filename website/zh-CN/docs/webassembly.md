@@ -95,7 +95,7 @@ make dev
 | 资源 | WASM 上的 `Assets::new(endpoint)` 通过拼接 endpoint 和 `/assets/icons/...` 按需下载 SVG。画廊的 endpoint 指向已发布站点，Vite 构建则把图标复制到 `/gallery/assets/`。 | 托管对应路径，并让 endpoint 与部署路径一致，且不要在末尾加斜杠。如果不修改 endpoint，本地画廊也会从已发布站点请求图标。文件缺失或请求失败会使图标无法显示。详见[图标与资源](./assets.md)。 |
 | 字体 | 画廊在首帧前嵌入 Inter、JetBrains Mono、Noto Sans SC 子集和 IBM Plex Sans，应用主题时重新设置字体。 | 打包初始字体；对于更大的文字集合，可考虑运行时下载字体，并验证回退与布局。详见[字体](./fonts.md)。 |
 | 键盘与输入法 | Web 平台通过一个很小的隐藏 HTML input 接收键盘与组合输入事件。画廊加载器在嵌入页面时管理焦点，并在纯触屏设备上禁用文字输入，避免 canvas 交互意外弹出键盘。 | 在目标浏览器和设备上检查焦点、Tab 顺序、组合输入和屏幕键盘。画廊的纯触屏策略只适合展示用途，不能当作通用文本输入方案。 |
-| 无障碍 | 组件可以在 GPUI 中声明 role 和 label，而此 Web 示例最终绘制在 canvas 中。 | 在浏览器中实际验证屏幕阅读器与键盘操作。不要推断原生无障碍桥接或 GPUI 属性在 Web 上有等价语义。对于目标浏览器无法暴露的内容或操作，提供可访问的 HTML 替代界面。 |
-| 原生服务 | 浏览器提供 fetch 及自身的输入、渲染 API；桌面设施的可用性和权限不同。 | 将文件对话框、剪贴板、通知等功能放在按目标平台区分的能力接口后面，并测试浏览器路径。详见[编码指南](./coding-guides.md#platform-and-capability-boundaries)。 |
+| [无障碍](./accessibility.md) | 组件可以在 GPUI 中声明 role 和 label，而此 Web 示例最终绘制在 canvas 中。 | 在浏览器中实际验证屏幕阅读器与键盘操作。不要推断原生无障碍桥接或 GPUI 属性在 Web 上有等价语义。对于目标浏览器无法暴露的内容或操作，提供可访问的 HTML 替代界面。 |
+| 原生服务 | 浏览器提供 fetch 及自身的输入、渲染 API；桌面设施的可用性和权限不同。 | 将文件对话框、剪贴板、通知等功能放在按目标平台区分的能力接口后面，并测试浏览器路径。详见[编码指南](./coding-guides.md#平台与能力边界)。 |
 
 发布流程会[构建两套 WASM 示例](https://github.com/longbridge/gpui-kit/blob/main/.github/workflows/release-website.yml)，因此这些入口也是持续维护的构建参考。WASM 构建成功只说明能够编译；交互、字形覆盖和无障碍仍需在浏览器里验证。

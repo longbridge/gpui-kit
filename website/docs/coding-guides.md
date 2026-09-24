@@ -423,7 +423,7 @@ descriptions, or close buttons—make semantic parts explicit.
 ## Theme and styling
 
 Read semantic values from the active theme and apply layout with GPUI's
-`Styled` methods:
+[`Styled` methods](./style):
 
 ```rust
 div()
@@ -499,7 +499,9 @@ its `prepare` hook before the Root surface is rendered. Therefore the theme's
 base font is not only body typography; it is the reference length for the
 application's rem-based design scale. This deliberately follows the useful part
 of Tailwind's model: named type, spacing, and size steps share one relative base
-instead of becoming unrelated pixel constants.
+instead of becoming unrelated pixel constants. See the [Tailwind CSS theme
+reference](https://tailwindcss.com/docs/theme) for that scale, and the
+[Style guide](./style) for GPUI's fluent method names and layout behavior.
 
 Change zoom by updating the base font and refreshing the window:
 

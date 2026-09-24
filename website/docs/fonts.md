@@ -61,8 +61,8 @@ Theme::update(cx, |theme| {
 ```
 
 `font_size` doubles as the application zoom control — `Root` calls
-`window.set_rem_size(cx.theme().font_size)`, so `rem`-based spacing scales
-with it. See [Coding Guides](./coding-guides.md) for details.
+`window.set_rem_size(cx.theme().font_size)`, so [`rem`-based spacing](./geometry)
+scales with it. See [Coding Guides](./coding-guides.md) for details.
 
 ## Per-element override
 
@@ -75,7 +75,7 @@ div()
     .font_weight(FontWeight::BOLD)
 ```
 
-These are ordinary [`Styled`](https://docs.rs/gpui/latest/gpui/trait.Styled.html)
+These are ordinary [`Styled`](https://docs.rs/gpui-pre/0.3.6/gpui/trait.Styled.html)
 methods, so they compose with the rest of the style chain.
 
 ## Bundling custom fonts
@@ -99,7 +99,7 @@ Then reference them by family name as usual:
 Theme::update(cx, |theme| theme.font_family = "MyFont".into());
 ```
 
-The [GPUI Kit web gallery](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs) bundles `Inter`, `JetBrains Mono`, a subset of `Noto Sans SC`, and `IBM Plex Sans` this way. `include_bytes!` puts those font bytes into the WebAssembly download. The gallery's CJK subset is about 25 KB, compared with about 1.2 MB for its source font: subset known interface copy to limit initial payload, then plan separately for arbitrary text entered by users. Font files also need their redistribution licenses.
+The [GPUI Kit web gallery](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs) bundles `Inter`, `JetBrains Mono`, a subset of `Noto Sans SC`, and `IBM Plex Sans` this way. Rust's [`include_bytes!`](https://doc.rust-lang.org/std/macro.include_bytes.html) puts those font bytes into the WebAssembly download. The gallery's CJK subset is about 25 KB, compared with about 1.2 MB for its source font: subset known interface copy to limit initial payload, then plan separately for arbitrary text entered by users. Font files also need their redistribution licenses.
 
 ## Theme JSON config
 
@@ -127,6 +127,8 @@ ThemeRegistry::watch_dir(PathBuf::from("./themes"), cx, move |cx| {
 See [Theme](../component/theme.md) for the full config reference.
 
 ## WebAssembly: choose a font supply strategy
+
+See the [WebAssembly guide](./webassembly) for the browser build and its font setup.
 
 GPUI's Web text system does **not enumerate or load the browser's installed fonts** as its main font collection. Register every family that must be shaped reliably, including the family used by the initial text style, before creating a window or measuring its first text. On this Web platform, `.SystemUIFont` maps to `IBM Plex Sans`; if that alias can be used before the theme applies, register that family too. Apply or change the theme **after** registration and keep its `font_family` and `mono_font_family` pointed at loaded families. A theme file naming an unavailable desktop font can otherwise fail font resolution. The [gallery initialization](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs) follows this order: initialize GPUI Kit, register font bytes, apply the theme, then open the window; later theme changes reassert its loaded families.
 

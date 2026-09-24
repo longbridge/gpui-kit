@@ -6,7 +6,7 @@ order: -2.632
 
 # Global
 
-`Global` marks a Rust type that GPUI can store once per [`App`](./context). It is useful for a setting or service shared by several features and windows. The value is keyed by its concrete Rust type, so `AppSettings` and `Theme` occupy different slots. `Global` is an empty marker trait with a `'static` bound; it does not make the value a View or create an event stream by itself.
+`Global` marks a Rust type that GPUI can store once per [`App`](./context). It is useful for a setting or service shared by several features and windows. The value is keyed by its concrete Rust type, so `AppSettings` and [`Theme`](../component/theme) occupy different slots. `Global` is an empty marker trait with a `'static` bound; it does not make the value a View or create an event stream by itself.
 
 ```rust
 use gpui_kit::*;
@@ -18,7 +18,7 @@ struct AppSettings {
 impl Global for AppSettings {}
 ```
 
-The slot belongs to this `App`, not to a particular `Window` or `Entity`. Initialize it once at application startup, before Views read it. A second `set_global` for the same type replaces the previous value; it does not merge fields.
+The slot belongs to this `App`, not to a particular [`Window`](./window) or [`Entity`](./entity). Initialize it once at application startup, before Views read it. A second `set_global` for the same type replaces the previous value; it does not merge fields.
 
 ## Read and change a global
 
@@ -44,13 +44,13 @@ cx.update_global::<AppSettings, _>(|settings, _cx| {
 });
 ```
 
-`Context<T>` can call these application APIs because it dereferences to `App`. Code outside an Entity, such as application initialization, receives `&mut App` directly.
+[`Context<T>`](./context) can call these application APIs because it dereferences to `App`. Code outside an Entity, such as application initialization, receives `&mut App` directly.
 
 ## App scope and Window scope
 
 Choose a global when all windows should see the same value: for example, an application preference, a theme, or a shared service handle. Keep focus, input dispatch, bounds, and other window-specific behavior in [Window](./window). A global is one slot for the entire app; putting a separate selection for each window into one global makes window ownership and cleanup harder.
 
-Keep a feature's business state in an [Entity](./entity) owned by that feature's crate or view. Reserve `Global` for services, settings, and coordination genuinely shared across the application; difficulty passing data between modules is not a reason to move a large business collection into an app-wide slot. When features need to collaborate, pass a lightweight Entity handle where the ownership boundary permits it, or use an explicit interface, command, or event. The [Coding Guides](./coding-guides) explain how to keep each feature's model and workflow behind its module boundary.
+Keep a feature's business state in an Entity owned by that feature's crate or view. Reserve `Global` for services, settings, and coordination genuinely shared across the application; difficulty passing data between modules is not a reason to move a large business collection into an app-wide slot. When features need to collaborate, pass a lightweight Entity handle where the ownership boundary permits it, or use an explicit interface, command, or event. The [Coding Guides](./coding-guides) explain how to keep each feature's model and workflow behind its module boundary.
 
 GPUI Kit's `Theme` illustrates application-wide ownership. After `gpui_kit::init(cx)`, components read the active theme through `cx.theme()`. GPUI Kit also keeps derived theme data in sync for its lower layers and refreshes windows when the theme changes. Use `Theme::change(...)` for a mode change or `Theme::update(cx, |theme| { … })` for an edit; a raw `Theme::global_mut(cx)` edit does not perform that synchronization or refresh every window. This is a theme-specific rule on top of GPUI's ordinary `Global` behavior.
 

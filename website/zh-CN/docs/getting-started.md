@@ -75,7 +75,7 @@ fn main() {
 2. `gpui_kit::init(cx)` 初始化启用的 Kit 层，包括组件主题。只调用一次，并且要先于打开应用窗口或构造组件。
 3. `gpui_kit::open_window(...)` 从闭包创建 `Entity<HelloWorld>`，再用 [`Root`](./window) 包裹它。`Root` 管理窗口的浮层，包括对话框、抽屉和通知。闭包返回内容视图，不要再自行返回一个 `Root`。
 
-`HelloWorld` 实现 GPUI 的 [`Render`](./render) trait。GPUI 渲染视图时，`render` 返回[元素树](./element)：一个包含文字和 `Button` 的 `div`。按钮是在本次渲染中构建的值；如果控件需要持久状态，比如输入框文字，所属视图应保存对应的状态 `Entity`，不要在 `render` 中重新创建。
+`HelloWorld` 实现 GPUI 的 [`Render`](./render) trait。GPUI 渲染视图时，`render` 返回[元素树](./element)：一个包含文字和 `Button` 的 `div`。按钮是在本次渲染中构建的值；如果控件需要持久状态，比如输入框文字，所属视图应保存对应的状态 [Entity](./entity)，不要在 `render` 中重新创建。
 
 ## 一个简短的心智模型
 
@@ -89,7 +89,7 @@ fn main() {
                         └─ RenderOnce 值组成可复用部分
 ```
 
-应用增长后，拥有独立流程的功能可以把 model 和 View 放在同一个 feature crate 内；只有需要真正面向整个应用的状态时，才在其中使用私有 `Global`。功能之间通过小型公开接口、event 或 `Entity` handle 协作。这样可复用部分容易接入，团队成员或 AI 代理并行修改时也有清晰边界。何时拆分以及如何确定所有权和依赖方向，详见[编码指南](./coding-guides)。
+应用增长后，拥有独立流程的功能可以把 model 和 View 放在同一个 feature crate 内；只有需要真正面向整个应用的状态时，才在其中使用私有 [Global](./global)。功能之间通过小型公开接口、event 或 `Entity` handle 协作。这样可复用部分容易接入，团队成员或 AI 代理并行修改时也有清晰边界。何时拆分以及如何确定所有权和依赖方向，详见[编码指南](./coding-guides)。
 
 ## 接下来读什么
 

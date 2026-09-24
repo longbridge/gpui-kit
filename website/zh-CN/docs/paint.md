@@ -32,7 +32,7 @@ fn paint_triangle(bounds: Bounds<Pixels>, color: Hsla, window: &mut Window) {
 
 ### 从 SVG Path 迁移
 
-`PathBuilder` 最初是为 K 线图的绘制需求引入 GPUI 的。它内部使用 Lyon 的 SVG path builder，因此路径段词汇与 SVG 接近。熟悉 SVG `d` 命令的人，可以直接迁移路径段的概念：
+`PathBuilder` 最初是为 K 线图的绘制需求引入 GPUI 的。它内部使用 Lyon 的 SVG path builder，因此路径段词汇与 SVG 接近。熟悉 [SVG `d` 路径命令](https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Attribute/d)的人，可以直接迁移路径段的概念：
 
 | SVG Path | GPUI builder | 含义 |
 | --- | --- | --- |
@@ -105,7 +105,7 @@ if let Ok(path) = builder.build() {
 
 [GPUI Kit Plot 的折线](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/shape/line.rs) 从数据点构建描边路径；[输入框的底层 Element](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) 用 Path 绘制选区与文本范围装饰，而闪烁光标用 quad 绘制。两者都使用 `PathBuilder`，但输入框还必须协调文字度量和命中测试。
 
-可以用 `window.with_content_mask` 限制绘制区域。绘制、输入 hitbox 与无障碍语义彼此独立：画出图形不会自动使它可点击，也不会自动让辅助技术读到它。交互图表还需建立命中区域或指针坐标映射；有语义的数据还需提供无障碍表示。路径三角化有成本，点和尺寸没变时不要重复构建；如果路径存的是窗口绝对坐标，窗口内位置变化时必须更新缓存。简单矩形则优先使用 `paint_quad` 或带样式的 `div()`。
+可以用 `window.with_content_mask` 限制绘制区域。绘制、输入 hitbox 与[无障碍语义](./accessibility)彼此独立：画出图形不会自动使它可点击，也不会自动让辅助技术读到它。交互图表还需建立命中区域或指针坐标映射；有语义的数据还需提供无障碍表示。路径三角化有成本，点和尺寸没变时不要重复构建；如果路径存的是窗口绝对坐标，窗口内位置变化时必须更新缓存。简单矩形则优先使用 `paint_quad` 或带样式的 `div()`。
 
 ## GPUI Kit 的三种状态归属
 
@@ -113,11 +113,11 @@ if let Ok(path) = builder.build() {
 
 ### 模型驱动的仪表：Entity 保留几何
 
-由 Entity 驱动的仪表可以分别保存背景弧线、数值弧线和指针三个 `Option<Path<Pixels>>`。数值变化时只清除后两者；若 Path 使用窗口绝对坐标，origin 变化时清除全部。`canvas` 的 prepaint callback 根据 bounds 构建缺失路径，paint callback 用当前主题色绘制。这样几何失效与颜色选择彼此独立。已有模型订阅的 View 适合持有这些缓存，但不要在每次 prepaint 都无条件调用 `cx.notify()`，否则可能每帧额外安排一次 render。
+由 [Entity](./entity) 驱动的仪表可以分别保存背景弧线、数值弧线和指针三个 `Option<Path<Pixels>>`。数值变化时只清除后两者；若 Path 使用窗口绝对坐标，origin 变化时清除全部。`canvas` 的 prepaint callback 根据 bounds 构建缺失路径，paint callback 用当前主题色绘制。这样几何失效与颜色选择彼此独立。已有模型订阅的 View 适合持有这些缓存，但不要在每次 prepaint 都无条件调用 `cx.notify()`，否则可能每帧额外安排一次 render。
 
 ### Plot：每帧重建的值使用 keyed window state
 
-[`Line`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/shape/line.rs) 是 render 时创建的值；如果缓存存在它身上，下一帧就会丢失。[`PathCaches::for_paint`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/path_cache.rs) 在当前 Plot 的 Element ID 下使用 `window.use_keyed_state`。`Line::paint_cached` 把投影后的点、描边宽度和曲线样式组成 shape key；`PathCache::get` 仅在 key 改变时重新三角化。路径以零原点构建，再克隆缓存顶点并平移到当前帧的 origin，所以滚动不会迫使曲线重新三角化，但平移本身仍有成本。数据点则用成本较低的 quad 在新 origin 绘制。这个模式要求 Element ID 稳定；同一个 series 在各帧使用同一个 slot 能提高缓存命中率。若系列按下标重排且 shape key 不同，会造成原本可避免的缓存失效。
+缓存依赖跨帧稳定的 [ElementId](./element_id)。[`Line`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/shape/line.rs) 是 render 时创建的值；如果缓存存在它身上，下一帧就会丢失。[`PathCaches::for_paint`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/path_cache.rs) 在当前 Plot 的 Element ID 下使用 `window.use_keyed_state`。`Line::paint_cached` 把投影后的点、描边宽度和曲线样式组成 shape key；`PathCache::get` 仅在 key 改变时重新三角化。路径以零原点构建，再克隆缓存顶点并平移到当前帧的 origin，所以滚动不会迫使曲线重新三角化，但平移本身仍有成本。数据点则用成本较低的 quad 在新 origin 绘制。这个模式要求 Element ID 稳定；同一个 series 在各帧使用同一个 slot 能提高缓存命中率。若系列按下标重排且 shape key 不同，会造成原本可避免的缓存失效。
 
 ### Input：文本编辑器统筹整个 Element 管线
 

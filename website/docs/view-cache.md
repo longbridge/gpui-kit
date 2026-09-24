@@ -13,7 +13,7 @@ There is no public type named `ViewCache` to construct. The view-cache API in cu
 | Mechanism | Reuses or avoids | Lifetime and owner |
 | --- | --- | --- |
 | `Entity::cached(style)` | A clean view's render, child layout/prepaint, and paint work | GPUI's window cache, keyed by the entity view and its element path |
-| `Window::use_keyed_state` | Small state or computed data used by a rebuilt element | Window element state under a stable `ElementId` |
+| [`Window::use_keyed_state`](./window) | Small state or computed data used by a rebuilt element | Window element state under a stable [`ElementId`](./element_id) |
 | A model-owned cache | A derived value, measurement, or drawing resource | An owning `Entity<T>`, with application-defined invalidation |
 | `VirtualList` | Building offscreen rows | Its visible range; a separate scroll handle keeps scroll position |
 
@@ -49,7 +49,7 @@ impl Render for Workspace {
 }
 ```
 
-Create `panel` when constructing `Workspace`, such as with `cx.new(...)`, and retain it in the struct. Creating a fresh entity inside `render` gives it a new identity and loses both its state and its warm cache. The `style` argument is the cached view's **outer layout contract**. GPUI lays out that box before deciding whether to reuse its contents; it cannot ask an unrendered subtree for an intrinsic size. Give the box a definite size from the parent (`size_full()` in a bounded parent, or explicit dimensions). For content-sized views, embed the entity normally with `.child(self.panel.clone())`.
+Create `panel` when constructing `Workspace`, such as with `cx.new(...)` (see [Context](./context)), and retain it in the struct. Creating a fresh entity inside `render` gives it a new identity and loses both its state and its warm cache. The `style` argument is the cached view's **outer layout contract**. GPUI lays out that box before deciding whether to reuse its contents; it cannot ask an unrendered subtree for an intrinsic size. Give the box a definite size from the parent (`size_full()` in a bounded parent, or explicit dimensions). For content-sized views, embed the entity normally with `.child(self.panel.clone())`.
 
 `AnyView::cached(style)` has the same behavior when a parent stores a type-erased panel, as GPUI Kit's dock does. [`RenderOnce`](./render-once) values and arbitrary `ViewElement`s cannot opt into this API: they have no entity notification contract to invalidate a frozen subtree.
 
@@ -67,13 +67,13 @@ For a hit, the entity must remain clean, and the cached view's **bounds, content
 | The cached box resizes, clips differently, or inherits a different text style | GPUI misses this cache entry and rebuilds it. |
 | The child is removed or its identity/path changes | Its old cached subtree cannot be used at the new position. |
 
-Keep state mutations in event handlers or tasks and call `cx.notify()` on the affected entity when its visible output changes. If the child's output depends on a [Global](./global), observe that global and notify the child; changing a global by itself does not dirty cached readers. If it depends on another entity, use an observation or another explicit invalidation path. Do not assume that a parent re-render alone will refresh a clean cached child. Use `window.refresh()` for an intentional full refresh, not as a normal state-update mechanism.
+Keep state mutations in event handlers or [tasks](./task) and call `cx.notify()` on the affected entity when its visible output changes. If the child's output depends on a [Global](./global), observe that global and notify the child; changing a global by itself does not dirty cached readers. If it depends on another entity, use an observation or another explicit invalidation path. Do not assume that a parent re-render alone will refresh a clean cached child. Use `window.refresh()` for an intentional full refresh, not as a normal state-update mechanism.
 
 Caching has a scope: it can skip work *inside* the child boundary, but the window still draws a frame and the parent still runs as needed. The first draw and every cache miss pay the ordinary render/layout/paint cost. Use it where a measured subtree is expensive and often stays clean while surrounding content changes.
 
 ## Element state is a different cache
 
-GPUI recreates value-like elements on subsequent renders. If an element needs a little state across consecutive frames, `Window::use_keyed_state` stores an `Entity<S>` under the current element path plus a supplied key. It also observes that state entity and notifies the current View when the state changes. The state survives while that path is accessed on successive frames, including frames where a cached subtree replays its element-state accesses; it is released when the path disappears and no other strong handle keeps it alive. `Window::use_state` uses a call-site key, which is suitable only where that location uniquely identifies the state. An [`ElementId`](./element_id) derived from stable domain data matters for repeated or reorderable items: changing an ID resets the state; reusing one for unrelated siblings risks collision.
+GPUI recreates value-like elements on subsequent renders. If an element needs a little state across consecutive frames, `Window::use_keyed_state` stores an `Entity<S>` under the current element path plus a supplied key. It also observes that state entity and notifies the current View when the state changes. The state survives while that path is accessed on successive frames, including frames where a cached subtree replays its element-state accesses; it is released when the path disappears and no other strong handle keeps it alive. `Window::use_state` uses a call-site key, which is suitable only where that location uniquely identifies the state. An `ElementId` derived from stable domain data matters for repeated or reorderable items: changing an ID resets the state; reusing one for unrelated siblings risks collision.
 
 GPUI Kit's [`Plot` path cache](../component/plot) is a concrete example. A plot and each `Line` are rebuilt as values, so a path held on a `Line` would disappear with that value. `PathCaches::for_paint("lines", window, cx)` stores caches in keyed window state under the plot's element ID. A `ShapeKey` covers projected points and geometry-affecting stroke settings; `PathCache::get` tessellates only when that key changes. The path is built relative to zero and translated to the current origin for painting, so moving a chart can reuse the geometry. A color change can be applied while painting without rebuilding unchanged path geometry.
 

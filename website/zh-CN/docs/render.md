@@ -6,7 +6,7 @@ order: -2.5
 
 # Render
 
-`Render` 连接持久存在的 [`Entity<T>`](./entity) 与它当前描述的界面。GPUI 需要某个 View 的元素树时，会调用 `T::render`。Entity 保留数据和 identity；返回的元素则描述本次渲染的布局、外观与 handler。面板、页面、编辑器等需要拥有可变状态、订阅或子 Entity 的 View，适合实现 `Render`。
+`Render` 连接持久存在的 [`Entity<T>`](./entity) 与它当前描述的界面。GPUI 需要某个 View 的[元素树](./element)时，会调用 `T::render`。Entity 保留数据和 identity；返回的元素则描述本次渲染的布局、外观与 handler。面板、页面、编辑器等需要拥有可变状态、订阅或子 Entity 的 View，适合实现 `Render`。
 
 ```rust
 use gpui_kit::*;
@@ -100,7 +100,7 @@ chat.update(cx, |chat, cx| {
 
 `notify` 使正在展示该 Entity 的窗口失效，并把通知排给观察者。GPUI 会安排后续渲染，不会在 `notify` 这一行同步调用 `render`。同一个 View 若展示在多个活动窗口，可能让各窗口都失效；未受影响的 View 子树则可以复用。对于自身不渲染、但有人观察的模型 Entity，通知也有意义。
 
-Event 与通知承担不同职责：`cx.emit(event)` 向订阅者传递带类型的事实；`cx.notify()` 报告 Entity 已变化。只发送 Event 不代表读取该 Entity 的所有 View 都会重绘；通知也不携带 Event 的数据。若状态变化和事件事实都需要对外可见，可分别使用两者。
+[Event](./event) 与通知承担不同职责：`cx.emit(event)` 向订阅者传递带类型的事实；`cx.notify()` 报告 Entity 已变化。只发送 Event 不代表读取该 Entity 的所有 View 都会重绘；通知也不携带 Event 的数据。若状态变化和事件事实都需要对外可见，可分别使用两者。
 
 一个 View 读取另一个 Entity 的状态时，要明确谁拥有数据、谁需要失效。若另一个 Entity 作为子 View 渲染，其自身 `notify` 可以使该子 View 失效。若父 View 把别的 Entity 的值复制到自己的输出中，应观察源 Entity，并在这些值变化时调用父 View 的 `cx.notify()`。不要假设保留状态的子 View 只能靠父 View 重渲染才能变化。
 

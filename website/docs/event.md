@@ -26,7 +26,7 @@ The command owner handles the Action and changes its state. It then emits an Eve
 
 ## Define and emit an Event
 
-Define the facts an Entity can report and implement `EventEmitter`:
+Define the facts an Entity can report and implement [`EventEmitter`](https://docs.rs/gpui-pre/0.3.6/gpui/trait.EventEmitter.html):
 
 ```rust
 #[derive(Clone, Debug)]
@@ -101,7 +101,7 @@ Use both when a command produces a fact other parts of the application need to o
 
 `MouseDownEvent`, `MouseUpEvent`, `MouseMoveEvent`, `ScrollWheelEvent`, `KeyDownEvent`, and `KeyUpEvent` describe raw input. They are distinct from the typed `EventEmitter` notifications above. A normal `div()` can register `.on_mouse_down(MouseButton::Left, ...)` or `.on_key_down(...)`; its `InteractiveElement` implementation handles the underlying hitbox and dispatch registration. Use [Action](./action) for an operation that needs a shortcut or menu entry, and raw events when positions, buttons, modifiers, or gesture deltas matter. Raw input callbacks do not create a typed entity Event unless the owning entity calls `cx.emit(...)`.
 
-For example, GPUI Kit's TimeField binds arrow-key **Actions** inside its own Key Context, handles a typed `KeyDownEvent` for digit input, and emits `TimeFieldEvent::Change` only after the time value changes. Its owner can subscribe to that event without knowing whether the change came from a key or another control. A matching KeyBinding can consume a key before a raw `on_key_down` handler receives it, so commands belong in Actions rather than duplicate raw key handlers. A digit handler follows this shape:
+For example, [GPUI Kit's TimeField](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/time_field.rs) binds arrow-key **Actions** inside its own Key Context, handles a typed `KeyDownEvent` for digit input, and emits `TimeFieldEvent::Change` only after the time value changes. Its owner can subscribe to that event without knowing whether the change came from a key or another control. A matching KeyBinding can consume a key before a raw `on_key_down` handler receives it, so commands belong in Actions rather than duplicate raw key handlers. A digit handler follows this shape:
 
 ```rust
 fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -125,7 +125,7 @@ fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Co
 
 Raw input has two dispatch phases. **Keyboard** listeners follow the focused element's path: capture walks from root to focused node; bubble returns from focused node to root. **Mouse** listeners are registered in paint order rather than on that ancestry path: capture runs back to front, and bubble runs front to back. The dispatcher calls matching mouse listeners in that order; a low-level listener must check its own hitbox before acting. Normal `.on_mouse_down(...)` and `.on_key_down(...)` callbacks run in bubble; `.capture_any_mouse_down(...)` is an element-level capture hook.
 
-Custom `Element` code can register a listener during `paint` with `window.on_mouse_event` and inspect `DispatchPhase`:
+Custom [`Element`](./element#the-three-phases) code can register a listener during `paint` with `window.on_mouse_event` and inspect `DispatchPhase`:
 
 ```rust
 window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
@@ -138,7 +138,7 @@ window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
 });
 ```
 
-This listener is registered during `paint` and is replaced when the next frame is rendered. A `Hitbox` should have been inserted during `prepaint`. GPUI Kit's Carousel scroll mask uses capture for pointer and wheel gestures: it consumes movement on the carousel's axis while letting movement on the other axis reach an outer scroller. `Hitbox::is_hovered` tests pointer location; `should_handle_scroll` also accounts for scroll occlusion. Prefer fluent element handlers for ordinary controls; use `window.on_mouse_event` when building a custom Element that needs its own hitbox or phase handling.
+This listener is registered during `paint` and is replaced when the next frame is rendered. A `Hitbox` should have been inserted during `prepaint`. GPUI Kit's [Carousel scroll mask](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/carousel/scroll_mask.rs) uses capture for pointer and wheel gestures: it consumes movement on the carousel's axis while letting movement on the other axis reach an outer scroller. `Hitbox::is_hovered` tests pointer location; `should_handle_scroll` also accounts for scroll occlusion. Prefer fluent element handlers for ordinary controls; use `window.on_mouse_event` when building a custom Element that needs its own hitbox or phase handling.
 
 ### `stop_propagation` versus `prevent_default`
 

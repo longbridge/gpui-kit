@@ -6,7 +6,7 @@ order: -2.4
 
 # ElementId
 
-An `ElementId` is a **local key** for an element in GPUI's rendered tree. GPUI combines that key with the IDs of its keyed ancestors to form a `GlobalElementId`. This path lets GPUI associate interaction and element state with the same logical element when a View renders again. It also preserves node identity in the [accessibility tree](./accessibility) when the element has a role.
+An `ElementId` is a **local key** for an element in GPUI's rendered tree. GPUI combines that key with the IDs of its keyed ancestors to form a `GlobalElementId`. This path lets GPUI associate interaction and element state with the same logical element when a [View renders](./render) again. It also preserves node identity in the [accessibility tree](./accessibility) when the element has a role.
 
 An ID is not a handle to an [Entity] and is not a way to look up an element like an HTML DOM ID. Use an `Entity<T>` for shared application state. Use an `ElementId` for identity in the element tree, including keyed component state, focus or scroll behavior supplied by a component, and state retained by a custom [Element].
 
@@ -49,7 +49,7 @@ div().id("workspace")
     └── div().id(("row", 42))  → ["workspace", "archive", ("row", 42)]
 ```
 
-The two rows may share a local ID because their keyed ancestor paths differ. This diagram shows only IDs written in the example: an entity-backed View also adds its `EntityId` as a path segment, and a `RenderOnce` component adds a type-name namespace. The path is scoped to the Window's rendered tree; `GlobalElementId` is GPUI's internal path, not a process-wide string you need to construct at call sites. For a custom drawing API that needs a path for its own key, `window.with_global_id(key, |global_id, window| { … })` creates one within that callback.
+The two rows may share a local ID because their keyed ancestor paths differ. This diagram shows only IDs written in the example: an entity-backed View also adds its `EntityId` as a path segment, and a [`RenderOnce`](./render-once) component adds a type-name namespace. The path is scoped to the [Window](./window)'s rendered tree; `GlobalElementId` is GPUI's internal path, not a process-wide string you need to construct at call sites. For a custom drawing API that needs a path for its own key, `window.with_global_id(key, |global_id, window| { … })` creates one within that callback.
 
 The practical uniqueness rule is: **within the same nearest keyed ancestor, each keyed descendant branch needs a distinct ID**. An unkeyed container does not open a new namespace:
 

@@ -6,7 +6,7 @@ order: -2.61
 
 # Style
 
-GPUI styles an element where it is built. The `Styled` trait supplies chainable methods for layout, spacing, color, borders, and text. Many names deliberately correspond to [Tailwind CSS utilities](https://tailwindcss.com/docs/styling-with-utility-classes): `flex items-center gap-2 px-3` becomes `.flex().items_center().gap_2().px_3()` in Rust. This is a useful way to read and write GPUI layouts, but the values are typed Rust values rather than CSS classes.
+GPUI styles an [Element](./element) where it is built. The `Styled` trait supplies chainable methods for layout, spacing, color, borders, and text. Many names deliberately correspond to <a href="https://tailwindcss.com/docs/styling-with-utility-classes" target="_blank" rel="noopener noreferrer">Tailwind CSS utilities</a>: `flex items-center gap-2 px-3` becomes `.flex().items_center().gap_2().px_3()` in Rust. This is a useful way to read and write GPUI layouts, but the values are typed Rust values rather than CSS classes.
 
 ```rust
 use gpui_kit::*;
@@ -344,7 +344,7 @@ Styled calls → StyleRefinement → resolved Style
                                     └─ color, text, shadow, cursor → GPUI paint and interaction
 ```
 
-In an element's `request_layout` phase, GPUI passes layout fields such as display, size, padding, gap, flex alignment, position, and grid placement, together with child layout IDs, to Taffy. Taffy computes the geometry. GPUI then uses the bounds in `prepaint` and `paint` for drawing and hit testing. Taffy does not implement GPUI's text shaping, hover listeners, Actions, or painting. See [Element](./element) for the full element lifecycle and [Paint](./paint) for custom drawing.
+In an element's `request_layout` phase, GPUI passes layout fields such as display, size, padding, gap, flex alignment, position, and grid placement, together with child layout IDs, to Taffy. Taffy computes the geometry. GPUI then uses the bounds in `prepaint` and the [Paint](./paint) phase for drawing and hit testing. Taffy does not implement GPUI's text shaping, hover listeners, [Actions](./action), or painting.
 
 `StyleRefinement` itself implements `Styled`, so a state style closure can use the same utility methods. Interaction variants such as `.hover(|style| style.bg(...))` belong to `InteractiveElement`, and need an interactive element. Conditional builder calls are different: `.when(...)` chooses a chain step while this frame is built.
 

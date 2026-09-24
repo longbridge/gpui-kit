@@ -6,7 +6,7 @@ order: -2.6
 
 # RenderOnce
 
-核心区别是所有权。**`RenderOnce::render(self, ...)` 消费组件值**：父级通常在自己 render 时构造一份新的、轻量的界面描述。**`Render::render(&mut self, ...)` 借用保留的 View**，这个 View 存放在 [Entity](./entity) 中。用 `RenderOnce` 表达一次 render 所需的声明式输入；当 View 自身需要跨 render 保存状态与生命周期时，用 `Render`。`Entity<T>` 也可以只保存没有实现 `Render` 的 model 或数据；类型实现 `Render` 后，该 Entity 才是可渲染的 View。
+核心区别是所有权。**`RenderOnce::render(self, ...)` 消费组件值**：父级通常在自己 render 时构造一份新的、轻量的界面描述。**[`Render::render(&mut self, ...)`](./render) 借用保留的 View**，这个 View 存放在 [Entity](./entity) 中。用 `RenderOnce` 表达一次 render 所需的声明式输入；当 View 自身需要跨 render 保存状态与生命周期时，用 `Render`。`Entity<T>` 也可以只保存没有实现 `Render` 的 model 或数据；类型实现 `Render` 后，该 Entity 才是可渲染的 View。
 
 ```rust
 // RenderOnce

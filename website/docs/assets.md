@@ -1,16 +1,12 @@
 ---
 title: Icons & Assets
-description: Configure bundled icons and custom assets for GPUI Component applications.
+description: Configure bundled icons and custom assets for GPUI Kit applications.
 order: -7
 ---
 
 # Icons & Assets
 
-The [IconName] and [Icon] in GPUI Component provide a comprehensive set of icons and assets that can be easily integrated into your GPUI applications.
-
-But for minimal size applications, **we have not embedded any icon assets by default** in `gpui-component` crate.
-
-We split the icon assets into a separate crate [gpui-kit-assets] to allow developers to choose whether to include the icon assets in their applications or if you don't need the icons at all, you can build your own assets.
+GPUI Kit exposes [IconName] and [Icon] through `gpui_kit::assets` and `gpui_kit::component`. The default `gpui-kit` features make both available, but the application must register an `AssetSource` to load icons by path. The underlying [gpui-kit-assets] crate keeps the SVG payloads separate from the component code: register the default `Assets`, select extra icons, or provide your own source.
 
 
 :::note NOTE — Depending on the crate does not embed every icon
@@ -46,7 +42,7 @@ Binary size is not RAM usage. Selected sources borrow static bytes without a
 copy/cache; actual rendering still allocates for parsing, rasterization and
 render caches. Runtime shared-name lookup can retain a name/path table, and
 Cargo's downloaded package/build artifacts still contain the complete catalog.
-On WASM, `Assets::new(endpoint)` and `AllAssets::new(endpoint)` use the existing
+On [WebAssembly](./webassembly), `Assets::new(endpoint)` and `AllAssets::new(endpoint)` use the existing
 on-demand CDN loader instead of embedding the complete bundle.
 
 :::
@@ -69,14 +65,13 @@ explicitly register `AllAssets` to use the complete bundle.
 
 ## Use default bundled assets
 
-The [gpui-kit-assets] crate provides a default bundled assets implementation that embeds the original 101 component icons listed in `crates/assets/default-icons.txt`.
+`gpui_kit::assets::Assets` provides the default resource source with the original 101 component icons listed in [`default-icons.txt`](https://github.com/longbridge/gpui-kit/blob/main/crates/assets/default-icons.txt).
 
-To use the default bundled assets, you need to add the `gpui-kit-assets` crate as a dependency in your `Cargo.toml`:
+Add the umbrella crate to `Cargo.toml`; its default features include `component` and `assets`:
 
 ```toml
 [dependencies]
-gpui-component = { git = "https://github.com/longbridge/gpui-kit" }
-gpui-kit-assets = { git = "https://github.com/longbridge/gpui-kit" }
+gpui-kit = "0.6"
 ```
 
 Then we need call the `with_assets` method when creating the GPUI application to register the asset source:
@@ -98,18 +93,18 @@ You may have a specific set of icons that you want to use in your application, o
 
 In this case, you can build your own assets by following these steps.
 
-The [assets](https://github.com/longbridge/gpui-kit/tree/main/crates/assets/assets/) folder in source code contains all the available icons in SVG format, every file is that GPUI Component support, it matched with the [IconName] enum.
+The [assets] folder in the repository contains the complete SVG catalog corresponding to the shared [IconName] enum.
 
 You can download the SVG files you need from the [assets] folder, or you can use your own SVG files by following the [IconName] naming convention.
 
-In GPUI application, we can use the [rust-embed] crate to embed the SVG files into the application binary.
+To use the following custom source, add `rust-embed = "8.7"` to your dependencies and use [rust-embed] to bundle your own SVG files.
 
 And GPUI Application providers an `AssetSource` trait to load the assets.
 
 ```rs
 use gpui_kit::*;
 use gpui_kit::assets::Assets as ComponentAssets;
-use gpui_kit::component::{v_flex, IconName, Root};
+use gpui_kit::component::{v_flex, IconName};
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
 
@@ -149,7 +144,7 @@ fn main() {
     let app = gpui_kit::application().with_assets(Assets);
 
     app.run(move |cx| {
-        // We must initialize gpui_component before using it.
+        // Initialize GPUI Kit before creating windows and components.
         gpui_kit::init(cx);
 
         gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
@@ -200,10 +195,10 @@ loading icons, and custom icon types.
 
 ## Resources
 
-- [Lucide Icons](https://lucide.dev/) - The icon set used in GPUI Component is based on the open-source Lucide Icons library, which provides a wide range of customizable SVG icons.
+- [Lucide Icons](https://lucide.dev/) - GPUI Kit's icon catalog is based on the open-source Lucide collection.
 
 [rust-embed]: https://docs.rs/rust-embed/latest/rust_embed/
-[IconName]: https://docs.rs/gpui-kit-assets/latest/gpui_kit_assets/enum.IconName.html
-[Icon]: https://docs.rs/gpui_component/latest/gpui_component/icon/struct.Icon.html
-[assets]: https://github.com/longbridge/gpui-kit/tree/main/crates/assets/assets/
-[gpui-kit-assets]: https://crates.io/crates/gpui-kit-assets
+[IconName]: https://docs.rs/gpui-kit-assets/0.6.5/gpui_kit_assets/enum.IconName.html
+[Icon]: https://docs.rs/gpui-component/0.6.5/gpui_component/struct.Icon.html
+[assets]: https://github.com/longbridge/gpui-kit/tree/main/crates/assets/assets/icons
+[gpui-kit-assets]: https://docs.rs/crate/gpui-kit-assets/0.6.5

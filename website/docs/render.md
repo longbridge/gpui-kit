@@ -6,7 +6,7 @@ order: -2.5
 
 # Render
 
-`Render` is the boundary between a persistent [`Entity<T>`](./entity) and the UI it currently describes. GPUI calls `T::render` when it needs that View's element tree. The Entity keeps its data and identity; the returned elements describe layout, appearance, and handlers for this rendering pass. Use `Render` for a panel, page, editor, or other View that owns changing state, subscriptions, or child entities.
+`Render` is the boundary between a persistent [`Entity<T>`](./entity) and the UI it currently describes. GPUI calls `T::render` when it needs that View's [element tree](./element). The Entity keeps its data and identity; the returned elements describe layout, appearance, and handlers for this rendering pass. Use `Render` for a panel, page, editor, or other View that owns changing state, subscriptions, or child entities.
 
 ```rust
 use gpui_kit::*;
@@ -100,7 +100,7 @@ chat.update(cx, |chat, cx| {
 
 `notify` marks live windows displaying that Entity for invalidation and queues notification to observers. GPUI arranges a later rendering pass; `render` is not called synchronously at the `notify` line. A View shown in more than one live window may invalidate in each. GPUI can reuse unaffected View subtrees. Notifications are also meaningful for observed model entities that do not themselves render.
 
-An event and a notification have different jobs: `cx.emit(event)` delivers a typed fact to subscribers; `cx.notify()` reports that the Entity changed. Emitting an event alone does not mean every View that reads the Entity will redraw. Conversely, a notification does not convey an event payload. Use both when the state and the event each need to be observed.
+An [Event](./event) and a notification have different jobs: `cx.emit(event)` delivers a typed fact to subscribers; `cx.notify()` reports that the Entity changed. Emitting an event alone does not mean every View that reads the Entity will redraw. Conversely, a notification does not convey an event payload. Use both when the state and the event each need to be observed.
 
 When one View reads another Entity's state, keep ownership and invalidation explicit. If the other Entity renders as a child, its own `notify` can invalidate that child View. If the parent copies the other's values into its own output, arrange for the parent to observe the source and call the parent's `cx.notify()` when those copied values change. Avoid assuming a parent rerender is the only way a retained child can change.
 

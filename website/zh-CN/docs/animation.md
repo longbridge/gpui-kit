@@ -18,7 +18,7 @@ GPUI Kit 有三个动效层次。应按**变化中的值由谁持有**来选择�
 
 ## GPUI 元素动画
 
-`Animation::new(duration)` 创建播放一次、线性变化的动画。`AnimationExt::with_animation(id, animation, animator)` 包装一个 `IntoElement`；回调收到元素及经过 easing 映射的进度值。GPUI 在布局阶段调用它，把返回元素的样式用于当前帧，并在结束前继续请求帧。回调可修改元素支持的属性，例如透明度或变换。
+`Animation::new(duration)` 创建播放一次、线性变化的动画。`AnimationExt::with_animation(id, animation, animator)` 包装一个 `IntoElement`；回调收到元素及经过 easing 映射的进度值。GPUI 在布局阶段调用它，把返回元素的样式用于当前帧，并在结束前继续请求帧。回调可修改元素支持的属性，例如透明度或变换。包装器的播放规则可参见 [GPUI 动画源码](https://github.com/zed-industries/zed/blob/main/crates/gpui/src/elements/animation.rs)。
 
 ```rust
 use std::time::Duration;
@@ -35,7 +35,7 @@ let entering = div()
 
 通过 `gpui_kit::*`（或显式导入 trait）让 `AnimationExt` 生效。ID 标识的是动画包装元素，而不是文字或视觉属性。同一位置、同一 ID 的包装元素再次渲染时会继续已有播放；每次渲染重新构造 `Animation::new(...)` **不会**重播。需要重新入场时，把应用维护的 generation 放入 ID。移除包装元素会结束它的生命周期。一次性动画结束后，只要同一包装元素仍挂载，就保持终值。
 
-`with_easing(f)` 把归一化时间映射到动画进度。GPUI 提供 `ease_in_out`、`bounce` 等函数；自定义曲线必须返回有限数值。曲线允许超出 `0..1`，因此当样式属性的合法范围更窄时，应自行裁剪结果。`repeat()` 在本地循环；`repeat_synced()` 根据应用共享时钟循环，适合多个提示同步。`with_max_fps(rate)` 限制该动画的最高重绘频率；非正数和非有限值会被忽略。`with_animations(id, animations, |element, step, progress| ...)` 播放固定步骤链，并提供当前步骤索引。
+`with_easing(f)` 把归一化时间映射到动画进度。GPUI 提供 `ease_in_out`、`bounce` 等函数；自定义曲线必须返回有限数值。曲线允许超出 `0..1`，因此当样式属性的合法范围更窄时，应自行裁剪结果。`repeat()` 在本地循环；`repeat_synced()` 根据应用共享时钟循环，适合多个提示同步。`with_max_fps(rate)` 限制该动画的最高重绘频率；非正数和非有限值会被忽略。实际帧表现的测量方法见 [FPS](./fps)。`with_animations(id, animations, |element, step, progress| ...)` 播放固定步骤链，并提供当前步骤索引。
 
 GPUI 还提供 `AnimationExt::with_spring(id, SpringAnimation<T>, animator)`，以弹簧驱动一个元素。稳定 ID 使目标改变时仍保留位置和速度。新挂载的弹簧默认从目标值开始，除非用 `SpringAnimation::from(...)` 指定起点。弹簧只作用于一个元素时可直接使用它；若一个独立 keyed 值要驱动组合中的多个部分，Base 的 `spring` 更合适。
 
@@ -99,4 +99,4 @@ GPUI 把偏好保存在 `App` 中；`cx.reduce_motion()` 读取，`cx.set_reduce
 
 GPUI 元素动画采用前述静态端点。Base 的有限 transition、spring、keyframes、presence 和 sequence 会立即到达相应目标或最终状态，并停止请求运动帧。`MotionReveal` 只消费进度：直接使用时，应在减弱动态效果下传入端点值，或由遵守该偏好的采样器驱动。子元素测量高度发生变化时，它仍可能请求一帧。无限循环的活动状态也必须有可理解的静态表示。自定义元素若自行持有时钟，应检查 `cx.reduce_motion()`，并且只在仍有必要运动时请求帧；不要在 render 中无条件调用 `cx.notify()`、`window.refresh()` 或 `window.request_animation_frame()`。
 
-动效应用于解释出现、关闭、展开和空间连续性。当透明度或 transform 已足以说明关系时，避免大范围 layout 动画。过渡过程中也要协调键盘焦点、命中区域和语义状态；绘制位置改变本身不会向辅助技术播报新状态。
+动效应用于解释出现、关闭、展开和空间连续性。当透明度或 transform 已足以说明关系时，避免大范围 layout 动画。过渡过程中也要协调键盘焦点、命中区域和语义状态；绘制位置改变本身不会向辅助技术播报新状态。界面变化的语义处理见[无障碍指南](./accessibility)。

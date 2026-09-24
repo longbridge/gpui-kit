@@ -6,7 +6,7 @@ order: -2.6
 
 # RenderOnce
 
-The core distinction is ownership. **`RenderOnce::render(self, ...)` consumes a component value**: its parent normally constructs a fresh, lightweight description when the parent renders. **`Render::render(&mut self, ...)` borrows a retained View** stored in an [Entity](./entity). Use `RenderOnce` for declarative inputs that describe a reusable piece of UI for this render, and `Render` when a View itself must keep state and a lifecycle across renders. `Entity<T>` can also hold a model or other data that does not implement `Render`; an Entity becomes a renderable View when its type implements that trait.
+The core distinction is ownership. **`RenderOnce::render(self, ...)` consumes a component value**: its parent normally constructs a fresh, lightweight description when the parent renders. **[`Render::render(&mut self, ...)`](./render) borrows a retained View** stored in an [Entity](./entity). Use `RenderOnce` for declarative inputs that describe a reusable piece of UI for this render, and `Render` when a View itself must keep state and a lifecycle across renders. `Entity<T>` can also hold a model or other data that does not implement `Render`; an Entity becomes a renderable View when its type implements that trait.
 
 ```rust
 // RenderOnce

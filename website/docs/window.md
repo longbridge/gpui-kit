@@ -6,7 +6,7 @@ order: -2.3
 
 # Window
 
-GPUI provides `Window` as the context for one platform window. It connects the rendered Element tree to platform input, Focus, Action dispatch, drawing, and window controls. A View receives it only while GPUI is updating or rendering that window:
+GPUI provides [`Window`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Window.html) as the context for one platform window. It connects the rendered Element tree to [platform input](./event#pointer-and-keyboard-input-are-also-events), Focus, Action dispatch, drawing, and window controls. A View receives it only while GPUI is updating or rendering that window:
 
 ```rust
 impl Render for Chat {
@@ -23,7 +23,7 @@ impl Render for Chat {
 
 Keep application state in an [Entity](./entity). Use `Window` when an operation belongs to the current window or needs its current interaction state.
 
-`App` gives access to application-wide services, [globals](./global), and entities. [`Context<Self>`](./context) adds operations tied to the current Entity, including `cx.notify()`, listeners, events, and tasks. `Window` carries focus, dispatch, input, keyed element state, measurement, and drawing for **one** window. These are temporary callback contexts; store an `Entity`, `FocusHandle`, task, subscription, or window handle for later work, never `&mut Window` or `&mut Context<_>`.
+`App` gives access to application-wide services, [globals](./global), and entities. [`Context<Self>`](./context) adds operations tied to the current Entity, including `cx.notify()`, listeners, events, and tasks. `Window` carries focus, dispatch, input, [keyed element state](./element_id), measurement, and drawing for **one** window. These are temporary callback contexts; store an `Entity`, `FocusHandle`, task, subscription, or window handle for later work, never `&mut Window` or `&mut Context<_>`.
 
 ## Open and own a window
 
@@ -45,7 +45,7 @@ application().run(|cx| {
 });
 ```
 
-`WindowOptions` controls initial bounds, focus, visibility, window kind, minimum size, and other platform-facing choices. The builder receives the `Window` only for construction. A window handle lets later code request an update, but handle-based updates can fail after the window closes. In a multi-window app, use the handle for the particular window whose focus or geometry you mean; an Entity handle alone does not select a window.
+[`WindowOptions`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.WindowOptions.html) controls initial bounds, focus, visibility, window kind, minimum size, and other platform-facing choices. The builder receives the `Window` only for construction. A window handle lets later code request an update, but handle-based updates can fail after the window closes. In a multi-window app, use the handle for the particular window whose focus or geometry you mean; an Entity handle alone does not select a window.
 
 ## What belongs to Window
 
@@ -72,7 +72,7 @@ The [Dialog implementation](https://github.com/longbridge/gpui-kit/blob/main/cra
 
 ## Focus and Action dispatch
 
-Focus is local to a Window. `window.focus(...)` selects a `FocusHandle`, and `window.focused(cx)` returns the current one. Attach that handle to a rendered Element with `.track_focus(&handle)` so it has a node on the Dispatch Path; a handle alone does not create a keyboard target. A tracked handle is not automatically in Tab order: opt in with `cx.focus_handle().tab_stop(true)` when creating it. Keyboard input then uses the focused Element's Dispatch Path to match a KeyBinding and dispatch its Action.
+Focus is local to a Window. `window.focus(...)` selects a `FocusHandle`, and `window.focused(cx)` returns the current one. Attach that handle to a rendered Element with `.track_focus(&handle)` so it has a node on the Dispatch Path; a handle alone does not create a keyboard target. A tracked handle is not automatically in Tab order: opt in with `cx.focus_handle().tab_stop(true)` when creating it. Keyboard input then uses the focused Element's Dispatch Path to match a [KeyBinding](./keybinding) and dispatch its Action.
 
 ```rust
 fn focus_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {

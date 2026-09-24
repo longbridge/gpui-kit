@@ -25,14 +25,16 @@ or build your own design system on the reusable behavior and infrastructure in
 application development. For library APIs, see [GPUI Component](/component),
 [GPUI Base](/base), and [GPUI Shell](/shell).
 
-Read [Action](./action) for GPUI Focus, `track_focus`, Key Contexts,
-KeyBindings, and command dispatch. Continue with [Event](./event) for typed
+Read [Action](./action) for GPUI Focus, `track_focus`, Key Contexts, and
+command dispatch. [KeyBinding](./keybinding) explains how to bind actions and
+display the active shortcut. Continue with [Event](./event) for typed
 notifications and the relationship between Actions and Events.
 
 For the core rendering model, start with [Entity](./entity) and
-[Context](./context), then read [RenderOnce](./render-once) and
-[ElementId](./element_id). [Task](./task) covers work that continues after
-a callback returns.
+[Context](./context), then read [Render](./render), [RenderOnce](./render-once),
+and [ElementId](./element_id). [Style](./style) covers GPUI's fluent styling
+methods; [Element](./element) and [Paint](./paint) explain lower-level drawing.
+[Task](./task) covers work that continues after a callback returns.
 
 ## Features
 

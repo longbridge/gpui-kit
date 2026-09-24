@@ -6,7 +6,7 @@ order: -2.4
 
 # ElementId
 
-`ElementId` 是 GPUI 渲染树中元素的**局部 key**。GPUI 将它与带 key 的祖先元素 ID 组合，形成 `GlobalElementId`。凭借这条路径，View 再次 render 时，GPUI 能把交互和元素状态关联到同一个逻辑元素。当元素有 role 时，这条路径也让它在[无障碍树](./accessibility)中保持节点身份。
+`ElementId` 是 GPUI 渲染树中元素的**局部 key**。GPUI 将它与带 key 的祖先元素 ID 组合，形成 `GlobalElementId`。凭借这条路径，[View 再次 render](./render) 时，GPUI 能把交互和元素状态关联到同一个逻辑元素。当元素有 role 时，这条路径也让它在[无障碍树](./accessibility)中保持节点身份。
 
 ID 不是 [Entity] 的 handle，也不能像 HTML DOM ID 一样用来查找元素。共享的应用状态用 `Entity<T>`；元素树中的身份用 `ElementId`，例如组件内部按 key 保存的状态、组件提供的焦点或滚动行为，以及自定义 [Element] 保留的状态。
 
@@ -49,7 +49,7 @@ div().id("workspace")
     └── div().id(("row", 42))  → ["workspace", "archive", ("row", 42)]
 ```
 
-两个 row 可以复用局部 ID，因为它们的带 key 祖先路径不同。图中只展示手写的 ID：由 Entity 支撑的 View 还会将其 `EntityId` 加入路径，`RenderOnce` 组件则会加入类型名命名空间。这条路径属于 Window 的渲染树；`GlobalElementId` 是 GPUI 的内部路径，无须在调用处自行构造，也不是整个进程通用的字符串。若自定义绘制 API 需要为自身的 key 取得路径，可用 `window.with_global_id(key, |global_id, window| { … })` 在回调期间创建。
+两个 row 可以复用局部 ID，因为它们的带 key 祖先路径不同。图中只展示手写的 ID：由 Entity 支撑的 View 还会将其 `EntityId` 加入路径，[`RenderOnce`](./render-once) 组件则会加入类型名命名空间。这条路径属于 [Window](./window) 的渲染树；`GlobalElementId` 是 GPUI 的内部路径，无须在调用处自行构造，也不是整个进程通用的字符串。若自定义绘制 API 需要为自身的 key 取得路径，可用 `window.with_global_id(key, |global_id, window| { … })` 在回调期间创建。
 
 实际的唯一性规则是：**在同一个最近的带 key 祖先之下，各条带 key 的后代分支需要不同的 ID**。没有 key 的容器不会开辟新命名空间：
 

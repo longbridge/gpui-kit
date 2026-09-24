@@ -20,6 +20,8 @@ Start by separating the scopes:
 
 `Context<T>` dereferences to `App`, so code with `cx: &mut Context<T>` can already call App APIs and does not need a separate `&mut App`. It also knows which Entity is current; plain `App` does not. Window remains separate because the same Entity may appear in different windows, while a data-only update may not belong to any window. Window also owns per-window state keyed by [ElementId](./element_id). Async contexts are handles, not long-lived `&mut App` or `&mut Window` borrows.
 
+The [GPUI `Context<T>` source](https://github.com/zed-industries/zed/blob/main/crates/gpui/src/app/context.rs) defines the entity-specific methods used below.
+
 GPUI Kit applications depend on `gpui-kit` and import GPUI through `use gpui_kit::*;`. Call `gpui_kit::init(cx)` before creating component-backed Views. An application-wide [Global](./global) lives on `App`; a component or feature View keeps retained state in an [Entity].
 
 ## `window, cx` or only `cx`
@@ -29,7 +31,7 @@ View state belongs to its Entity, while window interaction belongs to Window. A 
 ```rust
 fn focus_input(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     self.composer_open = true;
-    self.input_focus.focus(window);
+    self.input_focus.focus(window, cx);
     cx.notify();
 }
 ```
@@ -62,7 +64,7 @@ Async code uses the corresponding `AsyncApp` or `AsyncWindowContext` to re-enter
 
 ## A callback that needs its View
 
-A GPUI Kit `Button` click handler receives `(&ClickEvent, &mut Window, &mut App)`. It does not receive the View as `&mut Self`. Build the callback with `cx.listener` while rendering a View; GPUI will update that View and pass its `Context<Self>` to the inner closure. The component also supplies keyboard and [accessibility](./accessibility) behavior:
+A GPUI Kit `Button` click handler receives `(&ClickEvent, &mut Window, &mut App)`. It does not receive the View as `&mut Self`. Build the callback with `cx.listener` while [rendering](./render) a View; GPUI will update that View and pass its `Context<Self>` to the inner closure. The component also supplies keyboard and [accessibility](./accessibility) behavior:
 
 ```rust
 use gpui_kit::*;
@@ -170,7 +172,7 @@ cx.spawn_in(window, async move |this, cx| {
     let message = send_to_server().await?;
     this.update_in(cx, |chat, window, cx| {
         chat.messages.push(message);
-        chat.input_focus.focus(window);
+        chat.input_focus.focus(window, cx);
         cx.notify();
     })?;
     anyhow::Ok(())
@@ -184,7 +186,7 @@ The `WeakEntity` may have been released, and the Window may have closed while th
 
 ## Task lifetime
 
-A GPUI `Task` is cancelled when its handle is dropped:
+A GPUI [Task](./task) is cancelled when its handle is dropped:
 
 ```rs
 struct Chat {

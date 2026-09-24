@@ -10,7 +10,7 @@ order: -12
 
 本文是一份规范性指南：**必须**表示正确性或生态约束，**应该**表示默认选择，偏离时需要有明确理由；**可以**表示可选方法。具体方法签名仍以组件 API 文档和当前源码为准。
 
-这些规则建立在 `gpui-base` 的行为能力、GPUI Component 的主题与组件体系，以及桌面平台共同的交互习惯之上。Shadcn 提供了开放代码、组合能力和可靠默认值等有益方法，但不决定 GPUI 应用的外观。发生冲突时，优先服从 GPUI 生命周期和用户熟悉的桌面交互。
+这些规则建立在 `gpui-base` 的行为能力、GPUI Component 的主题与组件体系，以及桌面平台共同的交互习惯之上。<a href="https://ui.shadcn.com/docs" target="_blank" rel="noopener noreferrer">shadcn/ui</a> 提供了开放代码、组合能力和可靠默认值等有益方法，但不决定 GPUI 应用的外观。发生冲突时，优先服从 GPUI 生命周期和用户熟悉的桌面交互。
 
 ## 设计主张
 
@@ -212,7 +212,7 @@ Medium 是生态默认值。密度应在局部上下文整体变化，而不是�
 
 良好的 `rem` 系统能在界面 zoom 时保持设计层次。成功的 zoom 不只是每个对象都变大，而是在每一档 scale 下，title/body、control/icon、inner/outer spacing、primary/secondary region 之间仍保持相同关系。
 
-GPUI Component 采用了 Tailwind 中有价值的相对 scale 思想。Theme 的 base `font_size`通过 `Root` 成为 window `rem`；`text_sm()`、`gap_2()`、`p_4()`、`h_8()`、`size_4()`等 GPUI scale helper 都以它解析。Typography、spacing、control 与 icon 因而共享同一条 zoom axis。
+GPUI Component 采用了 <a href="https://tailwindcss.com/docs/theme" target="_blank" rel="noopener noreferrer">Tailwind CSS</a> 中有价值的相对 scale 思想。Theme 的 base `font_size`通过 `Root` 成为 window `rem`；`text_sm()`、`gap_2()`、`p_4()`、`h_8()`、`size_4()`等 GPUI scale helper 都以它解析。Typography、spacing、control 与 icon 因而共享同一条 zoom axis。
 
 设计时关注比例：
 
@@ -312,7 +312,7 @@ GPUI flex child 即使设置 `flex_1()`，也可能因为长内容拒绝收缩�
 | 加载 | 保持上下文、防止重复操作，并解释较长等待 |
 | 错误 | 说明发生了什么以及如何恢复 |
 
-需要键盘访问的命令使用 GPUI 焦点系统和 `Action`。遵循熟悉的平台快捷键，在菜单或工具提示中展示，并在浮层打开或关闭后把焦点放到合理位置。
+需要键盘访问的命令使用 GPUI 焦点系统和 [Action](./action)。遵循熟悉的平台[快捷键](./keybinding)，在菜单或工具提示中展示，并在浮层打开或关闭后把焦点放到合理位置。
 
 选中状态是信息模型的一部分，不是可选润色。标签页、分段选择、可选行、筛选项与导航入口必须持续显示选中状态。拥有下拉菜单的按钮在弹出层关闭前必须保持按下或打开外观；悬停无法说明触发按钮与弹出层之间的关系。
 

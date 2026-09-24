@@ -6,7 +6,7 @@ order: -2.7
 
 # Element
 
-**Element** 是 GPUI 为当前一帧构建的 Element 树节点。Element 负责布局、准备命中测试，并把像素绘制到 Window。下一帧开始前，GPUI 会释放整棵 Element 树及其中注册的帧级 callback，再根据应用的最新状态重新构建。
+**Element** 是 GPUI 为当前一帧构建的 Element 树节点。Element 负责布局、准备命中测试，并把像素[绘制](./paint)到 Window。下一帧开始前，GPUI 会释放整棵 Element 树及其中注册的帧级 callback，再根据应用的最新状态重新构建。
 
 大多数应用代码只需要组合 GPUI 和 GPUI Kit 提供的 Element：
 
@@ -61,7 +61,7 @@ GPUI 按顺序调用 `Element` 的三个 trait 方法。第一与第二次调用
 
 ### `request_layout`
 
-通过 `window.request_layout` 注册 Element 的 `Style` 和子布局节点。GPUI 使用 Taffy 布局引擎，在所有布局请求完成后计算尺寸和位置。
+通过 `window.request_layout` 注册 Element 的 [Style](./style) 和子布局节点。GPUI 使用 Taffy 布局引擎，在所有布局请求完成后计算尺寸和位置。
 
 这个阶段返回 `LayoutId`，以及后续阶段需要的 `RequestLayoutState`。此时不要假设最终 `Bounds` 已经确定。
 
@@ -134,7 +134,7 @@ impl Element for EventSurface {
 
 ### TextSystem 与低阶文字绘制
 
-`TextSystem` 负责字体查询、字形 shaping、度量和缓存。可通过 `cx.text_system()` 获取，Window 也有针对窗口的文字系统。文字宽度受到字体、字号、shaping 和可用宽度影响，因此复杂文本 Element 可能在布局阶段使用测量闭包，在 `prepaint` 算行、选区及 hitbox，在 `paint` 绘制准备好的文字。三个阶段要使用相同字体参数，否则光标和选区会错位。普通文字应直接使用现有文字 Element；只有选区、内联对象或编辑器等需求才需要下沉。[GPUI Base TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/text/text_view.rs) 和 [GPUI Kit 输入框底层 Element](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) 分别展示这条管线在富文本和编辑器中的应用。
+[`TextSystem`](./text-system) 负责字体查询、字形 shaping、度量和缓存。可通过 `cx.text_system()` 获取，Window 也有针对窗口的文字系统。文字宽度受到字体、字号、shaping 和可用宽度影响，因此复杂文本 Element 可能在布局阶段使用测量闭包，在 `prepaint` 算行、选区及 hitbox，在 `paint` 绘制准备好的文字。三个阶段要使用相同字体参数，否则光标和选区会错位。普通文字应直接使用现有文字 Element；只有选区、内联对象或编辑器等需求才需要下沉。[GPUI Base TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/text/text_view.rs) 和 [GPUI Kit 输入框底层 Element](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) 分别展示这条管线在富文本和编辑器中的应用。
 
 ## 什么时候实现 `Element`
 
@@ -147,7 +147,7 @@ impl Element for EventSurface {
 
 GPUI Kit 的输入框使用自定义 `Element`，因为它需要对文字进行 shaping，注册输入 handler，并绘制选区和光标。GPUI 的 `Svg`、`Img`、列表和 canvas 也使用同一套生命周期。大部分应用 UI 则通过组合已有 Element 完成，只在不同分支返回不同类型时转换成 `AnyElement`。
 
-编写可复用 UI 组件时，先使用 [`RenderOnce`](./render)。编写由 Entity 持有状态的 UI 时，使用 [`Render`](./render)。只有需要直接控制渲染管线时，才下沉到 `Element`。
+编写可复用 UI 组件时，先使用 [`RenderOnce`](./render-once)。编写由 Entity 持有状态的 UI 时，使用 [`Render`](./render)。只有需要直接控制渲染管线时，才下沉到 `Element`。
 
 ### GPUI Kit 源码中的选择
 
@@ -232,7 +232,7 @@ canvas(
 .h(px(1.))
 ```
 
-这里的 prepaint 结果是 `Option<Path<Pixels>>`，只在当前帧存在。[GPUI Kit 虚线 Separator](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/separator.rs) 在 canvas 的最终 bounds 中绘制路径；[环形 Progress](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/progress/progress_circle.rs) 则把 prepaint 计算的半径交给 paint。在 `Render` 或 `RenderOnce` 中仅需添加一处绘图 callback 时使用它。`canvas` 自身没有子元素、hitbox、Focus 跟踪或稳定 Element ID；如果这些职责必须协同，应实现 `Element`，或在 canvas 外组合标准交互 Element。
+这里的 prepaint 结果是 `Option<Path<Pixels>>`，只在当前帧存在。[GPUI Kit 虚线 Separator](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/separator.rs) 在 canvas 的最终 bounds 中绘制路径；[环形 Progress](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/progress/progress_circle.rs) 则把 prepaint 计算的半径交给 paint。在 `Render` 或 `RenderOnce` 中仅需添加一处绘图 callback 时使用它。`PathBuilder`、SVG Path 写法和路径缓存的例子见 [Paint](./paint)。`canvas` 自身没有子元素、hitbox、Focus 跟踪或稳定 Element ID；如果这些职责必须协同，应实现 `Element`，或在 canvas 外组合标准交互 Element。
 
 如果 `div()` 等现有 Interactive Element 已能满足需要，直接组合它。自定义底层原语需要标准交互时，可以像 GPUI 内置 Element 一样，嵌入或委托给 GPUI 的 `Interactivity`。如果自行实现 hitbox 与输入事件注册，也要自行正确处理派发、裁剪、cursor 行为和无障碍信息。
 
@@ -240,6 +240,6 @@ canvas(
 `Element::id()` 返回 `ElementId` 不只是给像素加一个标签，它会建立跨帧的稳定 identity。ID 在最近的 keyed ancestor 中必须唯一；只有 Element 或附加行为确实需要 identity 时才添加 ID。
 :::
 
-[Element]: https://docs.rs/gpui/latest/gpui/trait.Element.html
-[IntoElement]: https://docs.rs/gpui/latest/gpui/trait.IntoElement.html
-[AnyElement]: https://docs.rs/gpui/latest/gpui/struct.AnyElement.html
+[Element]: https://docs.rs/gpui-pre/0.3.6/gpui/trait.Element.html
+[IntoElement]: https://docs.rs/gpui-pre/0.3.6/gpui/trait.IntoElement.html
+[AnyElement]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.AnyElement.html

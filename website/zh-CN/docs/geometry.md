@@ -78,7 +78,7 @@ let panel = div()
 
 ## RGBA 与 HSLA
 
-`Rgba` 保存红、绿、蓝及 alpha 通道，分量是 0 到 1 的 `f32`。`rgb(0x3366CC)` 读取六位 RGB 十六进制值，alpha 为 1；`rgba(0x3366CC80)` 读取 **RRGGBBAA** 顺序的八位值，其中 alpha 为 `128 / 255`（约 0.502）。`Hsla` 保存色相、饱和度、亮度及 alpha，分量同样归一化到 0 至 1。因此 GPUI 的 `hsla(0.6, 0.8, 0.5, 1.)` 使用色相比例，而不是角度；构造函数也会把四个输入限制在这个范围内。主题色及其交互状态默认使用 `Hsla`；需要处理 RGB 通道或读取十六进制颜色时再使用 `Rgba`。
+[`Rgba`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Rgba.html) 保存红、绿、蓝及 alpha 通道，分量是 0 到 1 的 `f32`。`rgb(0x3366CC)` 读取六位 RGB 十六进制值，alpha 为 1；`rgba(0x3366CC80)` 读取 **RRGGBBAA** 顺序的八位值，其中 alpha 为 `128 / 255`（约 0.502）。GPUI 的 [`Hsla`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Hsla.html) 保存色相、饱和度、亮度及 alpha，分量同样归一化到 0 至 1。其 `hsla(0.6, 0.8, 0.5, 1.)` 构造函数使用色相比例，而不是角度，也会把四个输入限制在这个范围内。主题色及其交互状态默认使用 `Hsla`；需要处理 RGB 通道或读取十六进制颜色时再使用 `Rgba`。
 
 ```rust
 use gpui_kit::*;

@@ -8,7 +8,7 @@ order: -2.45
 
 微小成本会累积。UI 中一次普通的组件调用所带的成本，会随组件数量和重绘次数反复出现。GPUI 和 GPUI Kit 因此把它当作 API 设计约束：长期持有的文本应易于拥有和传递，不让每位调用方都完整复制其内容。`SharedString` 就是为组件作者提供这一默认路径的具体选择。
 
-`SharedString` 是 GPUI 用于保存文本的自有、不可变类型。GPUI Kit 用它存储 label、placeholder、title 等内容；组件或元素在 builder 调用结束后仍需持有这些文本。对于跨多次 [render](./render)、组件边界或 task 闭包持有的 **UI 文本**，默认使用它。临时读取可以借用 `&str`。可以通过 `use gpui_kit::*;` 或 `use gpui_kit::SharedString;` 导入。
+`SharedString` 是 GPUI 用于保存文本的自有、不可变类型。GPUI Kit 用它存储 label、placeholder、title 等内容；组件或元素在 builder 调用结束后仍需持有这些文本。对于跨多次 [render](./render)、组件边界或 task 闭包持有的 **UI 文本**，默认使用它。临时读取可以借用 [`&str`](https://doc.rust-lang.org/std/primitive.str.html)。可以通过 `use gpui_kit::*;` 或 `use gpui_kit::SharedString;` 导入。
 
 ## 微小成本会累积
 
@@ -18,7 +18,7 @@ order: -2.45
 
 ## 为何 UI 文本优先用它而不是 `String`
 
-设想工作区 View 将标题依次传给标题栏、标签页组件，最后交给标签。每层若要在调用方返回后继续持有标题，就得遵循 Rust 的所有权规则：移动值并放弃上游那份、借用并受源数据生命周期约束，或 clone。`String` 拥有可变缓冲区；在每个边界 clone 非空 `String`，就会创建独立缓冲区并复制标题字节。若每层改用 `format!` 重新构造标题，则会反复格式化和分配。
+设想工作区 View 将标题依次传给标题栏、标签页组件，最后交给标签。每层若要在调用方返回后继续持有标题，就得遵循 Rust 的所有权规则：移动值并放弃上游那份、借用并受源数据生命周期约束，或 clone。Rust 的 [`String`](https://doc.rust-lang.org/std/string/struct.String.html) 拥有可变缓冲区；在每个边界 clone 非空 `String`，就会创建独立缓冲区并复制标题字节。若每层改用 `format!` 重新构造标题，则会反复格式化和分配。
 
 `SharedString` 以容易 clone 的形式表示这段不可变文本。工作区可以保留一份值，每层再取得自有的 clone；对于堆上长文本，这些 clone 共享字节，无需在每次透传时完整复制。这就是 GPUI 与 GPUI Kit 在许多文本属性中使用它、并在组件边界接收 `impl Into<SharedString>` 的原因。代价是不可变：改动文本就要构建新值。只要内容不变，多个副本才得以共享；这并不意味着绝对零开销。
 
@@ -132,7 +132,7 @@ let heading = Label::new(title.clone());
 let button = Button::new("open-downloads").label(title);
 ```
 
-对于存放在 View 中、会在多次 render 时使用的文本，在 View 中保存一个 `SharedString`，再 clone 给每次创建的元素：
+对于存放在 View 中、会在多次 render 时使用的文本，在 View 中保存一个 `SharedString`，再 clone 给每次创建的元素。`Render::render` 会同时提供该 View 的 [Context](./context) 和 `Window`：
 
 ```rust
 use gpui_kit::*;
@@ -175,7 +175,7 @@ let title: SharedString = draft.into();
 
 ## 与 `Cow<str>` 的关系
 
-Rust 的 `Cow<'a, str>` 可以借用现有文本，避免当下复制，但其 `Borrowed` 形式受源数据生命周期约束。`Owned` 形式持有 `String`；clone 非空的 owned 值会复制文本字节。对 borrowed 值调用 `to_mut()`，则会先复制成自有的 `String`，再供修改：
+Rust 的 [`Cow<'a, str>`](https://doc.rust-lang.org/std/borrow/enum.Cow.html) 可以借用现有文本，避免当下复制，但其 `Borrowed` 形式受源数据生命周期约束。`Owned` 形式持有 `String`；clone 非空的 owned 值会复制文本字节。对 borrowed 值调用 `to_mut()`，则会先复制成自有的 `String`，再供修改：
 
 ```rust
 use std::borrow::Cow;

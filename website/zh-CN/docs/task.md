@@ -6,7 +6,7 @@ order: -2.631
 
 # Task
 
-在 GPUI 中，`Task<T>` 是 GPUI 执行器所调度工作的 handle。它最重要的性质是**所有权**：handle 被 drop 时，尚未完成的工作会取消。只有保存、等待，或者明确 detach 这个 handle，任务才会持续运行。因此，Task 的生命周期属于 View 的状态设计，而不只是 Rust `Future` trait 的细节。
+在 GPUI 中，[`Task<T>`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Task.html) 是 GPUI 执行器所调度工作的 handle。它最重要的性质是**所有权**：handle 被 drop 时，尚未完成的工作会取消。只有保存、等待，或者明确 detach 这个 handle，任务才会持续运行。因此，Task 的生命周期属于 View 的状态设计，而不只是 Rust `Future` trait 的细节。
 
 **启动任务的 API** 决定工作在哪里运行；返回的 `Task` 控制它的生命周期。前台任务可以通过异步 [Context](./context) 重新进入 GPUI，更新 [Entity]。后台任务在 UI 线程之外运行，只能返回自有数据，不能直接修改 Entity 状态。
 
@@ -19,7 +19,7 @@ order: -2.631
 
 ## 从 owner 启动任务
 
-在具名方法、事件处理器或生命周期钩子中启动任务。不要在 `render` 中无条件启动，否则每次 render 都可能再启动一份。启动前先取出输入值，避免 `self` 或 `cx` 的借用跨过 `await`。
+在具名方法、事件处理器或生命周期钩子中启动任务。不要在 [`render`](./render) 中无条件启动，否则每次 render 都可能再启动一份。启动前先取出输入值，避免 `self` 或 `cx` 的借用跨过 `await`。
 
 ```rust
 struct SearchView {
@@ -106,7 +106,7 @@ fn parse(&mut self, cx: &mut Context<Self>) {
 
 ## GPUI Kit 中的流式处理实例
 
-GPUI Kit 的流式 Markdown 示例使用两个由 View 持有的任务和一个 channel。后台生产者生成文本片段；前台接收者负责更新 Entity，检查 replay ID，再将有效片段送进 `TextViewState`。View 保存两个 `Task<()>` handle，关闭 View 就会取消流；再次 replay 会替换生产者任务。replay ID 也能过滤旧生产者已经排入 channel 的片段。
+GPUI Kit 的[流式 Markdown 示例](https://github.com/longbridge/gpui-kit/blob/main/examples/stream-markdown/src/main.rs)使用两个由 View 持有的任务和一个 channel。后台生产者生成文本片段；前台接收者负责更新 Entity，检查 replay ID，再将有效片段送进 `TextViewState`。View 保存两个 `Task<()>` handle，关闭 View 就会取消流；再次 replay 会替换生产者任务。replay ID 也能过滤旧生产者已经排入 channel 的片段。
 
 ```rust
 // View 中的接收任务：
