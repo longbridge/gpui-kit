@@ -22,7 +22,7 @@ use crate::{
     input::{self, SelectAll},
     text::{
         CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
-        RangeHighlight, RangeHighlightError, RenderedText, TableActionsFn, TextViewStyle,
+        RangeHighlight, RangeHighlightError, RenderedTextSnapshot, TableActionsFn, TextViewStyle,
         document::ParsedDocument,
         format,
         node::{self, NodeContext},
@@ -564,8 +564,8 @@ impl TextViewState {
     ///
     /// This is the string plain copy produces, as of the last parse that
     /// landed; text set since then is not in it until its parse lands.
-    pub fn rendered_text(&self) -> RenderedText {
-        RenderedText::new(
+    pub fn rendered_text(&self) -> RenderedTextSnapshot {
+        RenderedTextSnapshot::new(
             self.entity_id,
             self.committed_revision,
             self.parsed_content.document.clone(),
@@ -592,7 +592,7 @@ impl TextViewState {
     /// text.
     pub fn set_range_highlights(
         &mut self,
-        text: &RenderedText,
+        text: &RenderedTextSnapshot,
         highlights: impl IntoIterator<Item = RangeHighlight>,
         cx: &mut Context<Self>,
     ) -> Result<(), RangeHighlightError> {

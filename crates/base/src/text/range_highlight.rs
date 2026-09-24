@@ -24,8 +24,8 @@ use super::{
     stream_fade::{TextLeaf, TextLeafKey, text_leaves},
 };
 
-/// The text a [`TextViewState`](super::TextViewState) renders, as of one
-/// parse of its content.
+/// A snapshot of the text a [`TextViewState`](super::TextViewState) renders,
+/// as of one parse of its content.
 ///
 /// Offsets into it are UTF-8 byte offsets. It is the string plain copy
 /// produces: `hello **world**` renders as `hello world`, escapes are
@@ -43,23 +43,23 @@ use super::{
 ///
 /// [`rendered_text`]: super::TextViewState::rendered_text
 #[derive(Clone)]
-pub struct RenderedText {
+pub struct RenderedTextSnapshot {
     owner: EntityId,
     revision: usize,
     document: ParsedDocument,
     index: Arc<OnceLock<RenderedIndex>>,
 }
 
-impl std::fmt::Debug for RenderedText {
+impl std::fmt::Debug for RenderedTextSnapshot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RenderedText")
+        f.debug_struct("RenderedTextSnapshot")
             .field("owner", &self.owner)
             .field("revision", &self.revision)
             .finish_non_exhaustive()
     }
 }
 
-impl RenderedText {
+impl RenderedTextSnapshot {
     /// The text of `document`, whose index `index` holds once built.
     pub(super) fn new(
         owner: EntityId,
@@ -104,15 +104,15 @@ impl RenderedText {
     }
 }
 
-impl PartialEq for RenderedText {
+impl PartialEq for RenderedTextSnapshot {
     fn eq(&self, other: &Self) -> bool {
         self.owner == other.owner && self.revision == other.revision
     }
 }
 
-impl Eq for RenderedText {}
+impl Eq for RenderedTextSnapshot {}
 
-/// A background painted behind one range of a [`RenderedText`].
+/// A background painted behind one range of a [`RenderedTextSnapshot`].
 ///
 /// It is painted under the text and under the selection, and never changes
 /// layout. Where highlights overlap, the later one paints over the earlier. A
@@ -124,7 +124,7 @@ pub struct RangeHighlight {
 }
 
 impl RangeHighlight {
-    /// A highlight over `range`, in byte offsets of a [`RenderedText`].
+    /// A highlight over `range`, in byte offsets of a [`RenderedTextSnapshot`].
     pub fn new(range: Range<usize>) -> Self {
         Self {
             range,
@@ -408,7 +408,7 @@ pub(crate) struct RangeHighlightFrame {
 impl RangeHighlightFrame {
     /// Validates `highlights` against `text` and resolves them to leaves.
     pub(super) fn new(
-        text: &RenderedText,
+        text: &RenderedTextSnapshot,
         highlights: impl IntoIterator<Item = RangeHighlight>,
     ) -> Result<Option<Self>, RangeHighlightError> {
         let mut pieces = Vec::new();
