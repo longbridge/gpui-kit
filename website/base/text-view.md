@@ -249,6 +249,8 @@ something is still fading. Reduced motion skips the fade.
 `rendered_text()`, the text plain copy produces, so an application can show
 its search results or citations without reparsing or restyling the document.
 The ranges are painted, not shaped, so they never change layout.
+Ranges of the Markdown source, such as those `selected_source_range()`
+returns, convert to it with `rendered_text().range_for_source(range)`.
 `reveal_range` scrolls the line a range starts on into view, through the
 view's own list, an enclosing `gpui::list`, or `TextView::on_reveal` for any
 other container; see [Highlight ranges](../component/text-view.md#highlight-ranges)

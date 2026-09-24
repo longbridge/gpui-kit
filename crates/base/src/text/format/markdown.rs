@@ -391,12 +391,31 @@ fn source_segments(
 
     let mut segments = aligned_source_segments(raw, rendered, span.start, true);
 
+    // The text node of an escaped character starts after its backslash. The
+    // backslash and the character map as a whole; the rest of the run stays
+    // linear.
     if include_preceding_escape
         && let Some(previous) = local_start.checked_sub(1)
         && source.as_bytes().get(previous) == Some(&b'\\')
         && let Some(first) = segments.first_mut()
     {
+        let first_char_len = rendered[first.rendered.start..]
+            .chars()
+            .next()
+            .map_or(0, char::len_utf8);
+        if first.linear && first.rendered.len() > first_char_len {
+            let rest = SourceSegment {
+                rendered: first.rendered.start + first_char_len..first.rendered.end,
+                source: first.source.start + first_char_len..first.source.end,
+                linear: true,
+            };
+            first.rendered.end = rest.rendered.start;
+            first.source.end = rest.source.start;
+            segments.insert(1, rest);
+        }
+        let first = &mut segments[0];
         first.source.start -= 1;
+        first.linear = false;
     }
     segments
 }
@@ -436,6 +455,9 @@ fn aligned_source_segments(
                     rendered: rendered_start..rendered_end,
                     source: (source_offset + raw_cursor)
                         ..(source_offset + raw_cursor + *source_len),
+                    // Even when the decoded characters take as many bytes as the
+                    // entity, as `∾̳` and `&acE;` do, they are not one for one.
+                    linear: false,
                 },
             );
             rendered_start = rendered_end;
@@ -496,6 +518,7 @@ fn aligned_source_segments(
             SourceSegment {
                 rendered: rendered_start..rendered_end,
                 source: (source_offset + source_start)..(source_offset + source_end),
+                linear: source_len == rendered_char.len_utf8(),
             },
         );
         raw_cursor = source_end;
@@ -534,12 +557,15 @@ fn source_char_offset(
     None
 }
 
+/// Pushes `segment`, merging it into the previous one when both are linear and
+/// adjacent, so that a merged run still maps byte for byte. Any other segment
+/// is kept whole on its own.
 fn push_source_segment(segments: &mut Vec<SourceSegment>, segment: SourceSegment) {
     if let Some(previous) = segments.last_mut()
+        && previous.linear
+        && segment.linear
         && previous.rendered.end == segment.rendered.start
         && previous.source.end == segment.source.start
-        && previous.rendered.len() == previous.source.len()
-        && segment.rendered.len() == segment.source.len()
     {
         previous.rendered.end = segment.rendered.end;
         previous.source.end = segment.source.end;
@@ -1205,6 +1231,7 @@ mod tests {
             vec![SourceSegment {
                 rendered: 0..source.len(),
                 source: 0..source.len(),
+                linear: true,
             }]
         );
 
@@ -1224,6 +1251,7 @@ mod tests {
                 vec![SourceSegment {
                     rendered: 0..raw.len(),
                     source: 7..7 + raw.len(),
+                    linear: true,
                 }]
             );
             assert!(
@@ -1242,6 +1270,7 @@ mod tests {
             vec![SourceSegment {
                 rendered: 0..rendered.len(),
                 source: 4..4 + rendered.len(),
+                linear: true,
             }]
         );
         assert_eq!(
@@ -1250,10 +1279,12 @@ mod tests {
                 SourceSegment {
                     rendered: 0..2,
                     source: 0..2,
+                    linear: true,
                 },
                 SourceSegment {
                     rendered: 2..3,
                     source: 2..5,
+                    linear: false,
                 },
             ]
         );
@@ -1267,14 +1298,17 @@ mod tests {
                 SourceSegment {
                     rendered: 0..1,
                     source: 9..10,
+                    linear: true,
                 },
                 SourceSegment {
                     rendered: 1..2,
                     source: 11..13,
+                    linear: false,
                 },
                 SourceSegment {
                     rendered: 2..3,
                     source: 13..14,
+                    linear: true,
                 },
             ]
         );
@@ -1285,6 +1319,7 @@ mod tests {
             vec![SourceSegment {
                 rendered: 0..decoded.len(),
                 source: 3..3 + entity.len(),
+                linear: false,
             }]
         );
     }
@@ -1312,6 +1347,7 @@ mod tests {
             vec![SourceSegment {
                 rendered: missing.len()..missing.len() + 3,
                 source: 5..8,
+                linear: true,
             }]
         );
         assert_eq!(
@@ -1320,10 +1356,12 @@ mod tests {
                 SourceSegment {
                     rendered: missing.len()..missing.len() + 1,
                     source: 0..5,
+                    linear: false,
                 },
                 SourceSegment {
                     rendered: missing.len() + 1..missing.len() + 2,
                     source: 5..6,
+                    linear: true,
                 },
             ]
         );
@@ -1370,14 +1408,48 @@ mod tests {
         assert!(segments.contains(&SourceSegment {
             rendered: 1..2,
             source: 1..3,
+            linear: false,
         }));
         assert!(segments.contains(&SourceSegment {
             rendered: 3..4,
             source: 4..9,
+            linear: false,
         }));
 
         assert_eq!(select_rendered_range(source, 1..2), 1..3);
         assert_eq!(select_rendered_range(source, 3..4), 4..9);
+    }
+
+    #[test]
+    fn source_segments_keep_an_entity_as_long_as_its_characters_atomic() {
+        // `&acE;` decodes to `∾̳`: five bytes each, but not one for one.
+        let source = "a &acE; b";
+        let mut cx = NodeContext::default();
+        let document = parse(source, &mut cx).unwrap();
+        let paragraph = first_paragraph(&document.blocks[0]).unwrap();
+        assert_eq!(paragraph.children[0].text.as_ref(), "a ∾̳ b");
+        assert_eq!(
+            paragraph.children[0].source_segments,
+            vec![
+                SourceSegment {
+                    rendered: 0..2,
+                    source: 0..2,
+                    linear: true,
+                },
+                SourceSegment {
+                    rendered: 2..7,
+                    source: 2..7,
+                    linear: false,
+                },
+                SourceSegment {
+                    rendered: 7..9,
+                    source: 7..9,
+                    linear: true,
+                },
+            ]
+        );
+        // Selecting the combining mark alone reports the whole entity.
+        assert_eq!(select_rendered_range(source, 5..7), 2..7);
     }
 
     #[test]
@@ -1530,6 +1602,18 @@ mod tests {
     #[test]
     fn selected_source_range_maps_the_whole_markdown_escape() {
         assert_eq!(selected_rendered_range(r"\*", 0..1), Some(0..2));
+    }
+
+    #[test]
+    fn selected_source_range_maps_text_after_an_escape_character_for_character() {
+        let source = r"\*abc";
+        assert_eq!(select_rendered_range(source, 0..1), 0..2);
+        assert_eq!(select_rendered_range(source, 2..3), 3..4);
+        assert_eq!(select_rendered_range(source, 0..2), 0..3);
+        // Only punctuation escapes, so a backslash before a letter is text.
+        let source = r"\été";
+        assert_eq!(select_rendered_range(source, 0..1), 0..1);
+        assert_eq!(select_rendered_range(source, 1..3), 1..3);
     }
 
     #[test]

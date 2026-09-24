@@ -160,6 +160,58 @@ current text. Backgrounds that are part of the text, such as
 background is painted under it), and highlights do not fade in with streamed
 text. HTML views do not support range highlights.
 
+An application that keeps ranges of the Markdown source instead, such as the
+ranges `selected_source_range()` returns for the passages people comment on,
+converts each with `range_for_source` on the same `rendered_text()`:
+
+```rust
+use std::ops::Range;
+
+use gpui_kit::component::{
+    ActiveTheme as _,
+    text::{RangeHighlight, RangeHighlightError, TextViewState},
+};
+
+fn highlight_comments(
+    state: &mut TextViewState,
+    markdown: &str,
+    comments: &[Range<usize>],
+    cx: &mut Context<TextViewState>,
+) -> Result<(), RangeHighlightError> {
+    let text = state.rendered_text();
+    // The ranges index `markdown`. Until its parse lands, the view renders the
+    // source it had before; convert again when the view notifies.
+    if text.source() != markdown {
+        return Ok(());
+    }
+    let color = cx.theme().info.opacity(0.3);
+    let highlights = comments
+        .iter()
+        .filter_map(|comment| text.range_for_source(comment.clone()))
+        .map(|range| RangeHighlight::new(range, color));
+    state.set_range_highlights(highlights, cx)
+}
+```
+
+`range_for_source` returns the smallest range holding every character
+rendered from the source range. Source that renders nothing, such as emphasis
+delimiters, heading and list markers, code fences, table pipes and link
+destinations, adds nothing, so `**bold**` and `bold` convert to the same range.
+A character is included when any of its source is in the range: `&` for part
+of `&amp;`, or the whole text of an inline plugin object for part of its
+source. Converting the source range a selection reports gives the selected
+range back, except that a line break between blocks at either end of the
+selection is rendered from no source and is left out: Select All gives back
+everything but the line break after the last block.
+
+`rendered_text().source()` is the source of the last parse that landed. While
+text is appended with `push_str`, it is a prefix of the text the view was
+given; after `set_text` replaces the content, it can be the earlier, unrelated
+text until the new parse lands, so compare it with the source your ranges
+index, as the example does, before converting. The result is
+`None` when the range is empty, out of bounds or not on a character boundary,
+when nothing is rendered from it, and always in HTML views.
+
 ### Scroll to a range
 
 `reveal_range` scrolls to a range of the same text, such as the current

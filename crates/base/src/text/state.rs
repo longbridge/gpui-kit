@@ -594,6 +594,8 @@ impl TextViewState {
     ///
     /// Compute ranges from the current [`Self::rendered_text`] and set them in
     /// the same update. Search the new text again after its content changes.
+    /// Ranges of the Markdown source, such as [`Self::selected_source_range`]
+    /// returns, convert with [`RenderedText::range_for_source`].
     /// A range crossing blocks paints in both, skipping their separator.
     /// Text outside every block (separators, custom blocks, HTML blocks, and
     /// inline objects) is left unpainted. Any invalid range rejects the set.
@@ -2501,6 +2503,264 @@ mod tests {
                 painted(&state, TextLeafKey::block(0), cx)[0],
                 code..code + 2
             );
+        }
+
+        /// The ranges of the current rendered text converted from `sources`.
+        fn converted(
+            state: &Entity<TextViewState>,
+            sources: impl IntoIterator<Item = Range<usize>>,
+            cx: &mut TestAppContext,
+        ) -> Vec<Option<Range<usize>>> {
+            state.read_with(cx, |state, _| {
+                let text = state.rendered_text();
+                sources
+                    .into_iter()
+                    .map(|source| text.range_for_source(source))
+                    .collect()
+            })
+        }
+
+        fn find(haystack: &str, needle: &str) -> Range<usize> {
+            let start = haystack.find(needle).unwrap();
+            start..start + needle.len()
+        }
+
+        #[gpui::test]
+        fn source_ranges_highlight_the_text_rendered_from_them(cx: &mut TestAppContext) {
+            let markdown =
+                "In Rust, we use `u128` to handle **larger** numbers\n\n| a | **b** |\n|---|---|";
+            let state = state(markdown, cx);
+            state.update(cx, |state, cx| {
+                let text = state.rendered_text();
+                assert_eq!(text.source(), markdown);
+                let highlights = ["`u128` to handle **larger**", "**b**"]
+                    .into_iter()
+                    .map(|needle| text.range_for_source(find(markdown, needle)).unwrap())
+                    .map(highlight)
+                    .collect::<Vec<_>>();
+                state.set_range_highlights(highlights, cx).unwrap();
+            });
+            let rendered = "In Rust, we use u128 to handle larger numbers";
+            assert_eq!(
+                painted(&state, TextLeafKey::block(0), cx),
+                [find(rendered, "u128 to handle larger")]
+            );
+            let table = markdown.find("| a").unwrap();
+            assert_eq!(
+                painted(&state, TextLeafKey::table_cell(table, 1), cx),
+                [0..1]
+            );
+        }
+
+        #[gpui::test]
+        fn select_all_converts_to_every_rendered_character(cx: &mut TestAppContext) {
+            let markdown = "# Title\n\nhello **world**\n\n- item";
+            let state = state(markdown, cx);
+            state.update(cx, |state, cx| state.select_all(cx));
+            state.read_with(cx, |state, _| {
+                let text = state.rendered_text();
+                assert_eq!(text.as_str(), "Title\nhello world\nitem\n");
+                let source = state.selected_source_range().unwrap();
+                // All but the separator after the last block.
+                assert_eq!(text.range_for_source(source), Some(0..text.len() - 1));
+            });
+        }
+
+        #[gpui::test]
+        fn a_snapshot_converts_against_its_own_source(cx: &mut TestAppContext) {
+            let state = state("first", cx);
+            let before = state.read_with(cx, |state, _| state.rendered_text());
+            state.update(cx, |state, cx| state.push_str("\n\nsecond **part**", cx));
+            let source = "first\n\nsecond **part**";
+            let second = find(source, "second **part**");
+
+            // The append is parsed in the background, so until it lands the
+            // view renders the source it had.
+            state.read_with(cx, |state, _| {
+                let text = state.rendered_text();
+                assert_eq!(text, before);
+                assert_eq!(text.source(), "first");
+                assert_eq!(text.range_for_source(second.clone()), None);
+            });
+            cx.run_until_parked();
+
+            assert_eq!(
+                converted(&state, [second.clone(), 0..5], cx),
+                [Some(6..17), Some(0..5)]
+            );
+            state.read_with(cx, |state, _| {
+                let text = state.rendered_text();
+                assert_ne!(text, before);
+                assert_eq!(text.source(), source);
+                assert_eq!(&text.as_str()[6..17], "second part");
+            });
+            // An earlier snapshot keeps converting against its own source.
+            assert_eq!(before.source(), "first");
+            assert_eq!(before.range_for_source(0..5), Some(0..5));
+            assert_eq!(before.range_for_source(second), None);
+        }
+
+        #[gpui::test]
+        fn appended_blocks_convert_at_their_place_in_the_whole_source(cx: &mut TestAppContext) {
+            let state = state("first\n\nsecond", cx);
+            // The tail parse reparses from the last block, whose positions
+            // must still count from the start of the whole source.
+            state.update(cx, |state, cx| state.push_str(" more\n\n**écho** end", cx));
+            cx.run_until_parked();
+            let source = "first\n\nsecond more\n\n**écho** end";
+            let converted = converted(
+                &state,
+                [
+                    find(source, "second more"),
+                    find(source, "**écho**"),
+                    find(source, "end"),
+                ],
+                cx,
+            );
+            state.read_with(cx, |state, _| {
+                let text = state.rendered_text();
+                assert_eq!(text.source(), source);
+                let texts = converted
+                    .into_iter()
+                    .map(|range| &text.as_str()[range.unwrap()])
+                    .collect::<Vec<_>>();
+                assert_eq!(texts, ["second more", "écho", "end"]);
+            });
+        }
+
+        #[gpui::test]
+        fn a_background_parse_converts_once_it_lands(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let markdown = format!(
+                "{}\n\n**tail**",
+                "word ".repeat(MAX_SYNC_FULL_REPLACE_BYTES / 4)
+            );
+            let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown(&markdown, cx)));
+            let tail = find(&markdown, "**tail**");
+            state.read_with(cx, |state, _| {
+                let text = state.rendered_text();
+                assert!(text.source().is_empty());
+                assert!(text.is_empty());
+                assert_eq!(text.range_for_source(tail.clone()), None);
+            });
+            cx.run_until_parked();
+            state.read_with(cx, |state, _| {
+                let text = state.rendered_text();
+                assert_eq!(text.source(), markdown);
+                let range = text.range_for_source(tail).unwrap();
+                assert_eq!(&text.as_str()[range], "tail");
+            });
+        }
+
+        #[gpui::test]
+        fn inline_objects_convert_whole_and_stay_unpainted(cx: &mut TestAppContext) {
+            let markdown = "x $ab$ y";
+            let state = state(markdown, cx);
+            state.update(cx, |state, cx| {
+                let extensions = MarkdownExtensions::default().plugin(
+                    crate::text::markdown_ext::TestInlinePlugin::new("test").parse_with(
+                        |node, _| {
+                            let markdown::mdast::Node::InlineMath(math) = node else {
+                                return None;
+                            };
+                            Some(
+                                crate::text::MarkdownNode::new("formula", ())
+                                    .text(math.value.clone()),
+                            )
+                        },
+                    ),
+                );
+                state.set_markdown_extensions(Arc::new(extensions), cx);
+            });
+            cx.run_until_parked();
+            // "x ab y\n", where "ab" is the formula.
+            let formula = find(markdown, "$ab$");
+            assert_eq!(
+                converted(
+                    &state,
+                    [
+                        formula.clone(),
+                        formula.start + 1..formula.start + 2,
+                        0..markdown.len(),
+                        find(markdown, "ab$ y"),
+                    ],
+                    cx
+                ),
+                [Some(2..4), Some(2..4), Some(0..6), Some(2..6)]
+            );
+            let ranges = converted(&state, [formula, 0..markdown.len()], cx);
+            set(&state, [ranges[0].clone().unwrap()], cx).unwrap();
+            assert!(painted(&state, TextLeafKey::block(0), cx).is_empty());
+            set(&state, [ranges[1].clone().unwrap()], cx).unwrap();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..2, 4..6]);
+        }
+
+        #[gpui::test]
+        fn a_dragged_selection_highlights_through_its_source_range(cx: &mut TestAppContext) {
+            struct SelectionRoot {
+                state: Entity<TextViewState>,
+            }
+
+            impl Render for SelectionRoot {
+                fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                    gpui::div()
+                        .w(px(160.))
+                        .child(crate::TextSelectionLayer)
+                        .child(crate::text::TextView::new(&self.state))
+                }
+            }
+
+            cx.update(crate::init);
+            let markdown = "hello **world** and `code` &amp; more";
+            let (root, cx) = cx.add_window_view(|_, cx| SelectionRoot {
+                state: cx.new(|cx| TextViewState::markdown(markdown, cx)),
+            });
+            cx.run_until_parked();
+            let state = root.read_with(cx, |root, _| root.state.clone());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let bounds = state.read_with(cx, |state, _| state.bounds());
+            assert!(bounds.size.height > px(30.), "the text wraps, {bounds:?}");
+            let start = bounds.origin + gpui::point(px(2.), px(4.));
+            let end = bounds.bottom_right() - gpui::point(px(2.), px(4.));
+            cx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_move(end, gpui::MouseButton::Left, gpui::Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::default());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+
+            let range = state.update(cx, |state, cx| {
+                let selected = state.selected_text();
+                let source = state
+                    .selected_source_range()
+                    .expect("selection maps to source");
+                let text = state.rendered_text();
+                let range = text.range_for_source(source).expect("source renders text");
+                assert!(selected.contains("code &"), "selected {selected:?}");
+                assert_eq!(
+                    &text.as_str()[range.clone()],
+                    selected.trim_end_matches('\n')
+                );
+                state.clear_selection(cx);
+                state
+                    .set_range_highlights([highlight(range.clone())], cx)
+                    .unwrap();
+                range
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [range]);
+        }
+
+        #[gpui::test]
+        fn html_views_convert_no_source(cx: &mut TestAppContext) {
+            let html = cx.update(|cx| cx.new(|cx| TextViewState::html("<p>one</p>", cx)));
+            cx.run_until_parked();
+            html.read_with(cx, |html, _| {
+                let text = html.rendered_text();
+                assert_eq!(text.source(), "<p>one</p>");
+                assert_eq!(text.range_for_source(0..10), None);
+                assert_eq!(text.range_for_source(3..6), None);
+            });
         }
 
         #[gpui::test]

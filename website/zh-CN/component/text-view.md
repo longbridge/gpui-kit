@@ -97,6 +97,41 @@ fn highlight_matches(
 
 内容变化时，高亮会跟随它所在的块，保留到这个块里文字开始变化的位置为止。流式追加的文字（无论通过 `push_str` 还是 `set_text`）不影响前面的高亮；修改某处时，修改前后的高亮都会保留。表格单元格只按位置区分，因此修改表格内部时，被修改的那一行及其后各行单元格的高亮都会失效。视图会发出通知：观察这个 state，重新在新的 `rendered_text()` 里搜索即可。请在同一次 state 更新中计算范围并调用 `set_range_highlights`，确保范围对应当前文本。属于文字本身的背景（例如 `<mark>` 和语法高亮）会覆盖在范围高亮之上（行内代码的背景在高亮之下），高亮也不会随流式文字一起淡入。HTML 视图不支持范围高亮。
 
+如果应用保存的是 Markdown 源码里的范围，例如用户评论某段文字时 `selected_source_range()` 返回的范围，就在同一个 `rendered_text()` 上用 `range_for_source` 逐个转换：
+
+```rust
+use std::ops::Range;
+
+use gpui_kit::component::{
+    ActiveTheme as _,
+    text::{RangeHighlight, RangeHighlightError, TextViewState},
+};
+
+fn highlight_comments(
+    state: &mut TextViewState,
+    markdown: &str,
+    comments: &[Range<usize>],
+    cx: &mut Context<TextViewState>,
+) -> Result<(), RangeHighlightError> {
+    let text = state.rendered_text();
+    // 范围对应的是 `markdown`。它解析完成之前，视图显示的仍是之前的源码；
+    // 等视图发出通知后再转换一次。
+    if text.source() != markdown {
+        return Ok(());
+    }
+    let color = cx.theme().info.opacity(0.3);
+    let highlights = comments
+        .iter()
+        .filter_map(|comment| text.range_for_source(comment.clone()))
+        .map(|range| RangeHighlight::new(range, color));
+    state.set_range_highlights(highlights, cx)
+}
+```
+
+`range_for_source` 返回能包含该源码范围所渲染出的全部字符的最小范围。不渲染任何文字的源码（强调符号、标题和列表标记、代码围栏、表格竖线、链接地址）不影响结果，因此 `**bold**` 和 `bold` 转换出的范围相同。只要字符的源码有一部分落在范围内，这个字符就会被包含：`&amp;` 的一部分对应 `&`，inline plugin 对象源码的一部分对应该对象的全部文字。把选区报告的源码范围转换回来，得到的就是原来选中的范围；只是块之间的换行不对应任何源码，落在选区两端时不会包含在内：全选转换回来的范围不含最后一个块之后的换行。
+
+`rendered_text().source()` 是最近一次完成解析的源码。用 `push_str` 追加文字时，它是交给视图的文本的前缀；用 `set_text` 替换内容后，在新文本解析完成之前，它可能仍是之前那段不相干的文本。因此转换前要像示例那样，先确认它就是范围所对应的源码。范围为空、超出范围或不在字符边界上，或者没有渲染出任何文字时返回 `None`；HTML 视图总是返回 `None`。
+
 ### 滚动到范围
 
 `reveal_range` 滚动到同一份文本里的某个范围，比如用户跳到下一个结果时的当前结果：

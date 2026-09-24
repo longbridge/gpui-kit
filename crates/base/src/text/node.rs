@@ -544,6 +544,11 @@ impl PartialEq for ImageNode {
 pub(crate) struct SourceSegment {
     pub(crate) rendered: Range<usize>,
     pub(crate) source: Range<usize>,
+    /// Whether each rendered character came from a source character of the
+    /// same length, so that part of the segment maps to part of its source.
+    /// A decoded entity or an escape maps only as a whole, even an entity
+    /// whose characters take as many bytes as its source, like `&acE;`.
+    pub(crate) linear: bool,
 }
 
 pub(crate) enum SourceRangeSelection {
@@ -579,7 +584,7 @@ fn source_range_for_segments(
     selection: Range<usize>,
 ) -> Option<Range<usize>> {
     fn mapped_source_start(segment: &SourceSegment, rendered_start: usize) -> usize {
-        if segment.rendered.len() == segment.source.len() {
+        if segment.linear {
             segment.source.start + rendered_start.saturating_sub(segment.rendered.start)
         } else {
             segment.source.start
@@ -587,7 +592,7 @@ fn source_range_for_segments(
     }
 
     fn mapped_source_end(segment: &SourceSegment, rendered_end: usize) -> usize {
-        if segment.rendered.len() == segment.source.len() {
+        if segment.linear {
             segment.source.start
                 + rendered_end
                     .min(segment.rendered.end)
@@ -1744,7 +1749,9 @@ pub struct CodeBlock {
     lang: Option<SharedString>,
     state: Arc<Mutex<InlineState>>,
     highlight_cache: Arc<Mutex<Option<CachedCodeBlockHighlights>>>,
-    source_segments: Vec<SourceSegment>,
+    /// Rendered UTF-8 byte spans of the code paired with their exact Markdown
+    /// source spans.
+    pub(crate) source_segments: Vec<SourceSegment>,
     pub span: Option<Span>,
 }
 
