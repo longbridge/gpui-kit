@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, Axis, ElementId, IntoElement, ParentElement as _, Pixels, Styled as _, Window,
-    div, prelude::FluentBuilder as _, px,
+    deferred, div, prelude::FluentBuilder as _, px,
 };
 use gpui_base::{
     ResizeHandleContext, ResizeHandleRenderer, ResizeHandleState, Transition, transition,
@@ -101,26 +101,36 @@ pub(crate) fn render_resize_handle(
             _ => line.h(px(1.)).w_full().items_start().justify_center(),
         })
         .when(length > px(0.5), |line| {
-            line.child(
-                div()
-                    // `flex_none` keeps the one-pixel line from squashing it.
-                    .flex_none()
-                    .rounded(cx.theme().radius_full())
-                    .bg(cx.theme().muted_foreground)
-                    .opacity(opacity)
-                    // Half the overhang, pulled back so the pill straddles the
-                    // hairline evenly.
-                    .map(|pill| match axis {
-                        Axis::Horizontal => pill
-                            .w(INDICATOR_THICKNESS)
-                            .h(length)
-                            .ml((INDICATOR_THICKNESS - px(1.)) * -0.5),
-                        _ => pill
-                            .h(INDICATOR_THICKNESS)
-                            .w(length)
-                            .mt((INDICATOR_THICKNESS - px(1.)) * -0.5),
-                    }),
-            )
+            let pill = div()
+                // `flex_none` keeps the one-pixel line from squashing it.
+                .flex_none()
+                .rounded(cx.theme().radius_full())
+                .bg(cx.theme().muted_foreground)
+                .opacity(opacity)
+                // Half the overhang, pulled back so the pill straddles the
+                // hairline evenly.
+                .map(|pill| match axis {
+                    Axis::Horizontal => pill
+                        .w(INDICATOR_THICKNESS)
+                        .h(length)
+                        .ml((INDICATOR_THICKNESS - px(1.)) * -0.5),
+                    _ => pill
+                        .h(INDICATOR_THICKNESS)
+                        .w(length)
+                        .mt((INDICATOR_THICKNESS - px(1.)) * -0.5),
+                });
+            // A hugging handle's hairline is its container's outermost pixel,
+            // so the pill's outer pixel lies past the boundary, where a dock's
+            // clip would take it off. Deferring the pill -- and only the pill,
+            // only while it is up -- paints it after the tree under the
+            // window's mask, so it keeps that pixel. The hairline stays in
+            // tree order: a deferred element paints over the application's own
+            // deferred content, and a divider that cut through a popover
+            // opened from the neighbouring panel is what that looked like.
+            line.child(match handle.edge() {
+                Some(_) => deferred(pill).into_any_element(),
+                None => pill.into_any_element(),
+            })
         })
         .into_any_element()
 }

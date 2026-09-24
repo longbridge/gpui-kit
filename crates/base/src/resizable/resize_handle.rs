@@ -4,7 +4,7 @@ use gpui::{
     AnyElement, App, Axis, Element, ElementId, Entity, GlobalElementId, Hitbox, HitboxBehavior,
     InteractiveElement, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     ParentElement as _, Pixels, Point, Render, StatefulInteractiveElement, Styled as _, Window,
-    deferred, div, prelude::FluentBuilder as _, px,
+    div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{AxisExt as _, theme::ActiveTheme as _};
@@ -34,6 +34,7 @@ pub type ResizeHandleRenderer =
 /// renderer only supplies what is painted inside it.
 pub struct ResizeHandleContext {
     axis: Axis,
+    edge: Option<HandleEdge>,
     state: ResizeHandleState,
 }
 
@@ -42,6 +43,16 @@ impl ResizeHandleContext {
     /// between two side-by-side panels.
     pub fn axis(&self) -> Axis {
         self.axis
+    }
+
+    /// The edge of its container this handle hugs, or `None` for a handle
+    /// straddling the boundary it resizes.
+    ///
+    /// A hugging handle's line is the container's outermost pixel, so anything
+    /// a renderer centres on it crosses the boundary; see [`HandleEdge`] for
+    /// what the container does with that.
+    pub fn edge(&self) -> Option<HandleEdge> {
+        self.edge
     }
 
     /// Whether the pointer currently owns this handle.
@@ -95,8 +106,13 @@ impl ResizeHandleState {
 /// by even a pixel leaves that pixel of the container showing past the line
 /// on one side, or a gap before it on the other, along the whole seam. What a
 /// renderer paints on top of the line -- an indicator thicker than the line,
-/// centred on it -- overhangs the boundary, and is drawn deferred so the
-/// container's clip does not take the outer half off it.
+/// centred on it -- overhangs the boundary, and the container's clip takes
+/// the outer half off it unless the renderer defers that part. Only that part:
+/// a deferred element paints after the whole tree, and no priority puts it
+/// beneath the application's own deferred content, so a deferred line would
+/// cut straight through a popover opened at the default priority from a panel
+/// drawn before this container. A renderer learns which edge it is drawing for
+/// from [`ResizeHandleContext::edge`].
 ///
 /// [`dock_frame`]: crate::dock::dock_frame
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -288,46 +304,39 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
                         .h(straddle_extent)
                         .py(HANDLE_PADDING),
                 })
-                .child({
+                .child(
                     // A renderer that declines — or is absent — leaves the
                     // built-in line, so overriding one handle never obliges a
-                    // caller to redraw them all.
-                    let painted = self.appearance.as_ref().and_then(|appearance| {
-                        appearance(
-                            &ResizeHandleContext {
-                                axis,
-                                state: state.get(),
-                            },
-                            window,
-                            cx,
-                        )
-                    });
-                    match painted {
-                        // A hugging handle's hairline is its container's
-                        // outermost pixel, so anything a renderer centres on
-                        // it overhangs the container, and the container clips.
-                        // Deferring the appearance keeps its layout here and
-                        // paints it after the tree, under the window's own
-                        // mask, so the overhang survives. Nothing else moves:
-                        // the appearance carries no hitbox, dialogs, popups
-                        // and tooltips are deferred at higher priorities and
-                        // still paint over it, and an overlay that is not --
-                        // a sheet, a toast -- occludes the handle, which then
-                        // never engages and has nothing to paint.
-                        Some(painted) if edge.is_some() => deferred(painted).into_any_element(),
-                        Some(painted) => painted,
-                        None => div()
-                            // The line fills the handle's content box exactly,
-                            // so it has nothing to give: a shrinkable child
-                            // collapses with it.
-                            .flex_none()
-                            .bg(bg_color)
-                            .group_hover("handle", |this| this.bg(bg_color))
-                            .when(axis.is_horizontal(), |this| this.h_full().w(HANDLE_SIZE))
-                            .when(axis.is_vertical(), |this| this.w_full().h(HANDLE_SIZE))
-                            .into_any_element(),
-                    }
-                })
+                    // caller to redraw them all. What it paints stays in tree
+                    // order, under the container's own mask: a divider is
+                    // part of the panel it edges, and anything the
+                    // application floats over that panel has to cover it.
+                    self.appearance
+                        .as_ref()
+                        .and_then(|appearance| {
+                            appearance(
+                                &ResizeHandleContext {
+                                    axis,
+                                    edge,
+                                    state: state.get(),
+                                },
+                                window,
+                                cx,
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            div()
+                                // The line fills the handle's content box
+                                // exactly, so it has nothing to give: a
+                                // shrinkable child collapses with it.
+                                .flex_none()
+                                .bg(bg_color)
+                                .group_hover("handle", |this| this.bg(bg_color))
+                                .when(axis.is_horizontal(), |this| this.h_full().w(HANDLE_SIZE))
+                                .when(axis.is_vertical(), |this| this.w_full().h(HANDLE_SIZE))
+                                .into_any_element()
+                        }),
+                )
                 .into_any_element();
 
             let layout_id = el.request_layout(window, cx);
@@ -465,7 +474,8 @@ mod tests {
 
     use gpui::{
         AnyElement, App, Axis, Bounds, Context, Empty, IntoElement, ParentElement as _, Pixels,
-        Render, Styled as _, TestAppContext, Window, div, hsla, prelude::FluentBuilder as _, px,
+        Render, Styled as _, TestAppContext, Window, deferred, div, hsla,
+        prelude::FluentBuilder as _, px,
     };
 
     use super::{
@@ -474,39 +484,43 @@ mod tests {
     };
     use crate::{ElementExt as _, ResizableTheme, Theme};
 
-    /// What a hugging handle's renderer drew, and under which mask.
+    /// What a hugging handle's renderer was told and drew, and where the
+    /// drawing landed in the frame: under which mask, and before or after a
+    /// popover the application deferred from a panel drawn ahead of the dock.
     #[derive(Default)]
     struct Probe {
+        edge: Cell<Option<Option<HandleEdge>>>,
         line: Cell<Option<Bounds<Pixels>>>,
-        indicator: Cell<Option<Bounds<Pixels>>>,
         mask: Cell<Option<Bounds<Pixels>>>,
+        /// Ticked by every prepaint hook below, in the order the frame reaches
+        /// them.
+        prepaints: Cell<usize>,
+        line_prepainted: Cell<Option<usize>>,
+        popover_prepainted: Cell<Option<usize>>,
     }
 
-    /// The shape of a styled divider: a hairline filling the handle's content
-    /// box, with a three-pixel indicator centred across it -- so it overhangs
-    /// the line by one pixel on either side, the way `gpui-component` draws it.
-    fn styled_divider(axis: Axis, probe: Rc<Probe>) -> AnyElement {
-        let line_probe = probe.clone();
+    impl Probe {
+        fn tick(&self) -> usize {
+            let n = self.prepaints.get();
+            self.prepaints.set(n + 1);
+            n
+        }
+    }
+
+    /// A hairline filling the handle's content box, the way a styled divider
+    /// rests.
+    fn hairline(axis: Axis, probe: Rc<Probe>) -> AnyElement {
         div()
             .flex_none()
-            .flex()
             .map(|line| match axis {
-                Axis::Horizontal => line.w(px(1.)).h_full().items_center(),
-                Axis::Vertical => line.h(px(1.)).w_full().items_start().justify_center(),
+                Axis::Horizontal => line.w(px(1.)).h_full(),
+                Axis::Vertical => line.h(px(1.)).w_full(),
             })
-            .on_prepaint(move |bounds, _, _| line_probe.line.set(Some(bounds)))
-            .child(
-                div()
-                    .flex_none()
-                    .map(|pill| match axis {
-                        Axis::Horizontal => pill.w(px(3.)).h(px(20.)).ml(px(-1.)),
-                        Axis::Vertical => pill.h(px(3.)).w(px(20.)).mt(px(-1.)),
-                    })
-                    .on_prepaint(move |bounds, window, _| {
-                        probe.indicator.set(Some(bounds));
-                        probe.mask.set(Some(window.content_mask().bounds));
-                    }),
-            )
+            .on_prepaint(move |bounds, window, _| {
+                probe.line.set(Some(bounds));
+                probe.mask.set(Some(window.content_mask().bounds));
+                probe.line_prepainted.set(Some(probe.tick()));
+            })
             .into_any_element()
     }
 
@@ -522,6 +536,10 @@ mod tests {
     /// A dock-shaped box: 200px along the axis, clipped to itself the way
     /// `dock_frame` is, sitting between two 100px neighbours so both of its
     /// edges are seams. The handle hugs one of them.
+    ///
+    /// The first neighbour floats a popover across both seams, deferred at the
+    /// default priority the way an application's own `deferred(anchored())`
+    /// is -- a panel drawn before the dock, opening something over it.
     struct HuggingHarness {
         axis: Axis,
         edge: HandleEdge,
@@ -536,13 +554,23 @@ mod tests {
                 Axis::Horizontal => div().w(px(100.)).h_full(),
                 Axis::Vertical => div().h(px(100.)).w_full(),
             };
+            let popover = div()
+                .absolute()
+                .map(|popover| match axis {
+                    Axis::Horizontal => popover.top_0().left(px(50.)).w(px(300.)).h_full(),
+                    Axis::Vertical => popover.left_0().top(px(50.)).h(px(300.)).w_full(),
+                })
+                .on_prepaint({
+                    let probe = probe.clone();
+                    move |_, _, _| probe.popover_prepainted.set(Some(probe.tick()))
+                });
             div()
                 .flex()
                 .map(|row| match axis {
                     Axis::Horizontal => row.flex_row().w(px(400.)).h(px(100.)),
                     Axis::Vertical => row.flex_col().h(px(400.)).w(px(100.)),
                 })
-                .child(neighbour())
+                .child(neighbour().child(deferred(popover)))
                 .child(
                     div()
                         .relative()
@@ -558,7 +586,8 @@ mod tests {
                                     move |handle: &ResizeHandleContext,
                                           _: &mut Window,
                                           _: &mut App| {
-                                        Some(styled_divider(handle.axis(), probe.clone()))
+                                        probe.edge.set(Some(handle.edge()));
+                                        Some(hairline(handle.axis(), probe.clone()))
                                     },
                                 )),
                         ),
@@ -621,33 +650,56 @@ mod tests {
         }
     }
 
-    /// What a renderer centres on a hugging handle's line survives the
-    /// container's clip.
+    /// A hugging handle's appearance is painted in tree order, under its
+    /// container's mask -- beneath whatever the application floats over the
+    /// panels around it.
     ///
-    /// Centred on the outermost pixel, the indicator overhangs the container
-    /// by a pixel, and `overflow_hidden` would take that pixel off it. The
-    /// appearance is drawn deferred so the mask it is painted under is the
-    /// window's, not the container's.
+    /// This is the regression. The appearance was deferred so that an
+    /// indicator centred on the hairline would keep the pixel overhanging the
+    /// container, and a deferred element paints after the whole tree at a
+    /// priority no lower than the default. A popover an application defers
+    /// from a panel drawn before the dock -- at that default priority, as
+    /// `deferred(anchored())` is -- was painted first, and the dock's divider
+    /// ran straight through it.
     #[gpui::test]
-    fn a_hugging_handle_paints_its_indicator_unclipped(cx: &mut TestAppContext) {
+    fn a_hugging_handle_paints_beneath_a_popover_deferred_before_it(cx: &mut TestAppContext) {
         for axis in [Axis::Horizontal, Axis::Vertical] {
             for edge in [HandleEdge::Leading, HandleEdge::Trailing] {
                 let probe = draw_hugging(cx, axis, edge);
-                let line = probe.line.get().expect("the renderer was asked to draw");
-                let indicator = probe.indicator.get().expect("the indicator was laid out");
-                let mask = probe.mask.get().expect("the indicator was prepainted");
+                let line = probe
+                    .line_prepainted
+                    .get()
+                    .expect("the line was prepainted");
+                let popover = probe
+                    .popover_prepainted
+                    .get()
+                    .expect("the popover was prepainted");
+                assert!(
+                    line < popover,
+                    "{axis:?} {edge:?}: the line (prepaint #{line}) has to go down before \
+                     the popover (#{popover}), or it is painted over it"
+                );
 
-                let (line_start, line_end) = along(axis, line);
+                // The dock spans 100..300 along the axis; a deferred line would
+                // have been prepainted under the window's mask instead.
+                let mask = probe.mask.get().expect("the line was prepainted");
                 assert_eq!(
-                    along(axis, indicator),
-                    (line_start - px(1.), line_end + px(1.)),
-                    "{axis:?} {edge:?}: the indicator stays centred on the hairline"
+                    along(axis, mask),
+                    (px(100.), px(300.)),
+                    "{axis:?} {edge:?}: the line is painted under its container's clip"
                 );
-                assert_eq!(
-                    mask.intersect(&indicator),
-                    indicator,
-                    "{axis:?} {edge:?}: the indicator {indicator:?} is clipped by {mask:?}"
-                );
+            }
+        }
+    }
+
+    /// A renderer is told which edge the handle hugs, so it can keep what it
+    /// centres on the line clear of the container's clip itself.
+    #[gpui::test]
+    fn a_renderer_is_told_the_edge_a_handle_hugs(cx: &mut TestAppContext) {
+        for axis in [Axis::Horizontal, Axis::Vertical] {
+            for edge in [HandleEdge::Leading, HandleEdge::Trailing] {
+                let probe = draw_hugging(cx, axis, edge);
+                assert_eq!(probe.edge.get(), Some(Some(edge)), "{axis:?} {edge:?}");
             }
         }
     }
