@@ -20,7 +20,9 @@ use crate::{
 };
 
 use super::calendar::{Calendar, CalendarEvent, CalendarState, Date, Matcher};
-use super::time_field::{TimeField, TimeFieldEvent, TimeFieldState, TimePrecision};
+use super::time_field::{
+    TimeField, TimeFieldEvent, TimeFieldState, TimePrecision, tabular_figures,
+};
 use gpui_base::{DatePicker as BaseDatePicker, ElementExt as _};
 
 const CONTEXT: &'static str = "DatePicker";
@@ -779,6 +781,10 @@ impl RenderOnce for DatePicker {
                                     .overflow_hidden()
                                     .whitespace_nowrap()
                                     .truncate()
+                                    // The value updates live while its time is typed.
+                                    .when(state.time_precision.is_some(), |this| {
+                                        this.font_features(tabular_figures())
+                                    })
                                     .when(!state.date.is_some(), |this| {
                                         this.text_color(cx.theme().muted_foreground)
                                     })

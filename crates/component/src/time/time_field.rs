@@ -1,6 +1,8 @@
+use std::sync::Arc;
+
 use gpui::{
-    App, ElementId, Entity, Focusable as _, IntoElement, ParentElement as _, RenderOnce,
-    StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _,
+    App, ElementId, Entity, Focusable as _, FontFeatures, IntoElement, ParentElement as _,
+    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _,
 };
 
 use crate::{
@@ -10,6 +12,12 @@ use crate::{
 
 use gpui_base::TimeField as BaseTimeField;
 pub use gpui_base::{TimeFieldEvent, TimeFieldState, TimePrecision, TimeSegment};
+
+/// Digits of equal width (OpenType `tnum`), so a value that changes while it
+/// is edited keeps its width instead of shifting with each digit.
+pub(crate) fn tabular_figures() -> FontFeatures {
+    FontFeatures(Arc::new(vec![("tnum".into(), 1)]))
+}
 
 /// A segmented time editor, e.g. `09:30` or `09:30:15`.
 ///
@@ -78,6 +86,7 @@ impl RenderOnce for TimeField {
             .flex()
             .items_center()
             .flex_none()
+            .font_features(tabular_figures())
             .bg(bg)
             .text_color(fg)
             .border_1()
