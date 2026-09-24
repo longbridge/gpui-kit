@@ -364,6 +364,10 @@ impl TimeFieldState {
         self.editor.segment
     }
 
+    pub fn focus(&self, window: &mut Window, cx: &mut App) {
+        self.focus_handle.focus(window, cx);
+    }
+
     fn edit(&mut self, cx: &mut Context<Self>, edit: impl FnOnce(&mut SegmentEditor) -> bool) {
         if edit(&mut self.editor) {
             cx.emit(TimeFieldEvent::Change(self.editor.time));

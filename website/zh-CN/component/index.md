@@ -34,6 +34,7 @@ collapsed: false
 - [Combobox](combobox) - 可搜索的单选或多选下拉组件
 - [NumberInput](number-input) - 数字输入
 - [DatePicker](date-picker) - 日期选择器
+- [TimeField](time-field) - 分段时间输入
 - [OtpInput](otp-input) - 一次性验证码输入
 - [ColorPicker](color-picker) - 颜色选择器
 - [Questionnaire](questionnaire) - 可组合的多步骤问卷与答案

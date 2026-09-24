@@ -144,6 +144,7 @@ fetch the component's `.md` doc.
 | `Stepper`     | `stepper::Stepper`                              | Stateless. Multi-step progress               |
 | `ColorPicker` | `color_picker::{ColorPicker, ColorPickerState}` | Stateful.                                    |
 | `DatePicker`  | `date_picker::{DatePicker, DatePickerState}`    | Stateful.                                    |
+| `TimeField`   | `time_field::{TimeField, TimeFieldState}`       | Stateful. Time of day, 24/12-hour            |
 | `Calendar`    | `calendar::{Calendar, CalendarState}`           | Stateful. Inline month view                  |
 | `Form`        | `form::{v_form, h_form, field}`                 | Layout container for form fields             |
 

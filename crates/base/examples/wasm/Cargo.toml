@@ -8,6 +8,7 @@ edition.workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+chrono = "0.4.38"
 gpui.workspace = true
 gpui-base = { path = "../.." }
 gpui_platform.workspace = true

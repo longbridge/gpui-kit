@@ -31,9 +31,9 @@ use gpui_base::{
     NavOperation, NavStack, NavStackState, OtpState, Popup, Scrollbar, ScrollbarMode, Select,
     Sheet, Slider, SliderIndicator, SliderThumb, SliderTrack, Switch, SwitchThumb, SwitchTrack,
     Tab, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Tabs, TextSelectionEvent,
-    TextSelectionHandle, TextSelectionLayer, TextViewState, Textarea, Toast, ToastTransitionStatus,
-    Toggle, ToggleGroup, Toolbar, ToolbarGroup, Tooltip, Tree, TreeItem, TreeState,
-    VirtualListScrollHandle, v_virtual_list,
+    TextSelectionHandle, TextSelectionLayer, TextViewState, Textarea, TimeFieldState,
+    TimePrecision, Toast, ToastTransitionStatus, Toggle, ToggleGroup, Toolbar, ToolbarGroup,
+    Tooltip, Tree, TreeItem, TreeState, VirtualListScrollHandle, v_virtual_list,
 };
 use palette::{activate as activate_palette, canvas as example_canvas, example_rgb};
 #[cfg(target_family = "wasm")]
@@ -115,6 +115,7 @@ pub const COMPONENTS: &[&str] = &[
     "text-selection",
     "text-view",
     "textarea",
+    "time-field",
     "toast",
     "toggle",
     "toggle-group",
@@ -158,6 +159,7 @@ pub struct BaseShowcase {
     textarea: gpui::Entity<TextareaState>,
     editor: gpui::Entity<EditorState>,
     otp: gpui::Entity<OtpState>,
+    time_field: gpui::Entity<TimeFieldState>,
     calendar: gpui::Entity<CalendarState>,
     tree: gpui::Entity<TreeState>,
     date_focus: gpui::FocusHandle,
@@ -208,6 +210,16 @@ impl BaseShowcase {
             state
         });
         let otp = cx.new(|cx| OtpState::new(6, window, cx).default_value("12"));
+        let time_field = cx.new(|cx| {
+            let mut state = TimeFieldState::new(window, cx).precision(TimePrecision::Second);
+            state.set_time(
+                chrono::NaiveTime::from_hms_opt(9, 30, 0).unwrap_or_default(),
+                window,
+                cx,
+            );
+            state
+        });
+        cx.observe(&time_field, |_, _, cx| cx.notify()).detach();
         let textarea = cx.new(|cx| {
             TextareaState::new(window, cx)
                 .rows(3)
@@ -273,6 +285,8 @@ impl BaseShowcase {
             editor.update(cx, |state, cx| state.focus(window, cx));
         } else if component == "otp-input" {
             otp.update(cx, |state, cx| state.focus(window, cx));
+        } else if component == "time-field" {
+            time_field.update(cx, |state, cx| state.focus(window, cx));
         }
 
         let slider = cx.new(|_| SliderState::new().min(0.).max(100.).default_value(64.));
@@ -361,6 +375,7 @@ impl BaseShowcase {
             textarea,
             editor,
             otp,
+            time_field,
             calendar: cx.new(|cx| CalendarState::new(window, cx)),
             tree: cx.new(|cx| {
                 TreeState::new(cx).items(vec![
@@ -595,6 +610,7 @@ impl BaseShowcase {
             "text-selection" => self.text_selection(window, cx).into_any_element(),
             "text-view" => self.text_view(window).into_any_element(),
             "textarea" => self.textarea().into_any_element(),
+            "time-field" => self.time_field(cx).into_any_element(),
             "toast" => self.toast(cx).into_any_element(),
             "toggle" => self.toggle(cx).into_any_element(),
             "toggle-group" => self.toggle_group(cx).into_any_element(),

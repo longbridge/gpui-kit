@@ -43,6 +43,7 @@ GPUI Base primitives provide behavior without prescribing presentation. Each pag
 - [Switch](./switch.md) — A controlled on/off control with separately styleable track and thumb.
 - [Table](./table.md) — Semantic table primitives for composing headers, bodies, rows, and cells.
 - [Tabs](./tabs.md) — A tab list and accessible tab controls with controlled selection.
+- [Time Field](./time-field.md) — A segmented time-of-day editor with a complete keyboard model and 24- or 12-hour clocks.
 - [Toast](./toast.md) — A managed, animated stack of temporary status messages.
 - [Toggle](./toggle.md) — A controlled two-state pressable for persistent choices such as formatting.
 - [Toggle Group](./toggle-group.md) — Coordinates a set of toggle controls as a single- or multiple-selection group.

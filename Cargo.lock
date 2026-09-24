@@ -3751,6 +3751,7 @@ dependencies = [
 name = "gpui-base-examples"
 version = "0.6.5"
 dependencies = [
+ "chrono",
  "gpui-base",
  "gpui-pre",
  "gpui-pre-platform",
@@ -3762,6 +3763,7 @@ dependencies = [
 name = "gpui-base-examples-wasm"
 version = "0.6.5"
 dependencies = [
+ "chrono",
  "console_error_panic_hook",
  "console_log",
  "gpui-base",

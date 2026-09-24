@@ -40,6 +40,7 @@ mod text_selection;
 mod text_view;
 pub(super) use text_view::MARKDOWN as TEXT_VIEW_MARKDOWN;
 mod textarea;
+mod time_field;
 mod toast;
 mod toggle;
 mod toggle_group;
