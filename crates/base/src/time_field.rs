@@ -451,6 +451,7 @@ impl Render for TimeFieldState {
 #[derive(Clone, Copy, Debug)]
 pub struct TimeSegmentState {
     segment: TimeSegment,
+    value: u32,
     selected: bool,
     disabled: bool,
 }
@@ -458,6 +459,12 @@ pub struct TimeSegmentState {
 impl TimeSegmentState {
     pub fn segment(&self) -> TimeSegment {
         self.segment
+    }
+
+    /// The displayed value: the hour on the configured clock, the minute or
+    /// second, or `0` for AM and `1` for PM.
+    pub fn value(&self) -> u32 {
+        self.value
     }
 
     /// Whether keyboard editing applies to this segment: it is the selected
@@ -480,6 +487,14 @@ pub struct TimeFieldSegment {
     base: crate::ObservedElement<gpui::Stateful<gpui::Div>>,
     style: StyleRefinement,
     children: Vec<AnyElement>,
+}
+
+impl TimeFieldSegment {
+    /// Remove the default label so a styled facade can provide custom content.
+    pub fn clear_children(mut self) -> Self {
+        self.children.clear();
+        self
+    }
 }
 
 impl ParentElement for TimeFieldSegment {
@@ -586,6 +601,7 @@ impl RenderOnce for TimeField {
             }
             let segment_state = TimeSegmentState {
                 segment,
+                value: editor.value(segment),
                 selected: focused && segment == editor.segment,
                 disabled,
             };

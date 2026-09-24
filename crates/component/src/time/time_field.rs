@@ -19,6 +19,23 @@ pub(crate) fn tabular_figures() -> FontFeatures {
     FontFeatures(Arc::new(vec![("tnum".into(), 1)]))
 }
 
+/// Both period labels stacked in one grid cell, the inactive one transparent,
+/// so the segment is as wide as the wider label whichever is shown.
+fn period_label(pm: bool) -> impl IntoElement {
+    let label = |text: &'static str, active: bool| {
+        div()
+            .col_start(1)
+            .row_start(1)
+            .when(!active, |this| this.text_color(gpui::transparent_black()))
+            .child(text)
+    };
+    div()
+        .grid()
+        .grid_cols(1)
+        .child(label("AM", !pm))
+        .child(label("PM", pm))
+}
+
 /// A segmented time editor, e.g. `09:30`, `09:30:15` or `09:30 PM`.
 ///
 /// The value lives in [`TimeFieldState`]; see it for the keyboard model.
@@ -109,7 +126,11 @@ impl RenderOnce for TimeField {
                     .segment(move |segment, state, _, cx| {
                         segment
                             .px_0p5()
-                            .when(state.segment() == TimeSegment::Period, |this| this.ml_1())
+                            .when(state.segment() == TimeSegment::Period, |this| {
+                                this.ml_1()
+                                    .clear_children()
+                                    .child(period_label(state.value() == 1))
+                            })
                             .rounded(segment_radius)
                             .when(state.is_selected(), |this| this.bg(cx.theme().selection))
                             .into_any_element()
