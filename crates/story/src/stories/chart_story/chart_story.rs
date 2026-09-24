@@ -820,6 +820,8 @@ impl ChartCard {
                             .label(|d| money(d.revenue))
                             .fill(move |d, _, _, _| shade(mid, color_index(&d.region)))
                             .corner_radii(rounded_tip())
+                            .padding_inner(0.6)
+                            .padding_outer(0.1)
                             .id("bar-chart-mixed"),
                     )
                     .headline(format!(
@@ -950,6 +952,7 @@ impl ChartCard {
                                     if d.revenue >= 0. { positive } else { negative }
                                 },
                             )
+                            .label_color(move |d| if d.revenue >= 0. { positive } else { negative })
                             .value_axis(true)
                             .id("bar-chart-negative"),
                     )

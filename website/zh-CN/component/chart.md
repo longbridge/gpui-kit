@@ -260,6 +260,24 @@ BarChart::new(data)
     .value_tick_count(7)
 ```
 
+#### 柱状图标签与间距
+
+`label_color` 给每根柱的 `label` 文字单独配色，数值可以跟随柱子的颜色，不必统一用前景色。`padding_inner` 和 `padding_outer` 分别设置柱子之间、首尾两端的间距，以占一个分类宽度的比例计，默认是 0.4 和 0.2。`min_length` 让每根柱子至少画这么多像素长，数量为 0 的分档也能在基线上留一截柱桩。
+
+```rust
+// 分布图：细柱、数值跟随柱色、0 值留柱桩
+BarChart::new(buckets)
+    .band(|d| d.range.clone())
+    .value(|d| d.count)
+    .fill(|d, _, _, _| d.color)
+    .label(|d| d.count.to_string())
+    .label_color(|d| d.color)
+    .padding_inner(0.6)
+    .min_length(2.)
+```
+
+柱桩朝柱子本该生长的方向延伸：从零线向外，负值朝负方向，零值朝正方向。带 `label` 的纵向柱状图会在最高的柱子上方留出一行文字的高度，保证它的标签不超出图表。
+
 ### AreaChart
 
 面积图类似折线图，但会填充曲线下方的区域。

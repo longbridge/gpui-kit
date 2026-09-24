@@ -12,7 +12,7 @@ use crate::{
     ActiveTheme,
     plot::{
         AXIS_GAP, AxisLabelSide, AxisText, Grid, Plot, PlotAxis, PlotLabel,
-        label::{TEXT_GAP, TEXT_SIZE, Text, measure_text_width},
+        label::{TEXT_GAP, TEXT_HEIGHT, TEXT_SIZE, Text, measure_text_width},
         scale::{Scale, ScaleBand, ScaleLinear, Sealed},
         shape::{Bar, BarAlignment},
         tooltip::{CrossLine, PlotHover, Tooltip, TooltipState},
@@ -56,12 +56,16 @@ where
         Option<Rc<dyn Fn(&T, RangeInclusive<f32>, &dyn Fn(f32) -> f32) -> [LinearColorStop; 2]>>,
     tick_margin: usize,
     label: Option<Rc<dyn Fn(&T) -> SharedString>>,
+    label_color: Option<Rc<dyn Fn(&T) -> Hsla>>,
     label_axis: bool,
     value_axis: bool,
     value_tick_count: usize,
     grid: bool,
     alignment: BarAlignment,
     corner_radii: Corners<Pixels>,
+    padding_inner: f32,
+    padding_outer: f32,
+    min_length: f32,
     id: ElementId,
     interactive: bool,
     name: Option<SharedString>,
@@ -89,12 +93,16 @@ where
             fill_gradient: None,
             tick_margin: 1,
             label: None,
+            label_color: None,
             label_axis: true,
             value_axis: false,
             value_tick_count: 5,
             grid: true,
             alignment: BarAlignment::default(),
             corner_radii: Corners::all(px(0.)),
+            padding_inner: 0.4,
+            padding_outer: 0.2,
+            min_length: 0.,
             id: caller_id(),
             interactive: true,
             name: None,
@@ -235,6 +243,19 @@ where
         self
     }
 
+    /// Color each bar's [`label`](Self::label) text, instead of the theme's
+    /// foreground for all of them.
+    ///
+    /// Takes a closure per bar, as [`fill`](Self::fill) does, so a label can
+    /// follow its bar's color.
+    pub fn label_color<H>(mut self, color: impl Fn(&T) -> H + 'static) -> Self
+    where
+        H: Into<Hsla> + 'static,
+    {
+        self.label_color = Some(Rc::new(move |t| color(t).into()));
+        self
+    }
+
     /// Show or hide the band-axis line and labels.
     ///
     /// Default is true.
@@ -289,6 +310,35 @@ where
         self
     }
 
+    /// Set the gap between neighbouring bars, as a share of each band.
+    ///
+    /// Default is 0.4.
+    pub fn padding_inner(mut self, padding: f32) -> Self {
+        self.padding_inner = padding;
+        self
+    }
+
+    /// Set the gap before the first bar and after the last, as a share of a band.
+    ///
+    /// Default is 0.2.
+    pub fn padding_outer(mut self, padding: f32) -> Self {
+        self.padding_outer = padding;
+        self
+    }
+
+    /// Draw every bar at least `length` pixels long, so a zero or tiny value
+    /// still shows a stub instead of disappearing into the baseline.
+    ///
+    /// The stub grows the way the bar's value would: away from the zero line,
+    /// to the negative side for a negative value and to the positive side for
+    /// zero. A bar already that long is left alone.
+    ///
+    /// Default is 0.
+    pub fn min_length(mut self, length: f32) -> Self {
+        self.min_length = length;
+        self
+    }
+
     /// The band scale (matching `paint`): spans the height for horizontal bars, the width
     /// otherwise. Shared by `tooltip_state` and `tooltip`.
     fn band_scale(&self, bounds: Bounds<Pixels>) -> Option<ScaleBand<B>> {
@@ -306,8 +356,8 @@ where
                 self.data.iter().map(|v| band_fn(v)).collect(),
                 vec![0., (band_extent - gap).max(0.)],
             )
-            .padding_inner(0.4)
-            .padding_outer(0.2),
+            .padding_inner(self.padding_inner)
+            .padding_outer(self.padding_outer),
         )
     }
 
@@ -443,19 +493,26 @@ where
         // actual maximum label width instead of using a fixed constant.
         // Similarly, value labels (numbers) at the bar ends are measured so the
         // scale range is always shrunk by exactly the right amount.
+        // Vertical bars keep a line of text clear past the tallest bar when they
+        // carry value labels, so the label above it stays inside the chart.
+        let far_gap = if self.label.is_some() {
+            TEXT_HEIGHT
+        } else {
+            10.
+        };
         let (band_gap, value_end_gap) = if is_horizontal {
             self.horizontal_gaps
         } else {
-            (axis_gap, 10.)
+            (axis_gap, far_gap)
         };
         let (range, baseline) = match alignment {
             BarAlignment::Bottom => {
                 let baseline = value_dim - axis_gap;
-                (vec![baseline, 10.], baseline)
+                (vec![baseline, far_gap], baseline)
             }
             BarAlignment::Top => {
                 let baseline = axis_gap;
-                (vec![baseline, value_dim - 10.], baseline)
+                (vec![baseline, value_dim - far_gap], baseline)
             }
             BarAlignment::Left => {
                 let baseline = band_gap;
@@ -566,8 +623,8 @@ where
 
         // Far edge of the value axis in pixel space (opposite the baseline).
         let far = match alignment {
-            BarAlignment::Bottom => 10.,
-            BarAlignment::Top => value_dim - 10.,
+            BarAlignment::Bottom => far_gap,
+            BarAlignment::Top => value_dim - far_gap,
             BarAlignment::Left => value_dim - value_end_gap,
             BarAlignment::Right => value_end_gap,
         };
@@ -620,6 +677,8 @@ where
         let fill = self.fill.clone();
         let fill_gradient = self.fill_gradient.clone();
         let label_color = cx.theme().foreground;
+        let label_color_fn = self.label_color.clone();
+        let min_length = self.min_length;
 
         // Chart bounds in pixel space, with origin (0, 0) and size equal to
         // the full chart extent. Passed to user `fill` closures so they can
@@ -667,7 +726,17 @@ where
             .band_width(band_width)
             .cross(move |d| band_scale.tick(&band_fn_cloned(d)).map(|t| t + band_offset))
             .base(move |_| zero_pixel)
-            .value(move |d| value_scale.tick(&value_fn_cloned(d)))
+            .value(move |d| {
+                let value = value_fn_cloned(d);
+                let tick = value_scale.tick(&value)?;
+                Some(extend_to_min_length(
+                    tick,
+                    zero_pixel,
+                    value < V::zero(),
+                    alignment,
+                    min_length,
+                ))
+            })
             .corner_radii(self.corner_radii);
 
         bar = match (fill, fill_gradient) {
@@ -699,8 +768,10 @@ where
                 BarAlignment::Left => TextAlign::Left,
                 BarAlignment::Right => TextAlign::Right,
             };
-            bar =
-                bar.label(move |d, p| vec![Text::new(label(d), p, label_color).align(text_align)]);
+            bar = bar.label(move |d, p| {
+                let color = label_color_fn.as_ref().map_or(label_color, |f| f(d));
+                vec![Text::new(label(d), p, color).align(text_align)]
+            });
         }
 
         bar.paint(&bounds, window, cx);
@@ -823,6 +894,26 @@ where
     }
 }
 
+/// Push a bar's value end away from `zero` until the bar is `min` pixels long,
+/// in the direction its value grows for `alignment`.
+fn extend_to_min_length(
+    tick: f32,
+    zero: f32,
+    negative: bool,
+    alignment: BarAlignment,
+    min: f32,
+) -> f32 {
+    if (tick - zero).abs() >= min {
+        return tick;
+    }
+    let grows_toward_origin = matches!(alignment, BarAlignment::Bottom | BarAlignment::Right);
+    if grows_toward_origin != negative {
+        zero - min
+    } else {
+        zero + min
+    }
+}
+
 /// Clip a two-stop gradient to bar-local `[0, 1]`, interpolating colors at the
 /// clip points so the on-bar gradient matches the (possibly broader) gradient
 /// the caller defined.
@@ -931,5 +1022,38 @@ mod tests {
         assert_eq!(value_tick_positions(110., 10., 3), vec![110., 60., 10.]);
 
         assert_eq!(value_tick_positions(0., 50., 2), vec![0., 50.]);
+    }
+
+    #[test]
+    fn test_min_length_extends_away_from_zero() {
+        // A zero or tiny bar grows the way a positive one would.
+        assert_eq!(
+            extend_to_min_length(100., 100., false, BarAlignment::Bottom, 2.),
+            98.
+        );
+        assert_eq!(
+            extend_to_min_length(10., 10., false, BarAlignment::Top, 2.),
+            12.
+        );
+        assert_eq!(
+            extend_to_min_length(10., 10., false, BarAlignment::Left, 2.),
+            12.
+        );
+        assert_eq!(
+            extend_to_min_length(90., 90., false, BarAlignment::Right, 2.),
+            88.
+        );
+
+        // A small negative bar grows to the other side of the zero line.
+        assert_eq!(
+            extend_to_min_length(50.5, 50., true, BarAlignment::Bottom, 2.),
+            52.
+        );
+
+        // A bar already long enough is left alone.
+        assert_eq!(
+            extend_to_min_length(40., 100., false, BarAlignment::Bottom, 2.),
+            40.
+        );
     }
 }

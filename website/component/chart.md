@@ -272,6 +272,24 @@ BarChart::new(data)
     .value_tick_count(7)
 ```
 
+#### Bar Chart Labels and Spacing
+
+`label_color` colors each bar's `label` text, so a count can take its bar's color instead of the foreground. `padding_inner` and `padding_outer` set the gap between bars and before the first and after the last, as shares of a band; they default to 0.4 and 0.2. `min_length` draws every bar at least that many pixels long, so an empty bucket still shows a stub on the baseline.
+
+```rust
+// A distribution: narrow bars, counts in their bar's color, a stub for zero
+BarChart::new(buckets)
+    .band(|d| d.range.clone())
+    .value(|d| d.count)
+    .fill(|d, _, _, _| d.color)
+    .label(|d| d.count.to_string())
+    .label_color(|d| d.color)
+    .padding_inner(0.6)
+    .min_length(2.)
+```
+
+A stub grows the way its bar's value would: away from the zero line, to the negative side for a negative value and to the positive side for zero. Vertical bars with a `label` keep a line of text clear above the tallest bar, so its label stays inside the chart.
+
 ### AreaChart
 
 An area chart displays quantitative data visually, similar to a line chart but with the area below the line filled.
