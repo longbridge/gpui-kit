@@ -25,7 +25,7 @@ impl BaseShowcase {
                     .border_1()
                     .border_color(super::example_rgb(0xa3a3a3))
                     .bg(super::example_rgb(0xffffff))
-                    .segment(|segment, state, _, _| {
+                    .render_segment(|segment, state, _, _| {
                         segment
                             .px_0p5()
                             .when(state.is_selected(), |this| {

@@ -26,7 +26,7 @@ use gpui_kit::base::{HourCycle, TimeField, TimeFieldEvent, TimeFieldState, TimeP
 
 ## Anatomy and API
 
-The example composes `TimeField` over a `TimeFieldState`. The field renders one `TimeFieldSegment` per hour, minute, optional second and optional AM/PM part, separated by `:`. Lay out and style the root with `Styled`, and decorate each segment through `TimeField::segment`; the slot receives a `TimeSegmentState` with the segment, its value and whether it is selected.
+The example composes `TimeField` over a `TimeFieldState`. The field renders one `TimeFieldSegment` per hour, minute, optional second and optional AM/PM part, separated by `:`. Lay out and style the root with `Styled`, and decorate each segment through `TimeField::render_segment`; the slot receives a `TimeFieldSegmentState` with the segment, its value and whether it is selected.
 
 The authoritative module is [`components/time_field.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/time_field.rs). Native and browser previews compile this same file.
 

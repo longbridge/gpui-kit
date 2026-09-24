@@ -123,7 +123,7 @@ impl RenderOnce for TimeField {
                     .flex()
                     .h_full()
                     .items_center()
-                    .segment(move |segment, state, _, cx| {
+                    .render_segment(move |segment, state, _, cx| {
                         segment
                             .px_0p5()
                             .when(state.segment() == TimeSegment::Period, |this| {

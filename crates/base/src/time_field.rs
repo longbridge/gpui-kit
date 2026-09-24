@@ -360,7 +360,7 @@ impl TimeFieldState {
     }
 
     /// The segment that keyboard editing applies to.
-    pub fn segment(&self) -> TimeSegment {
+    pub fn selected_segment(&self) -> TimeSegment {
         self.editor.segment
     }
 
@@ -453,14 +453,14 @@ impl Render for TimeFieldState {
 
 /// State exposed to a [`TimeField`] segment slot for decoration.
 #[derive(Clone, Copy, Debug)]
-pub struct TimeSegmentState {
+pub struct TimeFieldSegmentState {
     segment: TimeSegment,
     value: u32,
     selected: bool,
     disabled: bool,
 }
 
-impl TimeSegmentState {
+impl TimeFieldSegmentState {
     pub fn segment(&self) -> TimeSegment {
         self.segment
     }
@@ -483,7 +483,7 @@ impl TimeSegmentState {
 }
 
 type SegmentRenderer =
-    Rc<dyn Fn(TimeFieldSegment, TimeSegmentState, &mut Window, &mut App) -> AnyElement>;
+    Rc<dyn Fn(TimeFieldSegment, TimeFieldSegmentState, &mut Window, &mut App) -> AnyElement>;
 
 /// An unstyled, pre-wired segment passed to the [`TimeField`] segment slot.
 #[derive(IntoElement)]
@@ -527,7 +527,7 @@ impl RenderOnce for TimeFieldSegment {
 ///
 /// Base owns focus, the keyboard model and pointer segment selection; the
 /// presentation lays out and decorates the field with `Styled` and each
-/// segment through [`TimeField::segment`]. A `:` separates the numeric
+/// segment through [`TimeField::render_segment`]. A `:` separates the numeric
 /// segments; the AM/PM segment follows without one.
 #[derive(IntoElement)]
 pub struct TimeField {
@@ -556,9 +556,9 @@ impl TimeField {
 
     /// Decorate each segment. The segment already carries its label: two
     /// digits, or `AM`/`PM`.
-    pub fn segment(
+    pub fn render_segment(
         mut self,
-        render: impl Fn(TimeFieldSegment, TimeSegmentState, &mut Window, &mut App) -> AnyElement
+        render: impl Fn(TimeFieldSegment, TimeFieldSegmentState, &mut Window, &mut App) -> AnyElement
         + 'static,
     ) -> Self {
         self.segment = Rc::new(render);
@@ -603,7 +603,7 @@ impl RenderOnce for TimeField {
             if ix > 0 && segment != TimeSegment::Period {
                 root = root.child(div().child(":"));
             }
-            let segment_state = TimeSegmentState {
+            let segment_state = TimeFieldSegmentState {
                 segment,
                 value: editor.value(segment),
                 selected: focused && segment == editor.segment,

@@ -26,7 +26,7 @@ use gpui_kit::base::{HourCycle, TimeField, TimeFieldEvent, TimeFieldState, TimeP
 
 ## 结构与 API
 
-示例在 `TimeFieldState` 之上组合 `TimeField`。字段为时、分以及可选的秒和上午/下午各渲染一个 `TimeFieldSegment`，数字段之间用 `:` 分隔。用 `Styled` 布局和装饰根元素，通过 `TimeField::segment` 装饰每一段；该插槽会收到 `TimeSegmentState`，包含段类型、当前值以及是否选中。权威实现位于 [`components/time_field.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/time_field.rs)，原生与浏览器预览编译的是同一文件。
+示例在 `TimeFieldState` 之上组合 `TimeField`。字段为时、分以及可选的秒和上午/下午各渲染一个 `TimeFieldSegment`，数字段之间用 `:` 分隔。用 `Styled` 布局和装饰根元素，通过 `TimeField::render_segment` 装饰每一段；该插槽会收到 `TimeFieldSegmentState`，包含段类型、当前值以及是否选中。权威实现位于 [`components/time_field.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/showcase/components/time_field.rs)，原生与浏览器预览编译的是同一文件。
 
 ## 状态与事件
 
