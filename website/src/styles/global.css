@@ -20,8 +20,8 @@ html.dark .comparison-partial { background-color: #facc15; }
 html.dark .comparison-no { background-color: #f87171; }
 .comparison-yes, .comparison-partial, .comparison-no {
   display: inline-block;
-  width: 0.65rem;
-  height: 0.65rem;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   font-size: 0;
   line-height: 0;
@@ -871,6 +871,13 @@ html.dark .astro-code span {
 
   thead th { border-bottom: 1px solid var(--doc-table-row-border); }
   tbody tr + tr td, tfoot td { border-top: 1px solid var(--doc-table-row-border); }
+
+  table:has(.comparison-yes) {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
 
   blockquote {
     padding: 0.25rem 0 0.25rem 1.25rem;
