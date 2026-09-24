@@ -58,19 +58,14 @@ gpui-wry = { path = "crates/webview", version = "0.6.5" }
 gpui-component-shell = { path = "crates/component-shell", version = "0.6.5" }
 story = { path = "crates/story" }
 
-# GPUI comes from the `gpui-pre-*` snapshots of Zed's crates, and any snapshot
-# may change GPUI's API. These requirements are what the published gpui-kit
-# crates carry to crates.io, so they pin the exact snapshot the release was
-# built against: a caret requirement let the weekly release move applications
-# onto a newer snapshot that gpui-component did not compile with (#3156). Bump
-# every snapshot crate together with its Cargo.lock entry; `script/check-gpui-pin.ts`
-# fails CI when a pin is not exact.
-gpui = { package = "gpui-pre", version = "=0.3.6" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.6", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { package = "gpui-pre-web", version = "=0.3.6" }
-gpui_macros = { package = "gpui-pre-macros", version = "=0.3.6" }
-reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.6" }
-sum-tree = { package = "gpui-pre-sum-tree", version = "=0.3.6" }
+# Temporary GPUI Fast trial for performance testing. Keep its companion crates
+# on the same commit so GPUI types are shared across the workspace.
+gpui = { git = "https://github.com/sunli829/gpui-fast", rev = "bee30b640956ba3b690e3e56de3edd2de2521fca" }
+gpui_platform = { git = "https://github.com/sunli829/gpui-fast", rev = "bee30b640956ba3b690e3e56de3edd2de2521fca", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { git = "https://github.com/sunli829/gpui-fast", rev = "bee30b640956ba3b690e3e56de3edd2de2521fca" }
+gpui_macros = { git = "https://github.com/sunli829/gpui-fast", rev = "bee30b640956ba3b690e3e56de3edd2de2521fca" }
+reqwest_client = { git = "https://github.com/sunli829/gpui-fast", rev = "bee30b640956ba3b690e3e56de3edd2de2521fca" }
+sum-tree = { package = "sum_tree", git = "https://github.com/sunli829/gpui-fast", rev = "bee30b640956ba3b690e3e56de3edd2de2521fca" }
 reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false, features = [
     "charset",
     "http2",
@@ -144,14 +139,14 @@ rustybuzz = { opt-level = 3 }
 taffy = { opt-level = 3 }
 ttf-parser = { opt-level = 3 }
 smol = { opt-level = 3 }
-gpui-pre = { opt-level = 3 }
-gpui-pre-platform = { opt-level = 3 }
-gpui-pre-macros = { opt-level = 3 }
+gpui = { opt-level = 3 }
+gpui_platform = { opt-level = 3 }
+gpui_macros = { opt-level = 3 }
 tree-sitter = { opt-level = 3 }
-gpui-pre-sum-tree = { opt-level = 3 }
+sum_tree = { opt-level = 3 }
 ropey = { opt-level = 3 }
 lsp-types = { opt-level = 3 }
-gpui-pre-reqwest-client = { opt-level = 3 }
+reqwest_client = { opt-level = 3 }
 markdown = { opt-level = 3 }
 xml5ever = { opt-level = 3 }
 # `quickjs-jit` is a facade that re-exports `quickjs-jit-core`, so naming it alone

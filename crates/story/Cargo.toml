@@ -12,6 +12,7 @@ default = ["tree-sitter"]
 
 [dependencies]
 anyhow.workspace = true
+gpui.workspace = true # gpui-fast's Action derive resolves the gpui crate directly.
 gpui-kit.workspace = true
 gpui-fps.workspace = true
 

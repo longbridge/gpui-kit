@@ -5,6 +5,7 @@ publish = false
 edition.workspace = true
 
 [dependencies]
+gpui.workspace = true # gpui-fast's Action derive resolves the gpui crate directly.
 gpui-kit.workspace = true
 gpui-component-story = { path = "../../crates/story" }
 anyhow.workspace = true
