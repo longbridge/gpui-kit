@@ -1254,30 +1254,33 @@ impl Example {
     /// Highlight every occurrence of the find query in the preview, unless
     /// the preview text it was last highlighted in is still current.
     fn highlight_matches(&mut self, cx: &mut Context<Self>) {
-        let text = self.text_view.read(cx).rendered_text();
-        if self.searched.as_ref() == Some(&text) {
-            return;
-        }
-
         let query = self.find_state.read(cx).value();
         let color = cx.theme().warning.opacity(0.3);
-        let highlights = if query.is_empty() {
-            Vec::new()
-        } else {
-            text.as_str()
-                .match_indices(query.as_str())
-                .map(|(start, found)| {
-                    RangeHighlight::new(start..start + found.len()).with_background(color)
-                })
-                .collect()
-        };
-        self.match_count = highlights.len();
+        let searched = self.searched.as_ref();
         let result = self.text_view.update(cx, |state, cx| {
-            state.set_range_highlights(&text, highlights, cx)
+            let text = state.rendered_text();
+            if searched == Some(&text) {
+                return None;
+            }
+            let highlights = if query.is_empty() {
+                Vec::new()
+            } else {
+                text.as_str()
+                    .match_indices(query.as_str())
+                    .map(|(start, found)| RangeHighlight::new(start..start + found.len(), color))
+                    .collect()
+            };
+            let count = highlights.len();
+            Some((text, count, state.set_range_highlights(highlights, cx)))
         });
+        let Some((text, count, result)) = result else {
+            return;
+        };
         if let Err(error) = result {
             eprintln!("Could not highlight the matches: {error}");
+            return;
         }
+        self.match_count = count;
         self.searched = Some(text);
         cx.notify();
     }

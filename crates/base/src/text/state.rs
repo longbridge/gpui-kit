@@ -573,7 +573,21 @@ impl TextViewState {
         )
     }
 
-    /// Replace the range highlights, whose ranges index `text`.
+    /// Replace the range highlights, whose ranges index the current rendered text.
+    ///
+    /// Use this when ranges are computed from this state during the same update.
+    /// For ranges computed earlier, use [`Self::set_range_highlights_for_snapshot`]
+    /// to reject results from a stale or foreign snapshot.
+    pub fn set_range_highlights(
+        &mut self,
+        highlights: impl IntoIterator<Item = RangeHighlight>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), RangeHighlightError> {
+        let text = self.rendered_text();
+        self.set_range_highlights_for_snapshot(&text, highlights, cx)
+    }
+
+    /// Replace the range highlights computed from `text` if it is still current.
     ///
     /// A highlight crossing from one block into another is painted in both,
     /// skipping the separator between them; text outside every block's text
@@ -588,9 +602,8 @@ impl TextViewState {
     /// cells in and after the edited row lose theirs, as a cell is only known
     /// by its place. Backgrounds that are part of the text, such as `<mark>`,
     /// paint over a highlight; inline code's paints under it.
-    /// Search the new [`Self::rendered_text`] again to highlight the new
-    /// text.
-    pub fn set_range_highlights(
+    /// Search the new [`Self::rendered_text`] again to highlight the new text.
+    pub fn set_range_highlights_for_snapshot(
         &mut self,
         text: &RenderedTextSnapshot,
         highlights: impl IntoIterator<Item = RangeHighlight>,
@@ -1875,7 +1888,7 @@ mod tests {
         }
 
         fn highlight(range: Range<usize>) -> RangeHighlight {
-            RangeHighlight::new(range).with_background(gpui::hsla(0.15, 1., 0.5, 0.4))
+            RangeHighlight::new(range, gpui::hsla(0.15, 1., 0.5, 0.4))
         }
 
         /// Highlights `ranges` of the current rendered text.
@@ -1885,8 +1898,7 @@ mod tests {
             cx: &mut TestAppContext,
         ) -> Result<(), RangeHighlightError> {
             state.update(cx, |state, cx| {
-                let text = state.rendered_text();
-                state.set_range_highlights(&text, ranges.into_iter().map(highlight), cx)
+                state.set_range_highlights(ranges.into_iter().map(highlight), cx)
             })
         }
 
@@ -2020,7 +2032,7 @@ mod tests {
             let text = state.read_with(cx, |state, _| state.rendered_text());
             other.update(cx, |other, cx| {
                 assert_eq!(
-                    other.set_range_highlights(&text, [highlight(0..3)], cx),
+                    other.set_range_highlights_for_snapshot(&text, [highlight(0..3)], cx),
                     Err(RangeHighlightError::ForeignText)
                 );
             });
@@ -2031,7 +2043,7 @@ mod tests {
             assert_ne!(state.read_with(cx, |state, _| state.rendered_text()), text);
             state.update(cx, |state, cx| {
                 assert_eq!(
-                    state.set_range_highlights(&text, [highlight(0..3)], cx),
+                    state.set_range_highlights_for_snapshot(&text, [highlight(0..3)], cx),
                     Err(RangeHighlightError::StaleText)
                 );
             });
@@ -2041,7 +2053,11 @@ mod tests {
             html.update(cx, |html, cx| {
                 let text = html.rendered_text();
                 assert_eq!(
-                    html.set_range_highlights(&text, [highlight(0..3)], cx),
+                    html.set_range_highlights([highlight(0..3)], cx),
+                    Err(RangeHighlightError::Unsupported)
+                );
+                assert_eq!(
+                    html.set_range_highlights_for_snapshot(&text, [highlight(0..3)], cx),
                     Err(RangeHighlightError::Unsupported)
                 );
             });
@@ -2089,7 +2105,7 @@ mod tests {
             assert_eq!(painted(&state, TextLeafKey::block(7), cx), [0..2]);
             state.update(cx, |state, cx| {
                 assert_eq!(
-                    state.set_range_highlights(&text, [highlight(0..5)], cx),
+                    state.set_range_highlights_for_snapshot(&text, [highlight(0..5)], cx),
                     Err(RangeHighlightError::StaleText)
                 );
             });
@@ -2254,7 +2270,7 @@ mod tests {
                 let text = state.rendered_text();
                 let some = text.as_str().find("some").unwrap();
                 state
-                    .set_range_highlights(&text, [highlight(some..some + 4)], cx)
+                    .set_range_highlights_for_snapshot(&text, [highlight(some..some + 4)], cx)
                     .unwrap();
                 state.push_str("\n\n[foo]: https://example.com", cx);
             });
@@ -2326,7 +2342,7 @@ mod tests {
             state.update(cx, |state, cx| {
                 let rendered = state.rendered_text();
                 state
-                    .set_range_highlights(&rendered, ranges.map(highlight), cx)
+                    .set_range_highlights_for_snapshot(&rendered, ranges.map(highlight), cx)
                     .unwrap();
             });
             cx.update(|window, cx| window.draw(cx).clear(cx));

@@ -116,39 +116,31 @@ impl Eq for RenderedTextSnapshot {}
 ///
 /// It is painted under the text and under the selection, and never changes
 /// layout. Where highlights overlap, the later one paints over the earlier. A
-/// highlight without a background paints nothing.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RangeHighlight {
     range: Range<usize>,
-    background: Option<Hsla>,
+    background: Hsla,
 }
 
 impl RangeHighlight {
     /// A highlight over `range`, in byte offsets of a [`RenderedTextSnapshot`].
-    pub fn new(range: Range<usize>) -> Self {
+    pub fn new(range: Range<usize>, background: impl Into<Hsla>) -> Self {
         Self {
             range,
-            background: None,
+            background: background.into(),
         }
-    }
-
-    /// The color painted behind the range.
-    pub fn with_background(mut self, background: impl Into<Hsla>) -> Self {
-        self.background = Some(background.into());
-        self
     }
 
     pub fn range(&self) -> Range<usize> {
         self.range.clone()
     }
 
-    pub fn background(&self) -> Option<Hsla> {
+    pub fn background(&self) -> Hsla {
         self.background
     }
 }
 
-/// Why [`TextViewState::set_range_highlights`](super::TextViewState::set_range_highlights)
-/// rejected a set of highlights. Nothing changes when it does.
+/// Why setting range highlights was rejected. Existing highlights stay unchanged.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[non_exhaustive]
 pub enum RangeHighlightError {
@@ -417,13 +409,11 @@ impl RangeHighlightFrame {
                 .index()
                 .resolve(&highlight.range)
                 .ok_or(RangeHighlightError::InvalidRange(ix))?;
-            if let Some(background) = highlight.background {
-                pieces.extend(
-                    leaf_ranges
-                        .into_iter()
-                        .map(|(key, range)| (key, range, background)),
-                );
-            }
+            pieces.extend(
+                leaf_ranges
+                    .into_iter()
+                    .map(|(key, range)| (key, range, highlight.background)),
+            );
         }
 
         // Stable, so each leaf keeps the application's order.
@@ -579,14 +569,10 @@ mod tests {
     use super::RangeHighlight;
 
     #[test]
-    fn test_range_highlight_builder() {
-        let highlight = RangeHighlight::new(2..5);
-        assert_eq!(highlight.range(), 2..5);
-        assert_eq!(highlight.background(), None);
-
+    fn range_highlight_requires_a_background() {
         let color = hsla(0.15, 1., 0.5, 0.4);
-        let highlight = highlight.with_background(color);
+        let highlight = RangeHighlight::new(2..5, color);
         assert_eq!(highlight.range(), 2..5);
-        assert_eq!(highlight.background(), Some(color));
+        assert_eq!(highlight.background(), color);
     }
 }

@@ -123,10 +123,12 @@ fn highlight_matches(
         text.as_str().match_indices(query).collect()
     };
     let highlights = matches.into_iter().enumerate().map(|(ix, (start, found))| {
-        RangeHighlight::new(start..start + found.len())
-            .with_background(if ix == current_match { current_color } else { color })
+        RangeHighlight::new(
+            start..start + found.len(),
+            if ix == current_match { current_color } else { color },
+        )
     });
-    state.set_range_highlights(&text, highlights, cx)
+    state.set_range_highlights(highlights, cx)
 }
 ```
 
@@ -150,9 +152,10 @@ the block's text is unchanged. Text appended while streaming, through
 `push_str` or `set_text`, keeps the highlights before it, and an edit keeps
 those before and after it. After an edit inside a table, the cells in and
 after the edited row lose theirs, since a cell is only known by its place in
-the table. The view notifies, and `set_range_highlights` rejects text taken
-before the change as stale: observe the state, and search the new
-`rendered_text()` again. Backgrounds that are part of the text, such as
+the table. The view notifies when its text changes: observe the state and
+search the new `rendered_text()` again. For asynchronous searches, pass the
+snapshot used to calculate the ranges to `set_range_highlights_for_snapshot`;
+it rejects results from a stale or different view. Backgrounds that are part of the text, such as
 `<mark>` and syntax highlighting, paint over a range highlight (inline code's
 background is painted under it), and highlights do not fade in with streamed
 text. HTML views do not support range highlights.
