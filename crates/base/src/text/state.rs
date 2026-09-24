@@ -4,7 +4,7 @@ use std::time::Instant;
 use std::{
     ops::{Range, RangeInclusive},
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     task::Poll,
     time::Duration,
 };
@@ -12,8 +12,8 @@ use std::{
 use web_time::Instant;
 
 use gpui::{
-    App, AppContext as _, Bounds, Context, FocusHandle, IntoElement, KeyBinding, ListState,
-    ParentElement as _, Pixels, Point, Render, SharedString, Styled as _, Task, Window,
+    App, AppContext as _, Bounds, Context, EntityId, FocusHandle, IntoElement, KeyBinding,
+    ListState, ParentElement as _, Pixels, Point, Render, SharedString, Styled as _, Task, Window,
     prelude::FluentBuilder as _, px,
 };
 
@@ -23,10 +23,11 @@ use crate::{
     input::{self, SelectAll},
     text::{
         CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
-        TableActionsFn, TextViewStyle,
+        RangeHighlight, RangeHighlightError, RenderedText, TableActionsFn, TextViewStyle,
         document::ParsedDocument,
         format,
         node::{self, NodeContext},
+        range_highlight::{RangeHighlightFrame, RenderedIndex},
         selection_adapter::TextViewSelectionAdapter,
         stream_fade::{StreamFadeTracker, TextViewMotion},
     },
@@ -92,6 +93,7 @@ pub(super) struct LineSpan {
 
 /// The state of a TextView.
 pub struct TextViewState {
+    entity_id: EntityId,
     pub(super) focus_handle: FocusHandle,
     pub(super) list_state: ListState,
 
@@ -134,6 +136,14 @@ pub struct TextViewState {
     /// string next frame without comparing its bytes.
     element_text: Option<SharedString>,
     revision: usize,
+    /// The revision of the update `parsed_content` was committed from.
+    committed_revision: usize,
+    /// The revision of the last update that replaced the text rather than
+    /// appending to it.
+    full_update_revision: usize,
+    /// The rendered text of `parsed_content`, built when first read.
+    rendered_index: Arc<OnceLock<RenderedIndex>>,
+    range_highlights: Option<Arc<RangeHighlightFrame>>,
     pub(super) selection_revision: usize,
     compatible_layout_update: bool,
     layout_text_style: Option<(gpui::TextStyle, Pixels)>,
@@ -175,6 +185,11 @@ impl TextViewState {
 
                         match parsed_update.result {
                             Ok(content) => {
+                                state.reconcile_range_highlights(
+                                    &content.document,
+                                    parsed_update.revision,
+                                    parsed_update.selection_compatible && !parsed_update.full_parse,
+                                );
                                 state.stream_fade.record(
                                     &state.parsed_content.document,
                                     &content.document,
@@ -207,6 +222,7 @@ impl TextViewState {
         let _parse_task = cx.background_spawn(UpdateFuture::new(format, rx, tx_result));
 
         let mut this = Self {
+            entity_id: cx.entity_id(),
             focus_handle,
             bounds: Bounds::default(),
             multi_click_selection: None,
@@ -241,6 +257,10 @@ impl TextViewState {
             text: text.to_string(),
             element_text: None,
             revision: 0,
+            committed_revision: 0,
+            full_update_revision: 0,
+            rendered_index: Arc::default(),
+            range_highlights: None,
             selection_revision: 0,
             compatible_layout_update: false,
             layout_text_style: None,
@@ -492,6 +512,7 @@ impl TextViewState {
     fn increment_update(&mut self, text: &str, append: bool, cx: &mut Context<Self>) {
         self.revision += 1;
         if !append {
+            self.full_update_revision = self.revision;
             self.selection_revision = self.selection_revision.wrapping_add(1);
         }
         let parse_synchronously = !append && text.len() <= MAX_SYNC_FULL_REPLACE_BYTES;
@@ -515,6 +536,7 @@ impl TextViewState {
         if parse_synchronously {
             match parse_content(self.format, ParsedContent::default(), &update_options) {
                 Ok(content) => {
+                    self.reconcile_range_highlights(&content.document, self.revision, false);
                     self.stream_fade.record(
                         &self.parsed_content.document,
                         &content.document,
@@ -541,6 +563,71 @@ impl TextViewState {
         }
 
         _ = self.tx.try_send(update_options);
+    }
+
+    /// The text this view renders, which [`RangeHighlight`] ranges index.
+    ///
+    /// This is the string plain copy produces, as of the last parse that
+    /// landed; text set since then is not in it until its parse lands.
+    pub fn rendered_text(&self) -> RenderedText {
+        RenderedText::new(
+            self.entity_id,
+            self.committed_revision,
+            self.parsed_content.document.clone(),
+            self.rendered_index.clone(),
+        )
+    }
+
+    /// Replace the range highlights, whose ranges index the current rendered text.
+    ///
+    /// Compute ranges from the current [`Self::rendered_text`] and set them in
+    /// the same update. Search the new text again after its content changes.
+    /// A range crossing blocks paints in both, skipping their separator.
+    /// Text outside every block (separators, custom blocks, HTML blocks, and
+    /// inline objects) is left unpainted. Any invalid range rejects the set.
+    ///
+    /// Highlights follow unchanged text through updates. Text appended while
+    /// streaming keeps earlier highlights; after a table edit, cells in and
+    /// after the edited row lose theirs because cells are known by position.
+    /// Text backgrounds such as `<mark>` paint over a highlight; inline code
+    /// backgrounds paint under it.
+    pub fn set_range_highlights(
+        &mut self,
+        highlights: impl IntoIterator<Item = RangeHighlight>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), RangeHighlightError> {
+        let text = self.rendered_text();
+        if self.format != TextViewFormat::Markdown {
+            return Err(RangeHighlightError::Unsupported);
+        }
+        self.range_highlights = RangeHighlightFrame::new(&text, highlights)?.map(Arc::new);
+        cx.notify();
+        Ok(())
+    }
+
+    /// Remove all range highlights.
+    pub fn clear_range_highlights(&mut self, cx: &mut Context<Self>) {
+        if self.range_highlights.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// Carry the range highlights over to `new`, the document the update of
+    /// `revision` parsed, before it replaces the current one.
+    ///
+    /// `append` is whether that update parsed only appended text onto the
+    /// document before it. Only when no update has replaced the text since
+    /// the current document was committed was that document the current one,
+    /// so only then do the blocks before its last stay unchanged.
+    fn reconcile_range_highlights(&mut self, new: &ParsedDocument, revision: usize, append: bool) {
+        let tail_only = append && self.full_update_revision <= self.committed_revision;
+        self.committed_revision = revision;
+        self.rendered_index = Arc::default();
+        if let Some(highlights) = self.range_highlights.take() {
+            self.range_highlights = highlights
+                .remap(&self.parsed_content.document, new, tail_only)
+                .map(Arc::new);
+        }
     }
 
     /// Save bounds and unselect if bounds changed.
@@ -802,6 +889,7 @@ impl Render for TextViewState {
             link_click_handler: self.link_click_handler.clone(),
             markdown_extensions: self.markdown_extensions.clone(),
             stream_fade,
+            range_highlights: self.range_highlights.clone(),
         };
 
         v_flex()
@@ -1815,5 +1903,460 @@ mod tests {
             assert_eq!(node.name(), "ticker");
             assert_eq!(node.data::<String>().map(String::as_str), Some("TSLA.US"));
         });
+    }
+
+    mod range_highlights {
+        use std::ops::Range;
+
+        use gpui::{Entity, TestAppContext};
+
+        use super::super::*;
+        use crate::text::stream_fade::TextLeafKey;
+
+        fn state(markdown: &str, cx: &mut TestAppContext) -> Entity<TextViewState> {
+            cx.update(crate::init);
+            let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown(markdown, cx)));
+            cx.run_until_parked();
+            state
+        }
+
+        fn highlight(range: Range<usize>) -> RangeHighlight {
+            RangeHighlight::new(range, gpui::hsla(0.15, 1., 0.5, 0.4))
+        }
+
+        /// Highlights `ranges` of the current rendered text.
+        fn set(
+            state: &Entity<TextViewState>,
+            ranges: impl IntoIterator<Item = Range<usize>>,
+            cx: &mut TestAppContext,
+        ) -> Result<(), RangeHighlightError> {
+            state.update(cx, |state, cx| {
+                state.set_range_highlights(ranges.into_iter().map(highlight), cx)
+            })
+        }
+
+        /// The ranges leaf `key` paints, in its own byte space.
+        fn painted(
+            state: &Entity<TextViewState>,
+            key: TextLeafKey,
+            cx: &mut TestAppContext,
+        ) -> Vec<Range<usize>> {
+            state.read_with(cx, |state, _| {
+                state.range_highlights.as_ref().map_or(Vec::new(), |frame| {
+                    frame
+                        .backgrounds(key)
+                        .iter()
+                        .map(|(range, _)| range.clone())
+                        .collect()
+                })
+            })
+        }
+
+        fn has_highlights(state: &Entity<TextViewState>, cx: &mut TestAppContext) -> bool {
+            state.read_with(cx, |state, _| state.range_highlights.is_some())
+        }
+
+        #[gpui::test]
+        fn rendered_text_is_the_plain_copy_text(cx: &mut TestAppContext) {
+            let state = state(
+                "# Title\n\nhello **world** \\*\n\n- item\n\n| a | b |\n|---|---|\n| c | d |\n\n```\nlet x\n```",
+                cx,
+            );
+            state.read_with(cx, |state, _| {
+                assert_eq!(
+                    state.rendered_text().as_str(),
+                    "Title\nhello world *\nitem\na b\nc d\n\nlet x\n"
+                );
+            });
+        }
+
+        #[gpui::test]
+        fn a_match_across_marks_paints_in_its_paragraph(cx: &mut TestAppContext) {
+            let state = state("hello **world**", cx);
+            set(&state, [0.."hello world".len()], cx).unwrap();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..11]);
+        }
+
+        #[gpui::test]
+        fn repeated_text_maps_to_the_occurrence_addressed(cx: &mut TestAppContext) {
+            let state = state("foo\n\nfoo", cx);
+            let second = state.read_with(cx, |state, _| {
+                state.rendered_text().as_str().rfind("foo").unwrap()
+            });
+            set(&state, [second..second + 3], cx).unwrap();
+            assert!(painted(&state, TextLeafKey::block(0), cx).is_empty());
+            assert_eq!(painted(&state, TextLeafKey::block(5), cx), [0..3]);
+        }
+
+        #[gpui::test]
+        fn a_range_across_blocks_skips_the_separator(cx: &mut TestAppContext) {
+            let state = state("ab\n\ncd", cx);
+            // "ab\ncd\n": 1..4 is "b\nc".
+            set(&state, [1..4], cx).unwrap();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [1..2]);
+            assert_eq!(painted(&state, TextLeafKey::block(4), cx), [0..1]);
+        }
+
+        #[gpui::test]
+        fn table_cells_and_code_blocks_are_leaves(cx: &mut TestAppContext) {
+            let state = state("| a | b |\n|---|---|\n| c | d |\n\n```\nlet x\n```", cx);
+            // "a b\nc d\n\nlet x\n"
+            set(&state, [0..3, 6..7, 9..12], cx).unwrap();
+            assert_eq!(painted(&state, TextLeafKey::table_cell(0, 0), cx), [0..1]);
+            assert_eq!(painted(&state, TextLeafKey::table_cell(0, 1), cx), [0..1]);
+            assert_eq!(painted(&state, TextLeafKey::table_cell(0, 3), cx), [0..1]);
+            let code_start = "| a | b |\n|---|---|\n| c | d |\n\n".len();
+            assert_eq!(painted(&state, TextLeafKey::block(code_start), cx), [0..3]);
+        }
+
+        #[gpui::test]
+        fn invalid_ranges_reject_the_whole_set(cx: &mut TestAppContext) {
+            let state = state("中文\n\nab", cx);
+            // "中文\nab\n"
+            set(&state, [0.."中".len()], cx).unwrap();
+            let invalid = [Range { start: 6, end: 3 }, 0..1, 0..100];
+            for range in invalid {
+                assert_eq!(
+                    set(&state, [0..3, range.clone()], cx),
+                    Err(RangeHighlightError::InvalidRange(1)),
+                    "{range:?}"
+                );
+            }
+            // The rejected sets left the earlier highlight in place.
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..3]);
+        }
+
+        #[gpui::test]
+        fn text_outside_every_block_is_left_unpainted(cx: &mut TestAppContext) {
+            let source = "foo one\n\n<div>foo two</div>\n\n| foo | x |\n|---|---|\n\nfoo three";
+            let state = state(source, cx);
+            let text = state.read_with(cx, |state, _| state.rendered_text().as_str().to_string());
+            // Every "foo" and " ", an empty range, and the separator after the
+            // first block: the HTML block's text and the separators are not
+            // any block's text, so they paint nothing, but nothing fails.
+            let ranges = text
+                .match_indices("foo")
+                .chain(text.match_indices(' '))
+                .map(|(start, found)| start..start + found.len())
+                .chain([3..3, 7..8])
+                .collect::<Vec<_>>();
+            set(&state, ranges, cx).unwrap();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..3, 3..4]);
+            let table = source.find("| foo").unwrap();
+            assert_eq!(
+                painted(&state, TextLeafKey::table_cell(table, 0), cx),
+                [0..3]
+            );
+            let last = source.find("foo three").unwrap();
+            assert_eq!(painted(&state, TextLeafKey::block(last), cx), [0..3, 3..4]);
+        }
+
+        #[gpui::test]
+        fn a_later_highlight_paints_over_an_earlier_one(cx: &mut TestAppContext) {
+            let state = state("abcdef", cx);
+            set(&state, [0..6, 2..3], cx).unwrap();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..6, 2..3]);
+        }
+
+        #[gpui::test]
+        fn html_text_is_unsupported(cx: &mut TestAppContext) {
+            let html = cx.update(|cx| cx.new(|cx| TextViewState::html("<p>one</p>", cx)));
+            cx.run_until_parked();
+            html.update(cx, |html, cx| {
+                assert_eq!(
+                    html.set_range_highlights([highlight(0..3)], cx),
+                    Err(RangeHighlightError::Unsupported)
+                );
+            });
+        }
+
+        #[gpui::test]
+        fn inline_objects_are_skipped(cx: &mut TestAppContext) {
+            let state = state("x $a$ y", cx);
+            state.update(cx, |state, cx| {
+                let extensions = MarkdownExtensions::default().plugin(
+                    crate::text::markdown_ext::TestInlinePlugin::new("test").parse_with(
+                        |node, _| {
+                            let markdown::mdast::Node::InlineMath(math) = node else {
+                                return None;
+                            };
+                            Some(
+                                crate::text::MarkdownNode::new("formula", ())
+                                    .text(math.value.clone()),
+                            )
+                        },
+                    ),
+                );
+                state.set_markdown_extensions(Arc::new(extensions), cx);
+            });
+            cx.run_until_parked();
+            // "x a y\n", where "a" is the formula.
+            set(&state, [2..3], cx).unwrap();
+            assert!(painted(&state, TextLeafKey::block(0), cx).is_empty());
+            set(&state, [0..5], cx).unwrap();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..2, 3..5]);
+        }
+
+        #[gpui::test]
+        fn push_str_keeps_earlier_blocks_and_clips_the_changed_tail(cx: &mut TestAppContext) {
+            let state = state("first\n\na **b", cx);
+            // "first\na **b\n"
+            set(&state, [0..5, 6..11], cx).unwrap();
+
+            // Closing the emphasis renders the tail as "a bc".
+            state.update(cx, |state, cx| state.push_str("c**", cx));
+            cx.run_until_parked();
+
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..5]);
+            assert_eq!(painted(&state, TextLeafKey::block(7), cx), [0..2]);
+        }
+
+        #[gpui::test]
+        fn push_str_keeps_a_block_whose_text_is_unchanged(cx: &mut TestAppContext) {
+            let state = state("first\n\nsecond", cx);
+            set(&state, [6..12], cx).unwrap();
+            // A setext underline turns the paragraph into a heading at the
+            // same source start, rendering the same text.
+            state.update(cx, |state, cx| state.push_str("\n===", cx));
+            cx.run_until_parked();
+            assert_eq!(painted(&state, TextLeafKey::block(7), cx), [0..6]);
+        }
+
+        #[gpui::test]
+        fn push_str_drops_highlights_of_a_leaf_that_is_gone(cx: &mut TestAppContext) {
+            let state = state("first\n\n| a |", cx);
+            set(&state, [0..5, 6..11], cx).unwrap();
+            // A delimiter row turns the paragraph into a table, whose text
+            // lives in cells instead.
+            state.update(cx, |state, cx| state.push_str("\n|---|", cx));
+            cx.run_until_parked();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..5]);
+            assert!(painted(&state, TextLeafKey::block(7), cx).is_empty());
+            assert!(painted(&state, TextLeafKey::table_cell(7, 0), cx).is_empty());
+        }
+
+        #[gpui::test]
+        fn replacing_text_drops_highlights_only_where_it_changed(cx: &mut TestAppContext) {
+            let state = state("first\n\nsecond", cx);
+            set(&state, [0..5, 6..12], cx).unwrap();
+            state.update(cx, |state, cx| state.set_text("first\n\nchanged", cx));
+            cx.run_until_parked();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..5]);
+            assert!(painted(&state, TextLeafKey::block(7), cx).is_empty());
+
+            let large = "x".repeat(MAX_SYNC_FULL_REPLACE_BYTES + 1);
+            state.update(cx, |state, cx| state.set_text(&large, cx));
+            cx.run_until_parked();
+            assert!(!has_highlights(&state, cx));
+        }
+
+        #[gpui::test]
+        fn a_highlight_follows_its_block_past_an_earlier_edit(cx: &mut TestAppContext) {
+            let state = state("foo\n\nbar\n\nbar", cx);
+            // "foo\nbar\nbar\n": the first "bar", in the block at source 5.
+            set(&state, [4..7], cx).unwrap();
+            // Deleting "foo" moves that "bar" to 0, and the second one to 5.
+            state.update(cx, |state, cx| state.set_text("bar\n\nbar", cx));
+            cx.run_until_parked();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..3]);
+            assert!(painted(&state, TextLeafKey::block(5), cx).is_empty());
+
+            let state = self::state("ERROR a\n\nERROR b\n\nERROR c", cx);
+            set(&state, [8..15], cx).unwrap();
+            state.update(cx, |state, cx| state.set_text("ERROR b\n\nERROR c", cx));
+            cx.run_until_parked();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..7]);
+            assert!(painted(&state, TextLeafKey::block(9), cx).is_empty());
+        }
+
+        #[gpui::test]
+        fn appending_a_copy_of_the_last_block_keeps_the_highlight_on_it(cx: &mut TestAppContext) {
+            let state = state("a\n\nfoo", cx);
+            // "a\nfoo\n"
+            set(&state, [2..5], cx).unwrap();
+            state.update(cx, |state, cx| state.set_text("a\n\nfoo\n\nfoo", cx));
+            cx.run_until_parked();
+            assert_eq!(painted(&state, TextLeafKey::block(3), cx), [0..3]);
+            assert!(painted(&state, TextLeafKey::block(8), cx).is_empty());
+        }
+
+        #[gpui::test]
+        fn deleting_a_table_row_drops_highlights_in_the_rows_it_moves(cx: &mut TestAppContext) {
+            let table = "| a | b |\n|---|---|\n| x | 1 |\n| x | 2 |";
+            let without_middle_row = "| a | b |\n|---|---|\n| x | 2 |";
+            // "a b\nx 1\nx 2\n\n": the last row's cells, then the middle
+            // row's "x".
+            for ranges in [vec![8..9, 10..11], vec![4..5]] {
+                let state = state(table, cx);
+                set(&state, [0..1].into_iter().chain(ranges), cx).unwrap();
+                state.update(cx, |state, cx| state.set_text(without_middle_row, cx));
+                cx.run_until_parked();
+                assert_eq!(painted(&state, TextLeafKey::table_cell(0, 0), cx), [0..1]);
+                for cell in 1..4 {
+                    assert!(
+                        painted(&state, TextLeafKey::table_cell(0, cell), cx).is_empty(),
+                        "cell {cell}"
+                    );
+                }
+            }
+        }
+
+        #[gpui::test]
+        fn streaming_table_rows_keeps_the_highlights_of_earlier_rows(cx: &mut TestAppContext) {
+            let state = state("| a | b |\n|---|---|\n| x | 1 |", cx);
+            // "a b\nx 1\n\n"
+            set(&state, [0..1, 4..5], cx).unwrap();
+            state.update(cx, |state, cx| {
+                state.set_text("| a | b |\n|---|---|\n| x | 1 |\n| y | 2 |", cx)
+            });
+            cx.run_until_parked();
+            assert_eq!(painted(&state, TextLeafKey::table_cell(0, 0), cx), [0..1]);
+            assert_eq!(painted(&state, TextLeafKey::table_cell(0, 2), cx), [0..1]);
+        }
+
+        #[gpui::test]
+        fn an_edit_in_an_earlier_block_keeps_later_highlights(cx: &mut TestAppContext) {
+            let state = state("one\n\ntwo", cx);
+            set(&state, [0..3, 4..7], cx).unwrap();
+            state.update(cx, |state, cx| state.set_text("one!\n\ntwo", cx));
+            cx.run_until_parked();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..3]);
+            assert_eq!(painted(&state, TextLeafKey::block(6), cx), [0..3]);
+        }
+
+        #[gpui::test]
+        fn an_append_after_a_full_update_compares_every_block(cx: &mut TestAppContext) {
+            let state = state("first\n\nsecond", cx);
+            set(&state, [0..5], cx).unwrap();
+            // An append result whose baseline was a full update that has not
+            // been committed: its earlier blocks are not the current ones.
+            let options = UpdateOptions {
+                revision: 0,
+                pending_text: "FIRST\n\nsecond".to_string(),
+                append: false,
+                mode: ParseMode::Replace,
+                markdown_extensions: Arc::default(),
+            };
+            let new = parse_content(TextViewFormat::Markdown, ParsedContent::default(), &options)
+                .unwrap()
+                .document;
+            state.update(cx, |state, _| {
+                state.full_update_revision = state.committed_revision + 1;
+                let revision = state.committed_revision + 2;
+                state.reconcile_range_highlights(&new, revision, true);
+            });
+            assert!(!has_highlights(&state, cx));
+        }
+
+        #[gpui::test]
+        fn streaming_through_set_text_keeps_highlights(cx: &mut TestAppContext) {
+            let state = state("first\n\nsec", cx);
+            // "first\nsec\n"
+            set(&state, [0..5, 6..9], cx).unwrap();
+            state.update(cx, |state, cx| state.set_text("first\n\nsecond", cx));
+            cx.run_until_parked();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..5]);
+            assert_eq!(painted(&state, TextLeafKey::block(7), cx), [0..3]);
+        }
+
+        #[gpui::test]
+        fn a_full_parse_merged_with_an_append_compares_every_block(cx: &mut TestAppContext) {
+            let state = state("", cx);
+            // The small text is committed at once, and its background parse
+            // merges with the append into one full parse, in which the
+            // definition turns the earlier `[foo]` into the link text `foo`.
+            state.update(cx, |state, cx| {
+                state.set_text("[foo] and some text\n\nmore", cx);
+                let text = state.rendered_text();
+                let some = text.as_str().find("some").unwrap();
+                state
+                    .set_range_highlights([highlight(some..some + 4)], cx)
+                    .unwrap();
+                state.push_str("\n\n[foo]: https://example.com", cx);
+            });
+            cx.run_until_parked();
+            state.read_with(cx, |state, _| {
+                assert!(state.rendered_text().as_str().starts_with("foo and some"));
+            });
+            assert!(painted(&state, TextLeafKey::block(0), cx).is_empty());
+        }
+
+        #[gpui::test]
+        fn a_full_update_before_an_append_drops_replaced_highlights(cx: &mut TestAppContext) {
+            let state = state("first", cx);
+            set(&state, [0..5], cx).unwrap();
+            let large = "x".repeat(MAX_SYNC_FULL_REPLACE_BYTES + 1);
+            state.update(cx, |state, cx| {
+                state.set_text(&large, cx);
+                state.push_str(" tail", cx);
+            });
+            cx.run_until_parked();
+            assert!(!has_highlights(&state, cx));
+        }
+
+        #[gpui::test]
+        fn reparsing_unchanged_text_keeps_highlights(cx: &mut TestAppContext) {
+            let state = state("first", cx);
+            set(&state, [0..5], cx).unwrap();
+            state.update(cx, |state, cx| {
+                state.set_markdown_extensions(
+                    Arc::new(MarkdownExtensions::default().parser_revision(1)),
+                    cx,
+                )
+            });
+            cx.run_until_parked();
+            assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..5]);
+        }
+
+        struct Root {
+            state: Entity<TextViewState>,
+        }
+
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                gpui::div()
+                    .w(px(120.))
+                    .child(crate::text::TextView::new(&self.state).selectable(true))
+            }
+        }
+
+        #[gpui::test]
+        fn highlights_paint_across_inline_code_tables_and_code_blocks(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let markdown = "wrapping text with `inline code` and a [link](https://x.y) \
+                            that wraps\n\n| a | b |\n|---|---|\n| c | d |\n\n```\nlet x = 1;\n```";
+            let (root, cx) = cx.add_window_view(|_, cx| Root {
+                state: cx.new(|cx| TextViewState::markdown(markdown, cx)),
+            });
+            cx.run_until_parked();
+            let state = root.read_with(cx, |root, _| root.state.clone());
+            let text = state.read_with(cx, |state, _| state.rendered_text().as_str().to_string());
+            let code = text.find("code").unwrap();
+            let len = text.len();
+            // Part of the inline code, every character, and the whole text.
+            let ranges = [code..code + 2]
+                .into_iter()
+                .chain(text.char_indices().map(|(ix, c)| ix..ix + c.len_utf8()))
+                .chain([0..len])
+                .filter(|range| !text[range.clone()].trim().is_empty());
+            state.update(cx, |state, cx| {
+                state
+                    .set_range_highlights(ranges.map(highlight), cx)
+                    .unwrap();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                painted(&state, TextLeafKey::block(0), cx)[0],
+                code..code + 2
+            );
+        }
+
+        #[gpui::test]
+        fn clear_range_highlights_removes_them(cx: &mut TestAppContext) {
+            let state = state("first", cx);
+            set(&state, [0..5], cx).unwrap();
+            state.update(cx, |state, cx| state.clear_range_highlights(cx));
+            assert!(!has_highlights(&state, cx));
+        }
     }
 }

@@ -97,7 +97,9 @@ impl TextViewMotion {
 
 /// Identifies one run of rendered text across re-parses: the source start of
 /// the block that owns it, plus the cell ordinal inside a table.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+///
+/// Keys order as their leaves appear in the document.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub(crate) struct TextLeafKey {
     block_start: usize,
     ordinal: usize,
@@ -127,6 +129,24 @@ impl TextLeafKey {
         Self {
             block_start: table_start,
             ordinal: ordinal + 1,
+        }
+    }
+
+    pub(crate) fn block_start(&self) -> usize {
+        self.block_start
+    }
+
+    /// The index of the table cell the leaf is, among all the cells of its
+    /// table, or `None` when it is not a cell.
+    pub(crate) fn cell_ix(&self) -> Option<usize> {
+        self.ordinal.checked_sub(1)
+    }
+
+    /// The same leaf in its block moved to start at `block_start`.
+    pub(crate) fn moved_to(self, block_start: usize) -> Self {
+        Self {
+            block_start,
+            ordinal: self.ordinal,
         }
     }
 }
@@ -335,7 +355,7 @@ impl StreamFadeTracker {
 }
 
 /// A block's rendered text, in the byte space its highlights use.
-enum TextLeaf<'a> {
+pub(super) enum TextLeaf<'a> {
     Paragraph(&'a Paragraph),
     Code(SharedString),
 }
@@ -370,13 +390,13 @@ impl TextLeaf<'_> {
 
     /// The length of the rendered text `self` shares with `old`, on a char
     /// boundary of `self`.
-    fn common_prefix_len(&self, old: &Self) -> usize {
+    pub(super) fn common_prefix_len(&self, old: &Self) -> usize {
         let prefix = common_prefix_len(self.chunks(), old.chunks());
         floor_char_boundary(self.chunks(), prefix)
     }
 }
 
-fn text_leaves<'a>(block: &'a BlockNode, out: &mut Vec<(TextLeafKey, TextLeaf<'a>)>) {
+pub(super) fn text_leaves<'a>(block: &'a BlockNode, out: &mut Vec<(TextLeafKey, TextLeaf<'a>)>) {
     match block {
         BlockNode::Paragraph(paragraph) => {
             if let Some(span) = paragraph.span {

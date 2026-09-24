@@ -95,6 +95,71 @@ Pass a `TextViewMotion` through `.motion(...)` to choose the duration or
 easing yourself, or to reveal each chunk word by word; see
 [GPUI Base TextView](/base/text-view#retained-state-and-streaming-updates).
 
+### Highlight ranges
+
+An application that searches a document, or points at a citation inside it,
+paints its ranges with `set_range_highlights`. The application owns the
+search: it finds its ranges in `rendered_text()`, the text the view shows, and
+hands them back with the colors to paint them in, a stronger one for the
+current result:
+
+```rust
+use gpui_kit::component::{
+    ActiveTheme as _,
+    text::{RangeHighlight, RangeHighlightError, TextViewState},
+};
+
+fn highlight_matches(
+    state: &mut TextViewState,
+    query: &str,
+    current_match: usize,
+    cx: &mut Context<TextViewState>,
+) -> Result<(), RangeHighlightError> {
+    let (color, current_color) = (cx.theme().warning.opacity(0.3), cx.theme().warning);
+    let text = state.rendered_text();
+    let matches = if query.is_empty() {
+        Vec::new()
+    } else {
+        text.as_str().match_indices(query).collect()
+    };
+    let highlights = matches.into_iter().enumerate().map(|(ix, (start, found))| {
+        RangeHighlight::new(
+            start..start + found.len(),
+            if ix == current_match { current_color } else { color },
+        )
+    });
+    state.set_range_highlights(highlights, cx)
+}
+```
+
+`rendered_text()` is the text plain copy produces: `hello **world**` reads
+`hello world`, escapes are resolved, and heading and list markers are left
+out. Offsets are UTF-8 byte offsets, so the ranges `str` search returns can be
+passed as they are, and a repeated phrase is addressed by where it occurs. The
+text is built the first time it is read.
+
+A highlight is painted behind the text and under the selection, so wrapping,
+alignment, syntax colors, links, selection and copy stay as they were. Where
+highlights overlap, the later one paints over the earlier. A range that
+crosses from one block into the next paints in both. Text that belongs to no
+block is left unpainted: the line breaks between blocks, the spaces between
+table cells, custom blocks, HTML blocks and inline plugin objects. Only a range
+that is reversed, out of bounds or not on a character boundary is rejected,
+and the whole set with it.
+
+When the content changes, a highlight follows its block and stays as far as
+the block's text is unchanged. Text appended while streaming, through
+`push_str` or `set_text`, keeps the highlights before it, and an edit keeps
+those before and after it. After an edit inside a table, the cells in and
+after the edited row lose theirs, since a cell is only known by its place in
+the table. The view notifies when its text changes: observe the state and
+search the new `rendered_text()` again. Compute ranges and call
+`set_range_highlights` in the same state update so the ranges address the
+current text. Backgrounds that are part of the text, such as
+`<mark>` and syntax highlighting, paint over a range highlight (inline code's
+background is painted under it), and highlights do not fade in with streamed
+text. HTML views do not support range highlights.
+
 ## Touch Selection
 
 On a touch screen, a long press selects the word under the finger and keeps

@@ -17,15 +17,16 @@ use gpui_kit::component::{
     h_flex,
     highlighter::Language,
     input::{
-        DocumentRangeSemanticTokensProvider, Editor, EditorState, InputEvent, Rope, RopeExt,
-        TabSize,
+        DocumentRangeSemanticTokensProvider, Editor, EditorState, Input, InputEvent, InputState,
+        Rope, RopeExt, TabSize,
     },
     menu::{DropdownMenu as _, PopupMenuItem},
     resizable::{h_resizable, resizable_panel},
     status_bar::StatusBar,
     text::{
         InlineElement, InlineRenderContext, MarkdownNode, MarkdownParseContext, MarkdownPlugin,
-        SelectionFormat, TextView, TextViewState, TextViewStyle, markdown_ast,
+        RangeHighlight, RenderedText, SelectionFormat, TextView, TextViewState, TextViewStyle,
+        markdown_ast,
     },
     v_flex,
 };
@@ -1182,6 +1183,10 @@ pub struct Example {
     /// Whether copying a selection yields the rendered text or its Markdown
     /// source.
     selection_format: SelectionFormat,
+    find_state: Entity<InputState>,
+    /// The preview text the find query was last highlighted in.
+    searched: Option<RenderedText>,
+    match_count: usize,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -1216,11 +1221,21 @@ impl Example {
             focus_handle.focus(window, cx);
         });
 
-        let _subscriptions =
-            vec![cx.subscribe(&input_state, |_, _, _: &InputEvent, cx| cx.notify())];
-
         let text_view = cx.new(|cx| TextViewState::markdown(EXAMPLE, cx));
         let inline_math = InlineMathPlugin::new(&text_view);
+        let find_state = cx.new(|cx| InputState::new(window, cx).placeholder("Find in preview"));
+
+        let _subscriptions = vec![
+            cx.subscribe(&input_state, |_, _, _: &InputEvent, cx| cx.notify()),
+            cx.subscribe(&find_state, |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.searched = None;
+                    this.highlight_matches(cx);
+                }
+            }),
+            // Search again whenever the preview's content changes.
+            cx.observe(&text_view, |this, _, cx| this.highlight_matches(cx)),
+        ];
         Self {
             text_view,
             inline_math,
@@ -1229,8 +1244,45 @@ impl Example {
             // Default to horizontal scrolling for tables.
             table_wrap: false,
             selection_format: SelectionFormat::Plain,
+            find_state,
+            searched: None,
+            match_count: 0,
             _subscriptions,
         }
+    }
+
+    /// Highlight every occurrence of the find query in the preview, unless
+    /// the preview text it was last highlighted in is still current.
+    fn highlight_matches(&mut self, cx: &mut Context<Self>) {
+        let query = self.find_state.read(cx).value();
+        let color = cx.theme().warning.opacity(0.3);
+        let searched = self.searched.as_ref();
+        let result = self.text_view.update(cx, |state, cx| {
+            let text = state.rendered_text();
+            if searched == Some(&text) {
+                return None;
+            }
+            let highlights = if query.is_empty() {
+                Vec::new()
+            } else {
+                text.as_str()
+                    .match_indices(query.as_str())
+                    .map(|(start, found)| RangeHighlight::new(start..start + found.len(), color))
+                    .collect()
+            };
+            let count = highlights.len();
+            Some((text, count, state.set_range_highlights(highlights, cx)))
+        });
+        let Some((text, count, result)) = result else {
+            return;
+        };
+        if let Err(error) = result {
+            eprintln!("Could not highlight the matches: {error}");
+            return;
+        }
+        self.match_count = count;
+        self.searched = Some(text);
+        cx.notify();
     }
 
     /// Build the markdown style: tables scroll horizontally unless `table_wrap`
@@ -1457,6 +1509,27 @@ impl Render for Example {
                     )
                     .child(
                         StatusBar::new()
+                            .left(
+                                h_flex()
+                                    .gap_2()
+                                    .child(
+                                        Input::new(&self.find_state)
+                                            .xsmall()
+                                            .w(px(200.))
+                                            .focus_bordered(false),
+                                    )
+                                    .when(!self.find_state.read(cx).value().is_empty(), |this| {
+                                        this.child(
+                                            div()
+                                                .text_xs()
+                                                .text_color(cx.theme().muted_foreground)
+                                                .child(match self.match_count {
+                                                    1 => "1 match".to_string(),
+                                                    count => format!("{count} matches"),
+                                                }),
+                                        )
+                                    }),
+                            )
                             .right(
                                 Button::new("preview-zoom")
                                     .ghost()

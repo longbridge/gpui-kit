@@ -433,12 +433,19 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                                     menu.set_previous_focus(previous_focus_handle, cx);
                                 });
 
-                                // Set up the subscription for dismiss handling
+                                // Set up the subscription for dismiss handling.
+                                // Hold a Weak here, not a strong clone: the closure
+                                // would otherwise close the cycle
+                                // `shared_state -> _subscription -> closure ->
+                                // shared_state`, so a menu left open when the window
+                                // closes leaks its PopupMenu entity.
                                 let _subscription = window.subscribe(&menu, cx, {
-                                    let shared_state = shared_state.clone();
+                                    let shared_state = Rc::downgrade(&shared_state);
                                     move |_, _: &DismissEvent, window, _cx| {
-                                        shared_state.borrow_mut().open = false;
-                                        window.refresh();
+                                        if let Some(shared_state) = shared_state.upgrade() {
+                                            shared_state.borrow_mut().open = false;
+                                            window.refresh();
+                                        }
                                     }
                                 });
 
@@ -647,6 +654,45 @@ mod tests {
             1,
             "the item's on_click must fire exactly once"
         );
+    }
+
+    /// Opening a context menu and closing the window without dismissing the
+    /// menu must release the `PopupMenu` entity (#3223): the dismiss
+    /// subscription used to capture a strong `Rc` clone of `shared_state`,
+    /// and the app-global listener registry kept that clone alive even after
+    /// the window (and its element state) was gone, so the menu entity
+    /// survived the window. The subscription now holds a `Weak` instead.
+    #[gpui::test]
+    fn open_without_dismiss_releases_the_menu_entity(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let before = cx.update(|cx| cx.leak_detector_snapshot());
+
+        {
+            let (_, cx) = cx.add_window_view(|_, _| RowsRoot {
+                clicked: Rc::new(Cell::new(0)),
+            });
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+            });
+
+            // Right-click the first row; the menu opens and is left open.
+            let press = point(px(10.), px(10.));
+            cx.simulate_mouse_down(press, MouseButton::Right, Default::default());
+            cx.simulate_mouse_up(press, MouseButton::Right, Default::default());
+            cx.run_until_parked();
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+            });
+
+            // Close the window without dismissing the menu.
+            cx.update(|window, _| window.remove_window());
+            cx.run_until_parked();
+        }
+
+        // The app itself is still alive here, so the global listener registry
+        // (which held the subscription's strong `Rc` clone) is too: any entity
+        // leaked by the old cycle is still reachable and detected.
+        cx.update(|cx| cx.assert_no_new_leaks(&before));
     }
 
     #[gpui::test]

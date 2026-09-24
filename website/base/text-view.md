@@ -245,6 +245,12 @@ append, and Markdown that completes as it streams (`**bo` becoming bold
 blocks the update reaches are compared, and frames are requested only while
 something is still fading. Reduced motion skips the fade.
 
+`TextViewState::set_range_highlights` paints backgrounds behind ranges of
+`rendered_text()`, the text plain copy produces, so an application can show
+its search results or citations without reparsing or restyling the document.
+The ranges are painted, not shaped, so they never change layout; see
+[Highlight ranges](../component/text-view.md#highlight-ranges) for the rules.
+
 Selection can copy rendered text or Markdown source through `SelectionFormat`. Link routing, code-block actions, table actions, images, and custom Markdown plugins use the same builders as the compatibility API documented on the [gpui-component TextView page](../component/text-view.md).
 
 ## Runnable source
