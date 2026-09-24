@@ -176,7 +176,13 @@ fn date_time_picker_reports_each_edit_and_stays_open(cx: &mut TestAppContext) {
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
         assert_eq!(window.find(id.clone()).value(), Some("2026/09/16 08:45:01"));
-        window.press("escape", cx);
+        // Clicking the selected day again confirms it and closes the popup.
+        window.click("calendar-2026-09-16-0-2", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
         assert_eq!(window.find(id.clone()).expanded(), Some(false));
     })
     .unwrap();

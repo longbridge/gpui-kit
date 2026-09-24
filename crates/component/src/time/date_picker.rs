@@ -261,7 +261,8 @@ impl DatePickerState {
     /// Edit the time of day as well as the date, down to `precision`.
     ///
     /// Selecting a date then keeps the popup open, and every change to the
-    /// date or time is reported as it happens.
+    /// date or time is reported as it happens. Clicking the selected date
+    /// again closes the popup.
     ///
     /// A range picker edits dates only; for a range with times, place two
     /// single pickers side by side.
@@ -401,6 +402,12 @@ impl DatePickerState {
 
     fn select_date(&mut self, date: Date, window: &mut Window, cx: &mut Context<Self>) {
         if self.edited_time_precision().is_some() {
+            if date == self.date {
+                // Clicking the selected day again confirms it, so picking a
+                // date and closing is a double-click.
+                self.set_open(false, window, cx);
+                return;
+            }
             // Keep the popup open so the time can be adjusted next.
             self.date = date;
             self.emit_change(cx);

@@ -72,8 +72,9 @@ DatePicker::new(&range_picker)
 
 Set a `time_precision` to edit the time of day as well. The popup then shows a
 time field below the calendar and stays open after a date is picked, so the
-time can be adjusted next. Every edit is reported as it happens; Enter, Escape
-or a click outside closes the popup.
+time can be adjusted next. Every edit is reported as it happens. Clicking the
+selected date again — or double-clicking a date — confirms it and closes the
+popup, as do Enter, Escape and a click outside.
 
 ```rust
 use chrono::NaiveTime;
