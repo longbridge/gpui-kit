@@ -208,8 +208,8 @@ where
     /// inside it beside their grid lines.
     ///
     /// Default is [`AxisLabelPlacement::Outside`].
-    pub fn y_axis_placement(mut self, placement: AxisLabelPlacement) -> Self {
-        self.axes.y_axis_placement = placement;
+    pub fn y_axis_label_placement(mut self, placement: AxisLabelPlacement) -> Self {
+        self.axes.y_axis_label_placement = placement;
         self
     }
 
@@ -237,8 +237,8 @@ where
 
     /// Label `count` of the x values, spread evenly from the first to the
     /// last, instead of every `tick_margin`-th.
-    pub fn x_label_count(mut self, count: usize) -> Self {
-        self.axes.x_label_count = Some(count);
+    pub fn x_tick_count(mut self, count: usize) -> Self {
+        self.axes.x_tick_count = Some(count);
         self
     }
 
@@ -339,7 +339,7 @@ where
         };
         let mut axis = PlotAxis::new().stroke(cx.theme().border);
         if self.x_axis {
-            let labeled = labeled_items(self.data.len(), self.axes.x_label_count, self.tick_margin);
+            let labeled = labeled_items(self.data.len(), self.axes.x_tick_count, self.tick_margin);
             let labels = build_point_x_labels(
                 &self.data,
                 x_fn.as_ref(),

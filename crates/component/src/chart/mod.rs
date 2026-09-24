@@ -209,10 +209,10 @@ pub(crate) fn labeled_items(
 /// `AreaChart`) draws, and the builders both charts forward to it.
 pub(crate) struct PointAxes {
     pub(crate) y_axis: bool,
-    pub(crate) y_axis_placement: AxisLabelPlacement,
+    pub(crate) y_axis_label_placement: AxisLabelPlacement,
     pub(crate) y_tick_count: usize,
     pub(crate) y_tick_format: Option<TickFormat>,
-    pub(crate) x_label_count: Option<usize>,
+    pub(crate) x_tick_count: Option<usize>,
     pub(crate) grid_columns: usize,
     pub(crate) grid_dashed: bool,
     pub(crate) y_padding: (f32, f32),
@@ -223,10 +223,10 @@ impl Default for PointAxes {
     fn default() -> Self {
         Self {
             y_axis: false,
-            y_axis_placement: AxisLabelPlacement::default(),
+            y_axis_label_placement: AxisLabelPlacement::default(),
             y_tick_count: 5,
             y_tick_format: None,
-            x_label_count: None,
+            x_tick_count: None,
             grid_columns: 0,
             grid_dashed: true,
             y_padding: (10., 0.),
@@ -239,7 +239,7 @@ impl PointAxes {
     /// Where the plot starts along x: past the value-axis gutter when the labels
     /// sit outside it.
     pub(crate) fn plot_left(&self) -> f32 {
-        if self.y_axis && self.y_axis_placement == AxisLabelPlacement::Outside {
+        if self.y_axis && self.y_axis_label_placement == AxisLabelPlacement::Outside {
             VALUE_AXIS_GAP
         } else {
             0.
@@ -337,7 +337,7 @@ impl PointAxes {
                     Some(format) => format(value),
                     None => format_tick(value),
                 };
-                match self.y_axis_placement {
+                match self.y_axis_label_placement {
                     // Beside its grid line, above it but for the top one, which
                     // would leave the plot.
                     AxisLabelPlacement::Inside => {

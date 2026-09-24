@@ -807,7 +807,7 @@ impl ChartCard {
                         .value_tick_count(3)
                         .value_tick_format(money)
                         .grid_dashed(false)
-                        .band_label_count(6)
+                        .band_tick_count(6)
                         .id("bar-chart"),
                 )
                 .trend(
@@ -975,7 +975,7 @@ impl ChartCard {
                         .name("Downloads")
                         .label(|d| compact(d.downloads))
                         .fill(move |_, _, _, alignment| bar_shading(accent, alignment))
-                        .band_label_count(4)
+                        .band_tick_count(4)
                         .id("bar-chart-gradient-bottom"),
                 )
                 .trend(
@@ -1098,7 +1098,7 @@ impl ChartCard {
                         .name("MRR")
                         .y_axis(true)
                         .y_tick_format(money)
-                        .x_label_count(4)
+                        .x_tick_count(4)
                         .id("line-chart"),
                 )
                 .trend(
@@ -1251,7 +1251,7 @@ impl ChartCard {
                             .point_count(data.stock_prices.len())
                             .tick_margin(5)
                             .y_axis(true)
-                            .y_axis_placement(AxisLabelPlacement::Inside)
+                            .y_axis_label_placement(AxisLabelPlacement::Inside)
                             .y_tick_count(3)
                             .y_tick_format(|v| format!("${v:.0}"))
                             .grid_columns(4)

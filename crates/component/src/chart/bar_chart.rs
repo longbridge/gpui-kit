@@ -55,11 +55,11 @@ where
     label_color: Option<Rc<dyn Fn(&T) -> Hsla>>,
     label_axis: bool,
     value_axis: bool,
-    value_axis_placement: AxisLabelPlacement,
+    value_axis_label_placement: AxisLabelPlacement,
     value_tick_count: usize,
     value_tick_format: Option<TickFormat>,
     band_count: Option<usize>,
-    band_label_count: Option<usize>,
+    band_tick_count: Option<usize>,
     grid: bool,
     grid_dashed: bool,
     alignment: BarAlignment,
@@ -97,11 +97,11 @@ where
             label_color: None,
             label_axis: true,
             value_axis: false,
-            value_axis_placement: AxisLabelPlacement::default(),
+            value_axis_label_placement: AxisLabelPlacement::default(),
             value_tick_count: 5,
             value_tick_format: None,
             band_count: None,
-            band_label_count: None,
+            band_tick_count: None,
             grid: true,
             grid_dashed: true,
             alignment: BarAlignment::default(),
@@ -299,8 +299,8 @@ where
     /// or inside the plot beside their grid lines, which keeps the bars' room.
     ///
     /// Default is [`AxisLabelPlacement::Outside`].
-    pub fn value_axis_placement(mut self, placement: AxisLabelPlacement) -> Self {
-        self.value_axis_placement = placement;
+    pub fn value_axis_label_placement(mut self, placement: AxisLabelPlacement) -> Self {
+        self.value_axis_label_placement = placement;
         self
     }
 
@@ -328,8 +328,8 @@ where
 
     /// Label `count` of the bands, spread evenly from the first to the last,
     /// instead of every `tick_margin`-th.
-    pub fn band_label_count(mut self, count: usize) -> Self {
-        self.band_label_count = Some(count);
+    pub fn band_tick_count(mut self, count: usize) -> Self {
+        self.band_tick_count = Some(count);
         self
     }
 
@@ -432,7 +432,7 @@ where
     /// The gutter the value-axis labels take along the band axis: none unless
     /// they are shown outside the plot.
     fn value_axis_gap(&self) -> f32 {
-        if self.value_axis && self.value_axis_placement == AxisLabelPlacement::Outside {
+        if self.value_axis && self.value_axis_label_placement == AxisLabelPlacement::Outside {
             VALUE_AXIS_GAP
         } else {
             0.
@@ -637,7 +637,7 @@ where
                     // on either side of the zero line: each label goes on the side
                     // its own bar leaves empty.
                     let labeled =
-                        labeled_items(self.data.len(), self.band_label_count, self.tick_margin);
+                        labeled_items(self.data.len(), self.band_tick_count, self.tick_margin);
                     let labels = self
                         .data
                         .iter()
@@ -670,7 +670,7 @@ where
                         band_fn.as_ref(),
                         &band_scale,
                         band_width,
-                        &labeled_items(self.data.len(), self.band_label_count, self.tick_margin),
+                        &labeled_items(self.data.len(), self.band_tick_count, self.tick_margin),
                         cx.theme().muted_foreground,
                     );
                     let (side, align) = if matches!(alignment, BarAlignment::Left) {
@@ -730,7 +730,7 @@ where
                 (text, tick)
             });
 
-            match self.value_axis_placement {
+            match self.value_axis_label_placement {
                 // The labels go in the gap `band_scale` kept clear for them,
                 // right-aligned against the plot area for vertical bars and centred
                 // under it otherwise.
@@ -1184,7 +1184,7 @@ mod tests {
         let outside = chart(&[1., 2.], 2).value_axis(true);
         let inside = chart(&[1., 2.], 2)
             .value_axis(true)
-            .value_axis_placement(AxisLabelPlacement::Inside);
+            .value_axis_label_placement(AxisLabelPlacement::Inside);
         assert_eq!(outside.value_axis_gap(), super::VALUE_AXIS_GAP);
         assert_eq!(inside.value_axis_gap(), 0.);
     }
