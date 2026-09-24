@@ -80,7 +80,7 @@ impl Render for ConversationPage {
 
 | Trait | 接收者与所有者 | 适合承担的工作 |
 | --- | --- | --- |
-| `Render` | 持久 `Entity<T>` View 上的 `render(&mut self, ..., &mut Context<Self>)` | 跨渲染过程持有变化或复杂的状态、订阅、焦点、Task 与子 Entity。 |
+| [`Render`](./render) | 持久 `Entity<T>` View 上的 `render(&mut self, ..., &mut Context<Self>)` | 跨渲染过程持有变化或复杂的状态、订阅、焦点、Task 与子 Entity。 |
 | [`RenderOnce`](./render-once) | 父级构造的值由 `render(self, ..., &mut App)` 消费 | 根据当前输入和回调描述轻量组件；父级下次渲染时提供新的值。 |
 
 上面的 `Chat` View 持有会变化的消息集合，因此实现 `Render`。GPUI Kit 的 `SelectState<D>` 是另一种实现 `Render` 的状态所有者。带样式的 `Button` 则实现 `RenderOnce`：父级提供当前 props，并处理点击结果。`RenderOnce` 值仍然可以交互；GPUI 也可能在其内部保留少量 keyed element state，只是这个值没有独立的 Entity 生命周期。两者区别在于**持久状态由谁拥有**，不是承诺一个 trait 每显示帧只运行一次，或另一个 trait 每帧都会运行。

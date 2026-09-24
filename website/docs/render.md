@@ -80,7 +80,7 @@ impl Render for ConversationPage {
 
 | Trait | Receiver and owner | Appropriate work |
 | --- | --- | --- |
-| `Render` | `render(&mut self, ..., &mut Context<Self>)` on a persistent `Entity<T>` View | Own changing or complex state, subscriptions, focus, tasks, and child entities across render passes. |
+| [`Render`](./render) | `render(&mut self, ..., &mut Context<Self>)` on a persistent `Entity<T>` View | Own changing or complex state, subscriptions, focus, tasks, and child entities across render passes. |
 | [`RenderOnce`](./render-once) | `render(self, ..., &mut App)` consumes a value constructed by its parent | Describe a lightweight component from current inputs and callbacks; the parent supplies a new value when it renders again. |
 
 The `Chat` View above implements `Render` because it owns a changing message collection. GPUI Kit's `SelectState<D>` is another state owner that implements `Render`. Its styled `Button` implements `RenderOnce`: the parent supplies its current props and handles the result of a click. A `RenderOnce` value can still be interactive, and GPUI may retain small keyed element state beneath it; it simply has no independent Entity lifecycle. This is a choice about **who owns persistent state**, not a promise that one trait runs once per display frame or that the other runs every frame.

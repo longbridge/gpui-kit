@@ -23,13 +23,13 @@ Consider a title passed from a workspace View through a header and tab component
 `SharedString` represents that immutable value in a form that is cheap to clone. The workspace can retain one value while each layer takes an owned clone; for long heap-backed text, the clones share its bytes instead of copying them at every handoff. This is why GPUI and GPUI Kit expose it in many text properties and accept `impl Into<SharedString>` at component boundaries. The tradeoff is immutability: changing the text means constructing a new value. Sharing helps while the value stays unchanged; it is not a promise of zero cost.
 
 <figure class="shared-string-memory">
-  <svg viewBox="0 0 880 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="shared-memory-title-en shared-memory-desc-en">
+  <svg viewBox="-16 -16 912 416" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="shared-memory-title-en shared-memory-desc-en">
     <title id="shared-memory-title-en">Three String owners compared with three SharedString owners</title>
     <desc id="shared-memory-desc-en">For long heap-backed text, three String owners each point to a separate full text buffer. Three SharedString owners hold separate small handles that point to one shared text buffer with a reference count. Animated dashed arrows show the ownership links, not elapsed time.</desc>
     <defs>
       <marker id="shared-arrow-en" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M1 1 L7 4 L1 7" /></marker>
     </defs>
-    <rect class="memory-panel" x="1" y="1" width="878" height="173" rx="12" />
+    <rect class="memory-panel" x="1" y="1" width="878" height="185" rx="12" />
     <text class="memory-heading" x="24" y="29">String::clone()</text>
     <text class="memory-subtitle" x="24" y="49">Each owned clone copies the full text into its own allocation.</text>
     <rect class="memory-owner" x="24" y="65" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="83">View A · handle</text>
@@ -42,7 +42,8 @@ Consider a title passed from a workspace View through a header and tab component
     <rect class="memory-buffer memory-buffer-copy" x="463" y="103" width="190" height="27" rx="5" /><text class="memory-label" x="476" y="121">Text buffer B · full text</text>
     <rect class="memory-buffer memory-buffer-copy" x="463" y="141" width="190" height="27" rx="5" /><text class="memory-label" x="476" y="159">Text buffer C · full text</text>
     <text class="memory-total memory-total-copy" x="676" y="121">3 text buffers</text>
-    <rect class="memory-panel" x="1" y="186" width="878" height="173" rx="12" />
+    <g transform="translate(0 12)">
+    <rect class="memory-panel" x="1" y="186" width="878" height="185" rx="12" />
     <text class="memory-heading" x="24" y="214">SharedString::clone()</text>
     <text class="memory-subtitle" x="24" y="234">Each owner keeps a handle; the long text stays in one allocation.</text>
     <rect class="memory-owner" x="24" y="251" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="269">View A · handle</text>
@@ -53,8 +54,9 @@ Consider a title passed from a workspace View through a header and tab component
     <path class="memory-flow memory-flow-share" d="M183 340 L451 303" marker-end="url(#shared-arrow-en)" />
     <rect class="memory-buffer memory-buffer-share" x="463" y="277" width="190" height="51" rx="6" /><text class="memory-label" x="476" y="300">One shared text buffer</text><text class="memory-detail" x="476" y="317">reference count: 3</text>
     <text class="memory-total memory-total-share" x="676" y="307">1 text buffer</text>
+    </g>
   </svg>
-  <figcaption>Conceptual long-text example with three owners, not a byte-accurate benchmark. `SharedString` still stores a handle per owner and updates a reference count; short inline values copy their small bytes instead.</figcaption>
+  <figcaption>Conceptual long-text example with three owners, not a byte-accurate benchmark. <code>SharedString</code> still stores a handle per owner and updates a reference count; short inline values copy their small bytes instead.</figcaption>
 </figure>
 
 ## How it stores text

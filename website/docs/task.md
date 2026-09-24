@@ -17,6 +17,71 @@ The **spawn API** chooses where work runs; the returned `Task` controls its life
 | `cx.spawn(...)` in `App` | Foreground thread | `&mut AsyncApp` | Application-level work without a current Entity |
 | `cx.background_spawn(...)` | Background executor | No GPUI context | Expensive parsing or computation on owned `Send` data |
 
+## How execution moves between threads
+
+On a desktop app, GPUI's **foreground executor** polls `cx.spawn` and `cx.spawn_in` futures on the main/UI thread. Several foreground tasks can be *concurrent*: when one awaits an unfinished operation, its poll returns `Pending`, and the UI thread can handle input, render, or poll another task. They do not run in parallel with each other on separate UI threads. An `await` whose value is already ready may continue in the same poll; an expensive synchronous function inside a foreground task still blocks the UI until it returns.
+
+The **background executor** schedules `Send` work through the platform's background dispatch queue or worker pool. On desktop, worker polls may run in parallel with the UI thread and with other background tasks, subject to available workers. GPUI does **not** create an OS thread for every `Task`. The actual worker count and scheduling depend on the platform; test executors may simulate the scheduling without parallel OS threads. A background future may be polled on different workers over its lifetime, so do not rely on worker thread affinity.
+
+<figure class="task-flow-figure">
+  <svg class="task-flow-desktop" viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="task-flow-title-en task-flow-desc-en">
+    <title id="task-flow-title-en">GPUI foreground and background task flow</title>
+    <desc id="task-flow-desc-en">Two columns show the main UI thread and the background executor. An event queues a foreground task. It dispatches Send work, yields while awaiting a pending result, and resumes on the UI thread to update an Entity and request a later render.</desc>
+    <defs><marker id="task-arrow-en" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M1 1 L7 4 L1 7" fill="none" stroke="var(--muted-foreground)" stroke-width="1.5" /></marker></defs>
+    <rect class="tf-panel" x="12" y="12" width="376" height="476" rx="14" />
+    <rect class="tf-panel" x="412" y="12" width="376" height="476" rx="14" />
+    <text class="tf-heading" x="36" y="46">Main / UI thread</text>
+    <text class="tf-heading" x="436" y="46">Background executor</text>
+    <rect class="tf-ui" x="36" y="76" width="328" height="70" rx="10" />
+    <text class="tf-title" x="54" y="106">1 · User event</text><text class="tf-code" x="54" y="130">cx.spawn(...)</text>
+    <rect class="tf-ui" x="36" y="169" width="328" height="74" rx="10" />
+    <text class="tf-title" x="54" y="198">2 · Foreground poll</text><text class="tf-code" x="54" y="222">cx.background_spawn(work)</text>
+    <rect class="tf-worker" x="436" y="169" width="328" height="74" rx="10" />
+    <text class="tf-title" x="454" y="198">Send future queued</text><text class="tf-detail" x="454" y="222">Platform workers / dispatch queue</text>
+    <rect class="tf-ui" x="36" y="270" width="328" height="82" rx="10" />
+    <text class="tf-title" x="54" y="302">3 · Await background Task</text><text class="tf-detail" x="54" y="327">If Pending, UI can handle input/render</text>
+    <rect class="tf-worker" x="436" y="270" width="328" height="82" rx="10" />
+    <text class="tf-title" x="454" y="302">Worker polls / computes</text><text class="tf-detail" x="454" y="327">May run in parallel with UI work</text>
+    <rect class="tf-ui" x="36" y="380" width="328" height="80" rx="10" />
+    <text class="tf-title" x="54" y="411">4 · Resume on UI thread</text><text class="tf-code" x="54" y="435">WeakEntity::update · cx.notify()</text>
+    <rect class="tf-worker" x="436" y="380" width="328" height="80" rx="10" />
+    <text class="tf-title" x="454" y="411">Send result ready</text><text class="tf-detail" x="454" y="436">Wake the foreground Task</text>
+    <path class="tf-arrow" d="M200 147 V165" marker-end="url(#task-arrow-en)" />
+    <path class="tf-arrow" d="M365 206 H432" marker-end="url(#task-arrow-en)" />
+    <path class="tf-arrow" d="M200 244 V266" marker-end="url(#task-arrow-en)" />
+    <path class="tf-arrow" d="M600 244 V266" marker-end="url(#task-arrow-en)" />
+    <path class="tf-arrow" d="M600 353 V376" marker-end="url(#task-arrow-en)" />
+    <path class="tf-arrow" d="M435 420 H368" marker-end="url(#task-arrow-en)" />
+  </svg>
+  <svg class="task-flow-mobile" viewBox="0 0 360 680" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="task-flow-mobile-title-en task-flow-mobile-desc-en">
+    <title id="task-flow-mobile-title-en">GPUI task flow on a narrow screen</title>
+    <desc id="task-flow-mobile-desc-en">The same flow stacked vertically: the UI thread starts and polls a task, background workers compute owned Send data, and the UI thread resumes to update an Entity and request rendering.</desc>
+    <defs><marker id="task-arrow-mobile-en" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M1 1 L7 4 L1 7" fill="none" stroke="var(--muted-foreground)" stroke-width="1.5" /></marker></defs>
+    <rect class="tf-panel" x="8" y="8" width="344" height="260" rx="14" />
+    <text class="tf-heading" x="24" y="34">Main / UI thread</text>
+    <rect class="tf-ui" x="24" y="50" width="312" height="62" rx="9" /><text class="tf-title" x="40" y="76">1 · User event</text><text class="tf-code" x="40" y="98">cx.spawn(...)</text>
+    <rect class="tf-ui" x="24" y="128" width="312" height="62" rx="9" /><text class="tf-title" x="40" y="154">2 · Foreground poll</text><text class="tf-code" x="40" y="176">background_spawn(work)</text>
+    <rect class="tf-ui" x="24" y="206" width="312" height="51" rx="9" /><text class="tf-title" x="40" y="231">3 · await Task</text><text class="tf-detail" x="163" y="231">Pending → UI free</text>
+    <rect class="tf-panel" x="8" y="282" width="344" height="251" rx="14" />
+    <text class="tf-heading" x="24" y="308">Background executor</text>
+    <rect class="tf-worker" x="24" y="324" width="312" height="63" rx="9" /><text class="tf-title" x="40" y="350">Queue Send future</text><text class="tf-detail" x="40" y="373">Platform workers / dispatch queue</text>
+    <rect class="tf-worker" x="24" y="403" width="312" height="50" rx="9" /><text class="tf-title" x="40" y="434">Worker poll / compute</text>
+    <rect class="tf-worker" x="24" y="469" width="312" height="51" rx="9" /><text class="tf-title" x="40" y="500">Send result → wake UI</text>
+    <rect class="tf-panel" x="8" y="548" width="344" height="124" rx="14" />
+    <text class="tf-heading" x="24" y="575">Main / UI thread</text>
+    <rect class="tf-ui" x="24" y="590" width="312" height="69" rx="9" /><text class="tf-title" x="40" y="617">4 · Resume and update Entity</text><text class="tf-code" x="40" y="642">WeakEntity::update · cx.notify()</text>
+    <path class="tf-arrow" d="M180 113 V124" marker-end="url(#task-arrow-mobile-en)" />
+    <path class="tf-arrow" d="M180 191 V202" marker-end="url(#task-arrow-mobile-en)" />
+    <path class="tf-arrow" d="M180 258 V320" marker-end="url(#task-arrow-mobile-en)" />
+    <path class="tf-arrow" d="M180 388 V399" marker-end="url(#task-arrow-mobile-en)" />
+    <path class="tf-arrow" d="M180 454 V465" marker-end="url(#task-arrow-mobile-en)" />
+    <path class="tf-arrow" d="M180 521 V586" marker-end="url(#task-arrow-mobile-en)" />
+  </svg>
+  <figcaption>A typical pending path. The worker returns owned data; only the foreground update mutates GPUI state. Colors and text adapt to the site's light and dark themes.</figcaption>
+</figure>
+
+`cx.spawn` accepts a foreground future that need not be `Send`, so it can hold main-thread-only GPUI handles, but it still must be `'static`: move owned inputs into it instead of borrowing `self`. `background_spawn` requires both its future and its output to be `Send + 'static`. Move owned data into the worker and return a `Send` result; keep `Entity`, `Window`, and `Context<T>` updates on the foreground side. Awaiting the background `Task` from the foreground task schedules the **continuation** back on the foreground executor when the result is ready. `cx.notify()` then invalidates the View for a later render; it does not synchronously draw a frame.
+
 ## Start work from an owner
 
 Start a task in a named method, event handler, or lifecycle hook. Do not start one unconditionally in [`render`](./render): every render could launch another copy. Extract the input before spawning, so no borrow of `self` or `cx` crosses an `await`.
@@ -84,25 +149,39 @@ fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
 
 ## Move heavy work off the UI thread
 
-A foreground task can await I/O without blocking the UI, but CPU-intensive work inside it still occupies the foreground thread. Move owned, `Send` input into `background_spawn`, await its `Task` from a foreground task, and apply the result there:
+A foreground task can await nonblocking I/O without occupying the UI thread while pending, but CPU-intensive work inside a poll still occupies it. Move owned, `Send` input into `background_spawn`, await its `Task` from a foreground task, and apply the result back on the UI thread:
 
 ```rust
-fn parse(&mut self, cx: &mut Context<Self>) {
-    let source = self.source.clone();
-    self._parse_task = Some(cx.spawn(async move |this, cx| {
-        let parsed = cx.background_spawn(async move {
-            parse_document(source)
-        }).await;
+struct DocumentView {
+    source: String, // Mutable editing buffer.
+    revision: u64,
+    parsed: Option<ParsedDocument>,
+    _parse_task: Option<Task<()>>,
+}
 
-        _ = this.update(cx, |view, cx| {
-            view.parsed = Some(parsed);
-            cx.notify();
-        });
-    }));
+impl DocumentView {
+    fn parse(&mut self, cx: &mut Context<Self>) {
+        self.revision = self.revision.wrapping_add(1);
+        let revision = self.revision;
+        let source = self.source.clone();
+        self._parse_task = Some(cx.spawn(async move |this, cx| {
+            let parsed = cx.background_spawn(async move {
+                parse_document(source)
+            }).await;
+
+            _ = this.update(cx, |view, cx| {
+                if view.revision != revision {
+                    return; // An older result must not replace newer content.
+                }
+                view.parsed = Some(parsed);
+                cx.notify();
+            });
+        }));
+    }
 }
 ```
 
-The background closure has no `App`, `Window`, or `Context<T>`. Clone only the input it needs before leaving the Entity update. If parsing can outlive a changed document, capture a revision alongside `source` and compare it inside `this.update` before assigning `parsed`.
+The worker receives the `String` and returns a `Send` `ParsedDocument`; it has no `App`, `Window`, or `Context<T>`. Clone only the input it needs before leaving the Entity update. Replacing `_parse_task` cancels the previous outer task and its awaited worker task, but cannot interrupt a synchronous parse already executing inside one poll. The revision check also rejects a result that became stale before the foreground update.
 
 ## A GPUI Kit streaming example
 

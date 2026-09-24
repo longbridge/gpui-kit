@@ -11,6 +11,15 @@ html.dark .architecture-dark { display: block; }
 html.dark .alignment-light { display: none; }
 html.dark .alignment-dark { display: block; }
 
+/* Comparison matrix status markers */
+.comparison-yes { color: #15803d; }
+.comparison-partial { color: #a16207; }
+.comparison-no { color: #b91c1c; }
+html.dark .comparison-yes { color: #4ade80; }
+html.dark .comparison-partial { color: #facc15; }
+html.dark .comparison-no { color: #f87171; }
+.comparison-yes, .comparison-partial, .comparison-no { font-size: 1.15em; line-height: 1; }
+
 /* ====================================================================
    CSS Design Tokens, light + dark. Do NOT change values — ported as-is
    from the pre-Astro VitePress theme.
@@ -79,6 +88,9 @@ html.dark .alignment-dark { display: block; }
   --accent-foreground: #171717;
   --destructive: #ef4444;
   --border: #e5e5e5;
+  --doc-table-head: #fafafa;
+  --doc-table-even: #fafafa;
+  --doc-table-row-border: #e5e5e5b3;
   --input: #e5e5e5;
   --ring: #0a0a0a;
   --titlebar: #f8f8f8;
@@ -130,6 +142,9 @@ html.dark .alignment-dark { display: block; }
   --destructive: #e44a4f;
   --warning: #f0a03c;
   --border: #262626;
+  --doc-table-head: #17171766;
+  --doc-table-even: #17171766;
+  --doc-table-row-border: #262626b3;
   --input: #2f2f2f;
   --ring: #d4d4d4;
   --titlebar: #171717;
@@ -672,13 +687,28 @@ html.dark .astro-code span {
   .path-preview svg { width: 100px; height: 128px; }
   .path-preview figcaption { color: var(--muted-foreground); font-size: 0.875rem; }
 
+  .task-flow-figure { margin: 1.5rem 0; }
+  .task-flow-figure svg { display: block; width: 100%; height: auto; }
+  .task-flow-figure .tf-panel { fill: var(--card); stroke: var(--border); stroke-width: 1.5; }
+  .task-flow-figure .tf-ui { fill: var(--secondary); stroke: var(--doc-link); stroke-width: 1.6; }
+  .task-flow-figure .tf-worker { fill: var(--secondary); stroke: var(--success); stroke-width: 1.6; }
+  .task-flow-figure .tf-heading { fill: var(--foreground); font: 700 18px ui-sans-serif, system-ui; }
+  .task-flow-figure .tf-title { fill: var(--foreground); font: 650 16px ui-sans-serif, system-ui; }
+  .task-flow-figure .tf-detail { fill: var(--muted-foreground); font: 14px ui-sans-serif, system-ui; }
+  .task-flow-figure .tf-code { fill: var(--foreground); font: 13px ui-monospace, SFMono-Regular, monospace; }
+  .task-flow-figure .tf-arrow { fill: none; stroke: var(--muted-foreground); stroke-width: 2; }
+  .task-flow-figure .task-flow-mobile { display: none; }
+  .task-flow-figure figcaption { color: var(--muted-foreground); font-size: .875rem; }
+  @media (max-width: 1100px) {
+    .task-flow-figure .task-flow-desktop { display: none; }
+    .task-flow-figure .task-flow-mobile { display: block; }
+  }
+
   .shared-string-memory { margin-block: 1.25rem 2rem; }
   .shared-string-memory svg {
     display: block;
     width: 100%;
     height: auto;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-card);
     background: var(--background);
     font-family: var(--font-sans);
   }
@@ -709,7 +739,7 @@ html.dark .astro-code span {
   .shared-string-memory .memory-total { font-size: 13px; font-weight: 650; }
   .shared-string-memory .memory-total-copy { fill: var(--warning); }
   .shared-string-memory .memory-total-share { fill: var(--data-3); }
-  .shared-string-memory figcaption { color: var(--muted-foreground); font-size: 0.875rem; line-height: 1.6; }
+  .shared-string-memory figcaption { margin-block-start: 0.5rem; color: var(--muted-foreground); font-size: 0.8125rem; line-height: 1.5; }
 
   @media (prefers-reduced-motion: reduce) {
     .shared-string-memory .memory-flow,
@@ -799,43 +829,40 @@ html.dark .astro-code span {
     margin-left: 0.15rem;
   }
 
+  /* GPUI Kit Table's bordered example: themed header, optional striped rows,
+     row dividers, and no elevation. */
   table {
     display: table;
     width: 100%;
     border: 1px solid var(--border);
-    border-radius: var(--radius-card);
+    border-radius: var(--radius);
     border-collapse: separate;
     border-spacing: 0;
     overflow: hidden;
     background: var(--background);
-    box-shadow:
-      0 -5px 14px -9px color-mix(in srgb, var(--foreground) 22%, transparent),
-      0 5px 14px -9px color-mix(in srgb, var(--foreground) 22%, transparent);
-    font-size: 0.82rem;
+    font-size: 0.875rem;
   }
 
   tr { border-top: 0; }
-  thead tr { background: var(--secondary); }
-  tbody tr:nth-child(even) { background: color-mix(in srgb, var(--secondary) 55%, var(--background)); }
+  thead tr, tfoot tr { background: var(--doc-table-head); }
+  tbody tr:nth-child(even) { background: var(--doc-table-even); }
 
   th {
     color: var(--muted-foreground);
-    font: 620 0.67rem/1.35 var(--font-mono);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
+    font: inherit;
   }
+  tfoot { color: var(--muted-foreground); }
 
   th, td {
-    padding: 0.52rem 0.65rem;
+    padding: 0.25rem 0.5rem;
     border: 0;
-    border-bottom: 1px solid var(--border);
     line-height: 1.5;
     text-align: left;
     vertical-align: top;
   }
 
-  tbody tr:last-child td { border-bottom: 0; }
-  th:first-child, td:first-child { padding-left: 0.75rem; }
+  thead th { border-bottom: 1px solid var(--doc-table-row-border); }
+  tbody tr + tr td, tfoot td { border-top: 1px solid var(--doc-table-row-border); }
 
   blockquote {
     padding: 0.25rem 0 0.25rem 1.25rem;

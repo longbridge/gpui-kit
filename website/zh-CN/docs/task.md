@@ -17,6 +17,71 @@ order: -2.631
 | 在 `App` 中调用 `cx.spawn(...)` | 前台线程 | `&mut AsyncApp` | 没有当前 Entity 的应用级工作 |
 | `cx.background_spawn(...)` | 后台执行器 | 不提供 GPUI Context | 使用自有 `Send` 数据进行耗时解析或计算 |
 
+## 任务如何在线程之间切换
+
+在桌面应用中，GPUI 的**前台执行器**在主线程／UI 线程 poll `cx.spawn` 和 `cx.spawn_in` 创建的 future。多个前台任务可以*并发*：一个任务等待未完成的操作时，poll 返回 `Pending`，UI 线程便可处理输入、渲染或 poll 其他任务。它们不会在多个 UI 线程上并行运行。如果 `await` 的值已经 ready，任务可能在同一次 poll 中继续执行；前台任务中的耗时同步函数仍会占住 UI 线程，直到函数返回。
+
+**后台执行器**把实现 `Send` 的工作交给平台后台调度队列或 worker pool。在桌面平台上，worker 可以与 UI 线程以及其他后台任务并行执行，具体取决于可用 worker。GPUI **不会为每个 `Task` 新建一个 OS 线程**。worker 数量和调度方式随平台而异；测试执行器也可能在没有并行 OS 线程的情况下模拟调度。后台 future 在其生命周期内可能由不同 worker poll，不能依赖固定的 worker 线程。
+
+<figure class="task-flow-figure">
+  <svg class="task-flow-desktop" viewBox="0 0 800 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="task-flow-title-zh task-flow-desc-zh">
+    <title id="task-flow-title-zh">GPUI 前台与后台任务流程</title>
+    <desc id="task-flow-desc-zh">两列分别表示主线程和后台执行器。事件启动前台任务，任务派发实现 Send 的工作并在等待期间让出 UI 线程。结果就绪后，前台任务在 UI 线程恢复，更新 Entity 并请求稍后渲染。</desc>
+    <defs><marker id="task-arrow-zh" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M1 1 L7 4 L1 7" fill="none" stroke="var(--muted-foreground)" stroke-width="1.5" /></marker></defs>
+    <rect class="tf-panel" x="12" y="12" width="376" height="476" rx="14" />
+    <rect class="tf-panel" x="412" y="12" width="376" height="476" rx="14" />
+    <text class="tf-heading" x="36" y="46">主线程 / UI 线程</text>
+    <text class="tf-heading" x="436" y="46">后台执行器</text>
+    <rect class="tf-ui" x="36" y="76" width="328" height="70" rx="10" />
+    <text class="tf-title" x="54" y="106">1 · 用户事件</text><text class="tf-code" x="54" y="130">cx.spawn(...)</text>
+    <rect class="tf-ui" x="36" y="169" width="328" height="74" rx="10" />
+    <text class="tf-title" x="54" y="198">2 · 前台 poll</text><text class="tf-code" x="54" y="222">cx.background_spawn(work)</text>
+    <rect class="tf-worker" x="436" y="169" width="328" height="74" rx="10" />
+    <text class="tf-title" x="454" y="198">Send future 入队</text><text class="tf-detail" x="454" y="222">平台 worker pool / 调度队列</text>
+    <rect class="tf-ui" x="36" y="270" width="328" height="82" rx="10" />
+    <text class="tf-title" x="54" y="302">3 · await 后台 Task</text><text class="tf-detail" x="54" y="327">若返回 Pending，UI 可继续处理输入与渲染</text>
+    <rect class="tf-worker" x="436" y="270" width="328" height="82" rx="10" />
+    <text class="tf-title" x="454" y="302">worker poll / 计算</text><text class="tf-detail" x="454" y="327">可与 UI 工作并行</text>
+    <rect class="tf-ui" x="36" y="380" width="328" height="80" rx="10" />
+    <text class="tf-title" x="54" y="411">4 · 回到 UI 线程</text><text class="tf-code" x="54" y="435">WeakEntity::update · cx.notify()</text>
+    <rect class="tf-worker" x="436" y="380" width="328" height="80" rx="10" />
+    <text class="tf-title" x="454" y="411">Send 结果就绪</text><text class="tf-detail" x="454" y="436">唤醒前台 Task</text>
+    <path class="tf-arrow" d="M200 147 V165" marker-end="url(#task-arrow-zh)" />
+    <path class="tf-arrow" d="M365 206 H432" marker-end="url(#task-arrow-zh)" />
+    <path class="tf-arrow" d="M200 244 V266" marker-end="url(#task-arrow-zh)" />
+    <path class="tf-arrow" d="M600 244 V266" marker-end="url(#task-arrow-zh)" />
+    <path class="tf-arrow" d="M600 353 V376" marker-end="url(#task-arrow-zh)" />
+    <path class="tf-arrow" d="M435 420 H368" marker-end="url(#task-arrow-zh)" />
+  </svg>
+  <svg class="task-flow-mobile" viewBox="0 0 360 680" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="task-flow-mobile-title-zh task-flow-mobile-desc-zh">
+    <title id="task-flow-mobile-title-zh">窄屏下的 GPUI 任务流程</title>
+    <desc id="task-flow-mobile-desc-zh">同一流程改为纵向排列：UI 线程启动并 poll 任务；后台 worker 计算自有的 Send 数据；UI 线程恢复后更新 Entity 并请求渲染。</desc>
+    <defs><marker id="task-arrow-mobile-zh" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M1 1 L7 4 L1 7" fill="none" stroke="var(--muted-foreground)" stroke-width="1.5" /></marker></defs>
+    <rect class="tf-panel" x="8" y="8" width="344" height="260" rx="14" />
+    <text class="tf-heading" x="24" y="34">主线程 / UI 线程</text>
+    <rect class="tf-ui" x="24" y="50" width="312" height="62" rx="9" /><text class="tf-title" x="40" y="76">1 · 用户事件</text><text class="tf-code" x="40" y="98">cx.spawn(...)</text>
+    <rect class="tf-ui" x="24" y="128" width="312" height="62" rx="9" /><text class="tf-title" x="40" y="154">2 · 前台 poll</text><text class="tf-code" x="40" y="176">background_spawn(work)</text>
+    <rect class="tf-ui" x="24" y="206" width="312" height="51" rx="9" /><text class="tf-title" x="40" y="231">3 · await Task</text><text class="tf-detail" x="163" y="231">Pending → UI 继续运行</text>
+    <rect class="tf-panel" x="8" y="282" width="344" height="251" rx="14" />
+    <text class="tf-heading" x="24" y="308">后台执行器</text>
+    <rect class="tf-worker" x="24" y="324" width="312" height="63" rx="9" /><text class="tf-title" x="40" y="350">Send future 入队</text><text class="tf-detail" x="40" y="373">平台 worker pool / 调度队列</text>
+    <rect class="tf-worker" x="24" y="403" width="312" height="50" rx="9" /><text class="tf-title" x="40" y="434">worker poll / 计算</text>
+    <rect class="tf-worker" x="24" y="469" width="312" height="51" rx="9" /><text class="tf-title" x="40" y="500">Send 结果 → 唤醒 UI</text>
+    <rect class="tf-panel" x="8" y="548" width="344" height="124" rx="14" />
+    <text class="tf-heading" x="24" y="575">主线程 / UI 线程</text>
+    <rect class="tf-ui" x="24" y="590" width="312" height="69" rx="9" /><text class="tf-title" x="40" y="617">4 · 恢复并更新 Entity</text><text class="tf-code" x="40" y="642">WeakEntity::update · cx.notify()</text>
+    <path class="tf-arrow" d="M180 113 V124" marker-end="url(#task-arrow-mobile-zh)" />
+    <path class="tf-arrow" d="M180 191 V202" marker-end="url(#task-arrow-mobile-zh)" />
+    <path class="tf-arrow" d="M180 258 V320" marker-end="url(#task-arrow-mobile-zh)" />
+    <path class="tf-arrow" d="M180 388 V399" marker-end="url(#task-arrow-mobile-zh)" />
+    <path class="tf-arrow" d="M180 454 V465" marker-end="url(#task-arrow-mobile-zh)" />
+    <path class="tf-arrow" d="M180 521 V586" marker-end="url(#task-arrow-mobile-zh)" />
+  </svg>
+  <figcaption>图示后台结果尚未就绪时的典型流程。worker 返回自有数据；只有前台更新会修改 GPUI 状态。配色随站点深浅主题切换。</figcaption>
+</figure>
+
+`cx.spawn` 的前台 future 不要求实现 `Send`，因此可持有只能在主线程使用的 GPUI handle，但仍要求 `'static`：应把自有输入移入 future，而不是借用 `self`。`background_spawn` 则要求 future 和输出都实现 `Send + 'static`。将自有数据交给 worker，让它返回可跨线程的结果；`Entity`、`Window` 和 `Context<T>` 的更新留在前台。在前台任务中 `await` 后台 `Task`，结果就绪后会把**后续执行**排回前台执行器。`cx.notify()` 随后将 View 标记为待渲染，并不会同步绘制一帧。
+
 ## 从 owner 启动任务
 
 在具名方法、事件处理器或生命周期钩子中启动任务。不要在 [`render`](./render) 中无条件启动，否则每次 render 都可能再启动一份。启动前先取出输入值，避免 `self` 或 `cx` 的借用跨过 `await`。
@@ -84,25 +149,39 @@ fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
 
 ## 将耗时工作移出 UI 线程
 
-前台任务等待 I/O 时不会阻塞 UI，但在前台任务中执行大量 CPU 计算仍会占用前台线程。将自有且实现 `Send` 的输入移入 `background_spawn`，从前台任务 `await` 它的 `Task`，然后在那里应用结果：
+前台任务等待非阻塞 I/O 且结果尚未就绪时不会占住 UI 线程，但一次 poll 中的大量 CPU 计算仍会占用它。将自有且实现 `Send` 的输入移入 `background_spawn`，从前台任务 `await` 它的 `Task`，再回到 UI 线程应用结果：
 
 ```rust
-fn parse(&mut self, cx: &mut Context<Self>) {
-    let source = self.source.clone();
-    self._parse_task = Some(cx.spawn(async move |this, cx| {
-        let parsed = cx.background_spawn(async move {
-            parse_document(source)
-        }).await;
+struct DocumentView {
+    source: String, // 可变编辑缓冲。
+    revision: u64,
+    parsed: Option<ParsedDocument>,
+    _parse_task: Option<Task<()>>,
+}
 
-        _ = this.update(cx, |view, cx| {
-            view.parsed = Some(parsed);
-            cx.notify();
-        });
-    }));
+impl DocumentView {
+    fn parse(&mut self, cx: &mut Context<Self>) {
+        self.revision = self.revision.wrapping_add(1);
+        let revision = self.revision;
+        let source = self.source.clone();
+        self._parse_task = Some(cx.spawn(async move |this, cx| {
+            let parsed = cx.background_spawn(async move {
+                parse_document(source)
+            }).await;
+
+            _ = this.update(cx, |view, cx| {
+                if view.revision != revision {
+                    return; // 旧结果不能覆盖新内容。
+                }
+                view.parsed = Some(parsed);
+                cx.notify();
+            });
+        }));
+    }
 }
 ```
 
-后台闭包拿不到 `App`、`Window` 或 `Context<T>`。离开 Entity 更新之前，只 clone 工作所需的输入。如果解析期间文档可能变化，连同 `source` 一起记录修订号，并在 `this.update` 内比较，避免旧结果覆盖新状态。
+worker 接收 `String`，返回实现 `Send` 的 `ParsedDocument`；它拿不到 `App`、`Window` 或 `Context<T>`。离开 Entity 更新之前，只 clone 工作所需的输入。替换 `_parse_task` 会取消上一个外层任务及它正在等待的后台任务，但不能中途打断一次 poll 中正在执行的同步解析。修订号检查还能阻止前台更新前已经过期的结果覆盖新状态。
 
 ## GPUI Kit 中的流式处理实例
 

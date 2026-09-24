@@ -23,13 +23,13 @@ order: -2.45
 `SharedString` 以容易 clone 的形式表示这段不可变文本。工作区可以保留一份值，每层再取得自有的 clone；对于堆上长文本，这些 clone 共享字节，无需在每次透传时完整复制。这就是 GPUI 与 GPUI Kit 在许多文本属性中使用它、并在组件边界接收 `impl Into<SharedString>` 的原因。代价是不可变：改动文本就要构建新值。只要内容不变，多个副本才得以共享；这并不意味着绝对零开销。
 
 <figure class="shared-string-memory">
-  <svg viewBox="0 0 880 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="shared-memory-title-zh shared-memory-desc-zh">
+  <svg viewBox="-16 -16 912 416" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="shared-memory-title-zh shared-memory-desc-zh">
     <title id="shared-memory-title-zh">三个 String 所有者与三个 SharedString 所有者的内存关系</title>
     <desc id="shared-memory-desc-zh">对于存于堆上的长文本，三个 String 所有者各自指向完整文本缓冲区。三个 SharedString 所有者分别持有小型句柄，指向一份带引用计数的共享文本。虚线动效只表示所有权连接，不表示耗时。</desc>
     <defs>
       <marker id="shared-arrow-zh" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M1 1 L7 4 L1 7" /></marker>
     </defs>
-    <rect class="memory-panel" x="1" y="1" width="878" height="173" rx="12" />
+    <rect class="memory-panel" x="1" y="1" width="878" height="185" rx="12" />
     <text class="memory-heading" x="24" y="29">String::clone()</text>
     <text class="memory-subtitle" x="24" y="49">每次取得自有副本，都要把完整文本复制到另一份分配中。</text>
     <rect class="memory-owner" x="24" y="65" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="83">View A · 句柄</text>
@@ -42,7 +42,8 @@ order: -2.45
     <rect class="memory-buffer memory-buffer-copy" x="463" y="103" width="190" height="27" rx="5" /><text class="memory-label" x="476" y="121">文本缓冲区 B · 完整文本</text>
     <rect class="memory-buffer memory-buffer-copy" x="463" y="141" width="190" height="27" rx="5" /><text class="memory-label" x="476" y="159">文本缓冲区 C · 完整文本</text>
     <text class="memory-total memory-total-copy" x="676" y="121">3 份文本缓冲区</text>
-    <rect class="memory-panel" x="1" y="186" width="878" height="173" rx="12" />
+    <g transform="translate(0 12)">
+    <rect class="memory-panel" x="1" y="186" width="878" height="185" rx="12" />
     <text class="memory-heading" x="24" y="214">SharedString::clone()</text>
     <text class="memory-subtitle" x="24" y="234">每位所有者都持有句柄；长文本只保留一份分配。</text>
     <rect class="memory-owner" x="24" y="251" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="269">View A · 句柄</text>
@@ -53,8 +54,9 @@ order: -2.45
     <path class="memory-flow memory-flow-share" d="M183 340 L451 303" marker-end="url(#shared-arrow-zh)" />
     <rect class="memory-buffer memory-buffer-share" x="463" y="277" width="190" height="51" rx="6" /><text class="memory-label" x="476" y="300">一份共享文本缓冲区</text><text class="memory-detail" x="476" y="317">引用计数：3</text>
     <text class="memory-total memory-total-share" x="676" y="307">1 份文本缓冲区</text>
+    </g>
   </svg>
-  <figcaption>这是三个所有者持有长文本的概念图，不是按字节精确缩放的性能基准。`SharedString` 每位所有者仍持有句柄，clone 也会更新引用计数；短内联文本则会复制少量字节。</figcaption>
+  <figcaption>这是三个所有者持有长文本的概念图，不是按字节精确缩放的性能基准。<code>SharedString</code> 每位所有者仍持有句柄，clone 也会更新引用计数；短内联文本则会复制少量字节。</figcaption>
 </figure>
 
 ## 文本如何存储

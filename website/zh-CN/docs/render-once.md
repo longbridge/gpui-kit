@@ -191,7 +191,7 @@ impl RenderOnce for StatusBadge {
 
 | 使用 | 适用情况 |
 | --- | --- |
-| `RenderOnce` + `IntoElement` | 可复用组件消费本次 render 的属性与 handler；也可使用 keyed state 或外部 Entity，渲染时得到 `&mut Window` 和 `&mut App`。 |
+| [`RenderOnce`](./render-once) + `IntoElement` | 可复用组件消费本次 render 的属性与 handler；也可使用 keyed state 或外部 Entity，渲染时得到 `&mut Window` 和 `&mut App`。 |
 | `Entity` 上的 [`Render`](./render) | 保留的 View 拥有变化的数据、集合、Subscription、Task 或生命周期；渲染时得到 `&mut Context<Self>`，可修改并通知它。 |
 | [`Element`](./element) | 内置元素无法表达所需的 layout、prepaint、paint、hit testing 等底层阶段。 |
 

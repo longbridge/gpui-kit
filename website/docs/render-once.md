@@ -191,7 +191,7 @@ This example also uses `use gpui_kit::*;`. The returned `div()` implements [`Sty
 
 | Use | When |
 | --- | --- |
-| `RenderOnce` + `IntoElement` | A reusable component consumes caller-supplied props and handlers for a render. It may use keyed state or an external Entity; rendering receives `&mut Window` and `&mut App`. |
+| [`RenderOnce`](./render-once) + `IntoElement` | A reusable component consumes caller-supplied props and handlers for a render. It may use keyed state or an external Entity; rendering receives `&mut Window` and `&mut App`. |
 | [`Render`](./render) | A retained `Entity` owns changing data, collections, subscriptions, tasks, or a lifecycle; rendering receives `&mut Context<Self>` to update and notify it. |
 | [`Element`](./element) | Built-in elements cannot express required layout, prepaint, paint, hit testing, or other low-level phases. |
 
