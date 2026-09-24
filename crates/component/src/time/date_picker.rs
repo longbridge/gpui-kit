@@ -656,7 +656,10 @@ impl DatePicker {
                 .justify_between()
                 .child(
                     div()
-                        .text_sm()
+                        .map(|this| match size {
+                            Size::Small => this.text_xs(),
+                            _ => this.text_sm(),
+                        })
                         .text_color(cx.theme().muted_foreground)
                         .child(label),
                 )
@@ -665,8 +668,10 @@ impl DatePicker {
         let start = TimeField::new(&state.start_time_field).with_id("start-time");
 
         v_flex()
-            .mt_3()
-            .pt_3()
+            .map(|this| match size {
+                Size::Small => this.mt_2().pt_2(),
+                _ => this.mt_3().pt_3(),
+            })
             .gap_2()
             .border_t_1()
             .border_color(cx.theme().border)

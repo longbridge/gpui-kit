@@ -118,9 +118,13 @@ impl RenderOnce for Calendar {
                 .flex()
                 .items_center()
                 .justify_center()
-                .when(state.kind() != CalendarItemKind::Weekday, |this| {
-                    this.text_sm()
-                })
+                .when(
+                    state.kind() != CalendarItemKind::Weekday,
+                    |this| match size {
+                        Size::Small => this.text_xs(),
+                        _ => this.text_sm(),
+                    },
+                )
                 .when(state.kind() == CalendarItemKind::Weekday, |this| {
                     this.text_xs()
                         .font_normal()
