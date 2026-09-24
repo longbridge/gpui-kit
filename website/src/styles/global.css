@@ -808,6 +808,9 @@ html.dark .astro-code span {
     border-spacing: 0;
     overflow: hidden;
     background: var(--background);
+    box-shadow:
+      0 -5px 14px -9px color-mix(in srgb, var(--foreground) 22%, transparent),
+      0 5px 14px -9px color-mix(in srgb, var(--foreground) 22%, transparent);
     font-size: 0.82rem;
   }
 
