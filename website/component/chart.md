@@ -93,6 +93,31 @@ LineChart::new(data)
 `LineChart` also takes `y_domain` and `point_count`; see Pinned Axis and
 Unfinished Series under AreaChart.
 
+#### Axes and Guides
+
+`LineChart` and `AreaChart` share these. `y_axis` shows tick labels at the y ticks, in a gutter left of the plot by default or over the plot with `y_axis_placement(AxisLabelPlacement::Inside)`. `y_tick_count` sets how many ticks there are, evenly spaced from the baseline to the top edge with both ends included; they place the horizontal grid lines too, and each label reads the value the scale puts at its height. The default of 5 is the grid the charts have always drawn. `y_tick_format` writes the label text from that value.
+
+`x_label_count` labels only that many x values, spread evenly from the first to the last, instead of every `tick_margin`-th. `grid_columns` adds vertical grid lines, `grid_dashed(false)` draws the grid solid, `reference_line` marks a value with a dashed line across the plot, and `y_padding` sets the space kept above the highest value and below the lowest, 10px and 0 by default.
+
+```rust
+use gpui_kit::component::plot::AxisLabelPlacement;
+
+// An intraday chart: labels over the plot, a solid grid, the previous close marked
+AreaChart::new(minutes)
+    .x(|d| d.time.clone())
+    .y(|d| d.price)
+    .y_domain(low, high)
+    .y_axis(true)
+    .y_axis_placement(AxisLabelPlacement::Inside)
+    .y_tick_count(3)
+    .y_tick_format(|v| format!("{v:.2}"))
+    .x_label_count(3)
+    .grid_columns(4)
+    .grid_dashed(false)
+    .reference_line(prev_close)
+    .y_padding(6., 6.)
+```
+
 ### BarChart
 
 A bar chart uses rectangular bars to show comparisons among categories. Bars can be oriented vertically or horizontally via the `alignment` option.
@@ -270,6 +295,24 @@ BarChart::new(data)
     .value(|d| d.value)
     .value_axis(true)
     .value_tick_count(7)
+```
+
+`value_axis_placement(AxisLabelPlacement::Inside)` draws the labels over the plot beside their grid lines, so the bars keep the room a gutter would take, and `value_tick_format` writes their text. `band_count` lays the band axis out for more bands than there is data, so a short series keeps each bar's width and fills only the leading bands. `band_label_count` labels only that many bands, spread evenly from the first to the last, and `grid_dashed(false)` draws the grid solid.
+
+```rust
+use gpui_kit::component::plot::AxisLabelPlacement;
+
+// A value per day over the last 20 days, however many have data yet
+BarChart::new(days)
+    .band(|d| d.date.clone())
+    .value(|d| d.value)
+    .value_axis(true)
+    .value_axis_placement(AxisLabelPlacement::Inside)
+    .value_tick_count(2)
+    .value_tick_format(|v| format!("{v:.2}"))
+    .band_count(20)
+    .band_label_count(2)
+    .grid_dashed(false)
 ```
 
 #### Bar Chart Labels and Spacing

@@ -20,6 +20,17 @@ pub enum AxisLabelSide {
     Start,
 }
 
+/// Where a chart draws the tick labels of its value axis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum AxisLabelPlacement {
+    /// In a gutter beside the plot, which the plot shrinks to make room for. (Default.)
+    #[default]
+    Outside,
+    /// Over the plot's edge, beside the grid line each label reads, so the plot
+    /// keeps its full size.
+    Inside,
+}
+
 pub struct AxisText {
     pub text: SharedString,
     pub tick: Pixels,

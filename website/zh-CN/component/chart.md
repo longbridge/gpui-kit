@@ -85,6 +85,31 @@ LineChart::new(data)
 
 `LineChart` 同样支持 `y_domain` 和 `point_count`，用法见 AreaChart 下的「固定 Y 轴与未完成的序列」。
 
+#### 坐标轴与辅助线
+
+以下选项 `LineChart` 和 `AreaChart` 通用。`y_axis` 在 Y 轴刻度处显示标签，默认放在绘图区左侧的标签栏里，用 `y_axis_placement(AxisLabelPlacement::Inside)` 可以改为叠在绘图区内。`y_tick_count` 设置刻度数，刻度从基线到顶边均匀分布，两端都算在内；横向网格线也画在这些刻度上，每个标签显示比例尺在该高度对应的数值。默认的 5 个刻度就是图表一直以来的网格。`y_tick_format` 根据这个数值生成标签文字。
+
+`x_label_count` 只给这么多个 X 值标注，从第一个到最后一个均匀挑选，不再按 `tick_margin` 每隔几个标一个。`grid_columns` 增加纵向网格线，`grid_dashed(false)` 把网格改为实线，`reference_line` 在某个数值处画一条贯穿绘图区的虚线，`y_padding` 设置最大值上方和最小值下方保留的空白，默认上方 10px、下方 0。
+
+```rust
+use gpui_kit::component::plot::AxisLabelPlacement;
+
+// 分时图：标签叠在图内、实线网格、标出昨收
+AreaChart::new(minutes)
+    .x(|d| d.time.clone())
+    .y(|d| d.price)
+    .y_domain(low, high)
+    .y_axis(true)
+    .y_axis_placement(AxisLabelPlacement::Inside)
+    .y_tick_count(3)
+    .y_tick_format(|v| format!("{v:.2}"))
+    .x_label_count(3)
+    .grid_columns(4)
+    .grid_dashed(false)
+    .reference_line(prev_close)
+    .y_padding(6., 6.)
+```
+
 ### BarChart
 
 柱状图通过矩形条形对比不同类别的数据，并可通过 `alignment` 选项切换垂直或水平方向。
@@ -258,6 +283,24 @@ BarChart::new(data)
     .value(|d| d.value)
     .value_axis(true)
     .value_tick_count(7)
+```
+
+`value_axis_placement(AxisLabelPlacement::Inside)` 把标签叠在绘图区内、紧挨各自的网格线，柱子不必让出标签栏的空间；`value_tick_format` 生成标签文字。`band_count` 让分类轴按比数据更多的格位数铺开，数据较少时每根柱保持原有宽度，只占前面几格。`band_label_count` 只给这么多个分类标注，从第一个到最后一个均匀挑选；`grid_dashed(false)` 把网格改为实线。
+
+```rust
+use gpui_kit::component::plot::AxisLabelPlacement;
+
+// 最近 20 天每天一个值，不管目前有几天数据
+BarChart::new(days)
+    .band(|d| d.date.clone())
+    .value(|d| d.value)
+    .value_axis(true)
+    .value_axis_placement(AxisLabelPlacement::Inside)
+    .value_tick_count(2)
+    .value_tick_format(|v| format!("{v:.2}"))
+    .band_count(20)
+    .band_label_count(2)
+    .grid_dashed(false)
 ```
 
 #### 柱状图标签与间距

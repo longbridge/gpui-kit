@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Bounds, ElementId, Hsla, IntoElement, Pixels, Point, SharedString, Window,
-    point, px,
+    AnyElement, App, Bounds, ElementId, Hsla, IntoElement, Pixels, Point, SharedString, Size,
+    Window, point, px,
 };
 use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
@@ -11,7 +11,7 @@ use num_traits::{Num, ToPrimitive};
 use crate::{
     ActiveTheme,
     plot::{
-        AXIS_GAP, Grid, PathCaches, Plot, PlotAxis, StrokeStyle,
+        AXIS_GAP, AxisLabelPlacement, PathCaches, Plot, PlotAxis, StrokeStyle,
         scale::{Scale, ScaleLinear, ScalePoint, Sealed},
         shape::Line,
         tooltip::{CrossLine, Dot, PlotHover, Tooltip, TooltipState},
@@ -19,8 +19,9 @@ use crate::{
 };
 
 use super::{
-    HOVER_DOT_SIZE, axis_point_count, build_point_x_labels, caller_id, hover_halo_size,
-    pinned_plot_mask, point_range, point_value_scale, pointer_spring,
+    HOVER_DOT_SIZE, PointAxes, ValueExtent, axis_point_count, build_point_x_labels, caller_id,
+    hover_halo_size, labeled_items, pinned_plot_mask, point_range, point_value_scale,
+    pointer_spring,
 };
 
 /// The hover a line chart paints, sampled once per frame in [`Plot::hover`].
@@ -50,6 +51,7 @@ where
     grid: bool,
     y_domain: Option<(Y, Y)>,
     point_count: Option<usize>,
+    axes: PointAxes,
     id: ElementId,
     interactive: bool,
     name: Option<SharedString>,
@@ -78,6 +80,7 @@ where
             grid: true,
             y_domain: None,
             point_count: None,
+            axes: PointAxes::default(),
             id: caller_id(),
             interactive: true,
             name: None,
@@ -172,7 +175,7 @@ where
     ///
     /// Pin it where zero is not a meaningful baseline, such as a price line
     /// that would otherwise be pressed flat against the top. The range keeps
-    /// the 10px above `max` that the default leaves above the highest value,
+    /// the `y_padding` headroom above `max`, 10px by default,
     /// and the line is clipped to the plot, so a value outside the range stops
     /// at its edge. Nothing is drawn when `min` equals `max`.
     pub fn y_domain(mut self, min: Y, max: Y) -> Self {
@@ -193,11 +196,96 @@ where
         self
     }
 
+    /// Show the y axis's tick labels, one at each of the `y_tick_count` ticks.
+    ///
+    /// Default is false.
+    pub fn y_axis(mut self, y_axis: bool) -> Self {
+        self.axes.y_axis = y_axis;
+        self
+    }
+
+    /// Set where the y-axis tick labels sit: in a gutter left of the plot, or
+    /// inside it beside their grid lines.
+    ///
+    /// Default is [`AxisLabelPlacement::Outside`].
+    pub fn y_axis_placement(mut self, placement: AxisLabelPlacement) -> Self {
+        self.axes.y_axis_placement = placement;
+        self
+    }
+
+    /// Set how many ticks the y axis carries, evenly spaced from the baseline
+    /// to the top edge with both ends included.
+    ///
+    /// The ticks place the horizontal grid lines and the tick labels, and each
+    /// label reads the value the scale puts at its height. Values below 2 are
+    /// raised to 2.
+    ///
+    /// Default is 5.
+    pub fn y_tick_count(mut self, count: usize) -> Self {
+        self.axes.y_tick_count = count.max(2);
+        self
+    }
+
+    /// Set the text of each y-axis tick label from the value at its tick.
+    pub fn y_tick_format<S>(mut self, format: impl Fn(f64) -> S + 'static) -> Self
+    where
+        S: Into<SharedString> + 'static,
+    {
+        self.axes.y_tick_format = Some(Rc::new(move |value| format(value).into()));
+        self
+    }
+
+    /// Label `count` of the x values, spread evenly from the first to the
+    /// last, instead of every `tick_margin`-th.
+    pub fn x_label_count(mut self, count: usize) -> Self {
+        self.axes.x_label_count = Some(count);
+        self
+    }
+
+    /// Divide the plot into `count` columns with vertical grid lines, the first
+    /// on its left edge.
+    ///
+    /// Default is 0, no vertical lines.
+    pub fn grid_columns(mut self, count: usize) -> Self {
+        self.axes.grid_columns = count;
+        self
+    }
+
+    /// Draw the grid dashed or solid.
+    ///
+    /// Default is true.
+    pub fn grid_dashed(mut self, dashed: bool) -> Self {
+        self.axes.grid_dashed = dashed;
+        self
+    }
+
+    /// Draw a dashed line across the plot at `value`, such as a previous close.
+    ///
+    /// Call again for more lines. A value outside the y axis is not drawn.
+    pub fn reference_line(mut self, value: Y) -> Self {
+        if let Some(value) = value.to_f64() {
+            self.axes.reference_lines.push(value);
+        }
+        self
+    }
+
+    /// Set the space kept clear above the highest value and below the lowest,
+    /// in pixels.
+    ///
+    /// Default is 10px above and none below.
+    pub fn y_padding(mut self, top: f32, bottom: f32) -> Self {
+        self.axes.y_padding = (top, bottom);
+        self
+    }
+
     /// Build the x (point) and y (linear) scales for the given bounds.
     ///
     /// Shared by `paint` and `tooltip_state` so the two stay in sync. Returns `None` when the
     /// x/y accessors have not been set.
-    fn scales(&self, bounds: Bounds<Pixels>) -> Option<(ScalePoint<X>, ScaleLinear<Y>)> {
+    fn scales(
+        &self,
+        bounds: Bounds<Pixels>,
+    ) -> Option<(ScalePoint<X>, ScaleLinear<Y>, ValueExtent)> {
         let (x_fn, y_fn) = (self.x.as_ref()?, self.y.as_ref()?);
 
         let width = bounds.size.width.as_f32();
@@ -207,11 +295,21 @@ where
         let len = self.data.len();
         let x = ScalePoint::new(
             self.data.iter().map(|v| x_fn(v)).collect(),
-            point_range(width, len, axis_point_count(self.point_count, len)),
+            point_range(
+                self.axes.plot_left(),
+                width - self.axes.plot_left(),
+                len,
+                axis_point_count(self.point_count, len),
+            ),
         );
-        let y = point_value_scale(self.data.iter().map(|v| y_fn(v)), self.y_domain, height);
+        let (y, extent) = point_value_scale(
+            self.data.iter().map(|v| y_fn(v)),
+            self.y_domain,
+            height,
+            self.axes.y_padding,
+        );
 
-        Some((x, y))
+        Some((x, y, extent))
     }
 }
 
@@ -224,7 +322,7 @@ where
         let (Some(x_fn), Some(y_fn)) = (self.x.as_ref(), self.y.as_ref()) else {
             return;
         };
-        let Some((x, y)) = self.scales(bounds) else {
+        let Some((x, y, extent)) = self.scales(bounds) else {
             return;
         };
 
@@ -232,27 +330,35 @@ where
         let height = bounds.size.height.as_f32() - axis_gap;
 
         // Draw X axis
+        // The axis runs under the plot only, clear of a value-axis gutter, so
+        // its labels shift back by the gutter the x scale already includes.
+        let left = self.axes.plot_left();
+        let axis_bounds = Bounds {
+            origin: bounds.origin + point(px(left), px(0.)),
+            size: Size::new(bounds.size.width - px(left), bounds.size.height),
+        };
         let mut axis = PlotAxis::new().stroke(cx.theme().border);
         if self.x_axis {
+            let labeled = labeled_items(self.data.len(), self.axes.x_label_count, self.tick_margin);
             let labels = build_point_x_labels(
                 &self.data,
                 x_fn.as_ref(),
                 &x,
                 axis_point_count(self.point_count, self.data.len()),
-                self.tick_margin,
+                &labeled,
                 cx.theme().muted_foreground,
-            );
+            )
+            .into_iter()
+            .map(|mut label| {
+                label.tick -= px(left);
+                label
+            });
             axis = axis.x(height).x_label(labels);
         }
-        axis.paint(&bounds, window, cx);
+        axis.paint(&axis_bounds, window, cx);
 
-        // Draw grid
         if self.grid {
-            Grid::new()
-                .y((0..=3).map(|i| height * i as f32 / 4.0).collect())
-                .stroke(cx.theme().border)
-                .dash_array(&[px(4.), px(2.)])
-                .paint(&bounds, window);
+            self.axes.paint_grid(bounds, height, window, cx);
         }
 
         // Draw line
@@ -288,6 +394,10 @@ where
                 line.paint(&bounds, window);
             }
         });
+
+        self.axes
+            .paint_reference_lines(extent, bounds, height, window, cx);
+        self.axes.paint_y_labels(extent, bounds, height, window, cx);
     }
 
     fn id(&self) -> Option<ElementId> {
@@ -301,11 +411,13 @@ where
         _cx: &App,
     ) -> Option<TooltipState> {
         let (x_fn, y_fn) = (self.x.as_ref()?, self.y.as_ref()?);
-        let (x, y) = self.scales(bounds)?;
+        let (x, y, _) = self.scales(bounds)?;
 
         // Ignore the x-axis label gutter so hovering the labels doesn't show a tooltip.
         let axis_gap = if self.x_axis { AXIS_GAP } else { 0. };
-        if position.y.as_f32() > bounds.size.height.as_f32() - axis_gap {
+        if position.y.as_f32() > bounds.size.height.as_f32() - axis_gap
+            || position.x.as_f32() < self.axes.plot_left()
+        {
             return None;
         }
 

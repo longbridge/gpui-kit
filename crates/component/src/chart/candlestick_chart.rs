@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-use super::{build_band_labels, caller_id, pointer_spring};
+use super::{build_band_labels, caller_id, labeled_items, pointer_spring};
 
 /// The hover a candlestick chart paints, sampled once per frame in [`Plot::hover`].
 #[derive(Clone, Copy)]
@@ -237,7 +237,7 @@ where
                 x_fn.as_ref(),
                 &x,
                 band_width,
-                self.tick_margin,
+                &labeled_items(self.data.len(), None, self.tick_margin),
                 cx.theme().muted_foreground,
             );
             axis = axis.x(height).x_label(labels);

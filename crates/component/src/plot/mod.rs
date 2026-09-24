@@ -15,7 +15,7 @@ use gpui::{
     point, px,
 };
 
-pub use axis::{AXIS_GAP, AxisLabelSide, AxisText, PlotAxis};
+pub use axis::{AXIS_GAP, AxisLabelPlacement, AxisLabelSide, AxisText, PlotAxis};
 pub use grid::Grid;
 pub use label::PlotLabel;
 pub use path_cache::{PathCache, PathCaches, ShapeKey};

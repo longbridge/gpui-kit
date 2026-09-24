@@ -10,7 +10,10 @@ use gpui_kit::component::{
     },
     dock::PanelControl,
     h_flex,
-    plot::shape::{BarAlignment, SankeyAlign, SankeyLink, SankeyValueScale},
+    plot::{
+        AxisLabelPlacement,
+        shape::{BarAlignment, SankeyAlign, SankeyLink, SankeyValueScale},
+    },
     scroll::ScrollableElement as _,
     separator::Separator,
     v_flex,
@@ -800,6 +803,11 @@ impl ChartCard {
                         .name("Revenue")
                         .fill(move |_, _, _, _| accent)
                         .corner_radii(rounded_tip())
+                        .value_axis(true)
+                        .value_tick_count(3)
+                        .value_tick_format(money)
+                        .grid_dashed(false)
+                        .band_label_count(6)
                         .id("bar-chart"),
                 )
                 .trend(
@@ -967,6 +975,7 @@ impl ChartCard {
                         .name("Downloads")
                         .label(|d| compact(d.downloads))
                         .fill(move |_, _, _, alignment| bar_shading(accent, alignment))
+                        .band_label_count(4)
                         .id("bar-chart-gradient-bottom"),
                 )
                 .trend(
@@ -1087,6 +1096,9 @@ impl ChartCard {
                         .y(|d| d.mrr)
                         .stroke(accent)
                         .name("MRR")
+                        .y_axis(true)
+                        .y_tick_format(money)
+                        .x_label_count(4)
                         .id("line-chart"),
                 )
                 .trend(
@@ -1225,6 +1237,7 @@ impl ChartCard {
                     .fold((f64::MAX, f64::MIN), |(low, high), d| {
                         (low.min(d.close), high.max(d.close))
                     });
+                let average = sessions.iter().map(|d| d.close).sum::<f64>() / sessions.len() as f64;
                 let last = sessions.last().map_or(0., |d| d.close);
                 Card::new("Closing Price", "Jun - Jul, in progress")
                     .chart(
@@ -1237,13 +1250,20 @@ impl ChartCard {
                             .y_domain(low, high)
                             .point_count(data.stock_prices.len())
                             .tick_margin(5)
+                            .y_axis(true)
+                            .y_axis_placement(AxisLabelPlacement::Inside)
+                            .y_tick_count(3)
+                            .y_tick_format(|v| format!("${v:.0}"))
+                            .grid_columns(4)
+                            .grid_dashed(false)
+                            .reference_line(average)
                             .name("Close")
                             .id("area-chart-in-progress"),
                     )
                     .headline(format!(
                         "${last:.2} at the last close, within ${low:.2} - ${high:.2}"
                     ))
-                    .note("A pinned y axis, and room for the sessions still to come")
+                    .note("A pinned y axis, the average close marked, and room for the sessions to come")
             }
             // Forty sessions do not fit forty labels, so every card thins them.
             Self::Candlestick => self.candlestick(data, "Daily", 0.8, 5, "candlestick-chart"),
