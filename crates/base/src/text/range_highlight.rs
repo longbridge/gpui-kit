@@ -113,7 +113,7 @@ impl Eq for RenderedText {}
 /// A background painted behind one range of a [`RenderedText`].
 ///
 /// It is painted under the text and under the selection, and never changes
-/// layout. Where highlights overlap, the later one paints over the earlier. A
+/// layout. Where highlights overlap, the later one paints over the earlier.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RangeHighlight {
     range: Range<usize>,
