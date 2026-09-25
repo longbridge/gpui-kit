@@ -1,4 +1,15 @@
 _version: 2
+Attachment:
+  Remove:
+    en: Remove
+    zh-CN: 移除
+    zh-HK: 移除
+    zh-TW: 移除
+  Retry:
+    en: Retry
+    zh-CN: 重试
+    zh-HK: 重試
+    zh-TW: 重試
 Calendar:
   week.0:
     en: Su

@@ -76,6 +76,7 @@ icons/play.svg
 icons/plus.svg
 icons/redo-2.svg
 icons/redo.svg
+icons/refresh-cw.svg
 icons/replace.svg
 icons/resize-corner.svg
 icons/rotate-cw.svg

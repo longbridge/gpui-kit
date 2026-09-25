@@ -295,9 +295,80 @@ impl Render for AttachmentStory {
                     ),
             )
             .child(
+                section("Composer tiles")
+                    .description(
+                        "Image tiles and file chips with the built-in remove and retry controls.",
+                    )
+                    .max_w(rems(42.5))
+                    .child(
+                        AttachmentGroup::new("attachment-story-composer")
+                            .child(
+                                Attachment::new()
+                                    .id("composer-image-done")
+                                    .axis(Axis::Vertical)
+                                    .on_remove(|_, window, cx| {
+                                        window.push_notification("Removed photo.png", cx);
+                                    })
+                                    .media(AttachmentMedia::new().src(
+                                        "https://pub.lbkrs.com/files/202503/vEnnmgUM6bo362ya/sdk.svg",
+                                    )),
+                            )
+                            .child(
+                                Attachment::new()
+                                    .id("composer-image-uploading")
+                                    .axis(Axis::Vertical)
+                                    .status(AttachmentStatus::Uploading)
+                                    .on_remove(|_, _, _| {})
+                                    .media(AttachmentMedia::new().src(
+                                        "https://pub.lbkrs.com/files/202503/vEnnmgUM6bo362ya/sdk.svg",
+                                    )),
+                            )
+                            .child(
+                                Attachment::new()
+                                    .id("composer-image-failed")
+                                    .axis(Axis::Vertical)
+                                    .status(AttachmentStatus::Failed)
+                                    .on_remove(|_, _, _| {})
+                                    .on_retry(|_, window, cx| {
+                                        window.push_notification("Retrying photo.png…", cx);
+                                    })
+                                    .media(AttachmentMedia::new().src(
+                                        "https://pub.lbkrs.com/files/202503/vEnnmgUM6bo362ya/sdk.svg",
+                                    )),
+                            )
+                            .child(
+                                Attachment::new()
+                                    .id("composer-file-uploading")
+                                    .status(AttachmentStatus::Uploading)
+                                    .on_remove(|_, _, _| {})
+                                    .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
+                                    .content(
+                                        AttachmentContent::new()
+                                            .title(AttachmentTitle::new("Q3 statement.pdf"))
+                                            .description(AttachmentDescription::new("Uploading…")),
+                                    ),
+                            )
+                            .child(
+                                Attachment::new()
+                                    .id("composer-file-failed")
+                                    .status(AttachmentStatus::Failed)
+                                    .on_remove(|_, _, _| {})
+                                    .on_retry(|_, window, cx| {
+                                        window.push_notification("Retrying Q3 statement.pdf…", cx);
+                                    })
+                                    .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
+                                    .content(
+                                        AttachmentContent::new()
+                                            .title(AttachmentTitle::new("Q3 statement.pdf"))
+                                            .description(AttachmentDescription::new("Upload failed")),
+                                    ),
+                            ),
+                    ),
+            )
+            .child(
                 section("Image overlays")
                     .description(
-                        "Image previews keep their overlays visible while only the image dims during upload.",
+                        "An uploading image takes a scrim and a spinner; custom overlays stay on top.",
                     )
                     .max_w(rems(42.5))
                     .child(
