@@ -281,7 +281,7 @@ let color_artwork = img("images/illustration.svg").size(px(160.));
 
 `img()` 支持常见的 PNG、JPEG、WebP、GIF、SVG，以及 GPUI 的 `Img::extensions()` 列出的其他格式。它通过字节识别位图格式，SVG 则走另一条解码路径；因此文件内容也必须有效，不能只改扩展名。默认的 `ObjectFit::Contain` 会在边界内完整显示图片；`Cover` 会铺满并可能裁剪，`Fill` 可能拉伸变形。`object_fit` 作用于 `img()`，不作用于单色 `svg()` 元素。`img()` 通过 GPUI 的图片缓存异步加载并解码；嵌入资源的字节会复制进加载器，嵌入本身不会省掉解码或运行时图片内存。动画 GIF 和 WebP 可以包含多个帧。
 
-对于 `"images/cover.png"` 这样的字符串，GPUI 会用该键调用已注册的 `AssetSource`。`img(std::path::Path::new("/absolute/file.png"))` 读取文件系统路径，URL 字符串使用 HTTP 加载器；它们的部署方式和错误处理不同。更多尺寸与填充示例见[图片](../component/image.md)。
+对于 `"images/cover.png"` 这样的字符串，GPUI 会用该键调用已注册的 `AssetSource`。`img(std::path::Path::new("/absolute/file.png"))` 读取文件系统路径，URL 字符串使用 HTTP 加载器；它们的部署方式和错误处理不同。各种来源如何加载、布局和缓存，见[图片](./image.md)。
 
 ## 单独嵌入 SVG 图标
 

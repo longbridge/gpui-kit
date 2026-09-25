@@ -285,7 +285,7 @@ let color_artwork = img("images/illustration.svg").size(px(160.));
 
 The `img()` source supports common PNG, JPEG, WebP, GIF, and SVG files (and other formats listed by GPUI's `Img::extensions()`). It detects raster formats from the bytes; SVG takes a separate decoding path. Use a real image file with a supported format, not only a matching extension. `ObjectFit::Contain` is the default; `Cover` fills the bounds and may crop, while `Fill` can distort. `object_fit` controls `img()`, not the monochrome `svg()` element. `img()` loads and decodes asynchronously through GPUI's image cache; embedded source bytes are copied into its loader, so embedding alone does not eliminate decode or runtime image memory. Animated GIF and WebP can contain multiple frames.
 
-For a string like `"images/cover.png"`, GPUI calls the registered `AssetSource` with that key. `img(std::path::Path::new("/absolute/file.png"))` reads a filesystem path, and a URL string uses the HTTP loader. They have different deployment and error behavior. See [Image](../component/image.md) for more sizing and fitting examples.
+For a string like `"images/cover.png"`, GPUI calls the registered `AssetSource` with that key. `img(std::path::Path::new("/absolute/file.png"))` reads a filesystem path, and a URL string uses the HTTP loader. They have different deployment and error behavior. See [Images](./image.md) for how each source loads, sizes, and caches.
 
 ## Embed individual SVG icons
 
