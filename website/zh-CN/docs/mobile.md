@@ -11,7 +11,7 @@ maturity: [experimental, platform-dependent]
 
 GPUI Kit 目前使用 `gpui-pre-mobile`，这是在[兼容性 fork](https://github.com/longbridge/gpui-mobile) 中维护的临时兼容包。它基于原项目进行打包适配，用于配合 `gpui-pre` 发布 crate，并持续跟进最新的 GPUI 版本、保持集成兼容。待社区 `gpui-mobile` 完成接入、GPUI 也发布 crate 后，我们计划将本文及相关依赖更新为社区的 `gpui-mobile`。
 
-目前该集成仍处于实验阶段。Swift 托管的 iOS 示例已在 iOS 模拟器中构建并运行。兼容性 fork 还提供 Android Activity 示例与构建脚本，但它使用不同的宿主路径；GPUI Kit 集成尚未在 Android 或实体 iPhone 上验证。下文的 iOS 模拟器路径是已演示的目标，不能据此推断移动平台均已获得支持。
+目前该集成仍处于实验阶段。Swift 托管的 iOS 示例已在 iOS 模拟器中构建并运行。在本文之外，GPUI Kit 已在 iOS 与 Android 上完成了有限范围的验证：一个 AI Chat 区域在两个平台上都通过了功能与性能测试，其中使用了 TextView、Button、Menu、Popover、Scrollbar、Input、Textarea 与文本选择，相关修复已合入 GPUI Kit。该场景完整覆盖了 TextView；其他组件与完整应用布局尚未在移动端验证。兼容性 fork 中的 Android Activity 示例使用不同的宿主路径，本文不涉及。下文的 iOS 模拟器路径是本文说明的目标，不能据此推断移动平台均已获得支持。
 
 ## 运行 iOS 示例
 
@@ -147,7 +147,7 @@ GPUI Base 在 iOS 和 Android 上禁用其 tooltip overlay。这只覆盖通过�
 
 在做出性能结论前，使用实体设备、Release 构建和 Xcode Instruments 测量。模拟器适合验证布局与交互，但它的结果不是设备帧耗时。
 
-Android 使用独立的 Activity 与渲染表面生命周期。仓库包含 Android 示例，但本文不代表 Android Kit 兼容性或嵌入原生 Android `View` 的能力已经得到验证。采用这些路径前需要单独评估。
+Android 使用独立的 Activity 与渲染表面生命周期。仓库包含 Android 示例。除上文已验证的 Chat 场景外，本文不代表 Android 上的 Kit 兼容性已经确立，也不涉及嵌入原生 Android `View`。采用这些路径前需要单独评估。
 
 ## 排查问题
 

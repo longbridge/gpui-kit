@@ -11,7 +11,7 @@ Mobile support builds on [gpui-mobile](https://github.com/itsbalamurali/gpui-mob
 
 GPUI Kit currently uses `gpui-pre-mobile`, a temporary compatibility package maintained in a [compatibility fork](https://github.com/longbridge/gpui-mobile). It adapts the original project for crate packaging and publication alongside `gpui-pre`, and tracks newer GPUI versions to keep the integration compatible. Once the community `gpui-mobile` completes the integration and GPUI is published as a crate, we plan to switch this guide and its dependencies to the community `gpui-mobile`.
 
-The current integration is experimental. The Swift-hosted iOS example has been built and exercised in the iOS simulator. The fork also has an Android activity example and a build script, but that is a different host path; GPUI Kit integration has not been validated there or on a physical iPhone. Treat the iOS simulator path below as the demonstrated target, not a general mobile support guarantee.
+The current integration is experimental. The Swift-hosted iOS example has been built and exercised in the iOS simulator. Beyond this guide, GPUI Kit has been validated on iOS and Android in a limited scope: an AI chat area built from TextView, Button, Menu, Popover, Scrollbar, Input, Textarea and text selection passed functional and performance testing on both platforms, and the fixes from that work are in GPUI Kit. TextView is covered completely in that scenario. Other components and complete application layouts have not been validated on mobile yet. The fork's Android activity example is a different host path that this guide does not cover. Treat the iOS simulator path below as the documented target, not a general mobile support guarantee.
 
 ## Run the iOS example
 
@@ -147,7 +147,7 @@ For an application integration, check launch and return from the background, key
 
 Measure rendering on a physical device with a release build and Xcode Instruments before making performance claims. Simulator results are useful for layout and interaction, but are not device frame-time measurements.
 
-Android uses a separate activity and surface lifecycle. The repository contains an Android example, but this guide does not establish Android Kit compatibility or native Android `View` embedding. Validate those paths separately before depending on them.
+Android uses a separate activity and surface lifecycle. The repository contains an Android example. Outside the chat scenario validated above, this guide does not establish Android Kit compatibility, and it does not cover native Android `View` embedding. Validate those paths separately before depending on them.
 
 ## Troubleshooting
 
