@@ -96,6 +96,21 @@ pub struct TextViewState {
 
     /// The bounds of the text view
     bounds: Bounds<Pixels>,
+    /// The size the document laid out to when last rendered uncached.
+    /// While set, a non-scrollable, unclamped `TextView` paints this state as
+    /// a cached view of that height, so a repaint of anything around it
+    /// reuses the previous frame instead of rebuilding and laying out every
+    /// block. Cleared whenever the layout may change: new content, inline
+    /// resources, style, typography or width.
+    pub(super) measured: Option<gpui::Size<Pixels>>,
+    /// This frame renders uncached and its bounds become `measured`.
+    pub(super) measuring: bool,
+    /// The frame animates (a streaming fade), so it must keep rendering and
+    /// is not measured for caching.
+    pub(super) measure_blocked: bool,
+    /// The document was laid out and prepainted this frame, rather than
+    /// replayed from a cached frame.
+    pub(super) document_prepainted: bool,
 
     pub(super) selectable: bool,
     pub(super) selection_format: SelectionFormat,
@@ -193,6 +208,7 @@ impl TextViewState {
                                 );
                                 state.parsed_content = content;
                                 state.parsed_error = None;
+                                state.measured = None;
                                 state.compatible_layout_update = parsed_update.selection_compatible;
                                 if parsed_update.full_parse {
                                     state.invalidate_measured_heights();
@@ -221,6 +237,10 @@ impl TextViewState {
             entity_id: cx.entity_id(),
             focus_handle,
             bounds: Bounds::default(),
+            measured: None,
+            measuring: false,
+            measure_blocked: false,
+            document_prepainted: false,
             multi_click_selection: None,
             selected_text_override: None,
             select_all: false,
@@ -393,6 +413,8 @@ impl TextViewState {
             .markdown_extensions
             .has_same_parser_configuration(&markdown_extensions);
         self.markdown_extensions = markdown_extensions;
+        // New render handles may paint differently than the cached frame.
+        self.measured = None;
         if parser_configuration_changed && self.format == TextViewFormat::Markdown {
             let text = self.text.clone();
             self.increment_update(&text, false, cx);
@@ -501,6 +523,7 @@ impl TextViewState {
         self.preserve_inline_selection = true;
         self.compatible_layout_update = true;
         self.invalidate_measured_heights();
+        self.measured = None;
         cx.notify();
     }
 
@@ -539,6 +562,7 @@ impl TextViewState {
                     );
                     self.parsed_content = content;
                     self.parsed_error = None;
+                    self.measured = None;
                     self.invalidate_measured_heights();
                     if !self.is_selecting {
                         self.reset_selection_and_adapter(cx);
@@ -860,6 +884,11 @@ impl Render for TextViewState {
             self.preserve_inline_selection = true;
             self.compatible_layout_update = true;
             self.invalidate_measured_heights();
+            // A cached frame re-renders on a text style change with its old
+            // height; measure again on the next frame.
+            if self.measured.take().is_some() {
+                cx.notify();
+            }
         }
         self.layout_text_style = Some(typography);
         let state = cx.entity();
@@ -867,6 +896,8 @@ impl Render for TextViewState {
         if stream_fade.is_some() {
             window.request_animation_frame();
         }
+        // An animating frame must render again next frame, not be replayed.
+        self.measure_blocked = stream_fade.is_some();
         // Built every frame, so everything in it is shared, not copied.
         let node_cx = NodeContext {
             offset: self.parsed_content.node_cx.offset,
@@ -928,6 +959,10 @@ impl Render for TextViewState {
                         .update_layout_revision(state.selection_revision, state.is_selecting);
                     state.update_bounds(bounds, cx);
                     state.compatible_layout_update = false;
+                    state.document_prepainted = true;
+                    if std::mem::take(&mut state.measuring) && !state.measure_blocked {
+                        state.measured = Some(bounds.size);
+                    }
                 });
                 if !is_selecting
                     && ((size_changed && selection_involves_view && !compatible_layout_update)
