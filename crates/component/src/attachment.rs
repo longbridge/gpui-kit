@@ -515,7 +515,7 @@ impl RenderOnce for Attachment {
 
 /// The upload bar's thickness.
 const UPLOAD_BAR_THICKNESS: f32 = 2.;
-/// The card's border width, which the bar and the media sit inside.
+/// The card's border width; the padding box's corners are this much tighter.
 const CARD_BORDER: f32 = 1.;
 
 /// The upload bar along a card's bottom edge. gpui clips rectangularly, so a
@@ -535,16 +535,17 @@ fn upload_bar(percent: f32, radius: Pixels, color: Hsla) -> impl IntoElement {
 }
 
 /// The bar as the intersection of its rectangle with the card's inner rounded
-/// rectangle: both ends are sampled along the corner arcs.
+/// rectangle: both ends are sampled along the corner arcs. An absolutely
+/// positioned child is laid out in the card's padding box, so `bounds` already
+/// sits inside the border; only the corner radius shrinks by the border width.
 fn upload_bar_path(bounds: Bounds<Pixels>, percent: f32, radius: Pixels) -> Option<Path<Pixels>> {
     const STEPS: usize = 6;
     let width = bounds.size.width.as_f32();
     let height = bounds.size.height.as_f32();
-    let radius =
-        (radius.as_f32() - CARD_BORDER).clamp(0., (width.min(height) / 2. - CARD_BORDER).max(0.));
-    let inner_left = CARD_BORDER;
-    let inner_right = width - CARD_BORDER;
-    let inner_bottom = height - CARD_BORDER;
+    let radius = (radius.as_f32() - CARD_BORDER).clamp(0., width.min(height) / 2.);
+    let inner_left = 0.;
+    let inner_right = width;
+    let inner_bottom = height;
     let top = inner_bottom - UPLOAD_BAR_THICKNESS;
     let end = inner_left + (inner_right - inner_left) * (percent / 100.).clamp(0., 1.);
     if end <= inner_left || top <= 0. {
