@@ -1824,6 +1824,36 @@ mod tests {
     }
 
     #[gpui::test]
+    fn runtime_check_materializes_text_views_without_drawing(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let application = TempTree::new("check-text-views");
+        std::fs::write(
+            application.path().join("main.js"),
+            r##"
+                import { div, View } from "gpui-kit";
+                import { TextView } from "gpui-base";
+                export default class App extends View {
+                  render() {
+                    return div()
+                      .child(TextView.markdown("markdown", "# Markdown"))
+                      .child(TextView.html("html", "<p>HTML</p>"));
+                  }
+                }
+            "##,
+        )
+        .expect("application source");
+        let runtime = ShellRuntime::new_isolated().expect("runtime");
+        let window = cx.add_window(|_, _| gpui::Empty);
+        let mut context = VisualTestContext::from_window(*window.deref(), cx);
+        // CLI check only constructs elements; no layout or drawing is active.
+        let description = context
+            .update(|window, cx| runtime.check(application.path(), window, cx))
+            .expect("check TextViews outside the drawing lifecycle");
+        assert!(description.contains("# Markdown"));
+        assert!(description.contains("<p>HTML</p>"));
+    }
+
+    #[gpui::test]
     fn runtime_load_uses_the_manifest_entry_without_plugin_manager_ceremony(
         cx: &mut TestAppContext,
     ) {

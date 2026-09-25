@@ -4,7 +4,8 @@
 use std::{collections::HashSet, io::Cursor, rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
-    App, Asset, Element, ImageCacheError, ImageSource, RenderImage, SharedString, SharedUri,
+    App, Asset, Bounds, Element, ElementId, GlobalElementId, ImageCacheError, ImageSource,
+    InspectorElementId, IntoElement, LayoutId, Pixels, RenderImage, SharedString, SharedUri,
     SvgRenderer, WeakEntity, Window, http_client::HttpClient,
 };
 use gpui_base::TextView;
@@ -19,7 +20,77 @@ const IMAGE_TIMEOUT: Duration = Duration::from_secs(30);
 
 type ImageResult = Result<Arc<RenderImage>, ImageCacheError>;
 
-pub(super) fn with_policy(
+pub(super) fn with_policy(view: TextView, policy: Rc<Policy>) -> impl IntoElement {
+    PolicyTextView { view, policy }
+}
+
+/// CLI check constructs elements without drawing. Only layout may initialize
+/// the keyed image owner; GPUI's Asset still owns all loading and notifications.
+struct PolicyTextView {
+    view: TextView,
+    policy: Rc<Policy>,
+}
+
+impl IntoElement for PolicyTextView {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for PolicyTextView {
+    type RequestLayoutState = <TextView as Element>::RequestLayoutState;
+    type PrepaintState = <TextView as Element>::PrepaintState;
+
+    fn id(&self) -> Option<ElementId> {
+        self.view.id()
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        self.view.source_location()
+    }
+
+    fn request_layout(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        self.view = image_sources(self.view.clone(), self.policy.clone(), window, cx);
+        self.view.request_layout(id, inspector_id, window, cx)
+    }
+
+    fn prepaint(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        state: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        self.view
+            .prepaint(id, inspector_id, bounds, state, window, cx)
+    }
+
+    fn paint(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        state: &mut Self::RequestLayoutState,
+        prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.view
+            .paint(id, inspector_id, bounds, state, prepaint, window, cx);
+    }
+}
+
+fn image_sources(
     view: TextView,
     policy: Rc<Policy>,
     window: &mut Window,
