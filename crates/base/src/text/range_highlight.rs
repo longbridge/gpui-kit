@@ -878,6 +878,16 @@ impl RevealAt {
         })
     }
 
+    /// The reveal moved into the text between `start` and `end` and rebased
+    /// to `start`: one before it moves to its first character, one after it
+    /// to its end.
+    pub(crate) fn clamp(&self, start: usize, end: usize) -> Self {
+        Self {
+            offset: self.offset.clamp(start, end) - start,
+            report: self.report.clone(),
+        }
+    }
+
     /// Report where the line the reveal starts on was laid out, in window
     /// coordinates, and whether it was inside the visible area.
     pub(crate) fn report(&self, line: Bounds<Pixels>, visible: bool) {

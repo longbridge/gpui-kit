@@ -435,8 +435,36 @@ impl Element for InlineFlow {
         let text_style = &typography.text_style;
         let mut elements = Vec::with_capacity(layout.fragments.len());
 
+        // A reveal goes to the fragment it starts in. A line break lays out
+        // no fragment, so a reveal starting on one, or on an empty line, goes
+        // to the next fragment of its text, or to the last when none follows.
+        let reveal_fragment = layout
+            .fragments
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, fragment)| {
+                let PositionedFragment::Text {
+                    item_ix,
+                    source_range,
+                    ..
+                } = fragment
+                else {
+                    return None;
+                };
+                let InlineFlowItem::Text {
+                    reveal: Some(reveal),
+                    ..
+                } = &self.items[*item_ix]
+                else {
+                    return None;
+                };
+                Some((ix, source_range.end > reveal.offset()))
+            })
+            .reduce(|found, next| if found.1 { found } else { next })
+            .map(|(ix, _)| ix);
+
         let mut text_fragment_count = 0;
-        for fragment in &layout.fragments {
+        for (fragment_ix, fragment) in layout.fragments.iter().enumerate() {
             match fragment {
                 PositionedFragment::Object {
                     item_ix,
@@ -547,7 +575,8 @@ impl Element for InlineFlow {
                     .reveal(
                         reveal
                             .as_ref()
-                            .and_then(|reveal| reveal.rebase(source_range.start, source_range.end)),
+                            .filter(|_| reveal_fragment == Some(fragment_ix))
+                            .map(|reveal| reveal.clamp(source_range.start, source_range.end)),
                     )
                     .text_style(fragment_style.clone())
                     .selection_bounds(Bounds::new(

@@ -2886,6 +2886,22 @@ mod tests {
         }
 
         #[gpui::test]
+        fn a_range_starting_on_a_line_break_in_an_inline_flow_reveals_the_next_line(
+            cx: &mut TestAppContext,
+        ) {
+            // Inline code lays the paragraph out as an inline flow.
+            let lines = (0..200)
+                .map(|ix| format!("line {ix} `code`"))
+                .collect::<Vec<_>>()
+                .join("\\\n");
+            let (state, cx) = window(&lines, Container::Scrollable, cx);
+            reveal(&state, "\nline 190", cx);
+            assert!(!is_pending(&state, cx));
+            let top = scroll_top(&state, cx);
+            assert!(top.offset_in_item > px(1000.), "{top:?}");
+        }
+
+        #[gpui::test]
         fn a_reveal_is_dropped_when_its_text_before_it_changes(cx: &mut TestAppContext) {
             let (state, cx) = window(&paragraphs(200), Container::Scrollable, cx);
             let target = "first words then the target";
