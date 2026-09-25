@@ -1091,6 +1091,7 @@ html.dark .astro-code span {
     border-left: 2px solid var(--brand);
     color: var(--muted-foreground);
   }
+  blockquote > p:only-child { margin-block: 0; }
 
   :not(pre) > code {
     border: 1px solid var(--border);
