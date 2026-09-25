@@ -370,8 +370,8 @@ Attachment::new()
     .media(AttachmentMedia::new().src(thumbnail))
 ```
 
-`on_remove` rides a black disc with a white ring on the card's upper trailing
-corner, so it stands off a picture as well as a card. It appears on hover on
+`on_remove` rides a small surface-colored disc with a hairline border on the
+card's upper trailing corner, the way a card's close control usually looks. It appears on hover on
 desktop and stays visible on touch platforms; the card reserves the overhang,
 so a row of cards keeps its alignment. `on_retry` takes effect only while the
 status is `Failed`: an image preview gets a round button in its scrim, and a

@@ -94,13 +94,10 @@ struct SlotLayout {
     id: Option<ElementId>,
 }
 
-/// How far the remove control's ring rides outside the card's upper trailing
-/// corner: the 18px disc overhangs by 6px, its 2px ring by 8px.
-const REMOVE_OVERHANG: Pixels = px(8.);
-/// The remove control's black disc.
-const REMOVE_BUTTON_SIZE: Pixels = px(18.);
-/// The white ring around the remove control.
-const REMOVE_RING_SIZE: Pixels = px(22.);
+/// How far the remove control rides outside the card's upper trailing corner.
+const REMOVE_OVERHANG: Pixels = px(6.);
+/// The remove control: a small surface-colored disc with a hairline border.
+const REMOVE_BUTTON_SIZE: Pixels = px(20.);
 /// The retry control over an image preview.
 const RETRY_BUTTON_SIZE: Pixels = px(24.);
 /// The hover group the remove control appears for. Siblings may share the
@@ -525,47 +522,41 @@ impl RenderOnce for Attachment {
                         this.invisible()
                             .group_hover(REMOVE_GROUP, |this| this.visible())
                     })
-                    // The ring is a white disc under the button rather than a
-                    // border on it: a border's rim blends with the black
-                    // behind it and reads as a grey outline.
-                    .child(
-                        div()
-                            .size(REMOVE_RING_SIZE)
-                            .rounded(cx.theme().radius_full())
-                            .bg(white())
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(remove_button(id, on_remove, cx)),
-                    ),
+                    .child(remove_button(id, on_remove, cx)),
             )
             .into_any_element()
     }
 }
 
-/// The corner remove control: a black disc with a white glyph, set in a white
-/// ring by its caller. It sits on pictures as often as on cards, so it keeps
-/// its own contrast like a scrim rather than following the theme.
+/// The corner remove control: a surface-colored disc with a hairline border
+/// and the foreground glyph, the way a card's close control usually looks.
 ///
 /// The glyphs go in as children: an icon-only `Button` scales its icon with
-/// the button, and these discs want a glyph much smaller than that.
+/// the button, and this disc wants a glyph much smaller than that.
 fn remove_button(id: ElementId, on_remove: ControlHandler, cx: &App) -> Button {
+    let tokens = cx.theme().semantic_tokens();
     Button::new((id, "remove"))
         // The custom variant thins its color to 20%; the disc must stay
         // opaque, so the surface is set on the instance instead.
         .custom(
             ButtonCustomVariant::new(cx)
-                .hover(black().opacity(0.85))
-                .active(black())
-                .foreground(white()),
+                .hover(tokens.colors.muted)
+                .active(tokens.colors.muted)
+                .foreground(tokens.colors.foreground),
         )
         .accessibility_label(t!("Attachment.Remove"))
-        .child(Icon::new(IconName::Close).size(px(10.)).text_color(white()))
+        .child(
+            Icon::new(IconName::Close)
+                .size(px(10.))
+                .text_color(tokens.colors.foreground),
+        )
         .size(REMOVE_BUTTON_SIZE)
         .p_0()
         .rounded(cx.theme().radius_full())
-        .bg(black())
-        .border_0()
+        .bg(tokens.colors.background)
+        .border_1()
+        .border_color(tokens.colors.border)
+        .shadow_sm()
         .on_click(move |event, window, cx| on_remove(event, window, cx))
 }
 
