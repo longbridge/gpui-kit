@@ -788,14 +788,6 @@ impl RenderOnce for AttachmentMedia {
                     .into_any_element(),
             }
         };
-        // Failed: the alert glyph when a retry is offered, the ban glyph for
-        // a rejection that cannot be retried.
-        let failed_glyph = if self.retry.is_some() {
-            IconName::CircleAlert
-        } else {
-            IconName::Ban
-        };
-
         // An icon slot shows the status itself; children come back with
         // `Complete`.
         let glyph = if has_source {
@@ -803,7 +795,10 @@ impl RenderOnce for AttachmentMedia {
         } else if status.is_in_progress() {
             Some(busy(tokens.colors.primary))
         } else if status.is_failed() {
-            Some(Icon::new(failed_glyph).size(glyph_size).into_any_element())
+            Some(match self.retry.clone() {
+                Some((id, on_retry)) => retry_button(id, on_retry, cx).into_any_element(),
+                None => Icon::new(IconName::Ban).size(glyph_size).into_any_element(),
+            })
         } else {
             None
         };
@@ -1760,6 +1755,76 @@ mod tests {
             cx.simulate_click(point(px(150.), px(30.)), Modifiers::default());
             assert_eq!(action_clicks.get(), 1);
             assert_eq!(card_clicks.get(), 1);
+        }
+    }
+
+    mod retry_dispatch {
+        use std::{cell::Cell, rc::Rc};
+
+        use gpui::{
+            Context, KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, Render, TestAppContext,
+            VisualTestContext, point, px,
+        };
+
+        use super::super::*;
+
+        struct FailedMediaHarness {
+            retry: bool,
+            retries: Rc<Cell<usize>>,
+        }
+
+        impl Render for FailedMediaHarness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let retries = self.retries.clone();
+                Attachment::new()
+                    .id("failed-attachment")
+                    .status(AttachmentStatus::Failed)
+                    .media(AttachmentMedia::new())
+                    .when(self.retry, |attachment| {
+                        attachment.on_retry(move |_, _, _| retries.set(retries.get() + 1))
+                    })
+            }
+        }
+
+        fn harness(
+            cx: &mut TestAppContext,
+            retry: bool,
+        ) -> (&mut VisualTestContext, Rc<Cell<usize>>) {
+            cx.update(crate::init);
+            let retries = Rc::new(Cell::new(0));
+            let (_, cx) = cx.add_window_view({
+                let retries = retries.clone();
+                move |_, _| FailedMediaHarness { retry, retries }
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            (cx, retries)
+        }
+
+        #[gpui::test]
+        fn failed_media_without_source_retries_by_pointer_and_keyboard(cx: &mut TestAppContext) {
+            let (cx, retries) = harness(cx, true);
+            cx.simulate_click(point(px(20.), px(20.)), Modifiers::default());
+            assert_eq!(retries.get(), 1);
+
+            cx.update(|window, cx| window.focus_next(cx));
+            cx.update(|window, cx| assert!(window.focused(cx).is_some()));
+            let keystroke = Keystroke::parse("enter").unwrap();
+            cx.simulate_event(KeyDownEvent {
+                keystroke: keystroke.clone(),
+                is_held: false,
+                prefer_character_input: false,
+            });
+            cx.simulate_event(KeyUpEvent { keystroke });
+            assert_eq!(retries.get(), 2);
+        }
+
+        #[gpui::test]
+        fn failed_media_without_retry_has_no_action(cx: &mut TestAppContext) {
+            let (cx, retries) = harness(cx, false);
+            cx.simulate_click(point(px(20.), px(20.)), Modifiers::default());
+            assert_eq!(retries.get(), 0);
+            cx.update(|window, cx| window.focus_next(cx));
+            cx.update(|window, cx| assert!(window.focused(cx).is_none()));
         }
     }
 }
