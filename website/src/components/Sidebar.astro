@@ -9,8 +9,25 @@ export interface Props {
 
 const { items, currentPath, lang = 'en' } = Astro.props;
 
-function isActive(link: string): boolean {
+function matches(link: string): boolean {
   return currentPath === link || currentPath.startsWith(link + '/');
+}
+
+function links(items: SidebarItem[]): string[] {
+  return items.flatMap(item => [
+    ...(item.link ? [item.link] : []),
+    ...(item.items ? links(item.items) : []),
+  ]);
+}
+
+// A section root such as `/docs` prefixes every page under it, so only the
+// longest matching link is current; otherwise two items light up at once.
+const activeLink = links(items)
+  .filter(matches)
+  .sort((a, b) => b.length - a.length)[0];
+
+function isActive(link: string): boolean {
+  return link === activeLink;
 }
 
 ---
@@ -38,6 +55,7 @@ function isActive(link: string): boolean {
                         <a
                           href={sub.link}
                           class={`sidebar-item${sub.link && isActive(sub.link) ? ' active' : ''}`}
+                          aria-current={sub.link && isActive(sub.link) ? 'page' : undefined}
                         >
                           {sub.text}
                         </a>
@@ -50,6 +68,7 @@ function isActive(link: string): boolean {
                   <a
                     href={item.link}
                     class={`sidebar-item${item.link && isActive(item.link) ? ' active' : ''}`}
+                    aria-current={item.link && isActive(item.link) ? 'page' : undefined}
                   >
                     {item.text}
                   </a>

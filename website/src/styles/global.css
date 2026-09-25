@@ -1500,6 +1500,7 @@ html.dark .astro-code span {
 .sidebar-group__items { list-style: none; padding: 0; margin: 0 0 1.25rem; }
 
 .sidebar-item {
+  position: relative;
   display: block;
   margin-inline: -0.5rem;
   padding: 0.28rem 0.5rem;
@@ -1512,7 +1513,25 @@ html.dark .astro-code span {
 }
 
 .sidebar-item:hover { background: var(--secondary); }
-.sidebar-item.active { color: var(--foreground); font-weight: 650; }
+/* The current page has to be found at a glance after scrolling a long
+   article, so it takes the sidebar accent fill (stronger than hover) and a
+   brand bar on its leading edge, not weight alone. */
+.sidebar-item.active,
+.sidebar-item.active:hover {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+  font-weight: 650;
+}
+
+.sidebar-item.active::before {
+  content: "";
+  position: absolute;
+  inset-block: 0.35rem;
+  left: 0;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--brand);
+}
 
 .sidebar-subgroup-title {
   padding: 0.28rem 0.5rem;
