@@ -2279,6 +2279,58 @@ mod tests {
         );
     }
 
+    /// A line with inline code takes `InlineFlow` and a plain line takes the
+    /// ordinary text path; both must be the same height, or a list with one
+    /// code item is unevenly spaced (#3162). The fractional scale factor and
+    /// zooms give line heights that are not whole logical pixels.
+    #[test]
+    fn inline_code_line_is_as_tall_as_a_plain_line() {
+        use crate::text::inline::test_fonts::{MONO, WideMonoTextSystem};
+        use gpui::{TestApp, rems};
+
+        struct LineRoot {
+            plain: Entity<TextViewState>,
+            code: Entity<TextViewState>,
+            preview_zoom: f32,
+        }
+
+        impl Render for LineRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(600.))
+                    .text_size(rems(self.preview_zoom))
+                    .child(TextView::new(&self.plain))
+                    .child(TextView::new(&self.code))
+            }
+        }
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        app.update(|cx| {
+            crate::init(cx);
+            crate::Theme::global_mut(cx).tokens.typography.mono = MONO.into();
+        });
+        for scale_factor in [1.6, 2.] {
+            for preview_zoom in [1., 1.25] {
+                let mut window = app.open_window(|_, cx| LineRoot {
+                    plain: cx.new(|cx| TextViewState::markdown("plain body words", cx)),
+                    code: cx.new(|cx| TextViewState::markdown("plain `code` words", cx)),
+                    preview_zoom,
+                });
+                window.simulate_scale_factor_change(scale_factor);
+                window.draw();
+                app.run_until_parked();
+                window.draw();
+                let (plain, code) = window.read(|root, cx| {
+                    (
+                        root.plain.read(cx).bounds().size.height,
+                        root.code.read(cx).bounds().size.height,
+                    )
+                });
+                assert_eq!(code, plain, "scale {scale_factor}, zoom {preview_zoom}");
+            }
+        }
+    }
+
     /// The code-bearing list item takes `InlineFlow`; the plain item takes the
     /// ordinary text path. Their first body glyphs must begin at the same row
     /// position relative to their own TextView origins.

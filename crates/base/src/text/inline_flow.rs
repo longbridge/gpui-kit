@@ -872,8 +872,8 @@ fn layout_measured_flow(
 ) -> InlineFlowLayout {
     #[cfg(test)]
     FLOW_LAYOUTS.with(|layouts| layouts.set(layouts.get() + 1));
-    let line_height = window.pixel_snap(window.line_height());
     let rem_size = window.rem_size();
+    let line_height = plain_line_height(text_style, rem_size, window);
     let total_len = items.iter().map(MeasureItem::len).sum::<usize>();
     if total_len == 0 {
         return InlineFlowLayout::default();
@@ -899,10 +899,15 @@ fn layout_measured_flow(
         // those two conventions through `TextSystem::baseline_offset`.
         let body_runs = text_runs(1, text_style, &[]);
         let body_line = shape_line(" ".into(), font_size, &body_runs, window);
-        let (body_line_height, body_baseline) =
-            shaped_line_height_and_baseline(&body_line, line_height, window);
+        let body_baseline = centered_baseline(&body_line, line_height);
+        // Like a plain text line, the body line box is the line height even
+        // when the font's glyphs are taller; runs may overflow it as far as
+        // body glyphs do.
+        let body_overflow_above = (body_line.ascent - body_baseline).max(Pixels::ZERO);
+        let body_overflow_below =
+            (body_line.descent - (line_height - body_baseline)).max(Pixels::ZERO);
         let mut line_ascent = body_baseline;
-        let mut line_descent = body_line_height - body_baseline;
+        let mut line_descent = line_height - body_baseline;
         let mut item_start = 0;
 
         for (item_ix, item) in items.iter().enumerate() {
@@ -947,10 +952,15 @@ fn layout_measured_flow(
                             Pixels::ZERO
                         };
                         let width = shaped_line.width() + padding;
-                        // Keep the glyph paint layer large enough for ascenders and descenders.
-                        // The compact code background is painted independently.
-                        let (segment_line_height, baseline) =
-                            shaped_line_height_and_baseline(&shaped_line, line_height, window);
+                        // Measure the run by its glyph box. The body strut already
+                        // carries the line's leading, so a run only has to fit its
+                        // glyphs: leading of its own would make a smaller or
+                        // differently proportioned run, such as inline code, push
+                        // its line taller than a plain one. Positioning grows the
+                        // box back to the line. The compact code background is
+                        // painted independently.
+                        let glyph_size = size(width, shaped_line.ascent + shaped_line.descent);
+                        let baseline = shaped_line.ascent;
                         let code_background = is_code
                             .then(|| {
                                 code_background(
@@ -958,14 +968,15 @@ fn layout_measured_flow(
                                     &runs,
                                     segment_font_size,
                                     &mut highlights,
-                                    size(width, segment_line_height),
+                                    glyph_size,
                                     baseline,
                                     window,
                                 )
                             })
                             .flatten();
-                        line_ascent = line_ascent.max(baseline);
-                        line_descent = line_descent.max(segment_line_height - baseline);
+                        line_ascent = line_ascent.max(baseline - body_overflow_above);
+                        line_descent =
+                            line_descent.max(glyph_size.height - baseline - body_overflow_below);
                         line_width += width;
                         line_fragments.push(LineFragmentLayout {
                             item_ix,
@@ -976,7 +987,7 @@ fn layout_measured_flow(
                                 highlights,
                                 code_background,
                             },
-                            size: size(width, segment_line_height),
+                            size: glyph_size,
                             source_range: start..end,
                             baseline: baseline,
                         });
@@ -1021,7 +1032,20 @@ fn layout_measured_flow(
         }
 
         let mut x = Pixels::ZERO;
-        for fragment in line_fragments {
+        for mut fragment in line_fragments {
+            // Give a text run's glyph box equal leading on both sides, as
+            // much as the line allows: its glyphs are painted centered in the
+            // box, so this keeps them on the line's baseline, and a body run
+            // gets exactly the line box. The leading is negative where the
+            // glyphs overflow the line, as a plain text line's do.
+            let leading = match fragment.kind {
+                LineFragmentKind::Text { .. } => (line_ascent - fragment.baseline)
+                    .min(line_descent - (fragment.size.height - fragment.baseline))
+                    .max(-fragment.size.height / 2.),
+                _ => Pixels::ZERO,
+            };
+            fragment.size.height += leading * 2.;
+            fragment.baseline += leading;
             let origin = point(x, y + line_ascent - fragment.baseline);
             let selection_bounds = Bounds::new(
                 point(x, y),
@@ -1052,7 +1076,10 @@ fn layout_measured_flow(
                     highlights,
                     code_background: code_background.map(|(background, color)| {
                         (
-                            Bounds::new(origin + background.origin, background.size),
+                            Bounds::new(
+                                origin + point(Pixels::ZERO, leading) + background.origin,
+                                background.size,
+                            ),
                             color,
                         )
                     }),
@@ -1397,19 +1424,23 @@ fn shape_line(
     window.text_system().shape_line(text, font_size, runs, None)
 }
 
-/// Returns the line box and baseline from the shaped metrics used by GPUI text
-/// painting. `ShapedLine::descent` is positive; do not substitute the signed
+/// The line height GPUI's text layout gives a plain line in `text_style`.
+/// Unlike `Window::line_height`, it is not first rounded to a whole logical
+/// pixel, which would make a flow line taller than a plain one.
+fn plain_line_height(text_style: &TextStyle, rem_size: Pixels, window: &Window) -> Pixels {
+    window.pixel_snap(
+        text_style
+            .line_height
+            .to_pixels(text_style.font_size, rem_size),
+    )
+}
+
+/// Returns where GPUI text painting puts the baseline of `shaped_line` in a
+/// box `line_height` tall: centered, even when the glyphs overflow the box.
+/// `ShapedLine::descent` is positive; do not substitute the signed
 /// `FontMetrics::descent` exposed by `TextSystem::baseline_offset` here.
-fn shaped_line_height_and_baseline(
-    shaped_line: &ShapedLine,
-    requested_line_height: Pixels,
-    window: &Window,
-) -> (Pixels, Pixels) {
-    let line_height =
-        window.pixel_snap(requested_line_height.max(shaped_line.ascent + shaped_line.descent));
-    let baseline =
-        (line_height - shaped_line.ascent - shaped_line.descent) / 2. + shaped_line.ascent;
-    (line_height, baseline)
+fn centered_baseline(shaped_line: &ShapedLine, line_height: Pixels) -> Pixels {
+    (line_height - shaped_line.ascent - shaped_line.descent) / 2. + shaped_line.ascent
 }
 
 pub(super) fn slice_ranges<T, U>(
@@ -1770,6 +1801,41 @@ mod tests {
             assert_eq!(reconstructed, text);
         }
     }
+
+    #[test]
+    fn inline_code_line_is_as_tall_as_a_plain_line_when_glyphs_overflow_it() {
+        use super::super::inline::test_fonts::{BODY, MONO, WideMonoTextSystem};
+        use gpui::{Empty, TestApp};
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        let mut window = app.open_window(|_, _| Empty);
+        let style = TextStyle {
+            font_family: BODY.into(),
+            font_size: AbsoluteLength::Pixels(px(40.)),
+            line_height: px(30.).into(),
+            ..Default::default()
+        };
+        let items = vec![MeasureItem::Text {
+            text: "a code z".into(),
+            links: vec![],
+            highlights: vec![(
+                2..6,
+                InlineHighlight {
+                    font_family: Some(MONO.into()),
+                    font_size_scale: Some(0.875),
+                    ..Default::default()
+                },
+            )],
+        }];
+        // The 40px glyphs are taller than the 30px line. A plain text line
+        // keeps the line height and lets them overflow, so a line with
+        // inline code must not grow to fit them.
+        window.update(|_, window, cx| {
+            let layout = layout_flow(&items, &[None], &style, None, window, cx);
+            assert_eq!(layout.size.height, window.pixel_snap(px(30.)));
+        });
+    }
+
     #[test]
     fn inline_code_size_is_relative_and_uses_the_native_body_baseline() {
         use super::super::inline::test_fonts::{BODY, MONO, WideMonoTextSystem};
@@ -1817,7 +1883,10 @@ mod tests {
                 assert_eq!(text_fragments[0].1, px(body_size));
                 assert_eq!(text_fragments[1].0, "code");
                 assert_eq!(text_fragments[1].1, px(body_size * 0.875));
-                assert!(text_fragments[1].3.height >= text_fragments[0].3.height);
+                // The code run's box stays inside the line, so whatever it
+                // paints over its box cannot reach a neighboring line.
+                assert!(text_fragments[1].2 >= Pixels::ZERO);
+                assert!(text_fragments[1].2 + text_fragments[1].3.height <= layout.size.height);
                 assert_eq!(
                     text_fragments[1].3.width,
                     WideMonoTextSystem::width_of("code", MONO, px(body_size * 0.875))
@@ -1830,14 +1899,16 @@ mod tests {
                 // whose FontMetrics descent is intentionally signed.
                 let body_runs = text_runs(1, &style, &[]);
                 let body_line = shape_line("a".into(), px(body_size), &body_runs, window);
-                let body_line_height = window.pixel_snap(
-                    window
-                        .line_height()
-                        .max(body_line.ascent + body_line.descent),
-                );
+                let body_line_height = plain_line_height(&style, window.rem_size(), window);
                 let plain_body_baseline = (body_line_height - body_line.ascent - body_line.descent)
                     / 2.
                     + body_line.ascent;
+                // The smaller code run fits inside the body line, so the
+                // line must be exactly as tall as a plain one.
+                assert_eq!(
+                    layout.size.height, body_line_height,
+                    "{body_size}px line height"
+                );
                 let mut painted_glyph_baseline =
                     |fragment: &(&str, Pixels, Pixels, Size<Pixels>)| {
                         let runs = if fragment.0 == "code" {
