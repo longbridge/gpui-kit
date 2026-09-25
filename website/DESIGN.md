@@ -57,7 +57,8 @@ Rules that follow from this:
   kickers and captions use `--muted-foreground` instead.
 - **The active sidebar item is a fill, not a bar.** It takes `--sidebar-accent`
   (stronger than the `--secondary` hover fill) and a heavier weight. Never mark
-  it — or any selected item — with a leading-edge bar or one-sided border.
+  it — or any selected item — with a leading-edge bar or one-sided border; see
+  the selection rule in the Design Guides.
 - **Never use `--brand` as a background behind text you did not also invert.**
   Text selection in particular uses `--selection`: black text on a near-black
   selection is unreadable.
