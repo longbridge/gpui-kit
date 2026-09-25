@@ -62,8 +62,8 @@ fn default_assets_preserve_the_component_bundle_without_all_lucide_icons() {
         .collect();
     let actual: BTreeSet<_> = Assets.list("icons/").unwrap().into_iter().collect();
     assert_eq!(actual, expected);
-    assert_eq!(actual.len(), 101);
-    assert_eq!(Assets::iter().count(), 101);
+    assert_eq!(actual.len(), 104);
+    assert_eq!(Assets::iter().count(), 104);
     assert!(Assets::get("icons/search.svg").is_some());
     assert!(Assets::get("icons/accessibility.svg").is_none());
     for path in actual {
