@@ -1161,7 +1161,7 @@ div()
 
 Charts automatically include:
 
-- Grid lines with dashed appearance
+- Grid lines with dashed appearance, in the theme's `chart.grid` color (a translucent `border` when a theme leaves it unset)
 - X-axis labels with smart positioning
 - Y-axis scaling starting from zero
 - Responsive tick spacing based on `tick_margin`

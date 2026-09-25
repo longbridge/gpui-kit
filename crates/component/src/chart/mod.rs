@@ -408,7 +408,7 @@ impl PointAxes {
         let columns: Vec<f32> = (0..self.grid_columns)
             .map(|i| width * i as f32 / self.grid_columns as f32)
             .collect();
-        let grid = Grid::new().y(rows).x(columns).stroke(cx.theme().border);
+        let grid = Grid::new().y(rows).x(columns).stroke(cx.theme().chart_grid);
         let grid = if self.grid_dashed {
             grid.dash_array(&[px(4.), px(2.)])
         } else {
