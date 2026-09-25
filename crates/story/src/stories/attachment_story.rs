@@ -325,9 +325,21 @@ impl Render for AttachmentStory {
                             )
                             .child(
                                 Attachment::new()
+                                    .id("composer-image-progress")
+                                    .axis(Axis::Vertical)
+                                    .status(AttachmentStatus::Uploading)
+                                    .progress(62.)
+                                    .on_remove(|_, _, _| {})
+                                    .media(AttachmentMedia::new().src(
+                                        "https://pub.lbkrs.com/files/202503/vEnnmgUM6bo362ya/sdk.svg",
+                                    )),
+                            )
+                            .child(
+                                Attachment::new()
                                     .id("composer-image-failed")
                                     .axis(Axis::Vertical)
                                     .status(AttachmentStatus::Failed)
+                                    .tooltip("Network error · Click to retry")
                                     .on_remove(|_, _, _| {})
                                     .on_retry(|_, window, cx| {
                                         window.push_notification("Retrying photo.png…", cx);
@@ -338,8 +350,20 @@ impl Render for AttachmentStory {
                             )
                             .child(
                                 Attachment::new()
+                                    .id("composer-image-rejected")
+                                    .axis(Axis::Vertical)
+                                    .status(AttachmentStatus::Failed)
+                                    .tooltip("Image exceeds 20 MB limit · Remove to send")
+                                    .on_remove(|_, _, _| {})
+                                    .media(AttachmentMedia::new().src(
+                                        "https://pub.lbkrs.com/files/202503/vEnnmgUM6bo362ya/sdk.svg",
+                                    )),
+                            )
+                            .child(
+                                Attachment::new()
                                     .id("composer-file-uploading")
                                     .status(AttachmentStatus::Uploading)
+                                    .progress(62.)
                                     .on_remove(|_, _, _| {})
                                     .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
                                     .content(
@@ -353,6 +377,7 @@ impl Render for AttachmentStory {
                                     .id("composer-file-failed")
                                     .status(AttachmentStatus::Failed)
                                     .on_remove(|_, _, _| {})
+                                    .tooltip("Network error · Click to retry")
                                     .on_retry(|_, window, cx| {
                                         window.push_notification("Retrying Q3 statement.pdf…", cx);
                                     })
@@ -361,6 +386,19 @@ impl Render for AttachmentStory {
                                         AttachmentContent::new()
                                             .title(AttachmentTitle::new("Q3 statement.pdf"))
                                             .description(AttachmentDescription::new("Upload failed")),
+                                    ),
+                            )
+                            .child(
+                                Attachment::new()
+                                    .id("composer-file-rejected")
+                                    .status(AttachmentStatus::Failed)
+                                    .tooltip("Max file size is 20 MB · Remove to send")
+                                    .on_remove(|_, _, _| {})
+                                    .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
+                                    .content(
+                                        AttachmentContent::new()
+                                            .title(AttachmentTitle::new("Trades 2026.xlsx"))
+                                            .description(AttachmentDescription::new("Exceeds 20 MB limit")),
                                     ),
                             ),
                     ),

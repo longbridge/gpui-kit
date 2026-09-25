@@ -4,6 +4,7 @@ icons/arrow-left.svg
 icons/arrow-right.svg
 icons/arrow-up.svg
 icons/asterisk.svg
+icons/ban.svg
 icons/battery-charging.svg
 icons/battery-full.svg
 icons/battery-low.svg
@@ -23,6 +24,7 @@ icons/chevron-left.svg
 icons/chevron-right.svg
 icons/chevron-up.svg
 icons/chevrons-up-down.svg
+icons/circle-alert.svg
 icons/circle-check.svg
 icons/circle-user.svg
 icons/circle-x.svg

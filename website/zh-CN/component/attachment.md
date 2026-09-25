@@ -127,9 +127,9 @@ Attachment::new()
 | 状态 | 用途 | 默认视觉提示 |
 | --- | --- | --- |
 | `Pending` | 已选择，等待上传。 | 边框使用 dashed 样式。 |
-| `Uploading` | 正在传输文件。 | 标题显示 shimmer；媒体显示 Spinner（图片上叠暗幕）。 |
+| `Uploading` | 正在传输文件。 | 标题显示 shimmer；媒体显示 Spinner，给了 `progress(...)` 则是进度环（图片上叠暗幕），chip 底边多一条进度条，描述自动带上百分比。 |
 | `Processing` | 上传完成，服务端正在处理。 | 标题显示 shimmer；媒体显示 Spinner（图片上叠暗幕）。 |
-| `Failed` | 上传或处理失败。 | 边框与描述使用 destructive 语义色；媒体显示警示图标或重试控件。 |
+| `Failed` | 上传或处理失败。 | 边框与描述使用 destructive 语义色；给了 `on_retry` 媒体显示重试控件 / 警示图标，没给则显示禁止图标（视为被拒绝）。 |
 | `Complete` | 已准备好供用户使用。 | 普通完成状态。 |
 
 状态文字应写入描述，不能只依赖边框颜色：
@@ -290,7 +290,31 @@ Attachment::new()
     .media(AttachmentMedia::new().src(thumbnail))
 ```
 
-`on_remove` 是骑在卡片右上角外侧的小圆钮，外围一圈 surface 色让它从图上托出来；桌面端悬停才出现，触屏平台常显。卡片会为探出的部分预留空间，一排卡片仍然对齐。`on_retry` 只在 `Failed` 时生效：图片预览的暗幕里出现圆形重试钮，具名描述后面跟一个本地化的「重试」链接。两者都把元素状态挂在 `.id(...)` 上，所以只在配合 `id` 时生效。移除、重试具体做什么由应用决定。
+`on_remove` 是骑在卡片右上角外侧的黑色小圆钮，外围一圈白边，压在图片或卡片上都看得清；桌面端悬停才出现，触屏平台常显。卡片会为探出的部分预留空间，一排卡片仍然对齐。`on_retry` 只在 `Failed` 时生效：图片预览的暗幕里出现圆形重试钮，具名描述后面跟一个本地化的「重试」链接；`Failed` 而没有 `on_retry` 视为被拒绝，媒体显示禁止图标。这些控件都把元素状态挂在 `.id(...)` 上，所以只在配合 `id` 时生效。移除、重试具体做什么由应用决定。
+
+还有两个 builder 把 composer 的场景补齐：
+
+```rust
+Attachment::new()
+    .id(("attachment", item.id))
+    .status(AttachmentStatus::Uploading)
+    .progress(item.percent)               // 0..=100
+    .content(
+        AttachmentContent::new()
+            .title(AttachmentTitle::new("Q3 statement.pdf"))
+            .description(AttachmentDescription::new("上传中")),
+    );
+
+Attachment::new()
+    .id(("attachment", item.id))
+    .status(AttachmentStatus::Failed)
+    .tooltip("图片超过 20 MB · 移除后再发送")
+    .on_remove(cx.listener(move |this, _, _, cx| this.remove(item.id, cx)))
+    .axis(Axis::Vertical)
+    .media(AttachmentMedia::new().src(thumbnail))
+```
+
+`progress(percent)` 把上传中的 Spinner 换成确定进度的圆环，横向卡片底边画一条主色进度条，具名描述后面自动接上「· 62%」；其它状态下忽略。`tooltip(text)` 在悬停卡片时显示文字，失败或被拒绝的原因就放这里。
 
 ## 状态继承与局部覆盖
 
@@ -425,6 +449,8 @@ Attachment::new()
 | `on_click(handler)` | 整卡点击；需配合 `id(...)`，绘制在 actions 之下。 |
 | `on_remove(handler)` | 角上的移除控件；需配合 `id(...)`。 |
 | `on_retry(handler)` | `Failed` 时的重试控件；需配合 `id(...)`。 |
+| `progress(percent)` | `Uploading` 时的进度环、底部进度条与「· 62%」。 |
+| `tooltip(text)` | 悬停提示，例如失败原因；需配合 `id(...)`。 |
 | `status(AttachmentStatus)` | 设置根生命周期状态。 |
 | `axis(Axis)` | 设置 `Horizontal` 或 `Vertical` 布局。 |
 | `media(AttachmentMedia)` | 设置预览 slot。 |

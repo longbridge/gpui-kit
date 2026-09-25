@@ -159,9 +159,9 @@ typed title, description, media, and action layout during rendering:
 | State | Surface/layout behavior | Recommended content |
 | --- | --- | --- |
 | `Pending` | Dashed border; preview is not dimmed. | “Ready to upload” and a start action. |
-| `Uploading` | Media shows a spinner (over a scrim on an image); typed title shimmers. | Progress value and a Cancel button. |
+| `Uploading` | Media shows a spinner, or a progress ring with `progress(...)` (over a scrim on an image); a chip draws a bar along its bottom edge; typed title shimmers. | A description such as “Uploading”; the percentage is appended for you. |
 | `Processing` | Media shows a spinner (over a scrim on an image); typed title shimmers. | “Processing…” and a non-destructive wait state. |
-| `Failed` | Destructive border and description; media shows the alert glyph or the retry control. | Error reason plus `on_retry` or `on_remove`. |
+| `Failed` | Destructive border and description; media shows the retry control or alert glyph with `on_retry`, the ban glyph without one (a rejection). | Error reason plus `on_retry`, or `tooltip(...)` with the reason and `on_remove`. |
 | `Complete` | Ready surface; preview is full opacity. | File metadata and normal actions. |
 
 ```rust
@@ -370,14 +370,44 @@ Attachment::new()
     .media(AttachmentMedia::new().src(thumbnail))
 ```
 
-`on_remove` rides a small disc on the card's upper trailing corner, ringed in
-the surface color so it stands off an image. It appears on hover on desktop and
-stays visible on touch platforms; the card reserves the overhang, so a row of
-cards keeps its alignment. `on_retry` takes effect only while the status is
-`Failed`: an image preview gets a round button in its scrim, and a typed
-description gets a localized “Retry” link after its text. Both key their
-element state on `.id(...)`, so they take effect only together with it. What
-removing or retrying means stays with the application.
+`on_remove` rides a black disc with a white ring on the card's upper trailing
+corner, so it stands off a picture as well as a card. It appears on hover on
+desktop and stays visible on touch platforms; the card reserves the overhang,
+so a row of cards keeps its alignment. `on_retry` takes effect only while the
+status is `Failed`: an image preview gets a round button in its scrim, and a
+typed description gets a localized “Retry” link after its text. A failed
+attachment without `on_retry` reads as a rejection and shows the ban glyph
+instead. All of these key their element state on `.id(...)`, so they take
+effect only together with it. What removing or retrying means stays with the
+application.
+
+Two more builders complete the composer picture:
+
+```rust
+Attachment::new()
+    .id(("attachment", item.id))
+    .status(AttachmentStatus::Uploading)
+    .progress(item.percent)               // 0..=100
+    .content(
+        AttachmentContent::new()
+            .title(AttachmentTitle::new("Q3 statement.pdf"))
+            .description(AttachmentDescription::new("Uploading")),
+    );
+
+Attachment::new()
+    .id(("attachment", item.id))
+    .status(AttachmentStatus::Failed)
+    .tooltip("Image exceeds 20 MB limit · Remove to send")
+    .on_remove(cx.listener(move |this, _, _, cx| this.remove(item.id, cx)))
+    .axis(Axis::Vertical)
+    .media(AttachmentMedia::new().src(thumbnail))
+```
+
+`progress(percent)` turns the uploading spinner into a determinate ring, draws
+a thin primary bar along a horizontal card's bottom edge, and appends
+“· 62%” to a typed description; it is ignored in every other status.
+`tooltip(text)` shows the text while the card is hovered, which is where the
+reason for a failure or a rejection belongs.
 
 ## Groups
 
@@ -494,6 +524,8 @@ These boundaries are deliberate:
 | `on_click(handler)` | none | Whole-card activation; requires `id(...)` and stays below the actions. |
 | `on_remove(handler)` | none | Corner remove control; requires `id(...)`. |
 | `on_retry(handler)` | none | Retry control while `Failed`; requires `id(...)`. |
+| `progress(percent)` | none | Determinate ring, bottom bar and “· 62%” while `Uploading`. |
+| `tooltip(text)` | none | Hover tooltip, e.g. the failure reason; requires `id(...)`. |
 | `status(AttachmentStatus)` | `Complete` | Set lifecycle styling. |
 | `axis(Axis)` | `Horizontal` | Choose horizontal or vertical layout. |
 | `with_size(Size)` | `Medium` | Set a named or custom size. |

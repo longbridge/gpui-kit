@@ -17,8 +17,10 @@ use crate::{
     ActiveTheme as _, Icon, IconName, InteractiveElementExt as _, Sizable, Size, StyledExt as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
     h_flex,
+    progress::ProgressCircle,
     shimmer::{ShimmerStyle, ShimmerText},
     spinner::Spinner,
+    tooltip::Tooltip,
     v_flex,
 };
 
@@ -75,6 +77,22 @@ type ControlHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>;
 
 /// A built-in control with the identity its element state is keyed on.
 type Control = (ElementId, ControlHandler);
+
+/// What the root hands its slots at layout time.
+#[derive(Clone)]
+struct SlotLayout {
+    size: Size,
+    status: AttachmentStatus,
+    axis: Axis,
+    /// Whether the media fills a vertical card flush with its border.
+    flush: bool,
+    /// The retry control, only while failed and identified.
+    retry: Option<Control>,
+    /// Upload progress in percent, only while uploading.
+    progress: Option<f32>,
+    /// The attachment's identity, keying the progress ring's state.
+    id: Option<ElementId>,
+}
 
 /// How far the remove control's box rides outside the card's upper trailing
 /// corner: the 18px disc overhangs by 6px, its 2px ring by 8px.
@@ -196,6 +214,8 @@ pub struct Attachment {
     on_click: Option<ControlHandler>,
     on_remove: Option<ControlHandler>,
     on_retry: Option<ControlHandler>,
+    progress: Option<f32>,
+    tooltip: Option<SharedString>,
 }
 
 impl Attachment {
@@ -213,6 +233,8 @@ impl Attachment {
             on_click: None,
             on_remove: None,
             on_retry: None,
+            progress: None,
+            tooltip: None,
         }
     }
 
@@ -257,6 +279,23 @@ impl Attachment {
         handler: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     ) -> Self {
         self.on_retry = Some(Rc::new(handler));
+        self
+    }
+
+    /// Report upload progress as a percentage from 0 to 100.
+    ///
+    /// While [`AttachmentStatus::Uploading`], the media shows a progress ring
+    /// instead of the spinner, a horizontal card draws a thin bar along its
+    /// bottom edge, and a typed description gains the percentage.
+    pub fn progress(mut self, percent: f32) -> Self {
+        self.progress = Some(percent.clamp(0., 100.));
+        self
+    }
+
+    /// Show a tooltip while the card is hovered, e.g. the reason an upload
+    /// failed. It takes effect only together with [`Self::id`].
+    pub fn tooltip(mut self, text: impl Into<SharedString>) -> Self {
+        self.tooltip = Some(text.into());
         self
     }
 
@@ -321,26 +360,29 @@ impl Attachment {
     }
 
     fn layout_slots(&mut self) {
-        let size = self.size;
-        let axis = self.axis;
-        let status = self.status;
-        let retry = self.retry_control();
-        // A vertical card without content is an image tile: the media fills
-        // the card flush with its border.
-        let flush = axis == Axis::Vertical && self.content.is_none();
+        let layout = SlotLayout {
+            size: self.size,
+            status: self.status,
+            axis: self.axis,
+            // A vertical card without content is an image tile: the media
+            // fills the card flush with its border.
+            flush: self.axis == Axis::Vertical && self.content.is_none(),
+            retry: self.retry_control(),
+            // Progress is only meaningful while uploading; processing is
+            // indeterminate.
+            progress: self.progress.filter(|_| self.status.is_uploading()),
+            id: self.id.clone(),
+        };
 
-        self.media = self
-            .media
-            .take()
-            .map(|media| media.layout(size, status, axis, flush, retry.clone()));
+        self.media = self.media.take().map(|media| media.layout(layout.clone()));
         self.content = self
             .content
             .take()
-            .map(|content| content.layout(size, axis, status, retry));
+            .map(|content| content.layout(layout.clone()));
         self.actions = self
             .actions
             .take()
-            .map(|actions| actions.layout_for_axis(axis));
+            .map(|actions| actions.layout_for_axis(layout.axis));
     }
 }
 
@@ -354,6 +396,10 @@ impl RenderOnce for Attachment {
         let has_content = self.content.is_some();
         let clickable = self.id.is_some() && self.on_click.is_some();
         let remove = self.id.clone().zip(self.on_remove.take());
+        let tooltip = self.id.clone().zip(self.tooltip.take());
+        let progress_bar = self
+            .progress
+            .filter(|_| status.is_uploading() && axis == Axis::Horizontal);
         let metrics = card_metrics(size);
         let radius = card_radius(size, cx);
         let flush = axis == Axis::Vertical && !has_content;
@@ -412,6 +458,25 @@ impl RenderOnce for Attachment {
             })
             .when_some(self.media, |this, media| this.child(media))
             .when_some(self.content, |this, content| this.child(content))
+            // A thin bar along the bottom edge tracks the upload; it starts
+            // and ends inside the corner radius so nothing pokes out of the curve.
+            .when_some(progress_bar, |this, percent| {
+                this.child(
+                    div()
+                        .absolute()
+                        .bottom_0()
+                        .left(radius)
+                        .right(radius)
+                        .h(px(2.))
+                        .child(
+                            div()
+                                .h_full()
+                                .w(relative(percent / 100.))
+                                .rounded(px(1.))
+                                .bg(tokens.colors.primary),
+                        ),
+                )
+            })
             .when_some(self.id.zip(self.on_click), |this, (id, on_click)| {
                 // The click layer is painted before the actions slot, so the
                 // actions' hitboxes stay on top and their buttons keep working.
@@ -425,9 +490,16 @@ impl RenderOnce for Attachment {
             })
             .when_some(self.actions, |this, actions| this.child(actions))
             .refine_style(&self.style);
+        let card = match tooltip {
+            Some((id, text)) => card
+                .id((id, "card"))
+                .tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
+                .into_any_element(),
+            None => card.into_any_element(),
+        };
 
         let Some((id, on_remove)) = remove else {
-            return card.into_any_element();
+            return card;
         };
         // The remove control rides outside the card, so the card gets a
         // hover group and room for the overhang.
@@ -515,6 +587,10 @@ pub struct AttachmentMedia {
     /// Whether the media fills a vertical card flush with its border.
     flush: bool,
     retry: Option<Control>,
+    /// Upload progress in percent, while uploading.
+    progress: Option<f32>,
+    /// The attachment's identity, keying the progress ring's state.
+    id: Option<ElementId>,
     source: Option<ImageSource>,
     children: Vec<AnyElement>,
     overlays: Vec<AnyElement>,
@@ -530,6 +606,8 @@ impl AttachmentMedia {
             axis: Axis::Horizontal,
             flush: false,
             retry: None,
+            progress: None,
+            id: None,
             source: None,
             children: Vec::new(),
             overlays: Vec::new(),
@@ -557,21 +635,16 @@ impl AttachmentMedia {
         self
     }
 
-    fn layout(
-        mut self,
-        size: Size,
-        status: AttachmentStatus,
-        axis: Axis,
-        flush: bool,
-        retry: Option<Control>,
-    ) -> Self {
+    fn layout(mut self, layout: SlotLayout) -> Self {
         if self.size.is_none() {
-            self.size = Some(size);
+            self.size = Some(layout.size);
         }
-        self.status = status;
-        self.axis = axis;
-        self.flush = flush;
-        self.retry = retry;
+        self.status = layout.status;
+        self.axis = layout.axis;
+        self.flush = layout.flush;
+        self.retry = layout.retry;
+        self.progress = layout.progress;
+        self.id = layout.id;
         self
     }
 }
@@ -615,31 +688,52 @@ impl RenderOnce for AttachmentMedia {
         } else {
             tokens.radius.md
         };
-        let glyph_size = if resolved_size == Size::XSmall {
-            Size::XSmall
+        let (glyph_size, ring_size) = if resolved_size == Size::XSmall {
+            (Size::XSmall, px(14.))
         } else {
-            Size::Small
+            (Size::Small, px(20.))
         };
         let status = self.status;
         let source = self.source;
         let has_source = source.is_some();
         let failed_media = status.is_failed() && !has_source;
         let corner_radii = self.style.corner_radii.clone();
+        let ring_id: ElementId = match self.id {
+            Some(id) => (id, "progress").into(),
+            None => "attachment-progress".into(),
+        };
+        // In progress: a determinate ring while uploading with a known
+        // percentage, a spinner otherwise.
+        let busy = |color: Hsla| -> AnyElement {
+            match self.progress {
+                Some(percent) => ProgressCircle::new(ring_id.clone())
+                    .value(percent)
+                    .color(color)
+                    .size(ring_size)
+                    .into_any_element(),
+                None => Spinner::new()
+                    .with_size(glyph_size)
+                    .color(color)
+                    .into_any_element(),
+            }
+        };
+        // Failed: the alert glyph when a retry is offered, the ban glyph for
+        // a rejection that cannot be retried.
+        let failed_glyph = if self.retry.is_some() {
+            IconName::CircleAlert
+        } else {
+            IconName::Ban
+        };
 
-        // An icon slot shows the status itself: a spinner while in progress,
-        // the alert glyph once failed. Children come back with `Complete`.
+        // An icon slot shows the status itself; children come back with
+        // `Complete`.
         let glyph = if has_source {
             None
         } else if status.is_in_progress() {
-            Some(
-                Spinner::new()
-                    .with_size(glyph_size)
-                    .color(tokens.colors.primary)
-                    .into_any_element(),
-            )
+            Some(busy(tokens.colors.primary))
         } else if status.is_failed() {
             Some(
-                Icon::new(IconName::TriangleAlert)
+                Icon::new(failed_glyph)
                     .with_size(glyph_size)
                     .into_any_element(),
             )
@@ -651,17 +745,11 @@ impl RenderOnce for AttachmentMedia {
         let scrim = if !has_source {
             None
         } else if status.is_in_progress() {
-            Some((
-                PROGRESS_SCRIM,
-                Spinner::new()
-                    .with_size(glyph_size)
-                    .color(white())
-                    .into_any_element(),
-            ))
+            Some((PROGRESS_SCRIM, busy(white())))
         } else if status.is_failed() {
             let control = match self.retry {
                 Some((id, on_retry)) => retry_button(id, on_retry, cx).into_any_element(),
-                None => Icon::new(IconName::TriangleAlert)
+                None => Icon::new(IconName::Ban)
                     .with_size(glyph_size)
                     .text_color(white())
                     .into_any_element(),
@@ -739,6 +827,7 @@ pub struct AttachmentContent {
     vertical_layout: bool,
     status: AttachmentStatus,
     retry: Option<Control>,
+    progress: Option<f32>,
     children: Vec<AttachmentContentChild>,
 }
 
@@ -756,6 +845,7 @@ impl AttachmentContent {
             vertical_layout: false,
             status: AttachmentStatus::Complete,
             retry: None,
+            progress: None,
             children: Vec::new(),
         }
     }
@@ -773,16 +863,19 @@ impl AttachmentContent {
         self
     }
 
-    fn layout(
-        mut self,
-        size: Size,
-        axis: Axis,
-        status: AttachmentStatus,
-        retry: Option<Control>,
-    ) -> Self {
+    fn layout(mut self, layout: SlotLayout) -> Self {
+        let SlotLayout {
+            size,
+            status,
+            axis,
+            retry,
+            progress,
+            ..
+        } = layout;
         self.vertical_layout = axis == Axis::Vertical;
         self.status = status;
         self.retry = retry;
+        self.progress = progress;
 
         for child in &mut self.children {
             match child {
@@ -829,8 +922,10 @@ impl Styled for AttachmentContent {
 impl RenderOnce for AttachmentContent {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let tokens = cx.theme().semantic_tokens();
-        // The retry link follows the first typed description while failed.
+        // The retry link follows the first typed description while failed;
+        // the percentage joins it while uploading.
         let mut retry = self.retry.filter(|_| self.status.is_failed());
+        let progress = self.progress.filter(|_| self.status.is_uploading());
         v_flex()
             .max_w_full()
             .min_w_0()
@@ -841,7 +936,7 @@ impl RenderOnce for AttachmentContent {
             .children(self.children.into_iter().map(|child| {
                 match child {
                     AttachmentContentChild::Title(title) => title.into_any_element(),
-                    AttachmentContentChild::Description(description) => match retry.take() {
+                    AttachmentContentChild::Description(mut description) => match retry.take() {
                         Some((id, on_retry)) => h_flex()
                             .max_w_full()
                             .min_w_0()
@@ -861,7 +956,14 @@ impl RenderOnce for AttachmentContent {
                                     .on_click(move |event, window, cx| on_retry(event, window, cx)),
                             )
                             .into_any_element(),
-                        None => description.into_any_element(),
+                        None => {
+                            if let Some(percent) = progress {
+                                description.text =
+                                    format!("{} · {}%", description.text, percent.round() as u32)
+                                        .into();
+                            }
+                            description.into_any_element()
+                        }
                     },
                     AttachmentContentChild::Element(element) => element,
                 }
@@ -973,7 +1075,7 @@ impl RenderOnce for AttachmentDescription {
         let color = self
             .status
             .is_some_and(AttachmentStatus::is_failed)
-            .then(|| tokens.colors.destructive.opacity(0.8))
+            .then_some(tokens.colors.destructive)
             .unwrap_or(tokens.colors.muted_foreground);
 
         div()
@@ -1317,6 +1419,36 @@ mod tests {
     }
 
     #[test]
+    fn test_attachment_progress_and_tooltip_builder() {
+        assert!(Attachment::new().progress.is_none());
+        assert!(Attachment::new().tooltip.is_none());
+        assert_eq!(Attachment::new().progress(130.).progress, Some(100.));
+        assert_eq!(Attachment::new().progress(-5.).progress, Some(0.));
+        assert_eq!(
+            Attachment::new().tooltip("Network error").tooltip,
+            Some("Network error".into())
+        );
+
+        // Progress reaches the slots only while uploading.
+        let mut uploading = Attachment::new()
+            .id("upload")
+            .status(AttachmentStatus::Uploading)
+            .progress(62.)
+            .media(AttachmentMedia::new().src("preview.png"))
+            .content(AttachmentContent::new().description(AttachmentDescription::new("Uploading")));
+        uploading.layout_slots();
+        assert_eq!(uploading.media.as_ref().unwrap().progress, Some(62.));
+        assert_eq!(uploading.content.as_ref().unwrap().progress, Some(62.));
+
+        let mut processing = Attachment::new()
+            .status(AttachmentStatus::Processing)
+            .progress(62.)
+            .media(AttachmentMedia::new().src("preview.png"));
+        processing.layout_slots();
+        assert!(processing.media.as_ref().unwrap().progress.is_none());
+    }
+
+    #[test]
     fn test_attachment_image_tile_media_is_flush() {
         let mut tile = Attachment::new()
             .axis(Axis::Vertical)
@@ -1461,24 +1593,31 @@ mod tests {
 
     #[test]
     fn test_attachment_media_size_inherits_root_unless_explicit() {
-        let inherited = AttachmentMedia::new().layout(
+        let slot = |size, status, axis, flush| SlotLayout {
+            size,
+            status,
+            axis,
+            flush,
+            retry: None,
+            progress: None,
+            id: None,
+        };
+        let inherited = AttachmentMedia::new().layout(slot(
             Size::Small,
             AttachmentStatus::Complete,
             Axis::Vertical,
             true,
-            None,
-        );
+        ));
         assert_eq!(inherited.size, Some(Size::Small));
         assert_eq!(inherited.axis, Axis::Vertical);
         assert!(inherited.flush);
 
-        let explicit = AttachmentMedia::new().with_size(Size::XSmall).layout(
+        let explicit = AttachmentMedia::new().with_size(Size::XSmall).layout(slot(
             Size::Large,
             AttachmentStatus::Failed,
             Axis::Horizontal,
             false,
-            None,
-        );
+        ));
         assert_eq!(explicit.size, Some(Size::XSmall));
         assert_eq!(explicit.status, AttachmentStatus::Failed);
     }
