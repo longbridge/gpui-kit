@@ -457,11 +457,13 @@ impl RenderOnce for Attachment {
             })
             .when_some(self.media, |this, media| this.child(media))
             .when_some(self.content, |this, content| this.child(content))
-            // A thin bar along the bottom edge tracks the upload. It starts
-            // where the corner curve passes its height, so it reads as running
-            // from the edge without poking out of the curve.
+            // A thin bar along the bottom edge tracks the upload. gpui clips
+            // rectangularly, so the bar cannot follow the corner curve; it
+            // starts where the curve crosses the bar's bottom row (one border
+            // width up the corner: r - sqrt(r² - (r - 1)²) ≈ 0.55 r for r = 8)
+            // so it reads as running from the edge without poking out.
             .when_some(progress_bar, |this, percent| {
-                let inset = radius * 0.4;
+                let inset = radius * 0.55;
                 this.child(
                     div()
                         .absolute()
