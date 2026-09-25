@@ -1935,6 +1935,7 @@ pub(crate) struct NodeContext {
     pub(crate) code_block_actions: Option<Arc<CodeBlockActionsFn>>,
     pub(crate) code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     pub(crate) table_actions: Option<Arc<TableActionsFn>>,
+    pub(crate) image_source: Option<Arc<super::text_view::ImageSourceFn>>,
     pub(crate) link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     pub(crate) markdown_extensions: Arc<MarkdownExtensions>,
     /// This frame's streamed fade-in, when any text is still fading.
@@ -1944,6 +1945,13 @@ pub(crate) struct NodeContext {
 }
 
 impl NodeContext {
+    fn image_source(&self, image: &ImageNode) -> ImageSource {
+        match &self.image_source {
+            Some(resolve) => resolve(&image.url),
+            None => image.source(),
+        }
+    }
+
     pub(super) fn add_ref(&mut self, identifier: SharedString, link: LinkMark) {
         self.link_refs.insert(identifier, link);
     }
@@ -2131,7 +2139,7 @@ impl Paragraph {
                 }
                 let link_click_handler = node_cx.link_click_handler.clone();
                 child_nodes.push(
-                    img(image.source())
+                    img(node_cx.image_source(image))
                         .id(ix)
                         .object_fit(ObjectFit::Contain)
                         .max_w(relative(1.))
@@ -2343,7 +2351,7 @@ impl Paragraph {
                 }
 
                 items.push(InlineFlowItem::Image {
-                    source: image.source(),
+                    source: node_cx.image_source(image),
                     link: image.link.clone(),
                     title: image.title(),
                     width: image.width,

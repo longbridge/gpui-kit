@@ -198,6 +198,36 @@ pub(crate) enum TextViewFormat {
     Markdown,
 }
 
+/// A document keeps the authority of the script that described it. Image
+/// loads happen in later native rendering phases, after the script scope ends.
+#[derive(Clone)]
+pub(crate) struct TextViewSpec {
+    pub(crate) id: SharedString,
+    pub(crate) text: SharedString,
+    pub(crate) format: TextViewFormat,
+    pub(crate) policy: Rc<crate::policy::Policy>,
+}
+
+impl std::fmt::Debug for TextViewSpec {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("TextViewSpec")
+            .field("id", &self.id)
+            .field("text", &self.text)
+            .field("format", &self.format)
+            .finish_non_exhaustive()
+    }
+}
+
+impl PartialEq for TextViewSpec {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.text == other.text
+            && self.format == other.format
+            && Rc::ptr_eq(&self.policy, &other.policy)
+    }
+}
+
 /// Which constructor produced a node.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Component {
@@ -205,11 +235,7 @@ pub(crate) enum Component {
     HFlex,
     VFlex,
     Module(ModuleComponentSpec),
-    TextView {
-        id: SharedString,
-        text: SharedString,
-        format: TextViewFormat,
-    },
+    TextView(TextViewSpec),
     /// A retained nested script view. The frozen description keeps the entity
     /// itself alive, so releasing the numeric handle cannot invalidate a frame
     /// that was already published.
@@ -647,7 +673,7 @@ impl Component {
             Component::HFlex => "h_flex",
             Component::VFlex => "v_flex",
             Component::Module(_) => "module_component",
-            Component::TextView { .. } => "TextView",
+            Component::TextView(_) => "TextView",
             Component::ChildView(_) => "child_view",
             Component::Text(_) => "text",
             Component::Registered(component) => component.name(),
@@ -1292,14 +1318,14 @@ impl SpecArena {
                 " {}.{} {:?} props={:?}",
                 spec.module, spec.component, spec.id, spec.props
             )),
-            Component::TextView { id, text, format } => out.push_str(&format!(
+            Component::TextView(spec) => out.push_str(&format!(
                 " {} {:?} {:?}",
-                match format {
+                match spec.format {
                     TextViewFormat::Html => "html",
                     TextViewFormat::Markdown => "markdown",
                 },
-                id,
-                text,
+                spec.id,
+                spec.text,
             )),
             Component::Text(value)
             | Component::Button(value)

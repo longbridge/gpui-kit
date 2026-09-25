@@ -113,6 +113,7 @@ pub struct TextViewState {
     pub(super) code_block_actions: Option<std::sync::Arc<CodeBlockActionsFn>>,
     pub(super) code_block_highlighter: Option<std::sync::Arc<CodeBlockHighlighterFn>>,
     pub(super) table_actions: Option<std::sync::Arc<TableActionsFn>>,
+    pub(super) image_source: Option<std::sync::Arc<super::text_view::ImageSourceFn>>,
     pub(super) link_click_handler: Option<std::sync::Arc<LinkClickHandlerFn>>,
     pub(super) markdown_extensions: Arc<MarkdownExtensions>,
 
@@ -244,6 +245,7 @@ impl TextViewState {
             code_block_highlighter: None,
             table_actions: None,
             link_click_handler: None,
+            image_source: None,
             markdown_extensions: Arc::default(),
             is_selecting: false,
             preserve_inline_selection: false,
@@ -887,6 +889,7 @@ impl Render for TextViewState {
             code_block_highlighter: self.code_block_highlighter.clone(),
             table_actions: self.table_actions.clone(),
             link_click_handler: self.link_click_handler.clone(),
+            image_source: self.image_source.clone(),
             markdown_extensions: self.markdown_extensions.clone(),
             stream_fade,
             range_highlights: self.range_highlights.clone(),

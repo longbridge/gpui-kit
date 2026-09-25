@@ -7147,11 +7147,14 @@ impl ShellRuntime {
                         "markdown" => crate::spec::TextViewFormat::Markdown,
                         _ => return Err(Exception::throw_type(&ctx, "TextView format must be html or markdown")),
                     };
-                    Ok(upgrade(&text_view_runtime, &ctx)?.push_node(Component::TextView {
-                        id: id.into(),
-                        text: text.into(),
-                        format,
-                    }))
+                    Ok(upgrade(&text_view_runtime, &ctx)?.push_node(Component::TextView(
+                        crate::spec::TextViewSpec {
+                            id: id.into(),
+                            text: text.into(),
+                            format,
+                            policy: crate::scope::policy(),
+                        },
+                    )))
                 }),
             )?;
             text_constructor(&globals, "__svg", runtime.clone(), Component::Svg)?;

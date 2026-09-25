@@ -136,6 +136,7 @@ use gpui_base::{
 };
 
 mod components;
+mod text_view;
 
 use crate::{
     capability::is_openable_url,
@@ -1059,10 +1060,10 @@ fn materialize_component(
                 cx,
             )
         }
-        Component::TextView { id, text, format } => {
-            let mut view = match format {
-                crate::spec::TextViewFormat::Html => TextView::html(id, text),
-                crate::spec::TextViewFormat::Markdown => TextView::markdown(id, text),
+        Component::TextView(spec) => {
+            let mut view = match spec.format {
+                crate::spec::TextViewFormat::Html => TextView::html(spec.id, spec.text),
+                crate::spec::TextViewFormat::Markdown => TextView::markdown(spec.id, spec.text),
             }
             .style(TextViewStyle::from_theme(&Theme::global(cx)));
             if let Some(selectable) = behavior.selectable {
@@ -1095,7 +1096,7 @@ fn materialize_component(
                 });
             }
             Styled::style(&mut view).refine(&refinement);
-            view.into_any_element()
+            text_view::PolicyTextView::new(view, spec.policy).into_any_element()
         }
         Component::Text(value) => {
             // A text run, not a `div` holding one. GPUI implements

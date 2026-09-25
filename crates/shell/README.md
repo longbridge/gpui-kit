@@ -382,6 +382,17 @@ limits. Every redirect target must be granted; HTTPS downgrade is refused, as
 are cross-origin POST replays and cross-origin redirects carrying Authorization
 or any caller-supplied header.
 
+Images in `TextView.html` and `TextView.markdown` use the document's captured
+network grant, including inline images and intrinsic-size measurement. Only
+absolute HTTP(S) URLs authorized for GET can load; relative, scheme-less,
+`data:`, `file:`, custom-scheme and credential-bearing URLs are refused. Each
+redirect is re-authorized, with at most 10 redirects and no HTTPS downgrade.
+Requests have a 30-second timeout and an 8 MiB response limit. Image loading
+never falls back to the host's unrestricted URI loader. Each TextView and
+policy identity has its own cache, released with its native element state;
+a broader grant cannot populate a cache used by a narrower grant. The ordinary
+application-asset `image(path)` API and default link handling are unchanged.
+
 Import `WebSocket` from `websocket`; `WebSocket.connect(url, { headers })` resolves after the handshake and returns
 async `read`, `write`, and `close` methods for text and binary messages. Frames
 and messages are limited to 8 MiB. Connect/handshake and writes have 30-second
