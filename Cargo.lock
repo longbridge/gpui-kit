@@ -4540,6 +4540,7 @@ dependencies = [
  "smol",
  "tracing",
  "tungstenite",
+ "usvg 0.46.0",
  "wait-timeout",
  "windows 0.58.0",
 ]

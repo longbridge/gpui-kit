@@ -375,3 +375,21 @@ fn text_view_document_images_keep_policies_separate(cx: &mut TestAppContext) {
         "only the first document may follow the redirect; none may borrow another cache",
     );
 }
+
+#[gpui::test]
+fn document_svg_images_cannot_read_local_files(cx: &mut TestAppContext) {
+    let path = std::env::temp_dir().join(format!("gpui-shell-svg-{}.png", std::process::id()));
+    std::fs::write(&path, PNG).unwrap();
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="1"><image href="{}" width="2" height="1"/></svg>"#,
+        path.display()
+    );
+    let decoded = cx.update(|cx| decode_image(svg.into_bytes(), cx.svg_renderer()));
+    std::fs::remove_file(&path).unwrap();
+    assert!(decoded.is_err());
+
+    // An SVG that references no file still decodes.
+    let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="2" height="1"><rect width="2" height="1"/></svg>"#;
+    let decoded = cx.update(|cx| decode_image(svg.as_bytes().to_vec(), cx.svg_renderer()));
+    assert!(decoded.is_ok());
+}

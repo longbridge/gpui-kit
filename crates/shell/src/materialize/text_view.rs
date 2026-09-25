@@ -1,7 +1,16 @@
 //! Fetch document images with the creating script's policy. GPUI owns asynchronous
 //! loading, caching and completion notifications; the document owns their lifetime.
 
-use std::{collections::HashSet, io::Cursor, rc::Rc, sync::Arc, time::Duration};
+use std::{
+    collections::HashSet,
+    io::Cursor,
+    rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use gpui::{
     App, Asset, Bounds, Element, ElementId, GlobalElementId, ImageCacheError, ImageSource,
@@ -258,6 +267,7 @@ async fn request_image(
 /// Otherwise decoding would silently start a second, ungated HTTP request.
 fn decode_image(bytes: Vec<u8>, renderer: SvgRenderer) -> ImageResult {
     let Ok(format) = image::guess_format(&bytes) else {
+        refuse_svg_file_references(&bytes)?;
         return renderer
             .render_single_frame(&bytes, 1.0)
             .map_err(Into::into);
@@ -280,6 +290,35 @@ fn decode_image(bytes: Vec<u8>, renderer: SvgRenderer) -> ImageResult {
         )?,
     };
     Ok(Arc::new(RenderImage::new(frames)))
+}
+
+/// GPUI renders an SVG `<image>` whose href is not a data URL from the local
+/// file it names, which would draw files the script has no grant to read.
+/// Parse the SVG with a resolver that records such an href, and refuse the
+/// image when it has one.
+fn refuse_svg_file_references(bytes: &[u8]) -> Result<(), ImageCacheError> {
+    let references_file = Arc::new(AtomicBool::new(false));
+    let options = usvg::Options {
+        image_href_resolver: usvg::ImageHrefResolver {
+            resolve_data: usvg::ImageHrefResolver::default_data_resolver(),
+            resolve_string: Box::new({
+                let references_file = references_file.clone();
+                move |_, _| {
+                    references_file.store(true, Ordering::Relaxed);
+                    None
+                }
+            }),
+        },
+        ..Default::default()
+    };
+    usvg::Tree::from_data(bytes, &options)
+        .map_err(|error| ImageCacheError::Usvg(Arc::new(error)))?;
+    if references_file.load(Ordering::Relaxed) {
+        return Err(ImageCacheError::Asset(
+            "TextView SVG images cannot reference files".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn static_frame(

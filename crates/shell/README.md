@@ -385,7 +385,8 @@ or any caller-supplied header.
 Images in `TextView.html` and `TextView.markdown` use the document's captured
 network grant, including inline images and intrinsic-size measurement. Only
 absolute HTTP(S) URLs authorized for GET can load; relative, scheme-less,
-`data:`, `file:`, custom-scheme and credential-bearing URLs are refused. Each
+`data:`, `file:`, custom-scheme and credential-bearing URLs are refused, as
+is an SVG image whose `<image>` references a file. Each
 redirect is re-authorized, with at most 10 redirects and no HTTPS downgrade.
 Requests have a 30-second timeout and an 8 MiB response limit. Image loading
 never falls back to the host's unrestricted URI loader. Each TextView and

@@ -67,6 +67,8 @@ serde.workspace = true
 serde_json.workspace = true
 smallvec.workspace = true
 smol.workspace = true
+# Only to find the files an SVG image references; GPUI's version, which renders it.
+usvg = { version = "0.46", default-features = false }
 tracing.workspace = true
 
 [dev-dependencies]
