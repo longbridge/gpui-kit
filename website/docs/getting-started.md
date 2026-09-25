@@ -102,3 +102,131 @@ Read these in order as your app grows:
 5. [Component catalog](../component/index.md): choose controls; then read [Icons & Assets](./assets.md) and [Fonts](./fonts.md) as your interface needs them.
 
 For a complete application with retained input state and subscriptions, use the [application recipes](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes). The [Coding Guides](./coding-guides.md) explain the conventions behind those examples.
+
+## Complete tested view
+
+This settings view is a compiled recipe showing retained input state and subscriptions. The excerpt is synchronized with its [Rust source](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/src/settings.rs).
+
+<!-- recipe:settings:start -->
+```rust
+use gpui_kit::component::{
+    ActiveTheme, IconName, WindowExt,
+    button::Button,
+    checkbox::Checkbox,
+    form::{Field, Form},
+    input::{Input, InputEvent, InputState},
+    radio::RadioGroup,
+    switch::Switch,
+};
+use gpui_kit::{
+    AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render, SharedString,
+    Styled as _, Subscription, Window, div,
+};
+
+pub struct Settings {
+    name: Entity<InputState>,
+    preview: SharedString,
+    changes: usize,
+    enabled: bool,
+    remember: bool,
+    delivery: Option<usize>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl Settings {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let name = cx.new(|cx| InputState::new(window, cx).placeholder("Name"));
+        let subscription = cx.subscribe_in(&name, window, |this, state, event, _, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.preview = state.read(cx).value().to_string().into();
+                this.changes += 1;
+                cx.notify();
+            }
+        });
+        Self {
+            name,
+            preview: "".into(),
+            changes: 0,
+            enabled: false,
+            remember: false,
+            delivery: Some(0),
+            _subscriptions: vec![subscription],
+        }
+    }
+
+    pub fn input(&self) -> Entity<InputState> {
+        self.name.clone()
+    }
+
+    pub fn preview(&self) -> &SharedString {
+        &self.preview
+    }
+
+    pub fn changes(&self) -> usize {
+        self.changes
+    }
+}
+
+impl Render for Settings {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .p_4()
+            .gap_3()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .child("Profile")
+            .child(
+                Form::new()
+                    .child(Field::new().label("Name").child(Input::new(&self.name)))
+                    .child(Field::new().label("Preview").child(self.preview.clone()))
+                    .child(
+                        Field::new().label_indent(false).child(
+                            Checkbox::new("remember")
+                                .label("Remember name")
+                                .checked(self.remember)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.remember = *value;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(
+                        Field::new().label_indent(false).child(
+                            Switch::new("enabled")
+                                .label("Enable notifications")
+                                .checked(self.enabled)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.enabled = *value;
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .child(
+                        Field::new().label("Delivery").child(
+                            RadioGroup::new("delivery")
+                                .children(["Immediately", "Daily summary"])
+                                .selected_index(self.delivery)
+                                .on_change(cx.listener(|this, value, _, cx| {
+                                    this.delivery = Some(*value);
+                                    cx.notify();
+                                })),
+                        ),
+                    )
+                    .footer(
+                        Button::new("about")
+                            .label("About…")
+                            .icon(IconName::Info)
+                            .on_click(|_, window, cx| {
+                                window.open_dialog(cx, |dialog, _, _| {
+                                    dialog.title("About").child("A complete GPUI Kit window")
+                                });
+                            }),
+                    ),
+            )
+    }
+}
+```
+<!-- recipe:settings:end -->

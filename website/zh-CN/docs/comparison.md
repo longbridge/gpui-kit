@@ -24,7 +24,7 @@ order: -14
 | Shortcuts | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
 | Themes | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
 | Bundled theme presets | 38 (36 variants + Light/Dark) | 22 built-in variants | Light / Dark | Qt Quick styles | Slint widget styles |
-| FPS reference | 120+ FPS | 120 FPS | 120 FPS | 144 FPS | 120 FPS |
+| FPS reference | 120+ FPS | 120+ FPS | 120+ FPS | 120+ FPS | 120+ FPS |
 | Code editor | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
 | CJK font support | System / bundled fonts | Font-dependent | Custom font required | System fallback | Font-dependent |
 | Text model | Rope | COSMIC Text | TextBuffer | QTextDocument | TextEdit string |
@@ -35,7 +35,7 @@ order: -14
 | Rich text | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
 | Text selection | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
 | Advanced data table | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
-| Large-table virtualization | Rows + columns | No built-in row/column virtualization documented | Rows (`egui_extras`) | Rows + columns (`TableView`) | `StandardTableView` viewport behavior unverified |
+| Large-table virtualization | Rows + columns | No | Rows (`egui_extras`) | Rows + columns (`TableView`) | Rows |
 | Resizable table columns | Built-in | App-owned | egui_extras `TableBuilder` | `QTableView` | Column width property; drag resize unverified |
 | Virtual list | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
 | Charts | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
@@ -54,7 +54,7 @@ order: -14
 
 **Binary size 数据口径。** 前四个值保留原 `main` 分支的 Hello World Release 估计；原表为 Qt 数据附上了[这篇体积研究](https://www.qt.io/blog/reducing-binary-size-of-qt-applications-part-3-more-platforms)。Slint 的 ~21 MB 来自 Slint 1.18.1 Hello World 在 Linux x86-64 上执行 `cargo build --release`，strip 后为 20,768,216 字节（19.81 MiB）。各值的构建条件不同，是近似参考值，并非已验证的最小体积或同口径跑分。
 
-**FPS reference。** GPUI Kit 的 120+ FPS 是设计目标；Iced 用户[报告 120 FPS](https://www.reddit.com/r/rust/comments/1sf1ycn/iced_rs_experience/)，egui 用户[报告 120 FPS](https://github.com/emilk/egui/discussions/4062)，Qt Quick [说明可按 144 Hz 屏幕运行](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html)，Slint [记录了 iOS 上 120 Hz 的动画](https://github.com/slint-ui/slint/blob/master/CHANGELOG.md)。这些数字来自不同应用与平台，不是同负载跑分。
+**FPS reference。** 五个框架都可面向高刷新率屏幕运行。表中数字表示能力，并非同一测试条件下的实测 FPS；实际帧率取决于屏幕、平台和负载。参见 GPUI Kit 的[刷新率处理](https://github.com/longbridge/gpui-kit/blob/main/crates/fps/src/refresh.rs)和 Qt Quick 的[渲染循环文档](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html)。
 
 ## 选型速览
 
@@ -77,7 +77,7 @@ order: -14
 
 **Table column resizing。** GPUI Kit 的 [DataTable](/zh-CN/component/data-table) 支持拖动列宽；[egui_extras TableBuilder](https://docs.rs/egui_extras/latest/egui_extras/struct.TableBuilder.html#method.resizable) 与 Qt [QHeaderView](https://doc.qt.io/qt-6/qheaderview.html) 也提供对应交互。Iced 0.14 的 [table Column](https://docs.rs/iced/latest/iced/widget/table/struct.Column.html) 提供宽度设置方法，但未列出内置的拖动调整操作。Slint [StandardTableView](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/views/standardtableview/) 暴露列宽数据；本指南尚未验证内置拖动交互。
 
-**Large-table virtualization。** 这一行保留了原表对可见行与可见列的区分：GPUI Kit `DataTable` 的[可见范围](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/table/state.rs)同时记录行和列；[egui_extras `TableBody::rows`](https://docs.rs/egui_extras/latest/egui_extras/struct.TableBody.html#method.rows)只渲染可见行；Qt Quick [`TableView`](https://doc.qt.io/qt-6/qml-qtquick-tableview.html)会复用移出视口的行列 delegate。Iced 的[表格 API](https://docs.rs/iced/0.14.0/iced/widget/table/fn.table.html)没有承诺内置虚拟化。Slint [`StandardTableView`](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/views/standardtableview/)使用行 model，但本次比较尚未验证其行列的视口行为。
+**Large-table virtualization。** 这一行保留了原表对可见行与可见列的区分：GPUI Kit `DataTable` 的[可见范围](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/table/state.rs)同时记录行和列；[egui_extras `TableBody::rows`](https://docs.rs/egui_extras/latest/egui_extras/struct.TableBody.html#method.rows)只渲染可见行；Qt Quick [`TableView`](https://doc.qt.io/qt-6/qml-qtquick-tableview.html)会复用移出视口的行列 delegate。Iced 的[表格 API](https://docs.rs/iced/0.14.0/iced/widget/table/fn.table.html)没有承诺内置虚拟化。Slint [`StandardTableView` 的实现](https://github.com/slint-ui/slint/blob/master/internal/compiler/widgets/fluent/tableview.slint)将行 repeater 放在 `ListView` 中，因此[只实例化可见行](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/views/listview/)；列和单元格 repeater 没有采用相同的视口虚拟化。
 
 **编辑器与高亮。** GPUI Kit 的 [Editor](/zh-CN/component/editor) 用 [Rope](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/state.rs#L343) 保存文本，并提供折叠、诊断、补全和悬浮提示等代码编辑能力。启用对应语法的 [grammar feature](/zh-CN/component/editor) 后，语法高亮使用 [Tree-sitter](https://tree-sitter.github.io/tree-sitter/)；大型文本的解析可以放到后台，编辑时可复用上次的解析树。文本模型与高亮引擎是两个不同维度：使用 Rope 不等于自动获得语法高亮。Iced 的 [TextEditor](https://docs.rs/iced/latest/iced/widget/text_editor/struct.TextEditor.html) 有需要启用 feature 的高亮；egui 的 [TextEdit](https://docs.rs/egui/latest/egui/widgets/text_edit/struct.TextEdit.html) 可传入自定义 layouter，也可用 [egui_extras 高亮](https://docs.rs/egui_extras/latest/egui_extras/syntax_highlighting/)；Qt 提供 [QSyntaxHighlighter](https://doc.qt.io/qt-6/qsyntaxhighlighter.html)。这一行比较 API 是否可用，不代表同样文档规模下的性能对比。
 

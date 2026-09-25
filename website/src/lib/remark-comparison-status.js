@@ -10,15 +10,20 @@ const statuses = {
 export function remarkComparisonStatus() {
   return (tree) => {
     visit(tree, 'html', (node) => {
-      const match = /^<comparison-status value="([a-z]+)"( decorative)?><\/comparison-status>$/.exec(node.value.trim());
+      if (node.value.trim() === '</comparison-status>') {
+        node.value = '</span>';
+        return;
+      }
+
+      const match = /^<comparison-status value="([a-z]+)"( decorative)?>$/.exec(node.value.trim());
       if (!match) return;
 
       const status = statuses[match[1]];
       if (!status) throw new Error(`Unknown comparison status: ${match[1]}`);
 
       node.value = match[2]
-        ? `<span class="${status.className}" aria-hidden="true"></span>`
-        : `<span class="${status.className}" role="img" aria-label="${status.label}" data-status="${match[1]}"></span>`;
+        ? `<span class="${status.className}" aria-hidden="true">`
+        : `<span class="${status.className}" role="img" aria-label="${status.label}" data-status="${match[1]}">`;
     });
   };
 }

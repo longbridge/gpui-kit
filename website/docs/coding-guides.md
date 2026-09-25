@@ -16,7 +16,7 @@ constraints; **should** is the default architecture and requires a concrete
 reason to depart from it. Current source and API docs remain authoritative for
 exact signatures.
 
-### Make the common path inexpensive
+## Make the common path inexpensive
 
 **Design principle: choose framework types and ownership so ordinary component use is inexpensive by default.** Developers should be able to build and reuse UI without adding a cache at every call site. [SharedString](./shared-string) for retained UI text and [RenderOnce](./render-once) for lightweight component values are examples: the API places ownership where it belongs and avoids repeated work in the common path. Small costs still multiply across elements and renders; measure exceptional hot paths before adding caches. Neither type promises zero cost. The [text ownership rule](#own-persistent-ui-text-with-sharedstring) and later rendering sections explain the mechanics.
 
