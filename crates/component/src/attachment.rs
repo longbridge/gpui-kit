@@ -117,6 +117,9 @@ struct CardMetrics {
     chip_width: AbsoluteLength,
     /// The side of the square media slot of a horizontal card.
     media: AbsoluteLength,
+    /// The glyph size inside the media slot: an icon child without its own size,
+    /// and the status glyphs.
+    media_glyph: AbsoluteLength,
     /// The padding before the media slot.
     padding_start: AbsoluteLength,
     /// The padding after the content and actions.
@@ -135,6 +138,7 @@ fn card_metrics(size: Size) -> CardMetrics {
             height: r(2.5),
             chip_width: r(11.),
             media: r(1.75),
+            media_glyph: r(0.875),
             padding_start: r(0.25),
             padding_end: r(0.375),
             card_padding: r(0.25),
@@ -146,6 +150,7 @@ fn card_metrics(size: Size) -> CardMetrics {
             height: r(3.),
             chip_width: r(12.5),
             media: r(2.),
+            media_glyph: r(1.),
             padding_start: r(0.375),
             padding_end: r(0.5),
             card_padding: r(0.375),
@@ -157,6 +162,7 @@ fn card_metrics(size: Size) -> CardMetrics {
             height: r(3.5),
             chip_width: r(14.5),
             media: r(2.375),
+            media_glyph: r(1.25),
             padding_start: r(0.5),
             padding_end: r(0.75),
             card_padding: r(0.5),
@@ -168,6 +174,7 @@ fn card_metrics(size: Size) -> CardMetrics {
             height: r(4.),
             chip_width: r(17.),
             media: r(2.75),
+            media_glyph: r(1.5),
             padding_start: r(0.625),
             padding_end: r(1.),
             card_padding: r(0.75),
@@ -180,6 +187,7 @@ fn card_metrics(size: Size) -> CardMetrics {
             height: (value * 3.5).into(),
             chip_width: (value * 14.5).into(),
             media: (value * 2.375).into(),
+            media_glyph: (value * 1.25).into(),
             padding_start: (value * 0.5).into(),
             padding_end: (value * 0.75).into(),
             card_padding: (value * 0.5).into(),
@@ -745,10 +753,16 @@ impl RenderOnce for AttachmentMedia {
         } else {
             tokens.radius.md
         };
-        let (glyph_size, ring_size) = if resolved_size == Size::XSmall {
-            (Size::XSmall, px(14.))
+        let glyph_size = metrics.media_glyph;
+        let spinner_size = if resolved_size == Size::XSmall {
+            Size::XSmall
         } else {
-            (Size::Small, px(20.))
+            Size::Small
+        };
+        let ring_size = if resolved_size == Size::XSmall {
+            px(14.)
+        } else {
+            px(20.)
         };
         let status = self.status;
         let source = self.source;
@@ -769,7 +783,7 @@ impl RenderOnce for AttachmentMedia {
                     .size(ring_size)
                     .into_any_element(),
                 None => Spinner::new()
-                    .with_size(glyph_size)
+                    .with_size(spinner_size)
                     .color(color)
                     .into_any_element(),
             }
@@ -789,11 +803,7 @@ impl RenderOnce for AttachmentMedia {
         } else if status.is_in_progress() {
             Some(busy(tokens.colors.primary))
         } else if status.is_failed() {
-            Some(
-                Icon::new(failed_glyph)
-                    .with_size(glyph_size)
-                    .into_any_element(),
-            )
+            Some(Icon::new(failed_glyph).size(glyph_size).into_any_element())
         } else {
             None
         };
@@ -807,7 +817,7 @@ impl RenderOnce for AttachmentMedia {
             let control = match self.retry {
                 Some((id, on_retry)) => retry_button(id, on_retry, cx).into_any_element(),
                 None => Icon::new(IconName::Ban)
-                    .with_size(glyph_size)
+                    .size(glyph_size)
                     .text_color(white())
                     .into_any_element(),
             };
@@ -826,6 +836,8 @@ impl RenderOnce for AttachmentMedia {
             .when(self.axis == Axis::Horizontal, |this| {
                 this.size(metrics.media)
             })
+            // An icon child without its own size follows the slot's text size.
+            .text_size(glyph_size)
             .when(self.axis == Axis::Vertical, |this| {
                 this.w_full().aspect_ratio(1.)
             })
