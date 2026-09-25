@@ -1,20 +1,11 @@
-//! Document images use the describing script's grant, not the host's ambient
-//! image loader. Scope the cache across every phase: InlineFlow also creates
-//! image elements during prepaint, and table sizing can measure them in layout.
+//! Fetch document images with the creating script's policy. GPUI owns asynchronous
+//! loading, caching and completion notifications; the document owns their lifetime.
 
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    io::Cursor,
-    rc::Rc,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::HashSet, io::Cursor, rc::Rc, sync::Arc, time::Duration};
 
 use gpui::{
-    App, Context, Element, ElementId, Entity, EntityId, GlobalElementId, ImageCache,
-    ImageCacheError, InspectorElementId, IntoElement, LayoutId, RenderImage, Resource,
-    SharedString, SharedUri, SvgRenderer, Task, Window, http_client::HttpClient,
+    App, Asset, Element, ImageCacheError, ImageSource, RenderImage, SharedString, SharedUri,
+    SvgRenderer, WeakEntity, Window, http_client::HttpClient,
 };
 use gpui_base::TextView;
 use image::AnimationDecoder as _;
@@ -28,179 +19,73 @@ const IMAGE_TIMEOUT: Duration = Duration::from_secs(30);
 
 type ImageResult = Result<Arc<RenderImage>, ImageCacheError>;
 
-/// A transparent wrapper: keep TextView's identity, layout and interactions.
-/// No script callback can replace this cache or reach the default image loader.
-pub(crate) struct PolicyTextView {
+pub(super) fn with_policy(
     view: TextView,
     policy: Rc<Policy>,
-    cache_id: SharedString,
-}
-
-impl PolicyTextView {
-    pub(super) fn new(view: TextView, policy: Rc<Policy>) -> Self {
-        // A cache's authority never changes. Including the retained policy identity
-        // also separates old and replacement snapshots with the same element id.
-        let cache_id = format!(
-            "{}/shell-images/{:p}",
-            view.id().expect("TextView has an element id"),
-            Rc::as_ptr(&policy),
-        )
-        .into();
-        Self {
-            view: view.image_source(|uri| uri.clone().into()),
-            policy,
-            cache_id,
-        }
-    }
-}
-
-impl IntoElement for PolicyTextView {
-    type Element = Self;
-
-    fn into_element(self) -> Self {
-        self
-    }
-}
-
-impl Element for PolicyTextView {
-    type RequestLayoutState = (
-        <TextView as Element>::RequestLayoutState,
-        Entity<DocumentImages>,
-    );
-    type PrepaintState = <TextView as Element>::PrepaintState;
-
-    fn id(&self) -> Option<ElementId> {
-        self.view.id()
-    }
-
-    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
-        self.view.source_location()
-    }
-
-    fn request_layout(
-        &mut self,
-        id: Option<&GlobalElementId>,
-        inspector_id: Option<&InspectorElementId>,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> (LayoutId, Self::RequestLayoutState) {
-        let policy = self.policy.clone();
-        let images = window.use_keyed_state(self.cache_id.clone(), cx, move |_, cx| {
-            DocumentImages::new(policy, cx)
-        });
-        let (layout, state) = window.with_image_cache(Some(images.clone().into()), |window| {
-            self.view.request_layout(id, inspector_id, window, cx)
-        });
-        (layout, (state, images))
-    }
-
-    fn prepaint(
-        &mut self,
-        id: Option<&GlobalElementId>,
-        inspector_id: Option<&InspectorElementId>,
-        bounds: gpui::Bounds<gpui::Pixels>,
-        state: &mut Self::RequestLayoutState,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Self::PrepaintState {
-        window.with_image_cache(Some(state.1.clone().into()), |window| {
-            self.view
-                .prepaint(id, inspector_id, bounds, &mut state.0, window, cx)
+    window: &mut Window,
+    cx: &mut App,
+) -> TextView {
+    let key = SharedString::from(format!(
+        "{}/shell-images/{:p}",
+        view.id().expect("TextView has an element id"),
+        Rc::as_ptr(&policy),
+    ));
+    let images = window.use_keyed_state(key, cx, |_, cx| {
+        let owner = cx.weak_entity();
+        cx.on_release(move |images: &mut DocumentImages, cx| {
+            for uri in &images.used {
+                let source = (owner.clone(), uri.clone());
+                if let Some(Ok(image)) = cx.fetch_asset::<DocumentImage>(&source) {
+                    cx.drop_image(image, None);
+                }
+                cx.remove_asset::<DocumentImage>(&source);
+            }
         })
-    }
-
-    fn paint(
-        &mut self,
-        id: Option<&GlobalElementId>,
-        inspector_id: Option<&InspectorElementId>,
-        bounds: gpui::Bounds<gpui::Pixels>,
-        state: &mut Self::RequestLayoutState,
-        prepaint: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
-        window.with_image_cache(Some(state.1.clone().into()), |window| {
-            self.view
-                .paint(id, inspector_id, bounds, &mut state.0, prepaint, window, cx);
-        });
-    }
-}
-
-/// Each keyed TextView owns a separate cache. A URL loaded by a broader grant
-/// must not satisfy the same URL under a different grant after a redirect.
-pub(crate) struct DocumentImages {
-    policy: Rc<Policy>,
-    entries: HashMap<SharedUri, ImageEntry>,
-}
-
-impl DocumentImages {
-    fn new(policy: Rc<Policy>, cx: &mut Context<Self>) -> Self {
-        cx.on_release(|images: &mut Self, cx| images.clear(cx))
-            .detach();
-        Self {
+        .detach();
+        DocumentImages {
             policy,
-            entries: HashMap::new(),
+            used: HashSet::new(),
         }
-    }
-
-    fn clear(&mut self, cx: &mut App) {
-        for entry in self.entries.values() {
-            entry.drop_image(cx);
-        }
-        // Dropping entries cancels their pending tasks as well.
-        self.entries.clear();
-    }
+    });
+    view.image_source(move |uri| {
+        let images = images.clone();
+        let uri = uri.clone();
+        ImageSource::Custom(Arc::new(move |window, cx| {
+            images.update(cx, |images, _| {
+                images.used.insert(uri.clone());
+            });
+            window.use_asset::<DocumentImage>(&(images.downgrade(), uri.clone()), cx)
+        }))
+    })
 }
 
-impl ImageCache for DocumentImages {
+struct DocumentImages {
+    // Retaining the immutable policy also keeps its identity from being reused.
+    policy: Rc<Policy>,
+    used: HashSet<SharedUri>,
+}
+
+struct DocumentImage;
+
+impl Asset for DocumentImage {
+    // The owner scopes both successful and failed loads to this view and policy.
+    // A weak reference lets releasing the view cancel pending loads.
+    type Source = (WeakEntity<DocumentImages>, SharedUri);
+    type Output = ImageResult;
+
     fn load(
-        &mut self,
-        resource: &Resource,
-        window: &mut Window,
+        (owner, uri): Self::Source,
         cx: &mut App,
-    ) -> Option<ImageResult> {
-        let Resource::Uri(uri) = resource else {
-            return Some(Err(denied_image()));
-        };
-        // Authorize before consulting any cache, including a failed entry.
-        let mut url = match image_url(self.policy.capabilities(), uri.as_ref()) {
-            Ok(url) => url,
-            Err(error) => return Some(Err(error)),
-        };
-        url.set_fragment(None);
-        let key: SharedUri = url.as_str().to_owned().into();
-        let entry = self
-            .entries
-            .entry(key)
-            .or_insert_with(|| ImageEntry::new(url, self.policy.capabilities().clone(), cx));
-        let mut state = entry.state.borrow_mut();
-        if let Some(result) = &state.result {
-            Some(result.clone())
-        } else {
-            state.views.insert(window.current_view());
-            None
-        }
-    }
-}
-
-struct ImageEntry {
-    state: Rc<RefCell<ImageLoad>>,
-    _task: Task<()>,
-}
-
-#[derive(Default)]
-struct ImageLoad {
-    result: Option<ImageResult>,
-    views: HashSet<EntityId>,
-}
-
-impl ImageEntry {
-    fn new(url: reqwest::Url, capabilities: Capabilities, cx: &mut App) -> Self {
-        let state = Rc::new(RefCell::new(ImageLoad::default()));
+    ) -> impl Future<Output = ImageResult> + Send + 'static {
+        let capabilities = owner
+            .upgrade()
+            .map(|images| images.read(cx).policy.capabilities().clone());
         let client = cx.http_client();
         let renderer = cx.svg_renderer();
         let timeout = cx.background_executor().timer(IMAGE_TIMEOUT);
-        let task = cx.background_executor().spawn(async move {
+        async move {
+            let capabilities = capabilities.ok_or_else(denied_image)?;
+            let url = image_url(&capabilities, uri.as_ref())?;
             smol::future::race(
                 async move {
                     let bytes = request_image(client, capabilities, url).await?;
@@ -214,30 +99,6 @@ impl ImageEntry {
                 },
             )
             .await
-        });
-        let weak = Rc::downgrade(&state);
-        let task = cx.spawn(async move |cx| {
-            let result = task.await;
-            let Some(state) = weak.upgrade() else {
-                return;
-            };
-            let views = {
-                let mut state = state.borrow_mut();
-                state.result = Some(result);
-                std::mem::take(&mut state.views)
-            };
-            cx.update(|cx| {
-                for view in views {
-                    cx.notify(view);
-                }
-            });
-        });
-        Self { state, _task: task }
-    }
-
-    fn drop_image(&self, cx: &mut App) {
-        if let Some(Ok(image)) = &self.state.borrow().result {
-            cx.drop_image(image.clone(), None);
         }
     }
 }

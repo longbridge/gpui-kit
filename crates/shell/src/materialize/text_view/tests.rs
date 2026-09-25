@@ -1,7 +1,8 @@
 use super::*;
 use crate::{HttpRequestGrant, ScriptView, ShellRuntime};
 use gpui::{
-    ParentElement as _, Render, Styled as _, TestAppContext, VisualTestContext, div,
+    Context, Entity, IntoElement, ParentElement as _, Render, Styled as _, TestAppContext,
+    VisualTestContext, div,
     http_client::{AsyncBody, FakeHttpClient, Method, RedirectPolicy, Response},
 };
 use std::{ops::Deref as _, sync::Mutex};

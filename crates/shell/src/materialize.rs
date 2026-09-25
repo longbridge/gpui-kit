@@ -1096,7 +1096,7 @@ fn materialize_component(
                 });
             }
             Styled::style(&mut view).refine(&refinement);
-            text_view::PolicyTextView::new(view, spec.policy).into_any_element()
+            text_view::with_policy(view, spec.policy, window, cx).into_any_element()
         }
         Component::Text(value) => {
             // A text run, not a `div` holding one. GPUI implements
