@@ -7,6 +7,10 @@ maturity: [experimental, platform-dependent]
 
 # 移动端
 
+:::info 当前定位
+GPUI Kit 的首要目标仍然是桌面环境。引入移动端支持，是为了让部分组件能够在 iOS 与 Android 应用中复用，例如在原生界面里用 TextView 原生渲染富文本内容。GPUI Kit 目前没有计划像 Flutter 那样把移动端作为主要目标，也不打算成为完整的移动应用框架。
+:::
+
 移动端支持基于 [gpui-mobile](https://github.com/itsbalamurali/gpui-mobile)，由 [itsbalamurali](https://github.com/itsbalamurali) 创建并与社区共同开发。原始移动平台的成果归功于该项目的作者和贡献者。移动平台负责 [Window](./window)、触摸输入、[TextSystem](./text-system) 和 GPU 渲染表面，GPUI 与 GPUI Kit 继续管理 Rust 视图树和组件。
 
 GPUI Kit 目前使用 `gpui-pre-mobile`，这是在[兼容性 fork](https://github.com/longbridge/gpui-mobile) 中维护的临时兼容包。它基于原项目进行打包适配，用于配合 `gpui-pre` 发布 crate，并持续跟进最新的 GPUI 版本、保持集成兼容。待社区 `gpui-mobile` 完成接入、GPUI 也发布 crate 后，我们计划将本文及相关依赖更新为社区的 `gpui-mobile`。

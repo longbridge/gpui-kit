@@ -7,6 +7,10 @@ maturity: [experimental, platform-dependent]
 
 # Mobile
 
+:::info Current scope
+GPUI Kit's primary target remains the desktop. Mobile support exists so that some components can be reused inside iOS and Android applications, for example rendering rich content natively with TextView inside a native screen. GPUI Kit does not currently plan to make mobile a primary target or to become a full mobile application framework in the way Flutter is.
+:::
+
 Mobile support builds on [gpui-mobile](https://github.com/itsbalamurali/gpui-mobile), created by [itsbalamurali](https://github.com/itsbalamurali) and developed with the community. Credit for the original mobile platform belongs to that project and its contributors. The platform supplies the [Window](./window), touch input, [text system](./text-system), and GPU surface; GPUI and GPUI Kit still own the Rust view tree and components.
 
 GPUI Kit currently uses `gpui-pre-mobile`, a temporary compatibility package maintained in a [compatibility fork](https://github.com/longbridge/gpui-mobile). It adapts the original project for crate packaging and publication alongside `gpui-pre`, and tracks newer GPUI versions to keep the integration compatible. Once the community `gpui-mobile` completes the integration and GPUI is published as a crate, we plan to switch this guide and its dependencies to the community `gpui-mobile`.
