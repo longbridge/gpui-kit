@@ -1,7 +1,7 @@
 ---
 title: Design Guides
 description: Product and interaction design guidance for GPUI Kit applications
-order: -12
+order: -2.1
 ---
 
 # Design Guides
@@ -17,7 +17,7 @@ and **may** is an optional technique. Component API documentation remains the
 authority for individual methods.
 
 The rules build on behavior in `gpui-base`, the GPUI Component theme and
-component system, and familiar desktop interaction. <a href="https://ui.shadcn.com/docs" target="_blank" rel="noopener noreferrer">shadcn/ui</a> contributes useful
+component system, and familiar desktop interaction. Shadcn contributes useful
 methods—open code, composition, and dependable defaults—but does not determine
 how a GPUI application should look. When influences conflict, preserve GPUI's
 lifecycle constraints and the interaction people already understand.
@@ -34,8 +34,7 @@ than compete with them.
    compose them into product-specific workflows. Create a new primitive only
    when its behavior is genuinely new.
 3. **Tokens before values.** Colors, radii, typography, and spacing should form
-   a system. Avoid isolated literals that cannot respond to themes. See
-   [Style](./style) for GPUI's styling API.
+   a system. Avoid isolated literals that cannot respond to themes.
 4. **Desktop before web convention.** Preserve keyboard access, window chrome,
    menus, dense data views, resizable regions, and persistent navigation where
    the task benefits from them.
@@ -179,8 +178,8 @@ value. A segmented control is one silhouette: its end segments follow the contai
 corners, its middle segments remain square, and each boundary has one divider
 of consistent thickness.
 
-<img class="alignment-light" src="/radius-hierarchy.svg?v=20260923-easing" alt="Light theme chat composer: the inset surface, both buttons, and placeholder spacing change together; red guide circles show their shared corner center.">
-<img class="alignment-dark" src="/radius-hierarchy-dark.svg?v=20260923-easing" alt="Dark theme chat composer: the inset surface, both buttons, and placeholder spacing change together; red guide circles show their shared corner center.">
+<img class="alignment-light" src="/radius-hierarchy.svg" alt="Light theme chat composer: the inset surface, both buttons, and placeholder spacing change together; red guide circles show their shared corner center.">
+<img class="alignment-dark" src="/radius-hierarchy-dark.svg" alt="Dark theme chat composer: the inset surface, both buttons, and placeholder spacing change together; red guide circles show their shared corner center.">
 
 A radius must govern the entire visible surface, not just its border. Exposed
 corners remain transparent to the surface behind them; child backgrounds,
@@ -386,7 +385,7 @@ Zoom is successful when the relationship between title and body, control and
 icon, inner and outer spacing, primary and secondary regions still feels the
 same at every scale—not merely when every object becomes larger.
 
-GPUI Component adopts the relative-scale idea familiar from <a href="https://tailwindcss.com/docs/theme" target="_blank" rel="noopener noreferrer">Tailwind CSS</a>. The
+GPUI Component adopts the relative-scale idea familiar from Tailwind. The
 theme's base `font_size` becomes the window's `rem` through `Root`, and GPUI
 scale helpers such as `text_sm()`, `gap_2()`, `p_4()`, `h_8()`, and `size_4()`
 resolve against it. This gives typography, spacing, controls, and icons one
@@ -576,13 +575,6 @@ In a segmented control, the selected fill and unselected surface must share
 the container's silhouette. Neither may square off an end corner or make a
 boundary appear heavier than its peers.
 
-Show a selected navigation item, list row, or tab through the item's own
-surface: a selected fill, stronger foreground, or heavier weight. Do not add a
-leading-edge bar or one-sided border as the selection marker. It is a web
-template habit, not a desktop convention; it breaks the item's rounded
-silhouette and adds a second, competing edge to a column that already aligns
-on its text.
-
 For destructive actions, distinguish between reversible and irreversible work.
 Prefer undo or a temporary notification for reversible changes. Use an
 `AlertDialog` when the consequence is serious and cannot be undone; name the
@@ -610,7 +602,7 @@ Use command frequency and scope to choose where an action lives:
 - put secondary actions for the current region behind a visible
   `DropdownMenu` trigger;
 - put commands that act on the object under the pointer in a `ContextMenu`;
-- expose the same important command through an [Action](./action)/[key binding](./keybinding) when it has a
+- expose the same important command through an Action/key binding when it has a
   natural keyboard form;
 - use a hover-revealed icon only as a shortcut to a command that remains
   reachable elsewhere.
@@ -801,19 +793,6 @@ translation would be less precise. Keep API identifiers in their original form
 and format them as code. Do not retain ordinary foreign words merely to sound
 technical. Explain a retained term on first use when needed, then use the same
 form throughout the interface, documentation, and API examples.
-
-In documentation, use the exact English name for a named API, component,
-source file, or guide in link text, including localized pages. For example,
-write `Font`, `Render`, `Input element`, and `Plot label` rather than translating
-their names or adding a redundant `GPUI Kit` prefix. Keep surrounding explanations in the
-page's language. Link only the named target; place words such as “source”
-outside the link when they describe why it is cited.
-
-In a technical comparison table shared across locales, keep capability names,
-framework names, API names, and model names in their established English form.
-Translate the explanation around the table, not its technical labels. Common
-interface words with an established local name may still be localized outside
-that comparison context.
 
 ### Buttons and confirmation dialogs
 
