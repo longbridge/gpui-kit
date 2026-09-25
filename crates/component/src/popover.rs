@@ -1,7 +1,7 @@
 use gpui::{
     Anchor, Animation, AnimationExt as _, AnyElement, App, Bounds, Context, Div, ElementId,
     FocusHandle, InteractiveElement as _, IntoElement, MouseButton, ParentElement, PathBuilder,
-    Pixels, Point, RenderOnce, Stateful, StyleRefinement, Styled, Window, canvas, point,
+    Pixels, Point, RenderOnce, Stateful, StyleRefinement, Styled, Window, canvas, div, point,
     prelude::FluentBuilder as _, px,
 };
 use std::{cell::Cell, rc::Rc, time::Duration};
@@ -334,6 +334,7 @@ impl RenderOnce for Popover {
         let style = self.style;
         let children = self.children;
         let content = self.content;
+        let trigger_style = self.trigger_style;
 
         BasePopover::new(self.id)
             .anchor(self.anchor)
@@ -397,7 +398,20 @@ impl RenderOnce for Popover {
                         )
                     })
             })
-            .when_some(self.trigger, |this, trigger| this.trigger_with(trigger))
+            .when_some(self.trigger, |this, trigger| {
+                this.trigger_with(move |is_open, window, cx| {
+                    let trigger = trigger(is_open, window, cx);
+                    // A styled trigger is wrapped so the refinement lands on the
+                    // container the popup measures and positions against, rather
+                    // than on the trigger element itself. A trigger with no
+                    // `trigger_style` is passed through untouched, so the wrapper
+                    // never appears in a layout that did not ask for one.
+                    match trigger_style {
+                        Some(style) => div().child(trigger).refine_style(&style).into_any_element(),
+                        None => trigger,
+                    }
+                })
+            })
             .when_some(self.open, |this, open| this.open(open))
             .when_some(self.tracked_focus_handle, |this, handle| {
                 this.track_focus(&handle)
@@ -637,6 +651,62 @@ mod tests {
         assert_eq!(
             window.debug_bounds("positioned-content").unwrap().origin,
             point(px(312.), px(230.))
+        );
+    }
+
+    struct TriggerStyleHarness {
+        styled: bool,
+    }
+
+    impl Render for TriggerStyleHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                Popover::new("trigger-style-popover")
+                    .default_open(true)
+                    .appearance(false)
+                    .offset(px(0.))
+                    .when(self.styled, |this| {
+                        this.trigger_style(StyleRefinement::default().p(px(10.)))
+                    })
+                    .trigger(Button::new("styled-trigger").size(px(40.)))
+                    .child(
+                        div()
+                            .debug_selector(|| "styled-content".into())
+                            .size(px(20.)),
+                    ),
+            )
+        }
+    }
+
+    /// `trigger_style` is a public setter, and the popup anchors to the bounds of
+    /// the trigger container. Before this was applied at render time the
+    /// refinement was stored and dropped, so a caller that sized or inset its
+    /// trigger got neither the layout nor the position it asked for.
+    #[gpui::test]
+    fn trigger_style_is_applied_to_the_trigger_container(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let (view, window) = cx.add_window_view(|_, _| TriggerStyleHarness { styled: false });
+        window.update(|window, cx| window.draw(cx).clear(cx));
+        window.update(|window, cx| window.draw(cx).clear(cx));
+        // Unstyled: the content sits directly under the 40px trigger.
+        assert_eq!(
+            window.debug_bounds("styled-content").unwrap().origin,
+            point(px(0.), px(40.))
+        );
+
+        window.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                view.styled = true;
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+        });
+        window.update(|window, cx| window.draw(cx).clear(cx));
+        // 10px of padding on each side grows the trigger container to 60px, and
+        // the popup is positioned against those bounds rather than the trigger's.
+        assert_eq!(
+            window.debug_bounds("styled-content").unwrap().origin,
+            point(px(0.), px(60.))
         );
     }
 
