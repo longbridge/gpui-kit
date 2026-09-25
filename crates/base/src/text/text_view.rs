@@ -590,12 +590,33 @@ impl Element for TextView {
             if let Some(text_view_style) = text_view_style {
                 state.selection_revision = state.selection_revision.wrapping_add(1);
                 state.text_view_style = text_view_style;
+                state.measured = None;
             }
 
             if let Some(text) = &self.text {
                 state.set_element_text(text, cx);
             }
         });
+
+        // Non-scrollable content lays out at its full height on every repaint
+        // of anything around it. Once measured, paint it as a cached view of
+        // that height: the previous frame is reused until the state is
+        // notified (new content, a selection change) or re-measured. The
+        // width stays full, so the document follows its container. A clamped
+        // view keeps rendering: `max_lines` collects line spans during
+        // prepaint.
+        let cached = state.update(cx, |state, _| {
+            let cacheable = !state.scrollable && state.max_lines.is_none();
+            let cached = state.measured.filter(|_| cacheable);
+            state.measuring = cacheable && cached.is_none();
+            cached
+        });
+        let document: AnyElement = match cached {
+            Some(size) => gpui::AnyView::from(state.clone())
+                .cached(StyleRefinement::default().w_full().h(size.height))
+                .into_any_element(),
+            None => state.clone().into_any_element(),
+        };
 
         let focus_handle = state.read(cx).focus_handle.clone();
         let list_state = state.read(cx).list_state.clone();
@@ -625,7 +646,7 @@ impl Element for TextView {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
             })
             .on_action(window.listener_for(&state, TextViewState::on_action_select_all))
-            .child(state.clone())
+            .child(document)
             // Overlay controls must paint after the document, otherwise rich
             // content and selection backgrounds cover the thumb and hitbox.
             .when(self.scrollable, |this| {
@@ -653,6 +674,19 @@ impl Element for TextView {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let state = request_layout.state.clone();
+        // A new width reflows the text to a new height: measure it again on
+        // the next frame.
+        let width = bounds.size.width;
+        let resized = state
+            .read(cx)
+            .measured
+            .is_some_and(|measured| (measured.width - width).abs() > px(0.5));
+        if resized {
+            state.update(cx, |state, cx| {
+                state.measured = None;
+                cx.notify();
+            });
+        }
         let max_lines_active = state.read(cx).max_lines.is_some();
         if max_lines_active {
             if let Ok(mut line_spans) = state.read(cx).line_spans.lock() {
@@ -664,6 +698,7 @@ impl Element for TextView {
                 .text_view_state_stack
                 .push(state.clone());
         }
+        state.update(cx, |state, _| state.document_prepainted = false);
         request_layout.element.prepaint(window, cx);
         if max_lines_active {
             GlobalState::global_mut(cx).text_view_state_stack.pop();
@@ -727,7 +762,9 @@ impl Element for TextView {
         cx: &mut App,
     ) {
         let state = &request_layout.state;
-        if self.selectable {
+        // A cached document replays its previous paint without registering
+        // its text again; the geometry from that frame is still accurate.
+        if self.selectable && state.read(cx).document_prepainted {
             state.update(cx, |state, _| state.selection_adapter.begin_frame());
         }
 
@@ -3060,5 +3097,141 @@ mod tests {
             (max - min) < 2.0,
             "list content total jittered while scrolling: min={min} max={max} totals={totals:?}"
         );
+    }
+
+    /// Counts how often the document is rendered, through a plugin node
+    /// that every render of the state rebuilds.
+    struct RenderCounter(Arc<AtomicUsize>);
+    impl crate::text::MarkdownPlugin for RenderCounter {
+        fn name(&self) -> &str {
+            "counter"
+        }
+        fn parse(
+            &self,
+            node: &markdown::mdast::Node,
+            _: &crate::text::MarkdownParseContext<'_>,
+        ) -> Option<crate::text::MarkdownNode> {
+            let markdown::mdast::Node::Link(link) = node else {
+                return None;
+            };
+            link.url.strip_prefix("counter:")?;
+            Some(crate::text::MarkdownNode::new("counter", ()).text("counted".to_string()))
+        }
+        fn render(
+            &self,
+            node: &crate::text::MarkdownNode,
+            _: &mut Window,
+            _: &mut gpui::App,
+        ) -> impl IntoElement {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            div().child(node.as_text().to_string())
+        }
+    }
+
+    struct CachedLayoutRoot {
+        view: Entity<TextViewState>,
+        width: Pixels,
+        renders: Arc<AtomicUsize>,
+        extensions: crate::text::MarkdownExtensions,
+        /// Supply the plugin anew on every render instead of reusing
+        /// `extensions`.
+        fresh_plugin: bool,
+    }
+    impl Render for CachedLayoutRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let text_view = TextView::new(&self.view);
+            let text_view = if self.fresh_plugin {
+                text_view.plugin(RenderCounter(self.renders.clone()))
+            } else {
+                text_view.markdown_extensions(self.extensions.clone())
+            };
+            div().w(self.width).child(text_view)
+        }
+    }
+
+    fn cached_layout_root<'a>(
+        source: &'static str,
+        cx: &'a mut TestAppContext,
+    ) -> (Entity<CachedLayoutRoot>, &'a mut VisualTestContext) {
+        cx.update(crate::init);
+        let renders = Arc::new(AtomicUsize::new(0));
+        let (root, cx) = cx.add_window_view(|_, cx| CachedLayoutRoot {
+            view: cx.new(|cx| TextViewState::markdown(source, cx)),
+            width: px(300.),
+            extensions: crate::text::MarkdownExtensions::default()
+                .plugin(RenderCounter(renders.clone())),
+            renders,
+            fresh_plugin: false,
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        (root, cx)
+    }
+
+    fn measured(root: &Entity<CachedLayoutRoot>, cx: &mut VisualTestContext) -> Option<Pixels> {
+        root.read_with(cx, |root, cx| {
+            root.view.read(cx).measured.map(|size| size.width)
+        })
+    }
+
+    #[gpui::test]
+    fn repainting_the_parent_reuses_a_measured_document(cx: &mut TestAppContext) {
+        let (root, cx) = cached_layout_root("# Title\n\nSome text [x](counter:x)", cx);
+        assert_eq!(measured(&root, cx), Some(px(300.)));
+        let renders = root.read_with(cx, |root, _| root.renders.clone());
+        let before = renders.load(Ordering::Relaxed);
+        assert!(before > 0);
+
+        for _ in 0..3 {
+            root.update(cx, |_, cx| cx.notify());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        assert_eq!(
+            renders.load(Ordering::Relaxed),
+            before,
+            "a parent repaint rendered the unchanged document again"
+        );
+    }
+
+    #[gpui::test]
+    fn a_plugin_supplied_every_render_renders_the_document_again(cx: &mut TestAppContext) {
+        let (root, cx) = cached_layout_root("Some text [x](counter:x)", cx);
+        root.update(cx, |root, _| root.fresh_plugin = true);
+        let renders = root.read_with(cx, |root, _| root.renders.clone());
+        for _ in 0..3 {
+            let before = renders.load(Ordering::Relaxed);
+            root.update(cx, |_, cx| cx.notify());
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert!(renders.load(Ordering::Relaxed) > before);
+        }
+    }
+
+    #[gpui::test]
+    fn new_content_is_measured_again(cx: &mut TestAppContext) {
+        let (root, cx) = cached_layout_root("one line [x](counter:x)", cx);
+        let height = |root: &Entity<CachedLayoutRoot>, cx: &mut VisualTestContext| {
+            root.read_with(cx, |root, cx| root.view.read(cx).measured.unwrap().height)
+        };
+        let short = height(&root, cx);
+        let view = root.read_with(cx, |root, _| root.view.clone());
+        view.update(cx, |view, cx| {
+            view.set_text("one\n\ntwo\n\nthree\n\nfour [x](counter:x)", cx)
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(height(&root, cx) > short);
+    }
+
+    #[gpui::test]
+    fn a_new_width_is_measured_again(cx: &mut TestAppContext) {
+        let (root, cx) = cached_layout_root("Some text [x](counter:x)", cx);
+        root.update(cx, |root, cx| {
+            root.width = px(200.);
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(measured(&root, cx), Some(px(200.)));
     }
 }
