@@ -196,202 +196,125 @@ GPUI 的图片缓存位于 App 的 `HttpClient` 之上。它在内存中按来�
 
 ### 在 HTTP 层缓存
 
-要跨视图、跨启动复用响应，可以用一个遵循 HTTP 缓存规则的客户端包装应用原有的 `HttpClient`，并在启动时安装一次。此后所有远程图片都会受益，包括不由应用自己编写的代码加载的图片。实现时遵循以下规则：
+要跨视图、跨启动复用响应，可以在启动时安装一个遵循 HTTP 缓存规则的 `HttpClient`。此后所有远程图片都会受益，包括不由应用自己编写的代码加载的图片。实现时遵循以下规则：
 
 - **只缓存不带请求体的 GET。** 其他请求原样转发。
 - **按共享缓存处理。** 整个应用共用一个客户端：应用自己的视图、扩展和文档视图都经过它。`no-store` 或 `private` 响应，以及对带 `Authorization` 请求的响应，除非服务器明确允许共享缓存保存，否则都不能存储。如果缓存下层会附加 Cookie 或令牌，缓存看不到这些凭据，因此应在缓存之上添加凭据，或者不缓存这些主机。
 - **用重新验证代替重新下载。** 新鲜的响应直接返回，不访问网络。过期后发送 `If-None-Match` 或 `If-Modified-Since`；收到 `304 Not Modified` 时，用更新后的响应头返回已存储的响应体。
-- **遵守调用方的重定向策略。** `img()` 会跟随重定向，但自行授权每一跳的加载器会请求 `RedirectPolicy::NoFollow`，并且必须拿到 `3xx` 响应。把策略放进缓存键，跟随重定向得到的结果就永远不会回应这类调用方；重定向响应本身也按同样的规则缓存。
-- **限制内存和磁盘用量。** 同时限制单个条目和总大小，淘汰旧条目；过大而不宜保存的响应直接以流的形式转发。
+- **遵守调用方的重定向策略。** `img()` 会跟随重定向，但自行授权每一跳的加载器会请求 `RedirectPolicy::NoFollow`，并且必须拿到 `3xx` 响应。每种策略使用各自的缓存，跟随重定向得到的结果就永远不会回应这类调用方。
+- **限制内存和磁盘用量。** 限制缓存大小，并清理旧条目。
 - **先授权，再请求。** 同一个 URL，缓存会回应任何请求它的调用方。判断调用方能否访问某个 URL 的检查，例如 gpui-shell 脚本的网络授权，必须在 `send` 之前完成。这样缓存不会扩大调用方的访问范围，只是省去重复一次已经获准的请求。
 
 ### 示例
 
-下面的示例在内存中实现这些规则。[http-cache-semantics](https://crates.io/crates/http-cache-semantics) crate 负责 HTTP 缓存规则的判断：新鲜度、验证器、`Vary` 以及共享缓存的限制。在 `Cargo.toml` 中加入 `http-cache-semantics = "2"`、`futures`、`bytes` 和 `anyhow`。
+[http-cache-reqwest](https://crates.io/crates/http-cache-reqwest) 以 [reqwest-middleware](https://crates.io/crates/reqwest-middleware) 中间件的形式实现了这些规则：新鲜度判断、基于 `ETag` 和 `Last-Modified` 的重新验证、共享缓存的存储限制，并自带磁盘存储。应用只需把它适配到 GPUI 的 `HttpClient`。添加以下依赖：
+
+```toml
+[dependencies]
+anyhow = "1"
+futures = "0.3"
+http-cache-reqwest = "0.15"
+reqwest = { version = "0.12", features = ["stream"] }
+reqwest-middleware = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+```
 
 ```rust
-use std::{
-    collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex},
-    time::SystemTime,
-};
+use std::{path::Path, sync::LazyLock};
 
-use bytes::Bytes;
-use futures::{AsyncReadExt as _, FutureExt as _, future::BoxFuture, io::Cursor};
+use futures::{AsyncReadExt as _, FutureExt as _, TryStreamExt as _, future::BoxFuture};
 use gpui_kit::http_client::{
-    AsyncBody, HttpClient, Inner, Method, RedirectPolicy, Request, Response, Url,
-    http::{HeaderValue, response},
+    AsyncBody, HttpClient, RedirectPolicy, Request, Response, Url, http::HeaderValue,
 };
-use http_cache_semantics::{AfterResponse, BeforeRequest, CachePolicy};
+use http_cache_reqwest::{CACacheManager, Cache, CacheMode, HttpCache, HttpCacheOptions};
+use reqwest::redirect;
+use reqwest_middleware::{ClientBuilder, ClientWithMiddleware};
 
-/// An [`HttpClient`] that answers GET requests from memory when HTTP caching
-/// rules allow it, and forwards everything else to `inner`.
-pub struct CachingHttpClient {
-    inner: Arc<dyn HttpClient>,
-    store: Arc<Mutex<Store>>,
+/// reqwest needs a tokio runtime; GPUI's executors are not one.
+static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("failed to start the HTTP runtime")
+});
+
+/// A reqwest client with an HTTP cache on disk.
+pub struct CachedHttpClient {
+    follow: ClientWithMiddleware,
+    no_follow: ClientWithMiddleware,
 }
 
-impl CachingHttpClient {
-    pub fn new(inner: Arc<dyn HttpClient>, max_bytes: usize) -> Self {
-        let store = Store {
-            max_bytes,
-            ..Default::default()
+impl CachedHttpClient {
+    pub fn new(cache_dir: &Path) -> anyhow::Result<Self> {
+        let client = |policy, dir| -> anyhow::Result<_> {
+            let client = reqwest::Client::builder().redirect(policy).build()?;
+            Ok(ClientBuilder::new(client)
+                .with(Cache(HttpCache {
+                    mode: CacheMode::Default,
+                    manager: CACacheManager {
+                        path: cache_dir.join(dir),
+                    },
+                    options: HttpCacheOptions::default(),
+                }))
+                .build())
         };
-        Self {
-            inner,
-            store: Arc::new(Mutex::new(store)),
-        }
+        // A caller that disables redirects must receive the 3xx itself. It
+        // gets a client that never follows them, with a cache of its own.
+        Ok(Self {
+            follow: client(redirect::Policy::default(), "follow")?,
+            no_follow: client(redirect::Policy::none(), "no-follow")?,
+        })
     }
 }
 
-/// The URI plus the caller's redirect policy. A caller that disables
-/// redirects must receive the 3xx itself, never a followed result.
-type Key = (String, Option<RedirectPolicy>);
-
-struct Entry {
-    policy: CachePolicy,
-    body: Bytes,
-}
-
-#[derive(Default)]
-struct Store {
-    entries: HashMap<Key, Entry>,
-    /// Keys in insertion order; the oldest is evicted first.
-    order: VecDeque<Key>,
-    bytes: usize,
-    max_bytes: usize,
-}
-
-impl Store {
-    /// A single response may use at most an eighth of the budget.
-    fn max_entry_bytes(&self) -> usize {
-        self.max_bytes / 8
-    }
-
-    fn get(&self, key: &Key) -> Option<(CachePolicy, Bytes)> {
-        let entry = self.entries.get(key)?;
-        Some((entry.policy.clone(), entry.body.clone()))
-    }
-
-    fn insert(&mut self, key: Key, policy: CachePolicy, body: Bytes) {
-        self.remove(&key);
-        self.bytes += body.len();
-        self.order.push_back(key.clone());
-        self.entries.insert(key, Entry { policy, body });
-        while self.bytes > self.max_bytes {
-            let Some(oldest) = self.order.pop_front() else {
-                break;
-            };
-            if let Some(entry) = self.entries.remove(&oldest) {
-                self.bytes -= entry.body.len();
-            }
-        }
-    }
-
-    fn remove(&mut self, key: &Key) {
-        if let Some(entry) = self.entries.remove(key) {
-            self.bytes -= entry.body.len();
-            self.order.retain(|k| k != key);
-        }
-    }
-}
-
-fn respond(head: response::Parts, body: Bytes) -> Response<AsyncBody> {
-    Response::from_parts(head, AsyncBody::from_bytes(body))
-}
-
-impl HttpClient for CachingHttpClient {
+impl HttpClient for CachedHttpClient {
     fn user_agent(&self) -> Option<&HeaderValue> {
-        self.inner.user_agent()
+        None
     }
 
     fn proxy(&self) -> Option<&Url> {
-        self.inner.proxy()
+        None
     }
 
     fn send(
         &self,
         req: Request<AsyncBody>,
     ) -> BoxFuture<'static, anyhow::Result<Response<AsyncBody>>> {
-        // Only a GET without a body is cacheable; pass everything else through.
-        if req.method() != Method::GET || !matches!(req.body().0, Inner::Empty) {
-            return self.inner.send(req);
-        }
-
-        let inner = self.inner.clone();
-        let store = self.store.clone();
+        let (head, mut body) = req.into_parts();
+        let client = match head.extensions.get::<RedirectPolicy>() {
+            Some(RedirectPolicy::NoFollow) => self.no_follow.clone(),
+            _ => self.follow.clone(),
+        };
         async move {
-            let (request, _) = req.into_parts();
-            let redirects = request.extensions.get::<RedirectPolicy>().cloned();
-            let key = (request.uri.to_string(), redirects);
-            let cached = store.lock().unwrap().get(&key);
-
-            // Fresh: answer without the network. Stale: send the conditional
-            // headers (If-None-Match / If-Modified-Since) the policy computed,
-            // keeping the caller's extensions such as its redirect policy.
-            let mut outgoing = request.clone();
-            if let Some((policy, body)) = &cached {
-                match policy.before_request(&request, SystemTime::now()) {
-                    BeforeRequest::Fresh(head) => return Ok(respond(head, body.clone())),
-                    BeforeRequest::Stale {
-                        request: revalidation,
-                        ..
-                    } => {
-                        outgoing.headers = revalidation.headers;
-                    }
-                }
-            }
-
-            let (head, body) = inner
-                .send(Request::from_parts(outgoing, AsyncBody::empty()))
-                .await?
-                .into_parts();
-
-            // 304: keep the cached body under the refreshed headers.
-            if let Some((policy, cached_body)) = cached {
-                match policy.after_response(&request, &head, SystemTime::now()) {
-                    AfterResponse::NotModified(policy, head) => {
-                        let mut store = store.lock().unwrap();
-                        store.insert(key, policy, cached_body.clone());
-                        return Ok(respond(head, cached_body));
-                    }
-                    AfterResponse::Modified(..) => {}
-                }
-            }
-
-            // `CachePolicy::new` evaluates the response as a shared cache:
-            // `no-store` and `private` responses, and most responses to requests
-            // carrying `Authorization`, are not storable.
-            let policy = CachePolicy::new(&request, &head);
-            if !policy.is_storable() {
-                store.lock().unwrap().remove(&key);
-                return Ok(Response::from_parts(head, body));
-            }
-
-            let limit = store.lock().unwrap().max_entry_bytes();
             let mut bytes = Vec::new();
-            let mut reader = body.take(limit as u64 + 1);
-            reader.read_to_end(&mut bytes).await?;
-            let body = reader.into_inner();
-            if bytes.len() > limit {
-                // Too large to keep: return what was read, then the rest of the stream.
-                store.lock().unwrap().remove(&key);
-                let rest = Cursor::new(bytes).chain(body);
-                return Ok(Response::from_parts(head, AsyncBody::from_reader(rest)));
-            }
+            body.read_to_end(&mut bytes).await?;
+            let request = client
+                .request(head.method, head.uri.to_string())
+                .headers(head.headers)
+                .body(bytes);
+            let response = RUNTIME.spawn(request.send()).await??;
 
-            let bytes = Bytes::from(bytes);
-            store.lock().unwrap().insert(key, policy, bytes.clone());
-            Ok(respond(head, bytes))
+            let mut builder = Response::builder()
+                .status(response.status())
+                .version(response.version());
+            *builder.headers_mut().unwrap() = response.headers().clone();
+            let body = response
+                .bytes_stream()
+                .map_err(std::io::Error::other)
+                .into_async_read();
+            Ok(builder.body(AsyncBody::from_reader(body))?)
         }
         .boxed()
     }
 }
 ```
 
+GPUI 自带的 reqwest 客户端会按每个请求的 `RedirectPolicy` 处理跳转，而 `reqwest-middleware` 客户端的跳转策略在构建时就固定了。所以示例构建了两个客户端：一个跟随跳转，供 `img()` 使用；另一个从不跟随，供请求 `RedirectPolicy::NoFollow` 的调用方使用。两者的缓存目录也要分开，因为跟随跳转的客户端前面的缓存，会把最终响应存在原始 URL 下，再拿它回应另一类调用方。`RedirectPolicy::FollowLimit` 使用 reqwest 默认的 10 次上限。
+
 ### 安装客户端
 
-在应用原有的客户端外层安装这个包装。这里的 `reqwest_client` 是 `gpui-pre-reqwest-client` crate，版本与所用 `gpui-kit` 固定的 GPUI 快照一致：
+在启动时安装一次，要在任何窗口加载远程图片之前。缓存目录请使用平台的缓存目录，例如用 [dirs](https://crates.io/crates/dirs) crate 获取，不要像这里一样放在临时目录：
 
 ```rust
 use std::sync::Arc;
@@ -399,10 +322,9 @@ use std::sync::Arc;
 gpui_kit::application().run(|cx| {
     gpui_kit::init(cx);
 
-    let network = reqwest_client::ReqwestClient::user_agent("my-app/1.0")
-        .expect("failed to create the HTTP client");
-    let cached = CachingHttpClient::new(Arc::new(network), 64 * 1024 * 1024);
-    cx.set_http_client(Arc::new(cached));
+    let cache_dir = std::env::temp_dir().join("my-app/http-cache");
+    let client = CachedHttpClient::new(&cache_dir).expect("failed to create the HTTP client");
+    cx.set_http_client(Arc::new(client));
 
     // Open windows here.
 });
@@ -410,12 +332,9 @@ gpui_kit::application().run(|cx| {
 
 ### 扩展示例
 
-这个示例刻意保持简短，应用有需要时可以在以下方面扩展：
-
-- **持久化。** 应用退出后条目随之消失。要跨启动保留图片，可以把每个响应体连同其 `CachePolicy` 存到磁盘（`CachePolicy` 实现了 `serde` 的 trait），以原子方式写入文件，并在启动时清理超出大小或时间限制的条目。基于 `reqwest` 的客户端也可以改用带磁盘存储的缓存中间件，例如 [http-cache-reqwest](https://crates.io/crates/http-cache-reqwest)。
-- **变体。** 每个 URL 只保留一个响应。因 `Vary` 而不同的响应会替换之前的变体。
-- **重复请求。** 同一 URL 的并发未命中会各自访问网络。GPUI 的图片加载器本身已经让同一来源只加载一次。
-- **淘汰策略。** 总是先移除最早存入的条目，不管它最近是否被使用。如果访问模式很重要，可以改用 LRU 结构。
+- **大小。** 磁盘存储没有大小上限。可以在启动时删除旧条目，或在目录超过上限时清空它。
+- **代理与 User-Agent。** 在 `reqwest::Client::builder()` 上配置，其他代码需要读取时，再从 `proxy()` 和 `user_agent()` 返回。
+- **请求体。** 示例在发送前把请求体读入内存，这对图片和小请求没有问题；上传大文件时，改用 `reqwest::Body::wrap_stream` 包装数据流。
 
 ## 常见问题
 
