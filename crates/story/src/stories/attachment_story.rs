@@ -5,9 +5,7 @@ use gpui_kit::component::{
         AttachmentMedia, AttachmentStatus, AttachmentTitle,
     },
     button::{Button, ButtonVariants as _},
-    progress::Progress,
     shimmer::ShimmerStyle,
-    spinner::Spinner,
     v_flex,
 };
 use gpui_kit::{
@@ -57,243 +55,6 @@ impl Render for AttachmentStory {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .gap_4()
-            .child(
-                section("File metadata")
-                    .description(
-                        "Compose typed metadata and actions, or keep using existing child elements.",
-                    )
-                    .max_w(rems(42.5))
-                    .v_flex()
-                    .gap_3()
-                    .child(
-                        Attachment::new()
-                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
-                            .content(
-                                AttachmentContent::new()
-                                    .title(AttachmentTitle::new("quarterly-report.pdf"))
-                                    .description(AttachmentDescription::new("PDF · 2.4 MB")),
-                            )
-                            .actions(
-                                AttachmentActions::new().child(
-                                    Button::new("remove-report")
-                                        .ghost()
-                                        .xsmall()
-                                        .icon(IconName::Close)
-                                        .tooltip("Remove quarterly-report.pdf"),
-                                ),
-                            ),
-                    )
-                    .child(
-                        Attachment::new()
-                            .small()
-                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
-                            .content(
-                                AttachmentContent::new()
-                                    .child(AttachmentTitle::new("research-data.csv"))
-                                    .child(AttachmentDescription::new("CSV · 840 KB")),
-                            ),
-                    ),
-            )
-            .child(
-                section("Whole-card click")
-                    .description(
-                        "The card opens its target while actions stay independently clickable.",
-                    )
-                    .max_w(rems(42.5))
-                    .v_flex()
-                    .gap_3()
-                    .child(
-                        Attachment::new()
-                            .id("clickable-attachment")
-                            .on_click(|_, window, cx| {
-                                window.push_notification("Opening design-mockups.png…", cx);
-                            })
-                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
-                            .content(
-                                AttachmentContent::new()
-                                    .title(AttachmentTitle::new("design-mockups.png"))
-                                    .description(AttachmentDescription::new("PNG · 1.8 MB")),
-                            )
-                            .actions(
-                                AttachmentActions::new().child(
-                                    Button::new("remove-clickable-attachment")
-                                        .ghost()
-                                        .xsmall()
-                                        .icon(IconName::Close)
-                                        .on_click(|_, window, cx| {
-                                            window.push_notification(
-                                                "Removed design-mockups.png",
-                                                cx,
-                                            );
-                                        }),
-                                ),
-                            ),
-                    ),
-            )
-            .child(
-                section("Upload states")
-                    .description(
-                        "Typed titles and descriptions inherit loading and failure states automatically.",
-                    )
-                    .max_w(rems(42.5))
-                    .v_flex()
-                    .gap_3()
-                    .child(
-                        Attachment::new()
-                            .status(AttachmentStatus::Pending)
-                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
-                            .content(
-                                AttachmentContent::new()
-                                    .title(AttachmentTitle::new("meeting-notes.pdf"))
-                                    .description(AttachmentDescription::new("Ready to upload")),
-                            ),
-                    )
-                    .child(
-                        Attachment::new()
-                            .status(AttachmentStatus::Uploading)
-                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
-                            .content(
-                                AttachmentContent::new()
-                                    .title(AttachmentTitle::new("design-assets.zip"))
-                                    .description(AttachmentDescription::new("Uploading · 68%"))
-                                    .child(Progress::new("attachment-upload-progress").value(68.)),
-                            )
-                            .actions(
-                                AttachmentActions::new().child(
-                                    Button::new("cancel-upload")
-                                        .ghost()
-                                        .xsmall()
-                                        .icon(IconName::Close)
-                                        .tooltip("Cancel upload"),
-                                ),
-                            ),
-                    )
-                    .child(
-                        Attachment::new()
-                            .status(AttachmentStatus::Processing)
-                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
-                            .content(
-                                AttachmentContent::new()
-                                    .title(
-                                        AttachmentTitle::new("transcript.pdf").with_shimmer_style(
-                                            ShimmerStyle::new()
-                                                .highlight_color(cx.theme().primary)
-                                                .spread(0.45)
-                                                .reverse(true),
-                                        ),
-                                    )
-                                    .description(AttachmentDescription::new("Processing document")),
-                            ),
-                    )
-                    .child(
-                        Attachment::new()
-                            .status(AttachmentStatus::Failed)
-                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
-                            .content(
-                                AttachmentContent::new()
-                                    .title(AttachmentTitle::new("archive.zip"))
-                                    .description(AttachmentDescription::new("Upload failed")),
-                            )
-                            .actions(
-                                AttachmentActions::new()
-                                    .child(Button::new("retry-upload").xsmall().label("Retry"))
-                                    .child(
-                                        Button::new("remove-failed-upload")
-                                            .danger()
-                                            .xsmall()
-                                            .icon(IconName::Delete)
-                                            .tooltip("Remove archive.zip"),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        Attachment::new()
-                            .status(AttachmentStatus::Complete)
-                            .media(
-                                AttachmentMedia::new()
-                                    .text_color(cx.theme().success)
-                                    .child(Icon::new(IconName::CircleCheck)),
-                            )
-                            .content(
-                                AttachmentContent::new()
-                                    .title(AttachmentTitle::new("published-report.pdf"))
-                                    .description(AttachmentDescription::new("Uploaded · 1.8 MB")),
-                            )
-                            .actions(
-                                AttachmentActions::new().child(
-                                    Button::new("remove-complete-upload")
-                                        .ghost()
-                                        .xsmall()
-                                        .icon(IconName::Close)
-                                        .tooltip("Remove published-report.pdf"),
-                                ),
-                            ),
-                    ),
-            )
-            .child(
-                section("Optional slots")
-                    .description("Media, metadata, and actions remain independently composable.")
-                    .max_w(rems(42.5))
-                    .v_flex()
-                    .gap_3()
-                    .child(
-                        Attachment::new().media(
-                            AttachmentMedia::new().child(Icon::new(IconName::FileText)),
-                        ),
-                    )
-                    .child(
-                        Attachment::new().content(
-                            AttachmentContent::new()
-                                .title(AttachmentTitle::new("metadata-only.txt"))
-                                .description(AttachmentDescription::new("Text · 1 KB")),
-                        ),
-                    )
-                    .child(
-                        Attachment::new()
-                            .content(
-                                AttachmentContent::new()
-                                    .title(AttachmentTitle::new("ready-for-review.pdf")),
-                            )
-                            .actions(
-                                AttachmentActions::new().child(
-                                    Button::new("attachment-review-file")
-                                        .ghost()
-                                        .small()
-                                        .label("Open"),
-                                ),
-                            ),
-                    ),
-            )
-            .child(
-                section("Thumbnail")
-                    .description(
-                        "Vertical attachments can turn the media slot into a full-width preview.",
-                    )
-                    .max_w(rems(42.5))
-                    .child(
-                        Attachment::new()
-                            .axis(Axis::Vertical)
-                            .media(
-                                AttachmentMedia::new().src(
-                                    "https://pub.lbkrs.com/files/202503/vEnnmgUM6bo362ya/sdk.svg",
-                                ),
-                            )
-                            .content(
-                                AttachmentContent::new()
-                                    .title(AttachmentTitle::new("sdk-preview.svg"))
-                                    .description(AttachmentDescription::new("SVG · 1280 × 720")),
-                            )
-                            .actions(
-                                AttachmentActions::new().child(
-                                    Button::new("remove-preview")
-                                        .ghost()
-                                        .xsmall()
-                                        .icon(IconName::Close)
-                                        .tooltip("Remove sdk-preview.svg"),
-                                ),
-                            ),
-                    ),
-            )
             .child(
                 section("Composer tiles")
                     .description(
@@ -404,26 +165,252 @@ impl Render for AttachmentStory {
                     ),
             )
             .child(
-                section("Image overlays")
+                section("File metadata")
                     .description(
-                        "An uploading image takes a scrim and a spinner; custom overlays stay on top.",
+                        "Typed metadata with the built-in remove control, or plain child elements.",
+                    )
+                    .max_w(rems(42.5))
+                    .v_flex()
+                    .gap_3()
+                    .child(
+                        Attachment::new()
+                            .id("quarterly-report")
+                            .on_remove(|_, window, cx| {
+                                window.push_notification("Removed quarterly-report.pdf", cx);
+                            })
+                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
+                            .content(
+                                AttachmentContent::new()
+                                    .title(AttachmentTitle::new("quarterly-report.pdf"))
+                                    .description(AttachmentDescription::new("PDF · 2.4 MB")),
+                            ),
+                    )
+                    .child(
+                        Attachment::new()
+                            .small()
+                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
+                            .content(
+                                AttachmentContent::new()
+                                    .child(AttachmentTitle::new("research-data.csv"))
+                                    .child(AttachmentDescription::new("CSV · 840 KB")),
+                            ),
+                    ),
+            )
+            .child(
+                section("Whole-card click")
+                    .description(
+                        "The card opens its target while actions stay independently clickable.",
+                    )
+                    .max_w(rems(42.5))
+                    .v_flex()
+                    .gap_3()
+                    .child(
+                        Attachment::new()
+                            .id("clickable-attachment")
+                            .on_click(|_, window, cx| {
+                                window.push_notification("Opening design-mockups.png…", cx);
+                            })
+                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
+                            .content(
+                                AttachmentContent::new()
+                                    .title(AttachmentTitle::new("design-mockups.png"))
+                                    .description(AttachmentDescription::new("PNG · 1.8 MB")),
+                            )
+                            .actions(
+                                AttachmentActions::new().child(
+                                    Button::new("remove-clickable-attachment")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Close)
+                                        .on_click(|_, window, cx| {
+                                            window.push_notification(
+                                                "Removed design-mockups.png",
+                                                cx,
+                                            );
+                                        }),
+                                ),
+                            ),
+                    ),
+            )
+            .child(
+                section("Upload states")
+                    .description(
+                        "The status draws itself: shimmer, spinner or progress ring, and the retry control.",
+                    )
+                    .max_w(rems(42.5))
+                    .v_flex()
+                    .gap_3()
+                    .child(
+                        Attachment::new()
+                            .status(AttachmentStatus::Pending)
+                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
+                            .content(
+                                AttachmentContent::new()
+                                    .title(AttachmentTitle::new("meeting-notes.pdf"))
+                                    .description(AttachmentDescription::new("Ready to upload")),
+                            ),
+                    )
+                    .child(
+                        Attachment::new()
+                            .id("design-assets")
+                            .status(AttachmentStatus::Uploading)
+                            .progress(68.)
+                            .on_remove(|_, window, cx| {
+                                window.push_notification("Cancelled design-assets.zip", cx);
+                            })
+                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
+                            .content(
+                                AttachmentContent::new()
+                                    .title(AttachmentTitle::new("design-assets.zip"))
+                                    .description(AttachmentDescription::new("Uploading")),
+                            ),
+                    )
+                    .child(
+                        Attachment::new()
+                            .status(AttachmentStatus::Processing)
+                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
+                            .content(
+                                AttachmentContent::new()
+                                    .title(
+                                        AttachmentTitle::new("transcript.pdf").with_shimmer_style(
+                                            ShimmerStyle::new()
+                                                .highlight_color(cx.theme().primary)
+                                                .spread(0.45)
+                                                .reverse(true),
+                                        ),
+                                    )
+                                    .description(AttachmentDescription::new("Processing document")),
+                            ),
+                    )
+                    .child(
+                        Attachment::new()
+                            .id("archive")
+                            .status(AttachmentStatus::Failed)
+                            .tooltip("Network error · Click to retry")
+                            .on_retry(|_, window, cx| {
+                                window.push_notification("Retrying archive.zip…", cx);
+                            })
+                            .on_remove(|_, window, cx| {
+                                window.push_notification("Removed archive.zip", cx);
+                            })
+                            .media(AttachmentMedia::new().child(Icon::new(IconName::FileText)))
+                            .content(
+                                AttachmentContent::new()
+                                    .title(AttachmentTitle::new("archive.zip"))
+                                    .description(AttachmentDescription::new("Upload failed")),
+                            ),
+                    )
+                    .child(
+                        Attachment::new()
+                            .status(AttachmentStatus::Complete)
+                            .media(
+                                AttachmentMedia::new()
+                                    .text_color(cx.theme().success)
+                                    .child(Icon::new(IconName::CircleCheck)),
+                            )
+                            .content(
+                                AttachmentContent::new()
+                                    .title(AttachmentTitle::new("published-report.pdf"))
+                                    .description(AttachmentDescription::new("Uploaded · 1.8 MB")),
+                            )
+                            .actions(
+                                AttachmentActions::new().child(
+                                    Button::new("remove-complete-upload")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Close)
+                                        .tooltip("Remove published-report.pdf"),
+                                ),
+                            ),
+                    ),
+            )
+            .child(
+                section("Optional slots")
+                    .description("Media, metadata, and actions remain independently composable.")
+                    .max_w(rems(42.5))
+                    .v_flex()
+                    .gap_3()
+                    .child(
+                        Attachment::new().media(
+                            AttachmentMedia::new().child(Icon::new(IconName::FileText)),
+                        ),
+                    )
+                    .child(
+                        Attachment::new().content(
+                            AttachmentContent::new()
+                                .title(AttachmentTitle::new("metadata-only.txt"))
+                                .description(AttachmentDescription::new("Text · 1 KB")),
+                        ),
+                    )
+                    .child(
+                        Attachment::new()
+                            .content(
+                                AttachmentContent::new()
+                                    .title(AttachmentTitle::new("ready-for-review.pdf")),
+                            )
+                            .actions(
+                                AttachmentActions::new().child(
+                                    Button::new("attachment-review-file")
+                                        .ghost()
+                                        .small()
+                                        .label("Open"),
+                                ),
+                            ),
+                    ),
+            )
+            .child(
+                section("Thumbnail")
+                    .description(
+                        "Vertical attachments can turn the media slot into a full-width preview.",
                     )
                     .max_w(rems(42.5))
                     .child(
                         Attachment::new()
                             .axis(Axis::Vertical)
-                            .status(AttachmentStatus::Uploading)
+                            .media(
+                                AttachmentMedia::new().src(
+                                    "https://pub.lbkrs.com/files/202503/vEnnmgUM6bo362ya/sdk.svg",
+                                ),
+                            )
+                            .content(
+                                AttachmentContent::new()
+                                    .title(AttachmentTitle::new("sdk-preview.svg"))
+                                    .description(AttachmentDescription::new("SVG · 1280 × 720")),
+                            )
+                            .actions(
+                                AttachmentActions::new().child(
+                                    Button::new("remove-preview")
+                                        .ghost()
+                                        .xsmall()
+                                        .icon(IconName::Close)
+                                        .tooltip("Remove sdk-preview.svg"),
+                                ),
+                            ),
+                    ),
+            )
+            .child(
+                section("Custom overlay")
+                    .description(
+                        "An overlay is painted above the preview and above any status scrim.",
+                    )
+                    .max_w(rems(42.5))
+                    .child(
+                        Attachment::new()
+                            .axis(Axis::Vertical)
                             .media(
                                 AttachmentMedia::new()
                                     .src(
                                         "https://pub.lbkrs.com/files/202503/vEnnmgUM6bo362ya/sdk.svg",
                                     )
-                                    .overlay(Spinner::new().small().color(cx.theme().foreground)),
+                                    .overlay(
+                                        Icon::new(IconName::Play)
+                                            .text_color(cx.theme().foreground),
+                                    ),
                             )
                             .content(
                                 AttachmentContent::new()
                                     .title(AttachmentTitle::new("preview.svg"))
-                                    .description(AttachmentDescription::new("Uploading · 72%")),
+                                    .description(AttachmentDescription::new("SVG · 1280 × 720")),
                             ),
                     ),
             )
