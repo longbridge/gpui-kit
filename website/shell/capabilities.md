@@ -2,6 +2,7 @@
 title: Capabilities
 description: The default-deny model, the fs / storage / clipboard / process surface, where storage lives, and what the sandbox withholds.
 order: 8
+maturity: [preview]
 ---
 
 # Capabilities

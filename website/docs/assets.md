@@ -327,6 +327,6 @@ On WebAssembly, `Assets::new(endpoint)` and `AllAssets::new(endpoint)` use the s
 
 [rust-embed]: https://docs.rs/rust-embed/latest/rust_embed/
 [IconName]: https://docs.rs/gpui-kit-assets/0.6.5/gpui_kit_assets/enum.IconName.html
-[Icon]: https://docs.rs/gpui-component/0.6.5/gpui_component/struct.Icon.html
+[Icon]: https://docs.rs/gpui-component/latest/gpui_component/struct.Icon.html
 [assets]: https://github.com/longbridge/gpui-kit/tree/main/crates/assets/assets/icons
 [gpui-kit-assets]: https://docs.rs/crate/gpui-kit-assets/0.6.5

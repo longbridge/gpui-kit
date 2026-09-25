@@ -3,6 +3,7 @@ title: Examples
 description: Complete standalone and embedded applications, including retained state, HostModule registrations, and native motion.
 order: 3
 pageClass: shell-examples-page
+maturity: [preview]
 ---
 
 # Examples

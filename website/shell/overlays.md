@@ -2,6 +2,7 @@
 title: Overlays
 description: Dialogs, the sheet and toasts, their stacking and dismissal order, and why they may only be opened from an event.
 order: 7
+maturity: [preview]
 ---
 
 # Overlays

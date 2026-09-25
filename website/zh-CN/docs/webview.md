@@ -2,11 +2,12 @@
 title: WebView
 description: 在 GPUI Kit 窗口中嵌入 Wry 原生 WebView，并了解当前的平台与 overlay 限制。
 order: -9.125
+maturity: [experimental, platform-dependent]
 ---
 
 # WebView
 
-[`gpui-wry`](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) 是 GPUI Kit 基于 [Wry](https://github.com/tauri-apps/wry) 的**实验性**集成。需要浏览器行为时可以使用它；[TextView HTML](/zh-CN/component/text-view#html) 用于渲染文档内容，并不是浏览器。要在默认外部浏览器中打开 URL，使用 [`cx.open_url`](./context)。当前集成支持 macOS 和 Windows。仓库示例中的 Linux 路径尚未完成。
+[`gpui-wry`](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) 是 GPUI Kit 基于 [Wry](https://github.com/tauri-apps/wry) 的**实验性**集成。需要浏览器行为时可以使用它；[TextView HTML](../component/text-view.md#html) 用于渲染文档内容，并不是浏览器。要在默认外部浏览器中打开 URL，使用 [`cx.open_url`](./context)。当前集成支持 macOS 和 Windows。仓库示例中的 Linux 路径尚未完成。
 
 ## 运行示例
 

@@ -253,5 +253,5 @@ assert!(archive.visible());
 
 See [Element](./element) for the layout, prepaint, and paint lifecycle, and [Entity](./entity) for state that must outlive an element's presence in the tree.
 
-[Element]: /docs/element
-[Entity]: /docs/entity
+[Element]: ./element.md
+[Entity]: ./entity.md

@@ -58,7 +58,7 @@ gpui-kit = "0.6"
 
 ### 为什么依赖名是 `gpui-pre`
 
-本文中的 **GPUI** 指 [Zed 的 GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)。`gpui-pre` 是将 Zed 指定提交的 GPUI crate 以一组配套版本发布到 crates.io 时使用的 Cargo 包名，供 GPUI Kit 固定可复现的依赖；它不是另一套渲染实现。发布过程会调整包名及依赖清单以适应 crates.io，所以本文的 API 说明以当前 GPUI Kit 固定的 GPUI 版本为准。本仓库固定 `gpui-pre = 0.3.6`；应用通常只依赖 `gpui-kit`，通过 `gpui_kit::*` 使用 GPUI。`gpui-pre` 发布了更新的快照，也不代表当前 GPUI Kit 版本已支持它。
+本文中的 **GPUI** 指 [Zed 的 GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)。`gpui-pre` 是将 Zed 指定提交的 GPUI crate 以一组配套版本发布到 crates.io 时使用的 Cargo 包名，供 GPUI Kit 固定可复现的依赖；它不是另一套渲染实现。发布过程会调整包名及依赖清单以适应 crates.io，所以本文的 API 说明以当前 GPUI Kit 固定的 GPUI 版本为准。本仓库固定 `gpui-pre = {{gpui_pre_version}}`；应用通常只依赖 `gpui-kit`，通过 `gpui_kit::*` 使用 GPUI。`gpui-pre` 发布了更新的快照，也不代表当前 GPUI Kit 版本已支持它。
 
 ## 验证安装
 

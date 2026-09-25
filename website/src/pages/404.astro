@@ -2,20 +2,74 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import Nav from '../components/Nav.astro';
 import { fetchStarCount } from '../lib/github';
+import { latestVersion, siteVersions } from '../lib/versions';
 
 let starCount = 0;
 try { starCount = await fetchStarCount(); } catch {}
 
 const base = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/`;
+// GitHub Pages serves the root build's 404 for every missing path, including
+// ones below /versions/<id>/. The script below uses these to find the same
+// page in another documentation version.
+const versions = siteVersions.map((version) => ({
+  id: version.id,
+  label: version.label,
+  latest: version.id === latestVersion,
+  prefix: version.id === latestVersion ? '' : `/versions/${encodeURIComponent(version.id)}`,
+}));
 ---
 
 <BaseLayout title="404 — Page Not Found" description="The page you are looking for does not exist." robots="noindex, nofollow" alternates={false}>
   <Nav lang="en" currentPath="/404" starCount={starCount} langSwitchHref={`${base}zh-CN`} />
   <main style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:calc(100vh - 3.5rem);padding:2rem;text-align:center;gap:1.25rem;">
     <h1 style="margin:0;font-size:clamp(3rem,8vw,6rem);font-weight:700;letter-spacing:-0.06em;color:var(--foreground);line-height:1;">404</h1>
-    <p style="margin:0;font-size:1.1rem;color:var(--muted-foreground);">The page you are looking for does not exist.</p>
-    <a href={base} style="display:inline-flex;align-items:center;gap:0.4rem;padding:0.55rem 1.1rem;border-radius:var(--radius-control);background:var(--brand);color:var(--brand-contrast);font-size:0.9rem;font-weight:600;text-decoration:none;">
+    <p data-not-found-message style="margin:0;max-width:34rem;font-size:1.1rem;color:var(--muted-foreground);">The page you are looking for does not exist.</p>
+    <a data-not-found-action href={base} style="display:inline-flex;align-items:center;gap:0.4rem;padding:0.55rem 1.1rem;border-radius:var(--radius-control);background:var(--brand);color:var(--brand-contrast);font-size:0.9rem;font-weight:600;text-decoration:none;">
       Go home
     </a>
   </main>
 </BaseLayout>
+
+<script is:inline define:vars={{ versions }}>
+  (async () => {
+    // Split /versions/<id>/rest into the version and the path inside it; any
+    // other path belongs to the default version, which is served at the root.
+    const pathname = location.pathname.replace(/\/+$/, '') || '/';
+    const match = pathname.match(/^\/versions\/([^/]+)(\/.*)?$/);
+    const current = match
+      ? versions.find((version) => version.id === decodeURIComponent(match[1]))
+      : versions.find((version) => version.prefix === '');
+    const inner = match ? match[2] || '/' : pathname;
+    if (!current || !/^\/(?:zh-CN\/)?(?:docs|component|base|shell)(?:\/|$)/.test(inner)) return;
+
+    const zh = inner.startsWith('/zh-CN/');
+    // Prefer the default version, then the others in their listed order (main
+    // first): a page missing from a release is most often new on main.
+    const candidates = [
+      ...versions.filter((version) => version.prefix === '' && version !== current),
+      ...versions.filter((version) => version.prefix !== '' && version !== current),
+    ];
+    for (const version of candidates) {
+      const href = `${version.prefix}${inner}${location.hash}`;
+      try {
+        const response = await fetch(`${version.prefix}${inner}`, { method: 'HEAD' });
+        if (!response.ok) continue;
+      } catch {
+        continue;
+      }
+      const label = (entry) => entry.latest ? `${entry.label}${zh ? '（最新）' : ' (latest)'}` : entry.label;
+      const message = document.querySelector('[data-not-found-message]');
+      const action = document.querySelector('[data-not-found-action]');
+      message.textContent = zh
+        ? `此页面不在 ${label(current)}${current.latest ? '' : ' '}文档中，但在 ${label(version)}${version.latest ? '' : ' '}文档中可以找到。`
+        : `This page is not in the ${label(current)} documentation, but it exists in ${label(version)}.`;
+      action.textContent = zh ? `打开 ${label(version)}${version.latest ? '' : ' '}文档` : `Open in ${label(version)}`;
+      action.href = href;
+      return;
+    }
+  })();
+</script>
+
+<style is:global>
+  @import '../styles/global.css';
+</style>

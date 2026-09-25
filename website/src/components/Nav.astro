@@ -71,8 +71,9 @@ const zhRoot = `${siteRoot}/zh-CN`;
 
 function swapLocale(path: string) {
   if (isZh) {
-    const rest = path.startsWith(zhRoot) ? path.slice(zhRoot.length) : path;
-    return rest || siteRoot || '/';
+    if (!path.startsWith(zhRoot)) return path;
+    // Keep the version prefix: `/versions/main/zh-CN/docs` → `/versions/main/docs`.
+    return `${siteRoot}${path.slice(zhRoot.length)}` || '/';
   }
   const rest = path.startsWith(siteRoot) ? path.slice(siteRoot.length) : path;
   return `${zhRoot}${rest === '/' ? '' : rest}`;
@@ -137,6 +138,7 @@ const currentVersionLabel = siteVersions.find((version) => version.id === curren
           {siteVersions.map((version) => (
             <a
               href={versionHref(version, versionPath)}
+              data-version-link
               class:list={["site-nav__dropdown-item", { "is-current": version.id === currentVersion }]}
               aria-current={version.id === currentVersion ? 'page' : undefined}
             >

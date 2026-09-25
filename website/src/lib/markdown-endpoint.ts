@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { bodyWithoutFrontmatter, documentationLicenseNotice, expandSnippets } from './llms';
 import { isLatestVersion } from './versions';
+import { expandDocVariables } from './doc-variables.js';
 
 /**
  * Serves a page's markdown at its own `.md` address, the way the published site
@@ -22,7 +23,7 @@ export function markdownResponse(options: {
   const front = [`url: ${options.route}.md`];
   if (options.description) front.push(`description: ${options.description}`);
 
-  const body = expandSnippets(bodyWithoutFrontmatter(source), dirname(absolute));
+  const body = expandDocVariables(expandSnippets(bodyWithoutFrontmatter(source), dirname(absolute)));
   const lang = options.route.startsWith('/zh-CN/') ? 'zh-CN' : 'en';
   const notice = documentationLicenseNotice(lang, `https://gpui-kit.com${options.route}`);
   const text = `---\n${front.join('\n')}\n---\n\n${body.trimEnd()}\n\n> ${notice}\n`;

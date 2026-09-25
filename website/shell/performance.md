@@ -2,6 +2,7 @@
 title: Performance
 description: What a script costs once frame rate stops being the variable — invalidation against description size, the View as the boundary that bounds both, and the two failures FPS cannot tell apart.
 order: 14
+maturity: [preview]
 ---
 
 # Performance

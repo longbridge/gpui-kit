@@ -81,7 +81,7 @@ div()
     .font_weight(FontWeight::BOLD)
 ```
 
-这些就是普通的 [`Styled`](https://docs.rs/gpui-pre/0.3.6/gpui/trait.Styled.html)
+这些就是普通的 [`Styled`](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/trait.Styled.html)
 方法，与样式链的其余部分组合使用。
 
 ## 打包自定义字体

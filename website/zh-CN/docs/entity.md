@@ -353,7 +353,7 @@ cx.spawn(async move |_, cx| {
 
 它们是两种独立的信号：`notify()` 不会发送 Event，`emit(event)` 本身也不会通知渲染者。某次状态变化如果既需要重绘，又需要语义事件，可以明确地各触发一次。观察者可以用收到的句柄读取目标 Entity，但仍须避免重入回调链中已被借用的 Entity。GPUI 通过 effect cycle 分发这些回调，此时当前 update 的借用已结束；不要假设回调会在 `update` 闭包内部执行。
 
-应把 `observe` 或 `subscribe` 返回的 [`Subscription`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Subscription.html) 保存在发起订阅的 Entity 上，放在 `_subscription` 字段或 `_subscriptions: Vec<Subscription>` 字段中：
+应把 `observe` 或 `subscribe` 返回的 [`Subscription`](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.Subscription.html) 保存在发起订阅的 Entity 上，放在 `_subscription` 字段或 `_subscriptions: Vec<Subscription>` 字段中：
 
 ```rs
 enum ChatEvent {
@@ -465,6 +465,6 @@ fn handles_share_state_and_control_lifetime(cx: &mut TestAppContext) {
 
 对于父级频繁重绘、自己却经常不变的昂贵子 View，GPUI 还提供 `child.clone().cached(style)` 和等价的 `AnyView::cached(style)`。父级必须保留同一个子 Entity，`style` 也必须给出确定的外层尺寸，因为 GPUI 在布局阶段可能跳过内容的 render。未变化的缓存子级可以重放先前的子树；通知、边界尺寸或继承的绘图上下文变化则会触发重建。缓存边界与元素状态、虚拟列表的区别，见 [View Cache](./view-cache)。
 
-[Entity]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.Entity.html
-[WeakEntity]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.WeakEntity.html
-[Event]: /zh-CN/docs/event
+[Entity]: https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.Entity.html
+[WeakEntity]: https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.WeakEntity.html
+[Event]: ./event.md

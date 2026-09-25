@@ -539,6 +539,6 @@ When an existing interactive element such as `div()` already provides the behavi
 `Element::id()` returning an `ElementId` does more than label pixels: it creates stable identity across frames. Keep IDs unique within their nearest keyed ancestor, and do not add an ID unless the element or an attached behavior needs identity.
 :::
 
-[Element]: https://docs.rs/gpui-pre/0.3.6/gpui/trait.Element.html
-[IntoElement]: https://docs.rs/gpui-pre/0.3.6/gpui/trait.IntoElement.html
-[AnyElement]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.AnyElement.html
+[Element]: https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/trait.Element.html
+[IntoElement]: https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/trait.IntoElement.html
+[AnyElement]: https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.AnyElement.html

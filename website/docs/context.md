@@ -30,7 +30,7 @@ Read the table as a progression: `App` is available first in `application().run`
 
 `Context<T>` dereferences to `App`, so code with `cx: &mut Context<T>` can already call App APIs and does not need a separate `&mut App`. It also knows which Entity is current; plain `App` does not. Window remains separate because the same Entity may appear in different windows, while a data-only update may not belong to any window. Window also owns per-window state keyed by [ElementId](./element_id). Async contexts are handles, not long-lived `&mut App` or `&mut Window` borrows.
 
-The [GPUI `Context<T>` source](https://docs.rs/crate/gpui-pre/0.3.6/source/src/app/context.rs) defines the entity-specific methods used below.
+The [GPUI `Context<T>` source](https://docs.rs/crate/gpui-pre/{{gpui_pre_version}}/source/src/app/context.rs) defines the entity-specific methods used below.
 
 GPUI Kit applications depend on `gpui-kit` and import GPUI through `use gpui_kit::*;`. Call `gpui_kit::init(cx)` before creating component-backed Views. An application-wide [Global](./global) lives on `App`; a component or feature View keeps retained state in an [Entity].
 
@@ -183,7 +183,7 @@ fn finish_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
 }
 ```
 
-The deferred closure still receives `this: &mut Self`; do not call `update` on that same Entity from inside it. Deferral is for work that needs the current update to finish, such as focus restoration after changing the UI tree. [`window.on_next_frame(...)`](https://docs.rs/crate/gpui-pre/0.3.6/source/src/window.rs) instead queues a callback for the next platform frame request and wakes the frame source. The callback runs before any drawing for that request; registering it does not mark the window dirty or cause a render. If its work changes visible Entity state, call `cx.notify()` from the callback. Use `window.request_animation_frame()` when the intent is to request a redraw on the next frame. A closed window or released View may prevent deferred work from running, so do not use it as a durable job queue.
+The deferred closure still receives `this: &mut Self`; do not call `update` on that same Entity from inside it. Deferral is for work that needs the current update to finish, such as focus restoration after changing the UI tree. [`window.on_next_frame(...)`](https://docs.rs/crate/gpui-pre/{{gpui_pre_version}}/source/src/window.rs) instead queues a callback for the next platform frame request and wakes the frame source. The callback runs before any drawing for that request; registering it does not mark the window dirty or cause a render. If its work changes visible Entity state, call `cx.notify()` from the callback. Use `window.request_animation_frame()` when the intent is to request a redraw on the next frame. A closed window or released View may prevent deferred work from running, so do not use it as a durable job queue.
 
 ## Async work
 
@@ -292,6 +292,6 @@ A parent can use `cx.subscribe(&draft, ...)` to handle `SaveRequested`; the even
 
 GPUI convention names every context parameter `cx`, regardless of its concrete type, and names the Window parameter `window`.
 
-[Entity]: /docs/entity
-[Event]: /docs/event
-[Global]: /docs/global
+[Entity]: ./entity.md
+[Event]: ./event.md
+[Global]: ./global.md

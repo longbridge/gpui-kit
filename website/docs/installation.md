@@ -58,7 +58,7 @@ The `0.6` requirement selects a compatible 0.6.x Kit release; this repository cu
 
 ### Why the dependency is named `gpui-pre`
 
-Throughout these docs, **GPUI** means [Zed's GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui). `gpui-pre` is the crates.io package name used to publish a snapshot of GPUI from a recorded Zed commit, alongside its related GPUI crates. It provides a reproducible publication and version alignment path for GPUI Kit; it is not another rendering implementation. The publication process adjusts package names and dependency manifests for crates.io, so API references in this manual target the GPUI version pinned by this Kit release. In this repository that is `gpui-pre = 0.3.6`; application code normally depends only on `gpui-kit` and imports GPUI through `gpui_kit::*`. A newer `gpui-pre` snapshot does not by itself mean that the current GPUI Kit release supports it.
+Throughout these docs, **GPUI** means [Zed's GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui). `gpui-pre` is the crates.io package name used to publish a snapshot of GPUI from a recorded Zed commit, alongside its related GPUI crates. It provides a reproducible publication and version alignment path for GPUI Kit; it is not another rendering implementation. The publication process adjusts package names and dependency manifests for crates.io, so API references in this manual target the GPUI version pinned by this Kit release. In this repository that is `gpui-pre = {{gpui_pre_version}}`; application code normally depends only on `gpui-kit` and imports GPUI through `gpui_kit::*`. A newer `gpui-pre` snapshot does not by itself mean that the current GPUI Kit release supports it.
 
 ## Verify the installation
 

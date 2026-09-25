@@ -2,6 +2,7 @@
 title: Capabilities
 description: 默认全部拒绝的模型，fs / storage / clipboard / process 接口，存储位置，以及沙箱裁掉了什么。
 order: 8
+maturity: [preview]
 ---
 
 # Capabilities

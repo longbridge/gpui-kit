@@ -65,6 +65,6 @@ Collapsible::new()
     .content(options)
 ```
 
-The content remains mounted while closed so it can be measured and immediately reverse if toggled mid-animation. Without `motion_id`, the component keeps the immediate mount/unmount behavior. See the [GPUI Base Motion guide](/base/motion) for timing, reduced-motion, and performance details.
+The content remains mounted while closed so it can be measured and immediately reverse if toggled mid-animation. Without `motion_id`, the component keeps the immediate mount/unmount behavior. See the [GPUI Base Motion guide](../base/motion.md) for timing, reduced-motion, and performance details.
 
 [Collapsible]: https://docs.rs/gpui-component/latest/gpui_component/collapsible/struct.Collapsible.html

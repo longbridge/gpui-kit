@@ -6,7 +6,7 @@ order: -2.76
 
 # TextSystem
 
-This page follows the `gpui-pre` 0.3.6 API pinned by this repository. `gpui-pre` is the published snapshot and version-alignment mechanism for GPUI, not a separate text engine. Start with a text element; use `TextSystem` directly when your element needs the glyph geometry that GPUI normally manages.
+This page follows the `gpui-pre` {{gpui_pre_version}} API pinned by this repository. `gpui-pre` is the published snapshot and version-alignment mechanism for GPUI, not a separate text engine. Start with a text element; use `TextSystem` directly when your element needs the glyph geometry that GPUI normally manages.
 
 GPUI's `TextSystem` resolves [fonts](./fonts) and supplies font metrics. Each [Window](./window) has a `WindowTextSystem` that adds a line-layout cache to the shared text system. Ordinary text elements and GPUI Kit controls use these services for you. Reach for `window.text_system()` when writing custom text geometry, a chart label, an editor, or another element that must use shaped glyph positions directly.
 

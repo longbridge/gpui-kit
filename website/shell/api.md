@@ -2,6 +2,7 @@
 title: API Reference
 description: Every name a script can import or reach — the four built-in modules, the cx and window globals, and the element methods that are not styles.
 order: 10
+maturity: [preview]
 ---
 
 # API Reference

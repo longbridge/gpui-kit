@@ -8,7 +8,7 @@ order: -2.62
 
 **Action** 表达应用可以执行的操作。快捷键、菜单项、命令面板、按钮或另一个 Action handler 都可以派发同一个有类型的值。GPUI 把它路由到 [Element](./element) 树中负责该命令的区域。[Event](./event) 则沿另一个方向工作：状态改变后，它报告已经发生的事情。
 
-[GPUI Action](https://docs.rs/crate/gpui-pre/0.3.6/source/src/action.rs) 源码定义了本页介绍的宏、trait 和 registry。
+[GPUI Action](https://docs.rs/crate/gpui-pre/{{gpui_pre_version}}/source/src/action.rs) 源码定义了本页介绍的宏、trait 和 registry。
 
 本页说明命令定义与派发。若尚未建立键盘目标，先读 [Focus](./focus)；按键写法、Context 匹配和 Keymap 设置见 [KeyBinding](./keybinding)。
 

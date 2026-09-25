@@ -2,13 +2,14 @@
 title: Native Extensions
 description: Integrate native menus and child views with GPUI Kit, including handles, layout, input, lifetime, and platform limits.
 order: -9.1
+maturity: [platform-dependent]
 ---
 
 # Native Extensions
 
 A native extension attaches an OS control or view to a GPUI window. The two concrete integrations in this repository show different paths: [NativeMenu](https://github.com/longbridge/gpui-kit/tree/main/crates/component/src/native_menu) uses the operating system's menu API, while [gpui-wry](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) embeds a native WebView. Both cross the GPUI/OS boundary; neither is implemented by launching another application.
 
-Use `NativeMenu` when a popup must escape a small window's bounds or follow the system menu appearance. Use the GPUI `PopupMenu` when the menu needs to participate in GPUI's own overlay composition. Use `gpui-wry` only when the screen needs an actual browser engine and can reserve a rectangle for a native child view; [TextView HTML](/component/text-view#html) handles document display, and [`cx.open_url`](./context#open-a-url-in-the-default-browser) opens the user's browser. `gpui-wry` is experimental.
+Use `NativeMenu` when a popup must escape a small window's bounds or follow the system menu appearance. Use the GPUI `PopupMenu` when the menu needs to participate in GPUI's own overlay composition. Use `gpui-wry` only when the screen needs an actual browser engine and can reserve a rectangle for a native child view; [TextView HTML](../component/text-view.md#html) handles document display, and [`cx.open_url`](./context#open-a-url-in-the-default-browser) opens the user's browser. `gpui-wry` is experimental.
 
 | Platform | NativeMenu | Embedded WebView in this repository |
 | --- | --- | --- |
@@ -20,7 +21,7 @@ The Linux menu fallback preserves the `NativeMenu` API, but it is GPUI content r
 
 ## Source and build map
 
-The workspace pins `gpui-pre` to `=0.3.6` in the root `Cargo.toml`. Check the source in this checkout before copying an adapter to a different GPUI version. The relevant paths are:
+The workspace pins `gpui-pre` to `={{gpui_pre_version}}` in the root `Cargo.toml`. Check the source in this checkout before copying an adapter to a different GPUI version. The relevant paths are:
 
 | Concern | Source in this repository | Build or exercise from the repository root |
 | --- | --- | --- |

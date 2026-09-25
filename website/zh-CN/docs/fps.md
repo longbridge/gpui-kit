@@ -93,7 +93,7 @@ GPUI 的工作跨越 CPU 与 GPU：应用状态、元素构造、布局和绘制
 5 ms、平台提交耗时 5 ms，也不表示 GPU 和合成器在 5 ms 内把画面显示出来。
 profiler 还提供 `dirty_to_draw_duration()` 和 `PresentTiming` 供自行埋点，
 但它们与 HUD 的 `FRAME` 是不同的测量。参见 GPUI 的
-[帧计时定义](https://docs.rs/gpui-pre/0.3.6/gpui/profiler/struct.FrameTiming.html)和
+[帧计时定义](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/profiler/struct.FrameTiming.html)和
 [sampler 源码](https://github.com/longbridge/gpui-kit/blob/main/crates/fps/src/sampler.rs)。
 
 ## 主读数
@@ -190,7 +190,7 @@ collector。trace 是进程级的，可用 `gpui::profiler::set_trace_enabled(tr
 关闭会清空缓冲区。HUD 显示期间会管理这个开关。这些原始记录可把帧与应用事件关联，
 包括首次失效时间 `dirty_at` 和 present 提交，但也不直接测 GPU 完成或像素何时出现在屏幕上。
 参见 GPUI 的
-[collector API](https://docs.rs/gpui-pre/0.3.6/gpui/profiler/struct.FrameTimingCollector.html)和
+[collector API](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/profiler/struct.FrameTimingCollector.html)和
 [GPUI Kit monitor 源码](https://github.com/longbridge/gpui-kit/blob/main/crates/fps/src/monitor.rs)。
 
 ## 最初的几帧不计入统计
@@ -215,4 +215,4 @@ collector。trace 是进程级的，可用 `gpui::profiler::set_trace_enabled(tr
 frame trace 也会放掉（除非别处还持有）。下一次渲染再从一个空的采样器重新开始：trace 缓冲区随开关被清空了，
 中间那些帧也本来就不归谁报告。
 
-[`Entity::cached`]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.Entity.html#method.cached
+[`Entity::cached`]: https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.Entity.html#method.cached

@@ -7,7 +7,9 @@
     "build": "bunx --bun astro build && bunx pagefind --site ${SITE_OUT_DIR:-dist}",
     "test:showcases": "bun test tests/showcases.test.ts tests/showcase-browser.test.ts",
     "test:seo": "bun test tests/seo.test.ts",
-    "test:versioned-examples": "PUBLIC_SITE_BASE=/versions/test/ SITE_OUT_DIR=dist/versions/test bunx --bun astro build && SITE_TEST_DIST=../dist/versions/test/ bun test tests/seo.test.ts --test-name-pattern 'versioned documentation examples'",
+    "test:docs": "bun test tests/doc-sources.test.ts",
+    "test:links": "bun test tests/links.test.ts",
+    "test:versioned-examples": "PUBLIC_SITE_BASE=/versions/test/ SITE_OUT_DIR=dist/versions/test bunx --bun astro build && SITE_TEST_DIST=../dist/versions/test/ bun test tests/seo.test.ts --test-name-pattern 'versioned documentation examples' && SITE_TEST_DIST=../dist/versions/test/ SITE_TEST_BASE=/versions/test/ bun test tests/links.test.ts",
     "preview": "bunx --bun astro preview",
     "astro": "bunx --bun astro"
   },

@@ -7,9 +7,9 @@ description: 渲染 Markdown 与 HTML 文本，并支持自定义 Markdown 插�
 
 `TextView` 用于在 GPUI 中渲染格式化文本。它支持 Markdown、简单 HTML、文本选择、代码块操作，以及通过 Markdown 插件解析和渲染项目自定义语法。
 
-标准实现现在位于 `gpui-base`；本模块保留兼容重导出和组件主题适配。仅使用 Base 时的设置、完整默认样式及可选语法高亮请参阅 [GPUI Base TextView](/zh-CN/base/text-view)。
+标准实现现在位于 `gpui-base`；本模块保留兼容重导出和组件主题适配。仅使用 Base 时的设置、完整默认样式及可选语法高亮请参阅 [GPUI Base TextView](../base/text-view.md)。
 
-`TextView::selectable(true)` 使用 `gpui-base` 提供的窗口级文本选择引擎。如果要让普通文本或自定义 renderer 参与同一选择，请参阅 [GPUI Base Text Selection](/base/text-selection)（英文）。
+`TextView::selectable(true)` 使用 `gpui-base` 提供的窗口级文本选择引擎。如果要让普通文本或自定义 renderer 参与同一选择，请参阅 [GPUI Base Text Selection](../base/text-selection.md)。
 
 ## 导入
 
@@ -56,7 +56,7 @@ TextView::new(&self.reply).stream_fade(true)
 
 淡入以渲染后的文字为准：`push_str`，或者 `set_text` 传入以当前文本为前缀的更长文本，新增的部分从透明渐变到正常颜色，用时 350ms、ease-out 曲线，这是从 Claude 实测得到的节奏：比模型每块 50–300ms 的到达间隔更长，于是相邻几块的淡入互相重叠，尾部呈现为一段渐变，而不是最新一块突然变实。代码块里的代码和表格单元格里的文字同样参与。流式过程中被补齐的 Markdown 标记（`**bo` 变成粗体 `bold`）只让发生变化的字形重新淡入，不会整段闪烁。替换当前内容的文本直接显示；系统开启减少动态效果时也直接显示。不开启就没有任何动画。
 
-需要自定义时长、缓动，或者让每块按词逐个浮现时，通过 `.motion(...)` 传入 `TextViewMotion`，详见 [GPUI Base TextView](/zh-CN/base/text-view#保留状态与动态更新)。
+需要自定义时长、缓动，或者让每块按词逐个浮现时，通过 `.motion(...)` 传入 `TextViewMotion`，详见 [GPUI Base TextView](../base/text-view.md#保留状态与动态更新)。
 
 ### 高亮文本范围
 
@@ -129,7 +129,7 @@ TextView::new(&state).on_reveal(move |line, _, _| {
 
 在触摸屏上，长按会选中手指下的单词，手指按住不放时选区跟随手指移动。抬起手指后，选区上方会出现包含 `复制` 和 `全选` 的编辑菜单，并在选区两端各显示一个拖动 handle。拖动 handle 会移动对应的一端，另一端保持不动；`全选` 选中被按下的那个视图，其 handle 仍可继续调整结果。
 
-handle 和菜单由 [`Root`](/zh-CN/component/root) 为整个窗口选区绘制，因此跨多个视图的选区也能覆盖到。点击其他位置会清除它们；手指滚动内容时菜单会暂时让开。
+handle 和菜单由 [`Root`](./root.md) 为整个窗口选区绘制，因此跨多个视图的选区也能覆盖到。点击其他位置会清除它们；手指滚动内容时菜单会暂时让开。
 
 ## 图片
 

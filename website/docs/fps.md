@@ -114,7 +114,7 @@ This distinction matters: a 5 ms `FRAME` says that GPUI's draw completed in
 took 5 ms, or that the GPU and compositor displayed it within 5 ms. The
 profiler also exposes `dirty_to_draw_duration()` and `PresentTiming` for
 custom instrumentation, but those are separate measurements from this HUD's
-`FRAME`. See GPUI's [frame timing definitions](https://docs.rs/gpui-pre/0.3.6/gpui/profiler/struct.FrameTiming.html)
+`FRAME`. See GPUI's [frame timing definitions](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/profiler/struct.FrameTiming.html)
 and the [sampler implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/fps/src/sampler.rs).
 
 ## The headline
@@ -241,7 +241,7 @@ The HUD manages this switch while visible. These raw records are useful when
 you need to correlate a frame with an app event, including the first
 invalidation timestamp (`dirty_at`) and present submission. They do not by
 themselves measure GPU completion or photons on screen. See GPUI's
-[collector API](https://docs.rs/gpui-pre/0.3.6/gpui/profiler/struct.FrameTimingCollector.html)
+[collector API](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/profiler/struct.FrameTimingCollector.html)
 and [GPUI Kit's monitor](https://github.com/longbridge/gpui-kit/blob/main/crates/fps/src/monitor.rs).
 
 ## The first frames are not measured
@@ -277,4 +277,4 @@ frame trace unless something else is holding it. The next render starts it all
 again from an empty sampler: the trace buffer was cleared with the switch, and
 the frames the window drew meanwhile were nobody's to report.
 
-[`Entity::cached`]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.Entity.html#method.cached
+[`Entity::cached`]: https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.Entity.html#method.cached

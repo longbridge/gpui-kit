@@ -2,13 +2,14 @@
 title: Native Extensions
 description: 说明如何将系统菜单和原生子视图接入 GPUI Kit，包括 handle、布局、输入、生命周期与平台限制。
 order: -9.1
+maturity: [platform-dependent]
 ---
 
 # Native Extensions
 
 Native extension 是把操作系统控件或视图接入 GPUI window。本仓库有两条具体路径：[NativeMenu](https://github.com/longbridge/gpui-kit/tree/main/crates/component/src/native_menu) 使用系统菜单 API，[gpui-wry](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) 嵌入原生 WebView。两者都跨越 GPUI 与系统的边界；启动另一个应用不属于这里讨论的原生控件接入。
 
-当弹出菜单需要超出小窗口边界，或应遵循系统菜单外观时，使用 `NativeMenu`；若菜单应参与 GPUI 自身的 overlay 合成，使用 GPUI `PopupMenu`。只有屏幕确实需要浏览器引擎，并能为原生子视图留出一块矩形区域时，才使用 `gpui-wry`。[TextView HTML](/zh-CN/component/text-view#html) 用于显示文档内容，[`cx.open_url`](./context#在默认浏览器中打开-url) 会打开用户的默认浏览器。`gpui-wry` 仍属实验性功能。
+当弹出菜单需要超出小窗口边界，或应遵循系统菜单外观时，使用 `NativeMenu`；若菜单应参与 GPUI 自身的 overlay 合成，使用 GPUI `PopupMenu`。只有屏幕确实需要浏览器引擎，并能为原生子视图留出一块矩形区域时，才使用 `gpui-wry`。[TextView HTML](../component/text-view.md#html) 用于显示文档内容，[`cx.open_url`](./context#在默认浏览器中打开-url) 会打开用户的默认浏览器。`gpui-wry` 仍属实验性功能。
 
 | 平台 | NativeMenu | 本仓库的嵌入式 WebView |
 | --- | --- | --- |
@@ -20,7 +21,7 @@ Linux 的菜单回退实现保持 `NativeMenu` API，但内容由 GPUI 绘制，
 
 ## 源码与构建路径
 
-工作区根目录的 `Cargo.toml` 把 `gpui-pre` 固定为 `=0.3.6`。把 adapter 移植到其他 GPUI 版本前，请先核对当前 checkout 的源码。相关路径如下：
+工作区根目录的 `Cargo.toml` 把 `gpui-pre` 固定为 `={{gpui_pre_version}}`。把 adapter 移植到其他 GPUI 版本前，请先核对当前 checkout 的源码。相关路径如下：
 
 | 内容 | 本仓库源码 | 在仓库根目录构建或运行 |
 | --- | --- | --- |

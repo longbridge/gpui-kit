@@ -2,6 +2,7 @@
 title: Hosting
 description: Rust 这一侧的全貌——运行时的生命周期、挂载脚本 View、从 Host 状态刷新它、指标、退出请求与 hot-reload。
 order: 11
+maturity: [preview]
 ---
 
 # Hosting

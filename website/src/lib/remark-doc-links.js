@@ -1,4 +1,5 @@
 import { dirname, relative, resolve, sep } from 'node:path';
+import { ROOT_CONTENT_LINK } from './doc-sources.js';
 
 // VitePress rewrote in-repo links like `./assets.md` or `../base/index.md` to
 // their published route. Astro leaves them as written, so every one of the 400+
@@ -29,7 +30,15 @@ export function remarkDocLinks({ base = '/' } = {}) {
 
     const rewrite = (node) => {
       const url = node.url;
-      if (!url || isExternal(url) || url.startsWith('#') || url.startsWith('/')) return;
+      if (!url || isExternal(url) || url.startsWith('#')) return;
+      // Sources are checked for site-root links to documentation, but released
+      // snapshots predate that check. Keep their links inside the version being
+      // built instead of sending the reader to the default version.
+      if (ROOT_CONTENT_LINK.test(url)) {
+        node.url = `${prefix}${url}` || '/';
+        return;
+      }
+      if (url.startsWith('/')) return;
 
       const hashAt = url.indexOf('#');
       const target = hashAt === -1 ? url : url.slice(0, hashAt);

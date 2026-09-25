@@ -7,9 +7,9 @@ description: Renders Markdown and HTML text with optional custom Markdown plugin
 
 `TextView` renders formatted text in GPUI. It supports Markdown and simple HTML, text selection, code block actions, and custom Markdown plugins for project-specific syntax.
 
-The canonical implementation now lives in `gpui-base`; this module remains a compatibility re-export and provides component-theme adaptation. Base-only setup, complete default styling, and opt-in syntax highlighting are documented on [GPUI Base TextView](/base/text-view).
+The canonical implementation now lives in `gpui-base`; this module remains a compatibility re-export and provides component-theme adaptation. Base-only setup, complete default styling, and opt-in syntax highlighting are documented on [GPUI Base TextView](../base/text-view.md).
 
-TextView is selectable by default and uses the shared window selection engine from `gpui-base`. Use `.selectable(false)` only when selection must be disabled. See [GPUI Base Text Selection](/base/text-selection) when integrating plain text or a custom renderer with the same selection.
+TextView is selectable by default and uses the shared window selection engine from `gpui-base`. Use `.selectable(false)` only when selection must be disabled. See [GPUI Base Text Selection](../base/text-selection.md) when integrating plain text or a custom renderer with the same selection.
 
 ## Import
 
@@ -93,7 +93,7 @@ reduced motion. Nothing animates unless the view opts in.
 
 Pass a `TextViewMotion` through `.motion(...)` to choose the duration or
 easing yourself, or to reveal each chunk word by word; see
-[GPUI Base TextView](/base/text-view#retained-state-and-streaming-updates).
+[GPUI Base TextView](../base/text-view.md#retained-state-and-streaming-updates).
 
 ### Highlight ranges
 
@@ -215,7 +215,7 @@ following the finger while it stays down. Lifting it opens an edit menu with
 Dragging a handle moves that end while the other stays put; `Select All`
 selects the view that was pressed, and its handles keep working on the result.
 
-The handles and the menu are drawn by [`Root`](/component/root) for the whole
+The handles and the menu are drawn by [`Root`](./root.md) for the whole
 window selection, so they cover a selection that spans several views. A tap
 elsewhere clears them, and the menu steps aside while the content scrolls
 under a finger.

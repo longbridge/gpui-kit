@@ -526,6 +526,6 @@ canvas(
 `Element::id()` 返回 `ElementId` 不只是给像素加一个标签，它会建立跨帧的稳定 identity。ID 在最近的 keyed ancestor 中必须唯一；只有 Element 或附加行为确实需要 identity 时才添加 ID。
 :::
 
-[Element]: https://docs.rs/gpui-pre/0.3.6/gpui/trait.Element.html
-[IntoElement]: https://docs.rs/gpui-pre/0.3.6/gpui/trait.IntoElement.html
-[AnyElement]: https://docs.rs/gpui-pre/0.3.6/gpui/struct.AnyElement.html
+[Element]: https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/trait.Element.html
+[IntoElement]: https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/trait.IntoElement.html
+[AnyElement]: https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.AnyElement.html

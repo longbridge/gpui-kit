@@ -2,6 +2,7 @@
 title: WebAssembly
 description: 使用仓库中的 WebAssembly 示例，在浏览器中构建和运行 GPUI Kit 应用。
 order: -3.5
+maturity: [preview]
 ---
 
 # WebAssembly
@@ -12,7 +13,7 @@ GPUI 和 GPUI Kit 的 WebAssembly 支持目前主要用于**在浏览器中展�
 
 GPUI Kit 可以在浏览器中渲染与桌面端共用的 Rust 视图和组件。Web 目标是 `wasm32-unknown-unknown`：Rust 生成 WebAssembly 模块，`wasm-bindgen` 生成 JavaScript 绑定，网页负责加载并启动应用。浏览器提供 canvas、输入和网络环境，因此只有桌面端的 `main` 函数还不足以作为 Web 入口。
 
-在当前工作区中，[`gpui_web` 是 Cargo 包 `gpui-pre-web` 0.3.6 的别名](https://github.com/longbridge/gpui-kit/blob/main/Cargo.toml)。[`gpui-kit` 将它作为仅用于 WASM 的依赖](https://github.com/longbridge/gpui-kit/blob/main/crates/kit/Cargo.toml)，并以 `gpui_kit::web` 重新导出；[画廊 crate](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/Cargo.toml)直接依赖的是 `gpui-kit`，并没有另行直接依赖 `gpui-pre-web`。画廊的 `cdylib`、导出的 `run(...)`、Web 平台初始化和 JavaScript 加载器，共同提供桌面端 `main` 所没有的浏览器入口。
+在当前工作区中，[`gpui_web` 是 Cargo 包 `gpui-pre-web` {{gpui_pre_version}} 的别名](https://github.com/longbridge/gpui-kit/blob/main/Cargo.toml)。[`gpui-kit` 将它作为仅用于 WASM 的依赖](https://github.com/longbridge/gpui-kit/blob/main/crates/kit/Cargo.toml)，并以 `gpui_kit::web` 重新导出；[画廊 crate](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/Cargo.toml)直接依赖的是 `gpui-kit`，并没有另行直接依赖 `gpui-pre-web`。画廊的 `cdylib`、导出的 `run(...)`、Web 平台初始化和 JavaScript 加载器，共同提供桌面端 `main` 所没有的浏览器入口。
 
 [组件画廊](https://gpui-kit.com/gallery/)是最快可运行的示例。它的 [Rust 入口](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)、[构建脚本](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/scripts/build-wasm.sh)和 [JavaScript 加载器](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/www/src/main.js)展示了从 GPUI Kit 视图到浏览器页面的完整路径。
 
@@ -66,7 +67,7 @@ GPUI Web 平台启动时的字体数据库是**空的**。画廊使用 `include_
 
 对于符合条件、打包字体缺少的 emoji，以及横排汉字、假名和现代谚文字素，`CanvasFontFallback::EmojiAndCjk` 可让浏览器用本机字体测量并绘制。GPUI 已加载的字体仍优先。回退按单个字素工作，因此字形覆盖、字距和排版特性取决于浏览器，不能代替完整的中日韩字体。默认策略仅覆盖 emoji，`Disabled` 则只使用已加载字体。策略在构造 `WebPlatform` 时确定，之后不能更改。
 
-GPUI 也支持**启动后加载字体**。在本仓库固定的 GPUI 版本（`gpui-pre` 0.3.6）中，`TextSystem::add_fonts` 可以通过 `Cow::Owned` 接收下载的字体字节，并使字体解析及行布局缓存失效。异步请求得到并检查过有效的原始字体文件后，在应用上下文注册并刷新窗口：
+GPUI 也支持**启动后加载字体**。在本仓库固定的 GPUI 版本（`gpui-pre` {{gpui_pre_version}}）中，`TextSystem::add_fonts` 可以通过 `Cow::Owned` 接收下载的字体字节，并使字体解析及行布局缓存失效。异步请求得到并检查过有效的原始字体文件后，在应用上下文注册并刷新窗口：
 
 ```rust
 use std::borrow::Cow;

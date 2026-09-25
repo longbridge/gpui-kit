@@ -253,5 +253,5 @@ assert!(archive.visible());
 
 布局、prepaint 和 paint 生命周期见 [Element](./element)；需要在元素离开渲染树后继续存在的状态见 [Entity](./entity)。
 
-[Element]: /zh-CN/docs/element
-[Entity]: /zh-CN/docs/entity
+[Element]: ./element.md
+[Entity]: ./entity.md

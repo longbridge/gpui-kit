@@ -1,6 +1,7 @@
 ---
 title: TitleBar
 description: 支持窗口控制和自定义内容的自定义标题栏组件。
+maturity: [platform-dependent]
 ---
 
 # TitleBar

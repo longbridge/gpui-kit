@@ -2,11 +2,12 @@
 title: WebView
 description: Embed a native Wry WebView in a GPUI Kit window, with the current platform and overlay limitations.
 order: -9.125
+maturity: [experimental, platform-dependent]
 ---
 
 # WebView
 
-[`gpui-wry`](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) is GPUI Kit's **experimental** integration with [Wry](https://github.com/tauri-apps/wry). Use it when a screen needs browser behavior; [TextView HTML](/component/text-view#html) renders document content but is not a browser. To open a URL in the user's default external browser, use [`cx.open_url`](./context#open-a-url-in-the-default-browser). The integration currently supports macOS and Windows. The Linux path in the repository's example is unfinished.
+[`gpui-wry`](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) is GPUI Kit's **experimental** integration with [Wry](https://github.com/tauri-apps/wry). Use it when a screen needs browser behavior; [TextView HTML](../component/text-view.md#html) renders document content but is not a browser. To open a URL in the user's default external browser, use [`cx.open_url`](./context#open-a-url-in-the-default-browser). The integration currently supports macOS and Windows. The Linux path in the repository's example is unfinished.
 
 ## Run the example
 

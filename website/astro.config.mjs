@@ -10,6 +10,8 @@ import { rehypeHeadingIds, unified } from '@astrojs/markdown-remark';
 import { remarkCallouts } from './src/lib/remark-callouts.js';
 import { remarkComparisonStatus } from './src/lib/remark-comparison-status.js';
 import { remarkDocLinks } from './src/lib/remark-doc-links.js';
+import { remarkDocVariables } from './src/lib/doc-variables.js';
+import { remarkMaturity } from './src/lib/remark-maturity.js';
 import { remarkSnippets } from './src/lib/remark-snippets.js';
 import { rehypeHeadingAnchors } from './src/lib/rehype-heading-anchors.js';
 import { wasmExamplesDevServer } from './src/lib/wasm-middleware.js';
@@ -56,12 +58,16 @@ export default defineConfig({
   outDir: resolve(process.cwd(), process.env.SITE_OUT_DIR || './dist'),
   output: 'static',
   trailingSlash: 'never',
-  redirects: {
-    ...componentRedirects,
-    ...legacyDocRedirects,
-    '/docs/ui-testing': '/docs/test',
-    '/zh-CN/docs/ui-testing': '/zh-CN/docs/test',
-  },
+  // Astro places each source below `base` but writes the destination as
+  // given, so a versioned build would redirect into the default version.
+  redirects: Object.fromEntries(
+    Object.entries({
+      ...componentRedirects,
+      ...legacyDocRedirects,
+      '/docs/ui-testing': '/docs/test',
+      '/zh-CN/docs/ui-testing': '/zh-CN/docs/test',
+    }).map(([from, to]) => [from, `${BASE.replace(/\/$/, '')}${to}`]),
+  ),
 
   integrations: [
     vue({ devtools: false }),
@@ -72,7 +78,7 @@ export default defineConfig({
     // Astro 7 made Sätteri the default processor; the remark/rehype pipeline is
     // opt-in now, and the math plugins only run on it.
     processor: unified({
-      remarkPlugins: [remarkMath, remarkSnippets, remarkCallouts, remarkComparisonStatus, [remarkDocLinks, { base: BASE }]],
+      remarkPlugins: [remarkMath, remarkSnippets, remarkCallouts, remarkComparisonStatus, remarkDocVariables, remarkMaturity, [remarkDocLinks, { base: BASE }]],
       rehypePlugins: [rehypeMathjax, rehypeHeadingIds, rehypeHeadingAnchors],
     }),
     shikiConfig,

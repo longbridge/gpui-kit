@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
+import { expandDocVariables } from './doc-variables.js';
 
 const SITE_TITLE = 'GPUI Kit';
 const SITE_DESCRIPTION =
@@ -166,7 +167,7 @@ function scanDir(
         .replace(/\.md$/, '')
         .replace(/index$/, '');
       const url = `${BASE_URL}/${urlPrefix}/${relPath}`.replace(/\/+/g, '/').replace(/\/$/, '');
-      const body = expandSnippets(bodyWithoutFrontmatter(content), dir);
+      const body = expandDocVariables(expandSnippets(bodyWithoutFrontmatter(content), dir));
 
       try {
         results.push({

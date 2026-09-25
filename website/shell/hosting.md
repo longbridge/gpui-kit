@@ -2,6 +2,7 @@
 title: Hosting
 description: The Rust side in full — runtime lifetime, mounting script Views, refreshing them from host state, metrics, exit requests and hot-reload.
 order: 11
+maturity: [preview]
 ---
 
 # Hosting

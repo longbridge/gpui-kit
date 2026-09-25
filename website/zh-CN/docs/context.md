@@ -30,7 +30,7 @@ GPUI callback 中经常出现 `window: &mut Window, cx: &mut Context<Self>`。�
 
 `Context<T>` 会解引用为 `App`，所以拿到 `cx: &mut Context<T>` 时已经可以调用 App API，不需要再传一个 `&mut App`。它还知道当前是哪一个 Entity；普通的 `App` 不知道。`Window` 必须单独传入，因为同一个 Entity 可能显示在不同窗口中，而纯数据更新也可能不属于任何窗口。Window 还管理由 [ElementId](./element_id) 标识的窗口内状态。异步 context 是句柄，不是可以长期持有的 `&mut App` 或 `&mut Window` 引用。
 
-下文使用的 Entity 专用方法定义在 [GPUI `Context<T>`](https://docs.rs/crate/gpui-pre/0.3.6/source/src/app/context.rs) 源码中。
+下文使用的 Entity 专用方法定义在 [GPUI `Context<T>`](https://docs.rs/crate/gpui-pre/{{gpui_pre_version}}/source/src/app/context.rs) 源码中。
 
 GPUI Kit 应用只依赖 `gpui-kit`，通过 `use gpui_kit::*;` 导入 GPUI API。创建基于组件的 View 之前调用 `gpui_kit::init(cx)`。应用级 [Global](./global) 属于 `App`；组件或功能 View 的持久状态放在 [Entity] 中。
 
@@ -183,7 +183,7 @@ fn finish_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
 }
 ```
 
-延迟闭包也已经收到 `this: &mut Self`，不要在其中再次对同一个 Entity 调用 `update`。当 UI 树变化后需要恢复 Focus 等操作必须等当前更新结束时，再使用 defer。[`window.on_next_frame(...)`](https://docs.rs/crate/gpui-pre/0.3.6/source/src/window.rs) 则为下一次平台 frame request 安排 callback，并唤醒 frame source。callback 在该次请求可能发生的绘制之前运行；仅注册它不会把窗口标为 dirty，也不会触发 render。如果 callback 改变了可见的 Entity 状态，应在 callback 内调用 `cx.notify()`。需要主动请求下一帧重绘时，使用 `window.request_animation_frame()`。窗口关闭或 View 释放后，延迟工作可能不会执行，因此不要把它当成持久任务队列。
+延迟闭包也已经收到 `this: &mut Self`，不要在其中再次对同一个 Entity 调用 `update`。当 UI 树变化后需要恢复 Focus 等操作必须等当前更新结束时，再使用 defer。[`window.on_next_frame(...)`](https://docs.rs/crate/gpui-pre/{{gpui_pre_version}}/source/src/window.rs) 则为下一次平台 frame request 安排 callback，并唤醒 frame source。callback 在该次请求可能发生的绘制之前运行；仅注册它不会把窗口标为 dirty，也不会触发 render。如果 callback 改变了可见的 Entity 状态，应在 callback 内调用 `cx.notify()`。需要主动请求下一帧重绘时，使用 `window.request_animation_frame()`。窗口关闭或 View 释放后，延迟工作可能不会执行，因此不要把它当成持久任务队列。
 
 ## 异步任务
 
@@ -292,6 +292,6 @@ impl Draft {
 
 无论 Context 的具体类型是什么，GPUI 通常都把参数命名为 `cx`，并把 Window 参数命名为 `window`。
 
-[Entity]: /zh-CN/docs/entity
-[Event]: /zh-CN/docs/event
-[Global]: /zh-CN/docs/global
+[Entity]: ./entity.md
+[Event]: ./event.md
+[Global]: ./global.md

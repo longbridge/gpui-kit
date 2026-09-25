@@ -6,7 +6,7 @@ order: -2.4
 
 # Focus
 
-**Focus** identifies the target for keyboard input in one [Window](./window). GPUI uses the focused element's path through the rendered tree to route [Actions and key bindings](./action). A pointer press may move Focus, but drawing a control or giving it an `ElementId` does not. This guide uses the GPUI API published as `gpui-pre` 0.3.6 through `gpui-kit`; `gpui-pre` is the snapshot publishing and version alignment name, not a different rendering engine.
+**Focus** identifies the target for keyboard input in one [Window](./window). GPUI uses the focused element's path through the rendered tree to route [Actions and key bindings](./action). A pointer press may move Focus, but drawing a control or giving it an `ElementId` does not. This guide uses the GPUI API published as `gpui-pre` {{gpui_pre_version}} through `gpui-kit`; `gpui-pre` is the snapshot publishing and version alignment name, not a different rendering engine.
 
 ## Try the existing example
 

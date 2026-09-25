@@ -6,7 +6,7 @@ order: -2.3
 
 # Window
 
-GPUI 提供 [`Window`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Window.html) 作为单个平台窗口的上下文。它把渲染后的 Element 树与[平台输入](./event#鼠标与键盘输入事件)、Focus、Action 派发、绘制和窗口控制连接起来。GPUI 只会在更新或渲染这个窗口时，把它传给 View：
+GPUI 提供 [`Window`](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.Window.html) 作为单个平台窗口的上下文。它把渲染后的 Element 树与[平台输入](./event#鼠标与键盘输入事件)、Focus、Action 派发、绘制和窗口控制连接起来。GPUI 只会在更新或渲染这个窗口时，把它传给 View：
 
 ```rust
 impl Render for Chat {
@@ -45,7 +45,7 @@ application().run(|cx| {
 });
 ```
 
-[`WindowOptions`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.WindowOptions.html) 控制初始位置和尺寸、Focus、是否显示、窗口类型、最小尺寸等平台选项。builder 只在构造期间获得 `Window`。window handle 可供稍后的代码发起更新，但窗口关闭后，基于 handle 的更新可能失败。多窗口应用要使用目标窗口的 handle 来操作其 Focus 或几何信息；只有 Entity handle 并不能确定窗口。
+[`WindowOptions`](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.WindowOptions.html) 控制初始位置和尺寸、Focus、是否显示、窗口类型、最小尺寸等平台选项。builder 只在构造期间获得 `Window`。window handle 可供稍后的代码发起更新，但窗口关闭后，基于 handle 的更新可能失败。多窗口应用要使用目标窗口的 handle 来操作其 Focus 或几何信息；只有 Entity handle 并不能确定窗口。
 
 `open_window` 返回 `AnyWindowHandle`，因为实际的 GPUI root 是 `gpui_kit::base::Root`，不是 `Workspace`。后续拿到 `&mut App` 的 callback 可通过 handle 进入对应窗口，使用前要检查窗口是否仍然存在：
 
@@ -214,7 +214,7 @@ callback 已经获得 `&mut Self`，不要在里面通过 handle 对同一个 En
 
 修改 Entity 后调用 `cx.notify()`，会把该 Entity 标记为需要渲染。`window.refresh()` 则把**整个窗口**标记为 dirty，供下一次绘制使用；窗口级状态变化无法通过 Entity 通知覆盖时可用它，例如平台或 overlay 状态变化。两者都不应该无条件写在 render 路径中。
 
-`window.on_next_frame(callback)` 在下一次平台帧 tick 中运行 callback，时机在该 tick 可能进行的绘制之前。它会产生帧需求，但本身不把窗口标记为 dirty。`window.request_animation_frame()` 会记录当前正在渲染的 View，在下一次 tick 通知它。当前锁定的 `gpui-pre` 0.3.6 实现会立即调用 `current_view()`，因此只应在 GPUI 有当前 View 的渲染路径中使用；在该路径之外，使用 `on_next_frame`，并显式通知 Entity 或调用 `window.refresh()`。只有运动还需要下一个采样时才调用。[GPUI 动画与 Base Motion](./animation) 已为各自动画处理帧请求和减弱动态效果。
+`window.on_next_frame(callback)` 在下一次平台帧 tick 中运行 callback，时机在该 tick 可能进行的绘制之前。它会产生帧需求，但本身不把窗口标记为 dirty。`window.request_animation_frame()` 会记录当前正在渲染的 View，在下一次 tick 通知它。当前锁定的 `gpui-pre` {{gpui_pre_version}} 实现会立即调用 `current_view()`，因此只应在 GPUI 有当前 View 的渲染路径中使用；在该路径之外，使用 `on_next_frame`，并显式通知 Entity 或调用 `window.refresh()`。只有运动还需要下一个采样时才调用。[GPUI 动画与 Base Motion](./animation) 已为各自动画处理帧请求和减弱动态效果。
 
 帧 callback 若修改了窗口外部状态，应在 callback 中调用 `window.refresh()`，让变化进入绘制。若修改 Entity 状态，则在更新该 Entity 的 callback 中调用 `cx.notify()`。仅有帧 tick 不会重绘没有被标记为 dirty 的窗口。
 

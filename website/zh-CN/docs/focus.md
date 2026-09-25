@@ -6,7 +6,7 @@ order: -2.4
 
 # Focus
 
-**Focus（焦点）**决定一个 [Window](./window) 中谁接收键盘输入。GPUI 沿当前获得 Focus 的元素及其祖先构成的路径路由 [Action 和按键绑定](./action)。鼠标按下可以移动 Focus，但画出控件或给它 `ElementId` 并不会自动建立焦点目标。本章以 `gpui-kit` 使用的 `gpui-pre` 0.3.6 API 为准；`gpui-pre` 是 GPUI 快照的发布与版本同步名称，不代表另一套渲染引擎。
+**Focus（焦点）**决定一个 [Window](./window) 中谁接收键盘输入。GPUI 沿当前获得 Focus 的元素及其祖先构成的路径路由 [Action 和按键绑定](./action)。鼠标按下可以移动 Focus，但画出控件或给它 `ElementId` 并不会自动建立焦点目标。本章以 `gpui-kit` 使用的 `gpui-pre` {{gpui_pre_version}} API 为准；`gpui-pre` 是 GPUI 快照的发布与版本同步名称，不代表另一套渲染引擎。
 
 ## 先运行现有示例
 

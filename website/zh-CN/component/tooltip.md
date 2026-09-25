@@ -9,7 +9,7 @@ Tooltip 用于在鼠标悬停或元素获得焦点时显示补充信息。它支
 
 ## 移动端行为
 
-iOS 和 Android 上会禁用由 GPUI Base overlay 管理的 tooltip。共享组件可以保留 tooltip 配置，但移动端操作仍应提供可见或可访问的标签。直接使用 GPUI `.tooltip()` 的调用（包括下方的基础 `div()` 示例）不经过此 overlay，因此不受该策略限制。集成方式请参阅[移动端](/zh-CN/docs/mobile)。
+iOS 和 Android 上会禁用由 GPUI Base overlay 管理的 tooltip。共享组件可以保留 tooltip 配置，但移动端操作仍应提供可见或可访问的标签。直接使用 GPUI `.tooltip()` 的调用（包括下方的基础 `div()` 示例）不经过此 overlay，因此不受该策略限制。集成方式请参阅[移动端](../docs/mobile.md)。
 
 ## 导入
 

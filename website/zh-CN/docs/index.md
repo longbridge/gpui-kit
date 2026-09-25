@@ -18,7 +18,7 @@ GPUI Kit 的核心架构包含五个层次：
 
 普通应用通过 `gpui-kit` 使用 GPUI、Base、Component 与默认资源；需要承载 JavaScript 扩展时另行依赖 `gpui-shell`。它仍是框架核心架构的一层。
 
-使用 `gpui-component` 可以获得统一、成熟的视觉风格；基于 `gpui-base` 则可以复用可靠的行为与基础设施，同时创建并拥有自己的设计系统。本节文档介绍 GPUI Kit 的入门配置、公共设计与编码指南，以及应用开发。各层 API 请参阅 [GPUI Component](/zh-CN/component)、[GPUI Base](/zh-CN/base) 与 [GPUI Shell](/zh-CN/shell)。
+使用 `gpui-component` 可以获得统一、成熟的视觉风格；基于 `gpui-base` 则可以复用可靠的行为与基础设施，同时创建并拥有自己的设计系统。本节文档介绍 GPUI Kit 的入门配置、公共设计与编码指南，以及应用开发。各层 API 请参阅 [GPUI Component](../component/index.md)、[GPUI Base](../base/index.md) 与 [GPUI Shell](../shell/index.md)。
 
 先读 [Focus](./focus)，理解 `FocusHandle`、Tab 顺序与键盘目标，再读 [Action](./action) 理解命令派发；[KeyBinding](./keybinding) 介绍 Action 的绑定与当前快捷键的展示。[Event](./event) 解释类型化通知以及 Action 与 Event 的关系。
 
@@ -43,7 +43,7 @@ GPUI Kit 的核心架构包含五个层次：
 ## 特性
 
 - **75+ 组件与原语**：覆盖表单、导航、浮层、数据展示、编辑、反馈和布局等场景
-- **生产就绪**：在实际桌面应用中持续打磨，并通过 GPUI Kit 的组件与示例不断验证
+- **生产就绪**：在实际桌面应用中持续打磨，并通过 GPUI Kit 的组件与示例不断验证；桌面主路径之外的能力以[成熟度](#成熟度)标注
 - **WebAssembly**：应用与组件示例可通过 `wasm32-unknown-unknown` 在 Web 中运行
 - **无障碍**：交互层内置 AccessKit role、name、state、relationship 与 action
 - **UI 集成测试**：在 headless window 中驱动真实鼠标、键盘、Focus、布局与无障碍行为
@@ -57,6 +57,19 @@ GPUI Kit 的核心架构包含五个层次：
 - **设计自由**：使用完整视觉系统，或基于 `gpui-base` 构建自己的系统
 - **类型化动效**：CSS 对齐的 easing、timing、keyframes、spring、presence 与测量式展开，稳定采样路径零分配
 - **跨平台**：通过一份 Rust 代码交付 macOS、Windows 和 Linux
+
+## 成熟度
+
+GPUI Kit 的桌面组件运行在包括 Longbridge 在内的生产应用中。其他能力的实践积累还比较短，因此在页面标题下方标注成熟度。没有标注的页面即为“稳定”。
+
+| 标注 | 含义 |
+| --- | --- |
+| **稳定** | 已用于 macOS、Windows 与 Linux 上的生产桌面应用。 |
+| **预览** | 可以使用且有文档。API 与边界行为在后续版本中仍可能调整。 |
+| **实验性** | 可以运行，但存在已知缺口。依赖它之前，请针对你的产品验证。 |
+| **依赖平台** | 可用性或行为因操作系统或目标平台而异，页面会列出差异。 |
+
+标注描述的是能力本身，而不是文档的完整程度。例如 WebAssembly 运行的是与桌面相同的组件，但浏览器并不是桌面平台，输入、无障碍、启动开销和部署仍需由产品自行验证。
 
 ## 最小示例
 
@@ -116,7 +129,7 @@ fn main() {
 
 - 阅读 [开始使用](./getting-started)
 - 浏览 [组件文档](../component/index)
-- 阅读 [GPUI Base 动画与动效](/zh-CN/base/motion)
+- 阅读 [GPUI Base 动画与动效](../base/motion.md)
 
 ## 社区与支持
 

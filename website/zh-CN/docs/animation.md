@@ -11,7 +11,7 @@ GPUI Kit 有三个动效层次。应按**变化中的值由谁持有**来选择�
 | 层次 | 适用场景 | 状态与策略 |
 | --- | --- | --- |
 | GPUI `Animation`、`AnimationExt` | 元素入场、循环提示，或挂载期间播放固定步骤 | GPUI 在包装元素的 [`ElementId`](./element_id) 下保存播放进度；调用方决定时长、曲线和视觉属性。 |
-| [GPUI Base Motion](/zh-CN/base/motion) | 运动中会变化的目标、卸载前的退出、关键帧和测量式展开 | Base 以稳定 key 保存每个通道，活动期间通过 [Window](./window) 请求帧；调用方决定视觉结果。 |
+| [GPUI Base Motion](../base/motion.md) | 运动中会变化的目标、卸载前的退出、关键帧和测量式展开 | Base 以稳定 key 保存每个通道，活动期间通过 [Window](./window) 请求帧；调用方决定视觉结果。 |
 | GPUI Component 动效 | 外观需要跟随主题的样式化控件 | `cx.theme().motion_tokens()` 提供语义化时长、曲线、弹簧和距离；组件再与 GPUI 或 Base 组合。 |
 
 语义状态归应用所有：对话框是否打开、当前选中哪个标签、滑块指向哪里。动画只负责呈现这些状态。无论在动画两端，还是关闭动效后，结果都必须清楚。
@@ -113,7 +113,7 @@ if sample.should_render() {
 
 ## GPUI 元素动画
 
-`Animation::new(duration)` 创建播放一次、线性变化的动画。`AnimationExt::with_animation(id, animation, animator)` 包装一个 `IntoElement`；回调收到元素及经过 easing 映射的进度值。GPUI 在布局阶段调用它，把返回元素的样式用于当前帧，并在结束前继续请求帧。回调可修改元素支持的属性，例如透明度或变换。包装器的播放规则可参见 [GPUI 0.3.6 动画源码](https://docs.rs/gpui-pre/0.3.6/src/gpui/elements/animation.rs.html)。这里的 `gpui-pre` 仅是 GPUI 的发布与版本同步包名，并不是额外的应用层。
+`Animation::new(duration)` 创建播放一次、线性变化的动画。`AnimationExt::with_animation(id, animation, animator)` 包装一个 `IntoElement`；回调收到元素及经过 easing 映射的进度值。GPUI 在布局阶段调用它，把返回元素的样式用于当前帧，并在结束前继续请求帧。回调可修改元素支持的属性，例如透明度或变换。包装器的播放规则可参见 [GPUI {{gpui_pre_version}} 动画源码](https://docs.rs/gpui-pre/{{gpui_pre_version}}/src/gpui/elements/animation.rs.html)。这里的 `gpui-pre` 仅是 GPUI 的发布与版本同步包名，并不是额外的应用层。
 
 ```rust
 use std::time::Duration;
@@ -280,7 +280,7 @@ Base 还提供以下选择：
 | 列表条目错峰 | `Stagger` | 根据索引和起点计算延迟；不持有列表及其 ID。 |
 | 展开未知高度的内容 | `MotionReveal` | 测量 child，再按调用方提供的进度裁剪可见高度；它本身不采样或推进进度。 |
 
-[Base Motion 指南](/zh-CN/base/motion)列出完整签名、参数校验、示例与基准测试。这里的 `Transition` 不同于旧的 `gpui_kit::base::animation::EffectTransition`：后者包装 GPUI `with_animation`，直接应用预设的淡入、滑动、宽度和高度效果。新的目标驱动动效优先使用 `base::motion` primitive，再自行应用采样值。
+[Base Motion 指南](../base/motion.md)列出完整签名、参数校验、示例与基准测试。这里的 `Transition` 不同于旧的 `gpui_kit::base::animation::EffectTransition`：后者包装 GPUI `with_animation`，直接应用预设的淡入、滑动、宽度和高度效果。新的目标驱动动效优先使用 `base::motion` primitive，再自行应用采样值。
 
 ## GPUI Component：语义化动效策略
 

@@ -6,7 +6,7 @@ order: -2.76
 
 # TextSystem
 
-本文以仓库固定的 `gpui-pre` 0.3.6 API 为准。`gpui-pre` 是 GPUI 快照的发布和版本对齐机制，并非另一套文本引擎。先使用文本元素；只有自定义元素需要 GPUI 平时替你管理的字形几何时，才直接调用 `TextSystem`。
+本文以仓库固定的 `gpui-pre` {{gpui_pre_version}} API 为准。`gpui-pre` 是 GPUI 快照的发布和版本对齐机制，并非另一套文本引擎。先使用文本元素；只有自定义元素需要 GPUI 平时替你管理的字形几何时，才直接调用 `TextSystem`。
 
 GPUI 的 `TextSystem` 负责解析 [Font](./fonts) 并提供 font metrics。每个 [Window](./window) 都有一个 `WindowTextSystem`，在共享文本系统上增加行布局缓存。普通文本元素和 GPUI Kit 控件会替你使用这些服务。编写自定义文本几何、图表标签、编辑器，或需要直接使用字形位置的元素时，才从 `window.text_system()` 入手。
 

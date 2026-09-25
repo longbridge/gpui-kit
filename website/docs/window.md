@@ -6,7 +6,7 @@ order: -2.3
 
 # Window
 
-GPUI provides [`Window`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Window.html) as the context for one platform window. It connects the rendered Element tree to [platform input](./event#pointer-and-keyboard-input-are-also-events), Focus, Action dispatch, drawing, and window controls. A View receives it only while GPUI is updating or rendering that window:
+GPUI provides [`Window`](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.Window.html) as the context for one platform window. It connects the rendered Element tree to [platform input](./event#pointer-and-keyboard-input-are-also-events), Focus, Action dispatch, drawing, and window controls. A View receives it only while GPUI is updating or rendering that window:
 
 ```rust
 impl Render for Chat {
@@ -45,7 +45,7 @@ application().run(|cx| {
 });
 ```
 
-[`WindowOptions`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.WindowOptions.html) controls initial bounds, focus, visibility, window kind, minimum size, and other platform-facing choices. The builder receives the `Window` only for construction. A window handle lets later code request an update, but handle-based updates can fail after the window closes. In a multi-window app, use the handle for the particular window whose focus or geometry you mean; an Entity handle alone does not select a window.
+[`WindowOptions`](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.WindowOptions.html) controls initial bounds, focus, visibility, window kind, minimum size, and other platform-facing choices. The builder receives the `Window` only for construction. A window handle lets later code request an update, but handle-based updates can fail after the window closes. In a multi-window app, use the handle for the particular window whose focus or geometry you mean; an Entity handle alone does not select a window.
 
 `open_window` returns an `AnyWindowHandle` because the actual GPUI root is `gpui_kit::base::Root`, not `Workspace`. From a later callback with `&mut App`, use the handle to enter that window, and check the result before assuming it is still open:
 
@@ -214,7 +214,7 @@ Use `window.on_next_frame(...)` only when the operation specifically belongs to 
 
 An Entity mutation followed by `cx.notify()` marks that Entity for rendering. `window.refresh()` marks the **whole window** dirty for its next draw; use it for window-local changes that lack an Entity notification, such as a platform or overlay state change. Neither belongs in an unconditional render path.
 
-`window.on_next_frame(callback)` runs the callback at the next platform frame tick, before that tick's optional draw. It creates frame demand but does not itself mark the window dirty. `window.request_animation_frame()` captures the currently rendering View and notifies it on the next tick. In the pinned `gpui-pre` 0.3.6 implementation, it calls `current_view()` immediately, so use it only while GPUI has a current View; outside that render path, use `on_next_frame` and explicitly notify an Entity or call `window.refresh()`. Call it only while the motion still needs another sample. GPUI's `AnimationExt::with_animation` and [Base Motion](./animation) already manage frame requests and reduced motion for their animations.
+`window.on_next_frame(callback)` runs the callback at the next platform frame tick, before that tick's optional draw. It creates frame demand but does not itself mark the window dirty. `window.request_animation_frame()` captures the currently rendering View and notifies it on the next tick. In the pinned `gpui-pre` {{gpui_pre_version}} implementation, it calls `current_view()` immediately, so use it only while GPUI has a current View; outside that render path, use `on_next_frame` and explicitly notify an Entity or call `window.refresh()`. Call it only while the motion still needs another sample. GPUI's `AnimationExt::with_animation` and [Base Motion](./animation) already manage frame requests and reduced motion for their animations.
 
 For a frame callback that changes external window state, call `window.refresh()` in that callback so the change reaches a draw. For Entity state, update the Entity and call `cx.notify()` in its update callback. A frame tick alone does not redraw an unchanged window.
 

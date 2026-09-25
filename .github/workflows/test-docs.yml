@@ -4,6 +4,7 @@ on:
     paths:
       - "website/**"
       - "themes/**"
+      - "Cargo.toml"
       - "script/build-website-versions"
       - "script/snapshot-website"
       - "script/test-snapshot-website"
@@ -40,7 +41,9 @@ jobs:
           SHOWCASES_DIR: ${{ github.workspace }}/.showcases
         run: |
           ../script/test-snapshot-website
+          bun run test:docs
           bun run test:showcases
           bun run build
           bun run test:seo
+          bun run test:links
           bun run test:versioned-examples

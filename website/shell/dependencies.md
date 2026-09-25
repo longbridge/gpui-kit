@@ -2,6 +2,7 @@
 title: Dependencies
 description: Shell packages — what makes a Git repository one, and how a manifest names, selects, fetches and imports it, down to what an editor sees.
 order: 9
+maturity: [preview]
 ---
 
 # Dependencies

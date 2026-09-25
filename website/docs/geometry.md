@@ -197,7 +197,7 @@ The width remains relative until layout knows the parent. A rem needs the root r
 
 ## HSLA and RGBA
 
-GPUI's [`Hsla`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Hsla.html) stores hue, saturation, lightness, and alpha as values from 0 to 1. Its `hsla(0.6, 0.8, 0.5, 1.)` constructor uses a hue fraction, not degrees, and clamps its four inputs to that range. Use `Hsla` as the default representation for theme colors and their interaction states. [`Rgba`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Rgba.html) stores red, green, blue, and alpha channels in the same range. `rgb(0x3366CC)` reads a six digit RGB hex value and sets alpha to 1; `rgba(0x3366CC80)` reads eight digits in **RRGGBBAA** order, with alpha `128 / 255` (about 0.502). Convert to `Rgba` when an RGB channel API or hex color is the natural input.
+GPUI's [`Hsla`](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.Hsla.html) stores hue, saturation, lightness, and alpha as values from 0 to 1. Its `hsla(0.6, 0.8, 0.5, 1.)` constructor uses a hue fraction, not degrees, and clamps its four inputs to that range. Use `Hsla` as the default representation for theme colors and their interaction states. [`Rgba`](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.Rgba.html) stores red, green, blue, and alpha channels in the same range. `rgb(0x3366CC)` reads a six digit RGB hex value and sets alpha to 1; `rgba(0x3366CC80)` reads eight digits in **RRGGBBAA** order, with alpha `128 / 255` (about 0.502). Convert to `Rgba` when an RGB channel API or hex color is the natural input.
 
 ```rust
 use gpui_kit::*;

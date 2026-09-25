@@ -2,6 +2,7 @@
 title: WebAssembly
 description: Build and run GPUI Kit applications in a browser with the repository's WebAssembly examples.
 order: -3.5
+maturity: [preview]
 ---
 
 # WebAssembly
@@ -12,7 +13,7 @@ GPUI and GPUI Kit WebAssembly support is used primarily to **showcase and try co
 
 GPUI Kit can render the same Rust views and components in a browser. The web target is `wasm32-unknown-unknown`: Rust produces a WebAssembly module, `wasm-bindgen` produces its JavaScript bindings, and a web page loads and starts the application. The browser supplies the canvas, input and network environment, so a desktop `main` function alone is not a web entry point.
 
-In this workspace, [`gpui_web` is the Cargo alias for `gpui-pre-web` 0.3.6](https://github.com/longbridge/gpui-kit/blob/main/Cargo.toml). [`gpui-kit` includes it as a WASM-only dependency](https://github.com/longbridge/gpui-kit/blob/main/crates/kit/Cargo.toml) and re-exports it as `gpui_kit::web`; [the gallery crate](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/Cargo.toml) depends on `gpui-kit`, not directly on `gpui-pre-web`. Its `cdylib`, exported `run(...)`, web platform initialization and JavaScript loader provide the browser entry path that the desktop `main` cannot provide.
+In this workspace, [`gpui_web` is the Cargo alias for `gpui-pre-web` {{gpui_pre_version}}](https://github.com/longbridge/gpui-kit/blob/main/Cargo.toml). [`gpui-kit` includes it as a WASM-only dependency](https://github.com/longbridge/gpui-kit/blob/main/crates/kit/Cargo.toml) and re-exports it as `gpui_kit::web`; [the gallery crate](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/Cargo.toml) depends on `gpui-kit`, not directly on `gpui-pre-web`. Its `cdylib`, exported `run(...)`, web platform initialization and JavaScript loader provide the browser entry path that the desktop `main` cannot provide.
 
 The [component gallery](https://gpui-kit.com/gallery/) is the quickest working example. Its [Rust entry point](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs), [build script](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/scripts/build-wasm.sh) and [JavaScript loader](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/www/src/main.js) show the complete path from a GPUI Kit view to a browser page.
 
@@ -66,7 +67,7 @@ The [subset script](https://github.com/longbridge/gpui-kit/blob/main/crates/stor
 
 For eligible missing emoji and horizontal Han, kana and modern Hangul graphemes, `CanvasFontFallback::EmojiAndCjk` can let the browser measure and draw from its local fonts. GPUI's loaded fonts remain preferred. This fallback works on individual graphemes, so browser font coverage, spacing and typography can differ; it is not a full CJK font replacement. The default policy covers emoji only, while `Disabled` uses loaded fonts alone. The policy is chosen when constructing `WebPlatform` and cannot be changed later.
 
-GPUI also supports **loading a font after startup**. In the GPUI version pinned by this repository (`gpui-pre` 0.3.6), `TextSystem::add_fonts` accepts downloaded font bytes through `Cow::Owned`; it clears font resolution and line-layout caches. After an asynchronous fetch has produced a valid raw font file, install it on the application context and redraw:
+GPUI also supports **loading a font after startup**. In the GPUI version pinned by this repository (`gpui-pre` {{gpui_pre_version}}), `TextSystem::add_fonts` accepts downloaded font bytes through `Cow::Owned`; it clears font resolution and line-layout caches. After an asynchronous fetch has produced a valid raw font file, install it on the application context and redraw:
 
 ```rust
 use std::borrow::Cow;

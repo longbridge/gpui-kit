@@ -2,6 +2,7 @@
 title: Dependencies
 description: shell package——什么样的 Git 仓库算一个，以及 manifest 如何命名、选择版本、抓取与导入它，直到编辑器看见它。
 order: 9
+maturity: [preview]
 ---
 
 # 依赖

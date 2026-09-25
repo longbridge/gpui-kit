@@ -7,7 +7,7 @@ description: A utility element that traps keyboard focus within a container, pre
 
 Focus trap utility for constraining keyboard focus within a specific container. Essential for modal dialogs, sheets, and overlay components to provide proper keyboard navigation accessibility.
 
-**Note:** [Dialog](/component/dialog) and [Sheet](/component/sheet) components have focus trap built-in. You only need to manually use `focus_trap()` for custom modal-like components.
+**Note:** [Dialog](./dialog.md) and [Sheet](./sheet.md) components have focus trap built-in. You only need to manually use `focus_trap()` for custom modal-like components.
 
 ## Import
 
@@ -245,12 +245,12 @@ impl Render for ModalView {
 
 ## See Also
 
-- [Root View System](/component/root) - Manages focus trap behavior at the window level
-- [Dialog](/component/dialog) - Uses focus trap automatically
-- [Sheet](/component/sheet) - Uses focus trap automatically
+- [Root View System](./root.md) - Manages focus trap behavior at the window level
+- [Dialog](./dialog.md) - Uses focus trap automatically
+- [Sheet](./sheet.md) - Uses focus trap automatically
 - [focus-trap-react](https://github.com/focus-trap/focus-trap-react) - Similar concept for React applications
 
 [Root]: https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html
 [FocusTrapElement]: https://docs.rs/gpui-component/latest/gpui_component/trait.FocusTrapElement.html
-[Dialog]: /component/dialog
-[Sheet]: /component/sheet
+[Dialog]: ./dialog.md
+[Sheet]: ./sheet.md

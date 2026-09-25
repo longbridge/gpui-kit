@@ -1,6 +1,7 @@
 ---
 title: TitleBar
 description: A custom window title bar component with window controls and custom content support.
+maturity: [platform-dependent]
 ---
 
 # TitleBar

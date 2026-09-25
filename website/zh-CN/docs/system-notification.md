@@ -2,6 +2,7 @@
 title: SystemNotification
 description: 使用 GPUI 发送系统通知、处理点击，并了解 GPUI Kit Notification 的集成方式和平台限制。
 order: -9.05
+maturity: [platform-dependent]
 ---
 
 # SystemNotification
@@ -61,7 +62,7 @@ GPUI 的 `show_system_notification` 返回 `()`，不返回投递结果。因此
 
 ## 使用底层 GPUI API 发送
 
-本项目固定使用 `gpui-pre 0.3.6`。其 [`App::show_system_notification`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.App.html#method.show_system_notification) 接收包含 `tag`、`title`、`body` 和 `actions` 的 `SystemNotification`：
+本项目固定使用 `gpui-pre {{gpui_pre_version}}`。其 [`App::show_system_notification`](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.App.html#method.show_system_notification) 接收包含 `tag`、`title`、`body` 和 `actions` 的 `SystemNotification`：
 
 ```rust
 use gpui_kit::SystemNotification;

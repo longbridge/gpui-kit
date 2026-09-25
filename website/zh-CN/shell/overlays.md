@@ -2,6 +2,7 @@
 title: Overlays
 description: dialog、sheet 与 toast，它们的层叠与关闭顺序，以及为什么只能从事件中打开。
 order: 7
+maturity: [preview]
 ---
 
 # Overlays

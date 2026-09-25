@@ -2,6 +2,7 @@
 title: Mobile
 description: Build an iOS application or embed GPUI Kit in a Swift UIKit container with the experimental gpui-pre-mobile platform.
 order: -10
+maturity: [experimental, platform-dependent]
 ---
 
 # Mobile
@@ -49,7 +50,7 @@ gpui = { package = "gpui-pre", version = "=0.3.4", default-features = false }
 gpui-kit = { git = "https://github.com/longbridge/gpui-kit", rev = "7d9efcd2069f9eaa6eb3ba6345aac4aa7d87c9f7", default-features = false, features = ["component"] }
 ```
 
-These revisions reproduce the example's dependency baseline. The Kit revision includes mobile platform gating but predates mobile tooltip suppression. The current GPUI Kit checkout uses `gpui-pre 0.3.6`, while this pinned mobile platform and renderer use `0.3.4`. Cargo can select both versions, producing incompatible GPUI types; replacing the Kit dependency with a local path is **not** a working upgrade by itself. First update the mobile platform and renderer to the same GPUI version as Kit and validate that combination. Only then can you use a path dependency such as:
+These revisions reproduce the example's dependency baseline. The Kit revision includes mobile platform gating but predates mobile tooltip suppression. The current GPUI Kit checkout uses `gpui-pre {{gpui_pre_version}}`, while this pinned mobile platform and renderer use `0.3.4`. Cargo can select both versions, producing incompatible GPUI types; replacing the Kit dependency with a local path is **not** a working upgrade by itself. First update the mobile platform and renderer to the same GPUI version as Kit and validate that combination. Only then can you use a path dependency such as:
 
 ```toml
 gpui-kit = { path = "../gpui-kit/crates/kit", default-features = false, features = ["component"] }
@@ -57,7 +58,7 @@ gpui-kit = { path = "../gpui-kit/crates/kit", default-features = false, features
 
 Adjust the path relative to your application's manifest. Keep the GPUI core, renderer, platform, and Kit on one compatible release.
 
-Unlike the desktop [Getting Started](/docs/getting-started) setup, mobile does not use `gpui_kit::application()` or `gpui_kit::platform`. Those desktop platform exports are excluded on iOS and Android. The mobile host initializes GPUI, calls `gpui_kit::init(cx)`, and mounts a single `component::Root` around the application's content.
+Unlike the desktop [Getting Started](./getting-started.md) setup, mobile does not use `gpui_kit::application()` or `gpui_kit::platform`. Those desktop platform exports are excluded on iOS and Android. The mobile host initializes GPUI, calls `gpui_kit::init(cx)`, and mounts a single `component::Root` around the application's content.
 
 ## Embed a view in UIKit
 
@@ -154,6 +155,6 @@ Android uses a separate activity and surface lifecycle. The repository contains 
 | --- | --- |
 | Xcode cannot find the simulator destination, or the app launches on another simulator | The pinned `build.sh` builds for iOS 18.6 on an iPhone 16 Pro. Install that runtime or edit its Xcode destination to match `xcodebuild -showdestinations`. Then run `xcrun simctl list devices available`: the script's `_ios_run_simulator` installs on the first available iPhone, independently of the build destination. If that is a different device, change its `sim_id` selection to the intended UUID. |
 | Device build fails signing or install | Replace the example development team in `example/ios/project.yml`, regenerate the Xcode project, and confirm the device appears in Xcode. The default script target is a physical device; pass `--simulator` explicitly for the documented simulator path. |
-| Rust reports two versions of GPUI or mismatched `App`/`Window` types | Check the resolved `gpui-pre` packages. The pinned mobile fork uses `0.3.4`; this checkout uses `0.3.6`. Align the entire mobile platform and Kit dependency set before using the local Kit path. |
+| Rust reports two versions of GPUI or mismatched `App`/`Window` types | Check the resolved `gpui-pre` packages. The pinned mobile fork uses `0.3.4`; this checkout uses `{{gpui_pre_version}}`. Align the entire mobile platform and Kit dependency set before using the local Kit path. |
 | App launches with a blank or stale GPUI view | Check that the Rust callback opens a window, the child controller is attached, `layoutSubviews` publishes nonzero bounds, and visible frames are requested. Inspect the Xcode console; the example sends Rust logs and panics to `NSLog`. |
 | Text, icons, or images are missing | Verify the font family and glyph coverage, registered `AssetSource` and exact icon keys, or the image's packaged path and HTTP client. A desktop asset or font configuration does not automatically carry into the mobile host. |

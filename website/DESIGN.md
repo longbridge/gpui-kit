@@ -93,6 +93,9 @@ Chinese. Monospace prefers `ui-monospace` / SF Mono and falls back to
 - **Body** — 1rem, line-height 1.7; docs prose is capped at `46rem`.
 - **Kicker / label** — 0.66–0.68rem mono, uppercase, wide tracking, muted.
   Small mono labels, not colour, mark structure.
+- **Maturity labels** (`maturity` frontmatter) sit between a page title and its
+  standfirst as the same mono labels on a hairline border. Preview and
+  Experimental are not warnings, so they take no status colour.
 
 Two constraints that are easy to get wrong:
 

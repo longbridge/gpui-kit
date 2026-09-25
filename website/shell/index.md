@@ -2,6 +2,7 @@
 title: GPUI Shell
 description: Makes a Rust GPUI application extensible in JavaScript, rendered by GPUI itself — no WebView, no DOM. Plugins first, standalone script applications second.
 order: 1
+maturity: [preview]
 ---
 
 # GPUI Shell
@@ -14,7 +15,7 @@ order: 1
 
 **It is not an Electron or a Tauri.** There is no WebView, no DOM, no HTML or CSS, no browser engine, and no Node.js. A script View describes an interface when invalidated; GPUI can reuse that description on later frames without rerunning its script `render`. Those frames use the same element model and renderer as a Rust application on `gpui-base`. This does not mean an idle window continuously draws, or that all frame work is free of JavaScript: virtual-list item and dock chrome callbacks are exceptions. Taking the whole runtime costs [+13.5 MiB of binary in the measured build](./engine.md#what-linking-it-costs).
 
-Both goals rest on the same split. `gpui-shell` is built directly on [`gpui-base`](/base), with [QuickJS](https://github.com/quickjs-ng/quickjs) running on the host's own thread. The host builds the runtime and grants what a script may reach; the script draws real interface inside the same process. Rust keeps rendering, layout, text editing, virtualization, focus, overlays and every system capability; the script owns composition, presentation and business logic.
+Both goals rest on the same split. `gpui-shell` is built directly on [`gpui-base`](../base/index.md), with [QuickJS](https://github.com/quickjs-ng/quickjs) running on the host's own thread. The host builds the runtime and grants what a script may reach; the script draws real interface inside the same process. Rust keeps rendering, layout, text editing, virtualization, focus, overlays and every system capability; the script owns composition, presentation and business logic.
 
 ```js
 import { View } from "gpui-kit";

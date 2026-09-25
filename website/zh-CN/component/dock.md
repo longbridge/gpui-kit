@@ -10,7 +10,7 @@ Dock 用可拖动标签组、嵌套分割和可收起的左、右、底部 Dock 
 
 `gpui-base` 负责数据模型、布局计算和拖放行为，`gpui-component` 提供完整控件与统一视觉。需要直接用于真实应用的 Dock 时，请使用 `gpui_kit::component::dock`。
 
-如果你需要了解与渲染器无关的架构或实现自定义渲染器，请阅读英文版 [Dock — gpui-base](/base/dock)。
+如果你需要了解与渲染器无关的架构或实现自定义渲染器，请阅读 [Dock — gpui-base](../base/dock.md)。
 
 ## 创建 DockArea
 

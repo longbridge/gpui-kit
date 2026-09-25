@@ -2,6 +2,7 @@
 title: Getting Started
 description: Add the runtime to a Rust application, write the script it loads, and check that script without opening a window.
 order: 2
+maturity: [preview]
 ---
 
 # Getting Started

@@ -6,7 +6,7 @@ order: -2.631
 
 # Task
 
-In GPUI, a [`Task<T>`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Task.html) is the handle to work scheduled by a GPUI executor. Its most important property is **ownership**: dropping the handle cancels unfinished work. A task runs only while its handle is stored, awaited, or explicitly detached. This makes the task's lifetime part of the View's state design, not just a detail of Rust's `Future` trait.
+In GPUI, a [`Task<T>`](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.Task.html) is the handle to work scheduled by a GPUI executor. Its most important property is **ownership**: dropping the handle cancels unfinished work. A task runs only while its handle is stored, awaited, or explicitly detached. This makes the task's lifetime part of the View's state design, not just a detail of Rust's `Future` trait.
 
 The **spawn API** chooses where work runs; the returned `Task` controls its lifetime. A foreground task can re-enter GPUI through an async [Context](./context) and update an [Entity]. A background task runs away from the UI thread and returns owned data; it cannot mutate Entity state there.
 
@@ -355,4 +355,4 @@ self._update_task = cx.background_executor().spawn(async move {
 
 The excerpt shows the ownership and update points; see the linked source for setup and rendering. The example uses `std::thread::sleep` in its background producer to simulate pacing and an **unbounded channel** with `try_send` only for this demonstration. An unbounded channel does not provide backpressure and can grow when a producer outpaces the UI. Its producer can continue sending after replacement until the synchronous loop returns; the replay ID keeps those chunks out of the UI. For a real stream, use asynchronous waiting and a bounded channel with backpressure, handle send and update errors, and end the receiver when its View is gone. `WeakEntity` protects the View lifetime, and the channel crosses executors. See [Entity](./entity) for Entity ownership and updates.
 
-[Entity]: /docs/entity
+[Entity]: ./entity.md

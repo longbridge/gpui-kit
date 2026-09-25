@@ -10,7 +10,7 @@ Dock builds application workspaces from draggable tab groups, nested splits, and
 
 `gpui-base` owns the data model, layout calculation, and drag-and-drop behavior. `gpui-component` supplies the polished controls and visual language. Use `gpui_kit::component::dock` when you want a Dock ready to fit into a real application.
 
-For the renderer-independent architecture and custom-renderer API, see [Dock — gpui-base](/base/dock).
+For the renderer-independent architecture and custom-renderer API, see [Dock — gpui-base](../base/dock.md).
 
 ## Create a dock area
 

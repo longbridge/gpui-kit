@@ -9,7 +9,7 @@ A versatile tooltip component that displays helpful information when hovering ov
 
 ## Mobile behavior
 
-On iOS and Android, tooltips managed by the GPUI Base overlay are disabled. Shared components may keep their tooltip configuration, but mobile actions still need visible or accessible labels. Direct GPUI `.tooltip()` calls, including the basic `div()` example below, bypass this overlay and are not disabled by this policy. See [Mobile](/docs/mobile) for integration guidance.
+On iOS and Android, tooltips managed by the GPUI Base overlay are disabled. Shared components may keep their tooltip configuration, but mobile actions still need visible or accessible labels. Direct GPUI `.tooltip()` calls, including the basic `div()` example below, bypass this overlay and are not disabled by this policy. See [Mobile](../docs/mobile.md) for integration guidance.
 
 ## Import
 

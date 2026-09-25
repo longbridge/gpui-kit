@@ -65,6 +65,6 @@ Collapsible::new()
     .content(options)
 ```
 
-启用后，内容在关闭时仍保持挂载，以便测量自然高度，并可在动画途中切换时立即反向。不调用 `motion_id` 时仍使用即时挂载/卸载行为。timing、reduced motion 和性能细节见 [GPUI Base 动画与动效](/zh-CN/base/motion)。
+启用后，内容在关闭时仍保持挂载，以便测量自然高度，并可在动画途中切换时立即反向。不调用 `motion_id` 时仍使用即时挂载/卸载行为。timing、reduced motion 和性能细节见 [GPUI Base 动画与动效](../base/motion.md)。
 
 [Collapsible]: https://docs.rs/gpui-component/latest/gpui_component/collapsible/struct.Collapsible.html

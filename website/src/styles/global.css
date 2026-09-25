@@ -517,9 +517,40 @@ html.dark .astro-code span {
 
   /* The page's standfirst: muted, and set at the body size — a larger measure
      read as a second heading under the title. */
-  > h1:first-child + p {
+  > h1:first-child + p:not(.doc-maturity),
+  > h1:first-child + .doc-maturity + p {
     max-width: 46rem;
     color: var(--muted-foreground);
+  }
+
+  /* Maturity labels sit between the title and the standfirst. They are
+     structure, not status colour: small mono labels on a hairline, like the
+     site's other kickers. Each links to the definitions on the docs home. */
+  .doc-maturity {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-block: -0.25rem 1rem;
+  }
+
+  .doc-maturity a.doc-maturity__label {
+    display: inline-flex;
+    align-items: center;
+    height: 1.35rem;
+    padding: 0 0.45rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    color: var(--muted-foreground);
+    font: 560 0.66rem/1 var(--font-mono);
+    letter-spacing: 0.05em;
+    text-decoration: none;
+    text-transform: uppercase;
+    transition: border-color 140ms ease, color 140ms ease;
+  }
+
+  .doc-maturity a.doc-maturity__label:hover {
+    border-color: color-mix(in srgb, var(--foreground) 24%, var(--border));
+    color: var(--foreground);
   }
 
   h2 {
@@ -1873,7 +1904,8 @@ html[lang^="zh"] :is(
   .sidebar-group__title,
   .toc__label,
   .doc-pager__label,
-  .component-example__label
+  .component-example__label,
+  .doc-content .doc-maturity__label
 ) {
   letter-spacing: 0.05em;
 }

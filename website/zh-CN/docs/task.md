@@ -6,7 +6,7 @@ order: -2.631
 
 # Task
 
-在 GPUI 中，[`Task<T>`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Task.html) 是 GPUI 执行器所调度工作的 handle。它最重要的性质是**所有权**：handle 被 drop 时，尚未完成的工作会取消。只有保存、等待，或者明确 detach 这个 handle，任务才会持续运行。因此，Task 的生命周期属于 View 的状态设计，而不只是 Rust `Future` trait 的细节。
+在 GPUI 中，[`Task<T>`](https://docs.rs/gpui-pre/{{gpui_pre_version}}/gpui/struct.Task.html) 是 GPUI 执行器所调度工作的 handle。它最重要的性质是**所有权**：handle 被 drop 时，尚未完成的工作会取消。只有保存、等待，或者明确 detach 这个 handle，任务才会持续运行。因此，Task 的生命周期属于 View 的状态设计，而不只是 Rust `Future` trait 的细节。
 
 **启动任务的 API** 决定工作在哪里运行；返回的 `Task` 控制它的生命周期。前台任务可以通过异步 [Context](./context) 重新进入 GPUI，更新 [Entity]。后台任务在 UI 线程之外运行，只能返回自有数据，不能直接修改 Entity 状态。
 
@@ -355,4 +355,4 @@ self._update_task = cx.background_executor().spawn(async move {
 
 摘录展示所有权和更新位置；初始化与渲染见链接中的完整源码。示例在后台生产任务中用 `std::thread::sleep` 模拟节奏，使用**无界 channel** 的 `try_send` 仅供演示。无界 channel 不提供背压；生产速度超过 UI 处理速度时，队列可能不断增长。替换任务后，生产者仍可能继续发送，直到同步循环返回；replay ID 防止旧片段进入 UI。真实流应异步等待，使用有界 channel 提供背压，处理发送和更新失败，并在 View 消失时结束接收任务。`WeakEntity` 保护 View 生命周期，channel 连接两个执行器。Entity 的所有权和更新方式见 [Entity](./entity)。
 
-[Entity]: /zh-CN/docs/entity
+[Entity]: ./entity.md

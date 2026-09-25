@@ -29,8 +29,8 @@ extensions; it remains part of the framework's core architecture.
 Use `gpui-component` for polished controls with one coherent visual language,
 or build your own design system on the reusable behavior and infrastructure in
 `gpui-base`. This section covers GPUI Kit setup, shared design and coding guides, and
-application development. For library APIs, see [GPUI Component](/component),
-[GPUI Base](/base), and [GPUI Shell](/shell).
+application development. For library APIs, see [GPUI Component](../component/index.md),
+[GPUI Base](../base/index.md), and [GPUI Shell](../shell/index.md).
 
 Read [Focus](./focus) for `FocusHandle`, Tab order, and the keyboard target, then
 [Action](./action) for command dispatch. [KeyBinding](./keybinding) explains how to bind actions and
@@ -61,7 +61,7 @@ architecture conventions once the first window works.
 ## Features
 
 - **75+ Components and Primitives**: Forms, navigation, overlays, data display, editing, feedback, layout, and more.
-- **Production Ready**: Refined through production desktop applications and continuously tested across GPUI Kit's components and examples.
+- **Production Ready**: Refined through production desktop applications and continuously tested across GPUI Kit's components and examples. Capabilities outside that desktop path are labeled by [maturity](#maturity).
 - **WebAssembly**: Applications and component showcases run on the web through `wasm32-unknown-unknown`.
 - **Accessibility**: AccessKit roles, names, states, relationships, and actions are built into the interaction layer.
 - **UI Integration Testing**: Headless windows exercise real pointer, keyboard, focus, layout, and accessibility behavior.
@@ -75,6 +75,19 @@ architecture conventions once the first window works.
 - **Design Freedom**: Use the complete visual system or build your own on `gpui-base`.
 - **Typed Motion**: CSS-aligned easing, timing, keyframes, springs, presence, and measured reveal with allocation-free steady sampling.
 - **Cross Platform**: Ship one Rust codebase to macOS, Windows, and Linux.
+
+## Maturity
+
+GPUI Kit's desktop components run in production applications, including Longbridge's. Other capabilities have a shorter track record, so their pages carry a label under the title. A page without a label is Stable.
+
+| Label | Meaning |
+| --- | --- |
+| **Stable** | Used by production desktop applications on macOS, Windows, and Linux. |
+| **Preview** | Usable and documented. The API and edge-case behavior may still change between releases. |
+| **Experimental** | Works with known gaps. Validate it for your product before depending on it. |
+| **Platform-dependent** | Availability or behavior differs by operating system or target. The page lists the differences. |
+
+A label describes the capability, not the quality of its documentation. WebAssembly, for example, runs the same components as the desktop, but a browser is not a desktop platform, and the product still has to verify input, accessibility, startup cost and deployment there.
 
 ## Quick Example
 
@@ -130,7 +143,7 @@ Run `cargo run` from the project directory. The window shows a label and button;
 
 ## Community & Support
 
-Learn how to build interruptible animation in the [GPUI Base Motion guide](/base/motion).
+Learn how to build interruptible animation in the [GPUI Base Motion guide](../base/motion.md).
 
 - [GitHub Repository](https://github.com/longbridge/gpui-kit)
 - [Issue Tracker](https://github.com/longbridge/gpui-kit/issues)

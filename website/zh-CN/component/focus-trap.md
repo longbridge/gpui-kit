@@ -7,7 +7,7 @@ description: 将键盘焦点限制在指定容器内的工具元素。
 
 Focus Trap 是一个用于将键盘焦点限制在特定容器内的工具能力，可防止用户通过 Tab 键把焦点移出当前区域。它对对话框、侧边面板和自定义覆盖层的可访问性非常重要。
 
-**注意：** [Dialog](/zh-CN/component/dialog) 和 [Sheet](/zh-CN/component/sheet) 已内置 focus trap。只有在构建自定义类模态组件时，才需要手动使用 `focus_trap()`。
+**注意：** [Dialog](./dialog.md) 和 [Sheet](./sheet.md) 已内置 focus trap。只有在构建自定义类模态组件时，才需要手动使用 `focus_trap()`。
 
 ## 导入
 
@@ -234,12 +234,12 @@ impl Render for ModalView {
 
 ## 另请参阅
 
-- [Root View System](/zh-CN/component/root)
-- [Dialog](/zh-CN/component/dialog)
-- [Sheet](/zh-CN/component/sheet)
+- [Root View System](./root.md)
+- [Dialog](./dialog.md)
+- [Sheet](./sheet.md)
 - [focus-trap-react](https://github.com/focus-trap/focus-trap-react)
 
 [Root]: https://docs.rs/gpui-component/latest/gpui_component/struct.Root.html
 [FocusTrapElement]: https://docs.rs/gpui-component/latest/gpui_component/trait.FocusTrapElement.html
-[Dialog]: /zh-CN/component/dialog
-[Sheet]: /zh-CN/component/sheet
+[Dialog]: ./dialog.md
+[Sheet]: ./sheet.md
