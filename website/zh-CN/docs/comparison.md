@@ -67,7 +67,9 @@ order: -14
 | 同时面向桌面、移动端与 Web | 可以用同一组件 API 探索 [WebAssembly 展示](/zh-CN/docs/webassembly)和实验性的 [iOS 工作](/zh-CN/docs/mobile)。 | Mobile 与 Web 集成仍需针对目标应用验证。 | Qt 的[平台列表](https://doc.qt.io/qt-6/supported-platforms.html)，以及 Slint 的 [mobile](https://docs.slint.dev/latest/docs/slint/guide/platforms/mobile/general/) 和 [web](https://docs.slint.dev/latest/docs/slint/guide/platforms/web/) 指南覆盖更广目标。 |
 | 可视化 UI 编辑 | Rust 代码和[组件画廊](/zh-CN/component/)让界面与应用逻辑保持接近。 | GPUI Kit 没有内置可视化设计器。 | [Qt Quick Designer](https://doc.qt.io/qtcreator/creator-using-qt-quick-designer.html) 提供可视化编辑；Slint 提供 [Live Preview](https://github.com/slint-ui/slint#tooling)。 |
 
-> **关于 Visual UI editor 的立场。**在 AI 辅助开发的工作流里，GPUI Kit 不需要另外提供拖拽式设计器。Rust source 就是 UI 定义：开发者和 coding agent 可以直接修改同一份组件与应用逻辑，再通过组件画廊和运行中的应用检查结果。依赖拖拽流程的团队仍可选择可视化编辑器；GPUI Kit 没有内置它，是有意的取舍，并非等待补齐的功能。
+> **关于 Visual UI editor 的立场**
+>
+> 在 AI 辅助开发的工作流里，GPUI Kit 不需要另外提供拖拽式设计器。Rust source 就是 UI 定义：开发者和 coding agent 可以直接修改同一份组件与应用逻辑，再通过组件画廊和运行中的应用检查结果。依赖拖拽流程的团队仍可选择可视化编辑器；GPUI Kit 没有内置它，是有意的取舍，并非等待补齐的功能。
 
 ## 如何理解这些判断
 

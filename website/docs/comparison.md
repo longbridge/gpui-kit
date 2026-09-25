@@ -67,7 +67,9 @@ The capability matrix shows coverage; these trade-offs show when that coverage m
 | A product on desktop, mobile, and web | The same GPUI Kit component APIs can be explored in [WebAssembly showcases](/docs/webassembly) and experimental [iOS work](/docs/mobile). | Mobile and Web integrations still need validation for the target application. | Qt's [platform matrix](https://doc.qt.io/qt-6/supported-platforms.html) and Slint's [mobile](https://docs.slint.dev/latest/docs/slint/guide/platforms/mobile/general/) and [web](https://docs.slint.dev/latest/docs/slint/guide/platforms/web/) guides document broader targets. |
 | Visual UI authoring | Rust code and the [component gallery](/component/) keep the interface close to application logic. | GPUI Kit does not include a visual designer. | [Qt Quick Designer](https://doc.qt.io/qtcreator/creator-using-qt-quick-designer.html) offers visual editing; Slint provides [Live Preview](https://github.com/slint-ui/slint#tooling). |
 
-> **Our position on visual UI editors.** In an AI-assisted workflow, a separate drag-and-drop designer is unnecessary for GPUI Kit. The Rust source remains the UI definition: people and coding agents can change the same components and application logic directly, then use the component gallery and a running app to inspect the result. A visual editor remains useful to teams whose workflow depends on one, but its absence is an intentional trade-off, not an unfinished step toward matching Qt Quick Designer.
+> **Our position on visual UI editors**
+>
+> In an AI-assisted workflow, a separate drag-and-drop designer is unnecessary for GPUI Kit. The Rust source remains the UI definition: people and coding agents can change the same components and application logic directly, then use the component gallery and a running app to inspect the result. A visual editor remains useful to teams whose workflow depends on one, but its absence is an intentional trade-off, not an unfinished step toward matching Qt Quick Designer.
 
 ## What the rows mean
 
