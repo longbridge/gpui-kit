@@ -93,6 +93,32 @@ Here `.into()` converts the literal to an owned `SharedString`; for a literal th
 
 `SharedString` cannot be edited in place. If a task truly needs a mutable construction or editing buffer, use a local `String` and convert it once when the result is ready. Converting an owned `String` to a long `SharedString` can still copy into shared storage; do not assume the `String` buffer is reused.
 
+## Convert at the ownership boundary
+
+Choose the operation according to who needs the text next:
+
+| Source and next use | Pattern | Ownership result |
+| --- | --- | --- |
+| Fixed literal retained by UI | `SharedString::new_static("Ready")` | Owns a value backed by static text |
+| Temporary `&str` retained by UI | `SharedString::from(text)` | Owns a value independent of the borrowed source |
+| Finished `String` retained by UI | `let label: SharedString = text.into();` | Moves the `String` into conversion; it may still copy or allocate |
+| Existing `SharedString`, both owners need it | `let label = title.clone();` | Both keep owned values; long heap text stays shared |
+| Existing `SharedString`, only the receiver needs it | `Label::new(title)` | Moves the value; no extra clone |
+| Existing `SharedString`, callee reads only | `read_text(title.as_str())` | Borrows `&str` for the call |
+
+For a builder taking `impl Into<SharedString>`, passing `&title` also works because GPUI implements conversion from `&SharedString` by cloning it. Passing `title.as_str()` instead converts borrowed text into a **new** `SharedString`; use `title.clone()` (or `&title`) when you mean to share the existing value. If an API specifically requires `String`, `title.to_string()` creates a separate mutable string; only do this at that API boundary.
+
+```rust
+use gpui_kit::SharedString;
+use gpui_kit::component::label::Label;
+
+let title = SharedString::new_static("Downloads");
+let heading = Label::new(title.clone()); // Keep title for another owner.
+let tab = Label::new(title); // Last use: move it.
+```
+
+The `heading` and `tab` values each own their text. The move makes `title` unavailable afterward; clone first only where another owner still needs it.
+
 ## From an API response to a View
 
 Design immutable text fields in API response snapshots as `SharedString` by default. Deserialize a JSON `title` directly into that type with Serde, then carry the response into application state. If the UI needs a formatted title, derive a separate presentation value when the response arrives instead of changing the transport response:
@@ -174,6 +200,18 @@ In GPUI Kit's production library source under `crates/{kit,base,component,assets
 
 To reproduce the count, scan `*.rs` named struct bodies under those four `src` directories, skip test-only files and content after `#[cfg(test)]`, then count field types containing the distinct Rust tokens `String` and `SharedString`. This is a lightweight source scan rather than a Rust semantic parse: it excludes local variables, function signatures, and enum fields, includes both native and WebAssembly `cfg` variants present in source, and says nothing about runtime allocations.
 :::
+
+## Common compiler errors and surprises
+
+| Symptom | Cause and fix |
+| --- | --- |
+| “use of moved value” after `Label::new(title)` | The builder consumes its argument. Pass `title.clone()` when the view or another element still needs the value; move it only on the last use. |
+| “borrowed data escapes” or a callback must be `'static` | A callback cannot retain `title.as_str()` borrowed from a view. Clone the `SharedString` into the `move` closure, then call `.as_str()` inside the closure if needed. |
+| A method expects `&str`, but it receives `SharedString` | Pass `title.as_str()` (or `&title` where deref coercion applies). This borrows without copying text. |
+| `push_str` or another mutation method is unavailable | `SharedString` is immutable. Build or edit in a `String`, then convert the completed text into `SharedString`. |
+| `.into()` has an ambiguous destination type | Specify it: `let title: SharedString = source.into();` or call `SharedString::from(source)`. |
+
+The callback case follows the same ownership rule as an element: the closure must own anything it keeps after `render` returns. For example, `let title_for_click = self.title.clone();` before an `on_click(move |_, _, _| { /* use title_for_click here */ })` gives the handler an independent value. Clone once when building the callback, rather than converting `self.title.as_str()` into a fresh value on each render.
 
 ## Related: `Cow<str>`
 

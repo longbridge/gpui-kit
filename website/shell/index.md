@@ -12,7 +12,7 @@ order: 1
 
 **The secondary goal is writing a whole application in JavaScript.** The CLI runs an application directory on its own, which is a usable path in itself and also how a plugin is developed: get the script running standalone, then mount it in a host.
 
-**It is not an Electron or a Tauri.** There is no WebView, no DOM, no HTML or CSS, no browser engine, and no Node.js. A script never renders. It describes an interface once, and Rust replays that description into real GPUI elements on every frame after it — the same element model a Rust application on `gpui-base` builds, through the same GPU renderer. JavaScript is the application layer here, not the rendering layer, which is why a repaint costs no JavaScript at all and taking the whole runtime costs [+13.5 MiB of binary](./engine.md#what-linking-it-costs).
+**It is not an Electron or a Tauri.** There is no WebView, no DOM, no HTML or CSS, no browser engine, and no Node.js. A script View describes an interface when invalidated; GPUI can reuse that description on later frames without rerunning its script `render`. Those frames use the same element model and renderer as a Rust application on `gpui-base`. This does not mean an idle window continuously draws, or that all frame work is free of JavaScript: virtual-list item and dock chrome callbacks are exceptions. Taking the whole runtime costs [+13.5 MiB of binary in the measured build](./engine.md#what-linking-it-costs).
 
 Both goals rest on the same split. `gpui-shell` is built directly on [`gpui-base`](/base), with [QuickJS](https://github.com/quickjs-ng/quickjs) running on the host's own thread. The host builds the runtime and grants what a script may reach; the script draws real interface inside the same process. Rust keeps rendering, layout, text editing, virtualization, focus, overlays and every system capability; the script owns composition, presentation and business logic.
 
@@ -101,28 +101,28 @@ Around that: `--watch` hot-reloads on save, `gpui-shell.json` declares identity 
 
 ### Performance: the script is not in the frame
 
-`render` does **not** run once per frame. It describes the interface once into a Snapshot, and until the next `cx.notify()` every repaint replays that Snapshot in Rust. A pointer crossing a button, a blinking cursor, a scrolling list and a native transition or spring advancing do not run JavaScript.
+`render` does **not** run once per frame. It describes a script View into a Snapshot when that View is invalidated. On a later requested frame, GPUI can use the Snapshot without running that View's `render`. Pointer hover, cursor blinking, scrolling and native animation need not invalidate the script View; frame-path callbacks such as virtual-list item renderers are separate. The display's refresh rate does not determine how many frames an idle window requests.
 
 The runtime counts the two events separately, and the gallery's Shell story (`cargo run -- shell`) puts both counters on screen:
 
-<img class="architecture-light" src="/shell-render-frequency-light.svg" alt="One second of a live panel. With nothing JavaScript reads changing, 60 frames fire and the JavaScript track stays empty. With prices moving every 50 ms, 60 frames fire and JavaScript runs about 20 times.">
-<img class="architecture-dark" src="/shell-render-frequency-dark.svg" alt="One second of a live panel. With nothing JavaScript reads changing, 60 frames fire and the JavaScript track stays empty. With prices moving every 50 ms, 60 frames fire and JavaScript runs about 20 times.">
+<img class="architecture-light" src="/shell-render-frequency-light.svg" alt="Illustrative one-second timeline with 60 requested frames. If script data does not change, the View's JavaScript render track stays empty. If prices change every 50 milliseconds, the View is rebuilt about 20 times while other frames reuse its Snapshot. This does not describe idle frame cadence.">
+<img class="architecture-dark" src="/shell-render-frequency-dark.svg" alt="Illustrative one-second timeline with 60 requested frames. If script data does not change, the View's JavaScript render track stays empty. If prices change every 50 milliseconds, the View is rebuilt about 20 times while other frames reuse its Snapshot. This does not describe idle frame cadence.">
 
 | What the interface is doing                       | Frames a second | JavaScript runs a second |
 | ------------------------------------------------- | --------------- | ------------------------ |
 | Repainting, with nothing JavaScript reads changed | 60              | 0                        |
 | Prices moving every 50 ms                         | 60              | 19                       |
 
-The frame count belongs to the display, the JavaScript count to the data. In the second row the other 41 frames replay a description that already exists.
+This is an illustrative interval in which 60 frames were requested, not an idle behavior or a guaranteed frame rate. The number of frames actually produced depends on scheduling and workload; the script render count depends on invalidations and coalescing. In the second row, 41 frames use a description that already exists.
 
-Cost is therefore paid per user action rather than per frame. On a 443-node panel, running `render` and recording the whole interface into a Snapshot takes 1.1 ms, paid only when state changes; each frame after it takes 1.3 ms, which is rendering itself — turning the Snapshot into elements, laying out, painting, with no JavaScript in it.
+The script description cost is paid when that View is invalidated, rather than on every frame. In the measured 443-node benchmark, running `render` and recording the interface into a Snapshot took 1.1 ms; a cached frame took 1.3 ms for GPUI work, with no script `render`. These are timings for that workload and machine, not a sustained FPS guarantee for a complex application.
 
-|                    | Cost per frame                                                      |
+|                    | Cost per requested benchmark frame                                    |
 | ------------------ | ------------------------------------------------------------------- |
 | Without a Snapshot | 1.1 ms (JS render) + 1.3 ms (Rust render) = **2.4 ms/frame render** |
 | With a Snapshot    | **1.3 ms**                                                          |
 
-Growing the panel does not change that. The [benchmark](./engine.md#the-measurement) covers sizes up to 8,403 nodes, no frame at any of them runs JavaScript, and the smallest size is asserted on every CI build.
+Growing the panel does not change the fact that a cached frame does not rerun the script View. The [benchmark](./engine.md#the-measurement) covers sizes up to 8,403 nodes; its cached-frame test asserts that the View's script `render` does not run. Its timings still grow substantially with panel size.
 
 ### Size: a script runtime for +13.5 MiB
 

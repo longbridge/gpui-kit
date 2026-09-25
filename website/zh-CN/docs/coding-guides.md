@@ -36,10 +36,10 @@ order: -13
 ```text
 crates/
 ├── app/
-│   └── src/main.rs             # 组合窗口与 Feature
+│   └── src/main.rs             # Compose windows and features
 ├── workspace/
 │   └── src/
-│       ├── lib.rs              # Feature 的公开边界
+│       ├── lib.rs              # Public feature boundary
 │       ├── model.rs
 │       ├── commands.rs
 │       ├── workspace_view.rs
@@ -60,7 +60,7 @@ crates/
 └── shared/
     └── src/
         ├── lib.rs
-        └── recent_items.rs     # 多个 Feature 共同使用的稳定能力
+        └── recent_items.rs     # Shared capability used by multiple features
 ```
 
 不要反过来建立全局 `models/`、`views/`、`modals/` 与 `commands/` 目录。这种方式只是按实现角色给文件分类，却会把每个 Feature 拆散到整个应用中。
@@ -70,7 +70,7 @@ App Shell 只组合 Feature Crate，尽量不承载 Feature 逻辑。每个 Feat
 例如 Workspace crate 可以导出可 clone 的 handle，把可变 model 留在公开 API 之后：
 
 ```rust
-// 简化的 workspace/src/lib.rs；model 变大后可移到私有的 model.rs。
+// Simplified workspace/src/lib.rs; move a larger model to a private model.rs.
 use gpui_kit::{App, Entity, SharedString};
 
 struct WorkspaceModel {
@@ -473,14 +473,14 @@ Platform branch 即使 presentation 不同，也必须保留 semantic contract�
 | Fluent property | 名词或形容词 | `label`, `disabled`, `selected`, `placement` |
 | 通用 non-boolean builder | `with_<field>` | `with_size`, `with_mode` |
 | In-place mutation | `set_<field>` | `set_items`, `set_selected_index` |
-| Boolean reader | `is_<形容词>` / `has_<名词>` | `is_open`, `is_closable`, `has_selection` |
+| Boolean reader | `is_<adjective>` / `has_<noun>` | `is_open`, `is_closable`, `has_selection` |
 | Plain value reader | field noun | `placement`, `selected_value` |
 | Callback registration | `on_<event/intent>` | `on_click`, `on_open_change` |
 | Named region renderer | `render_<region>` | `render_toolbar`, `render_content` |
 
 新 API 中，消费并返回 `Self` 的链式构造方法不加 `set_`；通过 `&mut self` 修改状态时使用`set_`。已经公开的名称应保持兼容，现有的 `set_position` 等链式方法属于兼容例外，不作为新 API 的命名范例。
 
-Boolean reader 只有两种：值持有某物时用 `has_<名词>`，描述状态或许可时用 `is_<形容词>`。只要动作有对应的形容词形式就用形容词：`is_closable` 而非 `can_close`，`is_zoomable` 而非 `can_zoom`，`is_copyable` 而非 `can_copy`。动作是没有形容词形式的动词短语时，改为命名它所需要的东西：用 `has_definition`，不用 `can_go_to_definition`。不再新增 `can_` reader。
+Boolean reader 只有两种：值持有某物时用 `has_<noun>`，描述状态或许可时用 `is_<adjective>`。只要动作有对应的形容词形式就用形容词：`is_closable` 而非 `can_close`，`is_zoomable` 而非 `can_zoom`，`is_copyable` 而非 `can_copy`。动作是没有形容词形式的动词短语时，改为命名它所需要的东西：用 `has_definition`，不用 `can_go_to_definition`。不再新增 `can_` reader。
 
 Boolean builder 可叫 `disabled(bool)`，reader 叫 `is_disabled()`。含 non-boolean field 的公开接口中的非布尔字段使用 `with_item_ix(...)` 构造、`item_ix()` 读取，避免冲突。新的局部或内部零起始索引优先使用 `_ix`，现有公开名称如 `selected_index` 保持不变，不再引入 `_idx`。调用方从不构造的快照，不要为了对称而发布构造方法。
 

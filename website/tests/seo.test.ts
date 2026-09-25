@@ -105,6 +105,7 @@ test('404 is excluded from indexing', () => {
 test('component pages have independent routes, translated alternates and readable legacy URLs', () => {
   for (const locale of ['', 'zh-CN/']) {
     const source = new URL(`../${locale}component/`, import.meta.url);
+    assert.match(read(`${locale}docs.md`).trimEnd(), /> [^\n]*CC BY 4\.0[^\n]*Apache-2\.0[^\n]*\.?$/);
     for (const name of readdirSync(source).filter(name => name.endsWith('.md'))) {
       const slug = name.slice(0, -3);
       const route = `${locale}component${slug === 'index' ? '' : `/${slug}`}`;
@@ -113,6 +114,7 @@ test('component pages have independent routes, translated alternates and readabl
       assert.match(html, /hreflang="en"/);
       assert.match(html, /hreflang="zh-CN"/);
       assert.match(read(`${route}.md`), new RegExp(`^---\nurl: /${route}\\.md\n`));
+      assert.match(read(`${route}.md`).trimEnd(), /> [^\n]*CC BY 4\.0[^\n]*Apache-2\.0[^\n]*\.?$/);
       assert.match(read(`${locale}docs/components/${slug}/index.html`), /http-equiv="refresh"/);
       assert.ok(read(`${locale}docs/components/${slug}/index.html`).includes(`url=/${route}`));
       assert.equal(read(`${locale}docs/components/${slug}.md`), read(`${route}.md`));

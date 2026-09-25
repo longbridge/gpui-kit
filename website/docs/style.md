@@ -25,6 +25,106 @@ div()
 
 The builder consumes and returns an element on each call. Rendering can build a fresh tree from current state; persistent application state belongs in an [`Entity`](./entity) or keyed element state. A style chain describes this frame's presentation, not a stylesheet or a retained component instance. See [RenderOnce](./render-once) for frame-local component construction.
 
+## Build a first layout
+
+Start with the region that owns the available space, then decide which child has a fixed width and which child can grow. Replace `examples/hello_world/src/main.rs` with this complete program, then run `cargo run -p hello_world` from the repository root:
+
+```rust
+use gpui_kit::*;
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _};
+use gpui_kit::prelude::FluentBuilder as _;
+
+struct StyleExample;
+
+impl Render for StyleExample {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let compact = window.viewport_size().width < px(600.);
+        let layout = if compact { v_flex() } else { h_flex() };
+        let documents = (1..=60).map(|number| {
+            div().p_2().child(format!("Document {number:02}"))
+        });
+
+        layout
+            .items_stretch()
+            .size_full()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .child(
+                v_flex()
+                    .when(!compact, |nav| nav.w_64().flex_shrink_0())
+                    .p_3()
+                    .gap_2()
+                    .child("Navigation")
+                    .child("Overview · Documents"),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .child(h_flex().p_3().child("Documents"))
+                    .child(
+                        v_flex()
+                            .id("document-list")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .child(v_flex().p_3().gap_2().children(documents)),
+                    ),
+            )
+    }
+}
+
+fn main() {
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| StyleExample)
+        })
+        .expect("failed to open window");
+    });
+}
+```
+
+In a wide window, navigation occupies a fixed `w_64()` rail and the document pane fills the rest. Narrow the content area below 600 logical pixels: the same navigation moves above the document pane, while the document list remains independently scrollable. Scroll to `Document 60`, then resize the window in both directions. The header stays in place while the list scrolls. This threshold is an explicit Rust condition evaluated when the view renders, not a Tailwind responsive prefix. The navigation in this small exercise is illustrative text; a real application should use reachable navigation controls.
+
+`h_flex()` makes a row and centers its children on the cross axis. `.items_stretch()` overrides that default so both panes occupy the row's height. `v_flex()` makes a column whose children stretch across its width. The fixed navigation pane does not shrink in the wide layout; the document pane takes the remaining width. The scroll area takes the remaining height below the header. The window-sized root gives `.size_full()` a resolved height; the `min_h_0()` calls let its flexible descendants shrink into a scroll viewport.
+
+### Decide where each size belongs
+
+| Need | Put it on | Why |
+| --- | --- | --- |
+| Space between siblings | The parent with `.gap_3()` | Gap separates children without adding padding at the outer edge. |
+| Space inside a surface | The surface with `.p_3()` | Padding moves its content inward and participates in its layout size. |
+| A fixed rail beside flexible content | Rail `.w_64().flex_shrink_0()`; content `.flex_1().min_w_0()` | The rail keeps its width while the content may shrink below its natural text width. |
+| A header above scrolling content | Column with a height; scroll child `.flex_1().min_h_0()` | The child can shrink into the available height, creating a real scroll viewport. |
+| Half the parent width | `.w(relative(0.5))` on the child | The fraction resolves against the relevant parent dimension during layout. |
+
+`w_full()` and `h_full()` mean the full *available* dimension. A percentage height still needs a definite height upstream. Min and max sizes constrain the result; they do not give an otherwise unbounded scroll area a viewport. For a long single-line label in a row, combine `.flex_1().min_w_0().truncate()` on the label container. `.truncate()` only changes text overflow; it cannot force an inflexible sibling to give up width.
+
+### Choose clipping, scrolling, or positioning
+
+`.overflow_hidden()` clips content; it does not make that content scrollable. On a stateful element, `.overflow_y_scroll()` creates vertical scrolling once the element has a bounded height. GPUI Kit's `.overflow_y_scrollbar()` adds a visible scrollbar and wraps the original element as its scroll area; it is an extension from `ScrollableElement`, not a `Styled` method. Keep one owner for each scroll region, and put content padding inside that region if its scrollbar should sit at the pane edge. See [Coding Guides](./coding-guides) for scroll ownership and measurement.
+
+Normal flex children consume layout space. Use `.relative()` on a container and `.absolute().top_0().right_0()` on a badge when the badge should overlay content without consuming a row or column slot. Offset setters position an absolute child; they do not make an ordinary flex child absolute. Later siblings normally paint over earlier siblings; general `Styled` has no `z_index(...)` method.
+
+### Theme and scale
+
+Use semantic colors and radius from `cx.theme()` for application surfaces. GPUI Kit components already apply their normal theme appearance; style their instances for local layout or an intentional refinement. The named spacing and size helpers are rem based: `_1` is `0.25rem`, `_2` is `0.5rem`, `_3` is `0.75rem`, and `_4` is `1rem`. In a GPUI Kit `Root`, the active theme's base font size sets the window rem size, so a font size or zoom change also changes rem based geometry. Use typed setters such as `.gap(rems(0.625))` when the scale has no suitable step; reserve `px(...)` for a dimension that truly needs pixels. See [Geometry](./geometry) for length types and [Fonts](./fonts) for the theme's rem setup.
+
+### Troubleshoot the result
+
+| Symptom | Check |
+| --- | --- |
+| The rail does not move above the documents when the window narrows | Resize the drawable content area below 600 logical pixels. The condition reads `window.viewport_size().width` during `render`; changing only display scale does not cross this logical-pixel threshold. |
+| `Document 60` cannot be reached | Place the pointer over the document list and scroll there. Keep `.id("document-list").overflow_y_scroll()` on the bounded list region, with `.flex_1().min_h_0()` on it and its containing column. |
+| The header moves when scrolling | Ensure the header is a sibling of the list viewport, not a child inside the scrolling element. |
+| A pane header disappears at the top | `h_flex()` centers children by default; stretch the row's children or give that pane full height. |
+| A title overflows instead of truncating | Release the flexible child's minimum width with `.min_w_0()` and bound the text width. |
+| A list grows past the window instead of scrolling | Give its ancestors a resolved height, let the flexible child shrink with `.min_h_0()`, and put scrolling on the intended viewport. |
+| A scrollbar sits inside the pane edge | Check which element owns scrolling and whether padding wraps the scroll owner. |
+| Layout changes after theme zoom | Recheck rem based dimensions and any cached measurements that assumed the old rem size. |
+
 ## Common `Styled` methods
 
 GPUI uses underscores where Tailwind uses hyphens. Where a matching concept exists, the first column links to its official Tailwind CSS reference in a new tab. The names are GPUI methods; call them on a `Styled` value, such as `div().gap_2()`. These tables cover the distinct `Styled` operations and the generic setters generated by its macros. Numeric variants follow the families described below, rather than occupying thousands of near-identical rows. Linked pages explain the corresponding styling concept; they do not imply identical behavior in GPUI and a browser.
@@ -298,42 +398,6 @@ The macros also generate methods for the size (`w`, `h`, `size`, `min_size`, `mi
 
 Spacing helpers use a rem based scale: `_1` is `0.25rem`, `_2` is `0.5rem`, `_3` is `0.75rem`, and `_4` is `1rem`. For a value outside the named helpers, use a typed setter such as `.gap(rems(0.625))`, `.w(px(240.))`, or `.w(relative(0.5))`. `relative(0.5)` expresses half the available relative size; `px(...)` expresses pixels. The named scale and method set are GPUI's implementation, so check the actual API rather than assuming every Tailwind class exists.
 
-### A row that can shrink
-
-```rust
-use gpui_kit::*;
-use gpui_kit::component::h_flex;
-
-h_flex()
-    .w_full()
-    .gap_3()
-    .child(div().w_64().flex_shrink_0().child("Navigation"))
-    .child(div().flex_1().min_w_0().truncate().child("A long document title"))
-```
-
-`h_flex()` is GPUI Kit's shorthand for `.flex().flex_row().items_center()`. Its children are centered vertically by default. Use `.items_stretch()` on the row, or `.h_full()` on a child, when a pane must occupy the row's full height. `.flex_1()` lets the title area take the remaining width; `.min_w_0()` lets it shrink below its content's natural width so truncation can take effect. The parent owns the gap and alignment; each child owns its sizing constraints.
-
-### A themed surface
-
-```rust
-use gpui_kit::*;
-use gpui_kit::component::ActiveTheme as _;
-
-div()
-    .flex()
-    .flex_col()
-    .gap_3()
-    .p_4()
-    .bg(cx.theme().background)
-    .text_color(cx.theme().foreground)
-    .border_1()
-    .border_color(cx.theme().border)
-    .rounded(cx.theme().radius)
-    .child("Account")
-```
-
-The Tailwind analogy covers layout and utility naming; it does not provide a CSS cascade or a Tailwind color palette. Read semantic colors and radii from `cx.theme()` for application surfaces. GPUI Kit components already own their normal themed appearance, so add instance styles for local layout or a deliberate refinement.
-
 ## What a style call changes
 
 Every `Styled` element exposes `fn style(&mut self) -> &mut StyleRefinement`. A call such as `.px_3()` writes the relevant optional padding fields; `.bg(...)` writes the background field. Fields left unset do not replace existing values when refinements are merged. The resolved `Style` holds both layout data and presentation data.
@@ -350,7 +414,7 @@ In an element's `request_layout` phase, GPUI passes layout fields such as displa
 
 ## Fluent composition and trait boundaries
 
-The fluent surface combines several traits. `Styled` supplies style methods. `ParentElement` supplies `.child(...)`. `InteractiveElement` supplies `.id(...)`, returning a `Stateful<Div>` that supports identity dependent interaction methods. Every `IntoElement` implements `FluentBuilder`; `IntoElement` alone does not grant styling or interaction.
+The fluent surface combines several traits. `Styled` supplies style methods. `ParentElement` supplies `.child(...)`. `InteractiveElement` supplies `.id(...)`, returning a `Stateful<Div>` that supports identity dependent methods such as `.overflow_y_scroll()`. `InteractiveElement` also supplies state style refinements such as `.hover(...)`. Every `IntoElement` implements `FluentBuilder`; `IntoElement` alone does not grant styling, children, or interaction. If a method is missing, check the receiver's trait and whether a preceding call changed its type.
 
 | `FluentBuilder` method | Effect |
 | --- | --- |
@@ -374,6 +438,8 @@ div()
 ```
 
 Conditional closures consume and return the builder. The condition is evaluated during the current render; it is not a subscription. `.map(...)` can return a different type. Use an `Entity` to own state that changes across frames.
+
+For example, `.when(selected, ...)` evaluates `selected` while building this frame; `.hover(|style| ...)` installs a style refinement for pointer hover. A scroll call needs a stateful element, so give the intended scroll owner an `.id(...)` first. An arbitrary component implementing `IntoElement` cannot be assumed to accept `.child(...)` or `.bg(...)`; inspect its own builder API or wrap it in a `div()` that owns those styles.
 
 GPUI Kit adds `StyledExt` for neutral helpers such as `h_flex`, `v_flex`, and `refine_style`, and `ThemeStyled` for theme driven appearance such as `popover_style(cx)`. These are extensions on top of GPUI's `Styled`, not Tailwind utilities. When implementing a custom element, return its `StyleRefinement` from `style()` and apply the resolved style during layout and paint. Implement only the child and interaction traits that the element can actually support.
 

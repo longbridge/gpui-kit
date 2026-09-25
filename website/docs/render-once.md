@@ -25,6 +25,7 @@ use gpui_kit::prelude::*;
 struct MessageRow {
     author: SharedString,
     body: SharedString,
+    action: Option<AnyElement>,
 }
 
 impl MessageRow {
@@ -32,17 +33,26 @@ impl MessageRow {
         Self {
             author: author.into(),
             body: body.into(),
+            action: None,
         }
+    }
+
+    fn action(mut self, action: impl IntoElement) -> Self {
+        self.action = Some(action.into_any_element());
+        self
     }
 }
 
 impl RenderOnce for MessageRow {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        let MessageRow { author, body, action } = self;
+
         div()
             .flex()
             .gap_2()
-            .child(div().font_semibold().child(self.author))
-            .child(self.body)
+            .child(div().font_semibold().child(author))
+            .child(body)
+            .when_some(action, |row, action| row.child(action))
     }
 }
 ```
@@ -55,6 +65,86 @@ div().child(MessageRow::new("You", "Explain RenderOnce"))
 
 The derive does not render the component eagerly. It generates an `IntoElement` implementation whose element is `ViewElement<Self>`; GPUI consumes and renders the value as part of the surrounding tree. Implementing `RenderOnce` alone gives the value a `View` implementation, but does not let you pass it directly to `.child(...)`: that also requires `IntoElement`, which this derive supplies. The derive does **not** implement `Styled`, `ParentElement`, focus, or accessibility semantics for your type. Those capabilities come from the elements you build or from additional traits you implement.
 
+## Try it: rebuild a value, keep the count
+
+In an app that depends on `gpui-kit`, replace `src/main.rs` with this complete example and run `cargo run`. The `CounterLabel` is a `RenderOnce` value. `CounterView` is the retained `Entity` that owns the count.
+
+```rust
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::*;
+
+#[derive(IntoElement)]
+struct CounterLabel {
+    count: u32,
+}
+
+impl RenderOnce for CounterLabel {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        div().child(format!("Count: {}", self.count))
+    }
+}
+
+struct CounterView {
+    count: u32,
+}
+
+impl Render for CounterView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .child(CounterLabel { count: self.count })
+            .child(
+                Button::new("increment")
+                    .primary()
+                    .label("Add one")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.count += 1;
+                        cx.notify();
+                    })),
+            )
+    }
+}
+
+fn main() {
+    application().with_assets(assets::Assets).run(|cx| {
+        init(cx);
+        open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| CounterView { count: 0 })
+        })
+        .expect("Failed to open window");
+    });
+}
+```
+
+The window starts at `Count: 0`. Click **Add one** twice: it should show `Count: 1`, then `Count: 2`. Each `CounterView::render` call constructs a new `CounterLabel` from the current count; its earlier value is consumed. The count survives because the same `CounterView` Entity owns it. `cx.notify()` requests another render after the click changes that owner. The component's name does not promise exactly one render per display frame; see [Render](./render) for when GPUI renders.
+
+If the text stays at zero, check that the listener writes `this.count` and calls `cx.notify()`. If it always returns to one, check that `CounterView { count: 0 }` is created in the window closure, not inside `render`. If `.child(CounterLabel { ... })` does not compile, keep `#[derive(IntoElement)]` and `use gpui_kit::*;` in scope. The later snippets in this page illustrate separate variations; use this full example as the copyable starting point.
+
+## Build and use the component
+
+`MessageRow` has a small builder surface: `new` supplies required text, while `action` is an optional **slot**. `AnyElement` stores whichever concrete element the caller supplies. The slot is rendered after the body; calling `.action(...)` twice replaces the earlier element. This follows the repository's [`Empty` component](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/empty.rs), which uses named optional slots and renders them in a fixed order. If the component must accept several children, store `Vec<AnyElement>` and implement `ParentElement`; one named slot does not need that trait.
+
+The caller can put a semantic control in the slot and keep the behavior in its retained View. In this example the `Editor` below owns `opened`; its click listener changes that field and requests another render:
+
+```rust
+// Inside Editor::render, where cx: &mut Context<Self> is available.
+MessageRow::new("You", "Explain RenderOnce").action(
+    Button::new("open-message")
+        .label("Open")
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.opened = true;
+            cx.notify();
+        })),
+)
+```
+
+Import `Button` with `use gpui_kit::component::button::Button;` and give `Editor` an `opened: bool` field. For repeated messages, pass each button a stable ID derived from that message's domain ID (for example, `("open-message", message.id)` if that ID is a supported `ElementId` part). The label is display text, not an identity. `MessageRow` itself has no Entity, listener context, or callback ownership: it consumes the already-built action. A custom component that owns its own callback can instead store an owned `'static` handler in a private field and forward it to a semantic control during `render`; use that design when the callback is part of the component's contract.
+
 ## Owned values and the render lifecycle
 
 The [`Render`](./render) guide covers the retained View. `RenderOnce` requires `Self: 'static`, and the value component's actual signature is:
@@ -65,17 +155,9 @@ fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement;
 
 Because `self` is owned, rendering can move fields directly into the Element tree and its `'static` handlers. The component value is used once; its parent constructs a new value the next time that parent renders. Builder methods may mutate the value while constructing it; the resulting props describe one render rather than a persistent mutable model.
 
-Destructuring first keeps ownership clear when several fields move into different parts of the tree:
+Destructuring first keeps ownership clear when several fields move into different parts of the tree. The complete `MessageRow::render` above does this for its text and action slot.
 
-```rust
-fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
-    let MessageRow { author, body } = self;
-
-    div()
-        .child(author)
-        .child(body)
-}
-```
+The slot conversion happens in the builder, before `render`; `.when_some(...)` adds it only when present. A `SharedString` owns reusable text, and `AnyElement` owns the type-erased child, so neither borrows a short-lived local variable.
 
 This does **not** mean the visible UI disappears after one frame, nor that every display refresh constructs a new value. “Once” refers to one component instance: the parent makes another whenever its `render` runs. A normal window redraw may render even unchanged child views, while an explicit [cached view](./view-cache) can skip a clean subtree. GPUI retains Entities and keyed state across these render passes, so this is not simply a traditional immediate-mode loop that rebuilds the whole application on every screen refresh. Do not retain `&mut Window` or `&mut App` beyond this call. Repeated rows should use stable IDs derived from domain data when their children need identity; see [ElementId](./element_id).
 
@@ -145,6 +227,18 @@ Create `query` once when constructing `SearchView`, for example with `cx.new(|cx
 Capturing an `Entity<T>` keeps that entity alive as long as the rendered handler is retained. This is often correct for a child acting on its owner. Use `WeakEntity<T>` when the handler must not extend the target's lifetime, and handle the case where `weak.update(...)` can no longer reach it.
 
 `RenderOnce::render` receives `&mut App`, not `&mut Context<Self>`. A `RenderOnce` component therefore has no entity [Context](./context) of its own: it cannot use `cx.listener` for itself, retain its own subscriptions or tasks, or call `cx.notify()` to schedule itself. Pass a handler, dispatch an [Action](./action), or update the state-owning `Entity` instead. Keyed element state can retain local interaction details, but it does not replace an owner for durable application data.
+
+## Common compile errors and a quick check
+
+| Symptom | Check |
+| --- | --- |
+| `MessageRow` does not implement `IntoElement` at `.child(...)` | Add `#[derive(IntoElement)]` as well as `impl RenderOnce`; keep `use gpui_kit::*;` in scope. |
+| `no method named when_some` (or a fluent style method) | Import `gpui_kit::prelude::*;` for `FluentBuilder`, and check whether the method belongs to the returned `div()` rather than your component type. |
+| A borrowed local value “does not live long enough” in a slot or handler | Move owned text (`SharedString`), an owned `AnyElement`, or a cloned `Entity` handle into the component. GPUI handlers must be `'static`. |
+| `cx.listener` or `cx.notify()` is unavailable in `RenderOnce::render` | That method gets `&mut App`, not an entity `Context<Self>`. Create the listener in the owner View's `Render::render` and pass it in, as above. |
+| Calling `.child(...)` on `MessageRow` fails | The derive provides `IntoElement`, not `ParentElement`. Add a named builder such as `.action(...)`, or implement `ParentElement` and store children explicitly. |
+
+To check a copied example, first put the type, builders, and `RenderOnce` implementation in the same module with both imports shown above. Use it as a child of a retained View and run `cargo check -p your-app` in that app's workspace. The `Editor` snippets are separate illustrations; add the mentioned fields and imports before compiling them together. For the repository's real API, compare [`Empty`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/empty.rs), [`Checkbox`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/checkbox.rs), and [`Button`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/button/button.rs).
 
 ## Builder-style components
 

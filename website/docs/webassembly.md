@@ -18,7 +18,7 @@ The [component gallery](https://gpui-kit.com/gallery/) is the quickest working e
 
 ## Run the gallery locally
 
-From the repository checkout, install Rust and Bun, then run:
+Install Rust, Bun and `make`. Run these commands from the repository root (the directory containing the workspace `Cargo.toml`):
 
 ```sh
 cd crates/story-web
@@ -27,7 +27,17 @@ cargo install wasm-bindgen-cli --version 0.2.121
 make dev
 ```
 
-Open **http://localhost:3000/gallery/**. `make dev` builds the WASM module in debug mode, generates bindings in `www/src/wasm/`, installs the web dependencies and starts Vite. The local [toolchain file](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/rust-toolchain.toml) selects nightly; the `wasm-bindgen-cli` version above matches this checkout's `Cargo.lock`. If the lockfile changes, match the CLI to the locked `wasm-bindgen` crate version. Rust changes require another `make build-wasm-dev` before refreshing the page; the Vite server handles web file changes. The [build script](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/scripts/build-wasm.sh) sets an 8 MiB linker stack for the gallery's large render tree, including in debug builds.
+Keep `make dev` running and open **http://localhost:3000/gallery/**. You should see the gallery's component list and a rendered view; the loading indicator alone does not confirm that graphics started. The first Rust build can take longer than later builds. `make dev` builds the WASM module in debug mode, generates bindings in `www/src/wasm/`, installs the web dependencies and starts Vite.
+
+Check the result in this order:
+
+1. The terminal reaches Vite's local URL without a Rust or `wasm-bindgen` error.
+2. The browser Network panel shows the generated JavaScript and `.wasm` requests succeeding. Open the `/gallery/` URL above, not the root of the Vite server.
+3. The loading indicator gives way to the gallery. Select a story and try a control, such as a button, to check that input reaches the Rust view. A removed loading indicator by itself only proves that the JavaScript loader called `run(...)`.
+
+If you edit a Rust view, keep Vite running in one terminal and run `make build-wasm-dev` from `crates/story-web` in another, then reload the page. Editing the loader or other `www/` files is handled by Vite. This distinction matters because Vite does not compile the Rust crate for you.
+
+The local [toolchain file](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/rust-toolchain.toml) selects nightly; the `wasm-bindgen-cli` version above matches this checkout's [`Cargo.lock`](https://github.com/longbridge/gpui-kit/blob/main/Cargo.lock). If the lockfile changes, match the CLI to the locked `wasm-bindgen` crate version. If another CLI version is already installed, check `wasm-bindgen --version` and reinstall the pinned version with `cargo install -f wasm-bindgen-cli --version 0.2.121`. The [build script](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/scripts/build-wasm.sh) sets an 8 MiB linker stack for the gallery's large render tree, including in debug builds.
 
 For a production gallery build, run `make build-prod` from the same directory. The site bundle lands in `www/dist/` and uses the `/gallery/` base path. Deploy it at that path, or change both the [Vite base](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/www/vite.config.js) and the [Rust asset endpoint](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs) for your own host.
 
@@ -36,6 +46,17 @@ For a production gallery build, run `make build-prod` from the same directory. T
 The gallery's `run(story, dark, theme_name, theme_json)` is exported with `#[wasm_bindgen]`. Its [loader](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/www/src/main.js) imports the generated JS module, awaits its default WASM initialization, reads the optional `?story=` URL parameter and host theme, then calls `run(...)`. On the Rust side, it calls `gpui_kit::platform::web_init()`, creates a web `Application`, registers assets, and passes a launch closure to `run_embedded`. Once graphics initialization succeeds, that closure calls `gpui_component_story::init(cx)` (which calls `gpui_kit::init(cx)`), loads fonts, applies the theme, and calls `gpui_kit::open_window`. The `ApplicationHandle` returned by `run_embedded` is retained in thread-local storage. Graphics initialization is asynchronous, so that return does not mean the launch closure ran or the first frame painted. For your application, initialize Kit before constructing components, as in [Getting Started](./getting-started.md), and keep the handle alive while the page uses the view.
 
 The gallery uses `WebPlatform::new_with_backend_and_font_fallback` and attaches its fetch HTTP client. `Auto` tries WebGPU and then WebGL2 if WebGPU fails. The current web platform uses one document canvas and one top-level window; another top-level window, or reopening a closed one, is unsupported. Render dialogs inside that window through Kit's `Root`. Reuse the [gallery entry point](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs) when adapting your own app; keep shared views in Rust, with the page responsible for loading the WASM module and hosting it.
+
+### Trace one launch
+
+| Stage | File or API | What it establishes |
+| --- | --- | --- |
+| Compile | `scripts/build-wasm.sh` | `cargo rustc` builds the gallery's `cdylib` for `wasm32-unknown-unknown`, then `wasm-bindgen --target web` writes JavaScript bindings and the browser-loadable module into `www/src/wasm/`. |
+| Load | `www/index.html` and `www/src/main.js` | The page shows a loading state; the loader imports the generated bindings and awaits their default initializer. This is the JavaScript-to-Rust boundary. |
+| Start | `run(...)` in `src/lib.rs` | Rust creates the web platform, supplies assets and keeps the `ApplicationHandle` alive. `run_embedded` starts graphics initialization asynchronously. |
+| Open | The launch closure in `src/lib.rs` | Once graphics are ready, it initializes Kit, registers fonts, applies a theme and opens the single GPUI window. Only then can the first view be painted. |
+
+Use this sequence when moving a desktop app to the browser: retain its GPUI view and state code where the target supports it, then provide a web entry point, a page loader and browser-specific resources. A successful Rust target build does not test the page loader or graphics initialization.
 
 ## Fonts and CJK text
 
@@ -59,15 +80,16 @@ Use a raw supported font file such as the TTF in GPUI Web's `examples/hello_web/
 
 ## A smaller GPUI Base example
 
-The [GPUI Base WASM showcase](https://github.com/longbridge/gpui-kit/tree/main/crates/base/examples/wasm) compiles the same [showcase views](https://github.com/longbridge/gpui-kit/tree/main/crates/base/examples/showcase) used by its native example. To run it independently:
+The [GPUI Base WASM showcase](https://github.com/longbridge/gpui-kit/tree/main/crates/base/examples/wasm) compiles the same [showcase views](https://github.com/longbridge/gpui-kit/tree/main/crates/base/examples/showcase) used by its native example. To run it independently from the repository root, install the matching `wasm-bindgen-cli` if you have not already done so:
 
 ```sh
 cd crates/base/examples/wasm
 rustup target add wasm32-unknown-unknown --toolchain nightly
+cargo install wasm-bindgen-cli --version 0.2.121
 make dev
 ```
 
-It uses `gpui_platform::single_threaded_web()`, generates bindings with `wasm-bindgen`, and serves the examples at **http://localhost:3001/examples/base/**. Its `run(component)` export selects a showcase view; the JavaScript loader reads `?component=...` from the URL. See its [build script](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/wasm/scripts/build.sh) and [loader](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/wasm/www/src/main.js). The gallery is the better starting point for styled GPUI Kit components; this example isolates the Base primitives.
+Keep the server running and open **http://localhost:3001/examples/base/**. It uses `gpui_platform::single_threaded_web()`, generates bindings with `wasm-bindgen`, and serves the examples through Vite. Its `run(component)` export selects a showcase view; the JavaScript loader reads `?component=...` from the URL. The CLI version again follows the workspace `Cargo.lock`. See its [build script](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/wasm/scripts/build.sh) and [loader](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/wasm/www/src/main.js). The gallery is the better starting point for styled GPUI Kit components; this example isolates the Base primitives.
 
 ## Troubleshoot a failed load or blank canvas
 
@@ -75,6 +97,7 @@ Open the browser's **Console and Network** panels first. The gallery loader catc
 
 | Symptom | Check |
 | --- | --- |
+| Rust build cannot find the WASM target, or `wasm-bindgen` is not found | Run `rustup target add wasm32-unknown-unknown` in `crates/story-web` so its selected nightly toolchain receives the target. Install the CLI version in `Cargo.lock`, then rerun `make build-wasm-dev`. The Rust compiler build must finish before a Vite page can load the module. |
 | JS or `.wasm` request is 404 | Open `/gallery/`, not the site root. Keep Vite's `base: '/gallery/'`, the deployment path and generated files together. Rebuild with `make build-wasm-dev` after Rust changes; ensure the generated `www/src/wasm/` files were included in the web build. |
 | `wasm-bindgen` import or instantiation fails | Match `wasm-bindgen-cli` to the locked crate version and regenerate bindings. Serve `.wasm` as `application/wasm`; the generated loader can fall back from streaming compilation when MIME is wrong, but that is slower. Check the Network response instead of assuming the requested URL returned a module. |
 | Loading indicator vanishes but canvas stays empty | Read Console errors after `run` returns. `Auto` tries WebGPU and then WebGL2; if both fail, check browser GPU support, policy and hardware acceleration. The web runtime cannot create a second top-level window. |
@@ -85,6 +108,8 @@ Open the browser's **Console and Network** panels first. The gallery loader catc
 ## Package size and delivery
 
 `include_bytes!` puts the gallery's subset fonts **inside the WASM payload**, so visitors download them with the module before they can see a first frame. The gallery also bundles the component stories and rendering stack; icon SVGs are separate on-demand requests. Vite packages the JavaScript loader and WASM for `/gallery/`, but changing only the Vite base will not change the Rust icon endpoint. After `make build-prod`, `ls -lh www/dist/assets/*.wasm` shows the uncompressed module size. Compare the **compressed transfer sizes** of that module and JS in the browser Network panel, and record the first-load time on a throttled connection. Local file size, CDN compression, browser cache state, compilation time and GPU initialization are different costs.
+
+Before publishing a copy of this gallery, serve `www/dist/` from the intended `/gallery/` path and repeat the three browser checks above against that served copy. Confirm that the generated `.wasm` and JS URLs resolve on the deployed host, and that icon, theme and font requests reach the hosts you intended. The example's asset endpoint is hard-coded to the published GPUI Kit site, so a successful local gallery does **not** prove that a separately hosted copy serves its own icons. Record a cold load and a warm load separately; browser caching changes the result. The repository's [release workflow](https://github.com/longbridge/gpui-kit/blob/main/.github/workflows/release-website.yml) builds both WASM examples and copies their `dist/` files under the corresponding website paths, but it does not replace browser testing on the final host.
 
 For example, **if** a full application such as Longbridge Pro were compiled into one WASM module, including all of its features and font coverage, the initial download and startup cost could grow substantially. That is a distribution risk to measure, not a measured package size or a claim that such an application currently ships on the web. Keeping fonts or features behind later requests can reduce initial transfer, but adds network, caching, CORS and loading-state work. The gallery's font subsets and on-demand icons illustrate those tradeoffs; they do not establish an application-size budget.
 

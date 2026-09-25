@@ -56,7 +56,7 @@ Several `notify` calls inside one event handler collapse into a single repaint �
 
 ## When `render` runs
 
-`render` does **not** run once per frame. GPUI repaints for reasons your application never hears about — a pointer moving over a button, a text cursor blinking, a list scrolling, an animation advancing — and none of those are a reason to run JavaScript.
+`render` does **not** run once per frame. GPUI can request a frame for reasons unrelated to a script View's data — a pointer moving over a button, a text cursor blinking, a list scrolling, or an animation advancing. Those events need not rerun that View's script `render`. They also do not imply that an idle window draws at the display's full refresh rate. Frame-path callbacks such as virtual-list item renderers are a separate case; see [Performance](./performance.md#reading-the-counters).
 
 So a `render` call does not describe *this frame*. It describes the interface once, into a Snapshot the runtime keeps:
 
@@ -77,7 +77,7 @@ Everything else replays the description you already produced, in Rust, without r
 
 Three consequences worth holding on to:
 
-**Your `render` cost follows your users, not your frame rate.** A View that changes ten times a second costs ten renders a second, whether the window is repainting at 60 FPS or 120. Describing a large panel is affordable precisely because it is not being redescribed sixty times for no reason.
+**Your script `render` cost follows invalidation, not the display refresh rate alone.** A View notified ten times a second needs at most ten rebuilds in that second, and notifications before the next frame may be coalesced. Repaints that reuse its Snapshot do not redescribe that View in JavaScript; other frame work still has a cost.
 
 **Hover, focus and active styles never call back into script.** `.hover(s => s.opacity(0.8))` is resolved into a native style description while the Snapshot is built, and GPUI applies it from there. A pointer moving across your interface runs no JavaScript at all. The same is true of an [`Input`](#retained-state)'s cursor and selection.
 

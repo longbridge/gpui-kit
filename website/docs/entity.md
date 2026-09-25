@@ -65,6 +65,74 @@ store.update(cx, |store, cx| {
 
 The model's `notify()` reaches `MessagePanel` through the stored observation, which notifies the View in turn. This explicit connection also keeps the View current if it is later placed behind a cache boundary. `RenderOnce` is another route to elements: it describes a value-like component consumed during rendering and does not, by itself, create or require an Entity. See [RenderOnce](./render-once) for that lifecycle.
 
+### Try it: one model, one observing View
+
+From the repository root, replace `examples/hello_world/src/main.rs` with this complete example, then run `cargo run -p hello_world`. It uses the existing example package and requires no new dependency. Save the original file first if you want to restore the Hello World example afterward.
+
+```rust
+use gpui_kit::base::StyledExt;
+use gpui_kit::component::button::Button;
+use gpui_kit::*;
+
+struct MessageStore {
+    count: usize,
+}
+
+struct MessagePanel {
+    store: Entity<MessageStore>,
+    _subscription: Subscription,
+}
+
+impl MessagePanel {
+    fn new(cx: &mut Context<Self>) -> Self {
+        let store = cx.new(|_| MessageStore { count: 0 });
+        let _subscription = cx.observe(&store, |_, _, cx| cx.notify());
+        Self {
+            store,
+            _subscription,
+        }
+    }
+}
+
+impl Render for MessagePanel {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let count = self.store.read(cx).count;
+
+        div()
+            .v_flex()
+            .gap_2()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .child(format!("Messages: {count}"))
+            .child(
+                Button::new("add-message")
+                    .label("Add message")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.store.update(cx, |store, cx| {
+                            store.count += 1;
+                            cx.notify();
+                        });
+                    })),
+            )
+    }
+}
+
+fn main() {
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(MessagePanel::new)
+        })
+        .expect("failed to open window");
+    });
+}
+```
+
+The window starts at **Messages: 0**. Each click changes the model Entity through `update`; its `notify()` schedules the stored observer, which calls `notify()` on the panel. The next render reads the same model handle, so the label becomes **Messages: 1**, then **Messages: 2**. The model has no `Render` implementation and is never added to the element tree. The panel retains both the model handle and the `Subscription`; recreating either in `render` would lose the stable relationship.
+
+If the count stays at zero, check both notification calls and the `_subscription` field. Removing the model's `notify()` leaves the observer without a signal; dropping the subscription after `new` cancels the observation. When changing the example, keep `store.update(...)` in the click handler and `store.read(cx)` in `render`, outside any active update of that same store.
+
 ## Create an Entity
 
 Use `cx.new` in any GPUI context:
@@ -165,7 +233,7 @@ let last_message = chat.read_with(cx, |chat, _cx| {
 });
 ```
 
-`read` takes `&App` (a `Context<T>` dereferences to `App`). `read_with` accepts any `AppContext` and returns what its closure produces. Neither creates a second copy of the Entity. Keep either read short: an Entity already leased for an update or render cannot be read again until that access ends.
+`read` takes `&App` (a `Context<T>` dereferences to `App`). `read_with` accepts any `AppContext` and returns what its closure produces. Neither creates a second copy of the Entity. Keep either read short: an Entity already leased for an update or render cannot be read again until that access ends. Do not keep an `&T` across a later update or an `await`; extract an owned value before leaving the read.
 
 ## Update state
 
@@ -283,7 +351,7 @@ An Entity can coordinate with another Entity in two related ways:
 - `cx.observe(&entity, ...)` runs when that Entity calls `cx.notify()`. Use it when only “this state changed” matters.
 - `cx.subscribe(&entity, ...)` receives a typed [Event]. Use it when the meaning and payload of the change matter.
 
-They are separate signals: `notify()` does not emit an Event, and `emit(event)` does not by itself notify renderers. A state change that needs both a redraw and a semantic event can do both deliberately, usually once each. An observer can inspect the observed Entity with the handle it receives; it must still avoid re-entering an Entity already borrowed by the callback chain.
+They are separate signals: `notify()` does not emit an Event, and `emit(event)` does not by itself notify renderers. A state change that needs both a redraw and a semantic event can do both deliberately, usually once each. An observer can inspect the observed Entity with the handle it receives; it must still avoid re-entering an Entity already borrowed by the callback chain. GPUI delivers these callbacks through its effect cycle, after the current update's borrow has ended; do not rely on the callback having run inside the `update` closure.
 
 Store the [`Subscription`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Subscription.html) returned by `observe` or `subscribe` on the subscribing Entity, in a `_subscription` field or a `_subscriptions: Vec<Subscription>` field:
 
@@ -348,7 +416,7 @@ See [Event] for `EventEmitter`, `emit`, and typed subscription design.
 
 ## Lifecycle
 
-An Entity remains alive while at least one strong `Entity<T>` handle exists. When the final strong handle is dropped, GPUI releases its state; `WeakEntity<T>` handles no longer upgrade successfully.
+An Entity remains alive while at least one strong `Entity<T>` handle exists. Dropping the final strong handle makes `WeakEntity<T>::upgrade()` fail. GPUI then runs release callbacks and drops the state during its effect cycle; do not depend on the state's destructor or a release callback running synchronously at the `drop(handle)` statement.
 
 Most cleanup should follow normal ownership:
 
@@ -357,7 +425,39 @@ Most cleanup should follow normal ownership:
 - keep View-level subscriptions in the same View's `_subscription` or `_subscriptions` field;
 - let dropping the View release its subscriptions and captured resources.
 
-For integration code that must react immediately before state is dropped, [Context](./context) also provides `cx.on_release(...)` for the current Entity and `cx.observe_release(...)` for another Entity. Store those returned subscriptions for exactly as long as the release callback is needed.
+For integration code that needs access to state before GPUI drops it, [Context](./context) also provides `cx.on_release(...)` for the current Entity and `cx.observe_release(...)` for another Entity. Both callbacks run when GPUI processes the release; `observe_release` runs only while its subscriber still exists. Store the returned subscriptions for exactly as long as the release callback is needed.
+
+### Try it: shared handles and a weak lifetime
+
+Add this test to a package that enables `gpui-kit`'s `test-support` feature (see [Testing](./test)). It needs no window. The assertions check that a clone shares state, one remaining strong handle keeps it alive, and the final drop invalidates the weak handle:
+
+```rust
+use gpui_kit::{AppContext, TestAppContext};
+
+struct Counter {
+    value: usize,
+}
+
+#[gpui_kit::test]
+fn handles_share_state_and_control_lifetime(cx: &mut TestAppContext) {
+    let counter = cx.new(|_| Counter { value: 0 });
+    let another_owner = counter.clone();
+    let weak = counter.downgrade();
+
+    another_owner.update(cx, |counter, cx| {
+        counter.value += 1;
+        cx.notify();
+    });
+    assert_eq!(counter.read(cx).value, 1);
+
+    drop(counter);
+    assert!(weak.upgrade().is_some());
+    drop(another_owner);
+    assert!(weak.upgrade().is_none());
+}
+```
+
+As a second check, use the `Chat`/`Workspace` example above: update Chat once with `notify()` alone and once with `emit(ChatEvent::MessageSent)` alone. Predict which call changes `sent_count`, then assert it in a `#[gpui_kit::test]`. Retain `_subscriptions` on `Workspace`; otherwise the test checks an already canceled listener.
 
 ## Entity identity and view caching
 

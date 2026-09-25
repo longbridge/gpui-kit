@@ -69,7 +69,7 @@ GPUI 目前使用 `SmolStr` 作为 `SharedString` 的底层实现。存储形式
 | `SharedString::from("Ready")` | 将这段短文本复制到值内部 | 复制内联字节，不分配堆内存 |
 | 较长的动态文本 | 共享的堆内存 | clone 带引用计数的 handle，不复制文本字节 |
 
-当前的内联容量是 23 字节。某些由换行符后接空格组成的文本也会使用无需分配的特殊静态表示。这些属于实现细节，不是长度限制，也不表示每个 `SharedString` 都不会分配内存。尤其是，`SharedString::from("较长的字面量...")` 走普通转换路径；如果明确需要字面量的静态存储，应使用 `new_static`。构造和 clone 都不会对相同内容做字符串驻留或自动去重。
+当前的内联容量是 23 字节。某些由换行符后接空格组成的文本也会使用无需分配的特殊静态表示。这些属于实现细节，不是长度限制，也不表示每个 `SharedString` 都不会分配内存。尤其是，`SharedString::from("a long literal ...")` 走普通转换路径；如果明确需要字面量的静态存储，应使用 `new_static`。构造和 clone 都不会对相同内容做字符串驻留或自动去重。
 
 对于这些当前的存储形式，`SharedString::clone()` 的工作量不随文本长度增长：静态值复制 handle，短内联值复制少量字节，堆上值复制 handle 并更新引用计数。它不会复制堆上长文本的字节。`String::clone()` 则会分配独立缓冲区并复制文本字节。重新构造长 `SharedString` 仍可能分配；格式化、转换、引用计数更新，以及最终释放共享副本，都需要时间。
 
@@ -81,9 +81,9 @@ GPUI 目前使用 `SmolStr` 作为 `SharedString` 的底层实现。存储形式
 use gpui_kit::SharedString;
 
 let title: SharedString = "Quarterly report for the product team".into();
-let header_title = title.clone(); // 给一个 UI 所有者保留副本。
-let tab_title = title.clone(); // 给另一个所有者保留副本。
-let borrowed: &str = title.as_str(); // 只读借用，不取得所有权。
+let header_title = title.clone(); // Keep a copy for one UI owner.
+let tab_title = title.clone(); // Keep a copy for another owner.
+let borrowed: &str = title.as_str(); // Borrow read-only without taking ownership.
 
 assert_eq!(borrowed, "Quarterly report for the product team");
 assert_eq!(header_title, tab_title);
@@ -92,6 +92,32 @@ assert_eq!(header_title, tab_title);
 这里的 `.into()` 把字面量转换为自有的 `SharedString`；字面量若应使用静态存储，则改用 `SharedString::new_static(...)`。这里走的是普通转换路径，标题也超过当前内联容量，因此 `header_title` 与 `tab_title` 在内容不变时共享其堆上文本；它们的 clone 仍要更新引用计数。可以通过 `as_str()`、`AsRef<str>` 或解引用取得 `&str`，无需创建另一位所有者；这个借用不能超过原 `SharedString` 的生命周期。
 
 `SharedString` 本身不能原地修改。如果确实需要可变的构造或编辑缓冲区，可在局部使用 `String`，完成后转换一次。将自有的长 `String` 转成 `SharedString` 时仍可能复制到共享存储中，不要假设会复用原缓冲区。
+
+## 在所有权边界转换
+
+根据下一步由谁持有文本选择操作：
+
+| 来源与下一步用途 | 写法 | 所有权结果 |
+| --- | --- | --- |
+| UI 长期持有的固定字面量 | `SharedString::new_static("Ready")` | 拥有使用静态文本存储的值 |
+| UI 长期持有的临时 `&str` | `SharedString::from(text)` | 拥有独立于借用来源的值 |
+| UI 长期持有的已完成 `String` | `let label: SharedString = text.into();` | 将 `String` 移入转换；仍可能复制或分配 |
+| 已有 `SharedString`，两位所有者都需要 | `let label = title.clone();` | 双方各自拥有值；堆上长文本继续共享 |
+| 已有 `SharedString`，仅接收方需要 | `Label::new(title)` | 移动该值，不额外 clone |
+| 已有 `SharedString`，被调用方只读取 | `read_text(title.as_str())` | 在本次调用中借用 `&str` |
+
+builder 接收 `impl Into<SharedString>` 时也可传入 `&title`，因为 GPUI 实现了从 `&SharedString` 转换并 clone。传 `title.as_str()` 则会由借用文本构造**新的** `SharedString`；希望共享现有值时，使用 `title.clone()`（或 `&title`）。如果某个 API 特别要求 `String`，`title.to_string()` 会生成独立的可变字符串；只在该 API 边界这样做。
+
+```rust
+use gpui_kit::SharedString;
+use gpui_kit::component::label::Label;
+
+let title = SharedString::new_static("Downloads");
+let heading = Label::new(title.clone()); // Keep title for another owner.
+let tab = Label::new(title); // Final use: move the value directly.
+```
+
+`heading` 与 `tab` 都各自拥有文本。移动后不能继续使用 `title`；只有别的所有者还需要它时才先 clone。
 
 ## 从 API 响应进入 View
 
@@ -175,6 +201,18 @@ let title: SharedString = draft.into();
 复核时，扫描上述四个 `src` 目录中 `*.rs` 的具名 struct 主体，跳过仅用于测试的文件及 `#[cfg(test)]` 之后的内容，再统计字段类型中出现独立 Rust token `String` 与 `SharedString` 的数量。这是轻量源码扫描，不是 Rust 语义解析：它不含局部变量、函数签名和 enum 字段，包含源码中同时存在的原生与 WebAssembly `cfg` 变体，也不能推断运行时分配次数。
 :::
 
+## 常见编译错误与意外行为
+
+| 现象 | 原因与修正 |
+| --- | --- |
+| `Label::new(title)` 之后出现“use of moved value” | builder 会消费参数。View 或其他元素仍需该值时传 `title.clone()`；最后一次使用才移动它。 |
+| “borrowed data escapes”，或 callback 要求 `'static` | callback 不能长期保存从 View 借出的 `title.as_str()`。把 `SharedString` clone 进 `move` 闭包，需要时在闭包内部调用 `.as_str()`。 |
+| 方法要求 `&str`，却传了 `SharedString` | 传 `title.as_str()`（适用解引用强制转换时也可用 `&title`）。这只是借用，不复制文本。 |
+| 找不到 `push_str` 等修改方法 | `SharedString` 不可变。用 `String` 构造或编辑，完成后转换为 `SharedString`。 |
+| `.into()` 无法推断目标类型 | 显式指定 `let title: SharedString = source.into();`，或调用 `SharedString::from(source)`。 |
+
+callback 与元素遵循相同的所有权规则：闭包必须拥有在 `render` 返回后仍要使用的值。例如，在 `on_click(move |_, _, _| { /* use title_for_click here */ })` 前执行 `let title_for_click = self.title.clone();`，就能给 handler 一份独立的值。构建 callback 时 clone 一次，不要在每次 render 时把 `self.title.as_str()` 重新转换成新值。
+
 ## 与 `Cow<str>` 的关系
 
 Rust 的 [`Cow<'a, str>`](https://doc.rust-lang.org/std/borrow/enum.Cow.html) 可以借用现有文本，避免当下复制，但其 `Borrowed` 形式受源数据生命周期约束。`Owned` 形式持有 `String`；clone 非空的 owned 值会复制文本字节。对 borrowed 值调用 `to_mut()`，则会先复制成自有的 `String`，再供修改：
@@ -183,7 +221,7 @@ Rust 的 [`Cow<'a, str>`](https://doc.rust-lang.org/std/borrow/enum.Cow.html) �
 use std::borrow::Cow;
 
 let mut text: Cow<'_, str> = Cow::Borrowed("Ready");
-text.to_mut().push('!'); // 现在是自有且可编辑的值。
+text.to_mut().push('!'); // The value is now owned and editable.
 ```
 
 `SharedString` 是独立持有的不可变值，具有静态、内联或共享堆存储形式。clone 堆上长文本会共享字节；修改内容需要构建新值。它不是 `Cow` 的别名，也没有 `Cow` 那种修改时才复制的行为。

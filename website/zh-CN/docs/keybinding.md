@@ -6,7 +6,7 @@ order: -2.625
 
 # KeyBinding
 
-**KeyBinding** 把一个或多个按键映射为有类型的 [Action](./action)。GPUI Kit 使用 GPUI 的 keymap：在应用上注册 binding，再把匹配的 Key Context 与 Action handler 放在当前 Focus 对应 [Element](./element) 的 Dispatch Path 上。Action 文档介绍完整的 Focus 与派发流程；本页重点说明 binding 的写法与匹配规则。
+**KeyBinding** 把一个或多个按键映射为有类型的 [Action](./action)。GPUI Kit 使用 GPUI 的 keymap：在应用上注册 binding，再把匹配的 Key Context 与 Action handler 放在当前 Focus 对应 [Element](./element) 的 Dispatch Path 上。先用 [Focus](./focus) 建立并跟踪键盘目标，再读 Action 的命令派发；本页重点说明 binding 的写法与匹配规则。
 
 ## 绑定一条命令
 
@@ -59,6 +59,8 @@ Handler 使用 GPUI 的常规签名，例如 `on_action_save_document`。这里�
 
 GPUI 还识别 `fn`、`ctrl`、`alt`、`shift`、`cmd`、`super`、`win` 与 `secondary`。常见的跨平台 Command/Control 快捷键应使用 `secondary`；所有平台都必须使用 Control 时才写 `ctrl`。大写 ASCII 字母如 `A` 表示 Shift+A，显式写 `shift-a` 更容易阅读。如果按键字符串或 context predicate 无法解析，`KeyBinding::new` 会 **panic**；静态定义应便于检查，用户输入则要先验证。
 
+操作系统或窗口管理器可能先于 GPUI 占用快捷键。应在每个支持的平台测试预定组合，尤其是 `cmd`/`super`/`win` 组合以及 `alt-f4` 等系统快捷键。Binding 能成功解析，并不代表按键事件一定会到达应用。
+
 多个 chord 可以共用首键。只要更长的 binding 仍有可能匹配，GPUI 会暂存前缀；后续按键会完成 chord，或使前缀被重新派发。不要在可编辑区域中随意把常用文本输入键设为 chord 前缀。
 
 ## 声明 Key Context
@@ -66,10 +68,10 @@ GPUI 还识别 `fn`、`ctrl`、`alt`、`shift`、`cmd`、`super`、`win` 与 `se
 元素的 `.key_context(...)` 声明当前节点上的事实。`KeyBinding::new` 的第三个参数是用于测试 Focus 路径上 context 的 **predicate**。二者语法相关，但用途不同：
 
 ```rust
-// 挂在一个元素上的 context：标识符及 key/value 状态。
+// Context on an element: an identifier and key/value state.
 div().key_context("Editor mode=normal")
 
-// 用作 KeyBinding::new 第三个参数的 predicate。
+// Predicate passed as the third argument to KeyBinding::new.
 Some("Editor")
 Some("Editor && mode == normal")
 Some("Editor && !Modal")
@@ -138,7 +140,7 @@ let binding = window.highest_precedence_binding_for_action_in(
     &self.editor_focus,
 );
 
-// 同一个 Action 与目标对应的 GPUI Kit 快捷键提示。
+// GPUI Kit shortcut hint for the same Action and target.
 let hint = Kbd::binding_for_action_in(
     &SaveDocument,
     &self.editor_focus,
@@ -187,5 +189,11 @@ GPUI 提供 Action registry 和 keymap 机制，但**用户 keymap 文件格式*
 4. **竞争：**检查更深层 context、同深度后注册的 binding 和 chord 前缀。`None` binding 可能排在较浅的 scoped binding 前面。
 5. **Handler：**检查匹配的 Action 在当前 Focus 路径上是否有 `on_action` handler，以及更具体的 handler 是否提前消费了它。
 6. **菜单与重载：**菜单仍显示旧快捷键时，在安装新 keymap 后再次调用 `cx.set_menus(...)`。组件快捷键在重载后消失时，确认 `clear_key_bindings()` 之后重新运行了所有组件初始化。
+
+## 用仓库示例验证
+
+[Tree 实现](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/tree.rs)在 `Tree` context 下注册方向键 binding，并在渲染的根元素上放置 `.key_context(CONTEXT)`、`.track_focus(&focus_handle)` 和 `on_action` handler。[Combobox 实现](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/combobox.rs)另外绑定 Enter、Escape 和用于第二种确认方式的 `secondary-enter`。[Popover story](https://github.com/longbridge/gpui-kit/blob/main/crates/story/src/stories/popover_story.rs)展示了 macOS Command 与其他平台 Control 的显式 binding，以及获得 Focus 的 Action owner。
+
+验证应用 binding 时，让目标 focus handle 获得 Focus，按下快捷键，确认预期 Action handler 运行。然后聚焦到声明的 context 之外的 sibling：有 context 限制的快捷键此时不应运行。最后打开 overlay 或文本输入框再试，检查 Focus 切换和按键冲突。另外，针对命令目标的 focus handle 调用 `highest_precedence_binding_for_action_in` 检查显示的快捷键；标签正确并不能证明 handler 可达。
 
 Focus 到 Action handler 的完整路由过程，继续阅读 [Action](./action)。

@@ -29,7 +29,7 @@ gpui-kit = "0.6"
 将 `src/main.rs` 替换为：
 
 ```rust
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::*;
 
 struct HelloWorld;
@@ -82,11 +82,11 @@ fn main() {
 [Entity<T>](./entity) 保存跨帧状态。它可以持有不参与绘制的 model；当 `T` 实现 `Render` 且被挂载时，这个 Entity 就是持久的 **View**，每次渲染都会生成新的元素树。[RenderOnce](./render-once) 组件则把输入作为一个值，描述树中可复用的一部分。调用方提供当前状态和 handler 时适合用它；它仍可使用少量带 key 的元素状态。复杂状态、订阅和任务则需要持久的 owner。
 
 ```text
-应用入口 → 功能单元（model、command、view）
-             ├─ Entity<Model>       保留状态
-             └─ Entity<View>        持久视图；View 实现 Render
-                   └─ 元素树         每次渲染重新构建
-                        └─ RenderOnce 值组成可复用部分
+Application entry → feature units (model, command, view)
+                    ├─ Entity<Model>       retains state
+                    └─ Entity<View>        persistent view; View implements Render
+                          └─ Element tree   rebuilt on each render
+                               └─ RenderOnce values compose reusable parts
 ```
 
 应用增长后，拥有独立流程的功能可以把 model 和 View 放在同一个 feature crate 内；只有需要真正面向整个应用的状态时，才在其中使用私有 [Global](./global)。功能之间通过小型公开接口、event 或 `Entity` handle 协作。这样可复用部分容易接入，团队成员或 AI 代理并行修改时也有清晰边界。何时拆分以及如何确定所有权和依赖方向，详见[编码指南](./coding-guides)。
@@ -95,17 +95,23 @@ fn main() {
 
 随着应用扩展，可按顺序阅读：
 
-1. [Element](./element.md) 和 [RenderOnce](./render-once.md)：理解每帧的元素树和按值构建的组件。
-2. [Entity](./entity.md) 和 [Context](./context.md)：保存状态，并在渲染之外更新它。
-3. [Window](./window.md)：打开窗口并使用 `Root` 浮层。
-4. [Event](./event.md) 和 [Action](./action.md)：连接状态变化、键盘快捷键和命令。
-5. [组件目录](../component/index.md)：选择控件；随后按界面需要阅读[图标与资源](./assets.md)和[字体](./fonts.md)。
+1. 阅读 [Entity](./entity.md)、[Context](./context.md) 和 [Render](./render.md)：持有一个值，在按钮回调中修改它，并确认窗口显示新值。再读 [Window](./window.md)，了解 `Root` 如何承载视图和浮层。
+2. 阅读 [Element](./element.md) 和 [RenderOnce](./render-once.md)：区分每次重建的元素树与持久状态。跟着 [Paint](./paint.md) 运行 Brush 练习，确认按下指针会改变绘制结果。
+3. 阅读 [Focus](./focus.md)、[Action](./action.md) 和 [Event](./event.md)：用 Tab 到达交互目标，触发一个命令并观察状态变化。再按 [Task](./task.md) 运行流式示例；连续点击两次 Replay，确认旧分片不会重新出现。
+4. 阅读[无障碍](./accessibility.md)和[测试](./test.md)：用键盘完成 Save 流程，检查焦点与可见结果，再运行文档中的 UI 测试，确认渲染状态和保存的模型值。在目标平台上另行检查辅助技术的实际表现。
+5. 从[组件目录](../component/index.md)选择应用需要的控件；按界面需求继续阅读[图标与资源](./assets.md)和[字体](./fonts.md)。
 
-如需了解带有持久输入状态与订阅的完整应用，请看[可运行应用示例](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes)。[编码指南](./coding-guides.md)说明了这些示例遵循的约定。
+如需了解持久输入状态与订阅，请看[应用示例](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes)中的测试用例。[编码指南](./coding-guides.md)说明了这些示例遵循的约定。
 
 ## 完整且经过测试的 View
 
-以下设置界面展示如何持有 InputState 并管理订阅。代码会与[对应的 Rust 源文件](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/src/settings.rs)保持同步。
+以下设置界面展示如何持有 InputState 并管理订阅。代码会与[对应的 Rust 源文件](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/src/settings.rs)保持同步。仓库中的 `gpui-kit-recipes` 默认可执行程序只打开一个简单的 bootstrap 视图，不会显示这个设置界面。[设置界面交互测试](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/tests/settings.rs)会在 GPUI 测试窗口中挂载 `Settings`。在仓库根目录执行：
+
+```sh
+cargo test -p gpui-kit-recipes --test settings
+```
+
+测试通过时，输入后预览值先变为 `a`；在一次无关的重新绘制后继续输入，预览值变为 `ab`，变更次数依次为 1 和 2。这验证了测试窗口内的输入订阅和状态生命周期，不等同于原生界面的视觉验收。
 
 <!-- recipe:settings:start -->
 ```rust

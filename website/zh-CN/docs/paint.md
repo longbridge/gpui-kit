@@ -8,6 +8,270 @@ order: -2.75
 
 GPUI 在布局与 `prepaint` 之后执行 `paint`。底层 [`Element`](./element) 拿到最终的 `Bounds<Pixels>`，才能确定绘制坐标。`paint` 向当前帧提交绘制命令，不负责确定布局或输入命中区域。矩形和边框使用 `window.paint_quad`，普通图文优先使用现有 Element，自由曲线和不规则形状使用 `window.paint_path`。只需绘制少量自定义图形时，可以使用 `canvas(prepaint, paint)`，无需实现完整的 `Element` trait。
 
+## 从一个三角形开始
+
+这个练习不需要新建 crate 或添加依赖。在本地检出中，将现有 `examples/hello_world/src/main.rs` 的内容暂时替换为下面的代码，再从仓库根目录运行 `cargo run -p hello_world`。窗口左上附近应出现一个蓝色三角形。如果不想保留练习代码，完成后恢复该示例文件。
+
+```rust
+use gpui_kit::*;
+
+struct PaintedTriangle;
+
+impl Render for PaintedTriangle {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(
+            canvas(
+                |bounds, _, _| bounds,
+                |_, bounds, window, _| {
+                    let mut path = PathBuilder::fill();
+                    let x = bounds.origin.x;
+                    let y = bounds.origin.y;
+                    path.move_to(point(x + px(24.), y + px(24.)));
+                    path.line_to(point(x + px(144.), y + px(24.)));
+                    path.line_to(point(x + px(84.), y + px(128.)));
+                    path.close();
+
+                    if let Ok(path) = path.build() {
+                        window.paint_path(path, rgb(0x3b82f6));
+                    }
+                },
+            )
+            .size_full(),
+        )
+    }
+}
+
+fn main() {
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| PaintedTriangle)
+        })
+        .expect("failed to open window");
+    });
+}
+```
+
+父 `div` 和子 `canvas` 都设置了 `.size_full()`，布局因此会给回调一个可用的矩形。第一个回调在 `prepaint` 阶段执行，并把最终 bounds 作为状态 `T` 返回；第二个回调在 `paint` 阶段收到这份值，用窗口坐标构建一条填充路径，再把 `Path<Pixels>` 交给 `paint_path`。`close()` 会把最后一个点与起点连接起来。`if let Ok` 处理三角化失败的情况，避免直接 panic。
+
+两个 `canvas` 回调都是单次 Element 流程中的 `FnOnce` 回调。如果绘制需要准备好的数据，就从第一个回调返回拥有所有权的值；不要把 `Window` 或 `App` 的引用保存到下一帧。`canvas` 本身是当前帧的 Element；若绘图数据需要跨 render 保留，应放入 Entity 或 keyed window state。
+
+试着把第三个点的 `px(84.)` 改成 `px(120.)` 后重新运行：变化的只有三角形的几何形状。再把 `PathBuilder::fill()` 改成 `PathBuilder::stroke(px(4.))`，可以画出轮廓。GPUI 渲染新的一帧时会重新创建元素树；这里的 Path 也会在 paint 时重新构建。小型装饰图形这样写很直接；大型或频繁重绘的路径应在测量成本后考虑缓存。
+
+这里最重要的是坐标交接：
+
+```text
+layout: canvas bounds = origin (x, y) + size (width, height)
+prepaint: pass final bounds to paint
+paint: local point (24, 24) + origin (x, y) -> window point -> PathBuilder
+```
+
+bounds 建立坐标系，但不会自动把路径裁剪在 canvas 内。图形可能越过 canvas 边界；如需限制溢出，应给容器设置合适的裁剪样式，或使用 content mask。
+
+## 让绘制响应点击
+
+将 `examples/hello_world/src/main.rs` 替换为下面的完整示例，再运行 `cargo run -p hello_world`。每次左键点击都会在指针位置添加一个蓝色小三角形。后续点击不会抹掉已有图形，因为位置保存在 `ClickPainter` Entity 中，而不是只存在于当前帧的 `canvas` 值里。
+
+```rust
+use gpui_kit::base::ElementExt;
+use gpui_kit::*;
+
+struct ClickPainter {
+    marks: Vec<Point<Pixels>>,
+    canvas_bounds: Option<Bounds<Pixels>>,
+}
+
+impl ClickPainter {
+    fn add_mark(
+        &mut self,
+        event: &MouseDownEvent,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(bounds) = self.canvas_bounds {
+            self.marks.push(point(
+                event.position.x - bounds.origin.x,
+                event.position.y - bounds.origin.y,
+            ));
+            cx.notify();
+        }
+    }
+}
+
+impl Render for ClickPainter {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let marks = self.marks.clone();
+        let painter = cx.entity().clone();
+
+        div()
+            .size_full()
+            .relative()
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::add_mark))
+            .on_prepaint(move |bounds, _, cx| {
+                painter.update(cx, |this, _| {
+                    this.canvas_bounds = Some(bounds);
+                });
+            })
+            .child(
+                canvas(
+                    move |bounds, _, _| (bounds.origin, marks),
+                    |_, (origin, marks), window, _| {
+                        for mark in marks {
+                            let center = point(origin.x + mark.x, origin.y + mark.y);
+                            let mut path = PathBuilder::fill();
+                            path.move_to(point(center.x, center.y - px(16.)));
+                            path.line_to(point(center.x + px(16.), center.y + px(12.)));
+                            path.line_to(point(center.x - px(16.), center.y + px(12.)));
+                            path.close();
+                            if let Ok(path) = path.build() {
+                                window.paint_path(path, rgb(0x3b82f6));
+                            }
+                        }
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
+    }
+}
+
+fn main() {
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| ClickPainter {
+                marks: Vec::new(),
+                canvas_bounds: None,
+            })
+        })
+        .expect("failed to open window");
+    });
+}
+```
+
+父 `div` 接收鼠标事件。它的 `on_prepaint` 钩子保存最终 bounds，供下次输入使用；保存 bounds 本身不请求新一帧。`add_mark` 减去该 bounds 的 origin，以 canvas 局部坐标保存位置，然后用 `cx.notify()` 请求新一帧。下一次 render 时，canvas 收到标记的快照；paint 回调加上**当前** origin，为每个标记构建路径。试着点击两次并调整窗口大小：两个标记应保持相对 canvas 的位置。如果点击没有结果，依次检查父容器尺寸是否非零、`canvas_bounds` 是否已保存，以及 handler 修改 `marks` 后是否调用 `cx.notify()`。
+
+## 跟随真实绘图应用
+
+在仓库根目录运行现有的 [Brush 示例](https://github.com/longbridge/gpui-kit/blob/main/examples/brush/src/main.rs)：
+
+```sh
+cargo run -p example-brush
+```
+
+在 **Drawing Canvas** 内拖动鼠标画一笔，再试试 **Size**、**Opacity**、颜色块、**Show Grid** 和 **Clear Canvas**。下面沿着示例中一笔画的输入、布局和绘制流程逐步阅读。
+
+先记住一帧的顺序：鼠标 handler 修改 `BrushStory` 中保留的状态并调用 `cx.notify()`；`render` 创建新元素树；布局确定尺寸和位置；`prepaint` 收到 bounds；`paint` 提交本帧的路径。保存的笔画点跨帧存在，而此示例中的 `Path` 对象会在绘制时重新构建。
+
+### 1. 为 canvas 分配空间并接收输入
+
+`render_canvas` 把绘图 canvas 放在占满容器的 `div` 中。外层可伸缩的 **Drawing Canvas** 区域提供空间；`div` 处理鼠标事件，子 canvas 占满同一区域：
+
+```rust
+let base_div = div()
+    .id("canvas")
+    .size_full()
+    .bg(theme.background)
+    .cursor_crosshair()
+    .relative()
+    .on_mouse_down(MouseButton::Left, cx.listener(Self::handle_mouse_down))
+    .on_mouse_move(cx.listener(Self::handle_mouse_move))
+    .on_mouse_up(MouseButton::Left, cx.listener(Self::handle_mouse_up))
+    .on_prepaint(move |bounds, _window, cx| {
+        state_entity.update(cx, |state, _| {
+            state.canvas_bounds = Some(bounds);
+        })
+    });
+```
+
+示例把 `canvas(...).absolute().size_full()` 作为这个 `div` 的子元素。canvas 需要自身样式或父布局分配尺寸，否则可能没有可绘制区域。父元素的 `on_prepaint` 保存最终的 `Bounds<Pixels>`，供鼠标 handler 使用。bounds 和鼠标位置都是**窗口坐标**，因此 canvas 的 origin 通常不是 `(0, 0)`。
+
+`on_prepaint` 保存 bounds 时没有调用 `cx.notify()`：它只记录后续输入所需的几何信息，不会在每帧绘制过程中再次请求渲染。
+
+### 2. 以 canvas 局部坐标保存点
+
+按下鼠标时，`BrushStory::handle_mouse_down` 开始一条 `Stroke`。它先减去保存的 origin，再存储指针位置；鼠标移动时也使用同样的转换：
+
+```rust
+let local_pos = if let Some(bounds) = self.canvas_bounds {
+    Point::new(
+        event.position.x - bounds.origin.x,
+        event.position.y - bounds.origin.y,
+    )
+} else {
+    event.position
+};
+```
+
+`BrushStory` 在 `strokes` 中保留完成的笔画，在 `current_stroke` 中保留正在绘制的笔画。handler 修改笔画时调用 `cx.notify()`，让 GPUI 渲染新的一帧。只有鼠标按下产生的一个点还不能形成可见线条：`build_stroke_path` 至少需要两个点。松开鼠标后，两个点及以上的笔画会加入已完成列表。
+
+### 3. 把最终 bounds 传给绘制阶段
+
+在 `render_canvas` 中，canvas 的第一个回调接收最终 bounds，连同笔画、当前笔画、网格开关和主题一起返回。第二个回调取得这些值并绘制。下面展示数据交接；[源码](https://github.com/longbridge/gpui-kit/blob/main/examples/brush/src/main.rs)还绘制了可选网格和正在画的笔画：
+
+```rust
+canvas(
+    move |bounds, _window, _cx| {
+        (
+            strokes_for_prepaint,
+            current_stroke_for_prepaint,
+            show_grid_for_prepaint,
+            theme_for_prepaint,
+            bounds,
+        )
+    },
+    move |_bounds,
+          (strokes, current_stroke, show_grid, theme, prepaint_bounds),
+          window,
+          _cx| {
+        for stroke in strokes.iter() {
+            if let Some(path) = BrushStory::build_stroke_path(stroke, &prepaint_bounds) {
+                window.paint_path(path, stroke.color);
+            }
+        }
+        // The example also paints the grid and current_stroke here.
+    },
+)
+.absolute()
+.size_full()
+```
+
+`prepaint` 发生在布局完成之后，此时 bounds 已确定。`paint_path` 提交当前帧的绘制命令；它本身不会修改状态，也不会安排下一帧。
+
+### 4. 用窗口坐标构建 Path
+
+`build_stroke_path` 先把保存的 canvas 局部坐标转换回窗口坐标，再对描边路径进行三角化：
+
+```rust
+let mut builder = PathBuilder::stroke(px(stroke.size));
+let first_point = Point::new(
+    bounds.origin.x + stroke.points[0].x,
+    bounds.origin.y + stroke.points[0].y,
+);
+builder.move_to(first_point);
+
+for point in stroke.points.iter().skip(1) {
+    let abs_point = Point::new(bounds.origin.x + point.x, bounds.origin.y + point.y);
+    builder.line_to(abs_point);
+}
+
+builder.build().ok()
+```
+
+试着调大 **Size** 再画一条线：`stroke.size` 决定新笔画的宽度，之前的笔画保留各自保存的宽度。**Opacity** 和颜色同样在一笔开始时确定。切换 **Show Grid**，可以看到同一个 paint 回调绘制的另一组路径；点击 **Clear Canvas** 则清空保留的笔画并请求新的一帧。如果布局移动或调整 canvas 尺寸，每次绘制都会使用当前的 bounds origin 放置这些点。
+
+如果笔画没有出现，可以按下面的顺序排查：
+
+| 现象 | 检查项 |
+| --- | --- |
+| 连网格都看不到 | 确认父容器和 canvas 的布局尺寸不为零；Path 不会自己占据布局空间。 |
+| 单击后没有留下笔迹 | 此示例不会把一个点画成线；拖动到采样到第二个点。 |
+| 移动 canvas 后笔迹偏移 | 输入时减去 canvas origin，绘制时加上**当前** origin。 |
+| 保存的点已经变化，画面却没有更新 | 确认状态持有者在有效变化后调用了 `cx.notify()`。 |
+| 部分几何无声消失 | 检查 `PathBuilder::build()` 的结果；此示例把错误转成 `None`。 |
+
+示例把构建失败视为“不绘制”；当几何来自用户数据时，应保留或报告错误。输入 handler 挂在外层 `div` 上；Path 本身不提供 hitbox 或无障碍行为。
+
 ## 构建 Path
 
 `PathBuilder` 描述矢量路径，`build()` 成功后会把它三角化成 `Path<Pixels>`。封闭区域选 `fill()`，线条选 `stroke(width)`。路径点使用窗口像素坐标；若数据以 Element 左上角为原点，先加上最终 bounds 的 origin。
@@ -49,12 +313,12 @@ fn paint_triangle(bounds: Bounds<Pixels>, color: Hsla, window: &mut Window) {
 
 GPUI Kit 标志可以直观说明 SVG Path 与 `PathBuilder` 的对应关系。它由两条独立的闭合路径组成：外形使用主题前景色，内部笔画使用主题的蓝色强调色。切换 GPUI 与 SVG 源码，再与下方的渲染结果对照。示例采用局部 32 × 32 坐标系；GPUI 代码会将 bounds 的 origin 加到每个点上。`foreground` 和 `accent_color` 由调用方提供。
 
-<div class="doc-tabs">
+<div class="doc-tabs" role="group" aria-label="GPUI Kit 标志路径源码">
   <input class="doc-tabs__input" type="radio" name="logo-source-zh" id="logo-rust-zh" checked>
   <input class="doc-tabs__input" type="radio" name="logo-source-zh" id="logo-svg-zh">
-  <div class="doc-tabs__list" role="tablist" aria-label="GPUI Kit logo path source">
-    <label for="logo-rust-zh" role="tab">PathBuilder</label>
-    <label for="logo-svg-zh" role="tab">SVG</label>
+  <div class="doc-tabs__list">
+    <label for="logo-rust-zh">PathBuilder</label>
+    <label for="logo-svg-zh">SVG</label>
   </div>
   <div class="doc-tabs__panels">
     <section class="doc-tabs__panel">
@@ -110,8 +374,8 @@ GPUI 的 `PathBuilder` 接受完整点坐标，没有 SVG 的 `H`、`V` 缩写�
 | 工作 | 阶段 | 原因 |
 | --- | --- | --- |
 | 声明尺寸与子节点布局 | `request_layout` | Taffy 此时需要 Style，但最终 bounds 尚不存在。 |
-| 根据最终 bounds 构建路径、插入 `Hitbox` | `prepaint` | 几何坐标和当前帧的输入区域已经确定。 |
-| 调用 `paint_path`、`paint_quad` 或绘制子节点 | `paint` | 这时可以确定绘制顺序。 |
+| 准备命中测试与绘制共用的几何、插入 `Hitbox` | `prepaint` | 几何坐标和当前帧的输入区域已经确定。 |
+| 按需构建仅用于绘制的几何、调用 `paint_path`、`paint_quad` 或绘制子节点 | `paint` | 这时可以确定绘制顺序；Brush 在这里构建 Path。 |
 
 [GPUI Kit Plot 的折线](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/shape/line.rs) 从数据点构建描边路径；[输入框的底层 Element](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) 用 Path 绘制选区与文本范围装饰，而闪烁光标用 quad 绘制。两者都使用 `PathBuilder`，但输入框还必须协调文字度量和命中测试。
 

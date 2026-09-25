@@ -5,12 +5,15 @@ description: A comprehensive Rust framework for building fantastic, high-perform
 
 # GPUI Kit
 
-GPUI Kit (aka: GPUI Component) is a comprehensive Rust desktop application framework built on GPUI.
+GPUI Kit is a Rust desktop application framework built on GPUI.
+The `gpui-pre` dependency name refers to the published, version-pinned GPUI snapshot used by Kit, not a different rendering framework; see [Installation](./installation#why-the-dependency-is-named-gpui-pre).
 
-It combines a complete UI system with application-grade data, layout, content,
-and editing capabilities, and it ships as three crates that build on each other,
-all reachable through the single `gpui-kit` dependency:
+GPUI Kit's core architecture has five layers:
 
+- **`gpui`**: The underlying UI runtime, entity model, windows, elements,
+  layout, and rendering.
+- **`gpui-kit`**: The application entry point that re-exports GPUI and brings
+  together Base, Component, and default assets through one dependency.
 - **`gpui-base`**: Unstyled behavior, controlled state, focus, overlays,
   virtual lists, dock infrastructure, and semantic design tokens.
 - **`gpui-component`**: GPUI Component, the complete styled component library
@@ -19,14 +22,18 @@ all reachable through the single `gpui-kit` dependency:
 - **`gpui-shell`**: Opens a Rust host to JavaScript extensions, one granted
   capability at a time.
 
+An application normally depends on `gpui-kit` for GPUI, Base, Component, and
+assets. Add `gpui-shell` separately when the application hosts JavaScript
+extensions; it remains part of the framework's core architecture.
+
 Use `gpui-component` for polished controls with one coherent visual language,
 or build your own design system on the reusable behavior and infrastructure in
 `gpui-base`. This section covers GPUI Kit setup, shared design and coding guides, and
 application development. For library APIs, see [GPUI Component](/component),
 [GPUI Base](/base), and [GPUI Shell](/shell).
 
-Read [Action](./action) for GPUI Focus, `track_focus`, Key Contexts, and
-command dispatch. [KeyBinding](./keybinding) explains how to bind actions and
+Read [Focus](./focus) for `FocusHandle`, Tab order, and the keyboard target, then
+[Action](./action) for command dispatch. [KeyBinding](./keybinding) explains how to bind actions and
 display the active shortcut. Continue with [Event](./event) for typed
 notifications and the relationship between Actions and Events.
 
@@ -36,6 +43,21 @@ and [ElementId](./element_id). [Style](./style) covers GPUI's fluent styling
 methods; [Element](./element) and [Paint](./paint) explain lower-level drawing.
 [Task](./task) covers work that continues after a callback returns.
 
+## Learn GPUI in a working order
+
+Use these stages as a learning path. Each stage has a small application task to
+try before moving on:
+
+1. **Open a window:** follow [Installation](./installation) and [Getting Started](./getting-started), run the button example, and confirm its click reaches the terminal.
+2. **Own and redraw state:** make an [Entity](./entity), update it through [Context](./context), and use [Render](./render) to show the new value. Then read [Window](./window) to understand which window receives the update.
+3. **Draw a custom control:** follow [Element](./element), [Geometry](./geometry), and [Paint](./paint) with the existing Brush example. Use [ElementId](./element_id) and [View Cache](./view-cache) when the drawing needs stable state or reuse.
+4. **Handle input and ongoing work:** establish a keyboard target with [Focus](./focus), then connect an [Action](./action) or [Event](./event) to the View; use [Task](./task) for asynchronous work and [Animation](./animation) for motion that ends cleanly.
+5. **Check the application:** use [Accessibility](./accessibility) and [Testing](./test) for interaction checks. Read [FPS Monitor](./fps) before making frame-rate claims, then choose a target such as [WebAssembly](./webassembly) or [Mobile](./mobile) if the application needs one.
+
+Each core page distinguishes a code example from its runtime result and links
+to the next concept. The [Coding Guides](./coding-guides) collect ownership and
+architecture conventions once the first window works.
+
 ## Features
 
 - **75+ Components and Primitives**: Forms, navigation, overlays, data display, editing, feedback, layout, and more.
@@ -44,7 +66,7 @@ methods; [Element](./element) and [Paint](./paint) explain lower-level drawing.
 - **Accessibility**: AccessKit roles, names, states, relationships, and actions are built into the interaction layer.
 - **UI Integration Testing**: Headless windows exercise real pointer, keyboard, focus, layout, and accessibility behavior.
 - **Native Feel**: Modern controls inspired by macOS and Windows.
-- **120 FPS**: GPU-accelerated interfaces that remain smooth under load.
+- **High refresh support**: GPUI can target a 120 Hz display when the complete workload fits its roughly 8.3 ms frame budget; actual smoothness depends on the application, device, and presentation path. See [Frames, refresh rates, and rendering modes](./fps#120-hz-is-a-frame-budget-not-a-refresh-promise).
 - **Data Tables**: Virtual scrolling, fixed and resizable columns, sorting, and cell selection across hundreds of thousands of rows.
 - **Virtual Lists**: Render only the visible range, including differently sized items.
 - **Code Editor**: 200K lines, Tree-sitter highlighting, diagnostics, completion, and hover.
@@ -56,55 +78,59 @@ methods; [Element](./element) and [Paint](./paint) explain lower-level drawing.
 
 ## Quick Example
 
-Add `gpui-kit` to your `Cargo.toml`:
+After preparing the platform libraries in [Installation](./installation), create a Rust project with `cargo new gpui-hello` and enter it with `cd gpui-hello`. Add `gpui-kit` to its `Cargo.toml`:
 
 ```toml
 [dependencies]
 gpui-kit = "0.6"
 ```
 
-Then create a simple "Hello, World!" application with a button:
+Replace `src/main.rs` with this complete "Hello, World!" application:
 
 ```rust
+use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::*;
-use gpui_kit::component::button::*;
-use gpui_kit::component::*;
 
-pub struct HelloWorld;
+struct HelloWorld;
+
 impl Render for HelloWorld {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div()
-            .v_flex()
-            .gap_2()
+            .flex()
+            .flex_col()
             .size_full()
             .items_center()
             .justify_center()
+            .gap_2()
             .child("Hello, World!")
             .child(
-                Button::new("ok")
+                Button::new("hello")
                     .primary()
-                    .label("Let's Go!")
+                    .label("Click me")
                     .on_click(|_, _, _| println!("Clicked!")),
             )
     }
 }
 
 fn main() {
-    gpui_kit::application().run(move |cx| {
-        // This must be called before using any GPUI Component features.
-        gpui_kit::init(cx);
+    application()
+        .with_assets(assets::Assets)
+        .run(|cx| {
+            init(cx);
 
-        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
-            cx.new(|_| HelloWorld)
-        })
-        .expect("Failed to open window");
-    });
+            open_window(WindowOptions::default(), cx, |_, cx| {
+                cx.new(|_| HelloWorld)
+            })
+            .expect("Failed to open window");
+        });
 }
 ```
 
+Run `cargo run` from the project directory. The window shows a label and button; clicking the button prints `Clicked!` in the terminal. Continue with [Getting Started](./getting-started) for the initialization sequence, `Render`, and retained state.
+
 ## Community & Support
 
-Learn how to build interruptible 120 FPS animation in the [GPUI Base Motion guide](/base/motion).
+Learn how to build interruptible animation in the [GPUI Base Motion guide](/base/motion).
 
 - [GitHub Repository](https://github.com/longbridge/gpui-kit)
 - [Issue Tracker](https://github.com/longbridge/gpui-kit/issues)

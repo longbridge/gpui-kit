@@ -13,13 +13,14 @@ function isActive(link: string): boolean {
   return currentPath === link || currentPath.startsWith(link + '/');
 }
 
-function renderItems(items: SidebarItem[], depth = 0): any[] {
-  return items;
-}
 ---
 
-<aside class="docs-sidebar" aria-label="Documentation navigation">
-  <nav>
+<aside class="docs-sidebar" aria-label={lang === 'zh-CN' ? '文档导航' : 'Documentation navigation'}>
+  <button class="docs-sidebar__toggle" type="button" aria-controls="docs-sidebar-navigation" aria-expanded="false">
+    {lang === 'zh-CN' ? '浏览文档目录' : 'Browse documentation'}
+    <span aria-hidden="true">▾</span>
+  </button>
+  <nav id="docs-sidebar-navigation">
     {items.map(group => (
       <div class="sidebar-group">
         {group.text && (
@@ -66,6 +67,16 @@ function renderItems(items: SidebarItem[], depth = 0): any[] {
   (function () {
     const sidebar = document.querySelector('.docs-sidebar');
     if (!sidebar) return;
+
+    const toggle = sidebar.querySelector('.docs-sidebar__toggle');
+    if (toggle) {
+      sidebar.dataset.navReady = '';
+      toggle.addEventListener('click', function () {
+        const open = sidebar.dataset.mobileOpen !== 'true';
+        sidebar.dataset.mobileOpen = String(open);
+        toggle.setAttribute('aria-expanded', String(open));
+      });
+    }
 
     const section = window.location.pathname.match(/(?:^|\/)(docs|base|shell)(?:\/|$)/)?.[1] || 'docs';
     const key = 'gpui-kit:sidebar-scroll:' + section;

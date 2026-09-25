@@ -59,10 +59,11 @@ on-demand CDN loader instead of embedding the complete bundle.
 
 ## Additional application icons
 
-Keep the default `Assets` registration. Supply additional SVGs through your
-application's `AssetSource`, falling back to the default source for component
-icons. The optional `icon_assets!` macro can also select bundled SVGs for an
-extra source that you compose with the default. See [Icons & Assets](../docs/assets.md).
+Keep the default `Assets` registration. For extra catalog icons, follow the
+[selected-icons recipe](../docs/assets.md#pick-additional-catalog-icons-with-icon_assets):
+`icon_assets!` creates a source for exactly the named SVGs, and the application
+registers it together with the default source. For your own SVG files, see
+[custom assets](../docs/assets.md#add-your-own-asset-files).
 
 
 ## Import

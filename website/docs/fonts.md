@@ -8,6 +8,20 @@ description: System fonts, theme fonts, per-element overrides, and bundling cust
 
 This page covers which fonts an application supplies. See [TextSystem](./text-system) for how GPUI resolves, shapes, measures, and paints their glyphs.
 
+## Start here
+
+For a desktop app, start with the theme defaults. If you need a specific look,
+choose a family installed on every machine you support, or bundle its font
+file. Set the UI and monospace families through `Theme::update`; use
+`.font_family(...)` only for a particular element. Check the result with real
+Latin, CJK, emoji, and mixed-script content on each target platform. A family
+name alone does not guarantee that all those glyphs exist.
+
+For a WebAssembly app, register font files before the first window or text
+measurement. The browser's installed font list is not GPUI Web's font
+collection. The [WebAssembly setup](#webassembly-choose-a-font-supply-strategy)
+below shows the extra choices for browser builds.
+
 ## Default fonts
 
 Every app starts with a UI font and a monospace font from the theme:
@@ -45,8 +59,24 @@ Common examples per platform:
 - Windows: `Segoe UI`, `Arial`, `Consolas`, `Courier New`
 - Linux: `Noto Sans`, `DejaVu Sans`, `Liberation Sans`, `DejaVu Sans Mono`
 
-If the name does not match an installed font, GPUI falls back silently — so
-verify the exact family name on each target platform.
+If a requested family cannot load, `TextSystem::resolve_font` tries GPUI's
+default font stack. If none loads, layout panics. A family that loads but lacks
+a particular glyph is a different problem: glyph fallback may draw that
+character in another face. Verify both the family name and the glyphs you
+need on each target platform. `Font::fallbacks` controls missing-glyph
+fallbacks after the requested family has loaded; it does not make an absent
+primary family available.
+
+To inspect names GPUI currently sees, run this after initialization and after
+any bundled fonts have been registered:
+
+```rust
+let families = cx.text_system().all_font_names();
+println!("Available font families: {families:?}");
+```
+
+This lists family names, including fonts installed with `add_fonts`, but does
+not prove that a face contains every character or requested weight.
 
 ## Changing fonts via Theme
 
@@ -66,7 +96,7 @@ scales with it. See [Coding Guides](./coding-guides.md) for details.
 
 ## Per-element override
 
-Any element accepts a font override without touching the theme:
+Elements implementing `Styled` accept a font override without touching the theme:
 
 ```rust
 div()
@@ -81,7 +111,9 @@ methods, so they compose with the rest of the style chain.
 ## Bundling custom fonts
 
 Fonts that are not installed on the user's system must be bundled and
-registered with the text system **before the first frame**:
+registered with the text system **before the first frame**. Put the font file
+in your app and call `add_fonts` during application startup, before opening a
+window or constructing anything that measures text:
 
 ```rust
 use std::borrow::Cow;
@@ -99,7 +131,75 @@ Then reference them by family name as usual:
 Theme::update(cx, |theme| theme.font_family = "MyFont".into());
 ```
 
-The [GPUI Kit web gallery](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs) bundles `Inter`, `JetBrains Mono`, a subset of `Noto Sans SC`, and `IBM Plex Sans` this way. Rust's [`include_bytes!`](https://doc.rust-lang.org/std/macro.include_bytes.html) puts those font bytes into the WebAssembly download. The gallery's CJK subset is about 25 KB, compared with about 1.2 MB for its source font: subset known interface copy to limit initial payload, then plan separately for arbitrary text entered by users. Font files also need their redistribution licenses.
+Use the family name stored *inside* the font file, which may differ from its
+filename. Register every face you need for predictable regular, bold, and
+italic text; a single regular file is not a promise of all styles. Bundling
+also makes a desktop app independent of whether that family is installed on
+the user's machine. Keep the font's redistribution license with the app.
+
+The [GPUI Kit web gallery](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs) bundles `Inter Variable`, `JetBrains Mono`, a subset of `Noto Sans SC`, and `IBM Plex Sans` this way. Rust's [`include_bytes!`](https://doc.rust-lang.org/std/macro.include_bytes.html) puts those font bytes into the WebAssembly download. The gallery's CJK subset is about 25 KB, compared with about 1.2 MB for its source font: subset known interface copy to limit initial payload, then plan separately for arbitrary text entered by users.
+
+### Try a bundled font in `hello_world`
+
+The repository already contains `crates/story-web/fonts/Inter-Regular.ttf`; its internal family name is `Inter Variable`. Replace `examples/hello_world/src/main.rs` with this complete example, then run `cargo run -p hello_world` from the repository root. The `include_bytes!` path below is relative to that `main.rs` file. Your own application should place a licensed font in its own assets and adjust the path.
+
+```rust
+use std::borrow::Cow;
+
+use gpui_kit::component::theme::Theme;
+use gpui_kit::*;
+
+struct FontLab;
+
+impl Render for FontLab {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_4()
+            .child("Theme font: Inter Variable")
+            .child(
+                div()
+                    .font_family(".SystemUIFont")
+                    .child("System UI font for comparison"),
+            )
+    }
+}
+
+fn main() {
+    application().run(|cx| {
+        init(cx);
+        cx.text_system()
+            .add_fonts(vec![Cow::Borrowed(
+                include_bytes!("../../../crates/story-web/fonts/Inter-Regular.ttf").as_slice(),
+            )])
+            .expect("Failed to load bundled font");
+
+        let families = cx.text_system().all_font_names();
+        assert!(families.iter().any(|family| family == "Inter Variable"));
+        println!("Registered font: Inter Variable");
+
+        Theme::update(cx, |theme| theme.font_family = "Inter Variable".into());
+        open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| FontLab))
+            .expect("Failed to open window");
+    });
+}
+```
+
+The terminal should print `Registered font: Inter Variable`, and the window should show two labels. The first inherits the theme's registered font; the second explicitly requests the system UI family. Their appearance may differ by platform. This checks registration and theme selection, not glyph coverage: try another string and the target platforms before relying on a font for user-entered text. Registration happens before `Theme::update` and `open_window`, so the first layout uses the new face.
+
+## Font changes affect layout
+
+Different faces have different advances, ascent, descent, and glyph coverage.
+A substituted family or newly loaded CJK face can change line wrapping,
+control height, caret placement, and alignment even at the same `px` size.
+Theme changes refresh windows, and `add_fonts` invalidates font resolution
+and cached line layouts; if fonts are installed while a window is already
+visible, call `cx.refresh_windows()` after registration. Recheck text after
+the new frame, especially in narrow controls and mixed-script paragraphs.
+For custom measurements, use the shaped line from [TextSystem](./text-system)
+instead of estimating width from character count.
 
 ## Theme JSON config
 
@@ -114,14 +214,20 @@ Font families and sizes can also come from a theme file:
 }
 ```
 
-Load it with `ThemeRegistry`:
+In a desktop application's startup callback, after `init(cx)`, choose a theme name and watch a directory containing theme files. This is a contextual snippet: `cx` comes from the callback, and `"My Theme"` must match the name inside a theme file in `./themes`.
 
 ```rust
+use std::path::PathBuf;
+use gpui_kit::component::theme::{Theme, ThemeRegistry};
+use gpui_kit::SharedString;
+
+let theme_name: SharedString = "My Theme".into();
 ThemeRegistry::watch_dir(PathBuf::from("./themes"), cx, move |cx| {
     if let Some(theme) = ThemeRegistry::global(cx).themes().get(&theme_name).cloned() {
         Theme::update(cx, |current| current.apply_config(&theme));
     }
-});
+})
+.expect("Failed to watch theme directory");
 ```
 
 See [Theme](../component/theme.md) for the full config reference.
@@ -156,6 +262,16 @@ fn install_downloaded_font(cx: &mut App, bytes: Vec<u8>) -> Result<()> {
 `add_fonts` invalidates font resolution and line-layout caches, but an already visible window needs `refresh_windows()` to show the newly shaped text. Validate the HTTP response and nonempty bytes before installing. Supply an actual supported font file such as raw TTF; a font-service CSS URL may return a stylesheet or WOFF2 subset rather than bytes this text system accepts. Browser cross-origin rules apply to external requests. Download only fonts the current content needs, and deduplicate concurrent requests.
 
 `App::on_missing_glyphs(callback) -> Subscription` can report unresolved grapheme clusters after shaping. Keep the subscription alive, inspect `MissingGlyph::grapheme()` and `font_class()`, and use it to request a script-specific font once. A new registration replaces the previous callback; reports are deduplicated and bounded, so this is a loading hint rather than a guaranteed complete inventory. If Canvas fallback can already draw a CJK grapheme, that grapheme will **not** produce a missing-glyph report. For accurate CJK typography, trigger loading from the selected language or known content coverage instead of relying only on missing-glyph reports.
+
+## Diagnose a font problem
+
+| Symptom | Check |
+| --- | --- |
+| App panics while laying out first text | List `all_font_names()` before opening the window. Confirm the primary family and a usable default family were registered, especially `.SystemUIFont`'s Web mapping. |
+| Text appears in an unexpected face | Compare the requested family with `all_font_names()` and the family embedded in the file. Check whether a theme switch replaced your choice. |
+| Squares or mixed faces in CJK text | Confirm the font contains the exact characters, not just a family name. A subset may cover labels but omit user input; load broader coverage or an appropriate script font. |
+| Text wraps differently after a font loads | Recheck the layout with the installed font's metrics; refresh an already visible window after `add_fonts`. |
+| Missing-glyph callback never fires on Web | Check whether Canvas fallback already drew the grapheme. Use content or language selection to trigger a font needed for consistent typography. |
 
 ## Browser Canvas fallback
 

@@ -39,6 +39,91 @@ assert_eq!(local, point(px(15.), px(15.)));
 
 These values typically appear after layout. A custom [`Element`](./element) receives `Bounds<Pixels>` in `prepaint` and uses the same resolved geometry for hitboxes and later [painting](./paint). A bounds value is geometry, not an interactive region by itself.
 
+## Choose a coordinate origin
+
+`Point<Pixels>` records a unit, not a coordinate system. In a window, the top-left of the window content is the usual origin; an element's own top-left is a different origin. State the space in variable names when both appear in one calculation:
+
+```rust
+use gpui_kit::*;
+
+let element_bounds = bounds(point(px(100.), px(60.)), size(px(80.), px(40.));
+let pointer_in_window = point(px(125.), px(75.));
+let pointer_in_element = pointer_in_window.relative_to(&element_bounds.origin);
+assert_eq!(pointer_in_element, point(px(25.), px(15.)));
+
+let marker_in_element = point(px(10.), px(8.));
+let marker_in_window = element_bounds.origin + marker_in_element;
+assert_eq!(marker_in_window, point(px(110.), px(68.)));
+```
+
+The `bounds` passed to a custom element's `prepaint` and `paint` is already positioned in window coordinates. A pointer event's `position` is also in window coordinates. Test `element_bounds.contains(&pointer_in_window)` directly; convert to local coordinates only for work such as locating a character or handle *inside* the element. Do not add `element_bounds.origin` a second time to a rectangle already based on those bounds. Conversely, a local point cannot be compared directly with a window-space hitbox even though both have type `Point<Pixels>`.
+
+## From layout to input and drawing
+
+The phases answer different questions:
+
+| Phase | Available geometry | Responsibility |
+| --- | --- | --- |
+| `request_layout` | Style lengths and layout nodes; some lengths still depend on the parent. | Return a `LayoutId` for the layout engine to solve. |
+| `prepaint` | Resolved `Bounds<Pixels>` for this frame. | Prepare geometry and, when needed, call `window.insert_hitbox(bounds, HitboxBehavior::Normal)`. |
+| `paint` | The resolved bounds and prepared state. | Draw with methods such as `window.paint_quad(fill(bounds, color))` and register frame-local input listeners. |
+
+The layout tree, hitboxes in the dispatch tree, and painted scene are separate. Painting a rectangle does not make it clickable; inserting a hitbox does not draw it. The hitbox returned by `insert_hitbox` can be carried as `PrepaintState` into `paint`, where a listener can test `hitbox.is_hovered_at(event.position, window)`. A hitbox records the content mask active when it was inserted, so establish clipping before inserting child hitboxes. See the [custom Element walkthrough](./element) for a complete event handler.
+
+## Scrolling, clipping, and a worked calculation
+
+A scroll viewport and its content have different origins. GPUI Kit's [virtual list implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/virtual_list.rs) uses a **negative** scroll offset, adds that offset when positioning items in window space, and prepaints them under a `ContentMask` for the viewport. Its `visible_range` first selects items in content space; the mask then limits drawing and input to the visible region. Selecting a visible item does not itself clip its pixels.
+
+### Run the coordinate calculation
+
+From the repository root, create `examples/hello_world/src/bin/geometry_walkthrough.rs` (create the `bin` directory if needed). This is a second binary in the existing `hello_world` package, not a new crate. Paste the complete program below, then run `cargo run -p hello_world --bin geometry_walkthrough`.
+
+The vertical viewport starts at window `(100, 60)` and has size `80 × 40`. Item A starts at content `y = 20`, has height `20`, and the scroll offset is `-30`. The pointer position is in window coordinates. The program converts it to item-local coordinates and calculates each item's intersection with the viewport:
+
+```rust
+use gpui_kit::*;
+
+fn main() {
+    let viewport = bounds(point(px(100.), px(60.)), size(px(80.), px(40.)));
+    let scroll_y = px(-30.);
+    let item_a = bounds(
+        viewport.origin + point(px(0.), px(20.) + scroll_y),
+        size(px(80.), px(20.)),
+    );
+    assert_eq!(item_a.origin, point(px(100.), px(50.)));
+
+    let pointer_in_window = point(px(105.), px(65.));
+    let pointer_in_item = pointer_in_window.relative_to(&item_a.origin);
+    assert_eq!(pointer_in_item, point(px(5.), px(15.)));
+
+    let visible_a = item_a.intersect(&viewport);
+    assert_eq!(visible_a.origin, point(px(100.), px(60.)));
+    assert_eq!(visible_a.size, size(px(80.), px(10.)));
+    assert!(visible_a.contains(&pointer_in_window));
+
+    let item_b = bounds(
+        viewport.origin + point(px(0.), px(80.) + scroll_y),
+        size(px(80.), px(20.)),
+    );
+    assert_eq!(item_b.origin.y, px(110.));
+    assert!(!item_b.intersects(&viewport));
+
+    println!(
+        "Item A: local pointer = ({}, {}), visible height = {}; Item B visible = {}",
+        pointer_in_item.x.as_f32(),
+        pointer_in_item.y.as_f32(),
+        visible_a.size.height.as_f32(),
+        item_b.intersects(&viewport),
+    );
+}
+```
+
+The expected output is `Item A: local pointer = (5, 15), visible height = 10; Item B visible = false`. The assertions also fail immediately if the scroll offset sign or coordinate origin is wrong. Item A begins 10 pixels above the viewport; only its bottom 10 pixels intersect it. Item B begins at window `y = 110`, beyond the viewport's bottom edge at `y = 100`. You can remove the exercise file after running it.
+
+`intersect()` computes a rectangle; it does **not** clip drawing or input by itself. In a real custom element, apply the viewport's `ContentMask` while prepainting and painting children, so child hitboxes inherit the mask and painted pixels are clipped. Use the resulting hitbox to resolve pointer handling. Ordinary scroll containers manage this for you. For a custom one, keep content positioning, clipping, and hitboxes in the same coordinate space, and clamp the scroll offset to the content range as the virtual list does.
+
+Common mistakes are treating `relative(0.5)` as 0.5 pixels before layout, comparing local coordinates with window bounds, subtracting a negative scroll offset when positioning content, or assuming `contains()` clips a painted child. For a mismatch, write down the origin and unit of each intermediate value, then inspect the resolved bounds and current content mask.
+
 ## Edges, sides, and placement
 
 `Edges<T>` holds four independent values in `top`, `right`, `bottom`, `left` order. Use `Edges<Pixels>` for resolved insets such as padding, borders, or the space reserved around a window. `Edges::all(value)` gives every side the same value; specify fields when they differ:

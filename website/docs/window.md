@@ -47,6 +47,83 @@ application().run(|cx| {
 
 [`WindowOptions`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.WindowOptions.html) controls initial bounds, focus, visibility, window kind, minimum size, and other platform-facing choices. The builder receives the `Window` only for construction. A window handle lets later code request an update, but handle-based updates can fail after the window closes. In a multi-window app, use the handle for the particular window whose focus or geometry you mean; an Entity handle alone does not select a window.
 
+`open_window` returns an `AnyWindowHandle` because the actual GPUI root is `gpui_kit::base::Root`, not `Workspace`. From a later callback with `&mut App`, use the handle to enter that window, and check the result before assuming it is still open:
+
+```rust
+if window_handle
+    .update(cx, |_, window, _| window.activate_window())
+    .is_err()
+{
+    // The window has already closed.
+}
+```
+
+The first callback argument is the Base `Root` view; keep the `workspace` Entity returned by `open_window` for application content updates. A window handle selects the window, while an Entity selects the state to update.
+
+## Try it: update and close one window
+
+This exercise uses the existing `hello_world` package. Replace `examples/hello_world/src/main.rs` with the following code, then run `cargo run -p hello_world` from the repository root:
+
+```rust
+use gpui_kit::component::button::*;
+use gpui_kit::component::*;
+use gpui_kit::*;
+
+struct WindowPractice {
+    renamed: bool,
+}
+
+impl Render for WindowPractice {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let status = if self.renamed {
+            "Title: Second title"
+        } else {
+            "Title: First title"
+        };
+
+        div()
+            .v_flex()
+            .gap_2()
+            .p_4()
+            .child(status)
+            .child(
+                Button::new("rename")
+                    .label("Change title")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.renamed = !this.renamed;
+                        let title = if this.renamed {
+                            "Second title"
+                        } else {
+                            "First title"
+                        };
+                        window.set_window_title(title);
+                        cx.notify();
+                    })),
+            )
+            .child(
+                Button::new("close")
+                    .label("Close window")
+                    .on_click(|_, window, _| window.remove_window()),
+            )
+    }
+}
+
+fn main() {
+    application().run(|cx| {
+        gpui_kit::init(cx);
+        open_window(WindowOptions::default(), cx, |window, cx| {
+            window.set_window_title("First title");
+            cx.new(|_| WindowPractice { renamed: false })
+        })
+        .expect("open practice window");
+    });
+}
+```
+
+Click **Change title** twice. The native window title and the text inside the View should alternate together. `renamed` is persistent Entity state; `cx.notify()` makes its new text visible. `window.set_window_title(...)` changes the current native window directly and does not need that Entity notification. Click **Close window** to request removal of this window. The button callback's `&mut Window` is valid only during that callback; after removal, a saved window handle may return an error on update.
+
+If the content changes but the title does not, check whether your desktop displays native window titles and whether `set_window_title` runs in the button callback. If neither changes, confirm `init(cx)` ran before `open_window`, the button has its `on_click` listener, and the listener calls `cx.notify()` after changing `renamed`. Restore the original `main.rs` after the exercise. For more than one window and ownership across them, continue with [Multi Window](./multi-window).
+
 ## What belongs to Window
 
 Common window-local operations include:
@@ -68,11 +145,15 @@ Common window-local operations include:
 
 `window.scale_factor()` converts logical pixels to physical display pixels: a factor of `2.0` means one logical pixel covers two device pixels along each axis. It may change when the window moves between displays. Do not multiply GPUI layout sizes by it; use it at a boundary that actually needs device pixels, such as a native platform integration. `visual_viewport_bounds()` can shrink or move when a mobile keyboard appears, while `viewport_size()` remains the layout area.
 
+These values have different origins: `bounds().origin` is global display space, while pointer events and `visual_viewport_bounds()` use window-local logical coordinates. Do not compare a pointer position directly with a saved global window origin. For an overlay that must stay clear of system insets or the software keyboard, `window.fully_visible_bounds()` gives a conservative window-local rectangle; it cannot account for obscuring surfaces the platform does not report.
+
 The [Dialog implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/dialog/dialog.rs) uses `window.viewport_size()` and window border padding to keep a surface within available content. The [native menu integration](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/native_menu/windows.rs) reads `scale_factor()` at its platform coordinate boundary. Let standard components perform these calculations when they already own the overlay or native control.
 
 ## Focus and Action dispatch
 
 Focus is local to a Window. `window.focus(...)` selects a `FocusHandle`, and `window.focused(cx)` returns the current one. Attach that handle to a rendered Element with `.track_focus(&handle)` so it has a node on the Dispatch Path; a handle alone does not create a keyboard target. A tracked handle is not automatically in Tab order: opt in with `cx.focus_handle().tab_stop(true)` when creating it. Keyboard input then uses the focused Element's Dispatch Path to match a [KeyBinding](./keybinding) and dispatch its Action.
+
+Follow the [Focus tutorial](./focus) to build and verify the target, Tab order, and overlay restoration before adding shortcuts.
 
 ```rust
 fn focus_composer(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -135,6 +216,8 @@ An Entity mutation followed by `cx.notify()` marks that Entity for rendering. `w
 
 `window.on_next_frame(callback)` runs the callback at the next platform frame tick, before that tick's optional draw. It creates frame demand but does not itself mark the window dirty. `window.request_animation_frame()` captures the currently rendering View and notifies it on the next tick. In the pinned `gpui-pre` 0.3.6 implementation, it calls `current_view()` immediately, so use it only while GPUI has a current View; outside that render path, use `on_next_frame` and explicitly notify an Entity or call `window.refresh()`. Call it only while the motion still needs another sample. GPUI's `AnimationExt::with_animation` and [Base Motion](./animation) already manage frame requests and reduced motion for their animations.
 
+For a frame callback that changes external window state, call `window.refresh()` in that callback so the change reaches a draw. For Entity state, update the Entity and call `cx.notify()` in its update callback. A frame tick alone does not redraw an unchanged window.
+
 Rendering builds a fresh Element tree from retained Entity state, then GPUI resolves layout, prepaints input geometry, and paints the scene. `Window` has methods for all these stages, but application views should normally derive elements in `render`; custom Elements need later-stage hooks only when resolved bounds are required. An unconditional `cx.notify()`, `window.refresh()`, or `window.request_animation_frame()` in `render` creates continuous work even when the UI is idle. See [Render](./render) and [Element](./element).
 
 ## Async work with a Window
@@ -195,6 +278,10 @@ Store the returned `Subscription` on the subscribing View. Dropping a local vari
 Do not store `&mut Window`; it is a temporary context supplied by GPUI. For later work, use `defer`, `spawn_in`, or obtain `window.window_handle()` and update it through GPUI. A handle does not keep a closed window alive, so handle-based updates can fail and should be treated accordingly.
 
 `window.remove_window()` requests removal from the current update. To decide whether a platform close request may proceed, register `window.on_window_should_close(cx, callback)` and return `false` to cancel it; the application owns any unsaved-work confirmation flow. To observe a completed close, `cx.on_window_closed(callback)` returns a `Subscription` whose callback takes `&mut App` and `WindowId`, in that order. Retain that subscription on an application owner. The closed `Window` is already inaccessible when this callback runs, so gather any needed window state before closing it.
+
+Register the close guard while that window is available, typically in the `open_window` builder. It applies to the platform's close request; `remove_window()` is an explicit programmatic removal. If the app should exit when its last window closes, use the closed callback to check `cx.windows().is_empty()` and call `cx.quit()`. The [FPS monitor example](https://github.com/longbridge/gpui-kit/blob/main/examples/fps_monitor/src/main.rs) shows this single-window quit pattern and a View requesting animation frames. Run it from this repository with `cargo run -p fps_monitor`; it uses GPUI Kit without the optional Component layer.
+
+If a window action appears to do nothing, first check that the handle still names an open window and that the focused Element's Dispatch Path contains the Action handler. If an Entity mutation is not visible, verify that its update calls `cx.notify()`; if a window-level change is not visible, call `window.refresh()`. If a frame callback fires without a draw, remember that `on_next_frame` creates frame demand but does not dirty the window. If an Event callback stops firing, check that its `Subscription` is retained.
 
 Keep these ownership rules together:
 

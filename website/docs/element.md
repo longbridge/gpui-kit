@@ -157,6 +157,268 @@ The element is intentionally invisible and has no handler. A hitbox is geometry 
 
 `HitboxBehavior::Normal` participates in hit testing without hiding hitboxes behind it. `BlockMouse` occludes both mouse and scroll handling behind the hitbox; `BlockMouseExceptScroll` leaves scrolling available. The hitbox also carries the current content mask. In a custom element, coordinate the hitbox with any clipping and paint order; drawing a shape does not create a hitbox automatically.
 
+### Make the surface visible and respond to a press
+
+The first example is a trait skeleton, so adding it as a child produces no visible pixels. To run the continuation, replace the contents of the existing [`examples/hello_world/src/main.rs`](https://github.com/longbridge/gpui-kit/blob/main/examples/hello_world/src/main.rs) with the complete file below. The parent gives the surface a definite `240 × 96` pixel area; its relative width and height now have a size to resolve against. This uses the existing workspace example and adds no dependency.
+
+```rust
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::*;
+
+struct SurfaceDemo {
+    presses: usize,
+}
+
+impl Render for SurfaceDemo {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .w(px(240.))
+                    .h(px(96.))
+                    .child(EventSurface {
+                        owner: cx.entity().clone(),
+                        color: cx.theme().primary,
+                    }),
+            )
+            .child(format!("Pointer presses: {}", self.presses))
+    }
+}
+
+struct EventSurface {
+    owner: Entity<SurfaceDemo>,
+    color: Hsla,
+}
+
+impl IntoElement for EventSurface {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element { self }
+}
+
+impl Element for EventSurface {
+    type RequestLayoutState = ();
+    type PrepaintState = Hitbox;
+
+    fn id(&self) -> Option<ElementId> { None }
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> { None }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let mut style = Style::default();
+        style.size.width = relative(1.).into();
+        style.size.height = relative(1.).into();
+        (window.request_layout(style, None, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        _: &mut App,
+    ) -> Self::PrepaintState {
+        window.insert_hitbox(bounds, HitboxBehavior::Normal)
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        hitbox: &mut Self::PrepaintState,
+        window: &mut Window,
+        _: &mut App,
+    ) {
+        window.paint_quad(fill(bounds, self.color));
+
+        let hitbox = hitbox.clone();
+        let owner = self.owner.clone();
+        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+            if phase.bubble()
+                && event.button == MouseButton::Left
+                && hitbox.is_hovered_at(event.position, window)
+            {
+                owner.update(cx, |view, cx| {
+                    view.presses += 1;
+                    cx.notify();
+                });
+            }
+        });
+    }
+}
+
+fn main() {
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| SurfaceDemo { presses: 0 })
+        })
+        .expect("failed to open window");
+    });
+}
+```
+
+From the repository root, run `cargo run -p hello_world`. The window shows a `240 × 96` theme-colored rectangle and `Pointer presses: 0`. Each left press inside the rectangle changes the label to `1`, `2`, and so on; a press outside it leaves the count unchanged. The rectangle is intentionally a pointer-only teaching example; it does not supply keyboard activation, focus, a cursor style, or an accessibility role. Use a standard [Button](../component/button) for an application control unless the lower-level behavior is essential.
+
+Read the example in four steps:
+
+1. **Mount and size.** `Render::render` creates a fresh `EventSurface` each time the view renders. The parent fixes the available width and height; the element requests `relative(1.)` in both directions. If its parent has no usable size, the requested percentage may resolve to a zero-sized or otherwise unexpected surface.
+2. **Prepare input geometry.** `prepaint` receives the solved `Bounds<Pixels>` and inserts a hitbox for exactly that rectangle. `PrepaintState = Hitbox` carries the hitbox to `paint`; it belongs to this frame's hit-test data.
+3. **Paint and register the listener.** The view reads `cx.theme().primary` and passes that `Hsla` into the element; `paint_quad(fill(bounds, self.color))` makes the same rectangle visible using the current theme. `on_mouse_event` adds a frame-local listener to the window's mouse-listener list, in paint registration order. It is not attached to the current dispatch node. The event type is inferred from `&MouseDownEvent`; the bubble phase, left button, and hitbox test prevent unrelated presses from changing the count. The listener closes over cloned handles because it must outlive this `paint` call.
+4. **Change retained state.** The `Entity<SurfaceDemo>` survives frame rebuilding. `owner.update` changes `presses`, and `cx.notify()` schedules the view to render again. The next `render` builds a new `EventSurface` and label. Neither associated phase state is used as an application counter.
+
+To verify each layer while learning, try these changes in the same file and rerun `cargo run -p hello_world` after each one:
+
+1. Comment out `window.paint_quad(...)`. The rectangle becomes invisible, but presses in its original area still increment the count. The hitbox, not the pixels, controls input routing.
+2. Restore painting and comment out `window.insert_hitbox(...)` **only after** changing `PrepaintState` to `()` and making `paint` omit its listener. The rectangle remains visible but does not react. Painting alone provides no hitbox or handler.
+3. Restore the complete example. Change the parent's `.w(px(240.))` to `.w(px(120.))`. The drawn and clickable areas shrink together because both use the resolved bounds.
+
+| What you observe | Check |
+| --- | --- |
+| No colored surface | The parent has a definite size, `request_layout` returns its `LayoutId`, and `paint_quad` is still present. |
+| Surface appears, but presses do nothing | `prepaint` inserts a hitbox for the same bounds, `paint` registers `on_mouse_event`, and the listener checks the bubble phase and left button. Check whether a front hitbox uses `BlockMouse` or `BlockMouseExceptScroll`; an ordinary `Normal` hitbox does not by itself block the hitbox behind it. |
+| Presses are received, but the label does not change | The listener updates `Entity<SurfaceDemo>` and calls `cx.notify()` inside that update. |
+
+The first two changes are experiments, not alternate finished implementations: restore the full code before continuing.
+
+The example does not need an `ElementId`: the counter belongs to the Entity, while the hitbox and listener are rebuilt each frame. Add a stable ID only when the low-level element itself needs keyed state or accessibility identity. For a surface with children, the next step is to retain their layout handles in `RequestLayoutState`, prepaint them after the parent has bounds, and paint them in order; see [TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/text/text_view.rs) for a real implementation. A reusable input primitive also needs a deliberate focus, keyboard, and accessibility contract; attaching a mouse listener alone does not provide one.
+
+### Compose one child in a custom Element
+
+The pointer surface above has no child layout to forward. This second complete example adds exactly one child. Replace [`examples/hello_world/src/main.rs`](https://github.com/longbridge/gpui-kit/blob/main/examples/hello_world/src/main.rs) with the code below, then run `cargo run -p hello_world` from the repository root. It uses the same package and dependencies as the previous exercise.
+
+```rust
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::*;
+
+struct ChildDemo;
+
+impl Render for ChildDemo {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div().flex().flex_col().items_start().gap_2().child(
+            ChildFrame {
+                child: Some(div()
+                    .w(px(160.))
+                    .h(px(32.))
+                    .bg(cx.theme().primary)
+                    .text_color(cx.theme().primary_foreground)
+                    .child("Child: 160 x 32")
+                    .into_any_element()),
+                background: cx.theme().secondary,
+                accent: cx.theme().primary,
+            },
+        )
+    }
+}
+
+struct ChildFrame {
+    child: Option<AnyElement>,
+    background: Hsla,
+    accent: Hsla,
+}
+
+impl IntoElement for ChildFrame {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element { self }
+}
+
+impl Element for ChildFrame {
+    type RequestLayoutState = AnyElement;
+    type PrepaintState = Bounds<Pixels>;
+
+    fn id(&self) -> Option<ElementId> { None }
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> { None }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let mut child = self.child.take().expect("layout requested once per frame");
+        let child_layout = child.request_layout(window, cx);
+        let mut style = Style::default();
+        style.padding = Edges::all(px(12.).into());
+        let layout = window.request_layout(style, [child_layout], cx);
+        (layout, child)
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        child: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        child.prepaint(window, cx);
+        Bounds {
+            origin: bounds.origin,
+            size: size(px(4.), bounds.size.height),
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        child: &mut Self::RequestLayoutState,
+        accent_bounds: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        window.paint_quad(fill(bounds, self.background));
+        window.paint_quad(fill(*accent_bounds, self.accent));
+        child.paint(window, cx);
+    }
+}
+
+fn main() {
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| ChildDemo)
+        })
+        .expect("failed to open window");
+    });
+}
+```
+
+The window shows a colored child labeled `Child: 160 x 32`, surrounded by a 12-pixel inset and a narrow accent strip on the frame's left edge. The outer frame has no fixed height: Taffy measures the 32-pixel child and adds the top and bottom padding. In this unconstrained example that yields a 56-pixel-high frame. Change the child's `.h(px(32.))` to `.h(px(64.))`, run again, and the frame grows to 88 pixels high. If an ancestor constrains height, that ancestor can change the result.
+
+Follow the ownership path rather than copying the calls mechanically:
+
+1. `Render::render` creates a `ChildFrame` with one `AnyElement`. The `Option` lets `request_layout` move that child into its returned `RequestLayoutState`; the phase is called once for this element in a frame. A new `ChildFrame` is built on the next render.
+2. The child requests its own `LayoutId` first. The parent passes that ID to `window.request_layout(style, [child_layout], cx)`. This connects the nodes in the layout tree. Passing an empty child list would leave the colored child out of the parent's measurement and placement.
+3. Once Taffy has resolved the tree, `prepaint` calls `child.prepaint(window, cx)` so the child sees its computed position and can prepare its own hitboxes or geometry. The parent also calculates a 4-pixel strip from its resolved bounds and returns that rectangle as `PrepaintState`.
+4. `paint` paints the parent's background and strip, then calls `child.paint(window, cx)`. This order keeps the child visible above the background. `AnyElement` carries its internal phase state; the parent must still call each phase in order.
+
+There is no hitbox on the frame because it does not handle input. The child's built-in `div` draws its background and text. Neither paint call can make a missing layout child appear: layout, prepaint, and paint all need to include it.
+
+| What you observe | Check |
+| --- | --- |
+| Frame appears but child is missing | The child is passed to `window.request_layout`, then receives both `prepaint` and `paint`. Check paint order if the frame background covers it. |
+| Child draws outside the inset | The parent style has `Edges::all(px(12.).into())` and uses the returned child layout ID. Do not hand-offset the child in `paint`; Taffy places it. |
+| Frame height does not follow child height | Check for a fixed height or clipping on the frame or an ancestor, and verify that the child layout ID is attached to the parent. |
+
+The example keeps the layout child in `RequestLayoutState` because it must survive through the next two phases. It keeps only the calculated accent rectangle in `PrepaintState`. Neither state is persistent application data; use an [Entity](./entity) for that.
+
 ### Identity and retained state
 
 `Element::id()` returns a local `ElementId`. GPUI combines it with keyed ancestors into a `GlobalElementId` and passes that global ID into the three phases. An element can use it with `window.with_element_state` for small state that survives rebuilding the element tree. GPUI Kit's carousel surface uses that mechanism for ongoing scroll state. The ID must be unique among siblings under the nearest keyed ancestor. Use a domain ID for reorderable items; an index changes meaning after insertion or sorting. An element without an ID receives `None` and cannot use this keyed state channel. Entity state remains the right owner for application data and subscriptions.
@@ -201,7 +463,7 @@ The low-level contract is enforced by a `Drawable<E>` wrapper. It moves through 
 
 ### Layout tree, dispatch tree, and scene are different structures
 
-`request_layout` contributes nodes to the layout engine and returns a `LayoutId`. After Taffy resolves that layout, `prepaint` obtains pixel bounds. GPUI creates a dispatch node for the Element while prepainting; its child elements and hitboxes establish the input geometry for the current frame. `paint` activates the corresponding dispatch node so Action, keyboard, and mouse listeners registered there follow the same tree path. Drawing commands go to the scene. A `paint_path` call changes the scene, but does not add a dispatch node or hitbox. Conversely, the carousel mask contributes input geometry and listeners without adding visible drawing.
+`request_layout` contributes nodes to the layout engine and returns a `LayoutId`. After Taffy resolves that layout, `prepaint` obtains pixel bounds. GPUI creates a dispatch node for the Element while prepainting; hitboxes are recorded separately for hit testing. `paint` activates the corresponding dispatch node for Action and keyboard listeners registered on that path. Mouse listeners registered with `window.on_mouse_event` instead enter a frame-local window list, called in registration order for capture and reverse order for bubble; their handlers must check the relevant hitbox. Drawing commands go to the scene. A `paint_path` call changes the scene, but does not add a dispatch node or hitbox. Conversely, the carousel mask contributes input geometry and listeners without adding visible drawing.
 
 This separation lets a custom Element do precisely one job. A decoration may only need a canvas and scene commands. A focusable control must coordinate dispatch, hitboxes, focus, and accessibility as well. A virtualized list must decide which children to measure and paint, not merely draw a large rectangle.
 

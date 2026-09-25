@@ -20,7 +20,7 @@ The engine choice is the one decision in this runtime that could not be settled 
 
 Everything else in the design follows from GPUI's element model and can be argued about with a whiteboard. The engine cannot, because the whole approach stands or falls on a single number: **how long it takes script code to describe a realistic interface.** Every method call in a builder chain is one crossing of the language boundary, and if that per-call cost is too high, no amount of design fixes it.
 
-What the number is *compared against* changed once a script `render` stopped being a frame render. A description is built when application state moves and [replayed by every frame until it moves again](./state.md#when-render-runs), so the cost below is paid per user action rather than per repaint. That makes the boundary cost matter less than it did — but it does not make it free, and it is still the number that would decide a second engine.
+What the number is *compared against* changed once a script `render` stopped being a frame render. A description is rebuilt when its View is invalidated and [reused on later requested frames](./state.md#when-render-runs), so the script cost is paid per invalidation rather than per repaint. That makes the boundary cost matter less than it did — but it does not make it free, and it is still the number that would decide a second engine.
 
 So the seam is a way of not having to be right in advance. The decision is made by measurement, and a second engine would be a new module rather than a rewrite.
 
@@ -38,13 +38,13 @@ cargo test -p gpui-shell --release --lib benchmark -- --nocapture
 
 | | What it measures | 443 nodes | Paid |
 | --- | --- | --- | --- |
-| **A** | script → Snapshot | **1.4 ms** | once per application change |
-| **B** | Snapshot → GPUI elements | **0.7 ms** | every frame |
-| **C** | a full cached repaint | **1.8 ms**, **no JavaScript at all** | every frame |
+| **A** | script → Snapshot | **1.4 ms** | each measured invalidation |
+| **B** | Snapshot → GPUI elements | **0.7 ms** | each measured materialization |
+| **C** | a full cached repaint | **1.8 ms**, **no script `render`** | each measured repaint |
 
 Run it in release or the figures mean nothing. Every absolute number on this page comes from a release build on a MacBook Pro (M3, 8 cores, 24 GB), and moves with the machine.
 
-**C is the one that is an assertion rather than a timing.** Fifty repaints of an unchanged View run no JavaScript at all. If a single one of them ever does, the runtime has regressed to charging script cost per frame, and the benchmark fails rather than merely getting slower.
+**C includes an assertion as well as a timing.** Fifty repaints of an unchanged View do not run that View's script `render`. If one does, the benchmark fails rather than merely getting slower. This test does not measure an idle window's repaint cadence or rule out other frame-path callbacks in a different interface.
 
 One size cannot show which of the three costs scale, so a fourth test walks the same panel up to 8,403 nodes. It sits behind `--ignored` because the largest size takes seconds:
 
@@ -52,13 +52,13 @@ One size cannot show which of the three costs scale, so a fourth test walks the 
 cargo test -p gpui-shell --release --lib benchmark -- --ignored --nocapture
 ```
 
-Describing costs 1.1 ms at 443 nodes, then 5.1, 10.3 and 20.5 ms as the panel grows to 2,103, 4,203 and 8,403. A whole frame — B plus GPUI's layout and paint, which is what C measures — costs 1.3, 5.9, 12.0 and 27.0 ms. Both scale close to linearly with the node count. What does not scale is the JavaScript: no frame at any size runs a line of it. Three things that settles:
+Describing costs 1.1 ms at 443 nodes, then 5.1, 10.3 and 20.5 ms as the panel grows to 2,103, 4,203 and 8,403. A measured cached repaint — including GPUI layout and paint — costs 1.3, 5.9, 12.0 and 27.0 ms. Both timings grow roughly with node count. The cached repaints in this test do not rerun the View's JavaScript. Three things that shows for this workload:
 
-- **4,203 nodes is where the Snapshot decides the outcome.** 12 ms a frame holds 60 FPS; rebuilding the description for every frame would cost 22 ms and drop them. Below that size both models have room to spare, which is worth knowing before reading too much into the ratio.
-- **The description cost did not vanish, it moved.** 20 ms for 8,403 nodes is paid when the user acts rather than sixty times a second, but it is still 20 ms — which is why the per-call cost remains the number a second engine would be judged on.
-- **Past a few thousand nodes the bill is not script at all.** 27 ms a frame at that size, with the VM untouched, is materialization, layout and paint. A View that large wants virtualizing; a faster engine would not move it.
+- **At 4,203 nodes, the Snapshot materially changes the frame budget.** A measured 12 ms cached repaint fits within the 16.67 ms budget of 60 Hz; hypothetically adding the 10.3 ms description cost to every frame would exceed it. This is a budget comparison for this benchmark, not a sustained 60 FPS result for an application.
+- **The description cost did not vanish, it moved.** About 20 ms for 8,403 nodes is paid when that View is invalidated rather than on every cached repaint, but it is still about 20 ms — which is why the per-call cost remains the number a second engine would be judged on.
+- **At the largest tested size, cached-frame cost is substantial without script `render`.** A 27 ms measured repaint includes GPUI element, layout and paint work. A View that large is a candidate for virtualization; a faster script engine alone would not remove that measured frame cost.
 
-Read A against the design's own budget — 1.5 ms for one script `render` — and it clears it, but with less room than hoped: the budget was derived from roughly 150 ns per recorded operation across 800 nodes, and the measurement reports about 320 ns across 443. A panel three times this size would not fit in one pass. What changed is how often that matters. At 120 FPS the old model would have spent 168 ms of every second describing an interface nobody had changed; the same panel now costs 1.4 ms when the user actually changes something, and 0.7 ms to repaint. The levers the design names for genuinely enormous panels — driving the per-call cost down, memoizing unchanged subtrees, virtualizing long lists — are still [not implemented](./elements.md#not-there-yet), and are now optimizations rather than prerequisites.
+Read A against the design's own budget — 1.5 ms for one script `render` — and it clears it, but with less room than hoped: the budget was derived from roughly 150 ns per recorded operation across 800 nodes, and the measurement reports about 320 ns across 443. A panel three times this size would not fit in one pass. What changed is how often that matters. In a hypothetical model that rebuilt this 1.4 ms description on each of 120 frames in one second, description alone would take 168 ms; the current cached-frame path pays that script cost on invalidation instead. The levers the design names for genuinely enormous panels — driving the per-call cost down, memoizing unchanged subtrees, virtualizing long lists — are still [not implemented](./elements.md#not-there-yet), and are now optimizations rather than prerequisites.
 
 Two implementation choices came out of the same measurement and are visible in the runtime today:
 
@@ -67,7 +67,7 @@ Two implementation choices came out of the same measurement and are visible in t
 
 ### A live market-data workload
 
-The synthetic benchmark isolates costs; a Longbridge market terminal exercises them together. The following sample used a release build in the active window on a 3,840 × 2,160 display running at 144 Hz. Its watchlist received live quote updates while the selected instrument's details and five-day price chart were visible. The target was 120 FPS, which gives each frame **8.33 ms**.
+The synthetic benchmark isolates costs; a Longbridge market terminal exercises them together. The following sample used a release build in the active window on a 3,840 × 2,160 display running at 144 Hz. Its watchlist received live quote updates while the selected instrument's details and five-day price chart were visible. A 120 FPS target gives **8.33 ms** per frame; the display refresh rate and the target are different numbers, and neither guarantees the achieved frame rate.
 
 Opt-in runtime counters sampled one-second intervals and separated script description work from native materialization:
 

@@ -12,7 +12,7 @@ order: 14
 script cost  =  how often a View is invalidated  ×  what describing that View costs
 ```
 
-Neither factor is the frame rate. A window repainting at 120 Hz runs no more JavaScript than one repainting at 30 Hz, and a View nobody has invalidated runs none at all. Both factors are yours: the left one is where you call `cx.notify()`, the right one is how much interface sits behind a single call.
+Neither factor is the display refresh rate by itself. A window that repaints at 120 Hz does not run the View's JavaScript merely because more frames are presented; a View nobody has invalidated runs no script `render`. The left factor depends on when you call `cx.notify()` and on other invalidations such as a theme change; the right one is how much interface sits behind one call. Display refresh rate is a ceiling or target for scheduling, not a promise that an idle window redraws continuously.
 
 Everything below is one of those two, or a way of telling which is the problem.
 
@@ -20,7 +20,7 @@ Everything below is one of those two, or a way of telling which is the problem.
 
 GPUI Shell gives each JavaScript View a Snapshot of its own: the description that View's `render` produced, kept in Rust.
 
-**A View's Snapshot is reused until that View changes.** Every frame in between is drawn from it — turned into GPUI elements, laid out, painted — entirely in Rust. No JavaScript runs.
+**A View's Snapshot is reused until that View changes.** When GPUI does request another frame, it can use that Snapshot without running the View's JavaScript `render`. This says nothing by itself about how often an idle window presents a frame, or about the CPU and GPU work in the rest of that frame.
 
 ```text
 the View changed  ──▶  render()  ──▶  a new Snapshot  ──▶  frame
@@ -99,7 +99,7 @@ onQuote(quote, cx) {
 Three rules follow from the same idea:
 
 - **Invalidate the View that changed.** State that belongs to one child should live on that child and be notified there, rather than on the parent that mounts it.
-- **Notifying more often than the frame rate costs nothing extra.** See below — batching by hand buys nothing, conditioning does.
+- **Several notifications before the next frame can share one script render.** See below. The handlers and their other work still run, so condition notifications on changes the View actually displays.
 - **From the host, `cx.notify()` and `ScriptView::refresh` are different requests.** A bare `notify` repaints the description that already exists. If Rust changed state the script reads through a [HostModule](./host-module.md), the description is stale and only `refresh` says so. See [Hosting](./hosting.md#refreshing-a-view-from-host-state).
 
 ### What `notify` does, and what coalesces it
@@ -114,9 +114,9 @@ notify  notify  notify  ──▶  one frame  ──▶  one render()
 
 Setting a flag three times is setting it once. Nothing is dropped: all three handlers ran and all three changed state; what they share is the single rebuild that follows.
 
-**That puts a ceiling on what invalidation can cost: at most one script render per View per frame.** A feed ticking a thousand times a second costs at most 120 renders a second on a 120 Hz display, not a thousand. It is why an over-eager `notify` shows up as wasted work rather than as a runaway.
+**Coalescing bounds script renders to at most one per View per frame.** For example, if a window presents 120 frames in a measured second while a feed delivers 1,000 notifications, that View can render at most 120 times in those frames. It does not make the 1,000 handlers free, establish an actual 120 FPS rate, or imply that every display refresh produces a frame.
 
-The runtime adds no throttle of its own on top of that, and there is none to tune. The coalescing is GPUI's own scheduling, and it never defers a rebuild past the next frame — so it costs no latency, which is the other half of the pair below.
+The runtime adds no separate script-render throttle to tune. GPUI's scheduling coalesces these requests into the next frame it processes; how soon that frame is presented depends on the window, platform, and workload.
 
 ### What the cache costs in memory
 
@@ -135,11 +135,11 @@ Rendering FPS          is the frame smooth?
 State → presentation   how long after state changes does the reader see it?
 ```
 
-Missing a `cx.notify()` costs no frames at all. GPUI keeps replaying the last good description at full rate, so the HUD reads a steady 120 FPS while the interface is showing something that stopped being true — and then jumps a quarter of a second later, when something unrelated invalidates the View. Every rendering measurement calls this healthy.
+Missing a `cx.notify()` may leave the displayed data stale without causing a dropped frame. If some other activity causes frames, GPUI can keep using the last published description, and a frame-rate counter can look healthy while the data is wrong. If nothing requests a frame, the window may simply remain still. The stale data becomes visible only after another invalidation refreshes that View; frame-rate measurements alone cannot detect the missing notification.
 
 | Symptom | Which number is wrong | Usual cause |
 | --- | --- | --- |
-| The window stutters while nothing in the application is changing | FPS | Description too large per frame, or a virtual list doing per-row work; see [the measurement](./engine.md#the-measurement) |
+| The window stutters during repaints even though script state is unchanged | Frame time / FPS | Frame work may be too large, for example layout, paint or virtual-list item work; see [the measurement](./engine.md#the-measurement) |
 | The window stutters while a feed is running | FPS *and* invalidation | One boundary being rebuilt too often, too large, or both |
 | The window is smooth and the data is late | Presentation latency | A `notify` that was skipped, deferred behind an `await`, or issued as a host `cx.notify()` where `refresh` was meant |
 

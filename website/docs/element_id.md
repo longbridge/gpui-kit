@@ -77,6 +77,115 @@ div().id("messages").children(messages.iter().map(|message| {
 
 If a repeated row contains several controls, key the row and give its children distinct local keys such as `"edit"` and `"delete"`. Moving the row then carries its whole keyed subtree with it.
 
+### Worked example: a row and its controls
+
+The following uses the actual `div().id(...)` and `Button::new(id)` APIs. `Message::id` is a stable database ID; `preview` is display data that may change. Each row owns a namespace for its controls:
+
+```rust
+use gpui_kit::*;
+use gpui_kit::component::button::Button;
+
+struct Message {
+    id: u64,
+    preview: SharedString,
+}
+
+fn message_list(messages: &[Message]) -> impl IntoElement {
+    div().id("messages").children(messages.iter().map(|message| {
+        div()
+            .id(("message", message.id))
+            .child(message.preview.clone())
+            .child(Button::new("archive").label("Archive"))
+    }))
+}
+```
+
+For message `42`, the written part of the button's path is `"messages" → ("message", 42) → "archive"` (GPUI may add View and component namespaces). Every row can call its button `"archive"` because the row IDs differ. If the list order changes from `[42, 7]` to `[7, 42]`, those paths stay with their messages. If message `42` is removed for a rendered frame, its element-local state ends; inserting it again later creates fresh state. An application-level selection or draft that must survive removal belongs in an owned `Entity<T>` or model.
+
+The row key does not automatically key siblings *inside* the row: two `Button::new("archive")` controls under that same row would still collide. Give them distinct local IDs. Also keep the same domain ID when a message's preview or localized label changes; using that text as the key would reset its UI identity.
+
+### Try it: reorder, hide, and restore rows
+
+In the existing `examples/hello_world` package, replace `src/main.rs` with the complete example below and run `cargo run -p hello_world`. Click **Add to 42** twice, then **Swap rows**. Record 42 still shows `2` after moving below record 7. Click **Hide 42**, wait until that row is visibly gone, then click **Show 42**. Its count starts again at `0` because the keyed state was absent from a rendered frame. Keep a persistent count in an application-owned Entity if it must survive hiding.
+
+```rust
+use gpui_kit::base::StyledExt;
+use gpui_kit::component::button::Button;
+use gpui_kit::*;
+
+struct Example {
+    reversed: bool,
+    show_42: bool,
+}
+
+impl Render for Example {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let order = if self.reversed { [7_u64, 42] } else { [42, 7] };
+        let rows = order
+            .into_iter()
+            .filter(|id| *id != 42 || self.show_42)
+            .map(|id| {
+                // This call happens while the parent View renders, before the row div is drawn.
+                // Give the state its own domain-derived key; the row ID below keys its subtree.
+                let count = window.use_keyed_state(("row-count", id), cx, |_, _| 0_u32);
+                let value = *count.read(cx);
+
+                div()
+                    .id(("row", id))
+                    .h_flex()
+                    .gap_2()
+                    .child(format!("Record {id}: {value}"))
+                    .child(
+                        Button::new("increment")
+                            .label(format!("Add to {id}"))
+                            .on_click(move |_, _, cx| {
+                                count.update(cx, |value, cx| {
+                                    *value += 1;
+                                    cx.notify();
+                                });
+                            }),
+                    )
+            })
+            .collect::<Vec<_>>();
+
+        div()
+            .v_flex()
+            .gap_2()
+            .p_4()
+            .child(Button::new("swap").label("Swap rows").on_click(cx.listener(
+                |this, _, _, cx| {
+                    this.reversed = !this.reversed;
+                    cx.notify();
+                },
+            )))
+            .child(
+                Button::new("toggle-42")
+                    .label(if self.show_42 { "Hide 42" } else { "Show 42" })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_42 = !this.show_42;
+                        cx.notify();
+                    })),
+            )
+            .child(div().id("rows").v_flex().gap_2().children(rows))
+    }
+}
+
+fn main() {
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| Example {
+                reversed: false,
+                show_42: true,
+            })
+        })
+        .expect("failed to open window");
+    });
+}
+```
+
+The row's `("row", id)` path keeps its controls associated with the same record when the order changes. `Button::new("increment")` can use the same local name in both rows because the row paths differ. The counter uses a *separate* `("row-count", id)` key: it is requested while the parent View builds the rows, before the row's element ID is on the path. Both keys must use the stable record ID. Hiding a row is observable only after GPUI renders a frame without that row; clicking Hide and Show before an intervening render may preserve the old state.
+
 ## How IDs retain state
 
 GPUI reconstructs elements during rendering. The Rust value returned by `div()` or a `RenderOnce` component is temporary; assigning it an ID does not turn it into a persistent `Entity<T>`. The ID gives GPUI a way to reconnect element-local state across consecutive frames.
@@ -116,6 +225,31 @@ This is the pattern behind GPUI Kit's `ScrollBounce` element, which retains moti
 - Removing an element ends its consecutive-frame state lifetime. Recreating it later initializes that state again.
 - An ID does not preserve a View's `Entity<T>` by itself; a strong Entity owner controls that lifetime.
 - Keyed state belongs to the Window's rendering context. Do not rely on a `GlobalElementId` to transfer state between windows.
+
+## Effects beyond element state
+
+An ID can be one input to a component's focus, scroll, measurement, or animation state. For example, Kit's `Button` obtains a focus handle with `window.use_keyed_state(self.id.clone(), ...)`, while `ScrollBounce` uses `window.with_element_state(...)` to retain its motion state. Reusing a path for two live controls can therefore mix behavior; changing a path can restart it. A `FocusHandle` or `ScrollHandle` still owns its respective behavior, and changing an `ElementId` does not by itself reset every handle stored elsewhere.
+
+Stable paths also matter to cached Views. A cached Entity View reuses work only while its entity and element path still match; on a cache hit, GPUI replays the subtree's element-state accesses. IDs are not a general render cache: adding `.id(...)` to a `div()` does not make its parent skip `render` (see [View Cache](./view-cache)).
+
+For accessibility, a custom element needs both an ID and a role to become a node. A stable ID lets GPUI preserve that node's identity across redraws, but it does not supply a role, label, keyboard behavior, or focusability. Use the component's accessibility API for those properties (see [Accessibility](./accessibility)).
+
+## Find a bad ID path
+
+1. Identify the logical object whose focus, scroll position, animation, or other state moved or reset. Write down the object's stable domain ID and every keyed ancestor above it. Check whether a sibling now has the same **full** path, or whether an ancestor key changes when data is reordered.
+2. Look for unkeyed wrappers between repeated controls. They do not distinguish paths. Replace a shared literal with a stable object-derived ID, or key the repeated parent. Do not fix a collision with a new random value on every render: that trades state sharing for state loss.
+3. If state resets only after an item disappears, check whether it was absent for a rendered frame. If it was, keep long-lived state in an Entity or model. If it resets while still present, check changing ancestor IDs, a newly created View Entity, and cache invalidation separately.
+
+A real Kit example is [`DockSkin::render_resize_handle`](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/dock/dock.rs): left, right, and bottom resize handles can live below the same keyed ancestor. Giving every handle the literal `"resize-handle"` would produce one `GlobalElementId`; the dock source notes that a press on one handle could then start another handle's drag. It selects `"resize-handle-left"`, `"resize-handle-right"`, and `"resize-handle-bottom"` from the stable placement instead.
+
+In UI integration tests, target IDs are query selectors for observed elements, not a second identity system. Import `gpui_kit::test::TestWindowExt`; `window.find("archive")` requires one matching observed target, so repeated controls need a native scope:
+
+```rust
+let archive = window.within(("message", 42_u64)).find("archive");
+assert!(archive.visible());
+```
+
+`window.within(...)` follows the keyed ancestor path even when the ancestor itself is not observed. An ambiguous `find` or `try_find` asks for a scope; it does not necessarily mean GPUI state collided, since two controls can correctly share a local ID under different row paths. Test the real click or focus outcome as well as the snapshot (see [Testing](./test)).
 
 See [Element](./element) for the layout, prepaint, and paint lifecycle, and [Entity](./entity) for state that must outlive an element's presence in the tree.
 

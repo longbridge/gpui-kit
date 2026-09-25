@@ -16,7 +16,7 @@ div()
     .items_center()
     .gap_2()
     .child(Icon::new(IconName::Search))
-    .child("搜索")
+    .child("Search")
 ```
 
 这段代码构建了一棵 Element 树，并没有实现 GPUI 底层的 `Element` trait。
@@ -38,7 +38,7 @@ fn status_icon(online: bool) -> AnyElement {
     if online {
         Icon::new(IconName::CircleCheck).into_any_element()
     } else {
-        div().child("离线").into_any_element()
+        div().child("Offline").into_any_element()
     }
 }
 ```
@@ -144,6 +144,268 @@ impl Element for EventSurface {
 
 `HitboxBehavior::Normal` 参与命中但不遮挡后方 hitbox；`BlockMouse` 遮挡后方鼠标及滚动处理，`BlockMouseExceptScroll` 保留后方滚动。绘制、裁剪和命中是三件事：画出形状不会自动建立 hitbox，插入 hitbox 也不会自动画出形状。
 
+### 让输入区域可见，并响应按下事件
+
+第一个例子只是 trait 骨架：把它作为子元素挂载后，仍然看不到任何像素。要运行接下来的完整示例，请用下面的代码替换现有 [`examples/hello_world/src/main.rs`](https://github.com/longbridge/gpui-kit/blob/main/examples/hello_world/src/main.rs) 的内容。父元素给输入区域明确的 `240 × 96` 像素空间；区域请求的相对宽高才有了可参照的尺寸。整个练习沿用仓库现有示例，无须增加依赖。
+
+```rust
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::*;
+
+struct SurfaceDemo {
+    presses: usize,
+}
+
+impl Render for SurfaceDemo {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .w(px(240.))
+                    .h(px(96.))
+                    .child(EventSurface {
+                        owner: cx.entity().clone(),
+                        color: cx.theme().primary,
+                    }),
+            )
+            .child(format!("Pointer presses: {}", self.presses))
+    }
+}
+
+struct EventSurface {
+    owner: Entity<SurfaceDemo>,
+    color: Hsla,
+}
+
+impl IntoElement for EventSurface {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element { self }
+}
+
+impl Element for EventSurface {
+    type RequestLayoutState = ();
+    type PrepaintState = Hitbox;
+
+    fn id(&self) -> Option<ElementId> { None }
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> { None }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let mut style = Style::default();
+        style.size.width = relative(1.).into();
+        style.size.height = relative(1.).into();
+        (window.request_layout(style, None, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        _: &mut App,
+    ) -> Self::PrepaintState {
+        window.insert_hitbox(bounds, HitboxBehavior::Normal)
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        hitbox: &mut Self::PrepaintState,
+        window: &mut Window,
+        _: &mut App,
+    ) {
+        window.paint_quad(fill(bounds, self.color));
+
+        let hitbox = hitbox.clone();
+        let owner = self.owner.clone();
+        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+            if phase.bubble()
+                && event.button == MouseButton::Left
+                && hitbox.is_hovered_at(event.position, window)
+            {
+                owner.update(cx, |view, cx| {
+                    view.presses += 1;
+                    cx.notify();
+                });
+            }
+        });
+    }
+}
+
+fn main() {
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| SurfaceDemo { presses: 0 })
+        })
+        .expect("failed to open window");
+    });
+}
+```
+
+在仓库根目录运行 `cargo run -p hello_world`。窗口会显示 `240 × 96` 的主题色矩形和 `Pointer presses: 0`；每次在矩形内按下鼠标左键，计数依次变成 `1`、`2`，按在矩形外则不会变化。这只是展示指针输入的教学示例；它没有键盘激活、Focus、光标样式或无障碍角色。应用中的常规操作控件应优先使用现成的 [Button](../component/button)，只有确实需要控制底层生命周期时才采用这种写法。
+
+可以按四步理解这个例子：
+
+1. **挂载并确定尺寸。** 每次 View 渲染，`Render::render` 都创建一个新的 `EventSurface`。父元素给出确定的宽高，子元素在两个方向都请求 `relative(1.)`。如果父元素没有可用尺寸，这个百分比可能解析成零尺寸或意外的区域。
+2. **准备输入几何。** `prepaint` 收到布局计算后的 `Bounds<Pixels>`，插入与矩形一致的 hitbox。`PrepaintState = Hitbox` 将它传给 `paint`；它属于当前帧的命中测试数据。
+3. **绘制并注册 listener。** View 读取 `cx.theme().primary`，把这个 `Hsla` 传给 Element；`paint_quad(fill(bounds, self.color))` 再使用当前主题的颜色画出同一矩形。`on_mouse_event` 按绘制注册顺序把当前帧的 listener 加入窗口鼠标监听列表，并不会将其挂在当前 dispatch node 上；`&MouseDownEvent` 决定事件类型，冒泡阶段、鼠标左键和 hitbox 判断共同排除无关输入。闭包捕获克隆后的 handle，因为它需要在这次 `paint` 返回后继续存在。
+4. **修改长期状态。** `Entity<SurfaceDemo>` 在 Element 树重建后仍然存在。`owner.update` 修改 `presses`，`cx.notify()` 使 View 再次渲染。下一次 `render` 会生成新的 `EventSurface` 与计数文字；两个阶段关联状态都不是应用计数器。
+
+学习时可以在同一个文件中逐项改动，每次都重新运行 `cargo run -p hello_world`：
+
+1. 注释掉 `window.paint_quad(...)`。矩形变得不可见，但原区域内的按下事件仍会增加计数。输入由 hitbox 而非像素决定。
+2. 恢复绘制。要移除 hitbox，需**同时**把 `PrepaintState` 改为 `()`，并从 `paint` 中移除 listener。此时矩形可见，但不会响应输入。绘制本身不提供命中区域或回调。
+3. 恢复完整示例，把父节点的 `.w(px(240.))` 改成 `.w(px(120.))`。可见区域和可点击区域会一起变窄，因为两者都使用布局求出的 bounds。
+
+| 观察结果 | 排查位置 |
+| --- | --- |
+| 看不到彩色区域 | 父节点是否给出确定尺寸、`request_layout` 是否返回布局 ID，以及 `paint_quad` 是否还在。 |
+| 区域可见，但按下无效 | `prepaint` 是否插入相同 bounds 的 hitbox；`paint` 是否注册 `on_mouse_event`；listener 是否检查冒泡阶段和鼠标左键。还需检查前方 hitbox 是否使用 `BlockMouse` 或 `BlockMouseExceptScroll`；普通 `Normal` hitbox 本身不会阻断后方 hitbox。 |
+| 事件已触发，但文字不更新 | listener 是否更新 `Entity<SurfaceDemo>`，并在 update 闭包内调用 `cx.notify()`。 |
+
+前两项改动是观察现象的实验，不是另两种完整实现；继续阅读前请恢复完整代码。
+
+这个例子不需要 `ElementId`：计数由 Entity 持有，而 hitbox 和 listener 每帧重建。只有底层 Element 自身需要 keyed state 或无障碍 identity 时才加入稳定 ID。带子元素的区域还要把子布局 handle 放入 `RequestLayoutState`，在父元素 bounds 确定后 prepaint 子元素，再按顺序绘制；真实实现可参考 [TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/text/text_view.rs)。可复用的输入原语还必须明确 Focus、键盘与无障碍契约；单靠鼠标 listener 不会自动具备这些能力。
+
+### 在自定义 Element 中组合一个子元素
+
+上面的指针区域没有子布局需要传递。接下来的完整示例增加**一个**子元素。把以下代码放入现有 [`examples/hello_world/src/main.rs`](https://github.com/longbridge/gpui-kit/blob/main/examples/hello_world/src/main.rs)，替换上一个练习的代码，然后在仓库根目录运行 `cargo run -p hello_world`。它继续使用原来的 package 和依赖。
+
+```rust
+use gpui_kit::component::ActiveTheme as _;
+use gpui_kit::*;
+
+struct ChildDemo;
+
+impl Render for ChildDemo {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div().flex().flex_col().items_start().gap_2().child(
+            ChildFrame {
+                child: Some(div()
+                    .w(px(160.))
+                    .h(px(32.))
+                    .bg(cx.theme().primary)
+                    .text_color(cx.theme().primary_foreground)
+                    .child("Child: 160 x 32")
+                    .into_any_element()),
+                background: cx.theme().secondary,
+                accent: cx.theme().primary,
+            },
+        )
+    }
+}
+
+struct ChildFrame {
+    child: Option<AnyElement>,
+    background: Hsla,
+    accent: Hsla,
+}
+
+impl IntoElement for ChildFrame {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element { self }
+}
+
+impl Element for ChildFrame {
+    type RequestLayoutState = AnyElement;
+    type PrepaintState = Bounds<Pixels>;
+
+    fn id(&self) -> Option<ElementId> { None }
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> { None }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let mut child = self.child.take().expect("layout requested once per frame");
+        let child_layout = child.request_layout(window, cx);
+        let mut style = Style::default();
+        style.padding = Edges::all(px(12.).into());
+        let layout = window.request_layout(style, [child_layout], cx);
+        (layout, child)
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        child: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        child.prepaint(window, cx);
+        Bounds {
+            origin: bounds.origin,
+            size: size(px(4.), bounds.size.height),
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        child: &mut Self::RequestLayoutState,
+        accent_bounds: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        window.paint_quad(fill(bounds, self.background));
+        window.paint_quad(fill(*accent_bounds, self.accent));
+        child.paint(window, cx);
+    }
+}
+
+fn main() {
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| ChildDemo)
+        })
+        .expect("failed to open window");
+    });
+}
+```
+
+窗口中会出现标有 `Child: 160 x 32` 的彩色子元素，四周留出 12 像素内边距，外框左侧还有一条窄色条。外框没有固定高度：Taffy 测量 32 像素高的子元素后，加上上下内边距。在这个不受约束的例子中，外框高度为 56 像素。把子元素的 `.h(px(32.))` 改为 `.h(px(64.))`，重新运行，外框就会增高到 88 像素。如果祖先节点限制高度，结果也会受该限制影响。
+
+沿着所有权与阶段的顺序阅读代码：
+
+1. `Render::render` 创建含有一个 `AnyElement` 的 `ChildFrame`。`Option` 允许 `request_layout` 把子元素移入返回的 `RequestLayoutState`；该 Element 在一帧内只请求一次布局。下一次渲染会创建新的 `ChildFrame`。
+2. 子元素先请求自己的 `LayoutId`。父元素再把它传给 `window.request_layout(style, [child_layout], cx)`，从而在布局树中连接这两个节点。若传入空的子节点列表，父元素测量和定位时就不会考虑这个彩色子元素。
+3. Taffy 完成布局后，`prepaint` 调用 `child.prepaint(window, cx)`，让子元素获得求出的最终位置，并准备自己的 hitbox 或几何。父元素同时根据自身 bounds 计算一条 4 像素宽的色条，把该矩形作为 `PrepaintState` 返回。
+4. `paint` 先画外框背景和色条，再调用 `child.paint(window, cx)`，让子元素显示在背景上方。`AnyElement` 保存其内部阶段状态，但父元素仍须依序调用它的各阶段。
+
+外框不处理输入，因此没有自己的 hitbox。内置的子 `div` 负责绘制自己的背景和文字。任何一次绘制调用都无法补回缺失的子布局；布局、prepaint 与 paint 必须都包含它。
+
+| 观察结果 | 排查位置 |
+| --- | --- |
+| 看到了外框，却没有子元素 | 是否把子布局 ID 传给 `window.request_layout`，并依次调用了子元素的 `prepaint` 和 `paint`。若外框背景盖住子元素，还要检查绘制顺序。 |
+| 子元素没有处于内边距以内 | 父元素的 style 是否包含 `Edges::all(px(12.).into())`，并使用返回的子布局 ID。不要在 `paint` 中手动偏移子元素；位置由 Taffy 计算。 |
+| 外框高度不随子元素改变 | 检查外框或祖先节点是否固定高度或裁剪内容，以及是否将子布局 ID 连接到父布局。 |
+
+这个例子把子元素保存在 `RequestLayoutState` 中，因为后续两个阶段还要使用它；`PrepaintState` 只保存计算好的色条矩形。两者都不是持久化应用状态；这类数据应交给 [Entity](./entity)。
+
 ### `GlobalElementId` 与跨帧状态
 
 `Element::id()` 返回局部 `ElementId`。GPUI 将它与上层 keyed 元素的 ID 组合成 `GlobalElementId`，传入三个阶段。底层 Element 可以用它和 `window.with_element_state` 保留少量跨帧状态；CarouselScrollMask 就这样保存连续滚动信息。ID 在最近的 keyed ancestor 下必须唯一；可重排的项目应使用领域 ID，不能用列表下标。没有 ID 时三个阶段收到 `None`。应用数据和订阅依然应由 Entity 持有。
@@ -188,7 +450,7 @@ GPUI Kit 的输入框使用自定义 `Element`，因为它需要对文字进行 
 
 ### 布局树、派发树与 Scene 是不同的结构
 
-`request_layout` 向布局引擎提交节点并返回 `LayoutId`。Taffy 求出最终布局后，`prepaint` 得到像素 bounds。GPUI 在 prepaint 时给 Element 建立 dispatch node；子元素与 hitbox 共同确定当前帧的输入区域。`paint` 会激活对应的 dispatch node，让在这里注册的 Action、键盘、鼠标 listener 沿同一条树路径派发。绘制命令则进入 Scene。调用 `paint_path` 只会改变 Scene，不会自动创建派发节点或 hitbox；反过来，Carousel 的 mask 建立输入区域和 listener，却不绘制可见图形。
+`request_layout` 向布局引擎提交节点并返回 `LayoutId`。Taffy 求出最终布局后，`prepaint` 得到像素 bounds。GPUI 在 prepaint 时给 Element 建立 dispatch node；hitbox 则单独记录，供命中测试使用。`paint` 会激活对应的 dispatch node，让在这条路径上注册的 Action 与键盘 listener 派发。`window.on_mouse_event` 注册的鼠标 listener 则进入当前帧的窗口列表：捕获阶段按注册顺序调用，冒泡阶段反向调用；handler 需检查相关 hitbox。绘制命令进入 Scene。调用 `paint_path` 只会改变 Scene，不会自动创建派发节点或 hitbox；反过来，Carousel 的 mask 建立输入区域和 listener，却不绘制可见图形。
 
 这种分离让自定义 Element 只承担真正需要的工作。装饰图形可能只需 canvas 和 Scene 命令；可聚焦控件还需协调派发、hitbox、Focus 和无障碍。虚拟列表要决定测量和绘制哪些子元素，而不只是画一个巨大的矩形。
 

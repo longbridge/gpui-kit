@@ -17,6 +17,125 @@ The **spawn API** chooses where work runs; the returned `Task` controls its life
 | `cx.spawn(...)` in `App` | Foreground thread | `&mut AsyncApp` | Application-level work without a current Entity |
 | `cx.background_spawn(...)` | Background executor | No GPUI context | Expensive parsing or computation on owned `Send` data |
 
+## Run the repository example
+
+From the repository root, after installing the platform prerequisites in [Installation](./installation.md), run:
+
+```sh
+cargo run -p example-stream-markdown
+```
+
+The window opens with a **Replay** button and a **Fade in streamed text** switch. Click Replay: the text clears, then appears in chunks. Click it again before the stream finishes to start a new replay; only chunks tagged with the current replay ID are displayed. Closing the window drops the View's task handles, but a producer already running its synchronous loop can finish that loop before stopping. The complete source is [`examples/stream-markdown/src/main.rs`](https://github.com/longbridge/gpui-kit/blob/main/examples/stream-markdown/src/main.rs); its package and dependencies are in [`examples/stream-markdown/Cargo.toml`](https://github.com/longbridge/gpui-kit/blob/main/examples/stream-markdown/Cargo.toml). This is a runnable workspace example; for a one-dependency app skeleton, start with [Getting Started](./getting-started.md).
+
+Follow one click through the source: `main` creates the window; `Example::new` creates the channel and saves a foreground receiver `Task`; the button calls `Example::replay`, which increments `replay_id`, clears the text and replaces the background producer `Task`; the receiver checks that ID before updating `TextViewState`. The example uses a worker to simulate incoming chunks. In an actual network stream, await the source's asynchronous read and await a bounded channel send so a slow UI cannot cause unbounded queued data.
+
+## Build a task you can start, cancel, and fail
+
+The streaming example shows task ownership but has no failure control. This small app makes all three outcomes visible. In the existing repository checkout, save the following as `examples/hello_world/src/bin/task_lab.rs` (create the `bin` directory if needed), then run `cargo run -p hello_world --bin task_lab` from the repository root. It uses the existing `hello_world` package and adds no dependency or workspace member.
+
+```rust
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::*;
+use std::time::Duration;
+
+struct TaskLab {
+    status: String,
+    request_id: u64,
+    task: Option<Task<()>>,
+}
+
+impl TaskLab {
+    fn start(&mut self, fail: bool, cx: &mut Context<Self>) {
+        self.request_id = self.request_id.wrapping_add(1);
+        let request_id = self.request_id;
+        self.task = None; // Drop the previous handle before starting again.
+        self.status = format!("Loading request {request_id}...");
+        cx.notify();
+
+        self.task = Some(cx.spawn(async move |this, cx| {
+            let result: Result<String, String> = cx
+                .background_spawn(async move {
+                    // Stand in for expensive work; this blocks a worker, not the UI thread.
+                    std::thread::sleep(Duration::from_millis(800));
+                    if fail {
+                        Err("Simulated failure".into())
+                    } else {
+                        Ok(format!("Completed request {request_id}"))
+                    }
+                })
+                .await;
+
+            _ = this.update(cx, |view, cx| {
+                if view.request_id != request_id {
+                    return; // A newer start or cancel owns the displayed state.
+                }
+                view.status = match result {
+                    Ok(value) => value,
+                    Err(error) => format!("Failed: {error}"),
+                };
+                cx.notify();
+            });
+        }));
+    }
+
+    fn cancel(&mut self, cx: &mut Context<Self>) {
+        self.request_id = self.request_id.wrapping_add(1);
+        self.task = None; // Dropping the handle prevents future polls.
+        self.status = "Cancelled".into();
+        cx.notify();
+    }
+}
+
+impl Render for TaskLab {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .gap_2()
+            .child(self.status.clone())
+            .child(
+                Button::new("start")
+                    .primary()
+                    .label("Start")
+                    .on_click(cx.listener(|view, _, _, cx| view.start(false, cx))),
+            )
+            .child(
+                Button::new("fail")
+                    .label("Fail")
+                    .on_click(cx.listener(|view, _, _, cx| view.start(true, cx))),
+            )
+            .child(
+                Button::new("cancel")
+                    .label("Cancel")
+                    .on_click(cx.listener(|view, _, _, cx| view.cancel(cx))),
+            )
+    }
+}
+
+fn main() {
+    application().with_assets(assets::Assets).run(|cx| {
+        init(cx);
+        open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| TaskLab {
+                status: "Idle".into(),
+                request_id: 0,
+                task: None,
+            })
+        })
+        .expect("Failed to open window");
+    });
+}
+```
+
+Click **Start** and watch **Loading** become **Completed** after about 800 ms; the window should still accept clicks during the wait. Click **Fail** to see a deterministic **Failed** state. Click **Start**, then **Cancel** before it completes: **Cancelled** should remain visible. Click **Start** and immediately **Fail**: only the latest request may update the label. A cancelled worker that is already inside `sleep` may finish that blocking call; the dropped `Task` and request ID prevent its result from changing the View. This sleep is deliberately confined to a background worker for the exercise. Real I/O should use an async API, and long CPU jobs need bounded steps or another cancellation mechanism if prompt stopping matters.
+
+After the exercise, delete only `examples/hello_world/src/bin/task_lab.rs`; keep any other files in `src/bin`. In an unmodified checkout, this leaves only the original `hello_world` binary, so the `cargo run -p hello_world` commands in other guides work again. If you already have other binaries in that package, specify `--bin hello_world` when running its original example.
+
+The View owns the foreground `Task`. That task awaits a background `Task<Result<...>>`, then updates the View through the weak Entity supplied by `cx.spawn`. `cx.notify()` makes each status transition visible. Keep the completed handle in the field until the next start or cancel; dropping a completed task is harmless. The `Result` branch shows the error in the UI instead of silently discarding it.
+
 ## How execution moves between threads
 
 On a desktop app, GPUI's **foreground executor** polls `cx.spawn` and `cx.spawn_in` futures on the main/UI thread. Several foreground tasks can be *concurrent*: when one awaits an unfinished operation, its poll returns `Pending`, and the UI thread can handle input, render, or poll another task. They do not run in parallel with each other on separate UI threads. An `await` whose value is already ready may continue in the same poll; an expensive synchronous function inside a foreground task still blocks the UI until it returns.
@@ -82,6 +201,8 @@ The **background executor** schedules `Send` work through the platform's backgro
 
 `cx.spawn` accepts a foreground future that need not be `Send`, so it can hold main-thread-only GPUI handles, but it still must be `'static`: move owned inputs into it instead of borrowing `self`. `background_spawn` requires both its future and its output to be `Send + 'static`. Move owned data into the worker and return a `Send` result; keep `Entity`, `Window`, and `Context<T>` updates on the foreground side. Awaiting the background `Task` from the foreground task schedules the **continuation** back on the foreground executor when the result is ready. `cx.notify()` then invalidates the View for a later render; it does not synchronously draw a frame.
 
+An async GPUI context is a way back into GPUI after `await`, not permission to keep a mutable `Context<T>` or `Window` borrowed across suspension. Capture owned inputs before spawning. Use `WeakEntity::update` for a short, synchronous state change after the result arrives; use `update_in` when the same window is required. No UI mutation belongs inside a `background_spawn` future.
+
 ## Start work from an owner
 
 Start a task in a named method, event handler, or lifecycle hook. Do not start one unconditionally in [`render`](./render): every render could launch another copy. Extract the input before spawning, so no borrow of `self` or `cx` crosses an `await`.
@@ -110,6 +231,8 @@ impl SearchView {
 The callback gets a `WeakEntity<SearchView>` named `this`. It does not keep the View alive. After the `await`, `this.update` reacquires the Entity on the foreground thread and returns an error if the View has gone away. Handle that case with `?`, `if let`, or an intentional `_ =` when disappearance is normal. Call `cx.notify()` after changing View state so dependent UI renders again.
 
 Assigning a new `Task` to `_search_task` drops the old handle and cancels the previous search. The field is an `Option` because this View has no task until the user starts one. A View that starts work during construction can store a plain `Task<()>` instead.
+
+`search_index` and `SearchResult` above stand for application code; this snippet illustrates ownership, rather than defining a complete application. For a complete buildable workflow, run the repository example above.
 
 :::info
 Cancellation is cooperative with async execution. Dropping a task prevents further polling; it cannot undo an external side effect that already happened or stop a blocking function in the middle of a call. For results that may arrive after a newer request, also check a request ID or revision before applying them.
@@ -183,38 +306,53 @@ impl DocumentView {
 
 The worker receives the `String` and returns a `Send` `ParsedDocument`; it has no `App`, `Window`, or `Context<T>`. Clone only the input it needs before leaving the Entity update. Replacing `_parse_task` cancels the previous outer task and its awaited worker task, but cannot interrupt a synchronous parse already executing inside one poll. The revision check also rejects a result that became stale before the foreground update.
 
+## Handle completion, failure, and cancellation
+
+For a user-visible operation, keep an explicit state such as idle, loading, loaded, or failed in the owning View. Set loading and notify before spawning. Have the worker return `Result<Data, Error>` as owned, `Send` data. After `await`, first reject an outdated request ID, then handle `Ok` by storing data or `Err` by storing a readable error; clear loading and notify once for the complete change. Keep useful previous data visible during a refresh if the UI allows it. A failure that is only logged or dropped by `.detach()` leaves users looking at a perpetual spinner.
+
+Treat release of the `WeakEntity` or originating window as an ordinary cancellation path: a failed `update` or `update_in` means there is no UI left to change. Dropping a task handle prevents future polls but does not undo I/O or stop synchronous worker code already running. If the operation has an external side effect, decide separately whether it must finish and how to report its outcome. A request ID still guards against queued messages or a late result after replacement.
+
+Never wait for another task with `while !ready {}` or repeated immediate polls. Such a loop occupies the UI thread and can prevent the awaited work from advancing. Await the `Task`, a timer, an I/O future, or a channel receive. For periodic work, await a timer between iterations and keep its handle with the owner. Large CPU work belongs on the background executor; break very long computation into bounded units if prompt cancellation matters. Avoid blocking sleep or blocking I/O in a foreground task.
+
+## Check and diagnose task behavior
+
+Run the example above and check these observable cases: Replay streams text, and a second Replay clears it and excludes old chunks. Closing the window drops the View and its task handles; it does not prove that an already running producer stops immediately. To distinguish a frozen UI from a slow worker, inspect whether the foreground future reaches a pending `await`; code before the first pending point runs on the UI thread. If nothing appears, check that the `Task` handle was retained, that the receiver is still alive, and that an update failure is handled. If stale text appears, inspect the request ID at the point of the UI update. If loading never ends, inspect both the success and error branches and whether the awaited operation can complete.
+
+For app tests, put pure parsing and request ordering in ordinary Rust tests; use GPUI context tests for the owner lifecycle and stale-result guard. A UI interaction test should trigger the action and observe loading, success, and failure through rendered state. Drive async work with the test executor rather than sleeps or a busy loop. The repository example itself can be checked with `cargo check -p example-stream-markdown` and manually exercised with the run command above.
+
 ## A GPUI Kit streaming example
 
-GPUI Kit's [streaming Markdown example](https://github.com/longbridge/gpui-kit/blob/main/examples/stream-markdown/src/main.rs) uses two owned tasks and a channel. A background producer generates text chunks. A foreground receiver owns the Entity update, checks a replay ID, and pushes accepted chunks into `TextViewState`. The View keeps both `Task<()>` handles, so closing it cancels the stream; starting another replay replaces the producer task. The replay ID also rejects chunks already queued by an older producer.
+GPUI Kit's [streaming Markdown example](https://github.com/longbridge/gpui-kit/blob/main/examples/stream-markdown/src/main.rs) uses two owned tasks and a channel. A background producer generates text chunks. A foreground receiver owns the Entity update, checks a replay ID, and pushes accepted chunks into `TextViewState`. The View keeps both `Task<()>` handles; closing it drops those handles, and another replay replaces the producer handle. The producer's async block contains no `await`, so once its synchronous loop is being polled, dropping its handle cannot interrupt that poll. The replay ID rejects chunks from an older producer, including ones queued before replacement.
 
 ```rust
-// From the View's receiver task:
-self._receiver_task = Some(cx.spawn(async move |this, cx| {
+// Condensed from Example::new; the returned Task is stored as _task.
+let _task = cx.spawn(async move |weak_self, cx| {
     while let Ok((replay_id, chunk)) = rx.recv().await {
-        if this.update(cx, |view, cx| {
-            if replay_id != view.replay_id {
+        _ = weak_self.update(cx, |this, cx| {
+            if replay_id != this.replay_id {
                 return;
             }
-            view.markdown_state.update(cx, |state, cx| {
+            this.markdown_state.update(cx, |state, cx| {
                 state.push_str(&chunk, cx);
             });
-            view.scroll_handle.scroll_to_bottom();
-        }).is_err() {
-            break; // The View has been released.
-        }
+            this.scroll_handle.scroll_to_bottom();
+        });
     }
-}));
+});
 
-// From the View's replay method, after incrementing replay_id:
-self._producer_task = cx.background_spawn(async move {
-    for chunk in chunks {
-        if tx.send((replay_id, chunk)).await.is_err() {
-            break; // The receiver has gone away.
-        }
+// Condensed from Example::replay; replacement drops the prior handle.
+self._update_task = cx.background_executor().spawn(async move {
+    let chars: Vec<char> = EXAMPLE.chars().collect();
+    while current < chars.len() {
+        let chunk_size = (5 + rand::random::<usize>() % 15).min(chars.len() - current);
+        let chunk: String = chars[current..current + chunk_size].iter().collect();
+        _ = tx.try_send((replay_id, chunk));
+        current += chunk_size;
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
 });
 ```
 
-This is a GPUI task pattern: task handles express ownership, `WeakEntity` protects the View lifetime, the channel crosses executors, and the replay ID protects state from stale results. See [Entity](./entity) for Entity ownership and updates.
+The excerpt shows the ownership and update points; see the linked source for setup and rendering. The example uses `std::thread::sleep` in its background producer to simulate pacing and an **unbounded channel** with `try_send` only for this demonstration. An unbounded channel does not provide backpressure and can grow when a producer outpaces the UI. Its producer can continue sending after replacement until the synchronous loop returns; the replay ID keeps those chunks out of the UI. For a real stream, use asynchronous waiting and a bounded channel with backpressure, handle send and update errors, and end the receiver when its View is gone. `WeakEntity` protects the View lifetime, and the channel crosses executors. See [Entity](./entity) for Entity ownership and updates.
 
 [Entity]: /docs/entity

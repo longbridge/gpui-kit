@@ -18,7 +18,7 @@ GPUI Kit 可以在浏览器中渲染与桌面端共用的 Rust 视图和组件�
 
 ## 在本地运行画廊
 
-准备好 Rust 和 Bun，然后从仓库检出目录执行：
+准备好 Rust、Bun 和 `make`，然后从仓库根目录（包含工作区 `Cargo.toml` 的目录）执行：
 
 ```sh
 cd crates/story-web
@@ -27,7 +27,17 @@ cargo install wasm-bindgen-cli --version 0.2.121
 make dev
 ```
 
-打开 **http://localhost:3000/gallery/**。`make dev` 以 debug 模式构建 WASM，在 `www/src/wasm/` 生成绑定，安装 Web 依赖并启动 Vite。[本地工具链文件](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/rust-toolchain.toml)选用 nightly；上述 `wasm-bindgen-cli` 版本与当前检出的 `Cargo.lock` 一致。如果锁文件更新，请让 CLI 版本与锁定的 `wasm-bindgen` crate 版本保持一致。修改 Rust 后，需要重新运行 `make build-wasm-dev` 再刷新页面；Vite 会处理 Web 文件的变化。[构建脚本](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/scripts/build-wasm.sh)为画廊较大的渲染树设置 8 MiB 链接栈，debug 构建也会使用该设置。
+保持 `make dev` 运行，打开 **http://localhost:3000/gallery/**。成功后应看到画廊的组件列表和渲染视图；仅看到加载提示并不能说明图形初始化已经完成。首次 Rust 构建可能比后续构建慢。`make dev` 以 debug 模式构建 WASM，在 `www/src/wasm/` 生成绑定，安装 Web 依赖并启动 Vite。
+
+按下面的顺序验收：
+
+1. 终端显示 Vite 的本地地址，且 Rust 编译和 `wasm-bindgen` 均未报错。
+2. 浏览器 Network 面板中，生成的 JavaScript 与 `.wasm` 请求均成功。使用上面的 `/gallery/` 地址，而不是 Vite 服务器根路径。
+3. 加载提示消失后出现画廊。打开一个组件故事并操作按钮等控件，确认输入确实传到了 Rust 视图。加载提示消失本身只说明 JavaScript 加载器调用了 `run(...)`。
+
+修改 Rust 视图时，可在一个终端保持 Vite 运行，另一个终端进入 `crates/story-web` 执行 `make build-wasm-dev`，再刷新页面。修改加载器或其他 `www/` 文件由 Vite 处理。Vite 不会自行重新编译 Rust crate，这两种修改不能混为一谈。
+
+[本地工具链文件](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/rust-toolchain.toml)选用 nightly；上述 `wasm-bindgen-cli` 版本与当前检出的 [`Cargo.lock`](https://github.com/longbridge/gpui-kit/blob/main/Cargo.lock) 一致。如果锁文件更新，请让 CLI 版本与锁定的 `wasm-bindgen` crate 版本保持一致。如果已安装其他版本，可运行 `wasm-bindgen --version` 检查，再用 `cargo install -f wasm-bindgen-cli --version 0.2.121` 安装锁定的版本。[构建脚本](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/scripts/build-wasm.sh)为画廊较大的渲染树设置 8 MiB 链接栈，debug 构建也会使用该设置。
 
 要构建生产版画廊，在同一目录运行 `make build-prod`。网页产物位于 `www/dist/`，基础路径为 `/gallery/`。请部署到这个路径；如果部署在其他路径，需要同时调整 [Vite 基础路径](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/www/vite.config.js)和 [Rust 资源端点](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)。
 
@@ -36,6 +46,17 @@ make dev
 画廊使用 `#[wasm_bindgen]` 导出 `run(story, dark, theme_name, theme_json)`。[加载器](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/www/src/main.js)导入生成的 JS 模块，等待默认 WASM 初始化完成，读取可选的 `?story=` 参数及宿主主题，再调用 `run(...)`。Rust 端先调用 `gpui_kit::platform::web_init()`，创建 Web `Application`、注册资源，并将启动闭包传给 `run_embedded`。图形初始化成功后，该闭包才调用 `gpui_component_story::init(cx)`（其中会调用 `gpui_kit::init(cx)`）、加载字体、应用主题，最后调用 `gpui_kit::open_window`。`run_embedded` 返回的 `ApplicationHandle` 保存在 thread-local 状态中。图形初始化是异步的，因此该函数返回时，启动闭包可能尚未运行，首帧也可能尚未绘制。改造自己的应用时，也要像[快速开始](./getting-started.md)那样先初始化 Kit，并在页面使用视图期间保留 handle。
 
 画廊通过 `WebPlatform::new_with_backend_and_font_fallback` 选择 Web 平台，同时接入 fetch HTTP client。`Auto` 先尝试 WebGPU，失败后再尝试 WebGL2。当前 Web 平台使用一个文档级 canvas，且只支持一个顶层窗口；不能再打开第二个顶层窗口，也不能在关闭后重新打开。对话框应通过 Kit 的 `Root` 在该窗口内渲染。可以参照[画廊入口](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)改造应用：共用视图留在 Rust 中，网页负责加载 WASM 模块并提供宿主页面。
+
+### 跟踪一次启动
+
+| 阶段 | 文件或 API | 完成的工作 |
+| --- | --- | --- |
+| 编译 | `scripts/build-wasm.sh` | `cargo rustc` 将画廊的 `cdylib` 编译为 `wasm32-unknown-unknown` 目标；随后 `wasm-bindgen --target web` 将 JavaScript 绑定和可供浏览器加载的模块写入 `www/src/wasm/`。 |
+| 加载 | `www/index.html` 与 `www/src/main.js` | 页面先显示加载状态；加载器导入生成的绑定并等待默认初始化函数。这一步跨越 JavaScript 与 Rust 的边界。 |
+| 启动 | `src/lib.rs` 中的 `run(...)` | Rust 创建 Web 平台，提供资源并保留 `ApplicationHandle`；`run_embedded` 异步启动图形初始化。 |
+| 开窗 | `src/lib.rs` 中的启动闭包 | 图形初始化成功后才初始化 Kit、注册字体、应用主题并打开唯一的 GPUI 窗口；之后首个视图才能绘制。 |
+
+将桌面应用移到浏览器时，可保留目标平台支持的 GPUI 视图与状态代码，但还需提供 Web 入口、页面加载器和浏览器专用资源。Rust 目标编译成功并不等于页面加载器或图形初始化已通过测试。
 
 ## 字体与中日韩文本
 
@@ -50,7 +71,7 @@ GPUI 也支持**启动后加载字体**。在本仓库固定的 GPUI 版本（`g
 ```rust
 use std::borrow::Cow;
 
-// cx: &mut App；font_bytes: Vec<u8>，由应用下载并检查。
+// cx: &mut App; font_bytes: Vec<u8>, downloaded and validated by the application.
 cx.text_system().add_fonts(vec![Cow::Owned(font_bytes)])?;
 cx.refresh_windows();
 ```
@@ -59,15 +80,16 @@ cx.refresh_windows();
 
 ## 更小的 GPUI Base 示例
 
-[GPUI Base WASM 示例](https://github.com/longbridge/gpui-kit/tree/main/crates/base/examples/wasm)与原生示例共用同一套[展示视图](https://github.com/longbridge/gpui-kit/tree/main/crates/base/examples/showcase)。可以单独运行：
+[GPUI Base WASM 示例](https://github.com/longbridge/gpui-kit/tree/main/crates/base/examples/wasm)与原生示例共用同一套[展示视图](https://github.com/longbridge/gpui-kit/tree/main/crates/base/examples/showcase)。从仓库根目录单独运行时，如果尚未安装匹配版本的 `wasm-bindgen-cli`，请一并安装：
 
 ```sh
 cd crates/base/examples/wasm
 rustup target add wasm32-unknown-unknown --toolchain nightly
+cargo install wasm-bindgen-cli --version 0.2.121
 make dev
 ```
 
-它使用 `gpui_platform::single_threaded_web()`，通过 `wasm-bindgen` 生成绑定，并在 **http://localhost:3001/examples/base/** 提供示例。导出的 `run(component)` 选择展示视图；JavaScript 加载器从 URL 读取 `?component=...`。详见[构建脚本](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/wasm/scripts/build.sh)和[加载器](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/wasm/www/src/main.js)。要从有主题的 GPUI Kit 组件入手，请使用画廊；此示例主要用于了解 Base 原语。
+保持服务器运行，打开 **http://localhost:3001/examples/base/**。它使用 `gpui_platform::single_threaded_web()`，通过 `wasm-bindgen` 生成绑定，并由 Vite 提供示例。导出的 `run(component)` 选择展示视图；JavaScript 加载器从 URL 读取 `?component=...`。CLI 版本同样以工作区 `Cargo.lock` 为准。详见[构建脚本](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/wasm/scripts/build.sh)和[加载器](https://github.com/longbridge/gpui-kit/blob/main/crates/base/examples/wasm/www/src/main.js)。要从有主题的 GPUI Kit 组件入手，请使用画廊；此示例主要用于了解 Base 原语。
 
 ## 加载失败或画布空白时如何排查
 
@@ -75,6 +97,7 @@ make dev
 
 | 现象 | 检查方式 |
 | --- | --- |
+| Rust 编译找不到 WASM 目标，或找不到 `wasm-bindgen` | 在 `crates/story-web` 下执行 `rustup target add wasm32-unknown-unknown`，让其选择的 nightly 工具链安装目标。按 `Cargo.lock` 的版本安装 CLI，再执行 `make build-wasm-dev`。必须先成功完成 Rust 构建，Vite 页面才有模块可加载。 |
 | JS 或 `.wasm` 请求返回 404 | 打开 `/gallery/`，而不是站点根路径。让 Vite 的 `base: '/gallery/'`、部署目录和生成文件保持一致。Rust 修改后重新执行 `make build-wasm-dev`，确认 Web 构建包含 `www/src/wasm/` 中的生成文件。 |
 | `wasm-bindgen` 导入或实例化失败 | 让 `wasm-bindgen-cli` 版本与锁定的 crate 一致，并重新生成绑定。以 `application/wasm` MIME 类型提供 `.wasm`；MIME 错误时生成的加载器可能退回较慢的非流式实例化。检查 Network 响应是否真的是模块。 |
 | 加载提示消失，但 canvas 仍为空白 | 在 `run` 返回之后继续查看 Console。`Auto` 先尝试 WebGPU，再尝试 WebGL2；若都失败，检查浏览器 GPU 支持、策略和硬件加速。Web 运行时不能打开第二个顶层窗口。 |
@@ -85,6 +108,8 @@ make dev
 ## 包体大小与网络分发
 
 `include_bytes!` 把画廊字体子集**放进 WASM 载荷**，访客需要在首帧前随模块一起下载。画廊还包含组件故事与渲染栈；图标 SVG 则另行按需请求。Vite 将 JavaScript 加载器和 WASM 打包到 `/gallery/`，但仅修改 Vite 基础路径不会改变 Rust 中的图标端点。运行 `make build-prod` 后，`ls -lh www/dist/assets/*.wasm` 可查看未压缩的模块大小。应在浏览器 Network 面板比较该模块与 JS 的**压缩传输量**，并用限速网络记录首次加载时间。本地文件大小、CDN 压缩、浏览器缓存、编译时间和 GPU 初始化分别是不同的成本。
+
+发布画廊副本前，应从目标 `/gallery/` 路径提供 `www/dist/`，对部署后的页面重新执行上面的三步浏览器验收。确认生成的 `.wasm` 和 JS 地址指向部署主机，而图标、主题、字体请求指向预期主机。示例将资源端点固定为已发布的 GPUI Kit 网站，因此本地画廊运行成功**不能**证明另外托管的副本会提供自己的图标。分别记录首次加载与缓存后的加载结果，浏览器缓存会改变测量值。仓库的[发布流程](https://github.com/longbridge/gpui-kit/blob/main/.github/workflows/release-website.yml)构建两套 WASM 示例并将其 `dist/` 文件复制到网站对应路径，但仍需在最终主机上做浏览器验证。
 
 例如，**如果**把类似长桥 Pro / Longbridge Pro 的完整应用及全部功能和字体覆盖一并编进单个 WASM 模块，首次下载和启动成本可能显著增加。这是需要测量的分发风险，并非该应用的实测包体，也不表示它目前在 Web 上发布。把字体或功能放到后续请求中可以降低首次传输量，但也会增加网络、缓存、CORS 和加载状态处理。画廊的字体子集与按需图标体现了这些取舍，不能直接作为完整应用的包体预算。
 

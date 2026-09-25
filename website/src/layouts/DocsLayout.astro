@@ -128,6 +128,23 @@ const structuredData = [
       });
     }
   }
+
+  for (const timeline of document.querySelectorAll<HTMLElement>('[data-frame-timeline]')) {
+    const toggle = timeline.querySelector<HTMLButtonElement>('[data-frame-timeline-toggle]');
+    if (!toggle) continue;
+
+    const pauseLabel = isZh ? '暂停动画' : 'Pause animation';
+    const playLabel = isZh ? '播放动画' : 'Play animation';
+    const setPaused = (paused: boolean) => {
+      timeline.dataset.paused = String(paused);
+      toggle.setAttribute('aria-pressed', String(paused));
+      toggle.textContent = paused ? playLabel : pauseLabel;
+    };
+
+    setPaused(false);
+    timeline.dataset.ready = '';
+    toggle.addEventListener('click', () => setPaused(timeline.dataset.paused !== 'true'));
+  }
 </script>
 
 <style is:global>

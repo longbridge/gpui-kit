@@ -12,7 +12,7 @@ order: 1
 
 **次要目标是用 JavaScript 写完整的应用。** CLI 可以直接跑起一个应用目录。这本身就是一条能用的路径，同时也是插件的开发方式：先把脚本单独跑通，再挂进 Host。
 
-**它不是 Electron，也不是 Tauri。** 没有 WebView，没有 DOM，没有 HTML 与 CSS，没有浏览器引擎，也没有 Node.js。脚本从不负责渲染，它只把界面**描述**一次，此后每一帧都由 Rust 把这份描述重放成真正的 GPUI 元素——和一个基于 `gpui-base` 的 Rust 应用所构建的，是同一套元素模型、同一个 GPU 渲染器。在这里 JavaScript 是应用层，不是渲染层：所以一次重绘完全不执行 JavaScript，而带上整个运行时也只多 [13.5 MiB 二进制](./engine.md#链接它要付多少)。
+**它不是 Electron，也不是 Tauri。** 没有 WebView，没有 DOM，没有 HTML 与 CSS，没有浏览器引擎，也没有 Node.js。脚本 View 失效时会描述界面；GPUI 可以在之后的帧里复用这份描述，而不重新执行该 View 的脚本 `render`。这些帧使用的元素模型与渲染器和基于 `gpui-base` 的 Rust 应用相同。这不表示空闲窗口持续绘制，也不表示帧中的所有工作都不会进入 JavaScript：虚拟列表项与 Dock chrome 回调是例外。在实测构建里，带上整个运行时增加了 [13.5 MiB 二进制](./engine.md#链接它要付多少)。
 
 这两个目标建立在同一条分工上。`gpui-shell` 直接构建在 [`gpui-base`](/base) 之上，[QuickJS](https://github.com/quickjs-ng/quickjs) 跑在 Host 自己的线程上。由 Host 构建运行时、决定脚本能碰到什么，而脚本在同一个进程里画出真正的界面。Rust 负责渲染、布局、文本编辑、虚拟化、焦点、浮层以及全部系统能力；脚本负责界面组合、视觉呈现与业务逻辑。
 
@@ -101,28 +101,28 @@ export default class Counter extends View {
 
 ### 性能：脚本不在每一帧里
 
-`render` **不是**每帧跑一次。它把界面描述一次、存进一份 Snapshot；在下一次 `cx.notify()` 之前，每一次重绘都由 Rust 重放这份 Snapshot。指针划过按钮、光标闪烁、列表滚动、原生 transition 或 spring 推进，这些重绘都不执行 JavaScript。
+`render` **不是**每帧跑一次。脚本 View 失效时，它把界面描述进一份 Snapshot；之后 GPUI 请求新帧时，可以复用这份 Snapshot，而不执行该 View 的 `render`。指针 hover、光标闪烁、列表滚动和原生动画不一定使脚本 View 失效；虚拟列表项渲染器等帧路径回调另当别论。空闲窗口请求多少帧，不由屏幕刷新率直接决定。
 
 运行时把两件事分开计数，gallery 的 Shell story（`cargo run -- shell`）把这两个数摆在界面上：
 
-<img class="architecture-light" src="/shell-render-frequency-light.svg" alt="一秒内的一块实时面板。JavaScript 的数据没有变化时，60 帧全部触发，而 JavaScript 那一行始终是空的；价格每 50 ms 变动一次时，仍是 60 帧，JavaScript 触发约 20 次。">
-<img class="architecture-dark" src="/shell-render-frequency-dark.svg" alt="一秒内的一块实时面板。JavaScript 的数据没有变化时，60 帧全部触发，而 JavaScript 那一行始终是空的；价格每 50 ms 变动一次时，仍是 60 帧，JavaScript 触发约 20 次。">
+<img class="architecture-light" src="/shell-render-frequency-light.svg" alt="示意的一秒时间线，假设期间请求了 60 帧。脚本数据没有变化时，该 View 的 JavaScript render 轨道为空；价格每 50 毫秒变化一次时，该 View 重建约 20 次，其余帧复用 Snapshot。图中没有描述空闲时的帧频。">
+<img class="architecture-dark" src="/shell-render-frequency-dark.svg" alt="示意的一秒时间线，假设期间请求了 60 帧。脚本数据没有变化时，该 View 的 JavaScript render 轨道为空；价格每 50 毫秒变化一次时，该 View 重建约 20 次，其余帧复用 Snapshot。图中没有描述空闲时的帧频。">
 
 | 界面在做什么                        | 每秒画的帧 | 每秒跑的 JavaScript |
 | ----------------------------------- | ---------- | ------------------- |
 | 只是重绘，JavaScript 的数据没有变化 | 60         | 0                   |
 | 价格每 50 ms 变动一次               | 60         | 19                  |
 
-帧数取决于屏幕，JavaScript 的次数取决于数据。第二行里另外 41 帧重放的是已有的描述。
+这是一个假设期间请求了 60 帧的示意，不表示空闲行为，也不保证实际帧率。真正生成多少帧取决于调度与负载；脚本 render 次数取决于失效与合并。第二行里另有 41 帧使用的是已有描述。
 
-成本因此按用户操作计，而不是按帧计。443 节点的面板，跑一遍 `render`、把整个界面记进 Snapshot 要 1.1 ms，只在状态变化时付；之后每一帧 1.3 ms，那是渲染本身——把 Snapshot 变成元素、布局、绘制，其中没有 JavaScript。
+脚本描述成本在该 View 失效时支付，而不是每一帧都支付。在实测的 443 节点基准里，执行 `render` 并把界面记进 Snapshot 用了 1.1 ms；缓存后的帧执行 GPUI 工作用了 1.3 ms，没有执行脚本 `render`。这些数字属于特定负载与机器，不能作为复杂应用的持续帧率保证。
 
-|               | 每帧成本                                                            |
+|               | 基准中每次请求帧的成本                                               |
 | ------------- | ------------------------------------------------------------------- |
 | 没有 Snapshot | 1.1 ms (JS render) + 1.3 ms (Rust render) = **2.4 ms/frame render** |
 | 有 Snapshot   | **1.3 ms**                                                          |
 
-面板变大也不改变这条性质：[基准测试](./engine.md#那次实测)覆盖到 8,403 个节点，各档的每一帧都不执行 JavaScript，最小一档由每次 CI 运行的断言保证。
+面板变大也不改变缓存帧无需重新执行脚本 View 的性质。[基准测试](./engine.md#那次实测)覆盖到 8,403 个节点；其中缓存帧的测试断言该 View 的脚本 `render` 不会运行，但耗时仍随面板规模显著增长。
 
 ### 体积：一个脚本运行时只要 +13.5 MiB
 
@@ -175,18 +175,18 @@ GPUI 的元素是**被消费**的值：`RenderOnce::render` 按值取走 `self`�
 ## 它在架构中的位置
 
 ```text
-  JavaScript 应用            main.js · views · 样式 · 业务逻辑
+  JavaScript app             main.js · views · styling · business logic
             │  import { … } from "gpui-kit"
             ▼
-  gpui-shell                 引擎分界线 · 元素描述 · CallScope
-                             样式表 · 主题 token · 能力模型
-                             ShellRoot（dialog / sheet / toast）· 调度器
+  gpui-shell                 engine seam · element specs · CallScope
+                             style sheets · theme tokens · capabilities
+                             ShellRoot (dialog / sheet / toast) · scheduler
             │
             ▼
-  gpui-base                  行为 · 状态 · 基础设施（无样式）
+  gpui-base                  behavior · state · unstyled infrastructure
             │
             ▼
-  gpui                       元素 · 样式 · 渲染 · GPU · 平台
+  gpui                       elements · styles · rendering · GPU · platform
 ```
 
 `gpui-shell` 与 `gpui-component` 是并列关系，而不是在它下游：两者都是 `gpui-base` 的使用者，都补上了 Base 不提供的那一层呈现。`gpui-component` 用 Rust 提供了一套成品且统一的呈现；`gpui-shell` 提供的是让脚本自己去提供呈现的那套机制。

@@ -913,6 +913,109 @@ html.dark .astro-code span {
     animation: keybinding-result-in 180ms ease-out;
   }
 
+  .frame-timeline {
+    margin-block: 1.5rem;
+    padding: 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--card);
+  }
+  .frame-timeline__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 0.8rem;
+    font-size: 0.875rem;
+  }
+  .frame-timeline__header strong { color: var(--foreground); }
+  .frame-timeline [data-frame-timeline-toggle] {
+    display: none;
+    flex: none;
+    padding: 0.35rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: var(--background);
+    color: var(--foreground);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.75rem;
+  }
+  .frame-timeline[data-ready] [data-frame-timeline-toggle] { display: inline-block; }
+  .frame-timeline [data-frame-timeline-toggle]:hover { border-color: var(--border-hover); }
+  .frame-timeline [data-frame-timeline-toggle]:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  .frame-timeline__tracks {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    overflow: hidden;
+  }
+  .frame-timeline__tracks::after {
+    content: '';
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: 2px;
+    background: var(--foreground);
+    opacity: 0.65;
+    pointer-events: none;
+    animation: frame-timeline-scan 6s linear infinite;
+  }
+  .frame-timeline[data-paused="true"] .frame-timeline__tracks::after {
+    animation-play-state: paused;
+  }
+  .frame-timeline__phase {
+    min-width: 0;
+    padding: 0.7rem 0.6rem 0.75rem;
+    text-align: center;
+    background: var(--background);
+  }
+  .frame-timeline__phase + .frame-timeline__phase { border-left: 1px solid var(--border); }
+  .frame-timeline__phase > span {
+    display: block;
+    color: var(--foreground);
+    font-size: 0.8rem;
+    font-weight: 650;
+  }
+  .frame-timeline__ticks {
+    display: flex;
+    align-items: center;
+    justify-content: space-evenly;
+    height: 2.5rem;
+    margin-block: 0.65rem 0.45rem;
+    border-top: 1px dashed var(--border);
+    border-bottom: 1px dashed var(--border);
+    background: color-mix(in srgb, var(--data-3) 4%, var(--background));
+  }
+  .frame-timeline__ticks i {
+    display: block;
+    width: 0.3rem;
+    height: 1.5rem;
+    border-radius: 0.15rem;
+    background: var(--data-3);
+  }
+  .frame-timeline__phase[data-phase="event"] .frame-timeline__ticks i {
+    background: var(--warning);
+  }
+  .frame-timeline__phase small {
+    display: block;
+    color: var(--muted-foreground);
+    font-size: 0.7rem;
+    line-height: 1.35;
+  }
+  .frame-timeline figcaption {
+    margin-top: 0.7rem;
+    color: var(--muted-foreground);
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
   @media (max-width: 640px) {
     .keybinding-demo__flow { grid-template-columns: 1fr; }
     .keybinding-demo__arrow { justify-self: center; transform: rotate(90deg); }
@@ -925,6 +1028,8 @@ html.dark .astro-code span {
     .keybinding-demo__controls button { transition: none; }
     .keybinding-demo__node { transition: none; }
     .keybinding-demo__matches > [data-result] { animation: none; }
+    .frame-timeline__tracks::after { animation: none; }
+    .frame-timeline[data-ready] [data-frame-timeline-toggle] { display: none; }
   }
 
   .element-lifecycle {
@@ -1193,6 +1298,7 @@ html.dark .astro-code span {
 @keyframes shared-memory-highlight { 50% { stroke-width: 3; } }
 @keyframes doc-copy-confirm { from { opacity: 0; transform: scale(0.7); } to { opacity: 1; transform: scale(1); } }
 @keyframes keybinding-result-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes frame-timeline-scan { from { left: 0; } to { left: calc(100% - 2px); } }
 
 /* ====================================================================
    Nav bar (docs layout)
@@ -1416,6 +1522,8 @@ html.dark .astro-code span {
 }
 
 .sidebar-subgroup__items { list-style: none; padding-left: 0.75rem; margin: 0; }
+
+.docs-sidebar__toggle { display: none; }
 
 /* ====================================================================
    Docs layout wrapper
@@ -1772,10 +1880,43 @@ html[lang^="zh"] :is(
     position: static;
     width: auto;
     height: auto;
-    max-height: 60vh;
-    padding: 1rem 0.5rem;
+    max-height: none;
+    padding: 0.65rem 0.5rem;
     border-right: 0;
     border-bottom: 1px solid var(--border);
+    overflow: visible;
+  }
+
+  .docs-sidebar[data-nav-ready] .docs-sidebar__toggle {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    background: var(--card);
+    color: var(--foreground);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .docs-sidebar__toggle:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  .docs-sidebar[data-nav-ready]:not([data-mobile-open="true"]) nav {
+    display: none;
+  }
+
+  .docs-sidebar[data-mobile-open="true"] nav,
+  .docs-sidebar:not([data-nav-ready]) nav {
+    max-height: 60vh;
+    overflow-y: auto;
+    padding-top: 0.75rem;
   }
 
   .docs-main,
