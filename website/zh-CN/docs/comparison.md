@@ -17,7 +17,7 @@ order: -14
 | Visual tooling | Code + component gallery | Code | Code | Qt Quick Designer | Live Preview / SlintPad |
 | Component count | [75+](/zh-CN/component/) | [35](https://docs.rs/iced/0.14.0/iced/widget/#structs) | [16](https://docs.rs/egui/0.36.2/egui/widgets/#structs) | [52](https://doc.qt.io/qt-6/qml-qtquick-controls-control.html) | [24](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/overview/) |
 | Rendering stack | GPUI | wgpu | eframe: glow / wgpu | Qt RHI / scene graph | FemtoVG / Skia / software |
-| Documentation | Guides + API + gallery | Book + API | API + demos | Guides + API + designer | Guides + API + preview |
+| Documentation | Complete core + component docs; API + gallery | Book + API | API + demos | Guides + API + designer | Guides + API + preview |
 | Default UI style | Theme-driven components | Styled widgets | egui visuals | Qt Quick styles | Slint widget styles |
 | Desktop OS | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
 | Multiple windows | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
@@ -51,6 +51,8 @@ order: -14
 | WebView | <comparison-status value="partial"></comparison-status> | <comparison-status value="no"></comparison-status> | <comparison-status value="no"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="no"></comparison-status> |
 
 **Component count。** GPUI Kit 有 75+ 个已记录的 component 和 primitive。其余数字分别来自 Iced 0.14 的 widget 模块（35）、egui 0.36 的 widgets 模块（16，含 `TextEdit`）、Qt Quick `Control` 派生类型（52）以及 Slint 的标准组件目录（24）。各目录纳入的辅助类型和扩展范围不同，这些数字表示目录规模，不能直接用于排名。
+
+**Documentation。** GPUI Kit 的[核心指南](/zh-CN/docs/)、[组件文档](/zh-CN/component/)、[API reference](https://docs.rs/gpui-kit/latest/gpui_kit/)和[交互式 gallery](/gallery/)覆盖当前公开能力；实验性功能也说明了现阶段的限制。
 
 **Binary size 数据口径。** 前四个值保留原 `main` 分支的 Hello World Release 估计；原表为 Qt 数据附上了[这篇体积研究](https://www.qt.io/blog/reducing-binary-size-of-qt-applications-part-3-more-platforms)。Slint 的 ~21 MB 来自 Slint 1.18.1 Hello World 在 Linux x86-64 上执行 `cargo build --release`，strip 后为 20,768,216 字节（19.81 MiB）。各值的构建条件不同，是近似参考值，并非已验证的最小体积或同口径跑分。
 
@@ -97,6 +99,6 @@ order: -14
 
 **平台覆盖。** GPUI Kit 有[实验性 iOS 集成](/zh-CN/docs/mobile)和可运行的 [WebAssembly 展示示例](/zh-CN/docs/webassembly)；本仓库尚未将后者验证为完整应用的成熟分发路径。Iced 有 [Web 示例](https://github.com/iced-rs/iced/blob/master/examples/README.md#tour)，[原生移动端支持仍在讨论](https://github.com/iced-rs/iced/issues/302)。[eframe](https://github.com/emilk/egui/blob/main/README.md#official-integrations)可在 Web 与原生平台运行 egui，但 Android/iOS 集成仍应针对具体应用验证。Qt 文档列出[支持平台](https://doc.qt.io/qt-6/supported-platforms.html)和 [WebAssembly 限制](https://doc.qt.io/qt-6/wasm.html)。Slint 有[移动端](https://docs.slint.dev/latest/docs/slint/guide/platforms/mobile/general/)与 [Web](https://docs.slint.dev/latest/docs/slint/guide/platforms/web/)文档；其 Web 输出使用 canvas，不支持浏览器屏幕阅读器。不能默认把这些基于 canvas 的 Wasm 界面当成 HTML 应用。
 
-**WebView。** GPUI Kit 有实验性的 [Wry 集成](https://github.com/longbridge/gpui-kit/blob/main/crates/webview/README.md)。原生 WebView 会盖住同一区域的 GPUI 元素；需要叠层时，宜放在独立窗口或弹出层。目前文档只列 macOS 和 Windows，Linux 示例仍未完成。Qt 提供官方 [WebEngine](https://doc.qt.io/qt-6/qwebengineview.html)与 [WebView](https://doc.qt.io/qt-6/qtwebview-index.html) 模块，但 Qt WebView 与 QML 元素的重叠也有限制。此行统计适用于所比较版本、由框架维护的集成：Iced 虽有第三方 [iced_webview](https://docs.rs/iced_webview/latest/iced_webview/) crate，但它依赖 Iced 0.13，本表未验证其适配当前 Iced 0.14；egui 没有同类受维护的原生集成，Slint 的 [WebView 需求](https://github.com/slint-ui/slint/issues/3930)仍未关闭。红点不排除应用自行桥接。
+**WebView。** GPUI Kit 有实验性的 [Wry 集成](/zh-CN/docs/webview)。原生 WebView 会盖住同一区域的 GPUI 元素；需要叠层时，宜放在独立窗口或弹出层。目前文档只列 macOS 和 Windows，Linux 示例仍未完成。Qt 提供官方 [WebEngine](https://doc.qt.io/qt-6/qwebengineview.html)与 [WebView](https://doc.qt.io/qt-6/qtwebview-index.html) 模块，但 Qt WebView 与 QML 元素的重叠也有限制。此行统计适用于所比较版本、由框架维护的集成：Iced 虽有第三方 [iced_webview](https://docs.rs/iced_webview/latest/iced_webview/) crate，但它依赖 Iced 0.13，本表未验证其适配当前 Iced 0.14；egui 没有同类受维护的原生集成，Slint 的 [WebView 需求](https://github.com/slint-ui/slint/issues/3930)仍未关闭。红点不排除应用自行桥接。
 
 **许可与比较范围。** GPUI Kit 采用 Apache-2.0；Iced 为 [MIT](https://github.com/iced-rs/iced/blob/master/LICENSE)；egui 为 [MIT 或 Apache-2.0](https://github.com/emilk/egui/blob/main/LICENSE-MIT)；Qt [按模块采用商业、LGPLv3 或 GPLv3 条款](https://doc.qt.io/qt-6/licensing.html)，其中 Qt Graphs 为 GPLv3 或商业许可；Slint 采用 [GPLv3 与商业或免版税条款](https://slint.dev/pricing)。SwiftUI、WinUI 等单平台原生栈的平台覆盖范围不同。Electron 与 Tauri 使用 WebView/JavaScript UI 架构，应单独评估，不在此原生 UI 矩阵中打分。包体积和帧率受构建 feature、渲染器、字体、打包方式及负载影响；应测量准备发布的产品 release 构建。

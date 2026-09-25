@@ -202,3 +202,5 @@ impl Workspace {
 - 窗口级工作只在 callback 执行期间获得 `&mut Window`；
 - 把 `Task` 和 `Subscription` 存在 View 上，让后台工作和订阅跟随 owner 生命周期；
 - Focus 与 Action 派发始终使用当前这个 Window 的状态。
+
+应用有多个窗口时，继续阅读 [Multi Window](./multi-window)。[Native Extensions](./native-extension) 介绍窗口边界上的系统 API；[WebView](./webview) 说明原生子视图集成及其限制。需要由操作系统投递通知时，参见 [SystemNotification](./system-notification)。

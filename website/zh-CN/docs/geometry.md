@@ -39,6 +39,40 @@ assert_eq!(local, point(px(15.), px(15.)));
 
 这些值通常在布局之后出现。自定义 [`Element`](./element) 在 `prepaint` 获得 `Bounds<Pixels>`，可以据此建立 hitbox，并在后续[绘制](./paint)中使用同一套坐标。`Bounds` 本身不会让区域自动具备交互能力。
 
+## Edges、Side 与 Placement
+
+`Edges<T>` 按 `top`、`right`、`bottom`、`left` 保存四个独立值。`Edges<Pixels>` 可表示已确定的 padding、border 或窗口四周留白。`Edges::all(value)` 给四边设置相同值；各边不同时直接填写字段：
+
+```rust
+use gpui_kit::*;
+
+let padding: Edges<Pixels> = Edges {
+    top: px(8.),
+    right: px(12.),
+    bottom: px(8.),
+    left: px(12.),
+};
+let uniform = Edges::all(px(4.));
+```
+
+`use gpui_kit::*` 导入的是 GPUI 的 `Edges`。GPUI Kit 另有可序列化、可生成 JSON schema 的 `gpui_kit::base::Edges<T>`，也通过 `gpui_kit::component::Edges<T>` 导出。它与 GPUI 的类型字段相同，但在 Rust 中是不同类型；应按目标 API 的签名选择。
+
+[`Placement`](https://docs.rs/gpui-base/latest/gpui_base/enum.Placement.html) 表示 trigger 的**一侧**：`Top`、`Right`、`Bottom` 或 `Left`，不是四边留白或矩形。例如，`Positioner::side` 将 `Placement::Bottom` 视为优先方向；下方空间不足时可以翻到 `Top`，随后把结果限制在 viewport 内。`ResolvedPosition::placement` 记录最终选中的方向：
+
+```rust
+use gpui_kit::*;
+use gpui_kit::base::{Align, Placement, Positioner};
+
+let trigger_bounds = bounds(point(px(40.), px(40.)), size(px(100.), px(32.)));
+let popup = Positioner::side(trigger_bounds)
+    .placement(Placement::Bottom)
+    .align(Align::Start)
+    .offset(px(8.))
+    .child(div().child("Menu"));
+```
+
+这里的 `trigger_bounds` 是窗口坐标中的 `Bounds<Pixels>`。GPUI Kit 的 `Side` 只表示 `Left` 或 `Right`，`Axis` 表示 `Horizontal` 或 `Vertical`。GPUI 的 `Anchor` 指定 `TopLeft`、`BottomCenter` 等参考点；`Corners<T>` 保存四个角的值，常用于圆角半径。它们与 `Placement` 的用途不同。窗口坐标与缩放详见 [Window](./window)。
+
 ## 为什么不直接用整数或浮点数？
 
 `px(12.)` 产生 `Pixels`，内部以 `f32` 保存。文字度量、动画及最终栅格化前的位置都可能有小数，整数会丢失这部分精度。裸 `f32` 还可能表示坐标、缩放倍数、透明度或父容器比例，编译器无法检查混用。像素距离之间可以加减，距离乘以标量后仍是像素距离：

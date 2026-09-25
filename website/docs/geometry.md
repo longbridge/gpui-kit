@@ -39,6 +39,40 @@ assert_eq!(local, point(px(15.), px(15.)));
 
 These values typically appear after layout. A custom [`Element`](./element) receives `Bounds<Pixels>` in `prepaint` and uses the same resolved geometry for hitboxes and later [painting](./paint). A bounds value is geometry, not an interactive region by itself.
 
+## Edges, sides, and placement
+
+`Edges<T>` holds four independent values in `top`, `right`, `bottom`, `left` order. Use `Edges<Pixels>` for resolved insets such as padding, borders, or the space reserved around a window. `Edges::all(value)` gives every side the same value; specify fields when they differ:
+
+```rust
+use gpui_kit::*;
+
+let padding: Edges<Pixels> = Edges {
+    top: px(8.),
+    right: px(12.),
+    bottom: px(8.),
+    left: px(12.),
+};
+let uniform = Edges::all(px(4.));
+```
+
+The `Edges` imported by `use gpui_kit::*` is GPUI's type. GPUI Kit also has `gpui_kit::base::Edges<T>` (reexported as `gpui_kit::component::Edges<T>`) for values that need serialization or a JSON schema. They have the same four fields but are different Rust types; use the one required by the API you call.
+
+[`Placement`](https://docs.rs/gpui-base/latest/gpui_base/enum.Placement.html) is GPUI Kit's choice of **one side** of a trigger: `Top`, `Right`, `Bottom`, or `Left`. It is not a rectangle or a set of four insets. For example, `Positioner::side` treats `Placement::Bottom` as a *preferred* side; it may flip to `Top` if the popup does not fit below the trigger, then clamps the result inside the viewport. `ResolvedPosition::placement` reports the side actually chosen:
+
+```rust
+use gpui_kit::*;
+use gpui_kit::base::{Align, Placement, Positioner};
+
+let trigger_bounds = bounds(point(px(40.), px(40.)), size(px(100.), px(32.)));
+let popup = Positioner::side(trigger_bounds)
+    .placement(Placement::Bottom)
+    .align(Align::Start)
+    .offset(px(8.))
+    .child(div().child("Menu"));
+```
+
+Here `trigger_bounds` is a `Bounds<Pixels>` in window coordinates. `Side` is the narrower GPUI Kit enum for `Left` or `Right`, and `Axis` expresses `Horizontal` or `Vertical`. GPUI's `Anchor` identifies a reference point such as `TopLeft` or `BottomCenter`; `Corners<T>` holds four corner values, often radii. Neither is a substitute for `Placement`. See [Window](./window) for window-local coordinates and scale.
+
 ## Why `Pixels` instead of `int` or `float`?
 
 `px(12.)` produces `Pixels`, a wrapper around `f32`. Fractions matter for text metrics, animation, and positioning before rasterization. Integers would discard that precision. A bare `f32` could mean a coordinate, a scale factor, an opacity, or a fraction of a parent; it gives the compiler no way to catch a mix-up. For example, adding two pixel distances is meaningful, and multiplying a distance by a scalar stays in pixels:

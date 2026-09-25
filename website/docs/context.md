@@ -24,6 +24,20 @@ The [GPUI `Context<T>` source](https://github.com/zed-industries/zed/blob/main/c
 
 GPUI Kit applications depend on `gpui-kit` and import GPUI through `use gpui_kit::*;`. Call `gpui_kit::init(cx)` before creating component-backed Views. An application-wide [Global](./global) lives on `App`; a component or feature View keeps retained state in an [Entity].
 
+## Open a URL in the default browser
+
+Use `cx.open_url(...)` to hand a URL to the platform's default browser. It is an `App` API, so it also works when `cx` is a `Context<T>` or the `&mut App` supplied to a button callback:
+
+```rust
+use gpui_kit::component::button::Button;
+
+Button::new("open-docs")
+    .label("Open docs")
+    .on_click(|_, _, cx| cx.open_url("https://gpui-kit.com/docs"))
+```
+
+This opens an external browser; use [WebView](./webview) when browser content must live inside a GPUI window. `open_url` returns no completion result. GPUI Kit's `Link` with an `href` also calls `cx.open_url(...)` when clicked.
+
 ## `window, cx` or only `cx`
 
 View state belongs to its Entity, while window interaction belongs to Window. A method receives both when it changes View state and operates on the window displaying that View. GPUI style places runtime parameters last, in `window, cx` order:

@@ -1,7 +1,7 @@
 ---
 title: Testing
 description: Test GPUI Kit applications and GPUI behavior with Rust unit tests, TestAppContext, native UI interactions, layout assertions and CI.
-order: -11
+order: -3.39
 example: false
 ---
 

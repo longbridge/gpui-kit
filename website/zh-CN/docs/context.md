@@ -24,6 +24,20 @@ GPUI callback 中经常出现 `window: &mut Window, cx: &mut Context<Self>`。�
 
 GPUI Kit 应用只依赖 `gpui-kit`，通过 `use gpui_kit::*;` 导入 GPUI API。创建基于组件的 View 之前调用 `gpui_kit::init(cx)`。应用级 [Global](./global) 属于 `App`；组件或功能 View 的持久状态放在 [Entity] 中。
 
+## 在默认浏览器中打开 URL
+
+使用 `cx.open_url(...)` 将 URL 交给平台默认浏览器。它是 `App` API，因此 `cx` 为 `Context<T>` 时也可以调用；Button callback 收到的 `&mut App` 同样可以调用：
+
+```rust
+use gpui_kit::component::button::Button;
+
+Button::new("open-docs")
+    .label("Open docs")
+    .on_click(|_, _, cx| cx.open_url("https://gpui-kit.com/docs"))
+```
+
+这会打开外部浏览器。若浏览器内容必须显示在 GPUI window 内，参见 [WebView](./webview)。`open_url` 不返回完成结果。GPUI Kit 的 `Link` 设置 `href` 后，点击时也会调用 `cx.open_url(...)`。
+
 ## `window, cx` 与只有 `cx`
 
 View 的状态属于 Entity，窗口交互属于 Window。一个方法既要修改 View 状态，又要操作这个 View 所在的窗口时，就同时接收两者。按照 GPUI 风格，它们放在参数列表最后，并保持 `window, cx` 的顺序：

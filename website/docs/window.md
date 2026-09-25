@@ -202,3 +202,5 @@ Keep these ownership rules together:
 - window-specific work receives `&mut Window` only for the duration of a callback;
 - `Task` and `Subscription` fields tie background work and observers to the owning View;
 - Focus and Action dispatch always use the state of the specific Window.
+
+Continue with [Multi Window](./multi-window) when an application owns several windows. [Native Extensions](./native-extension) covers OS APIs at a window boundary; [WebView](./webview) explains the native child-view integration and its limits. For OS-delivered notifications, see [SystemNotification](./system-notification).
