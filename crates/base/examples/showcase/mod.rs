@@ -704,10 +704,13 @@ pub fn run(app: Application, component: impl Into<String>) {
             })
             .detach();
         }
+        // The web platform resolves GPUI's `.SystemUIFont` alias to IBM Plex Sans and
+        // ships no fonts of its own, so the family has to be bundled or the first
+        // text layout panics and the canvas stays blank (see #2933).
         #[cfg(target_family = "wasm")]
         cx.text_system()
             .add_fonts(vec![Cow::Borrowed(
-                include_bytes!("../../../story-web/fonts/Inter-Regular.ttf").as_slice(),
+                include_bytes!("../../../story-web/fonts/IBMPlexSans-Regular.ttf").as_slice(),
             )])
             .expect("failed to load gpui-base example font");
         let options = WindowOptions {
@@ -728,9 +731,12 @@ pub fn run_embedded(app: Application, component: impl Into<String>) -> gpui::App
     let component = component.into();
     app.run_embedded(move |cx: &mut App| {
         gpui_base::init(cx);
+        // The web platform resolves GPUI's `.SystemUIFont` alias to IBM Plex Sans and
+        // ships no fonts of its own, so the family has to be bundled or the first
+        // text layout panics and the canvas stays blank (see #2933).
         cx.text_system()
             .add_fonts(vec![Cow::Borrowed(
-                include_bytes!("../../../story-web/fonts/Inter-Regular.ttf").as_slice(),
+                include_bytes!("../../../story-web/fonts/IBMPlexSans-Regular.ttf").as_slice(),
             )])
             .expect("failed to load gpui-base example font");
         cx.open_window(WindowOptions::default(), move |window, cx| {

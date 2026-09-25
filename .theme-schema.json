@@ -181,6 +181,10 @@
           "description": "Bearish color for candlestick charts (downward price movement).",
           "type": ["string", "null"]
         },
+        "chart.grid": {
+          "description": "Chart grid line color.",
+          "type": ["string", "null"]
+        },
         "danger.background": {
           "description": "Danger background color.",
           "type": ["string", "null"]

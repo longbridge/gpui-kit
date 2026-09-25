@@ -27,7 +27,9 @@ use crate::{
         document::ParsedDocument,
         format,
         node::{self, NodeContext},
-        range_highlight::{RangeHighlightFrame, RenderedIndex},
+        range_highlight::{
+            LeafRemap, PendingReveal, RangeHighlightFrame, RenderedIndex, RevealRequest,
+        },
         selection_adapter::TextViewSelectionAdapter,
         stream_fade::{StreamFadeTracker, TextViewMotion},
     },
@@ -144,6 +146,7 @@ pub struct TextViewState {
     /// The rendered text of `parsed_content`, built when first read.
     rendered_index: Arc<OnceLock<RenderedIndex>>,
     range_highlights: Option<Arc<RangeHighlightFrame>>,
+    pub(super) pending_reveal: Option<PendingReveal>,
     pub(super) selection_revision: usize,
     compatible_layout_update: bool,
     layout_text_style: Option<(gpui::TextStyle, Pixels)>,
@@ -261,6 +264,7 @@ impl TextViewState {
             full_update_revision: 0,
             rendered_index: Arc::default(),
             range_highlights: None,
+            pending_reveal: None,
             selection_revision: 0,
             compatible_layout_update: false,
             layout_text_style: None,
@@ -596,11 +600,55 @@ impl TextViewState {
         highlights: impl IntoIterator<Item = RangeHighlight>,
         cx: &mut Context<Self>,
     ) -> Result<(), RangeHighlightError> {
-        let text = self.rendered_text();
         if self.format != TextViewFormat::Markdown {
             return Err(RangeHighlightError::Unsupported);
         }
+        let text = self.rendered_text();
         self.range_highlights = RangeHighlightFrame::new(&text, highlights)?.map(Arc::new);
+        cx.notify();
+        Ok(())
+    }
+
+    /// Scroll the line `range` starts on into view, `range` indexing the
+    /// current rendered text, as with [`Self::set_range_highlights`].
+    ///
+    /// A [`Self::scrollable`] view scrolls itself. Otherwise the nearest
+    /// enclosing `gpui::list` scrolls, as long as the row holding the view is
+    /// laid out, so scroll to that row first when it may be off screen. Any
+    /// other scroll container scrolls through
+    /// [`TextView::on_reveal`](crate::text::TextView::on_reveal). An empty
+    /// range reveals the line of its position; a range in text that belongs
+    /// to no block's text, such as a custom block's, scrolls its whole block
+    /// into a scrollable view.
+    ///
+    /// Only the latest reveal is carried out. It follows the content as
+    /// [range highlights](Self::set_range_highlights) do, and it is dropped
+    /// when its text changes, when the view clamps its lines, or when it
+    /// cannot be shown within a second, so it never scrolls long after it
+    /// was asked for. A whole block taller than the view, scrolled to from
+    /// below, shows its end.
+    ///
+    /// Revealing is best effort: `Ok(())` means the range is valid for the
+    /// current text and the request was taken, not that the view has
+    /// scrolled. A dropped request is not reported.
+    pub fn reveal_range(
+        &mut self,
+        range: Range<usize>,
+        cx: &mut Context<Self>,
+    ) -> Result<(), RangeHighlightError> {
+        if self.format != TextViewFormat::Markdown {
+            return Err(RangeHighlightError::Unsupported);
+        }
+        let text = self.rendered_text();
+        if text.is_empty() && range == (0..0) {
+            // Nothing to reveal in an empty view.
+            self.pending_reveal = None;
+            return Ok(());
+        }
+        let now = cx.background_executor().now();
+        self.pending_reveal = Some(
+            PendingReveal::new(&text, &range, now).ok_or(RangeHighlightError::InvalidRange(0))?,
+        );
         cx.notify();
         Ok(())
     }
@@ -623,10 +671,17 @@ impl TextViewState {
         let tail_only = append && self.full_update_revision <= self.committed_revision;
         self.committed_revision = revision;
         self.rendered_index = Arc::default();
-        if let Some(highlights) = self.range_highlights.take() {
-            self.range_highlights = highlights
-                .remap(&self.parsed_content.document, new, tail_only)
+        if self.range_highlights.is_some() || self.pending_reveal.is_some() {
+            let remap = LeafRemap::new(&self.parsed_content.document, new, tail_only);
+            self.range_highlights = self
+                .range_highlights
+                .take()
+                .and_then(|highlights| highlights.remap(&remap))
                 .map(Arc::new);
+            self.pending_reveal = self
+                .pending_reveal
+                .take()
+                .and_then(|reveal| reveal.remap(&remap));
         }
     }
 
@@ -851,6 +906,50 @@ pub(crate) enum TextViewMultiClickKind {
     Line,
 }
 
+impl TextViewState {
+    /// Starts a frame of the pending reveal: the line to hand to rendering,
+    /// and the block a scrollable view has to scroll to first, because it is
+    /// off screen or the reveal is of a whole block.
+    fn reveal_frame(
+        &mut self,
+        now: Instant,
+        window: &mut Window,
+    ) -> (Option<RevealRequest>, Option<usize>) {
+        if self.max_lines.is_some()
+            || self
+                .pending_reveal
+                .as_ref()
+                .is_some_and(|reveal| reveal.is_expired(now))
+        {
+            self.pending_reveal = None;
+        }
+        let Some(pending) = &self.pending_reveal else {
+            return (None, None);
+        };
+
+        let block_ix = pending.block_ix(&self.parsed_content.document);
+        let block_off_screen = |ix: usize| {
+            let viewport = self.list_state.viewport_bounds();
+            self.list_state.bounds_for_item(ix).is_none_or(|item| {
+                item.bottom() <= viewport.top() || item.top() >= viewport.bottom()
+            })
+        };
+        let reveal_block = block_ix.filter(|ix| {
+            self.scrollable
+                && (pending.is_block() || !pending.was_laid_out())
+                && block_off_screen(*ix)
+        });
+        let request = pending.request();
+        if pending.is_block() {
+            // A block has no line to wait for.
+            self.pending_reveal = None;
+        } else {
+            window.request_animation_frame();
+        }
+        (request, reveal_block)
+    }
+}
+
 impl Render for TextViewState {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let typography = (window.text_style(), window.rem_size());
@@ -878,6 +977,7 @@ impl Render for TextViewState {
                 });
             }));
         }
+        let (reveal, reveal_block) = self.reveal_frame(cx.background_executor().now(), window);
         // Built every frame, so everything in it is shared, not copied.
         let node_cx = NodeContext {
             offset: self.parsed_content.node_cx.offset,
@@ -890,9 +990,10 @@ impl Render for TextViewState {
             markdown_extensions: self.markdown_extensions.clone(),
             stream_fade,
             range_highlights: self.range_highlights.clone(),
+            reveal,
         };
 
-        v_flex()
+        let content = v_flex()
             .w_full()
             // Clamped content must keep its natural height: stretching it to
             // the capped box would hide the overflow the clamp has to measure.
@@ -946,7 +1047,13 @@ impl Render for TextViewState {
                 {
                     TextSelection::clear(window, cx);
                 }
-            })
+            });
+        // After `render_root`, which resets the list when the block count
+        // changed, and with it the scroll position.
+        if let Some(block_ix) = reveal_block {
+            self.list_state.scroll_to_reveal_item(block_ix);
+        }
+        content
     }
 }
 
@@ -2308,8 +2415,8 @@ mod tests {
             assert_eq!(painted(&state, TextLeafKey::block(0), cx), [0..5]);
         }
 
-        struct Root {
-            state: Entity<TextViewState>,
+        pub(super) struct Root {
+            pub(super) state: Entity<TextViewState>,
         }
 
         impl Render for Root {
@@ -2357,6 +2464,532 @@ mod tests {
             set(&state, [0..5], cx).unwrap();
             state.update(cx, |state, cx| state.clear_range_highlights(cx));
             assert!(!has_highlights(&state, cx));
+        }
+    }
+
+    mod reveal_range {
+        use gpui::{
+            Entity, InteractiveElement as _, ListAlignment, ListState, ScrollHandle,
+            StatefulInteractiveElement as _, TestAppContext, VisualTestContext, div, list,
+        };
+
+        use super::super::*;
+        use crate::text::TextView;
+
+        /// Where the view sits in a 200 × 100 window.
+        #[derive(Clone)]
+        enum Container {
+            /// A scrollable view.
+            Scrollable,
+            /// A fit-content view, second row of an application list.
+            List(ListState),
+            /// A fit-content view in a scrolling `div`, which follows reveals
+            /// through `on_reveal`.
+            Div(ScrollHandle),
+            /// A fit-content view clamped to two lines, second row of a list.
+            Clamped(ListState),
+            /// A fit-content view in nothing that scrolls.
+            Fixed,
+        }
+
+        struct Root {
+            state: Entity<TextViewState>,
+            container: Container,
+        }
+
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let state = self.state.clone();
+                let frame = div().w(px(200.)).h(px(100.));
+                let row = |list_state: &ListState, clamp: bool| {
+                    let state = state.clone();
+                    list(list_state.clone(), move |ix, _, _| match ix {
+                        0 => div().h(px(40.)).into_any_element(),
+                        _ => TextView::new(&state)
+                            .when(clamp, |view| view.max_lines(2))
+                            .into_any_element(),
+                    })
+                    .size_full()
+                };
+                match &self.container {
+                    Container::Scrollable => frame
+                        .child(TextView::new(&state).scrollable(true))
+                        .into_any_element(),
+                    Container::List(list_state) => {
+                        frame.child(row(list_state, false)).into_any_element()
+                    }
+                    Container::Clamped(list_state) => {
+                        frame.child(row(list_state, true)).into_any_element()
+                    }
+                    Container::Div(handle) => {
+                        let scroll = handle.clone();
+                        frame
+                            .child(
+                                div()
+                                    .id("scroll")
+                                    .size_full()
+                                    .overflow_y_scroll()
+                                    .track_scroll(handle)
+                                    .child(TextView::new(&state).on_reveal(move |line, _, _| {
+                                        let viewport = scroll.bounds();
+                                        let mut offset = scroll.offset();
+                                        if line.bottom() > viewport.bottom() {
+                                            offset.y -= line.bottom() - viewport.bottom();
+                                        } else if line.top() < viewport.top() {
+                                            offset.y += viewport.top() - line.top();
+                                        }
+                                        scroll.set_offset(offset);
+                                    })),
+                            )
+                            .into_any_element()
+                    }
+                    Container::Fixed => frame.child(TextView::new(&state)).into_any_element(),
+                }
+            }
+        }
+
+        fn window<'a>(
+            markdown: &str,
+            container: Container,
+            cx: &'a mut TestAppContext,
+        ) -> (Entity<TextViewState>, &'a mut VisualTestContext) {
+            cx.update(crate::init);
+            let (root, cx) = cx.add_window_view(|_, cx| Root {
+                state: cx.new(|cx| TextViewState::markdown(markdown, cx)),
+                container,
+            });
+            cx.run_until_parked();
+            draw(cx);
+            let state = root.read_with(cx, |root, _| root.state.clone());
+            (state, cx)
+        }
+
+        fn draw(cx: &mut VisualTestContext) {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+
+        /// Asks to reveal the first occurrence of `needle`, then runs `then`
+        /// before anything is drawn.
+        fn request(
+            state: &Entity<TextViewState>,
+            needle: &str,
+            cx: &mut VisualTestContext,
+            then: impl FnOnce(&mut TextViewState, &mut Context<TextViewState>),
+        ) {
+            state.update(cx, |state, cx| {
+                let text = state.rendered_text();
+                let start = text.as_str().find(needle).unwrap();
+                state.reveal_range(start..start + needle.len(), cx).unwrap();
+                then(state, cx);
+            });
+        }
+
+        /// Reveals the first occurrence of `needle` and draws a few frames.
+        fn reveal(state: &Entity<TextViewState>, needle: &str, cx: &mut VisualTestContext) {
+            request(state, needle, cx, |_, _| {});
+            for _ in 0..3 {
+                draw(cx);
+            }
+        }
+
+        fn is_pending(state: &Entity<TextViewState>, cx: &mut VisualTestContext) -> bool {
+            state.read_with(cx, |state, _| state.pending_reveal.is_some())
+        }
+
+        fn scroll_top(
+            state: &Entity<TextViewState>,
+            cx: &mut VisualTestContext,
+        ) -> gpui::ListOffset {
+            state.read_with(cx, |state, _| state.list_state.logical_scroll_top())
+        }
+
+        fn paragraphs(count: usize) -> String {
+            (0..count)
+                .map(|ix| format!("paragraph {ix}"))
+                .collect::<Vec<_>>()
+                .join("\n\n")
+        }
+
+        fn words(count: usize) -> String {
+            (0..count)
+                .map(|ix| format!("w{ix}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        }
+
+        #[gpui::test]
+        fn a_scrollable_view_scrolls_to_an_offscreen_block(cx: &mut TestAppContext) {
+            let (state, cx) = window(&paragraphs(200), Container::Scrollable, cx);
+            reveal(&state, "paragraph 150", cx);
+            assert!(!is_pending(&state, cx));
+            let top = scroll_top(&state, cx);
+            assert!((140..=150).contains(&top.item_ix), "{top:?}");
+
+            reveal(&state, "paragraph 3", cx);
+            assert!(!is_pending(&state, cx));
+            assert!(scroll_top(&state, cx).item_ix <= 3);
+        }
+
+        #[gpui::test]
+        fn a_scrollable_view_scrolls_to_a_line_inside_a_long_paragraph(cx: &mut TestAppContext) {
+            let (state, cx) = window(&words(400), Container::Scrollable, cx);
+            reveal(&state, "w390", cx);
+            assert!(!is_pending(&state, cx));
+            let top = scroll_top(&state, cx);
+            assert_eq!(top.item_ix, 0);
+            assert!(top.offset_in_item > px(100.), "{top:?}");
+        }
+
+        #[gpui::test]
+        fn revealing_a_visible_line_does_not_scroll(cx: &mut TestAppContext) {
+            let (state, cx) = window(&words(400), Container::Scrollable, cx);
+            reveal(&state, "w200", cx);
+            let top = scroll_top(&state, cx);
+            assert!(top.offset_in_item > px(0.), "{top:?}");
+            for word in ["w199", "w198", "w197", "w196"] {
+                reveal(&state, word, cx);
+                assert!(!is_pending(&state, cx));
+                let now = scroll_top(&state, cx);
+                assert_eq!(
+                    (now.item_ix, now.offset_in_item),
+                    (top.item_ix, top.offset_in_item),
+                    "{word}"
+                );
+            }
+        }
+
+        #[gpui::test]
+        fn an_enclosing_list_scrolls_to_a_line_of_a_fit_content_view(cx: &mut TestAppContext) {
+            let outer = ListState::new(2, ListAlignment::Top, px(1000.));
+            let (state, cx) = window(&words(400), Container::List(outer.clone()), cx);
+            reveal(&state, "w390", cx);
+            assert!(!is_pending(&state, cx));
+            let top = outer.logical_scroll_top();
+            assert_eq!(top.item_ix, 1, "{top:?}");
+            assert!(top.offset_in_item > px(100.), "{top:?}");
+        }
+
+        #[gpui::test]
+        fn on_reveal_scrolls_a_container_that_ignores_scroll_requests(cx: &mut TestAppContext) {
+            let handle = ScrollHandle::new();
+            let (state, cx) = window(&words(400), Container::Div(handle.clone()), cx);
+            reveal(&state, "w390", cx);
+            assert!(!is_pending(&state, cx));
+            assert!(handle.offset().y < px(-100.), "{:?}", handle.offset());
+        }
+
+        #[gpui::test]
+        fn a_reveal_that_cannot_be_shown_gives_up(cx: &mut TestAppContext) {
+            let (state, cx) = window(&words(4000), Container::Fixed, cx);
+            reveal(&state, "w3990", cx);
+            assert!(is_pending(&state, cx));
+            for _ in 0..10 {
+                draw(cx);
+            }
+            assert!(!is_pending(&state, cx));
+        }
+
+        #[gpui::test]
+        fn a_reveal_not_carried_out_in_time_is_dropped(cx: &mut TestAppContext) {
+            let (state, cx) = window(&paragraphs(200), Container::Scrollable, cx);
+            request(&state, "paragraph 150", cx, |_, cx| {
+                cx.background_executor()
+                    .advance_clock(std::time::Duration::from_secs(2))
+            });
+            draw(cx);
+            assert!(!is_pending(&state, cx));
+            assert_eq!(scroll_top(&state, cx).item_ix, 0);
+        }
+
+        #[gpui::test]
+        fn an_empty_range_reveals_its_line(cx: &mut TestAppContext) {
+            let (state, cx) = window(&words(400), Container::Scrollable, cx);
+            reveal(&state, "w390", cx);
+            let top = scroll_top(&state, cx);
+            // A position on a visible line leaves the view where it is.
+            state.update(cx, |state, cx| {
+                let text = state.rendered_text();
+                let start = text.as_str().find("w391").unwrap();
+                state.reveal_range(start..start, cx).unwrap();
+            });
+            for _ in 0..3 {
+                draw(cx);
+            }
+            assert!(!is_pending(&state, cx));
+            let now = scroll_top(&state, cx);
+            assert_eq!(
+                (now.item_ix, now.offset_in_item),
+                (top.item_ix, top.offset_in_item)
+            );
+        }
+
+        #[gpui::test]
+        fn a_position_after_the_last_character_reveals_its_line(cx: &mut TestAppContext) {
+            let (state, cx) = window(&words(400), Container::Scrollable, cx);
+            reveal(&state, "w399", cx);
+            let top = scroll_top(&state, cx);
+            assert!(top.offset_in_item > px(1000.), "{top:?}");
+            // The end of the text, on the visible last line.
+            state.update(cx, |state, cx| {
+                let text = state.rendered_text();
+                let end = text.as_str().find("w399").unwrap() + "w399".len();
+                state.reveal_range(end..end, cx).unwrap();
+            });
+            for _ in 0..3 {
+                draw(cx);
+            }
+            assert!(!is_pending(&state, cx));
+            let now = scroll_top(&state, cx);
+            assert_eq!(
+                (now.item_ix, now.offset_in_item),
+                (top.item_ix, top.offset_in_item)
+            );
+        }
+
+        /// Reveals `range` of the current text and draws a few frames.
+        fn reveal_at(
+            state: &Entity<TextViewState>,
+            range: impl FnOnce(&str) -> std::ops::Range<usize>,
+            cx: &mut VisualTestContext,
+        ) {
+            state.update(cx, |state, cx| {
+                let text = state.rendered_text();
+                let range = range(text.as_str());
+                state.reveal_range(range, cx).unwrap();
+            });
+            for _ in 0..3 {
+                draw(cx);
+            }
+        }
+
+        fn assert_unmoved(
+            state: &Entity<TextViewState>,
+            top: gpui::ListOffset,
+            cx: &mut VisualTestContext,
+        ) {
+            assert!(!is_pending(state, cx));
+            let now = scroll_top(state, cx);
+            assert_eq!(
+                (now.item_ix, now.offset_in_item),
+                (top.item_ix, top.offset_in_item)
+            );
+        }
+
+        #[gpui::test]
+        fn the_end_of_the_text_and_its_separators_reveal_the_last_line(cx: &mut TestAppContext) {
+            let (state, cx) = window(&words(400), Container::Scrollable, cx);
+            reveal(&state, "w399", cx);
+            let top = scroll_top(&state, cx);
+            assert!(top.offset_in_item > px(1000.), "{top:?}");
+            // The end of the text, after the separator that ends the block.
+            reveal_at(&state, |text| text.len()..text.len(), cx);
+            assert_unmoved(&state, top, cx);
+            // Only that separator.
+            reveal_at(&state, |text| text.len() - 1..text.len(), cx);
+            assert_unmoved(&state, top, cx);
+
+            let code = (0..200)
+                .map(|ix| format!("line {ix}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            state.update(cx, |state, cx| {
+                state.set_text(&format!("```\n{code}\n```"), cx)
+            });
+            cx.run_until_parked();
+            reveal(&state, "line 199", cx);
+            let top = scroll_top(&state, cx);
+            assert!(top.offset_in_item > px(1000.), "{top:?}");
+            reveal_at(&state, |text| text.len()..text.len(), cx);
+            assert_unmoved(&state, top, cx);
+        }
+
+        #[gpui::test]
+        fn the_end_of_a_block_above_reveals_its_last_line(cx: &mut TestAppContext) {
+            let second = (0..400)
+                .map(|ix| format!("v{ix}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let markdown = format!("{}\n\n{second}", words(400));
+            let (state, cx) = window(&markdown, Container::Scrollable, cx);
+            reveal(&state, "v399", cx);
+            assert_eq!(scroll_top(&state, cx).item_ix, 1);
+            // The end of the first paragraph, on the separator after it.
+            reveal_at(
+                &state,
+                |text| {
+                    let end = text.find("w399").unwrap() + "w399".len();
+                    end..end
+                },
+                cx,
+            );
+            assert!(!is_pending(&state, cx));
+            let top = scroll_top(&state, cx);
+            assert_eq!(top.item_ix, 0, "{top:?}");
+            assert!(top.offset_in_item > px(1000.), "{top:?}");
+        }
+
+        #[gpui::test]
+        fn an_empty_view_has_nothing_to_reveal(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("", cx)));
+            cx.run_until_parked();
+            state.update(cx, |state, cx| {
+                assert_eq!(state.reveal_range(0..0, cx), Ok(()));
+                assert!(state.pending_reveal.is_none());
+            });
+        }
+
+        #[gpui::test]
+        fn revealing_a_visible_block_does_not_scroll(cx: &mut TestAppContext) {
+            let markdown = format!("{}\n\n<div>html</div>\n\n{}", words(400), words(400));
+            let (state, cx) = window(&markdown, Container::Scrollable, cx);
+            reveal(&state, "html", cx);
+            // Still in view a little further down.
+            state.update(cx, |state, _| state.list_state.scroll_by(px(30.)));
+            draw(cx);
+            let top = scroll_top(&state, cx);
+            reveal(&state, "html", cx);
+            assert_unmoved(&state, top, cx);
+        }
+
+        #[gpui::test]
+        fn a_line_of_an_inline_flow_counts_as_shown_once_scrolled_to(cx: &mut TestAppContext) {
+            // Inline code every tenth word, so the rows are taller than the
+            // body line and land between pixels.
+            let markdown = (0..400)
+                .map(|ix| {
+                    if ix % 10 == 0 {
+                        format!("`c{ix}`")
+                    } else {
+                        format!("w{ix}")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            let (state, cx) = window(&markdown, Container::Scrollable, cx);
+            reveal(&state, "c390", cx);
+            assert!(!is_pending(&state, cx));
+            assert!(scroll_top(&state, cx).offset_in_item > px(1000.));
+        }
+
+        #[gpui::test]
+        fn a_range_starting_on_a_line_break_reveals_the_next_line(cx: &mut TestAppContext) {
+            let code = (0..200)
+                .map(|ix| format!("line {ix}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let (state, cx) = window(&format!("```\n{code}\n```"), Container::Scrollable, cx);
+            reveal(&state, "\nline 190", cx);
+            assert!(!is_pending(&state, cx));
+            let top = scroll_top(&state, cx);
+            assert!(top.offset_in_item > px(1000.), "{top:?}");
+        }
+
+        #[gpui::test]
+        fn a_range_starting_on_a_line_break_in_an_inline_flow_reveals_the_next_line(
+            cx: &mut TestAppContext,
+        ) {
+            // Inline code lays the paragraph out as an inline flow.
+            let lines = (0..200)
+                .map(|ix| format!("line {ix} `code`"))
+                .collect::<Vec<_>>()
+                .join("\\\n");
+            let (state, cx) = window(&lines, Container::Scrollable, cx);
+            reveal(&state, "\nline 190", cx);
+            assert!(!is_pending(&state, cx));
+            let top = scroll_top(&state, cx);
+            assert!(top.offset_in_item > px(1000.), "{top:?}");
+        }
+
+        #[gpui::test]
+        fn a_reveal_is_dropped_when_its_text_before_it_changes(cx: &mut TestAppContext) {
+            let (state, cx) = window(&paragraphs(200), Container::Scrollable, cx);
+            let target = "first words then the target";
+            let markdown = format!("{target}\n\n{}", paragraphs(200));
+            state.update(cx, |state, cx| state.set_text(&markdown, cx));
+            cx.run_until_parked();
+
+            // Appending to its paragraph keeps it.
+            request(&state, "target", cx, |state, cx| {
+                state.set_text(&markdown.replacen("target", "target and more", 1), cx);
+                assert!(state.pending_reveal.is_some());
+            });
+            // An edit before it in its paragraph drops it.
+            request(&state, "target", cx, |state, cx| {
+                state.set_text(&markdown.replacen("words", "WORDS", 1), cx);
+                assert!(state.pending_reveal.is_none());
+            });
+        }
+
+        #[gpui::test]
+        fn a_clamped_view_does_not_reveal(cx: &mut TestAppContext) {
+            let outer = ListState::new(2, ListAlignment::Top, px(1000.));
+            let (state, cx) = window(&words(400), Container::Clamped(outer.clone()), cx);
+            reveal(&state, "w390", cx);
+            assert!(!is_pending(&state, cx));
+            assert_eq!(outer.logical_scroll_top().item_ix, 0);
+        }
+
+        #[gpui::test]
+        fn text_outside_every_block_reveals_its_block(cx: &mut TestAppContext) {
+            let markdown = format!("{}\n\n<div>html text</div>", paragraphs(100));
+            let (state, cx) = window(&markdown, Container::Scrollable, cx);
+            reveal(&state, "html text", cx);
+            assert!(!is_pending(&state, cx));
+            assert!(
+                scroll_top(&state, cx).item_ix >= 90,
+                "{:?}",
+                scroll_top(&state, cx)
+            );
+        }
+
+        #[gpui::test]
+        fn a_reveal_follows_its_text_past_an_edit_before_it(cx: &mut TestAppContext) {
+            let (state, cx) = window(&paragraphs(200), Container::Scrollable, cx);
+            // An inserted paragraph moves the target down one block.
+            request(&state, "paragraph 150", cx, |state, cx| {
+                state.set_text(&format!("inserted\n\n{}", paragraphs(200)), cx);
+                assert!(state.pending_reveal.is_some());
+            });
+            for _ in 0..3 {
+                draw(cx);
+            }
+            assert!(!is_pending(&state, cx));
+            let top = scroll_top(&state, cx);
+            assert!((141..=151).contains(&top.item_ix), "{top:?}");
+
+            // A reveal whose text changed is dropped.
+            request(&state, "paragraph 150", cx, |state, cx| {
+                state.set_text(&paragraphs(200).replace("paragraph 150", "changed"), cx);
+                assert!(state.pending_reveal.is_none());
+            });
+        }
+
+        #[gpui::test]
+        fn malformed_ranges_and_html_views_are_rejected(cx: &mut TestAppContext) {
+            cx.update(crate::init);
+            let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("first\n\nsecond", cx)));
+            cx.run_until_parked();
+            state.update(cx, |state, cx| {
+                assert_eq!(
+                    state.reveal_range(std::ops::Range { start: 5, end: 3 }, cx),
+                    Err(RangeHighlightError::InvalidRange(0))
+                );
+                assert_eq!(
+                    state.reveal_range(0..100, cx),
+                    Err(RangeHighlightError::InvalidRange(0))
+                );
+                state.reveal_range(0..5, cx).unwrap();
+            });
+
+            let html = cx.update(|cx| cx.new(|cx| TextViewState::html("<p>one</p>", cx)));
+            cx.run_until_parked();
+            html.update(cx, |html, cx| {
+                assert_eq!(
+                    html.reveal_range(0..3, cx),
+                    Err(RangeHighlightError::Unsupported)
+                );
+            });
         }
     }
 }

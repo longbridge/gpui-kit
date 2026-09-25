@@ -20,6 +20,7 @@ use super::{
     inline::{Inline, InlineHighlight, InlineState, text_runs, text_size_ranges},
     inline_object::{InlineObject, MeasuredInlineObject},
     node::LinkMark,
+    range_highlight::RevealAt,
 };
 
 const IMAGE_LEN: usize = 1;
@@ -53,6 +54,8 @@ pub(super) enum InlineFlowItem {
         /// Range highlight backgrounds, in this item's byte space. They are
         /// only painted, so unlike `highlights` they take no part in layout.
         backgrounds: Vec<(Range<usize>, Hsla)>,
+        /// The start of a pending reveal, when it is in this item.
+        reveal: Option<RevealAt>,
     },
     Image {
         source: ImageSource,
@@ -432,8 +435,36 @@ impl Element for InlineFlow {
         let text_style = &typography.text_style;
         let mut elements = Vec::with_capacity(layout.fragments.len());
 
+        // A reveal goes to the fragment it starts in. A line break lays out
+        // no fragment, so a reveal starting on one, or on an empty line, goes
+        // to the next fragment of its text, or to the last when none follows.
+        let reveal_fragment = layout
+            .fragments
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, fragment)| {
+                let PositionedFragment::Text {
+                    item_ix,
+                    source_range,
+                    ..
+                } = fragment
+                else {
+                    return None;
+                };
+                let InlineFlowItem::Text {
+                    reveal: Some(reveal),
+                    ..
+                } = &self.items[*item_ix]
+                else {
+                    return None;
+                };
+                Some((ix, source_range.end > reveal.offset()))
+            })
+            .reduce(|found, next| if found.1 { found } else { next })
+            .map(|(ix, _)| ix);
+
         let mut text_fragment_count = 0;
-        for fragment in &layout.fragments {
+        for (fragment_ix, fragment) in layout.fragments.iter().enumerate() {
             match fragment {
                 PositionedFragment::Object {
                     item_ix,
@@ -496,6 +527,7 @@ impl Element for InlineFlow {
                     let InlineFlowItem::Text {
                         state: source_state,
                         backgrounds,
+                        reveal,
                         ..
                     } = &self.items[*item_ix]
                     else {
@@ -540,6 +572,12 @@ impl Element for InlineFlow {
                         source_range.end,
                         |range, color| (range, *color),
                     ))
+                    .reveal(
+                        reveal
+                            .as_ref()
+                            .filter(|_| reveal_fragment == Some(fragment_ix))
+                            .map(|reveal| reveal.clamp(source_range.start, source_range.end)),
+                    )
                     .text_style(fragment_style.clone())
                     .selection_bounds(Bounds::new(
                         point(bounds.left(), bounds.top() + selection_bounds.top()),

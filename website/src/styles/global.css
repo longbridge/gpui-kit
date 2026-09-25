@@ -1502,7 +1502,12 @@ html.dark .astro-code span {
 .sidebar-item {
   display: block;
   margin-inline: -0.5rem;
-  padding: 0.28rem 0.5rem;
+  /* A transparent border, with the fill clipped inside it, leaves a 2px gap
+     between the hover and active fills of adjacent items. The padding gives
+     the pixel back so rows keep their height and text stays aligned. */
+  padding: calc(0.28rem - 1px) calc(0.5rem - 1px);
+  border: 1px solid transparent;
+  background-clip: padding-box;
   border-radius: var(--radius-control);
   color: var(--foreground);
   font-size: 0.8125rem;
@@ -1511,8 +1516,16 @@ html.dark .astro-code span {
   transition: color 140ms ease, background 140ms ease;
 }
 
-.sidebar-item:hover { background: var(--secondary); }
-.sidebar-item.active { color: var(--foreground); font-weight: 650; }
+.sidebar-item:hover { background-color: var(--secondary); }
+/* The current page has to be found at a glance after scrolling a long
+   article, so it takes the sidebar accent fill (stronger than hover), not
+   weight alone. */
+.sidebar-item.active,
+.sidebar-item.active:hover {
+  background-color: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+  font-weight: 650;
+}
 
 .sidebar-subgroup-title {
   padding: 0.28rem 0.5rem;

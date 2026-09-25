@@ -52,9 +52,13 @@ site and the documented components share one palette.
 Rules that follow from this:
 
 - **The brand colour is near-black (near-white in dark mode).** It is used for
-  primary buttons, focus rings and the active sidebar indicator — never as an
+  primary buttons and focus rings — never as an
   "accent" to add interest, because it is the same value as body text. Section
   kickers and captions use `--muted-foreground` instead.
+- **The active sidebar item is a fill, not a bar.** It takes `--sidebar-accent`
+  (stronger than the `--secondary` hover fill) and a heavier weight. Never mark
+  it — or any selected item — with a leading-edge bar or one-sided border; see
+  the selection rule in the Design Guides.
 - **Never use `--brand` as a background behind text you did not also invert.**
   Text selection in particular uses `--selection`: black text on a near-black
   selection is unreadable.

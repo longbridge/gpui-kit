@@ -22,6 +22,7 @@ def project_text() -> str:
         ROOT / "crates/story/src",
         ROOT / "crates/story-web/src",
         ROOT / "crates/base/examples/showcase",
+        ROOT / "crates/base/examples/motion",
     ]
     text = ""
     for root in roots:

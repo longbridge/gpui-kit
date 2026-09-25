@@ -850,7 +850,7 @@ where
 
         // Draw grid, excluding the line at the baseline.
         if self.grid {
-            let grid = Grid::new().stroke(cx.theme().border);
+            let grid = Grid::new().stroke(cx.theme().chart_grid);
             let grid = if self.grid_dashed {
                 grid.dash_array(&[px(4.), px(2.)])
             } else {
