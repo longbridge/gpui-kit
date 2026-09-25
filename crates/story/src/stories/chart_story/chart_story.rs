@@ -695,6 +695,7 @@ impl ChartCard {
                             .fill(accent.opacity(0.3))
                             .name("Alpha")
                             .max_value(100.)
+                            .tooltip_value(|_, value| format!("{value:.0} / 100").into())
                             .id("radar-chart"),
                     )
                     .headline(format!("Scores {average:.0} on average"))
@@ -965,6 +966,13 @@ impl ChartCard {
                             )
                             .label_color(move |d| if d.revenue >= 0. { positive } else { negative })
                             .value_axis(true)
+                            .tooltip_title(|d| format!("{} 2025", d.month).into())
+                            .tooltip_value(|_, value| money(value).into())
+                            .tooltip_value_color(
+                                move |_, value| {
+                                    if value >= 0. { positive } else { negative }
+                                },
+                            )
                             .id("bar-chart-negative"),
                     )
                     .headline(format!("{} net for the year", money(net)))
@@ -1102,6 +1110,7 @@ impl ChartCard {
                         .y_axis(true)
                         .y_tick_format(money)
                         .x_tick_count(4)
+                        .tooltip_value(|_, value| money(value).into())
                         .id("line-chart"),
                 )
                 .trend(
@@ -1206,6 +1215,32 @@ impl ChartCard {
                         .stroke(accent)
                         .fill(area_gradient(accent))
                         .name("2025")
+                        .render_tooltip(|d, _, cx| {
+                            let change = change_percent(d.revenue, d.last_year);
+                            let change_color = if change >= 0. {
+                                cx.theme().chart_bullish
+                            } else {
+                                cx.theme().chart_bearish
+                            };
+                            let row = |label: &'static str, value: String| {
+                                h_flex()
+                                    .justify_between()
+                                    .gap_4()
+                                    .child(
+                                        div().text_color(cx.theme().muted_foreground).child(label),
+                                    )
+                                    .child(value)
+                            };
+                            v_flex()
+                                .gap_1()
+                                .child(div().font_semibold().child(d.month.clone()))
+                                .child(row("2025", money(d.revenue)))
+                                .child(row("2024", money(d.last_year)))
+                                .child(
+                                    row("Change", format!("{change:+.1}%"))
+                                        .text_color(change_color),
+                                )
+                        })
                         .id("area-chart-gradient"),
                 )
                 .trend(
@@ -1370,6 +1405,7 @@ impl ChartCard {
                 .close(|d| d.close)
                 .body_width_ratio(body_width_ratio)
                 .tick_margin(tick_margin)
+                .tooltip_value(|_, value| format!("${value:.2}").into())
                 .id(id),
         )
         .trend(change_percent(last.close, first.open), "over 40 sessions")

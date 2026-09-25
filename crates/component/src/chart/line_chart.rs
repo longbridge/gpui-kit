@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{
-    HOVER_DOT_SIZE, HOVER_HALO_SIZE, PointAxes, ValueExtent, axis_point_count,
+    HOVER_DOT_SIZE, HOVER_HALO_SIZE, PointAxes, TooltipContent, ValueExtent, axis_point_count,
     build_point_x_labels, caller_id, labeled_items, pinned_plot_mask, point_range,
     point_value_scale,
 };
@@ -45,6 +45,7 @@ where
     id: ElementId,
     interactive: bool,
     name: Option<SharedString>,
+    tooltip_content: TooltipContent<T>,
 }
 
 impl<T, X, Y> LineChart<T, X, Y>
@@ -73,6 +74,7 @@ where
             id: caller_id(),
             interactive: true,
             name: None,
+            tooltip_content: TooltipContent::default(),
         }
     }
 
@@ -103,6 +105,47 @@ where
     /// Set the series name shown in the hover tooltip row (e.g. "Desktop").
     pub fn name(mut self, name: impl Into<SharedString>) -> Self {
         self.name = Some(name.into());
+        self
+    }
+
+    /// Set the hover tooltip's title for a datum, instead of its x value.
+    pub fn tooltip_title(mut self, title: impl Fn(&T) -> SharedString + 'static) -> Self {
+        self.tooltip_content.set_title(title);
+        self
+    }
+
+    /// Set the text of each tooltip row's value; the raw number by default.
+    ///
+    /// The closure receives the datum and the value the row reads.
+    pub fn tooltip_value(mut self, value: impl Fn(&T, f64) -> SharedString + 'static) -> Self {
+        self.tooltip_content.set_value(value);
+        self
+    }
+
+    /// Color each tooltip row's value, such as green or red by its sign; the
+    /// tooltip's text color by default.
+    pub fn tooltip_value_color<H>(mut self, color: impl Fn(&T, f64) -> H + 'static) -> Self
+    where
+        H: Into<Hsla> + 'static,
+    {
+        self.tooltip_content.set_value_color(color);
+        self
+    }
+
+    /// Draw the tooltip box's content for a datum yourself, in place of the
+    /// title and rows, for a layout they cannot express such as a table.
+    ///
+    /// The crosshair, the dots and where the box sits stay the chart's, and
+    /// [`tooltip_title`](Self::tooltip_title), [`tooltip_value`](Self::tooltip_value)
+    /// and [`tooltip_value_color`](Self::tooltip_value_color) no longer apply.
+    pub fn render_tooltip<E>(
+        mut self,
+        render: impl Fn(&T, &mut Window, &mut App) -> E + 'static,
+    ) -> Self
+    where
+        E: IntoElement,
+    {
+        self.tooltip_content.set_render(render);
         self
     }
 
@@ -449,37 +492,40 @@ where
         state: &TooltipState,
         cursor: Point<Pixels>,
         bounds: Bounds<Pixels>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
         let (x_fn, y_fn) = (self.x.as_ref()?, self.y.as_ref()?);
         let d = self.data.get(state.index)?;
-        let title: SharedString = x_fn(d).into();
-        let value = y_fn(d).to_f64()?;
         let stroke = self.stroke.unwrap_or(cx.theme().chart_2);
         let name = self.name.clone().unwrap_or_default();
         let dot = *state.dots.first()?;
 
-        Some(
-            // Follow the cursor; the crosshair and dot glide to the data point.
-            Tooltip::new(cursor, bounds.size)
-                .gap(px(8.))
-                // Confine the crosshair to the plot area so it doesn't cross the x-axis.
-                .cross_line(
-                    CrossLine::new(state.cross_line).height(
-                        bounds.size.height.as_f32() - if self.x_axis { AXIS_GAP } else { 0. },
-                    ),
-                )
-                .dots(Some(
-                    Dot::new(dot)
-                        .size(HOVER_DOT_SIZE)
-                        .halo(HOVER_HALO_SIZE)
-                        .stroke(cx.theme().background)
-                        .fill(stroke),
-                ))
-                .title(title)
-                .row(stroke, name, format!("{}", value))
-                .into_any_element(),
-        )
+        // Follow the cursor; the crosshair and dot glide to the data point.
+        let tooltip = Tooltip::new(cursor, bounds.size)
+            .gap(px(8.))
+            // Confine the crosshair to the plot area so it doesn't cross the x-axis.
+            .cross_line(
+                CrossLine::new(state.cross_line)
+                    .height(bounds.size.height.as_f32() - if self.x_axis { AXIS_GAP } else { 0. }),
+            )
+            .dots(Some(
+                Dot::new(dot)
+                    .size(HOVER_DOT_SIZE)
+                    .halo(HOVER_HALO_SIZE)
+                    .stroke(cx.theme().background)
+                    .fill(stroke),
+            ));
+
+        let tooltip = self.tooltip_content.fill(
+            tooltip,
+            d,
+            || Some(x_fn(d).into()),
+            || Some([(stroke, name, y_fn(d).to_f64()?)]),
+            window,
+            cx,
+        )?;
+
+        Some(tooltip.into_any_element())
     }
 }

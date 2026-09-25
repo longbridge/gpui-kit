@@ -719,6 +719,34 @@ PieChart::new(holdings)
     .tooltip_value(|d, _, _| pct(d.ratio))   // Read as it truly is
 ```
 
+### Tooltip Content
+
+`LineChart`, `AreaChart`, `BarChart`, `RadarChart` and `CandlestickChart` title their tooltip with the hovered x, band or dimension value and write each row's value as the raw number. `tooltip_title` and `tooltip_value` replace that text from the datum under the cursor, and `tooltip_value_color` colors each row's value, such as green or red by its sign:
+
+```rust
+BarChart::new(flows)
+    .band(|d| d.month.clone())
+    .value(|d| d.net)
+    .tooltip_title(|d| format!("{} 2025", d.month).into())
+    .tooltip_value(|_, value| format!("${value:.2}").into())
+    .tooltip_value_color(move |_, value| if value >= 0. { gain } else { loss })
+```
+
+For a layout the title and rows cannot express, such as a table, `render_tooltip` draws the box's content from the datum. The chart's hover marks — crosshair, dots, highlight band — and where the box sits stay the chart's, and the three text options no longer apply:
+
+```rust
+AreaChart::new(data)
+    .x(|d| d.month.clone())
+    .y(|d| d.last_year)
+    .y(|d| d.revenue)
+    .render_tooltip(|d, _, _| {
+        v_flex()
+            .child(d.month.clone())
+            .child(format!("2025: {}", d.revenue))
+            .child(format!("2024: {}", d.last_year))
+    })
+```
+
 ### Identity
 
 All of it is keyed on an `ElementId`, which a chart takes from the source location it was constructed at — unique for a chart written out once, which is nearly every chart. Where one construction site renders several charts as siblings, name them apart, or they share one hover state and one cache:
@@ -762,6 +790,18 @@ fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pi
             .into_any_element(),
     )
 }
+```
+
+A row's value takes a color with `value_color`, which colors the row added last, such as a change by its sign. `plain_row` adds a row without a swatch, for a figure no series on the plot draws, such as a total or a ratio; beside series rows its label lines up with theirs:
+
+```rust
+Tooltip::new(cursor, bounds.size)
+    .title("Apr 5")
+    .row(desktop, "Desktop", "373")
+    .row(mobile, "Mobile", "187")
+    .plain_row("Total", "560")
+    .plain_row("Change", "+12%")
+    .value_color(gain)
 ```
 
 To emphasize the plot's own graphics as well — fade the bars around the hovered one, lift a slice — implement `Plot::hover`, which runs each frame before `tooltip` and `paint` with the [`PlotHover`] in focus. It carries the `TooltipState` and lingers after the cursor leaves while `hover.focus()` eases back to zero, so sample the motion there and keep the result on `self`. `hover.glide` follows a position on the same spring the tooltip uses; hand the result to the crosshair and turn the tooltip's own glide off with `Tooltip::glide(false)`, so it springs once:

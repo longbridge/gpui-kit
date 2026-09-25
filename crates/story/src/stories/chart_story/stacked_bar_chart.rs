@@ -193,6 +193,7 @@ impl Plot for StackedBarChart {
             .title(d.date.clone());
 
         // One row per stacked series (its segment value at this band).
+        let mut total = 0.;
         for series in self.series.iter() {
             let color = ordinal.map(&series.key).unwrap_or(cx.theme().chart_4);
             let value = series
@@ -200,9 +201,14 @@ impl Plot for StackedBarChart {
                 .get(state.index)
                 .map(|p| p.y1 - p.y0)
                 .unwrap_or(0.);
+            total += value;
             tooltip = tooltip.row(color, series.key.clone(), format!("{}", value));
         }
 
-        Some(tooltip.into_any_element())
+        Some(
+            tooltip
+                .plain_row("total", format!("{}", total))
+                .into_any_element(),
+        )
     }
 }

@@ -444,11 +444,12 @@ pub fn track_hover(
     ))
 }
 
-/// A single labelled row in a [`Tooltip`]: a colored swatch, a muted label, and a value.
+/// A single labelled row in a [`Tooltip`]: an optional colored swatch, a muted label, and a value.
 struct TooltipRow {
-    color: Hsla,
+    color: Option<Hsla>,
     label: SharedString,
     value: SharedString,
+    value_color: Option<Hsla>,
 }
 
 #[derive(IntoElement)]
@@ -532,10 +533,39 @@ impl Tooltip {
         value: impl Into<SharedString>,
     ) -> Self {
         self.rows.push(TooltipRow {
-            color: color.into(),
+            color: Some(color.into()),
             label: label.into(),
             value: value.into(),
+            value_color: None,
         });
+        self
+    }
+
+    /// Append a row without a swatch, for a figure no series on the plot draws,
+    /// such as a total or a ratio.
+    ///
+    /// Among series rows its label lines up with theirs; without any, the
+    /// labels sit at the start.
+    pub fn plain_row(
+        mut self,
+        label: impl Into<SharedString>,
+        value: impl Into<SharedString>,
+    ) -> Self {
+        self.rows.push(TooltipRow {
+            color: None,
+            label: label.into(),
+            value: value.into(),
+            value_color: None,
+        });
+        self
+    }
+
+    /// Color the value of the row added last, such as green or red by its sign.
+    /// The value reads in the tooltip's text color otherwise.
+    pub fn value_color(mut self, color: impl Into<Hsla>) -> Self {
+        if let Some(row) = self.rows.last_mut() {
+            row.value_color = Some(color.into());
+        }
         self
     }
 
@@ -573,6 +603,26 @@ impl Styled for Tooltip {
 impl ParentElement for Tooltip {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
         self.base.extend(elements);
+    }
+}
+
+/// Whether the rows keep a swatch slot: when any has a swatch, so a plain row's
+/// label lines up with the series labels, and not when every row is plain.
+fn has_swatches(rows: &[TooltipRow]) -> bool {
+    rows.iter().any(|row| row.color.is_some())
+}
+
+#[cfg(test)]
+impl Tooltip {
+    pub(crate) fn title_for_test(&self) -> Option<&SharedString> {
+        self.title.as_ref()
+    }
+
+    pub(crate) fn rows_for_test(&self) -> Vec<(SharedString, Option<Hsla>)> {
+        self.rows
+            .iter()
+            .map(|row| (row.value.clone(), row.value_color))
+            .collect()
     }
 }
 
@@ -637,6 +687,7 @@ impl RenderOnce for Tooltip {
 
         // Structured content (title + rows) takes precedence over freeform `base` children.
         let content = if title.is_some() || !rows.is_empty() {
+            let swatched = has_swatches(&rows);
             v_flex()
                 .gap_1()
                 .when_some(title, |this, title| {
@@ -651,19 +702,25 @@ impl RenderOnce for Tooltip {
                             h_flex()
                                 .items_center()
                                 .gap_1p5()
-                                .child(
-                                    div()
-                                        .size_2()
-                                        .rounded(cx.theme().radius.half())
-                                        .bg(row.color),
-                                )
+                                .when(swatched, |this| {
+                                    this.child(
+                                        div()
+                                            .size_2()
+                                            .rounded(cx.theme().radius.half())
+                                            .when_some(row.color, |this, color| this.bg(color)),
+                                    )
+                                })
                                 .child(
                                     div()
                                         .text_color(cx.theme().muted_foreground)
                                         .child(row.label),
                                 ),
                         )
-                        .child(div().child(row.value))
+                        .child(
+                            div()
+                                .when_some(row.value_color, |this, color| this.text_color(color))
+                                .child(row.value),
+                        )
                 }))
         } else {
             base
@@ -754,5 +811,44 @@ mod tests {
         };
         assert!(!lingering.is_hovered());
         assert!(!lingering.is_entering());
+    }
+
+    #[test]
+    fn a_value_color_colors_only_the_row_added_last() {
+        let tooltip = Tooltip::new(point(px(0.), px(0.)), gpui::size(px(100.), px(100.)))
+            .value_color(gpui::red())
+            .row(gpui::blue(), "Open", "1")
+            .row(gpui::blue(), "Close", "2")
+            .value_color(gpui::green());
+        let colors: Vec<_> = tooltip.rows.iter().map(|row| row.value_color).collect();
+        assert_eq!(colors, vec![None, Some(gpui::green())]);
+    }
+
+    #[test]
+    fn a_plain_row_has_no_swatch_and_takes_a_value_color() {
+        let tooltip = Tooltip::new(point(px(0.), px(0.)), gpui::size(px(100.), px(100.)))
+            .row(gpui::blue(), "Call", "1")
+            .plain_row("Total", "3")
+            .value_color(gpui::red());
+        let rows: Vec<_> = tooltip
+            .rows
+            .iter()
+            .map(|row| (row.color, row.value_color))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![(Some(gpui::blue()), None), (None, Some(gpui::red()))]
+        );
+    }
+
+    #[test]
+    fn plain_rows_keep_a_swatch_slot_only_beside_series_rows() {
+        let tooltip = || Tooltip::new(point(px(0.), px(0.)), gpui::size(px(100.), px(100.)));
+        let mixed = tooltip()
+            .row(gpui::blue(), "Call", "1")
+            .plain_row("Total", "3");
+        let plain = tooltip().plain_row("Total", "3").plain_row("Ratio", "0.5");
+        assert!(has_swatches(&mixed.rows));
+        assert!(!has_swatches(&plain.rows));
     }
 }

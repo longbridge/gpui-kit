@@ -22,7 +22,7 @@ use crate::{
     },
 };
 
-use super::{HOVER_DOT_SIZE, HOVER_HALO_SIZE, caller_id};
+use super::{HOVER_DOT_SIZE, HOVER_HALO_SIZE, TooltipContent, caller_id};
 
 const HALF_PI: f32 = PI / 2.;
 
@@ -83,6 +83,7 @@ where
     strokes: Vec<Hsla>,
     fills: Vec<Background>,
     names: Vec<SharedString>,
+    tooltip_content: TooltipContent<T>,
     label: Option<Rc<dyn Fn(&T) -> RadarLabel + 'static>>,
     /// The text of each dimension's label, resolved once per frame in `prepaint`;
     /// element labels leave `None`. Read by `paint` (to draw them) and `tooltip`
@@ -114,6 +115,7 @@ where
             strokes: vec![],
             fills: vec![],
             names: vec![],
+            tooltip_content: TooltipContent::default(),
             label: None,
             label_texts: vec![],
             label_color: None,
@@ -158,6 +160,47 @@ where
     /// (e.g. `.value(..).stroke(..).name("Desktop")`).
     pub fn name(mut self, name: impl Into<SharedString>) -> Self {
         self.names.push(name.into());
+        self
+    }
+
+    /// Set the hover tooltip's title for a datum, instead of its dimension label.
+    pub fn tooltip_title(mut self, title: impl Fn(&T) -> SharedString + 'static) -> Self {
+        self.tooltip_content.set_title(title);
+        self
+    }
+
+    /// Set the text of each tooltip row's value; the raw number by default.
+    ///
+    /// The closure receives the datum and the value the row reads.
+    pub fn tooltip_value(mut self, value: impl Fn(&T, f64) -> SharedString + 'static) -> Self {
+        self.tooltip_content.set_value(value);
+        self
+    }
+
+    /// Color each tooltip row's value, such as green or red by its sign; the
+    /// tooltip's text color by default.
+    pub fn tooltip_value_color<H>(mut self, color: impl Fn(&T, f64) -> H + 'static) -> Self
+    where
+        H: Into<Hsla> + 'static,
+    {
+        self.tooltip_content.set_value_color(color);
+        self
+    }
+
+    /// Draw the tooltip box's content for a datum yourself, in place of the
+    /// title and rows, for a layout they cannot express such as a table.
+    ///
+    /// The dots and where the box sits stay the chart's, and
+    /// [`tooltip_title`](Self::tooltip_title), [`tooltip_value`](Self::tooltip_value)
+    /// and [`tooltip_value_color`](Self::tooltip_value_color) no longer apply.
+    pub fn render_tooltip<E>(
+        mut self,
+        render: impl Fn(&T, &mut Window, &mut App) -> E + 'static,
+    ) -> Self
+    where
+        E: IntoElement,
+    {
+        self.tooltip_content.set_render(render);
         self
     }
 
@@ -265,18 +308,26 @@ where
     ///
     /// Defaults to the theme chart colors, cycled per series.
     fn series_stroke(&self, ix: usize, cx: &App) -> Hsla {
-        let colors = [
+        self.stroke_in(ix, &Self::palette(cx))
+    }
+
+    /// The theme chart colors the series cycle through by default.
+    fn palette(cx: &App) -> [Hsla; 5] {
+        [
             cx.theme().chart_1,
             cx.theme().chart_2,
             cx.theme().chart_3,
             cx.theme().chart_4,
             cx.theme().chart_5,
-        ];
+        ]
+    }
 
+    /// The stroke color of the series at the given index, set or from `palette`.
+    fn stroke_in(&self, ix: usize, palette: &[Hsla; 5]) -> Hsla {
         self.strokes
             .get(ix)
             .copied()
-            .unwrap_or(colors[ix % colors.len()])
+            .unwrap_or(palette[ix % palette.len()])
     }
 
     /// The resolved outer radius for the given bounds.
@@ -555,7 +606,7 @@ where
         state: &TooltipState,
         cursor: Point<Pixels>,
         bounds: Bounds<Pixels>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
         let d = self.data.get(state.index)?;
@@ -564,7 +615,7 @@ where
 
         // No crosshair: a radar has no cartesian axis to snap to; the dots mark
         // the hovered dimension's vertices instead.
-        let mut tooltip =
+        let tooltip =
             Tooltip::new(cursor, bounds.size)
                 .gap(px(8.))
                 .dots(state.dots.iter().enumerate().map(|(i, p)| {
@@ -575,17 +626,26 @@ where
                         .fill(self.series_stroke(i, cx))
                 }));
 
-        // Filled by `prepaint`, which runs first; element labels leave no title.
-        if let Some(title) = self.label_texts.get(state.index).cloned().flatten() {
-            tooltip = tooltip.title(title);
-        }
-
-        // One row per series: swatch + label + value.
-        for (i, value_fn) in self.values.iter().enumerate() {
-            let name = self.names.get(i).cloned().unwrap_or_default();
-            let value = value_fn(d).to_f64()?;
-            tooltip = tooltip.row(self.series_stroke(i, cx), name, format!("{}", value));
-        }
+        let palette = Self::palette(cx);
+        let tooltip = self.tooltip_content.fill(
+            tooltip,
+            d,
+            // Filled by `prepaint`, which runs first; element labels leave no title.
+            || self.label_texts.get(state.index).cloned().flatten(),
+            // One row per series: swatch + label + value.
+            || {
+                self.values
+                    .iter()
+                    .enumerate()
+                    .map(|(i, value_fn)| {
+                        let name = self.names.get(i).cloned().unwrap_or_default();
+                        Some((self.stroke_in(i, &palette), name, value_fn(d).to_f64()?))
+                    })
+                    .collect::<Option<Vec<_>>>()
+            },
+            window,
+            cx,
+        )?;
 
         Some(tooltip.into_any_element())
     }

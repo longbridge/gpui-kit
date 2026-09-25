@@ -693,6 +693,34 @@ PieChart::new(holdings)
     .tooltip_value(|d, _, _| pct(d.ratio))   // 按真实值显示
 ```
 
+### Tooltip 内容
+
+`LineChart`、`AreaChart`、`BarChart`、`RadarChart` 和 `CandlestickChart` 默认用悬停处的 X 值、分类名或维度名作为 tooltip 标题，每行的数值直接显示原始数字。`tooltip_title` 和 `tooltip_value` 根据光标下的数据替换这些文字，`tooltip_value_color` 为每行的数值着色，比如按正负显示绿色或红色：
+
+```rust
+BarChart::new(flows)
+    .band(|d| d.month.clone())
+    .value(|d| d.net)
+    .tooltip_title(|d| format!("{} 2025", d.month).into())
+    .tooltip_value(|_, value| format!("${value:.2}").into())
+    .tooltip_value_color(move |_, value| if value >= 0. { gain } else { loss })
+```
+
+标题加若干行表达不了的版式（比如表格），用 `render_tooltip` 根据数据自行绘制浮层里的内容。图表的悬停标记（十字线、圆点、高亮带）和浮层的位置仍由图表负责，上面三个文字选项此时不再生效：
+
+```rust
+AreaChart::new(data)
+    .x(|d| d.month.clone())
+    .y(|d| d.last_year)
+    .y(|d| d.revenue)
+    .render_tooltip(|d, _, _| {
+        v_flex()
+            .child(d.month.clone())
+            .child(format!("2025: {}", d.revenue))
+            .child(format!("2024: {}", d.last_year))
+    })
+```
+
 ### 标识
 
 这些行为都以 `ElementId` 为键，图表默认取自己的构造位置作为 id——只写出一次的图表因此天然唯一，绝大多数图表都是这种情况。若同一处构造被渲染成多个同级图表，需要分别命名，否则它们会共用同一份悬停状态与缓存：
@@ -736,6 +764,18 @@ fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pi
             .into_any_element(),
     )
 }
+```
+
+`value_color` 为最后添加的一行设置数值颜色，比如按正负给涨跌幅着色。`plain_row` 添加一行不带色块的内容，用于图上没有对应系列的数字，比如合计或比率；与带色块的行放在一起时，它的标签会与这些行的标签对齐：
+
+```rust
+Tooltip::new(cursor, bounds.size)
+    .title("Apr 5")
+    .row(desktop, "Desktop", "373")
+    .row(mobile, "Mobile", "187")
+    .plain_row("Total", "560")
+    .plain_row("Change", "+12%")
+    .value_color(gain)
 ```
 
 如果还要强调 plot 自己的图形——让悬停柱子周围的柱子变淡、让扇区弹出——就实现 `Plot::hover`。它在每帧的 `tooltip` 与 `paint` 之前运行，收到当前聚焦的 [`PlotHover`]；它携带 `TooltipState`，光标离开后会保留一段时间，`hover.focus()` 逐渐回到零，因此在这里采样动效并把结果存到 `self`。`hover.glide` 让一个位置按 tooltip 所用的同一个 spring 移动；把结果交给十字线，并用 `Tooltip::glide(false)` 关掉 tooltip 自己的滑动，避免重复做 spring：

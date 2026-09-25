@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-use super::{build_band_labels, caller_id, labeled_items};
+use super::{TooltipContent, build_band_labels, caller_id, labeled_items};
 
 #[derive(IntoPlot)]
 pub struct CandlestickChart<T, X, Y>
@@ -40,6 +40,7 @@ where
     bearish: Option<Hsla>,
     id: ElementId,
     interactive: bool,
+    tooltip_content: TooltipContent<T>,
 }
 
 impl<T, X, Y> CandlestickChart<T, X, Y>
@@ -67,6 +68,7 @@ where
             bearish: None,
             id: caller_id(),
             interactive: true,
+            tooltip_content: TooltipContent::default(),
         }
     }
 
@@ -91,6 +93,47 @@ where
     /// drops its path cache, which is keyed on the same id.
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
+        self
+    }
+
+    /// Set the hover tooltip's title for a datum, instead of its x value.
+    pub fn tooltip_title(mut self, title: impl Fn(&T) -> SharedString + 'static) -> Self {
+        self.tooltip_content.set_title(title);
+        self
+    }
+
+    /// Set the text of each tooltip row's value; the raw number by default.
+    ///
+    /// The closure receives the datum and the value the row reads.
+    pub fn tooltip_value(mut self, value: impl Fn(&T, f64) -> SharedString + 'static) -> Self {
+        self.tooltip_content.set_value(value);
+        self
+    }
+
+    /// Color each tooltip row's value, such as green or red by its sign; the
+    /// tooltip's text color by default.
+    pub fn tooltip_value_color<H>(mut self, color: impl Fn(&T, f64) -> H + 'static) -> Self
+    where
+        H: Into<Hsla> + 'static,
+    {
+        self.tooltip_content.set_value_color(color);
+        self
+    }
+
+    /// Draw the tooltip box's content for a datum yourself, in place of the
+    /// title and rows, for a layout they cannot express such as a table.
+    ///
+    /// The highlight band and where the box sits stay the chart's, and
+    /// [`tooltip_title`](Self::tooltip_title), [`tooltip_value`](Self::tooltip_value)
+    /// and [`tooltip_value_color`](Self::tooltip_value_color) no longer apply.
+    pub fn render_tooltip<E>(
+        mut self,
+        render: impl Fn(&T, &mut Window, &mut App) -> E + 'static,
+    ) -> Self
+    where
+        E: IntoElement,
+    {
+        self.tooltip_content.set_render(render);
         self
     }
 
@@ -347,7 +390,7 @@ where
         state: &TooltipState,
         cursor: Point<Pixels>,
         bounds: Bounds<Pixels>,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
         let (x_fn, open_fn, high_fn, low_fn, close_fn) = (
@@ -358,7 +401,6 @@ where
             self.close.as_ref()?,
         );
         let d = self.data.get(state.index)?;
-        let title: SharedString = x_fn(d).into();
         let (open, close) = (open_fn(d), close_fn(d));
         let (bullish, bearish) = self.candle_colors(cx);
         let color = if close > open { bullish } else { bearish };
@@ -371,19 +413,27 @@ where
             .span(0., self.plot_height(bounds))
             .band(px(band_width));
 
-        let rows = [
-            (t!("Chart.open"), open),
-            (t!("Chart.high"), high_fn(d)),
-            (t!("Chart.low"), low_fn(d)),
-            (t!("Chart.close"), close),
-        ];
-        let mut tooltip = Tooltip::new(cursor, bounds.size)
+        let tooltip = Tooltip::new(cursor, bounds.size)
             .gap(px(8.))
-            .cross_line(cross_line)
-            .title(title);
-        for (label, value) in rows {
-            tooltip = tooltip.row(color, label.to_string(), format!("{}", value.to_f64()?));
-        }
+            .cross_line(cross_line);
+        let tooltip = self.tooltip_content.fill(
+            tooltip,
+            d,
+            || Some(x_fn(d).into()),
+            || {
+                [
+                    (t!("Chart.open"), open),
+                    (t!("Chart.high"), high_fn(d)),
+                    (t!("Chart.low"), low_fn(d)),
+                    (t!("Chart.close"), close),
+                ]
+                .into_iter()
+                .map(|(label, value)| Some((color, label.to_string().into(), value.to_f64()?)))
+                .collect::<Option<Vec<_>>>()
+            },
+            window,
+            cx,
+        )?;
 
         Some(tooltip.into_any_element())
     }
