@@ -244,6 +244,231 @@ A quick load may finish before the loading view appears. A missing asset key, in
 
 `with_loading` and `with_fallback` supply replacement elements; they do not expose a separate `ImageState` enum or automatically add a retry command. If a remote image is essential to the task, provide a nearby retry action in your application's state and rebuild the image with an updated source when the user retries. Avoid showing a fake loading skeleton after the source has already failed.
 
+## Cache remote images over HTTP
+
+GPUI loads a URL source such as `img("https://...")`, and a remote image in a `TextView` document, through the `HttpClient` installed on the `App`. On native platforms the application chooses that client: the default one fails every request, so install one with `cx.set_http_client(...)` or `Application::with_http_client(...)` before remote images can load. On the web, `gpui_kit::application()` installs a client backed by the browser's Fetch API, and the browser's HTTP cache already applies; this section is about native applications.
+
+GPUI's image cache sits above that client. It keeps decoded images in memory, keyed by source, which is enough for repeated sources in a running view but not for network traffic:
+
+- It ends with the process, so every launch downloads every image again.
+- It ignores `Cache-Control`, `ETag`, and `Last-Modified`. It cannot keep a response the server allows to be reused, or ask the server whether an older copy is still current.
+- It lives only as long as the cache that holds it. An image with its own `.image_cache(...)`, or a loader that keeps a cache per view, requests the image again each time a new view is created.
+
+To reuse responses across views and launches, wrap the application's `HttpClient` in a client that applies HTTP caching rules, and install the wrapper once at startup. Every remote image then benefits, including images loaded by code the application does not own. Follow these rules:
+
+- **Cache only a GET without a request body.** Pass every other request through unchanged.
+- **Treat the cache as shared.** One client serves the whole application: its own views, extensions, and document views. Do not store a `no-store` or `private` response, or a response to a request carrying `Authorization`, unless the server explicitly allows a shared cache to keep it. A layer below the cache that adds cookies or tokens hides them from the cache, so add credentials above the cache, or leave those hosts uncached.
+- **Revalidate instead of downloading again.** Serve a fresh response without the network. When it is stale, send `If-None-Match` or `If-Modified-Since`; on `304 Not Modified`, return the stored body with the refreshed headers.
+- **Honor the caller's redirect policy.** `img()` follows redirects, but a loader that authorizes each hop itself requests `RedirectPolicy::NoFollow` and must receive the `3xx` response. Keep the policy in the cache key so a followed result never answers that caller, and cache the redirect response itself by the same rules.
+- **Bound memory and disk use.** Cap each entry and the total size, evict old entries, and stream a response that is too large to keep straight through.
+- **Authorize before the request.** The cache answers any caller that asks for the same URL. A check that decides whether a caller may reach a URL, such as the network grants of gpui-shell scripts, must run before `send`. The cache then never widens what a caller can reach; it only avoids repeating a request that was already allowed.
+
+The example below applies these rules in memory. The [http-cache-semantics](https://crates.io/crates/http-cache-semantics) crate implements the HTTP caching rules: freshness, validators, `Vary`, and the restrictions on a shared cache. Add `http-cache-semantics = "2"`, `futures`, `bytes`, and `anyhow` to `Cargo.toml`.
+
+```rust
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::{Arc, Mutex},
+    time::SystemTime,
+};
+
+use bytes::Bytes;
+use futures::{AsyncReadExt as _, FutureExt as _, future::BoxFuture, io::Cursor};
+use gpui_kit::http_client::{
+    AsyncBody, HttpClient, Inner, Method, RedirectPolicy, Request, Response, Url,
+    http::{HeaderValue, response},
+};
+use http_cache_semantics::{AfterResponse, BeforeRequest, CachePolicy};
+
+/// An [`HttpClient`] that answers GET requests from memory when HTTP caching
+/// rules allow it, and forwards everything else to `inner`.
+pub struct CachingHttpClient {
+    inner: Arc<dyn HttpClient>,
+    store: Arc<Mutex<Store>>,
+}
+
+impl CachingHttpClient {
+    pub fn new(inner: Arc<dyn HttpClient>, max_bytes: usize) -> Self {
+        let store = Store {
+            max_bytes,
+            ..Default::default()
+        };
+        Self {
+            inner,
+            store: Arc::new(Mutex::new(store)),
+        }
+    }
+}
+
+/// The URI plus the caller's redirect policy. A caller that disables
+/// redirects must receive the 3xx itself, never a followed result.
+type Key = (String, Option<RedirectPolicy>);
+
+struct Entry {
+    policy: CachePolicy,
+    body: Bytes,
+}
+
+#[derive(Default)]
+struct Store {
+    entries: HashMap<Key, Entry>,
+    /// Keys in insertion order; the oldest is evicted first.
+    order: VecDeque<Key>,
+    bytes: usize,
+    max_bytes: usize,
+}
+
+impl Store {
+    /// A single response may use at most an eighth of the budget.
+    fn max_entry_bytes(&self) -> usize {
+        self.max_bytes / 8
+    }
+
+    fn get(&self, key: &Key) -> Option<(CachePolicy, Bytes)> {
+        let entry = self.entries.get(key)?;
+        Some((entry.policy.clone(), entry.body.clone()))
+    }
+
+    fn insert(&mut self, key: Key, policy: CachePolicy, body: Bytes) {
+        self.remove(&key);
+        self.bytes += body.len();
+        self.order.push_back(key.clone());
+        self.entries.insert(key, Entry { policy, body });
+        while self.bytes > self.max_bytes {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(entry) = self.entries.remove(&oldest) {
+                self.bytes -= entry.body.len();
+            }
+        }
+    }
+
+    fn remove(&mut self, key: &Key) {
+        if let Some(entry) = self.entries.remove(key) {
+            self.bytes -= entry.body.len();
+            self.order.retain(|k| k != key);
+        }
+    }
+}
+
+fn respond(head: response::Parts, body: Bytes) -> Response<AsyncBody> {
+    Response::from_parts(head, AsyncBody::from_bytes(body))
+}
+
+impl HttpClient for CachingHttpClient {
+    fn user_agent(&self) -> Option<&HeaderValue> {
+        self.inner.user_agent()
+    }
+
+    fn proxy(&self) -> Option<&Url> {
+        self.inner.proxy()
+    }
+
+    fn send(
+        &self,
+        req: Request<AsyncBody>,
+    ) -> BoxFuture<'static, anyhow::Result<Response<AsyncBody>>> {
+        // Only a GET without a body is cacheable; pass everything else through.
+        if req.method() != Method::GET || !matches!(req.body().0, Inner::Empty) {
+            return self.inner.send(req);
+        }
+
+        let inner = self.inner.clone();
+        let store = self.store.clone();
+        async move {
+            let (request, _) = req.into_parts();
+            let redirects = request.extensions.get::<RedirectPolicy>().cloned();
+            let key = (request.uri.to_string(), redirects);
+            let cached = store.lock().unwrap().get(&key);
+
+            // Fresh: answer without the network. Stale: send the conditional
+            // headers (If-None-Match / If-Modified-Since) the policy computed,
+            // keeping the caller's extensions such as its redirect policy.
+            let mut outgoing = request.clone();
+            if let Some((policy, body)) = &cached {
+                match policy.before_request(&request, SystemTime::now()) {
+                    BeforeRequest::Fresh(head) => return Ok(respond(head, body.clone())),
+                    BeforeRequest::Stale {
+                        request: revalidation,
+                        ..
+                    } => {
+                        outgoing.headers = revalidation.headers;
+                    }
+                }
+            }
+
+            let (head, body) = inner
+                .send(Request::from_parts(outgoing, AsyncBody::empty()))
+                .await?
+                .into_parts();
+
+            // 304: keep the cached body under the refreshed headers.
+            if let Some((policy, cached_body)) = cached {
+                match policy.after_response(&request, &head, SystemTime::now()) {
+                    AfterResponse::NotModified(policy, head) => {
+                        let mut store = store.lock().unwrap();
+                        store.insert(key, policy, cached_body.clone());
+                        return Ok(respond(head, cached_body));
+                    }
+                    AfterResponse::Modified(..) => {}
+                }
+            }
+
+            // `CachePolicy::new` evaluates the response as a shared cache:
+            // `no-store` and `private` responses, and most responses to requests
+            // carrying `Authorization`, are not storable.
+            let policy = CachePolicy::new(&request, &head);
+            if !policy.is_storable() {
+                store.lock().unwrap().remove(&key);
+                return Ok(Response::from_parts(head, body));
+            }
+
+            let limit = store.lock().unwrap().max_entry_bytes();
+            let mut bytes = Vec::new();
+            let mut reader = body.take(limit as u64 + 1);
+            reader.read_to_end(&mut bytes).await?;
+            let body = reader.into_inner();
+            if bytes.len() > limit {
+                // Too large to keep: return what was read, then the rest of the stream.
+                store.lock().unwrap().remove(&key);
+                let rest = Cursor::new(bytes).chain(body);
+                return Ok(Response::from_parts(head, AsyncBody::from_reader(rest)));
+            }
+
+            let bytes = Bytes::from(bytes);
+            store.lock().unwrap().insert(key, policy, bytes.clone());
+            Ok(respond(head, bytes))
+        }
+        .boxed()
+    }
+}
+```
+
+Install the wrapper around the client the application already uses. Here `reqwest_client` is the `gpui-pre-reqwest-client` crate at the GPUI snapshot version your `gpui-kit` release pins:
+
+```rust
+use std::sync::Arc;
+
+gpui_kit::application().run(|cx| {
+    gpui_kit::init(cx);
+
+    let network = reqwest_client::ReqwestClient::user_agent("my-app/1.0")
+        .expect("failed to create the HTTP client");
+    let cached = CachingHttpClient::new(Arc::new(network), 64 * 1024 * 1024);
+    cx.set_http_client(Arc::new(cached));
+
+    // Open windows here.
+});
+```
+
+The example keeps its scope small. Extend it where your application needs more:
+
+- **Persistence.** Entries disappear when the application quits. To keep images across launches, store each body with its `CachePolicy` on disk (`CachePolicy` implements `serde` traits), write files atomically, and remove entries past a size or age limit at startup. A client built on `reqwest` can instead use caching middleware with a disk store, such as [http-cache-reqwest](https://crates.io/crates/http-cache-reqwest).
+- **Variants.** Each URL keeps one response. A response that differs by `Vary` replaces the previous variant.
+- **Duplicate requests.** Concurrent misses for the same URL each reach the network. GPUI's image loader already shares one load per source.
+- **Eviction.** The oldest entry is removed first, whether or not it was used recently. Use an LRU structure when access patterns matter.
+
 ## SVG as an image or an icon
 
 Both forms can load a key from the same `AssetSource`, but they render differently:
@@ -288,7 +513,7 @@ Applying `.text_color(...)` to `img("images/brand.svg")` does **not** recolor th
 - Supply image dimensions close to the displayed size. A tiny thumbnail does not need the same encoded pixels as a full-screen photo.
 - Compress source files and verify their appearance on your target displays. Use a suitable format for photos versus line art; do not assume every platform or decoder accepts every format.
 - Keep a stable ratio or fixed bounds for images that arrive later. The loading and failure views should occupy the same region.
-- GPUI's default image cache already handles ordinary repeated sources. Introduce a custom cache only for a measured lifetime or memory requirement.
+- GPUI's default image cache already handles ordinary repeated sources. Introduce a custom cache only for a measured lifetime or memory requirement. To avoid downloading remote images again in new views or after a restart, cache at the HTTP layer instead; see [Cache remote images over HTTP](#cache-remote-images-over-http).
 - For a large scrolling gallery, create only the visible or nearby items using the collection APIs. The `img()` call alone is not a lazy-loading policy.
 - Pair informative images with visible descriptive text or an accessible description in the surrounding UI. Decorative images need no duplicated narration. Make image-driven commands real controls with names, focus, and keyboard activation.
 
