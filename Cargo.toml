@@ -60,12 +60,12 @@ story = { path = "crates/story" }
 
 # Temporary GPUI Fast trial for performance testing. Keep its companion crates
 # on the same commit so GPUI types are shared across the workspace.
-gpui = { git = "https://github.com/sunli829/gpui-fast", rev = "bee30b640956ba3b690e3e56de3edd2de2521fca" }
-gpui_platform = { git = "https://github.com/sunli829/gpui-fast", rev = "bee30b640956ba3b690e3e56de3edd2de2521fca", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { git = "https://github.com/sunli829/gpui-fast", rev = "bee30b640956ba3b690e3e56de3edd2de2521fca" }
-gpui_macros = { git = "https://github.com/sunli829/gpui-fast", rev = "bee30b640956ba3b690e3e56de3edd2de2521fca" }
-reqwest_client = { git = "https://github.com/sunli829/gpui-fast", rev = "bee30b640956ba3b690e3e56de3edd2de2521fca" }
-sum-tree = { package = "sum_tree", git = "https://github.com/sunli829/gpui-fast", rev = "bee30b640956ba3b690e3e56de3edd2de2521fca" }
+gpui = { git = "https://github.com/longbridge/gpui-fast", rev = "bae418d18771622ee77dae68b09ced1193a2c99a" }
+gpui_platform = { git = "https://github.com/longbridge/gpui-fast", rev = "bae418d18771622ee77dae68b09ced1193a2c99a", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { git = "https://github.com/longbridge/gpui-fast", rev = "bae418d18771622ee77dae68b09ced1193a2c99a" }
+gpui_macros = { git = "https://github.com/longbridge/gpui-fast", rev = "bae418d18771622ee77dae68b09ced1193a2c99a" }
+reqwest_client = { git = "https://github.com/longbridge/gpui-fast", rev = "bae418d18771622ee77dae68b09ced1193a2c99a" }
+sum-tree = { package = "sum_tree", git = "https://github.com/longbridge/gpui-fast", rev = "bae418d18771622ee77dae68b09ced1193a2c99a" }
 reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false, features = [
     "charset",
     "http2",
