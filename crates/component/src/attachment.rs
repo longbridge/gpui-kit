@@ -2,9 +2,10 @@ use std::{rc::Rc, time::Duration};
 
 use gpui::{
     AnyElement, App, Axis, ClickEvent, ElementId, Hsla, ImageSource, InteractiveElement as _,
-    IntoElement, MouseButton, ObjectFit, ParentElement, RenderOnce, ScrollHandle, SharedString,
-    StatefulInteractiveElement as _, StyleRefinement, Styled, StyledImage as _, Window, div, img,
-    linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px, relative, rems,
+    IntoElement, MouseButton, ObjectFit, ParentElement, Refineable as _, RenderOnce, ScrollHandle,
+    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, StyledImage as _,
+    Window, div, img, linear_color_stop, linear_gradient, prelude::FluentBuilder as _, px,
+    relative, rems,
 };
 use gpui_base::motion::{Transition, transition};
 
@@ -343,6 +344,7 @@ impl RenderOnce for AttachmentMedia {
             Size::Small | Size::Medium | Size::Large | Size::Size(_) => tokens.radius.md,
         };
         let source = self.source;
+        let corner_radii = self.style.corner_radii.clone();
         let has_source = source.is_some();
         let failed_media = self.status.is_failed() && !has_source;
         let dimmed_image = has_source
@@ -381,14 +383,18 @@ impl RenderOnce for AttachmentMedia {
                 tokens.colors.foreground
             })
             .when_some(source, |this, source| {
-                this.child(
-                    img(source)
-                        .absolute()
-                        .inset_0()
-                        .size_full()
-                        .object_fit(ObjectFit::Cover)
-                        .when(dimmed_image, |this| this.opacity(0.6)),
-                )
+                // gpui clips rectangularly, so the slot's `overflow_hidden` cannot
+                // round the image: it carries the slot's radius itself, including
+                // a caller's `.rounded()` refinement.
+                let mut image = img(source)
+                    .absolute()
+                    .inset_0()
+                    .size_full()
+                    .rounded(radius)
+                    .object_fit(ObjectFit::Cover)
+                    .when(dimmed_image, |this| this.opacity(0.6));
+                image.style().corner_radii.refine(&corner_radii);
+                this.child(image)
             })
             .children(children)
             .refine_style(&self.style)
