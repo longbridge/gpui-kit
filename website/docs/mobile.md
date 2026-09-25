@@ -13,6 +13,8 @@ GPUI Kit currently uses `gpui-pre-mobile`, a temporary compatibility package mai
 
 The current integration is experimental. The Swift-hosted iOS example has been built and exercised in the iOS simulator. Beyond this guide, GPUI Kit has been validated on iOS and Android in a limited scope: an AI chat area built from TextView, Button, Menu, Popover, Scrollbar, Input, Textarea and text selection passed functional and performance testing on both platforms, and the fixes from that work are in GPUI Kit. TextView is covered completely in that scenario. Other components and complete application layouts have not been validated on mobile yet. The fork's Android activity example is a different host path that this guide does not cover. Treat the iOS simulator path below as the documented target, not a general mobile support guarantee.
 
+Native UI and GPUI can share one screen on both iOS and Android. The native side keeps the parts users expect to behave like the platform, such as the navigation bar and the bottom input field, and GPUI renders as one view between them. Each side keeps its own layout and input; the host places the GPUI view like any other native view.
+
 ## Run the iOS example
 
 Start with the compatibility fork’s [Swift container example](https://github.com/longbridge/gpui-mobile/tree/0b882efdac7f524e0bb0b1d4c886b2aa752f9f20/example). It includes a conversation UI with `Message`, `Bubble`, `TextView`, `Input`, thought summaries, and copy actions. Its responses are local sample data; it does not connect to an AI service.
@@ -147,7 +149,7 @@ For an application integration, check launch and return from the background, key
 
 Measure rendering on a physical device with a release build and Xcode Instruments before making performance claims. Simulator results are useful for layout and interaction, but are not device frame-time measurements.
 
-Android uses a separate activity and surface lifecycle. The repository contains an Android example. Outside the chat scenario validated above, this guide does not establish Android Kit compatibility, and it does not cover native Android `View` embedding. Validate those paths separately before depending on them.
+Android uses a separate activity and surface lifecycle. The repository contains an Android example. GPUI can be embedded as an Android `View` in a native layout, as described above, but this guide documents only the iOS steps. Outside the chat scenario validated above, Android Kit compatibility is not established. Validate the Android host path separately before depending on it.
 
 ## Troubleshooting
 
