@@ -1,4 +1,4 @@
-use std::{ops::Range, sync::Arc};
+use std::{ops::Range, rc::Rc, sync::Arc};
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
@@ -12,6 +12,7 @@ use crate::StyledExt;
 use crate::text::TextViewFormat;
 use crate::text::markdown_ext::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
 use crate::text::node::{CodeBlock, TableData};
+use crate::text::range_highlight::{PendingReveal, RevealProgress};
 use crate::text::state::{LineSpan, SelectionFormat, TextViewState};
 use crate::text::stream_fade::TextViewMotion;
 use crate::{GlobalState, TextSelection, text::TextViewStyle};
@@ -79,6 +80,10 @@ pub(crate) type ImageSourceFn = dyn Fn(&gpui::SharedUri) -> gpui::ImageSource + 
 pub(crate) type LinkClickHandlerFn =
     dyn Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync;
 
+/// Kept by the element only, so unlike the handlers the state carries, it
+/// may hold a `ScrollHandle`.
+pub(crate) type RevealHandlerFn = dyn Fn(Bounds<Pixels>, &mut Window, &mut App);
+
 pub(crate) fn handle_link_click(
     handler: &Option<Arc<LinkClickHandlerFn>>,
     url: SharedString,
@@ -132,6 +137,7 @@ pub struct TextView {
     table_actions: Option<Arc<TableActionsFn>>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     image_source: Option<Arc<ImageSourceFn>>,
+    reveal_handler: Option<Rc<RevealHandlerFn>>,
     markdown_extensions: Arc<MarkdownExtensions>,
     motion: Option<TextViewMotion>,
 }
@@ -178,6 +184,7 @@ impl TextView {
             table_actions: None,
             link_click_handler: None,
             image_source: None,
+            reveal_handler: None,
             markdown_extensions: Arc::default(),
             motion: None,
         }
@@ -201,6 +208,7 @@ impl TextView {
             table_actions: None,
             link_click_handler: None,
             image_source: None,
+            reveal_handler: None,
             markdown_extensions: Arc::default(),
             motion: None,
         }
@@ -224,6 +232,7 @@ impl TextView {
             table_actions: None,
             link_click_handler: None,
             image_source: None,
+            reveal_handler: None,
             markdown_extensions: Arc::default(),
             motion: None,
         }
@@ -354,6 +363,22 @@ impl TextView {
         F: Fn(&SharedString, &ClickEvent, &mut Window, &mut App) + Send + Sync + 'static,
     {
         self.link_click_handler = Some(Arc::new(handler));
+        self
+    }
+
+    /// Scroll a container that does not follow scroll requests to the line
+    /// of [`TextViewState::reveal_range`].
+    ///
+    /// A `gpui::list` scrolls to that line by itself; a `div` with
+    /// `overflow_y_scroll`, for one, does not. After a frame in which the
+    /// line was laid out but not visible, the handler receives its bounds in
+    /// window coordinates, to scroll the container, e.g. through its
+    /// `ScrollHandle`, until the line is visible.
+    pub fn on_reveal<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(Bounds<Pixels>, &mut Window, &mut App) + 'static,
+    {
+        self.reveal_handler = Some(Rc::new(handler));
         self
     }
 
@@ -767,6 +792,25 @@ impl Element for TextView {
             request_layout.element.paint(window, cx);
         }
         GlobalState::global_mut(cx).text_view_state_stack.pop();
+
+        // Every list has scrolled by now, so the line of a reveal is where
+        // it ends up this frame.
+        if state.read(cx).pending_reveal.is_some() {
+            let progress = state.update(cx, |state, _| {
+                state.pending_reveal.as_mut().map(PendingReveal::progress)
+            });
+            match progress {
+                Some(RevealProgress::Shown) => {
+                    state.update(cx, |state, _| state.pending_reveal = None);
+                }
+                Some(RevealProgress::Hidden(line)) => {
+                    if let Some(handler) = &self.reveal_handler {
+                        handler(line, window, cx);
+                    }
+                }
+                Some(RevealProgress::NotLaidOut) | None => {}
+            }
+        }
 
         if self.selectable {
             let (adapter, scroll_offset, content_bounds, self_scroll, handle_color) = {
@@ -2253,6 +2297,58 @@ mod tests {
             shaped_markers(Format::Markdown, nested_starts_at_zero),
             ["1. ", "0. "]
         );
+    }
+
+    /// A line with inline code takes `InlineFlow` and a plain line takes the
+    /// ordinary text path; both must be the same height, or a list with one
+    /// code item is unevenly spaced (#3162). The fractional scale factor and
+    /// zooms give line heights that are not whole logical pixels.
+    #[test]
+    fn inline_code_line_is_as_tall_as_a_plain_line() {
+        use crate::text::inline::test_fonts::{MONO, WideMonoTextSystem};
+        use gpui::{TestApp, rems};
+
+        struct LineRoot {
+            plain: Entity<TextViewState>,
+            code: Entity<TextViewState>,
+            preview_zoom: f32,
+        }
+
+        impl Render for LineRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(600.))
+                    .text_size(rems(self.preview_zoom))
+                    .child(TextView::new(&self.plain))
+                    .child(TextView::new(&self.code))
+            }
+        }
+
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        app.update(|cx| {
+            crate::init(cx);
+            crate::Theme::global_mut(cx).tokens.typography.mono = MONO.into();
+        });
+        for scale_factor in [1.6, 2.] {
+            for preview_zoom in [1., 1.25] {
+                let mut window = app.open_window(|_, cx| LineRoot {
+                    plain: cx.new(|cx| TextViewState::markdown("plain body words", cx)),
+                    code: cx.new(|cx| TextViewState::markdown("plain `code` words", cx)),
+                    preview_zoom,
+                });
+                window.simulate_scale_factor_change(scale_factor);
+                window.draw();
+                app.run_until_parked();
+                window.draw();
+                let (plain, code) = window.read(|root, cx| {
+                    (
+                        root.plain.read(cx).bounds().size.height,
+                        root.code.read(cx).bounds().size.height,
+                    )
+                });
+                assert_eq!(code, plain, "scale {scale_factor}, zoom {preview_zoom}");
+            }
+        }
     }
 
     /// The code-bearing list item takes `InlineFlow`; the plain item takes the

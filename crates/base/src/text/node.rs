@@ -25,7 +25,7 @@ use crate::{
             text_size_ranges,
         },
         inline_flow::{InlineFlow, InlineFlowItem, slice_ranges},
-        range_highlight::RangeHighlightFrame,
+        range_highlight::{RangeHighlightFrame, RevealAt, RevealRequest},
         stream_fade::{StreamFadeFrame, TextLeafKey},
         text_view::handle_link_click,
     },
@@ -1891,7 +1891,8 @@ impl CodeBlock {
                     ),
                     node_cx.link_click_handler.clone(),
                 )
-                .range_backgrounds(node_cx.range_backgrounds(leaf_key).to_vec()),
+                .range_backgrounds(node_cx.range_backgrounds(leaf_key).to_vec())
+                .reveal(node_cx.reveal_at(leaf_key, 0, self.code().len())),
             );
         // The id scopes the caller's action ids per code block, so plain ids
         // like `"copy"` don't collide across blocks; without actions nothing
@@ -1942,6 +1943,8 @@ pub(crate) struct NodeContext {
     pub(crate) stream_fade: Option<Arc<StreamFadeFrame>>,
     /// The application's range highlights, when there are any.
     pub(crate) range_highlights: Option<Arc<RangeHighlightFrame>>,
+    /// The line being scrolled into view, when there is one.
+    pub(crate) reveal: Option<RevealRequest>,
 }
 
 impl NodeContext {
@@ -1971,6 +1974,12 @@ impl NodeContext {
             (Some(frame), Some(key)) => frame.backgrounds(key),
             _ => &[],
         }
+    }
+
+    /// The pending reveal, when it starts in the text leaf `key` between
+    /// `start` and `end`, rebased to `start`.
+    fn reveal_at(&self, key: Option<TextLeafKey>, start: usize, end: usize) -> Option<RevealAt> {
+        self.reveal.as_ref()?.at(key, start, end)
     }
 }
 
@@ -2064,7 +2073,7 @@ impl Paragraph {
         if self.should_render_inline_flow() {
             return InlineFlow::new(
                 leaf_element_id(fade_key),
-                self.inline_flow_items(fades, backgrounds, node_cx, cx),
+                self.inline_flow_items(fade_key, fades, backgrounds, node_cx, cx),
                 node_cx.link_click_handler.clone(),
             )
             .into_any_element();
@@ -2087,6 +2096,7 @@ impl Paragraph {
             }
             let highlights = fade_highlights(highlights, &slice_fades(fades, 0, text.len()));
             let backgrounds = slice_backgrounds(backgrounds, 0, text.len());
+            let reveal = node_cx.reveal_at(fade_key, 0, text.len());
             if let Ok(mut state) = self.state.lock() {
                 state.set_text(text);
             }
@@ -2097,6 +2107,7 @@ impl Paragraph {
                 node_cx.link_click_handler.clone(),
             )
             .range_backgrounds(backgrounds)
+            .reveal(reveal)
             .into_any_element();
         }
 
@@ -2134,6 +2145,7 @@ impl Paragraph {
                             consumed,
                             consumed + text.len(),
                         ))
+                        .reveal(node_cx.reveal_at(fade_key, consumed, consumed + text.len()))
                         .into_any_element(),
                     );
                 }
@@ -2226,6 +2238,7 @@ impl Paragraph {
                     node_cx.link_click_handler.clone(),
                 )
                 .range_backgrounds(slice_backgrounds(backgrounds, consumed, text_end))
+                .reveal(node_cx.reveal_at(fade_key, consumed, text_end))
                 .into_any_element(),
             );
         }
@@ -2258,6 +2271,7 @@ impl Paragraph {
 
     fn inline_flow_items(
         &self,
+        leaf_key: Option<TextLeafKey>,
         fades: &[(Range<usize>, f32)],
         backgrounds: &[(Range<usize>, Hsla)],
         node_cx: &NodeContext,
@@ -2281,6 +2295,7 @@ impl Paragraph {
                     let item_fades = slice_fades(fades, consumed, consumed + text.len());
                     let item_backgrounds =
                         slice_backgrounds(backgrounds, consumed, consumed + text.len());
+                    let item_reveal = node_cx.reveal_at(leaf_key, consumed, consumed + text.len());
                     consumed += text.len();
                     items.push(InlineFlowItem::Text {
                         state: inline_node.state.clone(),
@@ -2288,6 +2303,7 @@ impl Paragraph {
                         links: std::mem::take(&mut links),
                         highlights: fade_highlights(std::mem::take(&mut highlights), &item_fades),
                         backgrounds: item_backgrounds,
+                        reveal: item_reveal,
                     });
                 }
                 let mut object_style = HighlightStyle::default();
@@ -2347,6 +2363,7 @@ impl Paragraph {
                             consumed,
                             consumed + text.len(),
                         ),
+                        reveal: node_cx.reveal_at(leaf_key, consumed, consumed + text.len()),
                     });
                 }
 
@@ -2402,12 +2419,14 @@ impl Paragraph {
                 &slice_fades(fades, consumed, consumed + text.len()),
             );
             let backgrounds = slice_backgrounds(backgrounds, consumed, consumed + text.len());
+            let reveal = node_cx.reveal_at(leaf_key, consumed, consumed + text.len());
             items.push(InlineFlowItem::Text {
                 state: self.state.clone(),
                 text: text.into(),
                 links,
                 highlights,
                 backgrounds,
+                reveal,
             });
         }
 
@@ -2489,7 +2508,7 @@ fn measure_table_columns(
                 .iter()
                 .any(|node| node.custom.is_some())
             {
-                let items = cell.children.inline_flow_items(&[], &[], node_cx, cx);
+                let items = cell.children.inline_flow_items(None, &[], &[], node_cx, cx);
                 let width = super::inline_flow::intrinsic_width(&items, window, cx);
                 let border = if ix + 1 < col_count {
                     CELL_BORDER_PX
@@ -3469,7 +3488,7 @@ mod tests {
                 ],
                 ..Default::default()
             };
-            let items = paragraph.inline_flow_items(&[], &[], &node_cx, cx);
+            let items = paragraph.inline_flow_items(None, &[], &[], &node_cx, cx);
             let InlineFlowItem::Object { style, link, .. } = &items[0] else {
                 panic!()
             };

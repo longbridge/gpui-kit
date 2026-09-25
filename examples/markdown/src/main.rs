@@ -10,7 +10,7 @@ use std::{
 use gpui_component_story::Open;
 use gpui_kit::assets::Assets;
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
     avatar::Avatar,
     button::{Button, ButtonVariants as _},
     clipboard::Clipboard,
@@ -25,8 +25,8 @@ use gpui_kit::component::{
     status_bar::StatusBar,
     text::{
         InlineElement, InlineRenderContext, MarkdownNode, MarkdownParseContext, MarkdownPlugin,
-        RangeHighlight, RenderedText, SelectionFormat, TextView, TextViewState, TextViewStyle,
-        markdown_ast,
+        RangeHighlight, RangeHighlightError, RenderedText, SelectionFormat, TextView,
+        TextViewState, TextViewStyle, markdown_ast,
     },
     v_flex,
 };
@@ -1184,9 +1184,11 @@ pub struct Example {
     /// source.
     selection_format: SelectionFormat,
     find_state: Entity<InputState>,
-    /// The preview text the find query was last highlighted in.
+    /// The preview text the find query was last searched in.
     searched: Option<RenderedText>,
-    match_count: usize,
+    matches: Vec<Range<usize>>,
+    /// The index of the current match in `matches`.
+    current_match: usize,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -1227,11 +1229,14 @@ impl Example {
 
         let _subscriptions = vec![
             cx.subscribe(&input_state, |_, _, _: &InputEvent, cx| cx.notify()),
-            cx.subscribe(&find_state, |this, _, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Change) {
+            cx.subscribe(&find_state, |this, _, event: &InputEvent, cx| match event {
+                InputEvent::Change => {
                     this.searched = None;
+                    this.current_match = 0;
                     this.highlight_matches(cx);
                 }
+                InputEvent::PressEnter { shift, .. } => this.go_to_match(!shift, cx),
+                _ => {}
             }),
             // Search again whenever the preview's content changes.
             cx.observe(&text_view, |this, _, cx| this.highlight_matches(cx)),
@@ -1246,42 +1251,84 @@ impl Example {
             selection_format: SelectionFormat::Plain,
             find_state,
             searched: None,
-            match_count: 0,
+            matches: Vec::new(),
+            current_match: 0,
             _subscriptions,
         }
     }
 
-    /// Highlight every occurrence of the find query in the preview, unless
-    /// the preview text it was last highlighted in is still current.
+    /// Search the preview for the find query, unless the preview text it
+    /// was last searched in is still current, and highlight the matches.
     fn highlight_matches(&mut self, cx: &mut Context<Self>) {
-        let query = self.find_state.read(cx).value();
-        let color = cx.theme().warning.opacity(0.3);
-        let searched = self.searched.as_ref();
-        let result = self.text_view.update(cx, |state, cx| {
-            let text = state.rendered_text();
-            if searched == Some(&text) {
-                return None;
-            }
-            let highlights = if query.is_empty() {
-                Vec::new()
-            } else {
-                text.as_str()
-                    .match_indices(query.as_str())
-                    .map(|(start, found)| RangeHighlight::new(start..start + found.len(), color))
-                    .collect()
-            };
-            let count = highlights.len();
-            Some((text, count, state.set_range_highlights(highlights, cx)))
-        });
-        let Some((text, count, result)) = result else {
-            return;
-        };
-        if let Err(error) = result {
-            eprintln!("Could not highlight the matches: {error}");
+        let text = self.text_view.read(cx).rendered_text();
+        if self.searched.as_ref() == Some(&text) {
             return;
         }
-        self.match_count = count;
+
+        let query = self.find_state.read(cx).value();
+        self.matches = if query.is_empty() {
+            Vec::new()
+        } else {
+            text.as_str()
+                .match_indices(query.as_str())
+                .map(|(start, found)| start..start + found.len())
+                .collect()
+        };
+        self.current_match = self.current_match.min(self.matches.len().saturating_sub(1));
+        let query_changed = self.searched.is_none();
         self.searched = Some(text);
+        // Typing a query scrolls to its first match; content changing
+        // under an unchanged query leaves the view where it is.
+        self.paint_matches(query_changed, cx);
+    }
+
+    /// Step to the next match, or the previous one, and scroll to it.
+    fn go_to_match(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let count = self.matches.len();
+        if count == 0 {
+            return;
+        }
+        self.current_match = if forward {
+            (self.current_match + 1) % count
+        } else {
+            (self.current_match + count - 1) % count
+        };
+        self.paint_matches(true, cx);
+    }
+
+    /// Highlight the matches, the current one stronger, and scroll to it
+    /// when `reveal` is set.
+    fn paint_matches(&mut self, reveal: bool, cx: &mut Context<Self>) {
+        let Some(searched) = self.searched.clone() else {
+            return;
+        };
+        let color = cx.theme().warning.opacity(0.3);
+        let current_color = cx.theme().warning;
+        let highlights = self.matches.iter().enumerate().map(|(ix, range)| {
+            RangeHighlight::new(
+                range.clone(),
+                if ix == self.current_match {
+                    current_color
+                } else {
+                    color
+                },
+            )
+        });
+        let current = self.matches.get(self.current_match).cloned();
+        let result = self.text_view.update(cx, |state, cx| {
+            // The matches are ranges of the text they were found in.
+            if state.rendered_text() != searched {
+                return Ok(());
+            }
+            state.set_range_highlights(highlights, cx)?;
+            if reveal && let Some(current) = current {
+                state.reveal_range(current, cx)?;
+            }
+            Ok::<_, RangeHighlightError>(())
+        });
+        if let Err(error) = result {
+            eprintln!("Could not highlight the matches: {error}");
+        }
         cx.notify();
     }
 
@@ -1523,12 +1570,39 @@ impl Render for Example {
                                             div()
                                                 .text_xs()
                                                 .text_color(cx.theme().muted_foreground)
-                                                .child(match self.match_count {
-                                                    1 => "1 match".to_string(),
-                                                    count => format!("{count} matches"),
+                                                .child(if self.matches.is_empty() {
+                                                    "No matches".to_string()
+                                                } else {
+                                                    format!(
+                                                        "{} of {}",
+                                                        self.current_match + 1,
+                                                        self.matches.len()
+                                                    )
                                                 }),
                                         )
-                                    }),
+                                    })
+                                    .child(
+                                        Button::new("previous-match")
+                                            .icon(IconName::ChevronUp)
+                                            .ghost()
+                                            .xsmall()
+                                            .disabled(self.matches.is_empty())
+                                            .tooltip("Previous Match")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.go_to_match(false, cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("next-match")
+                                            .icon(IconName::ChevronDown)
+                                            .ghost()
+                                            .xsmall()
+                                            .disabled(self.matches.is_empty())
+                                            .tooltip("Next Match")
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.go_to_match(true, cx)
+                                            })),
+                                    ),
                             )
                             .right(
                                 Button::new("preview-zoom")

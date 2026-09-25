@@ -13,7 +13,7 @@ GPUI 提供 **Event**，用于在 [Entity](./entity) 之间发送类型明确的
 Action 可以触发状态变化，但 Event 的传递从状态变化之后开始：
 
 ```text
-Chat 状态变化 → emit(MessageSent) → 订阅者收到 Event → Workspace 更新
+Chat state changes → emit(MessageSent) → Subscriber receives event → Workspace updates
 ```
 
 <img class="architecture-light" src="/event-subscriptions-flow.svg?v=20260922-1" alt="Chat 发出一个 MessageSent Event，分别送达 Workspace、Activity Log 与 Telemetry 三个独立订阅者">
@@ -24,60 +24,166 @@ Chat 状态变化 → emit(MessageSent) → 订阅者收到 Event → Workspace 
 
 Command owner 处理 Action 并改变状态，再发出 Event，让 owner 或 service 响应结果，而不必依赖命令来自快捷键、按钮还是菜单。Focus 与命令派发见 [Action](./action)，快捷键匹配见 [KeyBinding](./keybinding)。
 
-## 定义并发出 Event
+## 从零完成一次 Event 传递
 
-先定义 Entity 可以报告的事实，并实现 [`EventEmitter`](https://docs.rs/gpui-pre/0.3.6/gpui/trait.EventEmitter.html)：
+下面的小程序有两个 Entity。`Chat` 保存发送数量并发出带类型的事实；`Workspace` 持有 `Chat`，订阅这个具体的 Entity，并显示最新数量。点击按钮后，`Chat` 更新状态，订阅回调再更新 `Workspace`。
+
+沿用[入门指南](./getting-started)中已经依赖 `gpui-kit` 的项目，把以下完整程序写入该项目的 `src/main.rs`，然后在项目目录运行 `cargo run`。窗口开始显示 **Messages sent: 0**；每次点击 **Send**，数量应增加一。
 
 ```rust
+use gpui_kit::*;
+use gpui_kit::assets::Assets;
+use gpui_kit::component::button::Button;
+
 #[derive(Clone, Debug)]
 enum ChatEvent {
-    DraftChanged,
-    MessageSent { message_id: MessageId },
+    MessageSent { total: usize },
+}
+
+struct Chat {
+    sent: usize,
 }
 
 impl EventEmitter<ChatEvent> for Chat {}
-```
 
-状态变化成功后再发出 Event：
-
-```rust
-fn finish_send(&mut self, message_id: MessageId, cx: &mut Context<Self>) {
-    self.draft.clear();
-    cx.emit(ChatEvent::MessageSent { message_id });
-    cx.notify(); // 可见的草稿变化时重新渲染 Chat。
+impl Chat {
+    fn send(&mut self, cx: &mut Context<Self>) {
+        self.sent += 1;
+        cx.emit(ChatEvent::MessageSent { total: self.sent });
+    }
 }
-```
 
-`cx.emit(...)` 会把通知放入 GPUI 的 effect 队列；当前 Entity 更新可以先结束，订阅者不是在 `finish_send` 内被直接调用。操作成功后再发出 Event。发出通知不能代替重新渲染：emitter 的可见 UI 发生变化时，还要单独调用 `cx.notify()`。Event 应按已经发生的事实命名，例如 `MessageSent`、`Saved`、`Dismissed`。`SendMessage` 这种命令式名称属于 Action。
-
-## 由 owner 订阅
-
-订阅方应把 Subscription 保存在发起订阅的同一个 View 上。GPUI Kit 的示例采用下面这种模式：
-
-```rust
 struct Workspace {
     chat: Entity<Chat>,
+    shown_total: usize,
     _subscriptions: Vec<Subscription>,
 }
 
 impl Workspace {
     fn new(cx: &mut Context<Self>) -> Self {
-        let chat = cx.new(Chat::new);
-        let _subscriptions = vec![cx.subscribe(&chat, |workspace, _chat, event, cx| {
-            if matches!(event, ChatEvent::MessageSent { .. }) {
-                workspace.refresh_conversation();
-                cx.notify();
+        let chat = cx.new(|_| Chat { sent: 0 });
+        let subscription = cx.subscribe(&chat, |workspace, _chat, event, cx| {
+            match event {
+                ChatEvent::MessageSent { total } => workspace.shown_total = *total,
             }
-        })];
+            cx.notify(); // The count shown by Workspace changed.
+        });
 
-        Self { chat, _subscriptions }
+        Self {
+            chat,
+            shown_total: 0,
+            _subscriptions: vec![subscription],
+        }
     }
+}
+
+impl Render for Workspace {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .p_4()
+            .child(format!("Messages sent: {}", self.shown_total))
+            .child(Button::new("send").label("Send").on_click(cx.listener(
+                |workspace, _, _, cx| {
+                    workspace.chat.update(cx, |chat, cx| chat.send(cx));
+                },
+            )))
+    }
+}
+
+fn main() {
+    gpui_kit::application().with_assets(Assets).run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(Workspace::new)
+        })
+        .expect("failed to open window");
+    });
 }
 ```
 
-不要只用局部变量保存返回的 `Subscription`：函数结束后它会被 drop，观察者随即断开。把 `_subscriptions` 放在 `Workspace` 上，两者便拥有相同生命周期；View 释放时，Subscription 也会一起释放并取消订阅。也不要把 View 级 Subscription 存到生命周期更长的全局 owner，否则 View 消失后 callback 与捕获的资源仍然存活，可能造成内存泄漏。
+启动代码先调用 `gpui_kit::init`，再由 `open_window` 创建窗口。按钮回调更新 `Chat`，状态变化和 `cx.emit` 都发生在 `Chat` 内；订阅者读取 Event 的内容，并在修改了 `Workspace` 显示的数量后调用 `cx.notify()`。
 
-回调依次得到 owner（`&mut Workspace`）、发出通知的 `Entity<Chat>`、借用的 `&ChatEvent` 和 owner 的 [Context](./context)（`Context<Workspace>`）。它只接收**这个 Entity** 发出的对应 Event 类型；另一个 `Chat` 实例不会共用订阅者。回调需要可变的 [Window](./window) 时使用 `cx.subscribe_in`，并把返回的 `Subscription` 存在同一字段。只需要知道某个 Entity 发生变化、不需要有类型的 payload 时，可以使用 `cx.observe(...)`。
+`cx.emit(...)` 将 Event 放进 effect 队列；当前 Entity 更新可以先结束，订阅回调并不是 `Chat::send` 内部的一次直接函数调用。操作成功后再 emit。如果发出 Event 的 Entity 自己也显示了变化后的状态，还要在那个 Entity 中调用 `cx.notify()`；`emit` 不会请求重绘。上例的 `Chat` 是不渲染 UI 的状态 Entity。Event 名称应表达事实，例如 `MessageSent`、`Saved`、`Dismissed`；`SendMessage` 则表示命令。
+
+### 把 Action 接到这个 Event
+
+上面的完整示例从按钮 callback 开始。要验证 [Action](./action) → 状态 → Event → 订阅的整条路径，请在**同一个** `src/main.rs` 中作四处改动。原有的 `Chat`、`ChatEvent`、`Chat::send` 和订阅回调保持不变。
+
+1. 在 import 后加入 `actions!(chat, [SendMessage]);`。在 `Workspace` 的 `chat` 字段旁增加 `focus: FocusHandle,`。
+2. 让 `Workspace::new` 在 `cx` 之前接收 `window: &mut Window`。在原有的 `let chat = ...` 前创建并聚焦句柄，再把 `focus,` 放入返回的 `Self`：
+
+   ```rust
+   let focus = cx.focus_handle().tab_stop(true);
+   focus.focus(window, cx);
+   ```
+
+3. 在 `impl Workspace` 中增加方法：
+
+   ```rust
+   fn on_send_message(&mut self, _: &SendMessage, _: &mut Window, cx: &mut Context<Self>) {
+       self.chat.update(cx, |chat, cx| chat.send(cx));
+   }
+   ```
+
+   在 `render` 的**最外层** `div()` 上、添加子元素之前接上三个调用，然后只用下面的 callback 替换按钮原有的 `.on_click(...)`：
+
+   ```rust
+   .track_focus(&self.focus)
+   .key_context("Chat")
+   .on_action(cx.listener(Self::on_send_message))
+
+   .on_click(cx.listener(|workspace, _, window, cx| {
+       workspace.focus.dispatch_action(&SendMessage, window, cx);
+   }))
+   ```
+
+4. 在 `main` 中调用 `gpui_kit::init(cx)` 后绑定 Enter，并让 `open_window` 闭包把窗口传入构造函数：
+
+   ```rust
+   cx.bind_keys([KeyBinding::new("enter", SendMessage, Some("Chat"))]);
+   gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+       cx.new(|cx| Workspace::new(window, cx))
+   })
+   .expect("failed to open window");
+   ```
+
+再次运行 `cargo run`。当 Workspace 区域拥有 Focus 时按 **Enter**，再点击 **Send**。两种输入都会把同一个 `SendMessage` Action 派发给 `Workspace::on_send_message`；该 handler 更新 `Chat`，`Chat::send` 增加 `sent` 并发出 `MessageSent`，保留的订阅再更新 `Workspace::shown_total`。可见计数应随每次输入增加一次。作为核对，可暂时删去 `Chat::send` 中的 `cx.emit(...)`：内部 `sent` 仍增加，但由于 `Workspace` 订阅的是 Event，可见计数不再变化。继续下一练习前恢复 `emit`。若 Enter 无效，检查焦点句柄是否挂在渲染出的容器上，以及 `Chat` Key Context 是否存在；若按钮无效，检查 Action handler 与派发路径。
+
+## Subscription 的生命周期与归属
+
+`cx.subscribe(&chat, callback)` 返回一个 `Subscription`。应像上例一样由订阅方保存它。丢弃该句柄会断开回调，因此只存在于 `new` 内的局部句柄会在函数返回时悄悄停止接收 Event。`Workspace` 被释放时，它保存的句柄也会释放。克隆 `Entity<Chat>` 只是保留事件源的引用，不会保留订阅关系。View 专用的订阅应随 View 保存，而不是放进生命周期更长的全局状态。
+
+回调参数依次是 `&mut Workspace`、发出通知的 `Entity<Chat>`、`&ChatEvent`、`&mut Context<Workspace>`。Event 内容只在回调期间借用；需要之后使用的数据应复制或克隆。订阅绑定到一个事件源 Entity 和一种 Event 类型，不会自动接收其他 `Chat` 或应用中所有 Event。多个 owner 可以分别订阅同一个事件源。要提前停止某项订阅，从 owner 的集合中移除并丢弃其句柄。
+
+如果回调还需要 `&mut Window`，使用 `cx.subscribe_in(&chat, window, callback)`。它的回调有五个参数：owner、`&Entity<Chat>`、`&ChatEvent`、window 和 context；返回的 `Subscription` 同样需要保存。只需要知道 Entity 有变化，不需要类型化 Event 内容时，使用 `cx.observe(&chat, ...)`。Event 表达主动发出的业务事实；`cx.notify()` 表示 Entity 需要更新，不会产生 `ChatEvent`。
+
+订阅没有响应时，检查发出 Event 的是否为同一个 Entity、`EventEmitter` 实现的类型是否与发出的类型一致、句柄是否还在，以及成功修改状态后是否执行了 `cx.emit`。如果回调执行了但界面仍是旧值，检查哪个 Entity 负责渲染该值，并在它的 context 上调用 `cx.notify()`。
+
+### 动手比较 `observe` 与 Event 订阅
+
+如果做过上面的 Action 延伸练习，先恢复原始的完整 `Chat`/`Workspace` 示例，再运行它：每次点击，界面上的计数增加一。然后在这个程序中做三处改动：
+
+1. 删除 `ChatEvent` 枚举和 `impl EventEmitter<ChatEvent> for Chat {}`，将 `Chat::send` 改成下面的方法。这个版本更新状态并调用 `notify`，不发出 Event。
+
+   ```rust
+   fn send(&mut self, cx: &mut Context<Self>) {
+       self.sent += 1;
+       cx.notify();
+   }
+   ```
+
+2. 在 `Workspace::new` 中，用下面的 observer 替换 `cx.subscribe(...)` 代码块。返回的句柄继续保存在现有的 `_subscriptions` 字段中。
+
+   ```rust
+   let subscription = cx.observe(&chat, |workspace, chat, cx| {
+       workspace.shown_total = chat.read(cx).sent;
+       cx.notify();
+   });
+   ```
+
+3. 再运行程序并点击 **Send**，计数仍然增加。observer 收到发生变化的 `Entity<Chat>`，再读取当前状态；它没有 `ChatEvent` 或 Event payload。暂时删掉 `Chat::send` 中的 `cx.notify()` 并重新运行：虽然 `Chat.sent` 变化了，但 observer 不会执行，显示的计数保持零。最后恢复 `cx.notify()`。
+
+只需知道某个 Entity 有变化，且可以从中读取当前状态时，适合使用 `observe`；生产者要主动报告一种带类型的事实时，适合使用 `subscribe`。两者都返回需要由 owner 保存的 `Subscription`。单独调用 `cx.emit` 不会通知 `observe` callback；单独调用 `cx.notify()` 也不会发出类型化 Event。
 
 :::info INFO — Event 不跟随 Focus 路由
 
@@ -110,7 +216,7 @@ fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Co
         return;
     }
     let Some(digit) = stroke.key.chars().next().and_then(|c| c.to_digit(10)) else {
-        return; // 其他按键交给 UI 的后续处理。
+        return; // Let the UI handle other keys.
     };
     window.prevent_default();
     cx.stop_propagation();
@@ -124,6 +230,57 @@ fn on_key_down(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Co
 ### Capture 与 bubble
 
 原始输入有两个派发阶段。**键盘** listener 沿 Focus 对应的路径运行：capture 从根节点走向 focused node，bubble 从 focused node 返回根节点。**鼠标** listener 按绘制顺序注册，而不是沿祖先路径运行：capture 从后向前，bubble 从前向后。派发器会按这个顺序调用匹配类型的鼠标 listener；底层 listener 必须自行检查 hitbox，确认输入是否落在自身区域。普通 `.on_mouse_down(...)` 和 `.on_key_down(...)` callback 在 bubble 阶段运行；`.capture_any_mouse_down(...)` 是元素级的 capture 接口。
+
+### 动手观察父子区域的鼠标处理顺序
+
+回到上面的完整 Event 版本示例。在 `Workspace` 中加入 `parent_hits: usize`、`child_hits: usize` 两个字段，并在 `Workspace::new` 中把它们都初始化为 `0`。然后将 `Render` 实现替换为下面的代码：
+
+```rust
+impl Render for Workspace {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .p_4()
+            .child(format!("Messages sent: {}", self.shown_total))
+            .child(Button::new("send").label("Send").on_click(cx.listener(
+                |workspace, _, _, cx| {
+                    workspace.chat.update(cx, |chat, cx| chat.send(cx));
+                },
+            )))
+            .child(format!(
+                "Parent: {} | Child: {}",
+                self.parent_hits, self.child_hits
+            ))
+            .child(
+                div()
+                    .p_4()
+                    .bg(rgb(0xd0d7de))
+                    .on_mouse_down(MouseButton::Left, cx.listener(|workspace, _, _, cx| {
+                        workspace.parent_hits += 1;
+                        cx.notify();
+                    }))
+                    .child("Parent surface")
+                    .child(
+                        div()
+                            .p_4()
+                            .bg(rgb(0x8ecae6))
+                            .on_mouse_down(MouseButton::Left, cx.listener(
+                                |workspace, _, _, cx| {
+                                    workspace.child_hits += 1;
+                                    cx.notify();
+                                    // Uncomment to stop the parent handler:
+                                    // cx.stop_propagation();
+                                },
+                            ))
+                            .child("Child surface"),
+                    ),
+            )
+    }
+}
+```
+
+点击蓝色的 **Child surface** 一次，两个计数都会增加。child listener 在绘制阶段较晚注册，所以在鼠标 bubble 阶段先运行；parent 的 hitbox 同样包含该位置，因而随后运行。点击子区域外的灰色部分，只增加 parent 计数。取消 child 回调中 `cx.stop_propagation()` 那一行的注释并重新运行，再点击 child 时只有 child 计数增加；点击灰色部分仍然只增加 parent 计数。点击 **Send** 只改变消息计数，不影响这两个命中计数。
+
+这里的两个区域为了练习而嵌套，但 GPUI 根据窗口当前帧的 listener 顺序及各自的 hitbox 派发鼠标事件，**不会**像 DOM 一样沿祖先链路由。即使两个重叠区域在元素树上没有父子关系，后绘制的 surface 仍可能是第一个 bubble listener。只有子区域确实需要独占这次输入时，才调用 `stop_propagation()` 阻止后续 listener。
 
 编写自定义 [`Element`](./element#三个阶段) 时，可在 `paint` 中用 `window.on_mouse_event` 注册 listener，再检查 `DispatchPhase`：
 

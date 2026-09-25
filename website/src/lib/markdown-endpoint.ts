@@ -25,7 +25,7 @@ export function markdownResponse(options: {
   const body = expandSnippets(bodyWithoutFrontmatter(source), dirname(absolute));
   const lang = options.route.startsWith('/zh-CN/') ? 'zh-CN' : 'en';
   const notice = documentationLicenseNotice(lang, `https://gpui-kit.com${options.route}`);
-  const text = `---\n${front.join('\n')}\n---\n\n> ${notice}\n\n${body}\n`;
+  const text = `---\n${front.join('\n')}\n---\n\n${body.trimEnd()}\n\n> ${notice}\n`;
 
   return new Response(text, {
     headers: {

@@ -18,9 +18,19 @@ Start by separating the scopes:
 | `AsyncApp` | A handle for foreground work across `await` | Re-enter `App` or an Entity in a short update |
 | `AsyncWindowContext` | An async handle for one window | Re-enter an Entity together with its Window |
 
+Read the table as a progression: `App` is available first in `application().run`; opening a window supplies `Window`; creating an Entity supplies its `Context<T>` whenever GPUI builds or updates that Entity. A foreground task receives an async handle instead of borrowing either synchronous context across an `await`.
+
+| Where code runs | Parameters GPUI supplies | Use it for |
+| --- | --- | --- |
+| `application().run`, application callbacks | `&mut App` | Initialize the kit, set Globals, create Entities, open windows |
+| Window builder, element or component callback | `&mut Window`, `&mut App` | Work with that window and application state; use `cx.listener` when the callback needs its owning View |
+| `Render` or an Entity update | `&mut Self`, `&mut Context<Self>`; `Render` and `update_in` also receive `&mut Window` | Read or change the current View; call `notify` when its rendered state changes |
+| `App::spawn` / `Context<T>::spawn` task | `&mut AsyncApp`, plus a `WeakEntity<T>` for Entity tasks | Resume short application or Entity operations after `await` |
+| `Context<T>::spawn_in` task | `&mut AsyncWindowContext` and `WeakEntity<T>` | Resume an operation that also needs the original Window |
+
 `Context<T>` dereferences to `App`, so code with `cx: &mut Context<T>` can already call App APIs and does not need a separate `&mut App`. It also knows which Entity is current; plain `App` does not. Window remains separate because the same Entity may appear in different windows, while a data-only update may not belong to any window. Window also owns per-window state keyed by [ElementId](./element_id). Async contexts are handles, not long-lived `&mut App` or `&mut Window` borrows.
 
-The [GPUI `Context<T>` source](https://github.com/zed-industries/zed/blob/main/crates/gpui/src/app/context.rs) defines the entity-specific methods used below.
+The [GPUI `Context<T>` source](https://docs.rs/crate/gpui-pre/0.3.6/source/src/app/context.rs) defines the entity-specific methods used below.
 
 GPUI Kit applications depend on `gpui-kit` and import GPUI through `use gpui_kit::*;`. Call `gpui_kit::init(cx)` before creating component-backed Views. An application-wide [Global](./global) lives on `App`; a component or feature View keeps retained state in an [Entity].
 
@@ -80,6 +90,8 @@ Async code uses the corresponding `AsyncApp` or `AsyncWindowContext` to re-enter
 
 A GPUI Kit `Button` click handler receives `(&ClickEvent, &mut Window, &mut App)`. It does not receive the View as `&mut Self`. Build the callback with `cx.listener` while [rendering](./render) a View; GPUI will update that View and pass its `Context<Self>` to the inner closure. The component also supplies keyboard and [accessibility](./accessibility) behavior:
 
+To try the complete example, replace `examples/hello_world/src/main.rs` in this repository's existing `hello_world` package with the following code. From the repository root, run `cargo run -p hello_world --bin hello_world`.
+
 ```rust
 use gpui_kit::*;
 use gpui_kit::assets::Assets;
@@ -115,30 +127,43 @@ fn main() {
 }
 ```
 
+The window first shows `Count: 0`. Click the button once and its label should become `Count: 1`; each further click increments it by one. This checks that the listener mutates the existing `Counter` Entity and that `cx.notify()` makes the new value visible. Restore your original `main.rs` after the exercise if you want to keep the package's previous example.
+
 The outer callback type belongs to the button. The inner closure receives `&mut Counter` and `&mut Context<Counter>`. `cx.listener` uses a weak handle to the View, so a stored handler does not keep a closed View alive. The count is Entity state, and `cx.notify()` tells GPUI to render its new value. Do not create the View again inside `render`; the owning `Entity<Counter>` is created when the window opens.
 
 ## Create, read, and update
 
-`cx.new` creates an [Entity]. Its closure receives the new Entity's own `Context<T>`:
+`cx.new` creates an [Entity]. Its closure receives the new Entity's own `Context<T>`. A strong `Entity<T>` handle keeps it alive. Use the handle with `read` for a synchronous borrowed view of its data, or `update` to receive `&mut T` and that Entity's own context:
 
 ```rs
-let chat = cx.new(|cx| Chat::new(cx));
+struct Draft {
+    text: String,
+}
 
-let count = chat.read(cx).message_count();
+fn edit_draft(cx: &mut App) -> Entity<Draft> {
+    let draft = cx.new(|_| Draft { text: String::new() });
+    let was_empty = draft.read(cx).text.is_empty();
 
-chat.update(cx, |chat, cx| {
-    chat.clear_draft();
-    cx.notify();
-});
+    if was_empty {
+        draft.update(cx, |draft, cx| {
+            draft.text.push_str("Hello");
+            cx.notify();
+        });
+    }
+
+    draft
+}
 ```
 
-`read` provides synchronous read-only access. `update` provides `&mut T` and its Context. Always use the inner `cx` passed to the update closure.
+The `read` reference cannot outlive the `App` borrow. Complete the read before requesting mutable access with `update`; copy or clone the small amount of data you need later. A strong handle's `update` returns the closure's value directly. A `WeakEntity<T>` can disappear, so its `update` and `update_in` return `Result` instead. Always use the inner `cx` passed to the update closure when notifying or using Entity-specific methods.
 
 `cx.new` can be called through `App` or `Context<T>` because both implement GPUI's `AppContext` API. From a `Context<Parent>`, the construction closure receives a **new** `Context<Child>`. It is not the parent's context. Keep the returned strong `Entity<Child>` in its owner when the child should survive across renders.
 
 :::info
 `cx.notify()` reports that the current Entity changed. It schedules dependent views and `observe` callbacks; changing a field alone does not.
 :::
+
+`notify` is unnecessary for a read. Avoid calling it unconditionally from `render`, which can schedule repeated renders. When one action changes several related fields, finish the change and notify once.
 
 Do not retain a reference from `read` across an `await`; clone the small piece of data the task needs first. Do not store `&mut App`, `&mut Window`, or `&mut Context<T>` in a View or task. Those are short-lived access granted for the current GPUI call.
 
@@ -158,7 +183,7 @@ fn finish_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
 }
 ```
 
-The deferred closure still receives `this: &mut Self`; do not call `update` on that same Entity from inside it. Deferral is for work that needs the current update to finish, such as focus restoration after changing the UI tree. `window.on_next_frame(...)` means the next rendered frame, which is a different boundary. A closed window or released View may prevent deferred work from running, so do not use it as a durable job queue.
+The deferred closure still receives `this: &mut Self`; do not call `update` on that same Entity from inside it. Deferral is for work that needs the current update to finish, such as focus restoration after changing the UI tree. [`window.on_next_frame(...)`](https://docs.rs/crate/gpui-pre/0.3.6/source/src/window.rs) instead queues a callback for the next platform frame request and wakes the frame source. The callback runs before any drawing for that request; registering it does not mark the window dirty or cause a render. If its work changes visible Entity state, call `cx.notify()` from the callback. Use `window.request_animation_frame()` when the intent is to request a redraw on the next frame. A closed window or released View may prevent deferred work from running, so do not use it as a durable job queue.
 
 ## Async work
 

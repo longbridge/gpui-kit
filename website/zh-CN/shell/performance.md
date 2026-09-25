@@ -11,10 +11,10 @@ order: 14
 一旦重绘不进入 JavaScript，剩下要算的就只有两样：
 
 ```text
-JavaScript 的开销  =  一个 View 多久失效一次  ×  描述这个 View 要花多少
+JavaScript cost = View invalidation frequency × cost to describe the View
 ```
 
-两样都不是帧率。窗口以 120 Hz 还是 30 Hz 重绘，JavaScript 执行的次数完全一样；没有人让它失效的 View，一次都不执行。
+两样都不由屏幕刷新率单独决定。窗口即使以 120 Hz 重绘，也不会仅因为呈现的帧更多，就多执行这个 View 的 JavaScript；没有失效的 View 不会执行脚本 `render`。左边取决于你何时调用 `cx.notify()`，也包括主题切换等其他失效原因；右边是一次调用背后压了多少界面。屏幕刷新率只是调度上限或目标，并不表示空闲窗口会持续重绘。
 
 两样也都在你手里：左边是你在哪里调用 `cx.notify()`，右边是一次 `notify` 背后压了多少界面。这一页剩下的内容讲的就是这两件事，以及出问题时怎么分辨是哪一个。
 
@@ -22,11 +22,11 @@ JavaScript 的开销  =  一个 View 多久失效一次  ×  描述这个 View �
 
 GPUI Shell 给每一个 JavaScript View 一份属于它自己的 Snapshot：这个 View 的 `render` 产出的那份描述，保存在 Rust 一侧。
 
-**只要 View 本身没有变化，它的 Snapshot 就一直被复用。** 中间的每一帧都从这份 Snapshot 画出来——转成 GPUI 元素、布局、绘制——全部在 Rust 里完成，不执行任何 JavaScript。
+**只要 View 本身没有变化，它的 Snapshot 就一直被复用。** 当 GPUI 确实请求下一帧时，可以使用这份 Snapshot，而不执行这个 View 的 JavaScript `render`。这本身不说明空闲窗口多久呈现一帧，也不说明该帧其余 CPU 与 GPU 工作的成本。
 
 ```text
-View 变了    ──▶  render()  ──▶  新的 Snapshot  ──▶  帧
-View 没变    ─────────────────▶  已有的那份 Snapshot  ──▶  帧
+View changed    ──▶  render()  ──▶  new Snapshot       ──▶  frame
+View unchanged  ─────────────────▶  existing Snapshot  ──▶  frame
 ```
 
 Snapshot 是按 View 存的，不是按窗口存的。一个窗口里有一百个 View，就有一百份 Snapshot，各自独立失效：
@@ -85,7 +85,7 @@ export default class Terminal extends View {
 ```js
 onQuote(quote, cx) {
   this.quotes.set(quote.symbol, quote);
-  cx.notify();                  // 每一跳都通知，包括没人在看的那些
+  cx.notify();                  // Notifies even when this symbol is not visible.
 }
 ```
 
@@ -101,7 +101,7 @@ onQuote(quote, cx) {
 同一个想法推出三条规则：
 
 - **让变化的那个 View 失效。** 只属于某个子 View 的状态，就应该放在那个子 View 上、在那里 notify，而不是放在挂载它的父 View 上。
-- **notify 得比帧率还密，也不会更贵。** 见下——手动攒批换不来什么，加条件才有用。
+- **下一帧之前的多次通知可以共用一次脚本 render。** 见下；各个回调及其其他工作仍会执行，所以只为 View 真正显示的变化发通知。
 - **在 Host 一侧，`cx.notify()` 与 `ScriptView::refresh` 是两个不同的请求。** 单纯的 `notify` 只是重绘已有的描述。如果 Rust 改的是脚本通过 [HostModule](./host-module.md) 读到的状态，那描述已经陈旧，只有 `refresh` 能说明这一点。见 [Hosting](./hosting.md#host-状态变了-怎么刷新-view)。
 
 ### notify 到底做了什么，谁在合并它
@@ -111,14 +111,14 @@ onQuote(quote, cx) {
 所以两帧之间的所有 notify 都会合并成一次 `render`——无论它们来自三个事件回调、一个循环里的 task，还是 Host：
 
 ```text
-notify  notify  notify  ──▶  一帧  ──▶  一次 render()
+notify  notify  notify  ──▶  one frame  ──▶  one render()
 ```
 
 一个标志置三次等于置一次。什么都没有被丢掉：三个回调都执行了，状态也都改了；它们共享的只是随后那一次重建。
 
-**这就给失效的开销划了一个上限：每个 View 每帧最多一次脚本 render。** 一秒跳一千次的行情，在 120 Hz 的屏幕上最多也只有每秒 120 次 render，而不是一千次。这也是为什么滥用 `notify` 表现为白做功，而不是失控。
+**合并让每个 View 每帧最多执行一次脚本 render。** 例如，某窗口在实测的一秒里呈现了 120 帧，同时行情送来 1,000 次通知，那么该 View 在这些帧中最多执行 120 次 render。这不会让 1,000 个回调变成零成本，也不能证明实际帧率就是 120 FPS，更不表示屏幕每次刷新都会产生一帧。
 
-运行时不在这之上再加任何自己的节流，也没有可调的参数。合并来自 GPUI 自己的调度，而且它绝不会把重建推迟到下一帧之后——所以它不带来延迟，而延迟正是下面那一对里的另一半。
+运行时没有另外可调的脚本 render 节流。GPUI 的调度会把这些请求合并到它处理的下一帧中；这一帧何时呈现，仍取决于窗口、平台与负载。
 
 ### 这份缓存占多少内存
 
@@ -133,15 +133,15 @@ notify  notify  notify  ──▶  一帧  ──▶  一次 render()
 一个运行中的界面可能出两种问题，而只有一种会体现在 FPS 上：
 
 ```text
-渲染帧率        画面流畅吗？
-状态 → 呈现     状态变了以后，多久用户才看得到？
+Frame rate          Is motion smooth?
+State → display     How long until the user sees a state change?
 ```
 
-漏掉一次 `cx.notify()` 一帧都不会掉。GPUI 会继续以满帧率重放上一份完好的描述，于是 HUD 稳稳地读出 120 FPS，而界面显示的东西早就不成立了——然后在四分之一秒后，因为某件不相干的事让这个 View 失效，画面突然跳一下。所有渲染指标都会把这种情况判为健康。
+漏掉一次 `cx.notify()`，数据可能已经过期，却没有出现掉帧。如果其他活动继续触发画面，GPUI 可以沿用上一份描述，帧率读数看起来也可能正常；如果没有请求新帧，窗口则可能保持静止。直到另一次失效刷新了这个 View，过期数据才会变化。仅靠帧率指标无法发现漏掉的通知。
 
 | 症状 | 哪个数字不对 | 常见原因 |
 | --- | --- | --- |
-| 应用里什么都没变，窗口却卡 | 帧率 | 每帧要物化的描述过大，或虚拟列表在按行做额外工作；见[那次实测](./engine.md#那次实测) |
+| 脚本状态未变化，但窗口重绘时仍卡顿 | 帧时间 / 帧率 | 布局、绘制或虚拟列表按行执行的工作可能过大；见[那次实测](./engine.md#那次实测) |
 | 行情在跑的时候窗口卡 | 帧率**和**失效频率 | 某个 View 重建得太频繁、太大，或两者都有 |
 | 画面很流畅，但数据慢半拍 | 呈现延迟 | 某次 `notify` 被漏掉、被压在 `await` 之后，或该用 `refresh` 的地方用了 Host 侧的 `cx.notify()` |
 
@@ -154,7 +154,7 @@ notify  notify  notify  ──▶  一帧  ──▶  一次 render()
 | 读数 | 它回答什么 |
 | --- | --- |
 | `script_renders()` | JavaScript 执行了多少次。跟着 `cx.notify()`、hot-reload 与主题切换走，永远不跟帧走 |
-| `materializations()` | Snapshot 变成元素多少次。跟着帧走 |
+| `materializations()` | 脏 Snapshot 被转成元素多少次；干净的窗口帧可复用 GPUI 子树 |
 | `mean_script_render()` | 一次描述要花多少，包含其中的 Host 调用 |
 | `mean_native()` | 其中有多少是在 HostModule 函数里，而不是在描述界面 |
 | `slowest_script_render()` | 这一段里最慢的那一次构建 |

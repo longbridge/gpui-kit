@@ -12,7 +12,7 @@ order: -14
 
 | Capability | GPUI Kit | Iced | egui | Qt 6 | Slint |
 | --- | --- | --- | --- | --- | --- |
-| UI model | Immediate + partial retained | Declarative view + retained state | Immediate | Retained scene | Reactive tree |
+| UI model | Declarative passes + retained state | Declarative view + retained state | Immediate | Retained scene | Reactive tree |
 | UI authoring | Rust | Rust | Rust | QML / C++ / Python | `.slint` + Rust / C++ / JavaScript / Python |
 | Visual tooling | Code + component gallery | Code | Code | Qt Quick Designer | Live Preview / SlintPad |
 | Component count | [75+](/zh-CN/component/) | [35](https://docs.rs/iced/0.14.0/iced/widget/#structs) | [16](https://docs.rs/egui/0.36.2/egui/widgets/#structs) | [52](https://doc.qt.io/qt-6/qml-qtquick-controls-control.html) | [24](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/overview/) |
@@ -24,7 +24,6 @@ order: -14
 | Shortcuts | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
 | Themes | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
 | Bundled theme presets | 38 (36 variants + Light/Dark) | 22 built-in variants | Light / Dark | Qt Quick styles | Slint widget styles |
-| FPS reference | 120+ FPS | 120+ FPS | 120+ FPS | 120+ FPS | 120+ FPS |
 | Code editor | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
 | CJK font support | System / bundled fonts | Font-dependent | Custom font required | System fallback | Font-dependent |
 | Text model | Rope | COSMIC Text | TextBuffer | QTextDocument | TextEdit string |
@@ -56,7 +55,7 @@ order: -14
 
 **Binary size 数据口径。** 前四个值保留原 `main` 分支的 Hello World Release 估计；原表为 Qt 数据附上了[这篇体积研究](https://www.qt.io/blog/reducing-binary-size-of-qt-applications-part-3-more-platforms)。Slint 的 ~21 MB 来自 Slint 1.18.1 Hello World 在 Linux x86-64 上执行 `cargo build --release`，strip 后为 20,768,216 字节（19.81 MiB）。各值的构建条件不同，是近似参考值，并非已验证的最小体积或同口径跑分。
 
-**FPS reference。** 五个框架都可面向高刷新率屏幕运行。表中数字表示能力，并非同一测试条件下的实测 FPS；实际帧率取决于屏幕、平台和负载。参见 GPUI Kit 的[刷新率处理](https://github.com/longbridge/gpui-kit/blob/main/crates/fps/src/refresh.rs)和 Qt Quick 的[渲染循环文档](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html)。
+**帧率。** 本表不对帧率排名：没有相同负载、硬件和呈现测量来支持跨框架 FPS 数字。120 Hz 目标意味着相关管线每帧约有 8.3 ms 预算；它不表示空闲窗口持续重绘，也不保证任何复杂界面都能持续每秒显示 120 帧。GPUI 的 draw 和 present 指标见 [FPS Monitor](./fps#120-hz-是帧预算不是刷新承诺)。
 
 ## 选型速览
 
@@ -73,7 +72,7 @@ order: -14
 
 ## 如何理解这些判断
 
-**渲染模式。** GPUI Kit 在每次 [render](./render) 时，按当前输入以 immediate 风格构造元素描述；需要跨次保留状态或复用结果时，则使用 [Entity](./entity)、带 ID 的元素状态以及可选的 [View Cache](./view-cache)。“Immediate + 部分 Retained”同时描述这两层，并不意味着每次屏幕刷新都要重建整个 UI。Iced 将自身描述为 [state/message/update/view 架构](https://book.iced.rs/architecture.html)。egui 明确使用 [immediate mode](https://docs.rs/egui/latest/egui/#understanding-immediate-mode)。Qt Quick [在帧间保留场景图](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html)，Slint 使用[响应式属性绑定](https://docs.slint.dev/latest/docs/slint/guide/language/concepts/reactivity/)。
+**渲染模式。** GPUI Kit 在 [render](./render) 过程中按当前输入构造元素描述，并保留 [Entity](./entity)、带 ID 的元素状态及可选的 [View Cache](./view-cache)。表格中的说法同时描述这些层次，并不意味着每次屏幕刷新都重建整个 UI；[渲染模式详解](./fps#immediateretained-和-hybrid-描述的是不同层次)将它们分开说明。Iced 将自身描述为 [state/message/update/view 架构](https://book.iced.rs/architecture.html)。egui 明确使用 [immediate mode](https://docs.rs/egui/latest/egui/#understanding-immediate-mode)。Qt Quick [在帧间保留场景图](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html)，Slint 使用[响应式属性绑定](https://docs.slint.dev/latest/docs/slint/guide/language/concepts/reactivity/)。
 
 **桌面基础能力。** 五种方案都能构建多窗口桌面应用、处理键盘快捷键并定制主题；实现方式不同。例如 Iced 有[窗口打开 API](https://docs.rs/iced/latest/iced/window/fn.open.html)，eframe 使用[原生 viewport](https://docs.rs/eframe/latest/eframe/trait.App.html)，Slint 提供[按键绑定](https://docs.slint.dev/latest/docs/slint/reference/keyboard-input/overview/)和[标准组件样式](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/style/)。输入法、剪贴板和拖放还应按目标平台实际测试。
 

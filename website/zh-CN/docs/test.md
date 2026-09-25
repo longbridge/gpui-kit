@@ -48,6 +48,7 @@ workspace/
   ui-tests/
     Cargo.toml
     tests/ui.rs
+    tests/common/mod.rs
 ```
 
 在 `ui-tests/Cargo.toml` 中写入：
@@ -67,22 +68,25 @@ gpui-kit = { path = "../gpui-kit/crates/kit", features = ["test-support"] }
 
 ## 一个完整测试
 
-把下面代码复制到 `tests/ui.rs`。示例使用 GPUI Kit 的统一入口，初始化组件库，用 `Root` 包装视图，并像真实应用一样将输入状态保存在视图上。
+下面直接引用仓库中会参与编译的 `tests/ui.rs`。它初始化组件库，并像真实应用一样将输入状态保存在视图上。其中 `mod common;` 会加载配套的
+`tests/common/mod.rs` fixture。这个辅助文件以明确的 640 × 480 窗口尺寸调用公开的
+`gpui_kit::open_window`，由该函数用 `gpui_kit::base::Root` 包装视图，并返回窗口句柄与视图 entity。它只是测试准备代码，不是额外的库依赖。
 
-测试会输入 Unicode 姓名，通过 Backspace 编辑，点击 Save，检查状态文本与布局，最后验证保存的业务值。以下代码直接引用仓库集成测试的源码，会实际编译运行。
+测试会输入 Unicode 姓名，通过 Backspace 编辑，点击 Save，检查状态节点的 AccessKit 角色、名称与布局，最后验证保存的业务值。测试并不能验证屏幕阅读器是否实际播报。以下代码直接引用仓库集成测试的源码，会实际编译运行。
 
 <<< ../../../crates/kit/tests/ui.rs{rust}
 
-在自己的应用中，应从 library crate 导入生产视图及其构造函数。不要在测试中另写一份视图实现，否则测试与应用可能逐渐不一致。本例内联定义视图，是为了让整个示例可以直接复制到新项目。
-
-在 `ui-tests/` 中运行：
+独立项目必须复制**两个**文件；只复制 `ui.rs` 会在 `mod common;` 处失败。在上述布局的 `ui-tests/` 目录运行：
 
 ```sh
+mkdir -p tests/common
+cp ../gpui-kit/crates/kit/tests/ui.rs tests/ui.rs
+cp ../gpui-kit/crates/kit/tests/common/mod.rs tests/common/mod.rs
 cargo generate-lockfile
 cargo test --test ui --locked
 ```
 
-将 `Cargo.lock` 一起提交。在 GPUI Kit 源码目录中，可以直接运行同一个示例：
+将 `Cargo.lock` 一起提交。在自己的应用中，应从 library crate 导入生产视图及其构造函数，替换示例中的 `Profile`，继续沿用窗口设置与交互写法。另写一份测试视图容易与应用实现脱节。在 GPUI Kit 源码目录中，可以直接运行同一个测试：
 
 ```sh
 cargo test -p gpui-kit --features test-support --test ui --locked
@@ -226,8 +230,8 @@ dialog.hover("help", cx);
 ```rust
 let before = window.find("agree");
 window.click("agree", cx);
-assert_eq!(before.checked(), Some(false)); // 原来的帧。
-assert_eq!(window.find("agree").checked(), Some(true)); // 新的一帧。
+assert_eq!(before.checked(), Some(false)); // Previous frame.
+assert_eq!(window.find("agree").checked(), Some(true)); // New frame.
 ```
 
 同时断言界面状态与业务结果。验证保存的模型或发出的事件也是集成测试的一部分，
@@ -316,6 +320,15 @@ GPUI 没有公开未观察祖先的继承绘制透明度，因此无法推断该
 实现没有使用 GPUI fork 或 Cargo patch 绕过这些限制。
 
 失败时按具体情况检查注册路径、观察配置、完成帧、键盘焦点、裁剪与覆盖层、异步完成条件。
+
+| 现象 | 优先检查 |
+| --- | --- |
+| 找不到 `mod common` | 连同 `tests/ui.rs` 复制 `tests/common/mod.rs`，或改用应用自己的窗口设置代码。 |
+| `find` 列不出匹配路径 | 检查 `test-support`、控件 ID 或 `.test_support()`，以及首次查询前的 `render_frame`。 |
+| 查询结果不唯一 | 用 `within` 定位已有父级，再查询子控件 ID。 |
+| `focused()` 提示遗漏绑定，或作用域 `input` 报错 | 在 `.track_focus(&handle)` 前观察元素，输入前点击正确的输入框。 |
+| 断言仍读到旧状态 | 完成帧后重新查询快照；若工作已排队，离开 `update_window` 并使用 `wait_for`。 |
+| 目标可见却收不到点击 | 检查裁剪和浮层顺序；指针辅助方法使用原生命中测试。 |
 
 ## 独立验证绘制结果
 

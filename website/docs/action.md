@@ -8,9 +8,100 @@ order: -2.62
 
 An **Action** represents an operation the application can perform. A shortcut, menu item, command palette, button, or another Action handler can all dispatch the same typed value. GPUI routes it to the part of the [Element](./element) tree that owns the command. An [Event](./event) serves the other direction: it reports something that happened after state changed.
 
-The [GPUI Action source](https://github.com/zed-industries/zed/blob/main/crates/gpui/src/action.rs) defines the macro, trait, and registry described here.
+The [GPUI Action source](https://docs.rs/crate/gpui-pre/0.3.6/source/src/action.rs) defines the macro, trait, and registry described here.
 
-This page explains command definition and dispatch. See [KeyBinding](./keybinding) for key notation, context matching, and keymap setup.
+This page explains command definition and dispatch. Start with [Focus](./focus) if you have not yet created a keyboard target; see [KeyBinding](./keybinding) for key notation, context matching, and keymap setup.
+
+## Run an Action already in this repository
+
+From the repository root, launch the Story Gallery directly on its Tree page:
+
+```sh
+cargo run -p gpui-component-story -- Tree
+```
+
+Select a file-tree row and press **Enter**. The process prints `Renaming item: ...` in the terminal. Select another row and repeat to see that the handler reads the current selection. If Enter does nothing, click a row first: the binding is scoped to the Tree story's focused path. This example does not rename a file.
+
+Read the implementation in [`crates/story/src/stories/tree_story.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/story/src/stories/tree_story.rs):
+
+1. `actions!(story, [Rename, OpenFile, Delete])` defines the typed commands.
+2. `init` binds `enter` to `Rename` under the `TreeStory` context. [`stories::init`](https://github.com/longbridge/gpui-kit/blob/main/crates/story/src/stories/mod.rs) calls it during application setup.
+3. `TreeStory::render` attaches `.key_context(CONTEXT)` and `.on_action(cx.listener(Self::on_action_rename))` to the story container. Its child Tree supplies the active focus path.
+4. `on_action_rename` reads the selected entry from `tree_state`. Selection belongs to the Tree state; the Action expresses what the user requested.
+
+The rest of this guide builds from that route. A menu or button can later dispatch the same Action without copying the handler.
+
+## Build a runnable Action in `hello_world`
+
+The Tree story is useful for tracing a real application. To build the route yourself, temporarily replace `examples/hello_world/src/main.rs` with the complete program below. It uses the existing `hello_world` package and needs no new crate or dependency.
+
+```rust
+use gpui_kit::component::button::Button;
+use gpui_kit::*;
+
+actions!(counter, [Increment]);
+
+struct Counter {
+    count: usize,
+    focus: FocusHandle,
+}
+
+impl Counter {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus = cx.focus_handle().tab_stop(true);
+        focus.focus(window, cx);
+        Self { count: 0, focus }
+    }
+
+    fn on_increment(&mut self, _: &Increment, _: &mut Window, cx: &mut Context<Self>) {
+        self.count += 1;
+        cx.notify();
+    }
+}
+
+impl Render for Counter {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .p_4()
+            .track_focus(&self.focus)
+            .key_context("Counter")
+            .on_action(cx.listener(Self::on_increment))
+            .child(format!("Count: {}", self.count))
+            .child("Press Enter while this region has focus")
+            .child(
+                Button::new("increment")
+                    .label("Increment")
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.focus.dispatch_action(&Increment, window, cx);
+                    })),
+            )
+    }
+}
+
+fn main() {
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        cx.bind_keys([KeyBinding::new("enter", Increment, Some("Counter"))]);
+        gpui_kit::open_window(WindowOptions::default(), cx, |window, cx| {
+            cx.new(|cx| Counter::new(window, cx))
+        })
+        .expect("failed to open window");
+    });
+}
+```
+
+Run it from the repository root:
+
+```sh
+cargo run -p hello_world --bin hello_world
+```
+
+The window starts at `Count: 0`. Press **Enter** while the counter region has Focus, or click **Increment**; each operation increases the displayed count by one. The counter's `FocusHandle` is retained in its Entity and attached to the rendered container. `cx.bind_keys` maps Enter to `Increment` only on a path containing `Counter`. The container's `.on_action` calls `on_increment`, which changes retained state and calls `cx.notify()` so the new count renders. The button sends the *same* Action to that container through its saved handle, even if clicking the button moves Focus.
+
+Check each link in the route with two small experiments, then restore the original source. First, remove `.key_context("Counter")`: Enter no longer selects this binding, while the button still works because direct dispatch does not consult Key Context. Next, restore the context and remove `.on_action(...)`: neither input changes the count because the route has no handler. If a handler runs but the label stays stale, check whether it mutates retained state and calls `cx.notify()`. Restore `examples/hello_world/src/main.rs` when finished.
 
 ## One command, several entry points
 
@@ -70,13 +161,15 @@ The Action registry uses the namespace and type name to build a typed value from
 
 The JSON-capable example requires `serde` with its `derive` feature and `schemars` as application dependencies for those two derives.
 
+Use a unit Action for a command whose handler can read all required state from its owner, as `Rename` does in the Tree story. Use a data Action when the caller must identify a target or supply a value. An Action payload is the command input, not a place to store the owner's changing UI state.
+
 For a runtime command whose payload should never come from JSON, `no_json` retains typed dispatch but opts out of JSON construction:
 
 ```rust
 #[derive(Action, Clone, PartialEq)]
 #[action(namespace = workspace, no_json)]
 struct OpenConversation {
-    conversation_id: ConversationId,
+    conversation_id: String,
 }
 ```
 
@@ -136,11 +229,17 @@ div()
 
 GPUI builds a **dispatch path** from the focused element through its ancestors. A `key_context("Chat")` on that path makes contextual bindings eligible; the matching key produces an Action. The Action then travels on the path. A handler on a sibling is not reachable from this route.
 
+### Trace one shortcut
+
+Suppose the focused element is inside `Chat`, itself inside `Workspace`. A binding such as `KeyBinding::new("secondary-enter", SendMessage, Some("Chat"))` is eligible only while `Chat` appears on that focused path. GPUI chooses a matching binding, then dispatches its `SendMessage` value along that path. The `Chat` handler runs before a `Workspace` bubble handler. If no element on the route handles the Action, a global `cx.on_action` handler can receive it. The context chooses a **binding**; it does not select a handler by itself. [KeyBinding](./keybinding) explains competing bindings and predicate syntax.
+
+For a command triggered by a click, `window.dispatch_action(Box::new(SendMessage), cx)` uses the focus captured when called. Ensure the intended route has focus, or dispatch through a retained `FocusHandle`. A button's callback can also call the owning entity's method directly when no shared command route is needed.
+
 ## Handler order and propagation
 
 Action dispatch has two phases:
 
-1. **Capture:** matching `.capture_action(...)` listeners from the root toward the target.
+1. **Capture:** global capture listeners, then matching `.capture_action(...)` listeners from the root toward the target.
 2. **Bubble:** matching `.on_action(...)` listeners from the target toward the root, then global `cx.on_action(...)` listeners if propagation continues.
 
 The closest bubble handler therefore gets the first chance to handle a command. An Action handler stops bubble propagation by default. Call `cx.propagate()` when this handler declines the Action and a parent or global handler should try it:
@@ -163,7 +262,17 @@ fn on_action_close(
 
 Capture listeners can call `cx.stop_propagation()` to stop dispatch before it reaches the target. Global bubble handlers also stop propagation by default, so a global fallback that declines a command should call `cx.propagate()`. These are Action dispatch controls; `window.prevent_default()` controls a default input behavior such as mouse focus transfer. See [Event](./event) for pointer and keyboard event propagation.
 
+To inspect a command without consuming it, a capture listener can observe it and leave propagation enabled. Capture starts with propagation enabled. In bubble, each listener starts with propagation stopped. Call `cx.propagate()` when the next ancestor or global fallback should also receive that Action. Returning early alone does not pass it on.
+
 `window.dispatch_action(Box::new(action), cx)` captures the current focus target and defers dispatch to the rendered frame. For an explicit owner, `focus_handle.dispatch_action(&action, window, cx)` starts at the element that rendered that handle, if it is present in the current frame. `cx.dispatch_action(&action)` targets the active window, or global handlers when no window is active. These choices matter when a popup or click changes focus before a command runs.
+
+| Call | Target | When to use it |
+| --- | --- | --- |
+| `window.dispatch_action(Box::new(action), cx)` | Current focus in this window, captured at call time | A menu or button command for the focused region. Dispatch is deferred. |
+| `focus_handle.dispatch_action(&action, window, cx)` | The element that rendered this handle in the current frame | A command for a specific rendered region, even if another control now has focus. No rendered handle means no dispatch. |
+| `cx.dispatch_action(&action)` | Active window, or global handlers without one | An application-level command when the caller has an `App` context. |
+
+None of these calls evaluates a Key Context predicate. Key Context participates when a **keystroke** selects an Action from the keymap. The dispatched Action still needs a handler reachable from its chosen target.
 
 ## Coordinate sibling regions through an owner
 
@@ -207,4 +316,13 @@ When a shortcut works only after clicking a region, inspect the route in order:
 4. Did a closer handler consume the Action, or did a declining handler forget `cx.propagate()`?
 5. If a direct dispatch runs after focus changes, should it use an explicit `FocusHandle` target?
 
+If a key does nothing, first distinguish **no binding match** from **no reachable handler**. Try dispatching the Action directly on the intended `FocusHandle`. If that reaches the handler, inspect the key string and context predicate. If it does not, inspect the rendered handle, dispatch path, and propagation. If the handler runs but the screen stays unchanged, verify that it updates the owning state and calls `cx.notify()` when a redraw is needed.
+
 Keep the handle, context, and handler with the region that owns the command. Use a global handler only for an operation that truly applies across the application.
+
+## Practice with the Tree story
+
+1. **Follow the path.** Run `cargo run -p gpui-component-story -- Tree`, select a row, and press Enter. In `tree_story.rs`, find the binding, context, and handler. Which component owns the selected row, and which entity owns the command handler?
+2. **Change the input.** In your own branch, temporarily change the Tree story binding from `"enter"` to `"secondary-r"`. Re-run the Story Gallery. Verify that the new key invokes the same `Rename` handler and that Enter no longer does. Restore the source after the experiment.
+3. **Predict propagation.** Place `Rename` handlers on a child and its parent in a small view. Have the child call `cx.propagate()` only when it has no selection. Predict which handler runs in both cases, then test with visible output. A handler that returns without calling `cx.propagate()` consumes the Action.
+4. **Add a target.** Model an operation that must carry a row identifier as a data Action with `#[action(namespace = story, no_json)]`. Dispatch it from a row callback; keep the mutation in the owning handler. Compare this with `Rename`, which reads the currently selected row instead.

@@ -10,7 +10,7 @@ Mobile support builds on [gpui-mobile](https://github.com/itsbalamurali/gpui-mob
 
 GPUI Kit currently uses `gpui-pre-mobile`, a temporary compatibility package maintained in a [compatibility fork](https://github.com/longbridge/gpui-mobile). It adapts the original project for crate packaging and publication alongside `gpui-pre`, and tracks newer GPUI versions to keep the integration compatible. Once the community `gpui-mobile` completes the integration and GPUI is published as a crate, we plan to switch this guide and its dependencies to the community `gpui-mobile`.
 
-The current integration is experimental. The Swift-hosted iOS example has been built and exercised in the iOS simulator. Android has a platform implementation, but the GPUI Kit integration described here has not been validated on Android or a physical iPhone.
+The current integration is experimental. The Swift-hosted iOS example has been built and exercised in the iOS simulator. The fork also has an Android activity example and a build script, but that is a different host path; GPUI Kit integration has not been validated there or on a physical iPhone. Treat the iOS simulator path below as the demonstrated target, not a general mobile support guarantee.
 
 ## Run the iOS example
 
@@ -29,7 +29,9 @@ cd example
 ./build.sh ios --simulator
 ```
 
-The script builds the Rust static library, generates the Xcode project, and installs and launches the app in a simulator. Add `--no-run` to build only. The example targets iOS 16 or later; this is a deployment setting, not a claim that every supported OS version has been tested.
+The script builds the Rust static library, generates the Xcode project, and installs and launches the app in a simulator. Add `--no-run` to build only, or `--release` for a release build. At this pinned revision the script builds for `iPhone 16 Pro` with iOS 18.6 by name; if that runtime or device is unavailable, change its Xcode destination to one installed on your Mac. The example targets iOS 16 or later; this is a deployment setting, not a claim that every supported OS version has been tested.
+
+Check the simulator used for **installation and launch** as a separate step. In the [pinned build script](https://github.com/longbridge/gpui-mobile/blob/0b882efdac7f524e0bb0b1d4c886b2aa752f9f20/example/build.sh), `build_ios` sets the Xcode destination, but `_ios_run_simulator` later takes the first available iPhone from `xcrun simctl list devices available`. On a Mac with multiple simulators, changing only the build destination can launch a different device. Run `xcrun simctl list devices available`, compare its first listed iPhone with your chosen build destination, and, if they differ, update the script's `sim_id` selection to the intended simulator UUID before rerunning `./build.sh ios --simulator`.
 
 For device development, install the `aarch64-apple-ios` Rust target and configure your own development team and signing in `example/ios/project.yml`. Re-generate the project after changing that file. Simulator execution does not establish device performance or release readiness.
 
@@ -47,13 +49,13 @@ gpui = { package = "gpui-pre", version = "=0.3.4", default-features = false }
 gpui-kit = { git = "https://github.com/longbridge/gpui-kit", rev = "7d9efcd2069f9eaa6eb3ba6345aac4aa7d87c9f7", default-features = false, features = ["component"] }
 ```
 
-These revisions reproduce the example's dependency baseline. The Kit revision includes mobile platform gating but predates mobile tooltip suppression. To use your local GPUI Kit checkout, replace the Kit dependency with:
+These revisions reproduce the example's dependency baseline. The Kit revision includes mobile platform gating but predates mobile tooltip suppression. The current GPUI Kit checkout uses `gpui-pre 0.3.6`, while this pinned mobile platform and renderer use `0.3.4`. Cargo can select both versions, producing incompatible GPUI types; replacing the Kit dependency with a local path is **not** a working upgrade by itself. First update the mobile platform and renderer to the same GPUI version as Kit and validate that combination. Only then can you use a path dependency such as:
 
 ```toml
 gpui-kit = { path = "../gpui-kit/crates/kit", default-features = false, features = ["component"] }
 ```
 
-Adjust the path relative to your application's manifest. Keep the GPUI core and renderer on the same release: the pinned mobile platform uses `gpui-pre` and `gpui-pre-wgpu` at `0.3.4`.
+Adjust the path relative to your application's manifest. Keep the GPUI core, renderer, platform, and Kit on one compatible release.
 
 Unlike the desktop [Getting Started](/docs/getting-started) setup, mobile does not use `gpui_kit::application()` or `gpui_kit::platform`. Those desktop platform exports are excluded on iOS and Android. The mobile host initializes GPUI, calls `gpui_kit::init(cx)`, and mounts a single `component::Root` around the application's content.
 
@@ -105,6 +107,14 @@ In `layoutSubviews`, update the child controller's frame only when nonzero bound
 
 The host drives `gpui_ios_request_frame` through a `CADisplayLink` while visible and invalidates the link when the controller disappears. Forward application active/inactive callbacks as shown in `App.swift`. Keep UIKit and bridge calls on the main thread.
 
+### Input, fonts, and assets
+
+UIKit determines the embedded view's safe area and keyboard avoidance. The GPUI platform translates native touch and text input for the Rust window, while Kit owns the component interaction inside it. Exercise focus, selection, editing, paste, scrolling, and on-screen keyboard changes in the simulator; a successful build does not establish that every input method works. `window.visual_viewport_bounds()` can change as the keyboard appears, while the layout viewport remains the same. Do not manually shrink both the UIKit container and the Rust content for one keyboard transition.
+
+The example's embedded callback initializes Kit and changes the theme but does not install application fonts or an icon `AssetSource`. A font family configured for desktop may be absent on iOS, and glyph coverage for CJK or emoji can differ. For fonts your app requires, bundle the font files, register them with `cx.text_system().add_fonts(...)` before opening the GPUI window, then select those families in the theme. Check the actual rendered text and missing glyphs on each target; see [Fonts](./fonts.md) and [TextSystem](./text-system.md).
+
+The dependency sample enables only Kit's `component` feature. If your app uses named Kit icons, enable its `assets` feature and register a suitable `AssetSource` on the mobile GPUI application before the first window. Native embedded assets and files addressed by runtime paths have different deployment needs: bundle and locate external image files in the app package, or provide an HTTP client for remote images. Do not assume a desktop file path exists in the iOS sandbox. See [Icons & Assets](./assets.md).
+
 ## Platform-specific behavior
 
 `gpui_kit::is_mobile()` is an inline `const fn` that returns `true` for iOS and Android targets. It checks the compilation target, not window width or whether a mouse is connected.
@@ -123,7 +133,7 @@ Share component behavior and content with desktop, while adapting the screen to 
 - Give each conversation one vertical scroll owner. For a `TextView` within that scroller, use `.w_full().min_w_0().scrollable(false)` so text and images fit the available width.
 - Keep the composer compact when empty. Use a single-line input when multiline composition is unnecessary, and ensure the keyboard does not cover the send action.
 - HoverCard opens and closes by tapping its trigger on iOS and Android. Tap outside to dismiss it; moving a finger does not open the card.
-- A long press or a double tap in an `Input`, `Textarea`, or selectable `TextView` selects the word under the finger, then shows grab handles at both ends and an edit menu with Cut, Copy, Paste, and Select All as they apply. Nothing needs to be configured; `Root` draws the menu for the window text selection.
+- A long press or double tap in an `Input` or `Textarea` selects a word with touch handles and an edit menu. For selectable, read-only `TextView` content, use a long press; its touch double tap intentionally does not select a word. These are Kit interaction paths that still need validation through the mobile platform's event translation.
 - Make actions discoverable by touch. Keep copy actions aligned with the reply and use a brief checkmark after copying. Do not rely on hover text to explain an action.
 - Prefer short paragraphs and purposeful headings. Let code, tables, and images support the conversation rather than presenting every Markdown format in each reply.
 - Use Kit theme colors, type sizes, and spacing consistently. Check long replies, wide code, image loading, and Chinese or other scripts at the actual device width.
@@ -137,3 +147,13 @@ For an application integration, check launch and return from the background, key
 Measure rendering on a physical device with a release build and Xcode Instruments before making performance claims. Simulator results are useful for layout and interaction, but are not device frame-time measurements.
 
 Android uses a separate activity and surface lifecycle. The repository contains an Android example, but this guide does not establish Android Kit compatibility or native Android `View` embedding. Validate those paths separately before depending on them.
+
+## Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Xcode cannot find the simulator destination, or the app launches on another simulator | The pinned `build.sh` builds for iOS 18.6 on an iPhone 16 Pro. Install that runtime or edit its Xcode destination to match `xcodebuild -showdestinations`. Then run `xcrun simctl list devices available`: the script's `_ios_run_simulator` installs on the first available iPhone, independently of the build destination. If that is a different device, change its `sim_id` selection to the intended UUID. |
+| Device build fails signing or install | Replace the example development team in `example/ios/project.yml`, regenerate the Xcode project, and confirm the device appears in Xcode. The default script target is a physical device; pass `--simulator` explicitly for the documented simulator path. |
+| Rust reports two versions of GPUI or mismatched `App`/`Window` types | Check the resolved `gpui-pre` packages. The pinned mobile fork uses `0.3.4`; this checkout uses `0.3.6`. Align the entire mobile platform and Kit dependency set before using the local Kit path. |
+| App launches with a blank or stale GPUI view | Check that the Rust callback opens a window, the child controller is attached, `layoutSubviews` publishes nonzero bounds, and visible frames are requested. Inspect the Xcode console; the example sends Rust logs and panics to `NSLog`. |
+| Text, icons, or images are missing | Verify the font family and glyph coverage, registered `AssetSource` and exact icon keys, or the image's packaged path and HTTP client. A desktop asset or font configuration does not automatically carry into the mobile host. |

@@ -135,6 +135,21 @@ impl<'a> Iterator for ByteChunks<'a> {
     }
 }
 
+/// Answer a tree-sitter read request at byte `offset`.
+///
+/// Tree-sitter reads bytes, not chars: a stale tree or stale included ranges
+/// can ask for an offset inside a multi-byte character. Slicing `&str` there
+/// panics, and a panic inside tree-sitter's `extern "C"` read callback aborts
+/// the process, so the chunk is sliced as bytes.
+pub(crate) fn parse_input_bytes(text: &Rope, offset: usize) -> &[u8] {
+    if offset >= text.len() {
+        return &[];
+    }
+
+    let (chunk, chunk_byte_ix) = text.chunk(offset);
+    &chunk.as_bytes()[offset - chunk_byte_ix..]
+}
+
 fn injection_range_len(range: &tree_sitter::Range) -> usize {
     range.end_byte.saturating_sub(range.start_byte)
 }
@@ -573,14 +588,7 @@ impl SyntaxHighlighter {
 
         let options = ParseOptions::new().progress_callback(&mut progress);
         let new_tree = self.parser.parse_with_options(
-            &mut move |offset, _| {
-                if offset >= text.len() {
-                    ""
-                } else {
-                    let (chunk, chunk_byte_ix) = text.chunk(offset);
-                    &chunk[offset - chunk_byte_ix..]
-                }
-            },
+            &mut move |offset, _| parse_input_bytes(text, offset),
             Some(&old_tree),
             Some(options),
         );
@@ -866,14 +874,7 @@ impl SyntaxHighlighter {
         let options = ParseOptions::new().progress_callback(&mut progress);
 
         let new_tree = parser.parse_with_options(
-            &mut |offset, _| {
-                if offset >= text.len() {
-                    ""
-                } else {
-                    let (chunk, chunk_byte_ix) = text.chunk(offset);
-                    &chunk[offset - chunk_byte_ix..]
-                }
-            },
+            &mut |offset, _| parse_input_bytes(text, offset),
             old_tree,
             Some(options),
         )?;
@@ -1244,6 +1245,20 @@ mod tests {
         let mut style = HighlightStyle::default();
         style.color = Some(color);
         style
+    }
+
+    #[test]
+    fn test_parse_input_bytes_inside_multibyte_char() {
+        // Stale trees make tree-sitter read from offsets inside a character;
+        // the read callback must return bytes instead of panicking.
+        let rope = Rope::from("let s = \"你好\";");
+        let start = "let s = \"".len();
+        assert_eq!(
+            parse_input_bytes(&rope, start + 1),
+            &"你好\";".as_bytes()[1..]
+        );
+        assert_eq!(parse_input_bytes(&rope, rope.len()), b"");
+        assert_eq!(parse_input_bytes(&rope, rope.len() + 4), b"");
     }
 
     #[test]

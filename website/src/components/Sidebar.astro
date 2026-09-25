@@ -9,17 +9,35 @@ export interface Props {
 
 const { items, currentPath, lang = 'en' } = Astro.props;
 
-function isActive(link: string): boolean {
+function matches(link: string): boolean {
   return currentPath === link || currentPath.startsWith(link + '/');
 }
 
-function renderItems(items: SidebarItem[], depth = 0): any[] {
-  return items;
+function links(items: SidebarItem[]): string[] {
+  return items.flatMap(item => [
+    ...(item.link ? [item.link] : []),
+    ...(item.items ? links(item.items) : []),
+  ]);
 }
+
+// A section root such as `/docs` prefixes every page under it, so only the
+// longest matching link is current; otherwise two items light up at once.
+const activeLink = links(items)
+  .filter(matches)
+  .sort((a, b) => b.length - a.length)[0];
+
+function isActive(link: string): boolean {
+  return link === activeLink;
+}
+
 ---
 
-<aside class="docs-sidebar" aria-label="Documentation navigation">
-  <nav>
+<aside class="docs-sidebar" aria-label={lang === 'zh-CN' ? '文档导航' : 'Documentation navigation'}>
+  <button class="docs-sidebar__toggle" type="button" aria-controls="docs-sidebar-navigation" aria-expanded="false">
+    {lang === 'zh-CN' ? '浏览文档目录' : 'Browse documentation'}
+    <span aria-hidden="true">▾</span>
+  </button>
+  <nav id="docs-sidebar-navigation">
     {items.map(group => (
       <div class="sidebar-group">
         {group.text && (
@@ -37,6 +55,7 @@ function renderItems(items: SidebarItem[], depth = 0): any[] {
                         <a
                           href={sub.link}
                           class={`sidebar-item${sub.link && isActive(sub.link) ? ' active' : ''}`}
+                          aria-current={sub.link && isActive(sub.link) ? 'page' : undefined}
                         >
                           {sub.text}
                         </a>
@@ -49,6 +68,7 @@ function renderItems(items: SidebarItem[], depth = 0): any[] {
                   <a
                     href={item.link}
                     class={`sidebar-item${item.link && isActive(item.link) ? ' active' : ''}`}
+                    aria-current={item.link && isActive(item.link) ? 'page' : undefined}
                   >
                     {item.text}
                   </a>
@@ -66,6 +86,16 @@ function renderItems(items: SidebarItem[], depth = 0): any[] {
   (function () {
     const sidebar = document.querySelector('.docs-sidebar');
     if (!sidebar) return;
+
+    const toggle = sidebar.querySelector('.docs-sidebar__toggle');
+    if (toggle) {
+      sidebar.dataset.navReady = '';
+      toggle.addEventListener('click', function () {
+        const open = sidebar.dataset.mobileOpen !== 'true';
+        sidebar.dataset.mobileOpen = String(open);
+        toggle.setAttribute('aria-expanded', String(open));
+      });
+    }
 
     const section = window.location.pathname.match(/(?:^|\/)(docs|base|shell)(?:\/|$)/)?.[1] || 'docs';
     const key = 'gpui-kit:sidebar-scroll:' + section;

@@ -710,9 +710,12 @@ pub fn run() {
 pub fn run_embedded(app: Application) -> ApplicationHandle {
     app.run_embedded(|cx: &mut App| {
         gpui_base::init(cx);
+        // The web platform resolves GPUI's `.SystemUIFont` alias to IBM Plex Sans and
+        // ships no fonts of its own, so the family has to be bundled or the first
+        // text layout panics and the canvas stays blank (see #2933).
         cx.text_system()
             .add_fonts(vec![Cow::Borrowed(
-                include_bytes!("../../../story-web/fonts/Inter-Regular.ttf").as_slice(),
+                include_bytes!("../../../story-web/fonts/IBMPlexSans-Regular.ttf").as_slice(),
             )])
             .expect("failed to load motion example font");
         cx.open_window(WindowOptions::default(), |_, cx| {

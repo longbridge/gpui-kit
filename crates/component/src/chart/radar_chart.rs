@@ -482,7 +482,7 @@ where
 
         // Draw grid rings and spokes
         if self.grid {
-            let stroke = cx.theme().border;
+            let stroke = cx.theme().chart_grid;
 
             for level in 1..=self.grid_levels {
                 let radius = outer_radius * level as f32 / self.grid_levels as f32;

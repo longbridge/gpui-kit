@@ -52,9 +52,10 @@ Icon 支持通过资源路径或内存中的字节渲染 SVG 图标，并可定�
 
 ## 应用额外图标
 
-照常注册默认 `Assets`，应用额外需要的 SVG 由自己的 `AssetSource` 提供，
-并在未找到时回退到默认资源源。也可以用可选的 `icon_assets!` 声明应用额外使用的
-内置 SVG，然后将其资源源与默认资源源组合。详见 [Icons & Assets](../docs/assets.md)。
+照常注册默认 `Assets`。如果要使用目录中的额外图标，请按照
+[选取图标教程](../docs/assets.md#用-icon_assets-选择更多目录图标)操作：`icon_assets!` 只为列出的
+SVG 创建资源源，应用还需将它与默认资源源组合并注册。应用自己的 SVG 文件请参阅
+[自定义资源](../docs/assets.md#自定义资源)。
 
 
 ## 导入
@@ -135,8 +136,8 @@ PopupMenuItem::new("Search").icon(icon);
 
 ```rust
 let bytes = include_bytes!("search.svg");
-Icon::default().path("icons/old.svg").data(bytes); // 使用 SVG 字节
-Icon::default().data(bytes).path("icons/search.svg"); // 使用资源路径
+Icon::default().path("icons/old.svg").data(bytes); // Uses SVG bytes
+Icon::default().data(bytes).path("icons/search.svg"); // Uses the asset path
 ```
 
 字节图标与路径图标使用相同的 SVG 渲染器，保留组件尺寸、前景色与按钮加载行为。

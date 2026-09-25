@@ -17,7 +17,7 @@ use gpui_base::input::{
 use ropey::Rope;
 use tree_sitter::{InputEdit, ParseOptions, Point};
 
-use super::{LanguageRegistry, SyntaxHighlighter};
+use super::{LanguageRegistry, SyntaxHighlighter, highlighter::parse_input_bytes};
 
 pub(crate) fn input_highlighter_factory() -> InputHighlighterFactory {
     Rc::new(|language| {
@@ -119,14 +119,7 @@ impl InputHighlighter for TreeSitterInputHighlighter {
                     };
                     let options = ParseOptions::new().progress_callback(&mut progress);
                     let tree = parser.parse_with_options(
-                        &mut |offset, _| {
-                            if offset >= text.len() {
-                                ""
-                            } else {
-                                let (chunk, chunk_byte_ix) = text.chunk(offset);
-                                &chunk[offset - chunk_byte_ix..]
-                            }
-                        },
+                        &mut |offset, _| parse_input_bytes(&text, offset),
                         old_tree.as_ref(),
                         Some(options),
                     )?;

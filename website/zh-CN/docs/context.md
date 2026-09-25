@@ -18,9 +18,19 @@ GPUI callback 中经常出现 `window: &mut Window, cx: &mut Context<Self>`。�
 | `AsyncApp` | 跨越 `await` 的前台任务句柄 | 通过一次简短的 update 重新进入 `App` 或 Entity |
 | `AsyncWindowContext` | 指向某个窗口的异步句柄 | 重新进入 Entity 及其 Window |
 
+可以按生命周期理解这张表：`application().run` 首先提供 `App`；打开窗口后才有 `Window`；创建 Entity 后，GPUI 在构造或更新该 Entity 时提供它的 `Context<T>`。前台异步任务得到的是异步句柄，而不是跨越 `await` 的同步 context 借用。
+
+| 代码运行位置 | GPUI 提供的参数 | 适合处理的事 |
+| --- | --- | --- |
+| `application().run`、应用级 callback | `&mut App` | 初始化 kit、设置 Global、创建 Entity、打开窗口 |
+| 窗口构造闭包、Element 或组件 callback | `&mut Window`、`&mut App` | 操作该窗口及应用状态；需要所属 View 时使用 `cx.listener` |
+| `Render` 或 Entity update | `&mut Self`、`&mut Context<Self>`；`Render` 和 `update_in` 另有 `&mut Window` | 读取或修改当前 View；可见状态变化时调用 `notify` |
+| `App::spawn` / `Context<T>::spawn` task | `&mut AsyncApp`；Entity task 还有 `WeakEntity<T>` | `await` 后短暂重新访问应用或 Entity |
+| `Context<T>::spawn_in` task | `&mut AsyncWindowContext` 和 `WeakEntity<T>` | 重新进入还需要原窗口的操作 |
+
 `Context<T>` 会解引用为 `App`，所以拿到 `cx: &mut Context<T>` 时已经可以调用 App API，不需要再传一个 `&mut App`。它还知道当前是哪一个 Entity；普通的 `App` 不知道。`Window` 必须单独传入，因为同一个 Entity 可能显示在不同窗口中，而纯数据更新也可能不属于任何窗口。Window 还管理由 [ElementId](./element_id) 标识的窗口内状态。异步 context 是句柄，不是可以长期持有的 `&mut App` 或 `&mut Window` 引用。
 
-下文使用的 Entity 专用方法定义在 [GPUI `Context<T>`](https://github.com/zed-industries/zed/blob/main/crates/gpui/src/app/context.rs) 源码中。
+下文使用的 Entity 专用方法定义在 [GPUI `Context<T>`](https://docs.rs/crate/gpui-pre/0.3.6/source/src/app/context.rs) 源码中。
 
 GPUI Kit 应用只依赖 `gpui-kit`，通过 `use gpui_kit::*;` 导入 GPUI API。创建基于组件的 View 之前调用 `gpui_kit::init(cx)`。应用级 [Global](./global) 属于 `App`；组件或功能 View 的持久状态放在 [Entity] 中。
 
@@ -80,6 +90,8 @@ fn clear_messages(&mut self, cx: &mut Context<Self>) {
 
 GPUI Kit `Button` 的点击 handler 接收 `(&ClickEvent, &mut Window, &mut App)`，不会直接收到 View 的 `&mut Self`。在 View 的[渲染](./render)代码中用 `cx.listener` 创建 handler；GPUI 随后会更新该 View，并把它的 `Context<Self>` 交给内层闭包。组件还提供键盘与[无障碍](./accessibility)行为：
 
+要运行下面的完整示例，将代码放入仓库现有 `hello_world` package 的 `examples/hello_world/src/main.rs`，替换该文件原有内容。在仓库根目录运行 `cargo run -p hello_world --bin hello_world`。
+
 ```rust
 use gpui_kit::*;
 use gpui_kit::assets::Assets;
@@ -93,7 +105,7 @@ impl Render for Counter {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div().child(
             Button::new("increment")
-                .label(format!("计数：{}", self.count))
+                .label(format!("Count: {}", self.count))
                 .on_click(cx.listener(|this, _event, _window, cx| {
                     this.count += 1;
                     cx.notify();
@@ -115,30 +127,43 @@ fn main() {
 }
 ```
 
+窗口最初显示 `Count: 0`。点击按钮一次后，标签应变成 `Count: 1`；继续点击会逐次加一。这可以检查 listener 修改的是同一个 `Counter` Entity，且 `cx.notify()` 让新值显示出来。练习结束后，如需保留原示例，请恢复原来的 `main.rs`。
+
 外层 callback 的类型由按钮决定。内层闭包收到 `&mut Counter` 和 `&mut Context<Counter>`。`cx.listener` 使用 View 的弱句柄，因此保存的 handler 不会让已关闭的 View 继续存活。计数属于 Entity 状态，`cx.notify()` 告诉 GPUI 渲染新值。不要在 `render` 中反复创建 View；拥有它的 `Entity<Counter>` 在窗口打开时创建。
 
 ## 创建、读取和更新
 
-`cx.new` 创建 [Entity]，构造闭包会拿到新 Entity 自己的 `Context<T>`：
+`cx.new` 创建 [Entity]，构造闭包会拿到新 Entity 自己的 `Context<T>`。强 `Entity<T>` 句柄会让它保持存活。用句柄的 `read` 同步借用数据，或用 `update` 获得 `&mut T` 和该 Entity 自己的 context：
 
 ```rs
-let chat = cx.new(|cx| Chat::new(cx));
+struct Draft {
+    text: String,
+}
 
-let count = chat.read(cx).message_count();
+fn edit_draft(cx: &mut App) -> Entity<Draft> {
+    let draft = cx.new(|_| Draft { text: String::new() });
+    let was_empty = draft.read(cx).text.is_empty();
 
-chat.update(cx, |chat, cx| {
-    chat.clear_draft();
-    cx.notify();
-});
+    if was_empty {
+        draft.update(cx, |draft, cx| {
+            draft.text.push_str("Hello");
+            cx.notify();
+        });
+    }
+
+    draft
+}
 ```
 
-`read` 用于同步只读访问；`update` 提供 `&mut T` 和它的 Context。在 update 闭包中始终使用内层传入的 `cx`。
+`read` 返回的引用不能超过 `App` 借用的生命周期。先结束读取，再用 `update` 申请可变访问；之后要用的数据应少量复制或 clone。强句柄的 `update` 直接返回闭包的结果。`WeakEntity<T>` 可能已释放，因此其 `update` 和 `update_in` 返回 `Result`。通知变化或调用 Entity 专用方法时，使用 update 闭包内层传入的 `cx`。
 
 `App` 和 `Context<T>` 都提供 GPUI 的 `AppContext` API，因此都可以调用 `cx.new`。从 `Context<Parent>` 创建子 Entity 时，构造闭包收到的是**新建子 Entity** 的 `Context<Child>`，并非父 Entity 的 context。若子 Entity 应跨越多次渲染存活，owner 应保存返回的强 `Entity<Child>` 句柄。
 
 :::info
 `cx.notify()` 表示当前 Entity 已改变。它会安排依赖它的 View 重新 render，并触发 `observe` callback；只修改字段不会产生这些效果。
 :::
+
+读取数据不需要 `notify`。不要在 `render` 中无条件调用它，否则可能持续安排重新渲染。一次操作需要修改多个相关字段时，先完成修改，再通知一次。
 
 不要让 `read` 返回的引用跨越 `await`，应先 clone 任务需要的少量数据。不要把 `&mut App`、`&mut Window` 或 `&mut Context<T>` 保存在 View 或 task 中；它们只在当前 GPUI 调用期间有效。
 
@@ -158,7 +183,7 @@ fn finish_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
 }
 ```
 
-延迟闭包也已经收到 `this: &mut Self`，不要在其中再次对同一个 Entity 调用 `update`。当 UI 树变化后需要恢复 Focus 等操作必须等当前更新结束时，再使用 defer。`window.on_next_frame(...)` 表示下一次渲染帧，是另一种时机。窗口关闭或 View 释放后，延迟工作可能不会执行，因此不要把它当成持久任务队列。
+延迟闭包也已经收到 `this: &mut Self`，不要在其中再次对同一个 Entity 调用 `update`。当 UI 树变化后需要恢复 Focus 等操作必须等当前更新结束时，再使用 defer。[`window.on_next_frame(...)`](https://docs.rs/crate/gpui-pre/0.3.6/source/src/window.rs) 则为下一次平台 frame request 安排 callback，并唤醒 frame source。callback 在该次请求可能发生的绘制之前运行；仅注册它不会把窗口标为 dirty，也不会触发 render。如果 callback 改变了可见的 Entity 状态，应在 callback 内调用 `cx.notify()`。需要主动请求下一帧重绘时，使用 `window.request_animation_frame()`。窗口关闭或 View 释放后，延迟工作可能不会执行，因此不要把它当成持久任务队列。
 
 ## 异步任务
 
@@ -222,7 +247,7 @@ struct Chat {
     _subscriptions: Vec<Subscription>,
 }
 
-// 位于 Chat::new 中：
+// In Chat::new:
 let _subscriptions = vec![
     cx.observe(&input, |_, _, cx| cx.notify()),
     cx.subscribe(&input, |chat, input, event: &InputEvent, cx| {

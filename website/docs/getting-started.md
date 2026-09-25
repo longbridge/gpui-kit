@@ -29,7 +29,7 @@ This single dependency includes GPUI, GPUI Base, the styled GPUI Component libra
 Replace `src/main.rs` with:
 
 ```rust
-use gpui_kit::component::button::Button;
+use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::*;
 
 struct HelloWorld;
@@ -95,17 +95,23 @@ As an app grows, a feature with its own workflow can keep its model and views to
 
 Read these in order as your app grows:
 
-1. [Element](./element.md) and [RenderOnce](./render-once.md): understand the frame's tree and value-like components.
-2. [Entity](./entity.md) and [Context](./context.md): retain state and update it outside rendering.
-3. [Window](./window.md): open windows and use the `Root` overlay layer.
-4. [Event](./event.md) and [Action](./action.md): connect state changes, keyboard shortcuts and commands.
-5. [Component catalog](../component/index.md): choose controls; then read [Icons & Assets](./assets.md) and [Fonts](./fonts.md) as your interface needs them.
+1. [Entity](./entity.md), [Context](./context.md), and [Render](./render.md): retain a value, change it from a button callback, and confirm the window shows the new value. Read [Window](./window.md) to see how `Root` hosts that view and its overlays.
+2. [Element](./element.md) and [RenderOnce](./render-once.md): distinguish the rebuilt element tree from persistent state. Follow the runnable Brush exercise in [Paint](./paint.md), and confirm a pointer press changes the drawing.
+3. [Focus](./focus.md), [Action](./action.md), and [Event](./event.md): use Tab to reach an interactive target, then trigger one command and observe its state change. Follow [Task](./task.md) to run the streaming example; press Replay twice and confirm old chunks do not return.
+4. [Accessibility](./accessibility.md) and [Testing](./test.md): follow the Save flow with a keyboard, check its focus and visible result, then run the documented UI test and confirm both the rendered status and saved model value. Check assistive technology separately on each target platform.
+5. [Component catalog](../component/index.md): choose controls for your application; then read [Icons & Assets](./assets.md) and [Fonts](./fonts.md) as your interface needs them.
 
-For a complete application with retained input state and subscriptions, use the [application recipes](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes). The [Coding Guides](./coding-guides.md) explain the conventions behind those examples.
+For a tested example of retained input state and subscriptions, read the [application recipes](https://github.com/longbridge/gpui-kit/tree/main/examples/ai_recipes). The [Coding Guides](./coding-guides.md) explain the conventions behind those examples.
 
 ## Complete tested view
 
-This settings view is a compiled recipe showing retained input state and subscriptions. The excerpt is synchronized with its [Rust source](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/src/settings.rs).
+This settings view is a compiled recipe showing retained input state and subscriptions. The excerpt is synchronized with its [Rust source](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/src/settings.rs). The repository's default `gpui-kit-recipes` executable opens a small bootstrap view; it does not display this settings view. The [settings interaction test](https://github.com/longbridge/gpui-kit/blob/main/examples/ai_recipes/tests/settings.rs) mounts `Settings` in a GPUI test window. From the repository root, run:
+
+```sh
+cargo test -p gpui-kit-recipes --test settings
+```
+
+The test passes when typing updates the retained preview to `a`, then to `ab` after an unrelated redraw, with change counts of 1 and 2. This verifies the input subscription and state lifetime in a test window; it does not perform a native visual review.
 
 <!-- recipe:settings:start -->
 ```rust

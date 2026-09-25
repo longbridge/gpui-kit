@@ -25,6 +25,106 @@ div()
 
 链上的每次调用都会取得元素并返回元素。render 可以根据当前状态构建新树；需要长期保存的应用状态应放在 [`Entity`](./entity) 或带 key 的元素状态中。样式链描述本帧的外观，并非样式表或长期保存的组件实例。逐帧构建组件的方式见 [RenderOnce](./render-once)。
 
+## 从第一个布局开始
+
+先找出负责可用空间的区域，再决定哪个子元素宽度固定、哪个可以伸展。用下面的完整程序替换 `examples/hello_world/src/main.rs`，然后在仓库根目录运行 `cargo run -p hello_world`：
+
+```rust
+use gpui_kit::*;
+use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _};
+use gpui_kit::prelude::FluentBuilder as _;
+
+struct StyleExample;
+
+impl Render for StyleExample {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let compact = window.viewport_size().width < px(600.);
+        let layout = if compact { v_flex() } else { h_flex() };
+        let documents = (1..=60).map(|number| {
+            div().p_2().child(format!("Document {number:02}"))
+        });
+
+        layout
+            .items_stretch()
+            .size_full()
+            .bg(cx.theme().background)
+            .text_color(cx.theme().foreground)
+            .child(
+                v_flex()
+                    .when(!compact, |nav| nav.w_64().flex_shrink_0())
+                    .p_3()
+                    .gap_2()
+                    .child("Navigation")
+                    .child("Overview · Documents"),
+            )
+            .child(
+                v_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .min_h_0()
+                    .child(h_flex().p_3().child("Documents"))
+                    .child(
+                        v_flex()
+                            .id("document-list")
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .child(v_flex().p_3().gap_2().children(documents)),
+                    ),
+            )
+    }
+}
+
+fn main() {
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| StyleExample)
+        })
+        .expect("failed to open window");
+    });
+}
+```
+
+窗口较宽时，导航区域以固定的 `w_64()` 宽度位于左侧，文档面板占用剩余空间。把内容区域缩小到 600 逻辑像素以下：同一个导航区域会移到文档面板上方，而文档列表仍可独立滚动。滚到 `Document 60`，再向两个方向调整窗口宽度；列表滚动时，标题栏应保持在原位。这里的阈值是在视图 render 时求值的 Rust 条件，不是 Tailwind 响应式前缀。这个小练习中的导航只是示意文本；真实应用应提供可操作的导航控件。
+
+`h_flex()` 建立横向布局，并默认让子元素沿交叉轴居中。`.items_stretch()` 覆盖这个默认值，让两个面板占满整行高度。`v_flex()` 建立纵向布局，子元素默认沿宽度方向拉伸。宽窗口中的导航面板保持固定宽度，文档面板占用剩余宽度。滚动区域占据标题栏下方的剩余高度。窗口大小为最外层的 `.size_full()` 提供确定高度，`min_h_0()` 则允许内部弹性区域收缩成滚动视口。
+
+### 确定尺寸该由谁负责
+
+| 需求 | 设置位置 | 原因 |
+| --- | --- | --- |
+| 同级元素之间的距离 | 在父元素上设置 `.gap_3()` | gap 分隔子元素，不会在容器外边缘增加内边距。 |
+| 面板内部的留白 | 在面板上设置 `.p_3()` | padding 把内容向内推，并参与面板的布局尺寸。 |
+| 固定侧栏与弹性内容 | 侧栏 `.w_64().flex_shrink_0()`；内容 `.flex_1().min_w_0()` | 侧栏保持宽度，内容可收缩到小于文字自然宽度。 |
+| 标题栏下方的滚动内容 | 有确定高度的纵向容器；滚动子元素 `.flex_1().min_h_0()` | 子元素可缩进剩余高度，从而形成真正的滚动视口。 |
+| 父元素宽度的一半 | 在子元素上设置 `.w(relative(0.5))` | 布局时，比例按相关父尺寸解析。 |
+
+`w_full()` 和 `h_full()` 表示填满*可用*尺寸。百分比高度仍要求上层有确定高度。最小值和最大值限制最终尺寸；它们不会让没有高度约束的滚动区域自动形成视口。横向布局中的单行长标题可在标题容器上组合 `.flex_1().min_w_0().truncate()`。`.truncate()` 只改变文字溢出方式，无法让不肯收缩的同级元素腾出宽度。
+
+### 选择裁剪、滚动或定位
+
+`.overflow_hidden()` 裁剪内容，但不会让内容滚动。在有状态的元素上，`.overflow_y_scroll()` 可在高度受限后启用纵向滚动。GPUI Kit 的 `.overflow_y_scrollbar()` 会加入可见滚动条，并以原元素作为滚动区域；它来自 `ScrollableElement` 扩展，而非 `Styled` 方法。每个滚动区域应有一个明确的负责元素。如果滚动条要贴着面板边缘，内容 padding 应放在滚动区域内部。滚动归属与测量方式见[编码指南](./coding-guides)。
+
+普通 Flex 子元素占用布局空间。要让角标覆盖内容而不占一行或一列，可在容器上设置 `.relative()`，在角标上设置 `.absolute().top_0().right_0()`。偏移 setter 用于定位绝对子元素；它们不会自动将普通 Flex 子元素变成绝对定位。后面的同级元素通常绘制在前面的同级元素之上；通用 `Styled` 没有 `z_index(...)` 方法。
+
+### 主题与尺寸尺度
+
+应用界面的颜色和圆角应从 `cx.theme()` 读取语义值。GPUI Kit 组件已应用正常的主题外观；实例样式可用于局部布局或有意的细化。具名间距和尺寸方法使用 rem 尺度：`_1` 为 `0.25rem`、`_2` 为 `0.5rem`、`_3` 为 `0.75rem`、`_4` 为 `1rem`。在 GPUI Kit 的 `Root` 中，当前主题的基础字号决定窗口的 rem 大小，因此字号或缩放变化也会改变基于 rem 的几何尺寸。命名尺度不合适时用 `.gap(rems(0.625))` 等带类型的 setter；只有确实需要像素尺寸时才使用 `px(...)`。长度类型见[几何](./geometry)，主题与 rem 设置见[字体](./fonts)。
+
+### 排查布局结果
+
+| 现象 | 检查方向 |
+| --- | --- |
+| 窗口缩窄后导航没有移到文档上方 | 把可绘制内容区域缩到 600 逻辑像素以下。条件在 `render` 中读取 `window.viewport_size().width`；仅改变显示器缩放倍率不会跨过这个逻辑像素阈值。 |
+| 无法滚到 `Document 60` | 把指针移到文档列表上并在该区域滚动。让有高度约束的列表区域拥有 `.id("document-list").overflow_y_scroll()`，并在该区域及外层纵向容器上保留 `.flex_1().min_h_0()`。 |
+| 滚动时标题栏也跟着移动 | 确认标题栏与列表视口是同级元素，不要把标题栏放进滚动元素内部。 |
+| 面板标题在顶部消失 | `h_flex()` 默认让子元素居中；让整行子元素拉伸，或让该面板占满高度。 |
+| 标题溢出而没有截断 | 在弹性子元素上用 `.min_w_0()` 解除最小宽度约束，并限制文字宽度。 |
+| 列表越过窗口而没有滚动 | 让祖先拥有确定高度，用 `.min_h_0()` 允许弹性子元素收缩，并在预期的视口上设置滚动。 |
+| 滚动条缩在面板边缘以内 | 检查哪个元素负责滚动，以及 padding 是否包在滚动元素外面。 |
+| 主题缩放后布局变化 | 重新检查基于 rem 的尺寸，以及仍沿用旧 rem 大小的测量缓存。 |
+
 ## 常用 `Styled` 方法
 
 Tailwind 名称中的连字符在 GPUI 方法中写成下划线。有对应样式概念时，第一列链接到相应的 Tailwind CSS 官方参考页，并在新窗口打开。表中列的是 GPUI 方法名；可在实现 `Styled` 的值上调用，例如 `div().gap_2()`。这些表格覆盖 `Styled` 中各类独立操作，以及宏生成的通用 setter；大量数字变体按下文所述的方法族归纳，不逐个占用数千行。链接说明对应的样式概念，不表示 GPUI 与浏览器的行为完全相同。
@@ -298,50 +398,14 @@ Tailwind 名称中的连字符在 GPUI 方法中写成下划线。有对应样�
 
 间距便捷方法使用基于 rem 的尺度：`_1` 为 `0.25rem`，`_2` 为 `0.5rem`，`_3` 为 `0.75rem`，`_4` 为 `1rem`。命名方法没有覆盖所需数值时，可使用 `.gap(rems(0.625))`、`.w(px(240.))` 或 `.w(relative(0.5))` 这类带类型的 setter。`relative(0.5)` 表示可用相对尺寸的一半；`px(...)` 表示像素。命名尺度和方法范围以 GPUI 的实现为准，不要假定每个 Tailwind class 都有对应方法。
 
-### 可收缩的横向布局
-
-```rust
-use gpui_kit::*;
-use gpui_kit::component::h_flex;
-
-h_flex()
-    .w_full()
-    .gap_3()
-    .child(div().w_64().flex_shrink_0().child("Navigation"))
-    .child(div().flex_1().min_w_0().truncate().child("A long document title"))
-```
-
-`h_flex()` 是 GPUI Kit 对 `.flex().flex_row().items_center()` 的简写，默认让子项沿垂直方向居中。需要面板占满整行高度时，在横向容器上用 `.items_stretch()`，或在子项上用 `.h_full()`。`.flex_1()` 让标题区域占据剩余宽度；`.min_w_0()` 允许其收缩到内容的自然宽度以下，让截断生效。父元素负责间隙与对齐，各子元素负责自己的尺寸约束。
-
-### 使用主题的表面
-
-```rust
-use gpui_kit::*;
-use gpui_kit::component::ActiveTheme as _;
-
-div()
-    .flex()
-    .flex_col()
-    .gap_3()
-    .p_4()
-    .bg(cx.theme().background)
-    .text_color(cx.theme().foreground)
-    .border_1()
-    .border_color(cx.theme().border)
-    .rounded(cx.theme().radius)
-    .child("Account")
-```
-
-Tailwind 的类比适用于布局和 utility 命名，并不提供 CSS 层叠或 Tailwind 的颜色表。应用界面的颜色与圆角应从 `cx.theme()` 读取语义值。GPUI Kit 组件已经拥有正常的主题外观；实例样式用于局部布局或明确的样式细化。
-
 ## 样式调用改动了什么
 
 每个实现 `Styled` 的元素都提供 `fn style(&mut self) -> &mut StyleRefinement`。例如，`.px_3()` 写入相应的可选 padding 字段，`.bg(...)` 写入 background 字段。合并样式时，未设置的字段不会覆盖已有值。解析后的 `Style` 同时包含布局数据与外观数据。
 
 ```text
-Styled 调用 → StyleRefinement → 解析后的 Style
-                                      ├─ 布局字段 → Taffy → bounds
-                                      └─ 颜色、文字、阴影、光标 → GPUI 绘制与交互
+Styled calls → StyleRefinement → resolved Style
+                                    ├─ layout fields → Taffy → bounds
+                                    └─ color, text, shadow, cursor → GPUI paint and interaction
 ```
 
 在元素的 `request_layout` 阶段，GPUI 将 display、size、padding、gap、Flex 对齐、position 和 Grid 位置等布局字段连同子元素的布局 ID 交给 Taffy。Taffy 计算几何尺寸与位置。GPUI 随后在 `prepaint` 和 [Paint](./paint) 阶段使用所得 bounds 绘制并进行命中测试。Taffy 不实现 GPUI 的文字 shaping、hover listener、[Action](./action) 或绘制。
@@ -350,7 +414,7 @@ Styled 调用 → StyleRefinement → 解析后的 Style
 
 ## Fluent 组合与 trait 边界
 
-链式 API 由多个 trait 共同提供。`Styled` 提供样式方法，`ParentElement` 提供 `.child(...)`，`InteractiveElement` 提供 `.id(...)` 并返回支持身份相关交互的 `Stateful<Div>`。每个 `IntoElement` 都实现 `FluentBuilder`；只实现 `IntoElement` 不会获得样式或交互能力。
+链式 API 由多个 trait 共同提供。`Styled` 提供样式方法，`ParentElement` 提供 `.child(...)`。`InteractiveElement` 提供 `.id(...)`，返回支持 `.overflow_y_scroll()` 等依赖身份的方法的 `Stateful<Div>`；它还提供 `.hover(...)` 等状态样式细化。每个 `IntoElement` 都实现 `FluentBuilder`；只实现 `IntoElement` 不会获得样式、子元素或交互能力。缺少某个方法时，检查接收者实现了哪个 trait，以及之前的调用是否改变了其类型。
 
 | `FluentBuilder` 方法 | 作用 |
 | --- | --- |
@@ -374,6 +438,8 @@ div()
 ```
 
 条件闭包取得 builder 并返回 builder。条件在本次 render 中求值，并非订阅。`.map(...)` 可以返回不同类型。跨帧变化的状态应由 `Entity` 持有。
+
+例如，`.when(selected, ...)` 在构建本帧时判断 `selected`；`.hover(|style| ...)` 则安装指针悬停时的样式细化。滚动方法需要有状态的元素，所以应先给预期的滚动负责元素设置 `.id(...)`。不能假定任意实现 `IntoElement` 的组件都接受 `.child(...)` 或 `.bg(...)`；应检查该组件自己的 builder API，或用负责这些样式的 `div()` 包裹它。
 
 GPUI Kit 另有 `StyledExt`，提供 `h_flex`、`v_flex` 和 `refine_style` 等不依赖主题的辅助方法；`ThemeStyled` 则提供 `popover_style(cx)` 等依赖主题的外观方法。它们是在 GPUI `Styled` 之上的扩展，不属于 Tailwind utility。自行实现元素时，应从 `style()` 返回元素的 `StyleRefinement`，并在布局与绘制阶段应用解析后的样式。只实现元素确实支持的子元素与交互 trait。
 

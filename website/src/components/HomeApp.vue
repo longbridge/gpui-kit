@@ -109,7 +109,7 @@ const copy = computed(() =>
               capsTitle: "为信息密集型软件而生。",
               capsDescription: "复杂桌面应用真正需要的系统能力，都已整合在框架之中。",
               caps: [
-                  { icon: "perf", title: "120 FPS 渲染", description: "每一帧都由 GPU 绘制，高密度界面依然稳定流畅，不掉帧。", apis: ["RenderOnce", "GPU"] },
+                  { icon: "perf", title: "高刷新率支持", description: "按需更新界面；120 Hz 下每帧约有 8.3 ms 预算，实际流畅度取决于完整界面与设备。", apis: ["RenderOnce", "GPU"] },
                   { icon: "table", title: "复杂数据表格", description: "虚拟滚动、列固定、列宽调整、排序与单元格选择，可承载数十万行。", apis: ["Table", "DataTable"] },
                   { icon: "list", title: "高性能虚拟列表", description: "只渲染可见区域，超长列表滚动依然保持流畅。", apis: ["VirtualList", "List"] },
                   { icon: "editor", title: "完整代码编辑器", description: "Rope 存储，20 万行仍保持稳定性能；内置 Tree-sitter 高亮与 LSP 诊断、补全、悬浮提示。", apis: ["Rope", "Tree-Sitter", "LSP", "Highlighter"] },
@@ -164,7 +164,7 @@ const copy = computed(() =>
               capsTitle: "Built for information-dense software.",
               capsDescription: "The systems that real desktop applications need are integrated into one framework.",
               caps: [
-                  { icon: "perf", title: "120 FPS rendering", description: "Every frame is drawn by the GPU, so dense interfaces stay smooth instead of dropping frames.", apis: ["RenderOnce", "GPU"] },
+                  { icon: "perf", title: "High refresh support", description: "Update on demand. A 120 Hz display gives each frame about 8.3 ms; smoothness depends on the whole UI and device.", apis: ["RenderOnce", "GPU"] },
                   { icon: "table", title: "Complex data tables", description: "Virtual scrolling, fixed and resizable columns, sorting and cell selection across hundreds of thousands of rows.", apis: ["Table", "DataTable"] },
                   { icon: "list", title: "Virtualized lists", description: "Only the visible range is rendered, so very long lists keep scrolling smoothly.", apis: ["VirtualList", "List"] },
                   { icon: "editor", title: "A real code editor", description: "Rope-backed text that stays stable at 200K lines, with Tree-sitter highlighting and LSP diagnostics, completion and hover.", apis: ["Rope", "Tree-Sitter", "LSP", "Highlighter"] },

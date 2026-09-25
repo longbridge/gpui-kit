@@ -12,7 +12,7 @@ Legend: <comparison-status value="yes" decorative></comparison-status> Yes · <c
 
 | Capability | GPUI Kit | Iced | egui | Qt 6 | Slint |
 | --- | --- | --- | --- | --- | --- |
-| UI model | Immediate + partial retained | Declarative view + retained state | Immediate | Retained scene | Reactive tree |
+| UI model | Declarative passes + retained state | Declarative view + retained state | Immediate | Retained scene | Reactive tree |
 | UI authoring | Rust | Rust | Rust | QML / C++ / Python | `.slint` + Rust / C++ / JavaScript / Python |
 | Visual tooling | Code + component gallery | Code | Code | Qt Quick Designer | Live Preview / SlintPad |
 | Component count | [75+](/component/) | [35](https://docs.rs/iced/0.14.0/iced/widget/#structs) | [16](https://docs.rs/egui/0.36.2/egui/widgets/#structs) | [52](https://doc.qt.io/qt-6/qml-qtquick-controls-control.html) | [24](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/overview/) |
@@ -24,7 +24,6 @@ Legend: <comparison-status value="yes" decorative></comparison-status> Yes · <c
 | Shortcuts | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
 | Themes | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="yes"></comparison-status> |
 | Bundled theme presets | 38 (36 variants + Light/Dark) | 22 built-in variants | Light / Dark | Qt Quick styles | Slint widget styles |
-| FPS reference | 120+ FPS | 120+ FPS | 120+ FPS | 120+ FPS | 120+ FPS |
 | Code editor | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="partial"></comparison-status> | <comparison-status value="yes"></comparison-status> | <comparison-status value="partial"></comparison-status> |
 | CJK font support | System / bundled fonts | Font-dependent | Custom font required | System fallback | Font-dependent |
 | Text model | Rope | COSMIC Text | TextBuffer | QTextDocument | TextEdit string |
@@ -56,7 +55,7 @@ Legend: <comparison-status value="yes" decorative></comparison-status> Yes · <c
 
 **Size provenance.** The first four values preserve the original `main` branch's Hello World release estimates; its Qt footnote linked [this binary-size study](https://www.qt.io/blog/reducing-binary-size-of-qt-applications-part-3-more-platforms). Slint's ~21 MB comes from a Slint 1.18.1 Hello World built with `cargo build --release` on Linux x86-64 and stripped to 20,768,216 bytes (19.81 MiB). These are approximate references from different build conditions, not verified minimums or a same-method benchmark.
 
-**FPS reference.** All five frameworks can target high-refresh displays. The values indicate capability, not results from a shared benchmark; actual FPS depends on the display, platform, and workload. See GPUI Kit's [display-rate handling](https://github.com/longbridge/gpui-kit/blob/main/crates/fps/src/refresh.rs) and Qt Quick's [render-loop documentation](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html).
+**Frame rate.** This table does not rank frame rates: no shared workload, hardware, or presentation measurement backs a cross-framework FPS figure. A 120 Hz target gives each frame roughly 8.3 ms across the relevant pipeline; it is not a claim that an idle window redraws continuously or that every complex screen sustains 120 displayed frames per second. See [FPS Monitor](./fps#120-hz-is-a-frame-budget-not-a-refresh-promise) for GPUI's draw and present measurements.
 
 ## Decision guide
 
@@ -73,7 +72,7 @@ The capability matrix shows coverage; these trade-offs show when that coverage m
 
 ## What the rows mean
 
-**Rendering model.** GPUI Kit uses an immediate style for constructing elements in each [render](./render): the current inputs produce the element description for that pass. It retains [Entities](./entity), keyed element state, and optionally [cached views](./view-cache) where persistent state or reuse is needed. “Immediate + partial retained” describes both halves of the model; it does not mean the entire UI is rebuilt on every display refresh. Iced describes a [state/message/update/view architecture](https://book.iced.rs/architecture.html). egui calls itself [immediate mode](https://docs.rs/egui/latest/egui/#understanding-immediate-mode). Qt Quick [retains its scene graph between frames](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html), while Slint uses [reactive property bindings](https://docs.slint.dev/latest/docs/slint/guide/language/concepts/reactivity/).
+**Rendering model.** GPUI Kit constructs an element description from current inputs during a [render](./render) pass. It retains [Entities](./entity), keyed element state, and optionally [cached views](./view-cache). The label in the table describes both parts; it is not a promise to rebuild the entire UI on every display refresh. The [rendering model explanation](./fps#immediate-retained-and-hybrid-describe-different-layers) separates these layers. Iced describes a [state/message/update/view architecture](https://book.iced.rs/architecture.html). egui calls itself [immediate mode](https://docs.rs/egui/latest/egui/#understanding-immediate-mode). Qt Quick [retains its scene graph between frames](https://doc.qt.io/qt-6/qtquick-visualcanvas-scenegraph.html), while Slint uses [reactive property bindings](https://docs.slint.dev/latest/docs/slint/guide/language/concepts/reactivity/).
 
 **Desktop basics.** All five can open multiple desktop windows, handle keyboard shortcuts, and customize visual themes, though the APIs differ. For example, Iced exposes [window opening](https://docs.rs/iced/latest/iced/window/fn.open.html), eframe supports [native viewports](https://docs.rs/eframe/latest/eframe/trait.App.html), and Slint documents [key bindings](https://docs.slint.dev/latest/docs/slint/reference/keyboard-input/overview/) and [widget styles](https://docs.slint.dev/latest/docs/slint/reference/std-widgets/style/). Test IME, clipboard, and drag-and-drop behavior on each target platform.
 

@@ -39,6 +39,91 @@ assert_eq!(local, point(px(15.), px(15.)));
 
 这些值通常在布局之后出现。自定义 [`Element`](./element) 在 `prepaint` 获得 `Bounds<Pixels>`，可以据此建立 hitbox，并在后续[绘制](./paint)中使用同一套坐标。`Bounds` 本身不会让区域自动具备交互能力。
 
+## 明确坐标原点
+
+`Point<Pixels>` 记录单位，却不记录坐标系。窗口内容的左上角通常是窗口坐标的原点；元素自身的左上角是另一个原点。一次计算中同时出现两种坐标时，用变量名标明：
+
+```rust
+use gpui_kit::*;
+
+let element_bounds = bounds(point(px(100.), px(60.)), size(px(80.), px(40.));
+let pointer_in_window = point(px(125.), px(75.));
+let pointer_in_element = pointer_in_window.relative_to(&element_bounds.origin);
+assert_eq!(pointer_in_element, point(px(25.), px(15.)));
+
+let marker_in_element = point(px(10.), px(8.));
+let marker_in_window = element_bounds.origin + marker_in_element;
+assert_eq!(marker_in_window, point(px(110.), px(68.)));
+```
+
+自定义元素在 `prepaint` 和 `paint` 收到的 `bounds` 已经位于窗口坐标中。指针事件的 `position` 也采用窗口坐标，因此可直接用 `element_bounds.contains(&pointer_in_window)` 判断；只有计算元素内部的字符或拖动手柄位置时才转换为局部坐标。不要给已经基于 `bounds` 的矩形再次加上 `element_bounds.origin`。反过来，虽然局部点和窗口 hitbox 都使用 `Point<Pixels>`，也不能直接比较。
+
+## 从布局到输入与绘制
+
+三个阶段分别处理不同问题：
+
+| 阶段 | 已有的几何信息 | 职责 |
+| --- | --- | --- |
+| `request_layout` | 样式长度和布局节点；有些长度仍依赖父容器。 | 返回 `LayoutId`，交给布局引擎求解。 |
+| `prepaint` | 当前帧已确定的 `Bounds<Pixels>`。 | 准备几何数据；需要交互区域时调用 `window.insert_hitbox(bounds, HitboxBehavior::Normal)`。 |
+| `paint` | 已确定的 bounds 和准备阶段的状态。 | 用 `window.paint_quad(fill(bounds, color))` 等方法绘制，并注册当前帧的输入监听器。 |
+
+布局树、事件派发树中的 hitbox、最终绘制场景是不同结构。绘制矩形不会自动使它可点击；插入 hitbox 也不会画出矩形。`insert_hitbox` 返回的 hitbox 可作为 `PrepaintState` 传到 `paint`，监听器再用 `hitbox.is_hovered_at(event.position, window)` 判断指针。hitbox 会记录插入时生效的 content mask，因此应先确定裁剪范围，再插入子元素的 hitbox。完整的事件处理示例见[自定义 Element 教程](./element)。
+
+## 滚动、裁剪与计算练习
+
+滚动视口和内容使用不同的原点。GPUI Kit 的[虚拟列表实现](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/virtual_list.rs)使用**负数**滚动偏移；它把偏移加到 item 的窗口位置，并在视口的 `ContentMask` 下对 item 执行 `prepaint`。`visible_range` 先在内容坐标中筛选 item，再由 mask 限制绘制和输入范围。筛选可见 item 本身并不会裁剪其像素。
+
+### 运行坐标计算练习
+
+从仓库根目录创建 `examples/hello_world/src/bin/geometry_walkthrough.rs`（若没有 `bin` 目录，先创建）。它是现有 `hello_world` 包内的第二个 binary，不是新 crate。粘贴以下完整程序，然后运行 `cargo run -p hello_world --bin geometry_walkthrough`。
+
+纵向视口在窗口坐标 `(100, 60)`，大小为 `80 × 40`。Item A 从内容坐标 `y = 20` 开始，高度为 `20`，滚动偏移为 `-30`。指针位置使用窗口坐标。程序将它转换为 item 局部坐标，并计算各 item 与视口的交集：
+
+```rust
+use gpui_kit::*;
+
+fn main() {
+    let viewport = bounds(point(px(100.), px(60.)), size(px(80.), px(40.)));
+    let scroll_y = px(-30.);
+    let item_a = bounds(
+        viewport.origin + point(px(0.), px(20.) + scroll_y),
+        size(px(80.), px(20.)),
+    );
+    assert_eq!(item_a.origin, point(px(100.), px(50.)));
+
+    let pointer_in_window = point(px(105.), px(65.));
+    let pointer_in_item = pointer_in_window.relative_to(&item_a.origin);
+    assert_eq!(pointer_in_item, point(px(5.), px(15.)));
+
+    let visible_a = item_a.intersect(&viewport);
+    assert_eq!(visible_a.origin, point(px(100.), px(60.)));
+    assert_eq!(visible_a.size, size(px(80.), px(10.)));
+    assert!(visible_a.contains(&pointer_in_window));
+
+    let item_b = bounds(
+        viewport.origin + point(px(0.), px(80.) + scroll_y),
+        size(px(80.), px(20.)),
+    );
+    assert_eq!(item_b.origin.y, px(110.));
+    assert!(!item_b.intersects(&viewport));
+
+    println!(
+        "Item A: local pointer = ({}, {}), visible height = {}; Item B visible = {}",
+        pointer_in_item.x.as_f32(),
+        pointer_in_item.y.as_f32(),
+        visible_a.size.height.as_f32(),
+        item_b.intersects(&viewport),
+    );
+}
+```
+
+预期输出为 `Item A: local pointer = (5, 15), visible height = 10; Item B visible = false`。若滚动偏移方向或坐标原点弄错，断言会立即失败。Item A 的顶部超出视口 10 像素，只有底部 10 像素与视口相交。Item B 位于窗口 `y = 110`，超过视口底边 `y = 100`。运行后可以删除练习文件。
+
+`intersect()` 只计算矩形，**不会**自行裁剪绘制和输入。真正编写自定义元素时，应在子元素的 `prepaint` 和 `paint` 期间应用视口 `ContentMask`，让子元素的 hitbox 继承 mask，并让绘制像素受其限制，然后通过得到的 hitbox 判断指针。普通滚动容器会替你处理这些步骤。自定义滚动容器还应像虚拟列表那样把偏移限制在内容范围内，并让内容定位、裁剪和 hitbox 使用一致的坐标。
+
+常见错误包括：在布局前把 `relative(0.5)` 当成 0.5 像素；把局部点与窗口 bounds 比较；定位内容时减去负数滚动偏移；或以为 `contains()` 会裁剪已绘制的子元素。遇到错位时，先写清每个中间值的原点与单位，再查看最终 bounds 和当前 content mask。
+
 ## Edges、Side 与 Placement
 
 `Edges<T>` 按 `top`、`right`、`bottom`、`left` 保存四个独立值。`Edges<Pixels>` 可表示已确定的 padding、border 或窗口四周留白。`Edges::all(value)` 给四边设置相同值；各边不同时直接填写字段：
@@ -80,7 +165,7 @@ let popup = Positioner::side(trigger_bounds)
 ```rust
 let inset: Pixels = px(8.);
 let width: Pixels = px(120.) - inset * 2.;
-let raw: f32 = width.as_f32(); // 只在需要 f32 的 API 边界转换。
+let raw: f32 = width.as_f32(); // Convert only at API boundaries that require f32.
 ```
 
 `Pixels` 表示 GPUI 的逻辑 UI 像素，不一定是显示器的物理像素。`Pixels::scale(factor)` 得到 `ScaledPixels`；`DevicePixels` 表示整数设备像素数。例如，`px(12.).scale(2.)` 是 24 个缩放后像素，但其类型仍不同于 `DevicePixels(24)`。跨越显示缩放或栅格化边界时，应区分这些单位。不过，同为 `Point<Pixels>` 的两个值是否使用同一原点，以及宽度是否非负，仍须由应用代码保证。
@@ -118,8 +203,8 @@ GPUI 的 [`Hsla`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Hsla.html) 保存�
 use gpui_kit::*;
 
 let tint: Hsla = hsla(0.6, 0.8, 0.5, 1.);
-let translucent = tint.opacity(0.5); // 乘以当前 alpha。
-let exact_alpha = tint.alpha(0.5);   // 替换 alpha。
+let translucent = tint.opacity(0.5); // Multiply the current alpha.
+let exact_alpha = tint.alpha(0.5);   // Replace the alpha.
 let again: Rgba = translucent.to_rgb();
 let source: Rgba = rgb(0x3366CC);
 let from_hex_alpha: Rgba = rgba(0x3366CC80);

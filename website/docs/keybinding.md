@@ -6,7 +6,7 @@ order: -2.625
 
 # KeyBinding
 
-A **KeyBinding** maps one or more keystrokes to a typed [Action](./action). GPUI Kit uses GPUI's keymap: register bindings on the application, then put a matching Key Context and Action handler on the focused [Element](./element)'s dispatch path. The Action guide explains that full Focus and dispatch path; this page concentrates on writing and resolving bindings.
+A **KeyBinding** maps one or more keystrokes to a typed [Action](./action). GPUI Kit uses GPUI's keymap: register bindings on the application, then put a matching Key Context and Action handler on the focused [Element](./element)'s dispatch path. Begin with [Focus](./focus) to create and track a keyboard target; the Action guide explains command dispatch. This page concentrates on writing and resolving bindings.
 
 ## Bind a command
 
@@ -58,6 +58,8 @@ A keystroke is a key name with optional modifiers separated by hyphens. Separate
 | `cmd-k left` | Two keystrokes in sequence: the platform modifier plus K, then Left. |
 
 GPUI also parses `fn`, `ctrl`, `alt`, `shift`, `cmd`, `super`, `win`, and `secondary` as modifiers. Use `secondary` for a conventional cross-platform Command/Control shortcut. Use `ctrl` when Control itself is required on every platform. A capital ASCII letter such as `A` implies Shift+A; writing `shift-a` makes that intent clearer. `KeyBinding::new` **panics** if its key string or context predicate cannot be parsed, so keep static definitions reviewable and validate user input before constructing bindings.
+
+The operating system or window manager may reserve a shortcut before GPUI receives it. Test the intended combination on each supported platform, especially `cmd`/`super`/`win` combinations and system shortcuts such as `alt-f4`. A binding that parses successfully is not proof that a key event will reach the application.
 
 Chords can share a first keystroke. GPUI holds a prefix while a longer matching binding is possible; a following keystroke completes the chord or causes the prefix to be replayed. Avoid making a common text entry key a chord prefix in an editable region.
 
@@ -187,5 +189,11 @@ GPUI provides this Action registry and keymap machinery, but an application owns
 4. **Competition:** Check deeper contexts, later bindings at the same depth, and chord prefixes. A `None` binding can outrank a shallower scoped binding.
 5. **Handler:** Check that the matching Action has an `on_action` handler on the focused path and that a more specific handler does not consume it first.
 6. **Menus and reloads:** If a menu shows an old shortcut, call `cx.set_menus(...)` after installing the new keymap. If a reload removed a component shortcut, confirm that `clear_key_bindings()` was followed by all component initialization.
+
+## Verify with repository examples
+
+The [Tree implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/tree.rs) registers arrow-key bindings under `Tree` and places `.key_context(CONTEXT)`, `.track_focus(&focus_handle)`, and the `on_action` handlers on its rendered root. The [Combobox implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/combobox.rs) adds Enter, Escape, and `secondary-enter` for a second confirmation mode. The [Popover story](https://github.com/longbridge/gpui-kit/blob/main/crates/story/src/stories/popover_story.rs) shows explicit macOS Command versus other-platform Control bindings and a focused action owner.
+
+To check an application binding, give the target its focus handle, press the shortcut, and confirm the expected Action handler runs. Then focus a sibling outside the declared context: the contextual shortcut should no longer run. Finally, open an overlay or text input and repeat the test to expose focus changes and key conflicts. Check the displayed shortcut separately with `highest_precedence_binding_for_action_in` for the command's target handle; a correct label alone does not show that the handler is reachable.
 
 For the full route from Focus through Action handling, continue with [Action](./action).

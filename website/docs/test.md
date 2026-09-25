@@ -58,6 +58,7 @@ workspace/
   ui-tests/
     Cargo.toml
     tests/ui.rs
+    tests/common/mod.rs
 ```
 
 Put the following in `ui-tests/Cargo.toml`:
@@ -81,30 +82,38 @@ uses the component crate directly can enable `gpui-component/test-support`.
 
 ## A complete test
 
-Copy the following into `tests/ui.rs`. The example uses GPUI Kit's facade,
-initializes the component library and wraps the view in `Root`. It retains the
-input state on the view, as a real application should.
+The source below is the repository's compiled `tests/ui.rs`. It initializes
+the component library and retains the input state on the view, as a real
+application should. Its `mod common;` line loads the companion
+`tests/common/mod.rs` fixture. That fixture calls the public
+`gpui_kit::open_window` with explicit 640 × 480 bounds, wraps the view in
+`gpui_kit::base::Root`, and returns both the window handle and the view entity.
+It is test setup, not an additional library dependency.
 
 The test enters a Unicode name, edits it with Backspace, clicks Save, checks
-the accessible status announcement and layout, and verifies the saved application value. The same
-source is compiled and run in GPUI Kit's integration suite.
+the status node's AccessKit role and label plus layout, and verifies the saved
+application value. The same source is compiled and run in GPUI Kit's
+integration suite. These assertions do not verify what a screen reader actually
+announces; check that in the running app on each target platform.
 
 <<< ../../crates/kit/tests/ui.rs{rust}
 
-In your own application, import the production view and its constructor from
-your library crate. Keeping a second implementation of the view in the test
-would allow the test and application to diverge. This example defines its view
-inline only so the entire test can be copied into a new package.
-
-From `ui-tests/`, run:
+For the standalone layout above, copy **both** files from the Kit checkout;
+`ui.rs` alone will fail at `mod common;`. From `ui-tests/`, run:
 
 ```sh
+mkdir -p tests/common
+cp ../gpui-kit/crates/kit/tests/ui.rs tests/ui.rs
+cp ../gpui-kit/crates/kit/tests/common/mod.rs tests/common/mod.rs
 cargo generate-lockfile
 cargo test --test ui --locked
 ```
 
-Commit `Cargo.lock` with the test project. Inside the GPUI Kit checkout, run
-this exact example with:
+Commit `Cargo.lock` with the test project. In your application, import its
+production view and constructor instead of copying the example's `Profile`;
+keep the same window setup and interaction pattern. A separate test view can
+drift from the application. Inside the GPUI Kit checkout, run this exact test
+with:
 
 ```sh
 cargo test -p gpui-kit --features test-support --test ui --locked
@@ -369,6 +378,15 @@ No GPUI fork or Cargo patch is used to bypass these limitations.
 
 On failure, check the reported paths, observation, completed frame, keyboard
 focus, clipping/overlays and asynchronous completion, in that order as relevant.
+
+| Symptom | First check |
+| --- | --- |
+| `mod common` cannot be found | Copy `tests/common/mod.rs` beside the included `tests/ui.rs`, or replace the fixture call with your application's window setup. |
+| `find` lists no matching path | Confirm `test-support`, the control's ID or `.test_support()`, and an initial `render_frame`. |
+| A query is ambiguous | Resolve an existing parent with `within`, then query its child ID. |
+| `focused()` reports a missed binding, or scoped `input` panics | Observe the element before `.track_focus(&handle)` and click the intended input before typing. |
+| An assertion still sees the old state | Query a fresh snapshot after a completed frame; for queued work, leave `update_window` and use `wait_for`. |
+| A visible target does not receive the click | Inspect clipping and overlay order; pointer helpers use native hit testing. |
 
 ## Verify rendering independently
 

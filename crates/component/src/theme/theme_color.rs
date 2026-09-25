@@ -143,6 +143,8 @@ pub struct ThemeColor {
     pub chart_bullish: Hsla,
     /// Bearish color for candlestick charts (downward price movement).
     pub chart_bearish: Hsla,
+    /// Chart grid line color.
+    pub chart_grid: Hsla,
     /// Danger background color.
     pub danger: Hsla,
     /// Danger active background color.
@@ -444,6 +446,7 @@ define_theme_tokens! {
     chart_5,
     chart_bullish,
     chart_bearish,
+    chart_grid,
     danger,
     danger_active,
     danger_foreground,

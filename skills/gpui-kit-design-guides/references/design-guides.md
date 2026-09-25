@@ -575,6 +575,13 @@ In a segmented control, the selected fill and unselected surface must share
 the container's silhouette. Neither may square off an end corner or make a
 boundary appear heavier than its peers.
 
+Show a selected navigation item, list row, or tab through the item's own
+surface: a selected fill, stronger foreground, or heavier weight. Do not add a
+leading-edge bar or one-sided border as the selection marker. It is a web
+template habit, not a desktop convention; it breaks the item's rounded
+silhouette and adds a second, competing edge to a column that already aligns
+on its text.
+
 For destructive actions, distinguish between reversible and irreversible work.
 Prefer undo or a temporary notification for reversible changes. Use an
 `AlertDialog` when the consequence is serious and cannot be undone; name the

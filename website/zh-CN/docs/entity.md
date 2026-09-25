@@ -24,11 +24,11 @@ clone Entity 会复制句柄，不会复制其中的状态。GPUI 会以同步�
 `Entity<T>` 是状态及身份的句柄；`T` **不需要**实现 `Render`。纯数据 Entity 可以保存模型或组件状态，供多个所有者读取或修改。若 `T` **实现了** `Render`，它的 `Entity<T>` 还可以放进元素树，成为持久的 View。View 的 Entity 会继续存活，而 `render` 返回的元素会在绘制时重新构建。
 
 ```text
-Entity<MessageStore>（模型；无 Render）
-          ↑ 读取/观察
+Entity<MessageStore> (model; no Render)
+          ↑ read/observe
 Entity<MessagePanel>（Render View）
           ↓ render
-        元素树
+      Element tree
 ```
 
 ```rust
@@ -50,7 +50,7 @@ impl Render for MessagePanel {
     }
 }
 
-// 在 render 之外的 GPUI context 中：
+// In a GPUI context outside render:
 let store = cx.new(|_| MessageStore { messages: vec![] });
 let panel = cx.new(|cx| {
     let _subscription = cx.observe(&store, |_, _, cx| cx.notify());
@@ -60,10 +60,78 @@ store.update(cx, |store, cx| {
     store.messages.push("Hello".into());
     cx.notify();
 });
-// 将 `panel` 作为子 View；`store` 是数据，不是元素。
+// Use `panel` as a child view; `store` is data, not an element.
 ```
 
 模型调用 `notify()` 后，保存的观察关系会通知 `MessagePanel`，后者再通知自己的 View。即使以后给该 View 加上缓存边界，这个显式连接也能保持内容更新。`RenderOnce` 是生成元素的另一条路径：它描述渲染时被消费的值类型组件，本身既不会创建也不要求 Entity。其生命周期见 [RenderOnce](./render-once)。
+
+### 动手练习：一个模型与一个观察它的 View
+
+从仓库根目录开始，将 `examples/hello_world/src/main.rs` 暂时替换为下面的完整代码，然后运行 `cargo run -p hello_world`。练习复用现有示例包，无需添加依赖。如果还要保留原来的 Hello World 示例，请先保存原文件。
+
+```rust
+use gpui_kit::base::StyledExt;
+use gpui_kit::component::button::Button;
+use gpui_kit::*;
+
+struct MessageStore {
+    count: usize,
+}
+
+struct MessagePanel {
+    store: Entity<MessageStore>,
+    _subscription: Subscription,
+}
+
+impl MessagePanel {
+    fn new(cx: &mut Context<Self>) -> Self {
+        let store = cx.new(|_| MessageStore { count: 0 });
+        let _subscription = cx.observe(&store, |_, _, cx| cx.notify());
+        Self {
+            store,
+            _subscription,
+        }
+    }
+}
+
+impl Render for MessagePanel {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let count = self.store.read(cx).count;
+
+        div()
+            .v_flex()
+            .gap_2()
+            .size_full()
+            .items_center()
+            .justify_center()
+            .child(format!("Messages: {count}"))
+            .child(
+                Button::new("add-message")
+                    .label("Add message")
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.store.update(cx, |store, cx| {
+                            store.count += 1;
+                            cx.notify();
+                        });
+                    })),
+            )
+    }
+}
+
+fn main() {
+    gpui_kit::application().run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(MessagePanel::new)
+        })
+        .expect("failed to open window");
+    });
+}
+```
+
+窗口最初显示 **Messages: 0**。每点击一次，handler 通过 `update` 修改模型 Entity；模型的 `notify()` 安排已保存的 observer 运行，observer 再对面板调用 `notify()`。下一次 render 从同一模型句柄读取计数，文字依次变成 **Messages: 1**、**Messages: 2**。模型没有实现 `Render`，也没有被放进 Element tree。面板长期持有模型句柄和 `Subscription`；若在 `render` 中重新创建它们，就会失去稳定的关系。
+
+如果计数始终为零，检查两处通知调用及 `_subscription` 字段。删除模型的 `notify()`，observer 就收不到信号；若 `new` 结束时丢弃 subscription，观察关系会被取消。改动练习时，让 `store.update(...)` 留在点击 handler 中，让 `store.read(cx)` 留在 `render` 中，并避免在更新同一个 store 的过程中再次读取它。
 
 ## 创建 Entity
 
@@ -165,7 +233,7 @@ let last_message = chat.read_with(cx, |chat, _cx| {
 });
 ```
 
-`read` 接收 `&App`（`Context<T>` 可以解引用为 `App`）；`read_with` 接收任意 `AppContext`，返回闭包的结果。它们都不会再复制一份 Entity。读取范围应尽量短：正在被 update 或 render 借用的 Entity，必须等本次访问结束后才能再次读取。
+`read` 接收 `&App`（`Context<T>` 可以解引用为 `App`）；`read_with` 接收任意 `AppContext`，返回闭包的结果。它们都不会再复制一份 Entity。读取范围应尽量短：正在被 update 或 render 借用的 Entity，必须等本次访问结束后才能再次读取。不要把 `&T` 留到后续 update 或 `await` 之后；离开读取范围前先取出拥有所有权的值。
 
 ## 更新状态
 
@@ -188,7 +256,7 @@ let new_count = chat.update(cx, |chat, cx| {
     cx.notify();
     chat.messages.len()
 });
-// 到这里 Chat 的 update 已结束；`new_count` 是普通的 usize。
+// Chat's update has ended; `new_count` is now a plain usize.
 ```
 
 始终使用 `update` 闭包传入的内部 `cx`。它是当前 Entity 的 `Context<Chat>`。
@@ -202,9 +270,9 @@ let new_count = chat.update(cx, |chat, cx| {
 clone `Entity<T>` 会创建另一个强句柄，并让 Entity 继续存活。若父 View 持有子 Entity，又把**强引用** `Entity<ParentView>` 交给子级保存，两边就会相互持有：
 
 ```text
-外部 owner → ParentView ──强引用──→ ChildView
+External owner → ParentView ──strong reference──→ ChildView
                  ↑                    │
-                 └──────强引用────────┘
+                  └──────strong reference──────┘
 ```
 
 外部 owner 被释放后，环中的强句柄仍然存在，所以两个 Entity 都不会释放。把父级句柄传给子级临时使用没有问题；当子级长期保存强句柄、父级又长期持有子级时才形成环。反向引用应保存为 [`WeakEntity<ParentView>`][WeakEntity]：
@@ -241,7 +309,7 @@ impl Render for ChildView {
     }
 }
 
-// 在 render 之外的 GPUI context 中：
+// In a GPUI context outside render:
 let parent = cx.new(|_| ParentView { child: None, clicks: 0 });
 let child = cx.new(|_| ChildView { parent: parent.downgrade() });
 parent.update(cx, |parent, cx| {
@@ -250,7 +318,7 @@ parent.update(cx, |parent, cx| {
 });
 ```
 
-现在父级拥有子级，但子级的反向引用不会让父级继续存活：`ParentView ──强引用──→ ChildView ──弱引用──→ ParentView`。`upgrade()` 返回 `Option<Entity<ParentView>>`；父级已释放时，点击处理器直接返回。处理器在渲染之后运行，所以可以更新父级，而不会重入父级 `render` 时的借用。GPUI Kit 的嵌套弹出菜单也采用父级强持有子级、子级弱返指父级的所有权方向。
+现在父级拥有子级，但子级的反向引用不会让父级继续存活：`ParentView ──strong──→ ChildView ──weak──→ ParentView`。`upgrade()` 返回 `Option<Entity<ParentView>>`；父级已释放时，点击处理器直接返回。处理器在渲染之后运行，所以可以更新父级，而不会重入父级 `render` 时的借用。GPUI Kit 的嵌套弹出菜单也采用父级强持有子级、子级弱返指父级的所有权方向。
 
 弱句柄可能比目标存活得更久。可以尝试 upgrade，或者使用它提供的可失败访问方法：
 
@@ -283,7 +351,7 @@ cx.spawn(async move |_, cx| {
 - `cx.observe(&entity, ...)` 在目标 Entity 调用 `cx.notify()` 时执行。只关心“状态变了”时使用。
 - `cx.subscribe(&entity, ...)` 接收类型化 [Event]。需要知道变化的含义和数据时使用。
 
-它们是两种独立的信号：`notify()` 不会发送 Event，`emit(event)` 本身也不会通知渲染者。某次状态变化如果既需要重绘，又需要语义事件，可以明确地各触发一次。观察者可以用收到的句柄读取目标 Entity，但仍须避免重入回调链中已被借用的 Entity。
+它们是两种独立的信号：`notify()` 不会发送 Event，`emit(event)` 本身也不会通知渲染者。某次状态变化如果既需要重绘，又需要语义事件，可以明确地各触发一次。观察者可以用收到的句柄读取目标 Entity，但仍须避免重入回调链中已被借用的 Entity。GPUI 通过 effect cycle 分发这些回调，此时当前 update 的借用已结束；不要假设回调会在 `update` 闭包内部执行。
 
 应把 `observe` 或 `subscribe` 返回的 [`Subscription`](https://docs.rs/gpui-pre/0.3.6/gpui/struct.Subscription.html) 保存在发起订阅的 Entity 上，放在 `_subscription` 字段或 `_subscriptions: Vec<Subscription>` 字段中：
 
@@ -348,7 +416,7 @@ impl Workspace {
 
 ## 生命周期
 
-只要还有一个强引用 `Entity<T>`，Entity 就会继续存活。最后一个强句柄被 drop 后，GPUI 会释放其状态，此时 `WeakEntity<T>` 将无法再 upgrade。
+只要还有一个强引用 `Entity<T>`，Entity 就会继续存活。最后一个强句柄被 drop 后，`WeakEntity<T>::upgrade()` 就会失败。GPUI 随后在 effect cycle 中运行 release callback 并释放状态；不要依赖状态的析构函数或 release callback 在 `drop(handle)` 语句处同步执行。
 
 大部分清理工作应该直接跟随所有权关系：
 
@@ -357,7 +425,39 @@ impl Workspace {
 - 把 View 级 Subscription 放在同一个 View 的 `_subscription` 或 `_subscriptions` 字段中；
 - View 被 drop 时，一并释放订阅及 callback 捕获的资源。
 
-如果集成代码必须在状态被 drop 前立即执行操作，[Context](./context) 还提供了 `cx.on_release(...)` 来观察当前 Entity，以及 `cx.observe_release(...)` 来观察另一个 Entity。它们返回的 Subscription 也应该只保存到 release callback 所需的生命周期结束为止。
+如果集成代码需要在 GPUI 释放状态前访问它，[Context](./context) 还提供了 `cx.on_release(...)` 来观察当前 Entity，以及 `cx.observe_release(...)` 来观察另一个 Entity。两种回调都在 GPUI 处理释放时执行；`observe_release` 只有在订阅者仍存活时才会执行。它们返回的 Subscription 也应该只保存到 release callback 所需的生命周期结束为止。
+
+### 练习：共享句柄与弱引用生命周期
+
+把这个测试放进启用了 `gpui-kit` 的 `test-support` feature 的 package（参见[测试](./test)）。它不需要窗口。断言依次验证 clone 共享状态、剩余的强句柄维持生命周期，以及最后一个强句柄被 drop 后弱引用失效：
+
+```rust
+use gpui_kit::{AppContext, TestAppContext};
+
+struct Counter {
+    value: usize,
+}
+
+#[gpui_kit::test]
+fn handles_share_state_and_control_lifetime(cx: &mut TestAppContext) {
+    let counter = cx.new(|_| Counter { value: 0 });
+    let another_owner = counter.clone();
+    let weak = counter.downgrade();
+
+    another_owner.update(cx, |counter, cx| {
+        counter.value += 1;
+        cx.notify();
+    });
+    assert_eq!(counter.read(cx).value, 1);
+
+    drop(counter);
+    assert!(weak.upgrade().is_some());
+    drop(another_owner);
+    assert!(weak.upgrade().is_none());
+}
+```
+
+再用上面的 `Chat`/`Workspace` 示例做第二项检查：先只调用 `notify()` 更新一次 Chat，再只调用 `emit(ChatEvent::MessageSent)` 更新一次。预测哪次会改变 `sent_count`，然后在 `#[gpui_kit::test]` 中断言。把 `_subscriptions` 保存在 `Workspace` 上，否则测试面对的是已经取消的监听器。
 
 ## Entity 身份与 View 缓存
 

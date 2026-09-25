@@ -153,6 +153,15 @@ impl TextView {
         self.inner = self.inner.on_link_click(f);
         self
     }
+    /// Scrolls a container that ignores scroll requests to the line of
+    /// `TextViewState::reveal_range`, with the line's window bounds.
+    pub fn on_reveal<F>(mut self, f: F) -> Self
+    where
+        F: Fn(Bounds<Pixels>, &mut Window, &mut App) + 'static,
+    {
+        self.inner = self.inner.on_reveal(f);
+        self
+    }
     /// Sets which Markdown extensions the parser accepts.
     pub fn markdown_extensions(mut self, value: MarkdownExtensions) -> Self {
         self.inner = self.inner.markdown_extensions(value);

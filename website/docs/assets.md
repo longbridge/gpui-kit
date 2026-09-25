@@ -63,7 +63,7 @@ returns `icons/accessibility.svg`. The default source contains only the original
 101 component icons. Supply extra icons using the custom source below, or
 explicitly register `AllAssets` to use the complete bundle.
 
-## Use default bundled assets
+## Start with the default source
 
 `gpui_kit::assets::Assets` provides the default resource source with the original 101 component icons listed in [`default-icons.txt`](https://github.com/longbridge/gpui-kit/blob/main/crates/assets/default-icons.txt).
 
@@ -74,79 +74,24 @@ Add the umbrella crate to `Cargo.toml`; its default features include `component`
 gpui-kit = "0.6"
 ```
 
-Then we need call the `with_assets` method when creating the GPUI application to register the asset source:
+For a native desktop app, register the source before opening a window. This complete `src/main.rs` renders a default icon:
 
-```rs
+```rust
 use gpui_kit::*;
 use gpui_kit::assets::Assets;
+use gpui_kit::component::{Icon, IconName};
 
-let app = gpui_kit::application().with_assets(Assets);
-```
+struct Example;
 
-Now, we can use `IconName` and `Icon` in our application as usual, the original component icons are loaded from the default bundle.
-
-Continue [Use the icons](#use-the-icons) section to see how to use the icons in your application.
-
-## Build you own assets
-
-You may have a specific set of icons that you want to use in your application, or you may want to reduce the size of your application binary by including only the icons you need.
-
-In this case, you can build your own assets by following these steps.
-
-The [assets] folder in the repository contains the complete SVG catalog corresponding to the shared [IconName] enum.
-
-You can download the SVG files you need from the [assets] folder, or you can use your own SVG files by following the [IconName] naming convention.
-
-To use the following custom source, add `rust-embed = "8.7"` to your dependencies and use [rust-embed] to bundle your own SVG files.
-
-And GPUI Application providers an `AssetSource` trait to load the assets.
-
-```rs
-use gpui_kit::*;
-use gpui_kit::assets::Assets as ComponentAssets;
-use gpui_kit::component::{v_flex, IconName};
-use rust_embed::RustEmbed;
-use std::borrow::Cow;
-
-/// An asset source that loads assets from the `./assets` folder.
-#[derive(RustEmbed)]
-#[folder = "./assets"]
-#[include = "icons/**/*.svg"]
-pub struct Assets;
-
-impl AssetSource for Assets {
-    fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        if path.is_empty() {
-            return Ok(None);
-        }
-
-        if let Some(file) = Self::get(path) {
-            return Ok(Some(file.data));
-        }
-        ComponentAssets.load(path)
-    }
-
-    fn list(&self, path: &str) -> Result<Vec<SharedString>> {
-        let mut paths = ComponentAssets.list(path)?;
-        paths.extend(Self::iter().filter_map(|p| p.starts_with(path).then(|| p.into())));
-        paths.sort();
-        paths.dedup();
-        Ok(paths)
+impl Render for Example {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().child(Icon::new(IconName::Inbox))
     }
 }
-```
 
-We need call the `with_assets` method when creating the GPUI application to register the asset source:
-
-```rs
 fn main() {
-    // Register Assets to GPUI application.
-    let app = gpui_kit::application().with_assets(Assets);
-
-    app.run(move |cx| {
-        // Initialize GPUI Kit before creating windows and components.
+    gpui_kit::application().with_assets(Assets).run(|cx| {
         gpui_kit::init(cx);
-
         gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
             cx.new(|_| Example)
         })
@@ -155,26 +100,192 @@ fn main() {
 }
 ```
 
-## Use the icons
+`with_assets` installs one application-wide source. `gpui_kit::init(cx)` initializes the component layer before the window is constructed. `IconName::Inbox` resolves to `icons/inbox.svg`; GPUI passes that exact path to the source. Merely adding the crate dependency does not register a source. See [Getting Started](./getting-started.md) for the full application setup.
 
-Now we can use the icons in our application:
+## Pick additional catalog icons with `icon_assets!`
 
-```rs
-pub struct Example;
+If an app already depends on `gpui-kit`, use `gpui_kit::assets::icon_assets!`; its default `assets` feature exposes the macro and the shared catalog. **Do not add a second `gpui-kit-assets` dependency just to use it.** A crate that intentionally uses the asset layer without the umbrella can depend on `gpui-kit-assets` directly and call `gpui_kit_assets::icon_assets!` instead.
+
+Choose the source according to the icons the app renders:
+
+| Need | Register with `with_assets` | Native icon data |
+| --- | --- | --- |
+| Only the default component icons | `Assets` | 101 default SVGs |
+| Default icons plus a few catalog icons | A composite of `Assets` and `icon_assets!` | Defaults plus named selections |
+| Every catalog icon | `AllAssets` | All 1,830 SVGs |
+| Only a few catalog icons, without Component | The generated source alone | Named selections only |
+
+The macro arguments are **`IconName` variant identifiers**, not strings, paths, or your own SVG filenames. For example, `Accessibility` selects `icons/accessibility.svg`. The generated `ExtraIcons` is a unit struct implementing `AssetSource`: `load` returns borrowed embedded bytes for selected paths and `Ok(None)` otherwise; `list(prefix)` lists selected paths. Selection happens at compile time. A misspelled or nonexistent variant fails compilation. The macro accepts an optional visibility modifier, such as `icon_assets!(pub ExtraIcons, [Accessibility]);`, when the source must be used from another module.
+
+The following complete `src/main.rs` selects two extra Lucide icons while retaining the default component icons. It targets native desktop applications. Use the `gpui-kit` dependency shown above; no SVG copying or new crate is needed.
+
+```rust
+use gpui_kit::*;
+use gpui_kit::assets::{Assets as ComponentAssets, icon_assets};
+use gpui_kit::component::Icon;
+use std::borrow::Cow;
+
+icon_assets!(ExtraIcons, [Accessibility, AlarmClock]);
+
+struct AppAssets;
+
+impl AssetSource for AppAssets {
+    fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if let Some(bytes) = ExtraIcons.load(path)? {
+            return Ok(Some(bytes));
+        }
+        ComponentAssets.load(path)
+    }
+
+    fn list(&self, path: &str) -> Result<Vec<SharedString>> {
+        let mut paths = ComponentAssets.list(path)?;
+        paths.extend(ExtraIcons.list(path)?);
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
+}
+
+struct Example;
 
 impl Render for Example {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        v_flex()
-            .gap_2()
-            .size_full()
-            .items_center()
-            .justify_center()
-            .text_center()
-            .child(IconName::Inbox)
-            .child(IconName::Bot)
+        div()
+            .child(Icon::new(gpui_kit::assets::IconName::Accessibility))
+            .child(Icon::new(gpui_kit::assets::IconName::AlarmClock))
     }
 }
+
+fn main() {
+    gpui_kit::application().with_assets(AppAssets).run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| Example)
+        })
+        .expect("Failed to open window");
+    });
+}
 ```
+
+`with_assets` takes one source, so `AppAssets` owns both lookups. It checks `ExtraIcons` first because native `ComponentAssets.load` returns an error for an unknown path; that error would prevent a later fallback. `list` merges, sorts, and deduplicates both sources so callers see the same keys that `load` can serve. The generated source alone is suitable only when the app does not need the default component icons.
+
+To migrate a hand-written asset lookup for bundled Lucide icons, replace its copied SVG bytes or filename match arms with one `icon_assets!(ExtraIcons, [...]);` declaration. Keep any unrelated app files in their own source, query that source and `ExtraIcons` before the default `Assets` fallback, and merge all three `list` results. Remove the old SVG copies only after verifying that no other code loads those files by path. Your own files such as `icons/brand-mark.svg` are outside the catalog and still need the custom source described below. `IconName::ALL` lists names; it does not make every name loadable from the currently registered source.
+
+For a quick check, call `AppAssets.load("icons/accessibility.svg")` and `AppAssets.load("icons/inbox.svg")`; both should return `Some` on native. `AppAssets.list("icons/")` should contain both paths. If the extra icon is blank, check that the rendered `IconName` appears in the macro list and that `AppAssets`, rather than `ComponentAssets`, was registered. On WebAssembly, the macro source can still embed the selection, but the built-in `Assets` is constructed with an endpoint and must be stored as a field in the composite source.
+
+## Add your own asset files
+
+`icon_assets!` selects from GPUI Kit's named catalog. For an application's own logo, illustration, photo, or other image, use an application `AssetSource`. The [assets] folder in this repository supplies catalog SVGs; placing a new file in your app does **not** add an `IconName` variant. A key such as `icons/brand-mark.svg` is relative to the embedded folder, not a URL or a path relative to the running process's working directory.
+
+The example below embeds one custom SVG and an image folder. Use this layout next to your application's `Cargo.toml`:
+
+```text
+Cargo.toml
+src/main.rs
+assets/icons/brand-mark.svg
+assets/images/cover.png
+```
+
+Add [rust-embed] alongside `gpui-kit`:
+
+```toml
+[dependencies]
+gpui-kit = "0.6"
+rust-embed = { version = "8.7", features = ["include-exclude"] }
+```
+
+This complete native `src/main.rs` serves app files first and falls back to GPUI Kit's default component icons. The `images/**/*` pattern embeds **every file** under that folder, so keep only intended assets there; you can replace it with narrower `#[include]` patterns. The example registers one source before opening the window.
+
+```rs
+use gpui_kit::*;
+use gpui_kit::assets::Assets as ComponentAssets;
+use gpui_kit::component::Icon;
+use rust_embed::RustEmbed;
+use std::borrow::Cow;
+
+#[derive(RustEmbed)]
+#[folder = "./assets"]
+#[include = "icons/**/*.svg"]
+#[include = "images/**/*"]
+struct AppFiles;
+
+struct AppAssets;
+
+impl AssetSource for AppAssets {
+    fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+        if path.is_empty() {
+            return Ok(None);
+        }
+
+        if let Some(file) = AppFiles::get(path) {
+            return Ok(Some(file.data));
+        }
+        ComponentAssets.load(path)
+    }
+
+    fn list(&self, path: &str) -> Result<Vec<SharedString>> {
+        let mut paths = ComponentAssets.list(path)?;
+        paths.extend(AppFiles::iter().filter_map(|p| p.starts_with(path).then(|| p.into())));
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
+}
+
+struct Example;
+
+impl Render for Example {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(Icon::default().path("icons/brand-mark.svg"))
+            .child(img("images/cover.png").w(px(240.)).h(px(160.)).object_fit(ObjectFit::Cover))
+    }
+}
+
+fn main() {
+    gpui_kit::application().with_assets(AppAssets).run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| Example)
+        })
+        .expect("Failed to open window");
+    });
+}
+```
+
+`AssetSource::load(path)` supplies bytes for an exact key; `list(prefix)` reports matching keys. In this example app files win on a key collision, and unknown keys reach `ComponentAssets`. On native, that built-in source errors on an unknown nonempty path. If the app also uses `icon_assets!`, check its generated source before this fallback and include its paths in `list` as shown above. On WASM, construct `Assets::new(endpoint)` and store that value in the composite source instead of using the native unit struct.
+
+## Use an asset path
+
+Use the path exposed by the registered source. `Icon::path` is for SVG icons; `IconName` maps known names to those paths.
+
+```rust
+use gpui_kit::component::{Icon, IconName};
+
+let built_in = Icon::new(IconName::Inbox);
+let custom = Icon::default().path("icons/brand-mark.svg");
+let extra = Icon::new(gpui_kit::assets::IconName::Accessibility);
+```
+
+`extra` needs the selected-icons source above or `AllAssets`. `custom` needs a source that contains `icons/brand-mark.svg`. Use `Icon::path` or `svg().path(...)` for a **monochrome SVG** that should follow the text color; GPUI paints it as a tinted alpha mask. Set an explicit size and `text_color` when needed. Use `img()` for photographs and other raster graphics, or for a **multicolor SVG** whose original colors should be preserved:
+
+```rust
+use gpui_kit::{ObjectFit, StyledImage, img, px, svg};
+
+let tinted_mark = svg().path("icons/brand-mark.svg").size(px(24.));
+let cover = img("images/cover.png")
+    .w(px(240.))
+    .h(px(160.))
+    .object_fit(ObjectFit::Cover);
+let color_artwork = img("images/illustration.svg").size(px(160.));
+```
+
+The `img()` source supports common PNG, JPEG, WebP, GIF, and SVG files (and other formats listed by GPUI's `Img::extensions()`). It detects raster formats from the bytes; SVG takes a separate decoding path. Use a real image file with a supported format, not only a matching extension. `ObjectFit::Contain` is the default; `Cover` fills the bounds and may crop, while `Fill` can distort. `object_fit` controls `img()`, not the monochrome `svg()` element. `img()` loads and decodes asynchronously through GPUI's image cache; embedded source bytes are copied into its loader, so embedding alone does not eliminate decode or runtime image memory. Animated GIF and WebP can contain multiple frames.
+
+For a string like `"images/cover.png"`, GPUI calls the registered `AssetSource` with that key. `img(std::path::Path::new("/absolute/file.png"))` reads a filesystem path, and a URL string uses the HTTP loader. They have different deployment and error behavior. See [Image](../component/image.md) for more sizing and fitting examples.
 
 ## Embed individual SVG icons
 
@@ -192,6 +303,23 @@ This only removes the asset lookup for that icon. Built-in `IconName` values and
 other path-based component icons still need an asset source. See
 [SVG Bytes](../component/icon.md#svg-bytes) for ownership, source replacement,
 loading icons, and custom icon types.
+
+## Diagnose a missing asset
+
+| Symptom | Check |
+| --- | --- |
+| A default component icon is blank | Confirm `.with_assets(Assets)` (or a composed source) runs before opening windows. Check that the path starts with `icons/` and ends in `.svg`. |
+| A shared catalog name is blank | Confirm that name belongs to the registered source. `Assets` has 101 defaults; register selected icons or `AllAssets` for other names. |
+| A custom icon is blank | Compare the exact `Icon::path` key with the path below the source's `#[folder]`; check `#[include]` and case. `list("icons/")` can reveal what the source exposes. |
+| An image is blank | Check whether the argument is an asset key, filesystem `Path`, or URL; verify that the source includes the raster file and that the bytes are a supported image format. |
+
+On native, a missing path in the built-in `Assets` and `AllAssets` returns an error; an empty path returns `Ok(None)`. In a composed source, test custom matches before the built-in fallback. `Icon::data` avoids path lookup for that one SVG, but malformed SVG bytes can still fail to render.
+
+## Packaging and WebAssembly
+
+Native `Assets` embeds only the default SVGs; `AllAssets` embeds the full catalog. `icon_assets!` embeds selected SVG bytes, and `rust-embed` embeds files matched by your include patterns. Source paths are resolved at build time, so packaged native apps do not need the source `assets/` directory at runtime. A filesystem `Path` passed to `img()` is different: that file must exist where the app runs. Use the size measurements above as examples, then measure your own release binary.
+
+On WebAssembly, `Assets::new(endpoint)` and `AllAssets::new(endpoint)` use the same on-demand HTTP source. It requests `endpoint + "/assets/" + path` for `icons/*.svg`, caches successful responses, and reports a temporary loading error while a request is in flight. Host the exact files and use an endpoint without a trailing slash. Check the browser Network and Console panels for status, CORS, or URL problems; the loader does not itself request a repaint after a download. `list()` returns an empty list on this source. The native `rust-embed` example above is a separate choice for explicitly embedding app files, including on WASM. See [WebAssembly](./webassembly.md) for the gallery's deployment setup.
 
 ## Resources
 
