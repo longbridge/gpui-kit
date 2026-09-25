@@ -61,7 +61,7 @@ const tokens: Record<string, string> = {
   'brand-hover': 'primary.hover.background',
   'brand-contrast': 'primary.foreground',
   'brand-subtle': 'muted.background',
-  selection: 'list.active.background',
+  selection: 'selection.background',
   success: 'base.green',
   warning: 'base.yellow',
   destructive: 'base.red',
