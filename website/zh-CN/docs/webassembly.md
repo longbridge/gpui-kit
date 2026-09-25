@@ -2,7 +2,7 @@
 title: WebAssembly
 description: 使用仓库中的 WebAssembly 示例，在浏览器中构建和运行 GPUI Kit 应用。
 order: -3.5
-maturity: [preview]
+maturity: [showcase-only]
 ---
 
 # WebAssembly

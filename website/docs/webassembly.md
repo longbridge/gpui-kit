@@ -2,7 +2,7 @@
 title: WebAssembly
 description: Build and run GPUI Kit applications in a browser with the repository's WebAssembly examples.
 order: -3.5
-maturity: [preview]
+maturity: [showcase-only]
 ---
 
 # WebAssembly

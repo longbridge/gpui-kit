@@ -51,8 +51,8 @@ reader in the version they are reading.
   rejects the pinned version written out by hand; a deliberate reference to
   another snapshot is listed in `tests/doc-sources.test.ts`.
 - **Mark maturity in the frontmatter** of a page whose capability is not on
-  the stable desktop path: `maturity: [preview]`, `[experimental]`, or
-  `[platform-dependent]`, combined as needed. Unmarked pages are Stable. The
+  the stable desktop path: `maturity: [preview]`, `[experimental]`,
+  `[showcase-only]`, or `[platform-dependent]`, combined as needed. Unmarked pages are Stable. The
   labels render under the title and link to their definitions on the
   documentation home. Both locales must carry the same value.
 

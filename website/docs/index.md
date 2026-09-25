@@ -85,9 +85,10 @@ GPUI Kit's desktop components run in production applications, including Longbrid
 | **Stable** | Used by production desktop applications on macOS, Windows, and Linux. |
 | **Preview** | Usable and documented. The API and edge-case behavior may still change between releases. |
 | **Experimental** | Works with known gaps. Validate it for your product before depending on it. |
+| **Showcase only** | Currently used to demonstrate components in a browser, not to ship applications. |
 | **Platform-dependent** | Availability or behavior differs by operating system or target. The page lists the differences. |
 
-A label describes the capability, not the quality of its documentation. WebAssembly, for example, runs the same components as the desktop, but a browser is not a desktop platform, and the product still has to verify input, accessibility, startup cost and deployment there.
+A label describes the capability, not the quality of its documentation. WebAssembly, for example, runs the same components as the desktop, but for now it serves the component showcases; shipping an application in a browser is not a supported path yet.
 
 ## Quick Example
 

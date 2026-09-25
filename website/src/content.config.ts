@@ -7,7 +7,7 @@ const pageSchema = z.object({
   order: z.number().optional(),
   example: z.union([z.string(), z.literal(false)]).optional(),
   exampleKind: z.enum(['base', 'component']).optional(),
-  maturity: z.array(z.enum(['stable', 'preview', 'experimental', 'platform-dependent'])).optional(),
+  maturity: z.array(z.enum(['stable', 'preview', 'experimental', 'showcase-only', 'platform-dependent'])).optional(),
 });
 
 const docs = defineCollection({
