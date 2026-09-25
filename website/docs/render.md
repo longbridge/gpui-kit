@@ -46,7 +46,7 @@ impl Render for Chat {
 }
 ```
 
-The signature is `fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement`; the trait requires `Self: 'static + Sized`. `self` is the state inside the current Entity. `window` gives access to window specific operations; `cx` is this Entity's [Context](./context). `impl IntoElement` keeps the concrete, often deeply nested return type out of the signature. Here `div()` is a GPUI element and `Button` is a GPUI Kit component. The click closure is *registered* while rendering and runs later on input, with mutable access to `Chat` through `cx.listener`.
+`Render::render` receives mutable access to the View, a `Window`, and that View's [Context](./context), then returns `impl IntoElement`; the trait requires `Self: 'static + Sized`. The return type keeps the concrete, often deeply nested element type out of the signature. Here `div()` is a GPUI element and `Button` is a GPUI Kit component. The click closure is *registered* while rendering and runs later on input, with mutable access to `Chat` through `cx.listener`.
 
 ## The View owns state; the tree describes this pass
 

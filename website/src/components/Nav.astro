@@ -88,7 +88,10 @@ const currentVersionLabel = siteVersions.find((version) => version.id === curren
 <nav class="site-nav" aria-label="Primary">
   <div class="site-nav__inner">
     <a href={base} class="site-nav__brand">
-      <img src={`${base}logo.svg`} alt="" class="site-nav__logo" />
+      <svg class="site-nav__logo" viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M4 4h24v5H10v14h18v5H4V4Z" />
+        <path d="M16 13h12v10h-5v-5h-7v-5Z" />
+      </svg>
       <span>GPUI Kit</span>
     </a>
 
@@ -170,19 +173,6 @@ const currentVersionLabel = siteVersions.find((version) => version.id === curren
 
       <!-- Theme toggle -->
       <ThemePalette lang={lang} />
-      <button
-        id="theme-toggle"
-        class="theme-toggle"
-        aria-label={isZh ? '切换主题' : 'Toggle color theme'}
-        type="button"
-      >
-        <svg class="theme-toggle__sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
-        </svg>
-        <svg class="theme-toggle__moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
-        </svg>
-      </button>
 
       <!-- Mobile menu toggle -->
       <button
@@ -242,30 +232,6 @@ const currentVersionLabel = siteVersions.find((version) => version.id === curren
       sync();
     });
   });
-
-  const toggle = document.getElementById('theme-toggle');
-  const sun = toggle?.querySelector('.theme-toggle__sun') as HTMLElement | null;
-  const moon = toggle?.querySelector('.theme-toggle__moon') as HTMLElement | null;
-
-  function updateIcon() {
-    const isDark = document.documentElement.classList.contains('dark');
-    if (sun) sun.style.display = isDark ? 'none' : '';
-    if (moon) moon.style.display = isDark ? '' : 'none';
-  }
-
-  updateIcon();
-
-  toggle?.addEventListener('click', () => {
-    const isDark = !document.documentElement.classList.contains('dark');
-    document.documentElement.classList.toggle('dark', isDark);
-    delete document.documentElement.dataset.theme;
-    delete document.documentElement.dataset.themeName;
-    delete document.documentElement.dataset.themeSource;
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
-    updateIcon();
-  });
-  document.addEventListener('themechange', updateIcon);
-
 
   // Mobile nav drawer
   const burger = document.getElementById('nav-burger');

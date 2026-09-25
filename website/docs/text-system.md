@@ -42,7 +42,7 @@ The displayed result depends on installed families and platform font fallback. D
 
 ## Shape one line
 
-`TextRun::len` is a **UTF-8 byte length**, and all runs together should cover the text they style. A run selects the font, color, background, underline, and strikethrough for its byte range. The text argument is a [SharedString](./shared-string). This example follows the [GPUI Kit Plot label](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/label.rs):
+`TextRun::len` is a **UTF-8 byte length**, and all runs together should cover the text they style. A run selects the font, color, background, underline, and strikethrough for its byte range. The text argument is a [SharedString](./shared-string). This example follows [Plot label](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/label.rs):
 
 ```rust
 use gpui_kit::*;
@@ -69,7 +69,7 @@ let width = shape_label(label, color, window).width();
 
 ## Wrap multiple lines
 
-Use `window.text_system().shape_text(text, font_size, runs, wrap_width, line_clamp)` for newlines and optional soft wrapping. It returns a `Result` of `WrappedLine`s. `wrap_width: Some(width)` sets the available width. `line_clamp` limits soft-wrap boundaries, but `shape_text` still returns a `WrappedLine` for every explicit newline-separated source line; it does not guarantee at most N lines in total. The line layout contains wrap boundaries and widths, so a custom text element can place each visual line and map pointer positions back to source text. A width or font change can alter those boundaries; recompute layout when either changes.
+Use `shape_text` for newlines and optional soft wrapping. It returns a `Result` of `WrappedLine`s. `wrap_width: Some(width)` sets the available width. `line_clamp` limits soft-wrap boundaries, but `shape_text` still returns a `WrappedLine` for every explicit newline-separated source line; it does not guarantee at most N lines in total. The line layout contains wrap boundaries and widths, so a custom text element can place each visual line and map pointer positions back to source text. A width or font change can alter those boundaries; recompute layout when either changes.
 
 For ordinary paragraphs, let a GPUI text element or GPUI Kit `TextView` perform this work. A custom element should only shape text directly when it needs glyph-aware placement, drawing, or hit testing that existing elements cannot supply.
 
@@ -83,7 +83,7 @@ GPUI's [rendering pipeline](./render) separates layout, prepaint, and paint. Pla
 | `prepaint` | Shape against resolved width, calculate line origins and cursor geometry, establish hitboxes. | Layout has produced bounds; input geometry must match this frame. |
 | `paint` | Paint the prepared `ShapedLine`s at their origins. | Reusing prepaint's shape keeps pixels and hit tests aligned. |
 
-`ShapedLine::paint(origin, line_height, align, align_width, window, cx)` submits a line; `paint_background(...)` is separate when a run has a background. Handle its `Result`. The [Input element](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) applies this phase split to visible text, line numbers, selections, and carets. Text painting does not itself establish a hitbox, keyboard focus, or accessibility name; a custom interactive text element must supply those contracts too. See [Paint](./paint) for custom drawing.
+`ShapedLine::paint` submits a line; `paint_background(...)` is separate when a run has a background. Handle its `Result`. The [Input element](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) applies this phase split to visible text, line numbers, selections, and carets. Text painting does not itself establish a hitbox, keyboard focus, or accessibility name; a custom interactive text element must supply those contracts too. See [Paint](./paint) for custom drawing.
 
 ## Cache and performance boundaries
 

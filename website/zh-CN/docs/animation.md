@@ -18,7 +18,7 @@ GPUI Kit 有三个动效层次。应按**变化中的值由谁持有**来选择�
 
 ## GPUI 元素动画
 
-`Animation::new(duration)` 创建播放一次、线性变化的动画。`AnimationExt::with_animation(id, animation, animator)` 包装一个 `IntoElement`；回调收到元素及经过 easing 映射的进度值。GPUI 在布局阶段调用它，把返回元素的样式用于当前帧，并在结束前继续请求帧。回调可修改元素支持的属性，例如透明度或变换。包装器的播放规则可参见 [GPUI 动画源码](https://github.com/zed-industries/zed/blob/main/crates/gpui/src/elements/animation.rs)。
+`Animation::new(duration)` 创建播放一次、线性变化的动画。`AnimationExt::with_animation(id, animation, animator)` 包装一个 `IntoElement`；回调收到元素及经过 easing 映射的进度值。GPUI 在布局阶段调用它，把返回元素的样式用于当前帧，并在结束前继续请求帧。回调可修改元素支持的属性，例如透明度或变换。包装器的播放规则可参见 [GPUI 动画](https://github.com/zed-industries/zed/blob/main/crates/gpui/src/elements/animation.rs) 源码。
 
 ```rust
 use std::time::Duration;
@@ -89,7 +89,7 @@ Base 还提供以下选择：
 
 样式化组件通过 `cx.theme().motion_tokens()` 共享策略。`MotionTokens` 包含 `duration_instant`、`duration_fast`、`duration_normal`、`duration_slow`；`easing_enter`、`easing_exit`、`easing_move`；`spring_control`、`spring_move`；以及 `distance_short`、`distance_medium`。默认值构成协调的尺度，并不意味着所有控件都必须动画。从当前主题读取 token，产品才能集中调整。
 
-例如，[Switch 源码](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/switch.rs) 在 `(self.id.clone(), "thumb")` 通道上采样 Base spring，向选中或未选中时的滑块偏移移动，策略来自 `cx.theme().motion_tokens().spring_move`。[可调整大小手柄源码](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/resizable.rs) 分别采样长度和透明度通道，使用 `duration_fast` 与 `easing_move`；指示块淡出时，细分隔线仍保留。[Collapsible](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/collapsible.rs) 通过 `.motion_id(id)` 启用测量式、可反向的展开。没有这个 ID 时，它直接挂载或卸载。
+例如，[Switch](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/switch.rs) 源码 在 `(self.id.clone(), "thumb")` 通道上采样 Base spring，向选中或未选中时的滑块偏移移动，策略来自 `cx.theme().motion_tokens().spring_move`。[可调整大小手柄](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/resizable.rs) 源码 分别采样长度和透明度通道，使用 `duration_fast` 与 `easing_move`；指示块淡出时，细分隔线仍保留。[Collapsible](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/collapsible.rs) 通过 `.motion_id(id)` 启用测量式、可反向的展开。没有这个 ID 时，它直接挂载或卸载。
 
 部分组件用 GPUI 元素包装器播放固定动画：[Spinner](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/spinner.rs) 循环旋转，[Popover](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/popover.rs) 播放入场。选择依据是组件需要持续追踪目标，还是播放固定流程；两者都可以属于样式层。
 

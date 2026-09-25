@@ -84,6 +84,52 @@ const structuredData = [
   <SiteFooter lang={lang} />
 </BaseLayout>
 
+<script>
+  const copyIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>';
+  const checkIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>';
+  const isZh = document.documentElement.lang === 'zh-CN';
+
+  for (const pre of document.querySelectorAll<HTMLPreElement>('.doc-content pre')) {
+    const code = pre.querySelector('code');
+    if (!code) continue;
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'doc-code-copy';
+    button.setAttribute('aria-label', isZh ? '复制代码' : 'Copy code');
+    button.innerHTML = copyIcon;
+    let resetTimer: ReturnType<typeof setTimeout> | undefined;
+
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(code.textContent ?? '');
+        button.dataset.copied = '';
+        button.setAttribute('aria-label', isZh ? '已复制' : 'Copied');
+        button.innerHTML = checkIcon;
+        clearTimeout(resetTimer);
+        resetTimer = setTimeout(() => {
+          delete button.dataset.copied;
+          button.setAttribute('aria-label', isZh ? '复制代码' : 'Copy code');
+          button.innerHTML = copyIcon;
+        }, 1600);
+      } catch {}
+    });
+
+    pre.append(button);
+  }
+
+  for (const demo of document.querySelectorAll<HTMLElement>('.keybinding-demo')) {
+    for (const button of demo.querySelectorAll<HTMLButtonElement>('[data-focus-target]')) {
+      button.addEventListener('click', () => {
+        demo.dataset.focus = button.dataset.focusTarget;
+        for (const target of demo.querySelectorAll<HTMLButtonElement>('[data-focus-target]')) {
+          target.setAttribute('aria-pressed', String(target === button));
+        }
+      });
+    }
+  }
+</script>
+
 <style is:global>
   @import '../styles/global.css';
 </style>

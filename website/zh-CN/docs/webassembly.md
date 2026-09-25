@@ -35,7 +35,7 @@ make dev
 
 画廊使用 `#[wasm_bindgen]` 导出 `run(story, dark, theme_name, theme_json)`。[加载器](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/www/src/main.js)导入生成的 JS 模块，等待默认 WASM 初始化完成，读取可选的 `?story=` 参数及宿主主题，再调用 `run(...)`。Rust 端先调用 `gpui_kit::platform::web_init()`，创建 Web `Application`、注册资源，并将启动闭包传给 `run_embedded`。图形初始化成功后，该闭包才调用 `gpui_component_story::init(cx)`（其中会调用 `gpui_kit::init(cx)`）、加载字体、应用主题，最后调用 `gpui_kit::open_window`。`run_embedded` 返回的 `ApplicationHandle` 保存在 thread-local 状态中。图形初始化是异步的，因此该函数返回时，启动闭包可能尚未运行，首帧也可能尚未绘制。改造自己的应用时，也要像[快速开始](./getting-started.md)那样先初始化 Kit，并在页面使用视图期间保留 handle。
 
-画廊通过 `WebPlatform::new_with_backend_and_font_fallback(false, WebBackendPreference::Auto, CanvasFontFallback::EmojiAndCjk)` 选择 Web 平台，同时接入 fetch HTTP client。`Auto` 先尝试 WebGPU，失败后再尝试 WebGL2。当前 Web 平台使用一个文档级 canvas，且只支持一个顶层窗口；不能再打开第二个顶层窗口，也不能在关闭后重新打开。对话框应通过 Kit 的 `Root` 在该窗口内渲染。可以参照[画廊入口](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)改造应用：共用视图留在 Rust 中，网页负责加载 WASM 模块并提供宿主页面。
+画廊通过 `WebPlatform::new_with_backend_and_font_fallback` 选择 Web 平台，同时接入 fetch HTTP client。`Auto` 先尝试 WebGPU，失败后再尝试 WebGL2。当前 Web 平台使用一个文档级 canvas，且只支持一个顶层窗口；不能再打开第二个顶层窗口，也不能在关闭后重新打开。对话框应通过 Kit 的 `Root` 在该窗口内渲染。可以参照[画廊入口](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)改造应用：共用视图留在 Rust 中，网页负责加载 WASM 模块并提供宿主页面。
 
 ## 字体与中日韩文本
 
@@ -45,7 +45,7 @@ GPUI Web 平台启动时的字体数据库是**空的**。画廊使用 `include_
 
 对于符合条件、打包字体缺少的 emoji，以及横排汉字、假名和现代谚文字素，`CanvasFontFallback::EmojiAndCjk` 可让浏览器用本机字体测量并绘制。GPUI 已加载的字体仍优先。回退按单个字素工作，因此字形覆盖、字距和排版特性取决于浏览器，不能代替完整的中日韩字体。默认策略仅覆盖 emoji，`Disabled` 则只使用已加载字体。策略在构造 `WebPlatform` 时确定，之后不能更改。
 
-GPUI 也支持**启动后加载字体**。在本仓库固定的 GPUI 版本（`gpui-pre` 0.3.6）中，`TextSystem::add_fonts(&self, fonts: Vec<Cow<'static, [u8]>>) -> Result<()>` 可以通过 `Cow::Owned` 接收下载的字体字节，并使字体解析及行布局缓存失效。异步请求得到并检查过有效的原始字体文件后，在应用上下文注册并刷新窗口：
+GPUI 也支持**启动后加载字体**。在本仓库固定的 GPUI 版本（`gpui-pre` 0.3.6）中，`TextSystem::add_fonts` 可以通过 `Cow::Owned` 接收下载的字体字节，并使字体解析及行布局缓存失效。异步请求得到并检查过有效的原始字体文件后，在应用上下文注册并刷新窗口：
 
 ```rust
 use std::borrow::Cow;

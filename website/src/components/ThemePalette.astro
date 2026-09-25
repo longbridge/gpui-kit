@@ -6,19 +6,21 @@ const { lang = 'en' } = Astro.props;
 const isZh = lang === 'zh-CN';
 const base = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/`;
 const choices = [
+  { id: 'system', name: isZh ? '跟随系统' : 'Follow System', family: 'GPUI Kit', mode: 'system' },
   { id: 'light', name: isZh ? '默认浅色' : 'Default Light', family: 'GPUI Kit', mode: 'light' },
   { id: 'dark', name: isZh ? '默认深色' : 'Default Dark', family: 'GPUI Kit', mode: 'dark' },
   ...themes,
 ];
 const groups = [
+  { mode: 'system', label: isZh ? '系统' : 'System' },
   { mode: 'light', label: isZh ? '浅色' : 'Light' },
   { mode: 'dark', label: isZh ? '深色' : 'Dark' },
 ];
 ---
 
 <button id="theme-palette-open" class="theme-toggle" type="button"
-  aria-label={isZh ? '选择主题，按 ⌘K 打开' : 'Choose theme, press Cmd+K to open'}
-  aria-keyshortcuts="Meta+K Control+K" title={isZh ? '选择主题 (⌘K / Ctrl+K)' : 'Choose theme (Cmd+K / Ctrl+K)'}>
+  aria-label={isZh ? '选择主题，按 T 打开' : 'Choose theme, press T to open'}
+  aria-keyshortcuts="T" title={isZh ? '选择主题 (T)' : 'Choose theme (T)'}>
   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
     <path d="M12 22a1 1 0 0 1 0-20 10 9 0 0 1 10 9 5 5 0 0 1-5 5h-2.25a1.75 1.75 0 0 0-1.4 2.8l.3.4a1.75 1.75 0 0 1-1.4 2.8z"/>
     <circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/>
@@ -72,14 +74,15 @@ const groups = [
   function storedId() {
     const stored = localStorage.getItem('theme');
     return options.some((option) => option.dataset.themeId === stored)
-      ? stored! : document.documentElement.classList.contains('dark') ? 'dark' : 'light';
+      ? stored! : 'system';
   }
 
   function apply(option: HTMLButtonElement) {
     const id = option.dataset.themeId!;
     const root = document.documentElement;
-    root.classList.toggle('dark', option.dataset.mode === 'dark');
-    if (id === 'light' || id === 'dark') {
+    root.classList.toggle('dark', option.dataset.mode === 'system'
+      ? window.matchMedia('(prefers-color-scheme: dark)').matches : option.dataset.mode === 'dark');
+    if (id === 'light' || id === 'dark' || id === 'system') {
       delete root.dataset.theme;
       delete root.dataset.themeName;
       delete root.dataset.themeSource;
@@ -142,7 +145,8 @@ const groups = [
     option.addEventListener('click', () => {
       committedId = option.dataset.themeId!;
       apply(option);
-      localStorage.setItem('theme', committedId);
+      if (committedId === 'system') localStorage.removeItem('theme');
+      else localStorage.setItem('theme', committedId);
       dialog?.close();
     });
   });
@@ -161,7 +165,8 @@ const groups = [
   });
 
   document.addEventListener('keydown', (event) => {
-    if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.altKey || event.key.toLowerCase() !== 'k') return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.key.toLowerCase() !== 't') return;
+    if (!dialog?.open && event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
     event.preventDefault();
     dialog?.open ? dialog.close() : open();
   });

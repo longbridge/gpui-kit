@@ -46,7 +46,7 @@ impl Render for Chat {
 }
 ```
 
-完整签名为 `fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement`；trait 要求 `Self: 'static + Sized`。`self` 是当前 Entity 内的状态；`window` 提供窗口级操作；`cx` 是当前 Entity 的 [Context](./context)。`impl IntoElement` 避免在签名中写出通常很深的具体返回类型。这里的 `div()` 是 GPUI Element，`Button` 是 GPUI Kit 组件。点击 closure 在渲染时只是被*注册*，发生输入后才通过 `cx.listener` 取得 `Chat` 的可变引用并运行。
+`Render::render` 接收 View 的可变引用、`Window` 和该 View 的 [Context](./context)，返回 `impl IntoElement`；trait 要求 `Self: 'static + Sized`。返回类型无需写出具体、往往深度嵌套的 Element 类型。这里的 `div()` 是 GPUI Element，`Button` 是 GPUI Kit 组件。点击 closure 在渲染时只是被*注册*，发生输入后才通过 `cx.listener` 取得 `Chat` 的可变引用并运行。
 
 ## View 持有状态，元素树描述本次界面
 

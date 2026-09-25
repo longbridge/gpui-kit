@@ -30,22 +30,22 @@ order: -2.631
     <defs><marker id="task-arrow-zh" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M1 1 L7 4 L1 7" fill="none" stroke="var(--muted-foreground)" stroke-width="1.5" /></marker></defs>
     <rect class="tf-panel" x="12" y="12" width="376" height="476" rx="14" />
     <rect class="tf-panel" x="412" y="12" width="376" height="476" rx="14" />
-    <text class="tf-heading" x="36" y="46">主线程 / UI 线程</text>
-    <text class="tf-heading" x="436" y="46">后台执行器</text>
+    <text class="tf-heading" x="36" y="46">Main / UI thread</text>
+    <text class="tf-heading" x="436" y="46">Background executor</text>
     <rect class="tf-ui" x="36" y="76" width="328" height="70" rx="10" />
-    <text class="tf-title" x="54" y="106">1 · 用户事件</text><text class="tf-code" x="54" y="130">cx.spawn(...)</text>
+    <text class="tf-title" x="54" y="106">1 · User event</text><text class="tf-code" x="54" y="130">cx.spawn(...)</text>
     <rect class="tf-ui" x="36" y="169" width="328" height="74" rx="10" />
-    <text class="tf-title" x="54" y="198">2 · 前台 poll</text><text class="tf-code" x="54" y="222">cx.background_spawn(work)</text>
+    <text class="tf-title" x="54" y="198">2 · Foreground poll</text><text class="tf-code" x="54" y="222">cx.background_spawn(work)</text>
     <rect class="tf-worker" x="436" y="169" width="328" height="74" rx="10" />
-    <text class="tf-title" x="454" y="198">Send future 入队</text><text class="tf-detail" x="454" y="222">平台 worker pool / 调度队列</text>
+    <text class="tf-title" x="454" y="198">Send future queued</text><text class="tf-detail" x="454" y="222">Platform workers / dispatch queue</text>
     <rect class="tf-ui" x="36" y="270" width="328" height="82" rx="10" />
-    <text class="tf-title" x="54" y="302">3 · await 后台 Task</text><text class="tf-detail" x="54" y="327">若返回 Pending，UI 可继续处理输入与渲染</text>
+    <text class="tf-title" x="54" y="302">3 · Await background Task</text><text class="tf-detail" x="54" y="327">If Pending, UI can handle input/render</text>
     <rect class="tf-worker" x="436" y="270" width="328" height="82" rx="10" />
-    <text class="tf-title" x="454" y="302">worker poll / 计算</text><text class="tf-detail" x="454" y="327">可与 UI 工作并行</text>
+    <text class="tf-title" x="454" y="302">Worker polls / computes</text><text class="tf-detail" x="454" y="327">May run in parallel with UI work</text>
     <rect class="tf-ui" x="36" y="380" width="328" height="80" rx="10" />
-    <text class="tf-title" x="54" y="411">4 · 回到 UI 线程</text><text class="tf-code" x="54" y="435">WeakEntity::update · cx.notify()</text>
+    <text class="tf-title" x="54" y="411">4 · Resume on UI thread</text><text class="tf-code" x="54" y="435">WeakEntity::update · cx.notify()</text>
     <rect class="tf-worker" x="436" y="380" width="328" height="80" rx="10" />
-    <text class="tf-title" x="454" y="411">Send 结果就绪</text><text class="tf-detail" x="454" y="436">唤醒前台 Task</text>
+    <text class="tf-title" x="454" y="411">Send result ready</text><text class="tf-detail" x="454" y="436">Wake the foreground Task</text>
     <path class="tf-arrow" d="M200 147 V165" marker-end="url(#task-arrow-zh)" />
     <path class="tf-arrow" d="M365 206 H432" marker-end="url(#task-arrow-zh)" />
     <path class="tf-arrow" d="M200 244 V266" marker-end="url(#task-arrow-zh)" />
@@ -58,18 +58,18 @@ order: -2.631
     <desc id="task-flow-mobile-desc-zh">同一流程改为纵向排列：UI 线程启动并 poll 任务；后台 worker 计算自有的 Send 数据；UI 线程恢复后更新 Entity 并请求渲染。</desc>
     <defs><marker id="task-arrow-mobile-zh" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M1 1 L7 4 L1 7" fill="none" stroke="var(--muted-foreground)" stroke-width="1.5" /></marker></defs>
     <rect class="tf-panel" x="8" y="8" width="344" height="260" rx="14" />
-    <text class="tf-heading" x="24" y="34">主线程 / UI 线程</text>
-    <rect class="tf-ui" x="24" y="50" width="312" height="62" rx="9" /><text class="tf-title" x="40" y="76">1 · 用户事件</text><text class="tf-code" x="40" y="98">cx.spawn(...)</text>
-    <rect class="tf-ui" x="24" y="128" width="312" height="62" rx="9" /><text class="tf-title" x="40" y="154">2 · 前台 poll</text><text class="tf-code" x="40" y="176">background_spawn(work)</text>
-    <rect class="tf-ui" x="24" y="206" width="312" height="51" rx="9" /><text class="tf-title" x="40" y="231">3 · await Task</text><text class="tf-detail" x="163" y="231">Pending → UI 继续运行</text>
+    <text class="tf-heading" x="24" y="34">Main / UI thread</text>
+    <rect class="tf-ui" x="24" y="50" width="312" height="62" rx="9" /><text class="tf-title" x="40" y="76">1 · User event</text><text class="tf-code" x="40" y="98">cx.spawn(...)</text>
+    <rect class="tf-ui" x="24" y="128" width="312" height="62" rx="9" /><text class="tf-title" x="40" y="154">2 · Foreground poll</text><text class="tf-code" x="40" y="176">background_spawn(work)</text>
+    <rect class="tf-ui" x="24" y="206" width="312" height="51" rx="9" /><text class="tf-title" x="40" y="231">3 · await Task</text><text class="tf-detail" x="163" y="231">Pending → UI free</text>
     <rect class="tf-panel" x="8" y="282" width="344" height="251" rx="14" />
-    <text class="tf-heading" x="24" y="308">后台执行器</text>
-    <rect class="tf-worker" x="24" y="324" width="312" height="63" rx="9" /><text class="tf-title" x="40" y="350">Send future 入队</text><text class="tf-detail" x="40" y="373">平台 worker pool / 调度队列</text>
-    <rect class="tf-worker" x="24" y="403" width="312" height="50" rx="9" /><text class="tf-title" x="40" y="434">worker poll / 计算</text>
-    <rect class="tf-worker" x="24" y="469" width="312" height="51" rx="9" /><text class="tf-title" x="40" y="500">Send 结果 → 唤醒 UI</text>
+    <text class="tf-heading" x="24" y="308">Background executor</text>
+    <rect class="tf-worker" x="24" y="324" width="312" height="63" rx="9" /><text class="tf-title" x="40" y="350">Queue Send future</text><text class="tf-detail" x="40" y="373">Platform workers / dispatch queue</text>
+    <rect class="tf-worker" x="24" y="403" width="312" height="50" rx="9" /><text class="tf-title" x="40" y="434">Worker poll / compute</text>
+    <rect class="tf-worker" x="24" y="469" width="312" height="51" rx="9" /><text class="tf-title" x="40" y="500">Send result → wake UI</text>
     <rect class="tf-panel" x="8" y="548" width="344" height="124" rx="14" />
-    <text class="tf-heading" x="24" y="575">主线程 / UI 线程</text>
-    <rect class="tf-ui" x="24" y="590" width="312" height="69" rx="9" /><text class="tf-title" x="40" y="617">4 · 恢复并更新 Entity</text><text class="tf-code" x="40" y="642">WeakEntity::update · cx.notify()</text>
+    <text class="tf-heading" x="24" y="575">Main / UI thread</text>
+    <rect class="tf-ui" x="24" y="590" width="312" height="69" rx="9" /><text class="tf-title" x="40" y="617">4 · Resume and update Entity</text><text class="tf-code" x="40" y="642">WeakEntity::update · cx.notify()</text>
     <path class="tf-arrow" d="M180 113 V124" marker-end="url(#task-arrow-mobile-zh)" />
     <path class="tf-arrow" d="M180 191 V202" marker-end="url(#task-arrow-mobile-zh)" />
     <path class="tf-arrow" d="M180 258 V320" marker-end="url(#task-arrow-mobile-zh)" />

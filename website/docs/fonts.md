@@ -140,7 +140,7 @@ There are three useful supply choices:
 | Bundle subsets for known UI strings | Smaller payload | Other CJK characters and newly entered text need another source. |
 | Fetch a font file when needed | Smaller initial payload; later network request | Install it at runtime, then refresh windows so text is shaped again. Handle loading and failure states. |
 
-For a fetched font, pass owned bytes to the **same** `TextSystem::add_fonts(&self, Vec<Cow<'static, [u8]>>) -> Result<()>` API. The HTTP download can come from the application's `cx.http_client()` or another client; the registration step is:
+For a fetched font, pass owned bytes to the **same** `TextSystem::add_fonts` API. The HTTP download can come from the application's `cx.http_client()` or another client; the registration step is:
 
 ```rust
 use std::borrow::Cow;

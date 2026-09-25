@@ -79,6 +79,12 @@ const tokens: Record<string, string> = {
   'code-comment': 'syntax.comment',
   'code-fn': 'syntax.function',
   'code-type': 'syntax.type',
+  'code-constant': 'syntax.constant',
+  'code-number': 'syntax.number',
+  'code-attribute': 'syntax.attribute',
+  'code-property': 'syntax.property',
+  'code-variable': 'syntax.variable.special',
+  'code-link': 'syntax.link_uri',
 };
 
 function highlightColor(highlight: Record<string, unknown> | undefined, key: string): string | undefined {

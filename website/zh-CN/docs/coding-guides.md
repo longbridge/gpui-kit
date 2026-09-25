@@ -359,7 +359,7 @@ Focus owner 必须明确：
 - 绘制清楚的 `focus_visible` state；
 - 禁止在 `render` 中无条件 request focus。
 
-被 track 的 handle 只有自己声明了才是 Tab stop：用 `cx.focus_handle().tab_stop(true)`（或 `.tab_index(n)`）建它，元素自身的 `tab_index`/`tab_stop` 不会作用到传给 `track_focus` 的 handle 上。Stateless component 可以在 `render` 里通过 `window.use_keyed_state(id, cx, |_, cx| cx.focus_handle().tab_stop(true))` 建这个 handle；keyed state 跨帧保留，Tab 顺序因此稳定——`Button` 就是这么做的。
+被 track 的 handle 只有自己声明了才是 Tab stop：用 `cx.focus_handle().tab_stop(true)`（或 `.tab_index(n)`）建它，元素自身的 `tab_index`/`tab_stop` 不会作用到传给 `track_focus` 的 handle 上。Stateless component 可以在 `render` 里通过 `window.use_keyed_state` 建这个 handle；keyed state 跨帧保留，Tab 顺序因此稳定——`Button` 就是这么做的。
 
 `key_context` 与 `on_action` 应附着于同一个 focused region。注册了 Action 但没有正确 focus path，不算实现键盘交互。Composite widget 应完成整个 navigation model：方向键、适用时的 Home/End/Page、confirm、cancel 与 Tab，而不是几个孤立 shortcut。
 

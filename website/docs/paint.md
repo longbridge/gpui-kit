@@ -32,7 +32,7 @@ fn paint_triangle(bounds: Bounds<Pixels>, color: Hsla, window: &mut Window) {
 
 ### From SVG paths to GPUI
 
-`PathBuilder` was introduced to GPUI for candlestick chart drawing needs. It uses Lyon's SVG path builder internally, so its segment vocabulary is familiar from SVG. If you know [SVG `d` path commands](https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Attribute/d), the segment concepts transfer directly:
+`PathBuilder` was introduced to GPUI for candlestick chart drawing needs. It uses Lyon's SVG path builder internally, so its segment vocabulary is familiar from SVG. If you know [SVG path commands](https://developer.mozilla.org/en-US/docs/Web/SVG/Reference/Attribute/d), the segment concepts transfer directly:
 
 | SVG path | GPUI builder | Meaning |
 | --- | --- | --- |
@@ -45,55 +45,65 @@ fn paint_triangle(bounds: Bounds<Pixels>, color: Hsla, window: &mut Window) {
 
 The geometry model is familiar, but the Rust argument order is not a literal transcription of SVG syntax: `curve_to` and `cubic_bezier_to` take the **end point first**, followed by control points. `x_rotation` is passed as a `Pixels` value whose numeric part represents degrees in the current API. Coordinates are typed `Point<Pixels>`, and `build()` tessellates the path before `paint_path` submits it. This makes porting SVG drawing logic straightforward while keeping GPUI's typed coordinate and error handling rules explicit.
 
-### One candlestick, two path notations
+### The GPUI Kit mark in two path notations
 
-Switch between GPUI and SVG source. Both trace the same twelve corners in the same order; the preview is the actual SVG path. This is a teaching example that combines wick and body in one silhouette. [GPUI Kit's candlestick chart](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/chart/candlestick_chart.rs) instead paints a stroked path for the wick and a quad for the body. The example uses a local 100 × 128 coordinate space. In a real GPUI `canvas`, add `bounds.origin` to each point.
+The GPUI Kit mark makes the relationship between SVG paths and `PathBuilder` concrete. Its two closed paths paint separately: the outer shape uses the theme foreground and the inner stroke uses the theme blue accent. Switch between the GPUI and SVG source, then compare them with the rendered mark below. The example uses a local 32 × 32 coordinate space; the GPUI code adds the bounds origin to each point. `foreground` and `accent_color` are colors supplied by the caller.
 
 <div class="doc-tabs">
-  <input class="doc-tabs__input" type="radio" name="candle-source-en" id="candle-rust-en" checked>
-  <input class="doc-tabs__input" type="radio" name="candle-source-en" id="candle-svg-en">
-  <div class="doc-tabs__list" role="tablist" aria-label="Candlestick path source">
-    <label for="candle-rust-en" role="tab">GPUI PathBuilder</label>
-    <label for="candle-svg-en" role="tab">SVG path</label>
+  <input class="doc-tabs__input" type="radio" name="logo-source-en" id="logo-rust-en" checked>
+  <input class="doc-tabs__input" type="radio" name="logo-source-en" id="logo-svg-en">
+  <div class="doc-tabs__list" role="tablist" aria-label="GPUI Kit logo path source">
+    <label for="logo-rust-en" role="tab">PathBuilder</label>
+    <label for="logo-svg-en" role="tab">SVG</label>
   </div>
   <div class="doc-tabs__panels">
     <section class="doc-tabs__panel">
-      <pre><code class="language-rust">let mut builder = PathBuilder::fill();
-builder.move_to(point(px(48.), px(16.)));
-builder.line_to(point(px(52.), px(16.)));
-builder.line_to(point(px(52.), px(42.)));
-builder.line_to(point(px(68.), px(42.)));
-builder.line_to(point(px(68.), px(90.)));
-builder.line_to(point(px(52.), px(90.)));
-builder.line_to(point(px(52.), px(112.)));
-builder.line_to(point(px(48.), px(112.)));
-builder.line_to(point(px(48.), px(90.)));
-builder.line_to(point(px(32.), px(90.)));
-builder.line_to(point(px(32.), px(42.)));
-builder.line_to(point(px(48.), px(42.)));
-builder.close();
-if let Ok(path) = builder.build() {
-    window.paint_path(path, color);
-}</code></pre>
+      <pre class="astro-code shiki-themes macos-classic-light macos-classic-dark" style="background-color:#f6f6f7;--shiki-dark-bg:#131313;color:#000000;--shiki-dark:#CACCCA" tabindex="0"><code><span class="line"><span style="color:#0433FF;--shiki-dark:#87B1F6">let</span><span style="color:#000000;--shiki-dark:#CACCCA"> p </span><span style="color:#0433FF;--shiki-dark:#87B1F6">=</span><span style="color:#0433FF;--shiki-dark:#87B1F6"> |</span><span style="color:#000000;--shiki-dark:#CACCCA">x</span><span style="color:#0433FF;--shiki-dark:#87B1F6">:</span><span style="color:#571AB7;--shiki-dark:#CBA6F7"> f32</span><span style="color:#000000;--shiki-dark:#CACCCA">, y</span><span style="color:#0433FF;--shiki-dark:#87B1F6">:</span><span style="color:#571AB7;--shiki-dark:#CBA6F7"> f32</span><span style="color:#0433FF;--shiki-dark:#87B1F6">|</span><span style="color:#0000A2;--shiki-dark:#B3C5F3"> point</span><span style="color:#000000;--shiki-dark:#CACCCA">(bounds</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">left</span><span style="color:#000000;--shiki-dark:#CACCCA">() </span><span style="color:#0433FF;--shiki-dark:#87B1F6">+</span><span style="color:#0000A2;--shiki-dark:#B3C5F3"> px</span><span style="color:#000000;--shiki-dark:#CACCCA">(x), bounds</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">top</span><span style="color:#000000;--shiki-dark:#CACCCA">() </span><span style="color:#0433FF;--shiki-dark:#87B1F6">+</span><span style="color:#0000A2;--shiki-dark:#B3C5F3"> px</span><span style="color:#000000;--shiki-dark:#CACCCA">(y));</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#0433FF;--shiki-dark:#87B1F6">let</span><span style="color:#0433FF;--shiki-dark:#87B1F6"> mut</span><span style="color:#000000;--shiki-dark:#CACCCA"> outer </span><span style="color:#0433FF;--shiki-dark:#87B1F6">=</span><span style="color:#571AB7;--shiki-dark:#CBA6F7"> PathBuilder</span><span style="color:#0433FF;--shiki-dark:#87B1F6">::</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">fill</span><span style="color:#000000;--shiki-dark:#CACCCA">();</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">outer</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">move_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">4</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">4</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">outer</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">line_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">28</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">4</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">outer</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">line_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">28</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">9</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">outer</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">line_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">10</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">9</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">outer</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">line_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">10</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">23</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">outer</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">line_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">28</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">23</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">outer</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">line_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">28</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">28</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">outer</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">line_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">4</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">28</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">outer</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">close</span><span style="color:#000000;--shiki-dark:#CACCCA">();</span></span>
+<span class="line"><span style="color:#0433FF;--shiki-dark:#87B1F6">if</span><span style="color:#0433FF;--shiki-dark:#87B1F6"> let</span><span style="color:#571AB7;--shiki-dark:#CBA6F7"> Ok</span><span style="color:#000000;--shiki-dark:#CACCCA">(path) </span><span style="color:#0433FF;--shiki-dark:#87B1F6">=</span><span style="color:#000000;--shiki-dark:#CACCCA"> outer</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">build</span><span style="color:#000000;--shiki-dark:#CACCCA">() {</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">    window</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">paint_path</span><span style="color:#000000;--shiki-dark:#CACCCA">(path, foreground);</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">}</span></span>
+<span class="line"></span>
+<span class="line"><span style="color:#0433FF;--shiki-dark:#87B1F6">let</span><span style="color:#0433FF;--shiki-dark:#87B1F6"> mut</span><span style="color:#000000;--shiki-dark:#CACCCA"> accent </span><span style="color:#0433FF;--shiki-dark:#87B1F6">=</span><span style="color:#571AB7;--shiki-dark:#CBA6F7"> PathBuilder</span><span style="color:#0433FF;--shiki-dark:#87B1F6">::</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">fill</span><span style="color:#000000;--shiki-dark:#CACCCA">();</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">accent</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">move_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">16</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">13</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">accent</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">line_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">28</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">13</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">accent</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">line_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">28</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">23</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">accent</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">line_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">23</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">23</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">accent</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">line_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">23</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">18</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">accent</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">line_to</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">p</span><span style="color:#000000;--shiki-dark:#CACCCA">(</span><span style="color:#0433FF;--shiki-dark:#CC9E00">16</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">, </span><span style="color:#0433FF;--shiki-dark:#CC9E00">18</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#000000;--shiki-dark:#CACCCA">));</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">accent</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">close</span><span style="color:#000000;--shiki-dark:#CACCCA">();</span></span>
+<span class="line"><span style="color:#0433FF;--shiki-dark:#87B1F6">if</span><span style="color:#0433FF;--shiki-dark:#87B1F6"> let</span><span style="color:#571AB7;--shiki-dark:#CBA6F7"> Ok</span><span style="color:#000000;--shiki-dark:#CACCCA">(path) </span><span style="color:#0433FF;--shiki-dark:#87B1F6">=</span><span style="color:#000000;--shiki-dark:#CACCCA"> accent</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">build</span><span style="color:#000000;--shiki-dark:#CACCCA">() {</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">    window</span><span style="color:#0433FF;--shiki-dark:#87B1F6">.</span><span style="color:#0000A2;--shiki-dark:#B3C5F3">paint_path</span><span style="color:#000000;--shiki-dark:#CACCCA">(path, accent_color);</span></span>
+<span class="line"><span style="color:#000000;--shiki-dark:#CACCCA">}</span></span></code></pre>
     </section>
     <section class="doc-tabs__panel">
-      <pre><code class="language-svg">&lt;svg viewBox=&quot;0 0 100 128&quot;&gt;
-  &lt;path fill=&quot;currentColor&quot;
-    d=&quot;M48 16 L52 16 L52 42 L68 42 L68 90
-       L52 90 L52 112 L48 112 L48 90 L32 90
-       L32 42 L48 42 Z&quot; /&gt;
+      <pre><code class="language-svg">&lt;svg viewBox=&quot;0 0 32 32&quot;&gt;
+  &lt;path fill=&quot;currentColor&quot; d=&quot;M4 4 L28 4 L28 9 L10 9 L10 23 L28 23 L28 28 L4 28 Z&quot; /&gt;
+  &lt;path fill=&quot;#3B82F6&quot; d=&quot;M16 13 L28 13 L28 23 L23 23 L23 18 L16 18 Z&quot; /&gt;
 &lt;/svg&gt;</code></pre>
     </section>
   </div>
+  <figure class="path-preview">
+  <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="logo-title-en">
+    <title id="logo-title-en">GPUI Kit mark drawn with two colored paths</title>
+    <path fill="currentColor" d="M4 4 L28 4 L28 9 L10 9 L10 23 L28 23 L28 28 L4 28 Z" />
+    <path fill="var(--data-2, #3B82F6)" d="M16 13 L28 13 L28 23 L23 23 L23 18 L16 18 Z" />
+  </svg>
+  <figcaption>Two filled paths, with foreground and the theme blue accent painted separately.</figcaption>
+  </figure>
 </div>
 
-<figure class="path-preview">
-  <svg viewBox="0 0 100 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="candle-title-en">
-    <title id="candle-title-en">Candlestick drawn from the SVG path above</title>
-    <path fill="currentColor" d="M48 16 L52 16 L52 42 L68 42 L68 90 L52 90 L52 112 L48 112 L48 90 L32 90 L32 42 L48 42 Z" />
-  </svg>
-  <figcaption>One filled path: wick and body share the same outline.</figcaption>
-</figure>
+GPUI’s `PathBuilder` takes full point coordinates; it has no SVG `H` or `V` shorthand and does not parse an SVG `d` string directly. The SVG tab spells out every `L` coordinate to make the correspondence visible. If the source is already an SVG file and no `Path<Pixels>` is needed, render the asset with `svg().path("icons/logo.svg")`. Converting arbitrary SVG path data into a GPUI `Path` requires a separate parser that feeds segments into `PathBuilder`.
 
 ## Choose the right phase
 

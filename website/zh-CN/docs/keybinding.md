@@ -43,7 +43,7 @@ impl Render for Editor {
 }
 ```
 
-Handler 使用 GPUI 的常规签名，例如 `fn on_action_save_document(&mut self, _: &SaveDocument, window: &mut Window, cx: &mut Context<Self>)`。这里的 `cx` 是 owner 的 [Context](./context)。注册 binding 不会自动让元素获得 Focus；进入区域时主动设置 Focus，或让鼠标交互聚焦其 tracked handle。Focus 所属权、派发与传播详见 [Action](./action)。
+Handler 使用 GPUI 的常规签名，例如 `on_action_save_document`。这里的 `cx` 是 owner 的 [Context](./context)。注册 binding 不会自动让元素获得 Focus；进入区域时主动设置 Focus，或让鼠标交互聚焦其 tracked handle。Focus 所属权、派发与传播详见 [Action](./action)。
 
 ## 按键字符串的写法
 
@@ -51,13 +51,13 @@ Handler 使用 GPUI 的常规签名，例如 `fn on_action_save_document(&mut se
 
 | Binding | 含义 |
 | --- | --- |
-| `"secondary-s"` | 主快捷键修饰键加 S：macOS 是 Command，Linux 和 Windows 是 Control。 |
-| `"ctrl-enter"`、`"alt-f4"`、`"shift-tab"` | 指定具体修饰键。 |
-| `"cmd-shift-p"` | 平台修饰键加 Shift 和 P。`cmd`、`super`、`win` 都指平台修饰键；在 Windows 上它是 Windows 键，并非 Control。 |
-| `"up"`、`"escape"`、`"space"`、`"backspace"` | 具名按键。 |
-| `"cmd-k left"` | 连续按两次：平台修饰键加 K，然后 Left。 |
+| `secondary-s` | 主快捷键修饰键加 S：macOS 是 Command，Linux 和 Windows 是 Control。 |
+| `ctrl-enter`、`alt-f4`、`shift-tab` | 指定具体修饰键。 |
+| `cmd-shift-p` | 平台修饰键加 Shift 和 P。`cmd`、`super`、`win` 都指平台修饰键；在 Windows 上它是 Windows 键，并非 Control。 |
+| `up`、`escape`、`space`、`backspace` | 具名按键。 |
+| `cmd-k left` | 连续按两次：平台修饰键加 K，然后 Left。 |
 
-GPUI 还识别 `fn`、`ctrl`、`alt`、`shift`、`cmd`、`super`、`win` 与 `secondary`。常见的跨平台 Command/Control 快捷键应使用 `secondary`；所有平台都必须使用 Control 时才写 `ctrl`。大写 ASCII 字母如 `"A"` 表示 Shift+A，显式写 `"shift-a"` 更容易阅读。如果按键字符串或 context predicate 无法解析，`KeyBinding::new` 会 **panic**；静态定义应便于检查，用户输入则要先验证。
+GPUI 还识别 `fn`、`ctrl`、`alt`、`shift`、`cmd`、`super`、`win` 与 `secondary`。常见的跨平台 Command/Control 快捷键应使用 `secondary`；所有平台都必须使用 Control 时才写 `ctrl`。大写 ASCII 字母如 `A` 表示 Shift+A，显式写 `shift-a` 更容易阅读。如果按键字符串或 context predicate 无法解析，`KeyBinding::new` 会 **panic**；静态定义应便于检查，用户输入则要先验证。
 
 多个 chord 可以共用首键。只要更长的 binding 仍有可能匹配，GPUI 会暂存前缀；后续按键会完成 chord，或使前缀被重新派发。不要在可编辑区域中随意把常用文本输入键设为 chord 前缀。
 
@@ -85,6 +85,37 @@ Some("Workspace > Editor")
 多个 binding 匹配相同按键时，GPUI 首先按 context 在 Focus 路径上的深度排序。内层 `Editor` 的 binding 优先于祖先 `Workspace` 的 binding。同一深度下，**后注册**的 binding 排在前面。`None` context 被视为匹配最深的 context，所以它不会自动成为低优先级 fallback：后注册的 `None` binding 可能排在相同按键的 `Editor` binding 前面。希望 workspace 快捷键让位于内层控件时，应显式指定 workspace context。
 
 GPUI 可以依次尝试多个匹配的 binding。它沿 Focus 路径派发每个候选 Action，直到某个 handler 消费它；Action handler 默认停止传播。Handler 决定不处理时，可调用 `cx.propagate()` 继续派发。存在竞争 binding 时，注册顺序、context 深度和 handler 是否可达都会影响结果。
+
+切换 Focus 位置，可看到本例中哪个 `escape` binding 排在前面。层次图标出当前 Focus 路径；结果假定路径上的 handler 会消费首个 Action。
+
+<div class="keybinding-demo" data-focus="editor">
+  <div class="keybinding-demo__controls" role="group" aria-label="Focus target">
+    <button type="button" data-focus-target="workspace" aria-pressed="false">Workspace</button>
+    <button type="button" data-focus-target="editor" aria-pressed="true">Editor</button>
+    <button type="button" data-focus-target="modal" aria-pressed="false">Modal</button>
+  </div>
+  <div class="keybinding-demo__flow">
+    <div class="keybinding-demo__tree" aria-label="Focus path">
+      <div class="keybinding-demo__caption">Focus path</div>
+      <div class="keybinding-demo__node" data-node="window">Window</div>
+      <div class="keybinding-demo__node" data-node="workspace">Workspace <span>Escape → ClearWorkspaceSelection</span></div>
+      <div class="keybinding-demo__node" data-node="editor">Editor <span>Escape → CloseEditorSearch</span></div>
+      <div class="keybinding-demo__node" data-node="modal">Modal <span>No Escape binding</span></div>
+    </div>
+    <div class="keybinding-demo__arrow" aria-hidden="true">→</div>
+    <div class="keybinding-demo__matches" aria-live="polite">
+      <div class="keybinding-demo__caption">Matching Escape bindings · highest first</div>
+      <div data-result="workspace">
+        <div class="keybinding-demo__match"><b>1 · Workspace</b><span>ClearWorkspaceSelection</span></div>
+      </div>
+      <div data-result="editor">
+        <div class="keybinding-demo__match keybinding-demo__match--first"><b>1 · Editor</b><span>CloseEditorSearch</span></div>
+        <div class="keybinding-demo__match"><b>2 · Workspace</b><span>ClearWorkspaceSelection</span></div>
+      </div>
+      <div data-result="modal"><p>No matching Escape binding on this Focus path.</p></div>
+    </div>
+  </div>
+</div>
 
 ```rust
 cx.bind_keys([
@@ -118,7 +149,7 @@ div().children(hint)
 
 第一个调用返回 `Option<KeyBinding>`；第二个返回可直接放在标签旁渲染的 `Option<Kbd>`。它们都会考虑目标区域的 context、较高优先级 binding 的遮蔽，以及当前 keymap（包括用户覆盖设置）。`None` 表示在可解析的目标路径上没有该 Action 可显示的 binding。这些查询基于**上一帧已经渲染的内容**，刚在当前帧首次绘制的 focus handle 可能暂时查不到结果。查到 binding 并不代表命令在当前运行状态下可以执行，也不证明目标路径上有 Action handler；owner 仍需决定是否允许执行。`window.is_action_available_in(&SaveDocument, &self.editor_focus)` 可以检查该路径上是否有元素级 Action handler。
 
-查询 window 当前 context 时，还可以使用 `window.highest_precedence_binding_for_action(&action)` 和 `window.bindings_for_action(&action)`；后者返回全部可见 binding。已知单个 context 时，可用 `window.highest_precedence_binding_for_action_in_context(&action, KeyContext::parse("Editor")?)`。GPUI Kit 也提供 `Kbd::binding_for_action(&action, Some("Editor"), window)` 查询简单 context；传 `None` 则查询 window 当前 context。这里的 `Some(...)` 使用 **Key Context 声明语法**，例如 `"Editor mode=normal"`，而不是 `"Editor && mode == normal"` 这样的 predicate 语法。无效的 context 字符串会悄悄回退到 window 查询，因此动态输入应先验证。存在嵌套 context 或菜单改变了 Focus 时，使用具体 focus handle 更可靠。GPUI Kit 的 `Kbd::global_binding_for_action(&action, window)` 可针对空 Key Context 做最后的 fallback 查询，它不会重建嵌套 Focus 路径。
+查询 window 当前 context 时，还可以使用 `window.highest_precedence_binding_for_action(&action)` 和 `window.bindings_for_action(&action)`；后者返回全部可见 binding。已知单个 context 时，可用 `window.highest_precedence_binding_for_action_in_context`。GPUI Kit 也提供 `Kbd::binding_for_action(&action, Some("Editor"), window)` 查询简单 context；传 `None` 则查询 window 当前 context。这里的 `Some(...)` 使用 **Key Context 声明语法**，例如 `Editor mode=normal`，而不是 `Editor && mode == normal` 这样的 predicate 语法。无效的 context 字符串会悄悄回退到 window 查询，因此动态输入应先验证。存在嵌套 context 或菜单改变了 Focus 时，使用具体 focus handle 更可靠。GPUI Kit 的 `Kbd::global_binding_for_action(&action, window)` 可针对空 Key Context 做最后的 fallback 查询，它不会重建嵌套 Focus 路径。
 
 `Kbd::binding_for_action_in` 目前**只显示 chord 的第一个按键**。需要显示完整序列时，应格式化返回的 `KeyBinding` 中每个 keystroke：
 
@@ -140,7 +171,7 @@ let shortcut = binding.map(|binding| {
 
 快捷键、按钮、命令面板与菜单项应使用同一个 Action。菜单可以保存 `MenuItem::action("Save Document", SaveDocument)`；按钮可以调用 `window.dispatch_action(Box::new(SaveDocument), cx)`。当前 Focus 路径上的 owner 随后运行同一个 handler。
 
-先注册 binding，再调用 `cx.set_menus(...)`。Native menu 在创建时读取当时的 keymap，并保留显示的快捷键。应用以后更改 binding，需要再次调用 `cx.set_menus(...)` 重建菜单，让标签和原生快捷键反映新 keymap。窗口内的菜单和 tooltip 应按上文从 Action 查询当前 binding，不要硬编码 `⌘A` 或 `Ctrl+A`：平台、目标 context 和用户 keymap 都可能改变实际显示的快捷键。GPUI Kit 的 Popup Menu 会根据命令目标或触发位置的 Focus 查询快捷键，并通过 `Kbd` 显示；简单 context 的 tooltip 可以使用 `Tooltip::new("Save Document").action(&SaveDocument, Some("Editor"))`，让它在渲染时查询。
+先注册 binding，再调用 `cx.set_menus(...)`。Native menu 在创建时读取当时的 keymap，并保留显示的快捷键。应用以后更改 binding，需要再次调用 `cx.set_menus(...)` 重建菜单，让标签和原生快捷键反映新 keymap。窗口内的菜单和 tooltip 应按上文从 Action 查询当前 binding，不要硬编码 `⌘A` 或 `Ctrl+A`：平台、目标 context 和用户 keymap 都可能改变实际显示的快捷键。GPUI Kit 的 Popup Menu 会根据命令目标或触发位置的 Focus 查询快捷键，并通过 `Kbd` 显示；简单 context 的 tooltip 可以使用 `Tooltip::action`，让它在渲染时查询。
 
 ## 用户 Keymap 与具名 Action
 

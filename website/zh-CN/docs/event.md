@@ -77,7 +77,7 @@ impl Workspace {
 
 不要只用局部变量保存返回的 `Subscription`：函数结束后它会被 drop，观察者随即断开。把 `_subscriptions` 放在 `Workspace` 上，两者便拥有相同生命周期；View 释放时，Subscription 也会一起释放并取消订阅。也不要把 View 级 Subscription 存到生命周期更长的全局 owner，否则 View 消失后 callback 与捕获的资源仍然存活，可能造成内存泄漏。
 
-回调依次得到 owner（`&mut Workspace`）、发出通知的 `Entity<Chat>`、借用的 `&ChatEvent` 和 owner 的 [Context](./context)（`Context<Workspace>`）。它只接收**这个 Entity** 发出的对应 Event 类型；另一个 `Chat` 实例不会共用订阅者。回调需要可变的 [Window](./window) 时使用 `cx.subscribe_in(&chat, window, |workspace, chat, event, window, cx| { ... })`，并把返回的 `Subscription` 存在同一字段。只需要知道某个 Entity 发生变化、不需要有类型的 payload 时，可以使用 `cx.observe(...)`。
+回调依次得到 owner（`&mut Workspace`）、发出通知的 `Entity<Chat>`、借用的 `&ChatEvent` 和 owner 的 [Context](./context)（`Context<Workspace>`）。它只接收**这个 Entity** 发出的对应 Event 类型；另一个 `Chat` 实例不会共用订阅者。回调需要可变的 [Window](./window) 时使用 `cx.subscribe_in`，并把返回的 `Subscription` 存在同一字段。只需要知道某个 Entity 发生变化、不需要有类型的 payload 时，可以使用 `cx.observe(...)`。
 
 :::info INFO — Event 不跟随 Focus 路由
 

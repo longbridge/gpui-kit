@@ -6,7 +6,7 @@ order: -2.76
 
 # TextSystem
 
-GPUI 的 `TextSystem` 负责解析[字体](./fonts)并提供字体度量。每个 [Window](./window) 都有一个 `WindowTextSystem`，在共享文本系统上增加行布局缓存。普通文本元素和 GPUI Kit 控件会替你使用这些服务。编写自定义文本几何、图表标签、编辑器，或需要直接使用字形位置的元素时，才从 `window.text_system()` 入手。
+GPUI 的 `TextSystem` 负责解析 [Font](./fonts) 并提供 font metrics。每个 [Window](./window) 都有一个 `WindowTextSystem`，在共享文本系统上增加行布局缓存。普通文本元素和 GPUI Kit 控件会替你使用这些服务。编写自定义文本几何、图表标签、编辑器，或需要直接使用字形位置的元素时，才从 `window.text_system()` 入手。
 
 文本渲染是一条连续的流程：
 
@@ -42,7 +42,7 @@ GPUI Kit 的 [TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/
 
 ## 塑形单行文本
 
-`TextRun::len` 以 **UTF-8 字节**计数，所有 run 合起来应覆盖要绘制的文本。每个 run 指定其字节范围内的字体、颜色、背景、下划线和删除线。文本参数是 [SharedString](./shared-string)。下面的例子沿用 [GPUI Kit Plot 标签](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/label.rs)的做法：
+`TextRun::len` 以 **UTF-8 字节**计数，所有 run 合起来应覆盖要绘制的文本。每个 run 指定其字节范围内的字体、颜色、背景、下划线和删除线。文本参数是 [SharedString](./shared-string)。下面的例子沿用 [Plot label](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/plot/label.rs) 的做法：
 
 ```rust
 use gpui_kit::*;
@@ -65,17 +65,17 @@ let width = shape_label(label, color, window).width();
 
 `shape_line(text, font_size, runs, force_width)` 返回 `ShapedLine`：`width()` 是塑形后的 advance，结果还包含原文、带位置的字形、字体 ID、ascent、descent 和装饰 run。除非自定义布局有意指定宽度，否则 `force_width` 传 `None`。`shape_line` 只处理**一行**，不要传入包含 `\n` 的文本。只需要几何信息时，`layout_line(&str, size, runs, force_width)` 返回 `Arc<LineLayout>`；如果还要绘制，直接选用 `shape_line`。
 
-`LineLayout::x_for_index(byte_index)`、`index_for_x(x)` 与 `closest_index_for_x(x)` 可用于光标和命中测试。索引是原始文本中的 UTF-8 字节位置，不是 Unicode 字符数，也不是视觉列数。x 位置使用 GPUI 的[逻辑像素几何](./geometry)。选择边界应保持在合法文本边界上；测量、光标定位和绘制应使用同一份塑形布局，结果才能一致。
+`LineLayout::x_for_index(byte_index)`、`index_for_x(x)` 与 `closest_index_for_x(x)` 可用于光标和命中测试。索引是原始文本中的 UTF-8 字节位置，不是 Unicode 字符数，也不是视觉列数。x 位置使用 GPUI 的 [logical pixel geometry](./geometry)。选择边界应保持在合法文本边界上；测量、光标定位和绘制应使用同一份塑形布局，结果才能一致。
 
 ## 多行换行
 
-文本包含换行符或需要软换行时，使用 `window.text_system().shape_text(text, font_size, runs, wrap_width, line_clamp)`。它返回 `WrappedLine` 集合的 `Result`。`wrap_width: Some(width)` 指定可用宽度。`line_clamp` 限制软换行边界，但 `shape_text` 仍会为每个由显式换行符分隔的源行返回一个 `WrappedLine`，不能保证结果总共不超过 N 行。行布局保存换行边界和宽度，让自定义文本元素放置每个视觉行，并将指针位置映射回源文本。宽度或字体变化会改变换行边界，因此应重新计算布局。
+文本包含换行符或需要软换行时，使用 `shape_text`。它返回 `WrappedLine` 集合的 `Result`。`wrap_width: Some(width)` 指定可用宽度。`line_clamp` 限制软换行边界，但 `shape_text` 仍会为每个由显式换行符分隔的源行返回一个 `WrappedLine`，不能保证结果总共不超过 N 行。行布局保存换行边界和宽度，让自定义文本元素放置每个视觉行，并将指针位置映射回源文本。宽度或字体变化会改变换行边界，因此应重新计算布局。
 
 普通段落应交给 GPUI 文本元素或 GPUI Kit `TextView`。只有现有元素无法满足字形级定位、绘制或命中测试需求时，自定义元素才应直接塑形。
 
 ## 对齐 GPUI 渲染阶段
 
-GPUI 的[渲染流程](./render)分开布局、prepaint 和 paint；自定义文本工作应放在对应阶段：
+GPUI 的 [Render](./render) 流程分开布局、prepaint 和 paint；自定义文本工作应放在对应阶段：
 
 | 阶段 | 文本工作 | 原因 |
 | --- | --- | --- |
@@ -83,7 +83,7 @@ GPUI 的[渲染流程](./render)分开布局、prepaint 和 paint；自定义文
 | `prepaint` | 根据已解析宽度塑形、计算行原点和光标几何、建立 hitbox。 | 布局已给出边界；输入几何必须对应当前帧。 |
 | `paint` | 在准备好的原点绘制 `ShapedLine`。 | 重用 prepaint 的塑形结果，使像素与命中测试一致。 |
 
-`ShapedLine::paint(origin, line_height, align, align_width, window, cx)` 提交一行；若 run 有背景，另用 `paint_background(...)`。两者返回 `Result`，应处理。[Input 元素](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) 对可见文本、行号、选择区域与光标采用这种阶段划分。绘制文字本身不会建立 hitbox、键盘焦点或无障碍名称；可交互的自定义文本元素也要实现这些契约。自定义绘制详见 [Paint](./paint)。
+`ShapedLine::paint` 提交一行；若 run 有背景，另用 `paint_background(...)`。两者返回 `Result`，应处理。[Input element](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) 对可见文本、行号、选择区域与光标采用这种阶段划分。绘制文字本身不会建立 hitbox、键盘焦点或无障碍名称；可交互的自定义文本元素也要实现这些契约。自定义绘制详见 [Paint](./paint)。
 
 ## 缓存与性能边界
 

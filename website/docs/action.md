@@ -84,8 +84,25 @@ Choose a stable verb based name for each command. Use one Action type for all en
 
 ## Focus selects the route
 
-<img class="architecture-light" src="/focus-action-flow.svg?v=20260922-3" alt="Focus determines the dispatch path; key contexts match a shortcut to an Action, which is dispatched toward the focused element">
-<img class="architecture-dark" src="/focus-action-flow-dark.svg?v=20260922-3" alt="Focus determines the dispatch path; key contexts match a shortcut to an Action, which is dispatched toward the focused element">
+<svg class="focus-action-diagram" viewBox="0 0 1120 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="focus-action-title-en focus-action-desc-en">
+  <title id="focus-action-title-en">GPUI shortcut dispatch in three steps</title>
+  <desc id="focus-action-desc-en">Focus builds a dispatch path, Key Context selects a binding, and its Action reaches a handler on that path.</desc>
+  <defs><marker id="focus-action-arrow-en" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" class="fa-arrow-head" /></marker></defs>
+  <rect x="24" y="24" width="310" height="202" rx="14" class="fa-box" />
+  <text x="50" y="58" class="fa-step">1 · FOCUS</text><text x="50" y="88" class="fa-title">Build the Dispatch Path</text>
+  <rect x="50" y="111" width="258" height="58" rx="9" class="fa-active" /><text x="70" y="136" class="fa-code">Chat → Workspace</text><text x="70" y="157" class="fa-body">focused Element → ancestors</text>
+  <text x="50" y="201" class="fa-body">Start at the Element with Focus.</text>
+  <path d="M348 125H393" class="fa-arrow" marker-end="url(#focus-action-arrow-en)" />
+  <rect x="407" y="24" width="310" height="202" rx="14" class="fa-box" />
+  <text x="433" y="58" class="fa-step">2 · KEY CONTEXT</text><text x="433" y="88" class="fa-title">Match a KeyBinding</text>
+  <rect x="433" y="111" width="258" height="58" rx="9" class="fa-active" /><text x="453" y="136" class="fa-code">⌘ Enter + "Chat"</text><text x="453" y="157" class="fa-code">→ SendMessage</text>
+  <text x="433" y="201" class="fa-body">Use key_context values on the path.</text>
+  <path d="M731 125H776" class="fa-arrow" marker-end="url(#focus-action-arrow-en)" />
+  <rect x="790" y="24" width="306" height="202" rx="14" class="fa-box" />
+  <text x="816" y="58" class="fa-step">3 · ACTION</text><text x="816" y="88" class="fa-title">Dispatch along the path</text>
+  <rect x="816" y="111" width="254" height="58" rx="9" class="fa-action" /><text x="836" y="136" class="fa-code">Chat handler</text><text x="836" y="157" class="fa-body">then parents if propagated</text>
+  <text x="816" y="201" class="fa-body">The most specific handler runs first.</text>
+</svg>
 
 A [FocusHandle](./window) identifies a keyboard target. Keep the handle on the entity that owns the interaction, then attach it to an element each time that entity renders:
 

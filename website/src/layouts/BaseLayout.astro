@@ -95,16 +95,17 @@ const jsonLd = JSON.stringify(structuredData ?? defaultStructuredData).replace(/
     <script is:inline define:vars={{ themeInfo, base }}>
       (function () {
         const stored = localStorage.getItem('theme');
-        const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const systemTheme = window.matchMedia('(prefers-color-scheme: dark)');
         const selected = themeInfo[stored];
         if (selected) {
           document.documentElement.dataset.theme = stored;
           document.documentElement.dataset.themeName = selected.name;
           document.documentElement.dataset.themeSource = `${base}theme-data/${selected.source}.json`;
         }
-        if (selected?.mode === 'dark' || stored === 'dark' || (!stored && prefersDark)) {
-          document.documentElement.classList.add('dark');
-        }
+        document.documentElement.classList.toggle('dark', selected?.mode === 'dark' || stored === 'dark' || (!stored && systemTheme.matches));
+        systemTheme.addEventListener('change', (event) => {
+          if (!localStorage.getItem('theme')) document.documentElement.classList.toggle('dark', event.matches);
+        });
       })();
     </script>
 

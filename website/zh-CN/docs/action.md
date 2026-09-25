@@ -8,7 +8,7 @@ order: -2.62
 
 **Action** 表达应用可以执行的操作。快捷键、菜单项、命令面板、按钮或另一个 Action handler 都可以派发同一个有类型的值。GPUI 把它路由到 [Element](./element) 树中负责该命令的区域。[Event](./event) 则沿另一个方向工作：状态改变后，它报告已经发生的事情。
 
-[GPUI Action 源码](https://github.com/zed-industries/zed/blob/main/crates/gpui/src/action.rs)定义了本页介绍的宏、trait 和 registry。
+[GPUI Action](https://github.com/zed-industries/zed/blob/main/crates/gpui/src/action.rs) 源码定义了本页介绍的宏、trait 和 registry。
 
 本页说明命令定义与派发。按键写法、Context 匹配和 Keymap 设置见 [KeyBinding](./keybinding)。
 
@@ -84,8 +84,25 @@ struct OpenConversation {
 
 ## Focus 决定路由
 
-<img class="architecture-light" src="/focus-action-flow.svg?v=20260922-3" alt="Focus 决定 Dispatch Path；Key Context 将快捷键匹配为 Action，再向获得 Focus 的元素派发">
-<img class="architecture-dark" src="/focus-action-flow-dark.svg?v=20260922-3" alt="Focus 决定 Dispatch Path；Key Context 将快捷键匹配为 Action，再向获得 Focus 的元素派发">
+<svg class="focus-action-diagram" viewBox="0 0 1120 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="focus-action-title-zh focus-action-desc-zh">
+  <title id="focus-action-title-zh">GPUI 快捷键派发的三个步骤</title>
+  <desc id="focus-action-desc-zh">Focus 建立派发路径，Key Context 选择匹配的快捷键，Action 沿路径交给 handler。</desc>
+  <defs><marker id="focus-action-arrow-zh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" class="fa-arrow-head" /></marker></defs>
+  <rect x="24" y="24" width="310" height="202" rx="14" class="fa-box" />
+  <text x="50" y="58" class="fa-step">1 · FOCUS</text><text x="50" y="88" class="fa-title">Build the Dispatch Path</text>
+  <rect x="50" y="111" width="258" height="58" rx="9" class="fa-active" /><text x="70" y="136" class="fa-code">Chat → Workspace</text><text x="70" y="157" class="fa-body">focused Element → ancestors</text>
+  <text x="50" y="201" class="fa-body">Start at the Element with Focus.</text>
+  <path d="M348 125H393" class="fa-arrow" marker-end="url(#focus-action-arrow-zh)" />
+  <rect x="407" y="24" width="310" height="202" rx="14" class="fa-box" />
+  <text x="433" y="58" class="fa-step">2 · KEY CONTEXT</text><text x="433" y="88" class="fa-title">Match a KeyBinding</text>
+  <rect x="433" y="111" width="258" height="58" rx="9" class="fa-active" /><text x="453" y="136" class="fa-code">⌘ Enter + "Chat"</text><text x="453" y="157" class="fa-code">→ SendMessage</text>
+  <text x="433" y="201" class="fa-body">Use key_context values on the path.</text>
+  <path d="M731 125H776" class="fa-arrow" marker-end="url(#focus-action-arrow-zh)" />
+  <rect x="790" y="24" width="306" height="202" rx="14" class="fa-box" />
+  <text x="816" y="58" class="fa-step">3 · ACTION</text><text x="816" y="88" class="fa-title">Dispatch along the path</text>
+  <rect x="816" y="111" width="254" height="58" rx="9" class="fa-action" /><text x="836" y="136" class="fa-code">Chat handler</text><text x="836" y="157" class="fa-body">then parents if propagated</text>
+  <text x="816" y="201" class="fa-body">The most specific handler runs first.</text>
+</svg>
 
 [FocusHandle](./window) 标识一个键盘目标。由负责交互的实体保存 handle，并在每次渲染时将它附加到元素：
 

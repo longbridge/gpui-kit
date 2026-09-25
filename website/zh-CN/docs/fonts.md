@@ -130,7 +130,7 @@ GPUI 的 Web 文本系统**不会把浏览器已安装字体枚举、加载为�
 | 只打包已知界面文字的子集 | 包体较小 | 其他 CJK 字符和新增输入需要其他来源。 |
 | 需要时再请求字体文件 | 初始包体较小，稍后增加网络请求 | 运行时注册，并刷新窗口以重新塑形文字；需要处理加载和失败状态。 |
 
-下载后的字体字节仍交给**同一个** `TextSystem::add_fonts(&self, Vec<Cow<'static, [u8]>>) -> Result<()>` API，但使用 owned 数据。HTTP 下载可以通过应用的 `cx.http_client()` 或其他客户端完成；注册步骤如下：
+下载后的字体字节仍交给**同一个** `TextSystem::add_fonts` API，但使用 owned 数据。HTTP 下载可以通过应用的 `cx.http_client()` 或其他客户端完成；注册步骤如下：
 
 ```rust
 use std::borrow::Cow;

@@ -77,7 +77,7 @@ impl Workspace {
 
 Do not leave the returned `Subscription` in a local variable: it is dropped when the function returns, which disconnects the observer. Keeping `_subscriptions` on `Workspace` gives both the same lifetime. When the View is dropped, its subscriptions are dropped and disconnected too. Avoid storing View-scoped subscriptions in a longer-lived global owner: keeping callbacks and captured resources alive after the View is gone can cause a memory leak.
 
-The callback receives the owner (`&mut Workspace`), the emitting `Entity<Chat>`, a borrowed `&ChatEvent`, and the owner's [Context](./context) (`Context<Workspace>`). It receives notifications from that **specific entity** and event type; another `Chat` instance does not share its subscribers. Use `cx.subscribe_in(&chat, window, |workspace, chat, event, window, cx| { ... })` when the callback needs a mutable [Window](./window); keep its returned `Subscription` in the same field. Use `cx.observe(...)` instead when the owner only needs to know that an entity changed and does not need a typed payload.
+The callback receives the owner (`&mut Workspace`), the emitting `Entity<Chat>`, a borrowed `&ChatEvent`, and the owner's [Context](./context) (`Context<Workspace>`). It receives notifications from that **specific entity** and event type; another `Chat` instance does not share its subscribers. Use `cx.subscribe_in` when the callback needs a mutable [Window](./window); keep its returned `Subscription` in the same field. Use `cx.observe(...)` instead when the owner only needs to know that an entity changed and does not need a typed payload.
 
 :::info INFO — Event delivery does not follow Focus
 

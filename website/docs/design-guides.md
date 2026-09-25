@@ -795,6 +795,19 @@ and format them as code. Do not retain ordinary foreign words merely to sound
 technical. Explain a retained term on first use when needed, then use the same
 form throughout the interface, documentation, and API examples.
 
+In documentation, use the exact English name for a named API, component,
+source file, or guide in link text, including localized pages. For example,
+write `Font`, `Render`, `Input element`, and `Plot label` rather than translating
+their names or adding a redundant `GPUI Kit` prefix. Keep surrounding explanations in the
+page's language. Link only the named target; place words such as “source”
+outside the link when they describe why it is cited.
+
+In a technical comparison table shared across locales, keep capability names,
+framework names, API names, and model names in their established English form.
+Translate the explanation around the table, not its technical labels. Common
+interface words with an established local name may still be localized outside
+that comparison context.
+
 ### Buttons and confirmation dialogs
 
 Button labels are short by default—usually one or two words—and describe the

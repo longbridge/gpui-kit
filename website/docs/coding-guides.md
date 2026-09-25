@@ -579,7 +579,7 @@ A tracked handle is a Tab stop only when it says so: build it with
 `cx.focus_handle().tab_stop(true)` (or `.tab_index(n)`), because the element's
 own `tab_index`/`tab_stop` settings do not apply to a handle passed to
 `track_focus`. A stateless component may create that handle in `render`
-through `window.use_keyed_state(id, cx, |_, cx| cx.focus_handle().tab_stop(true))`;
+through `window.use_keyed_state`;
 the keyed state survives re-renders, so the Tab order is stable — this is
 what `Button` does.
 

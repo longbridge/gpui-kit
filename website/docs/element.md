@@ -49,15 +49,31 @@ GPUI Kit uses `AnyElement` this way for optional slots, table cells, and functio
 
 GPUI drives an `Element` through three trait methods in order. The layout solver runs between the first and second calls:
 
-<ol class="element-lifecycle" aria-label="GPUI Element frame lifecycle">
-  <li><strong>1 · Build tree</strong><span><code>Render::render</code> creates this frame's Element values.</span></li>
-  <li><strong>2 · Request layout</strong><span>GPUI calls <code>Element::request_layout</code>; return <code>LayoutId</code> and <code>RequestLayoutState</code>.</span></li>
-  <li><strong>3 · Resolve bounds</strong><span>Taffy computes the layout. GPUI obtains <code>Bounds&lt;Pixels&gt;</code>.</span></li>
-  <li><strong>4 · Prepaint</strong><span>GPUI calls <code>Element::prepaint</code>; prepare geometry and hitboxes, return <code>PrepaintState</code>.</span></li>
-  <li><strong>5 · Paint</strong><span>GPUI calls <code>Element::paint</code>; submit drawing and current-frame input listeners.</span></li>
-</ol>
+<figure class="element-lifecycle" aria-label="GPUI Element frame lifecycle">
+  <div class="element-lifecycle__intro"><code>Render::render</code> builds this frame's Element tree</div>
+  <ol class="element-lifecycle__steps">
+    <li><span class="element-lifecycle__number">01</span><strong>request_layout</strong><p>Register styles and child layouts; return <code>LayoutId</code> and <code>RequestLayoutState</code>.</p></li>
+    <li><span class="element-lifecycle__number">02</span><strong>prepaint</strong><p>Use resolved bounds to prepare geometry and hitboxes; return <code>PrepaintState</code>.</p></li>
+    <li><span class="element-lifecycle__number">03</span><strong>paint</strong><p>Draw prepared content and register current-frame input listeners.</p></li>
+  </ol>
+  <figcaption>Taffy resolves <code>Bounds&lt;Pixels&gt;</code> between <code>request_layout</code> and <code>prepaint</code>.</figcaption>
+</figure>
 
 The tree and frame-local listeners are discarded before the next frame. `RequestLayoutState` and `PrepaintState` move forward within this pass; they are not persistent caches.
+
+### Decide which method owns the work
+
+Ask what information the work needs and what it produces:
+
+| Work | Put it in | Why |
+| --- | --- | --- |
+| Choose width, height, padding, and child layout; measure intrinsic content when its size affects layout | `request_layout` | The layout solver needs these inputs before it can calculate bounds. A measurement closure can use an offered width, but the element's final position is still unknown. |
+| Turn final bounds into text lines, a path, clipping geometry, or a hitbox; decide which virtualized children are visible | `prepaint` | This is the first phase with the resolved pixel rectangle. Save results needed for drawing or input in `PrepaintState`. |
+| Submit quads, glyphs, paths, or images; attach pointer, scroll, or keyboard listeners for this frame | `paint` | The scene and dispatch tree are ready to receive drawing commands and listeners. Reuse the prepared geometry. |
+
+For example, a clickable chart first requests the chart's size and its child layouts. Once the size is known, it maps data points into pixel coordinates and inserts hitboxes for the interactive regions. Finally, it paints the paths from those coordinates and registers the pointer listeners. If the chart needs a label's width **to determine its own size**, measure that width during `request_layout`; if it only needs the label's final position **inside an already sized chart**, prepare it during `prepaint`.
+
+A useful boundary test is: **Would this calculation change the element's requested size?** If yes, it belongs in layout or its measurement closure. If it only needs the resulting bounds, use `prepaint`. If it changes the pixels or current-frame handlers without changing geometry, use `paint`. Long-lived model data and subscriptions are outside all three methods; keep them in an [Entity](./entity).
 
 ### `request_layout`
 
@@ -207,7 +223,15 @@ These concepts sit on separate boundaries:
 
 `InteractiveElement` is implemented by types that expose an `Interactivity` field. Its methods include `on_mouse_down`, `on_key_down`, `track_focus`, `key_context`, `on_action`, and hover styles. Calling `.id(...)` returns `Stateful<Self>`, which implements `StatefulInteractiveElement` and exposes state-dependent methods such as accessibility role and label, tooltip, and click handling. The wrapper is a type-level signal: stateful interaction needs a stable identity. Implementing `IntoElement` alone only makes a value acceptable as a child; it does not implement either interactive trait. `#[derive(IntoElement)]` plus `RenderOnce` is the usual component path, while a hand-written low-level `Element` typically implements `IntoElement` by returning itself.
 
-There are two useful ways to obtain those APIs. When composing an ordinary surface, use an existing interactive element: `div().id("result-row").aria_label("Search result").on_click(|_, _, _| {})`. The `.id(...)` call changes the Rust type from `Div` to `Stateful<Div>`, so identity-dependent methods become available. Give each repeated row a domain-derived ID rather than the same literal ID. `on_click` registers a handler; it does not automatically update an Entity's state.
+There are two useful ways to obtain those APIs. When composing an ordinary surface, use an existing interactive element:
+
+```rust
+div().id("result-row")
+    .aria_label("Search result")
+    .on_click(|_, _, _| {})
+```
+
+The `.id(...)` call changes the Rust type from `Div` to `Stateful<Div>`, so identity-dependent methods become available. Give each repeated row a domain-derived ID rather than the same literal ID. `on_click` registers a handler; it does not automatically update an Entity's state.
 
 When exposing the same fluent methods on a GPUI Kit component, delegate its interaction state to the underlying primitive. The component's [Radio implementation](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/radio.rs) follows this shape (the excerpt omits unrelated fields):
 

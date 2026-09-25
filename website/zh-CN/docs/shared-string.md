@@ -31,29 +31,29 @@ order: -2.45
     </defs>
     <rect class="memory-panel" x="1" y="1" width="878" height="185" rx="12" />
     <text class="memory-heading" x="24" y="29">String::clone()</text>
-    <text class="memory-subtitle" x="24" y="49">每次取得自有副本，都要把完整文本复制到另一份分配中。</text>
-    <rect class="memory-owner" x="24" y="65" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="83">View A · 句柄</text>
-    <rect class="memory-owner" x="24" y="103" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="121">View B · 句柄</text>
-    <rect class="memory-owner" x="24" y="141" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="159">View C · 句柄</text>
+    <text class="memory-subtitle" x="24" y="49">Each owned clone copies the full text into its own allocation.</text>
+    <rect class="memory-owner" x="24" y="65" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="83">View A · handle</text>
+    <rect class="memory-owner" x="24" y="103" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="121">View B · handle</text>
+    <rect class="memory-owner" x="24" y="141" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="159">View C · handle</text>
     <path class="memory-flow memory-flow-copy" d="M183 78 H451" marker-end="url(#shared-arrow-zh)" />
     <path class="memory-flow memory-flow-copy" d="M183 116 H451" marker-end="url(#shared-arrow-zh)" />
     <path class="memory-flow memory-flow-copy" d="M183 154 H451" marker-end="url(#shared-arrow-zh)" />
-    <rect class="memory-buffer memory-buffer-copy" x="463" y="65" width="190" height="27" rx="5" /><text class="memory-label" x="476" y="83">文本缓冲区 A · 完整文本</text>
-    <rect class="memory-buffer memory-buffer-copy" x="463" y="103" width="190" height="27" rx="5" /><text class="memory-label" x="476" y="121">文本缓冲区 B · 完整文本</text>
-    <rect class="memory-buffer memory-buffer-copy" x="463" y="141" width="190" height="27" rx="5" /><text class="memory-label" x="476" y="159">文本缓冲区 C · 完整文本</text>
-    <text class="memory-total memory-total-copy" x="676" y="121">3 份文本缓冲区</text>
+    <rect class="memory-buffer memory-buffer-copy" x="463" y="65" width="190" height="27" rx="5" /><text class="memory-label" x="476" y="83">Text buffer A · full text</text>
+    <rect class="memory-buffer memory-buffer-copy" x="463" y="103" width="190" height="27" rx="5" /><text class="memory-label" x="476" y="121">Text buffer B · full text</text>
+    <rect class="memory-buffer memory-buffer-copy" x="463" y="141" width="190" height="27" rx="5" /><text class="memory-label" x="476" y="159">Text buffer C · full text</text>
+    <text class="memory-total memory-total-copy" x="676" y="121">3 text buffers</text>
     <g transform="translate(0 12)">
     <rect class="memory-panel" x="1" y="186" width="878" height="185" rx="12" />
     <text class="memory-heading" x="24" y="214">SharedString::clone()</text>
-    <text class="memory-subtitle" x="24" y="234">每位所有者都持有句柄；长文本只保留一份分配。</text>
-    <rect class="memory-owner" x="24" y="251" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="269">View A · 句柄</text>
-    <rect class="memory-owner" x="24" y="289" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="307">View B · 句柄</text>
-    <rect class="memory-owner" x="24" y="327" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="345">View C · 句柄</text>
+    <text class="memory-subtitle" x="24" y="234">Each owner keeps a handle; the long text stays in one allocation.</text>
+    <rect class="memory-owner" x="24" y="251" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="269">View A · handle</text>
+    <rect class="memory-owner" x="24" y="289" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="307">View B · handle</text>
+    <rect class="memory-owner" x="24" y="327" width="154" height="27" rx="5" /><text class="memory-label" x="36" y="345">View C · handle</text>
     <path class="memory-flow memory-flow-share" d="M183 264 L451 303" marker-end="url(#shared-arrow-zh)" />
     <path class="memory-flow memory-flow-share" d="M183 302 H451" marker-end="url(#shared-arrow-zh)" />
     <path class="memory-flow memory-flow-share" d="M183 340 L451 303" marker-end="url(#shared-arrow-zh)" />
-    <rect class="memory-buffer memory-buffer-share" x="463" y="277" width="190" height="51" rx="6" /><text class="memory-label" x="476" y="300">一份共享文本缓冲区</text><text class="memory-detail" x="476" y="317">引用计数：3</text>
-    <text class="memory-total memory-total-share" x="676" y="307">1 份文本缓冲区</text>
+    <rect class="memory-buffer memory-buffer-share" x="463" y="277" width="190" height="51" rx="6" /><text class="memory-label" x="476" y="300">One shared text buffer</text><text class="memory-detail" x="476" y="317">reference count: 3</text>
+    <text class="memory-total memory-total-share" x="676" y="307">1 text buffer</text>
     </g>
   </svg>
   <figcaption>这是三个所有者持有长文本的概念图，不是按字节精确缩放的性能基准。<code>SharedString</code> 每位所有者仍持有句柄，clone 也会更新引用计数；短内联文本则会复制少量字节。</figcaption>

@@ -49,15 +49,31 @@ GPUI Kit 会在可选 slot、表格单元格以及返回不同 UI 类型的函�
 
 GPUI 按顺序调用 `Element` 的三个 trait 方法。第一与第二次调用之间，布局引擎还会求出最终位置：
 
-<ol class="element-lifecycle" aria-label="GPUI Element 每帧生命周期">
-  <li><strong>1 · 构建树</strong><span><code>Render::render</code> 创建当前帧的 Element 值。</span></li>
-  <li><strong>2 · 请求布局</strong><span>GPUI 调用 <code>Element::request_layout</code>；返回 <code>LayoutId</code> 与 <code>RequestLayoutState</code>。</span></li>
-  <li><strong>3 · 求解边界</strong><span>Taffy 计算布局，GPUI 得到 <code>Bounds&lt;Pixels&gt;</code>。</span></li>
-  <li><strong>4 · 预绘制</strong><span>GPUI 调用 <code>Element::prepaint</code>；准备几何和 hitbox，返回 <code>PrepaintState</code>。</span></li>
-  <li><strong>5 · 绘制</strong><span>GPUI 调用 <code>Element::paint</code>；提交绘制与当前帧的输入 listener。</span></li>
-</ol>
+<figure class="element-lifecycle" aria-label="GPUI Element 每帧生命周期">
+  <div class="element-lifecycle__intro"><code>Render::render</code> 构建当前帧的 Element 树</div>
+  <ol class="element-lifecycle__steps">
+    <li><span class="element-lifecycle__number">01</span><strong>request_layout</strong><p>注册 Style 和子布局；返回 <code>LayoutId</code> 与 <code>RequestLayoutState</code>。</p></li>
+    <li><span class="element-lifecycle__number">02</span><strong>prepaint</strong><p>使用最终 bounds 准备几何和 hitbox；返回 <code>PrepaintState</code>。</p></li>
+    <li><span class="element-lifecycle__number">03</span><strong>paint</strong><p>绘制已准备好的内容，并注册当前帧的输入 listener。</p></li>
+  </ol>
+  <figcaption>Taffy 在 <code>request_layout</code> 与 <code>prepaint</code> 之间计算 <code>Bounds&lt;Pixels&gt;</code>。</figcaption>
+</figure>
 
 下一帧前，Element 树和帧级 listener 会被释放。`RequestLayoutState` 与 `PrepaintState` 只在这一轮调用中向后传递，并非长期缓存。
+
+### 如何判断代码放在哪个阶段
+
+先看这段代码需要什么信息，以及它要产生什么结果：
+
+| 工作 | 所属阶段 | 原因 |
+| --- | --- | --- |
+| 决定宽高、padding、子元素布局；当内容尺寸影响布局时测量内容 | `request_layout` | 布局引擎必须先拿到这些输入，才能求出 bounds。测量闭包可以使用提供的可用宽度，但此时仍不知道 Element 的最终位置。 |
+| 根据最终 bounds 计算文字行、Path、裁剪区域或 hitbox；决定虚拟列表中哪些子元素可见 | `prepaint` | 这是首次拿到最终像素矩形的阶段。把绘制或输入处理还要用到的结果存入 `PrepaintState`。 |
+| 提交 quad、字形、Path 或图片；注册当前帧的指针、滚轮或键盘 listener | `paint` | 此时 Scene 和派发树已经可以接收绘制命令与 listener，应复用准备好的几何结果。 |
+
+例如，一个可点击的图表先请求图表及子元素的布局。尺寸确定后，再把数据点映射到像素坐标，并为可交互区域插入 hitbox。最后根据这些坐标画出 Path，并注册指针 listener。如果标签宽度会**影响图表自身的尺寸**，就在 `request_layout` 测量；如果只需确定标签在**已定尺寸的图表内部**放在哪里，就在 `prepaint` 准备。
+
+可以用一个问题判断边界：**这项计算会改变 Element 请求的尺寸吗？**会，就放在 layout 或其测量闭包；只依赖最终 bounds，就放在 `prepaint`；只改变像素或本帧 handler、不改变几何，就放在 `paint`。长期模型数据和订阅不属于这三个阶段，应由 [Entity](./entity) 持有。
 
 ### `request_layout`
 
@@ -194,7 +210,15 @@ GPUI Kit 的输入框使用自定义 `Element`，因为它需要对文字进行 
 
 `InteractiveElement` 要求实现者暴露 `Interactivity`，提供 `on_mouse_down`、`on_key_down`、`track_focus`、`key_context`、`on_action` 及 hover 样式等方法。调用 `.id(...)` 后获得 `Stateful<Self>`，它实现 `StatefulInteractiveElement`，提供依赖稳定身份的 role、无障碍名称、tooltip 和 click 等 API。`IntoElement` 只负责把值转成 Element，不会自动获得上述交互能力。普通组件通常使用 `#[derive(IntoElement)]` 与 `RenderOnce`；自行实现底层 `Element` 时，`IntoElement` 通常直接返回 `self`。
 
-获得这些 API 有两条路径。组合普通交互区域时，直接使用已有元素：`div().id("result-row").aria_label("Search result").on_click(|_, _, _| {})`。`.id(...)` 将 Rust 类型从 `Div` 变成 `Stateful<Div>`，依赖身份的方法才随之可用。重复行应按业务对象生成各自的 ID，而不是共用这里的字面量。`on_click` 只注册回调，不会自动更新 Entity 状态。
+获得这些 API 有两条路径。组合普通交互区域时，直接使用已有元素：
+
+```rust
+div().id("result-row")
+    .aria_label("Search result")
+    .on_click(|_, _, _| {})
+```
+
+`.id(...)` 将 Rust 类型从 `Div` 变成 `Stateful<Div>`，依赖身份的方法才随之可用。重复行应按业务对象生成各自的 ID，而不是共用这里的字面量。`on_click` 只注册回调，不会自动更新 Entity 状态。
 
 若 GPUI Kit 组件本身也要公开同一套 fluent 方法，应把交互状态委托给内部基础元素。[Radio 的实现](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/radio.rs)采用如下模式（省略无关字段）：
 
