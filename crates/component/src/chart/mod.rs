@@ -208,7 +208,7 @@ pub(crate) struct TooltipContent<T> {
     title: Option<Rc<dyn Fn(&T) -> SharedString>>,
     value: Option<Rc<dyn Fn(&T, usize, f64) -> SharedString>>,
     value_color: Option<Rc<dyn Fn(&T, usize, f64) -> Hsla>>,
-    render: Option<Rc<dyn Fn(&T, &mut Window, &mut App) -> AnyElement>>,
+    content: Option<Rc<dyn Fn(&T, &mut Window, &mut App) -> AnyElement>>,
 }
 
 impl<T> Default for TooltipContent<T> {
@@ -217,7 +217,7 @@ impl<T> Default for TooltipContent<T> {
             title: None,
             value: None,
             value_color: None,
-            render: None,
+            content: None,
         }
     }
 }
@@ -238,12 +238,12 @@ impl<T: 'static> TooltipContent<T> {
         self.value_color = Some(Rc::new(move |d, ix, value| color(d, ix, value).into()));
     }
 
-    pub(crate) fn set_render<E: IntoElement>(
+    pub(crate) fn set_content<E: IntoElement>(
         &mut self,
-        render: impl Fn(&T, &mut Window, &mut App) -> E + 'static,
+        content: impl Fn(&T, &mut Window, &mut App) -> E + 'static,
     ) {
-        self.render = Some(Rc::new(move |d, window, cx| {
-            render(d, window, cx).into_any_element()
+        self.content = Some(Rc::new(move |d, window, cx| {
+            content(d, window, cx).into_any_element()
         }));
     }
 
@@ -280,8 +280,8 @@ impl<T: 'static> TooltipContent<T> {
     where
         R: IntoIterator<Item = (Hsla, SharedString, f64)>,
     {
-        if let Some(render) = self.render.as_ref() {
-            return Some(tooltip.child(render(d, window, cx)));
+        if let Some(content) = self.content.as_ref() {
+            return Some(tooltip.child(content(d, window, cx)));
         }
         let mut tooltip = match self.title_text(d, title()) {
             Some(title) => tooltip.title(title),
@@ -783,7 +783,7 @@ mod tests {
     fn tooltip_fill_renders_the_caller_content_without_building_rows(cx: &mut TestAppContext) {
         let mut content = TooltipContent::<f64>::default();
         content.set_title(|_| "Caller".into());
-        content.set_render(|_, _, _| div());
+        content.set_content(|_, _, _| div());
         let built = Cell::new(false);
         let cx = cx.add_empty_window();
         let tooltip = cx.update(|window, cx| {

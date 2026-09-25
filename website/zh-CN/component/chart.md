@@ -695,25 +695,25 @@ PieChart::new(holdings)
 
 ### Tooltip 内容
 
-`LineChart`、`AreaChart`、`BarChart`、`RadarChart` 和 `CandlestickChart` 默认用悬停处的 X 值、分类名或维度名作为 tooltip 标题，每行的数值直接显示原始数字。`tooltip_title` 和 `tooltip_value` 根据光标下的数据替换这些文字，`tooltip_value_color` 为每行的数值着色，比如按正负显示绿色或红色。两个闭包都会收到数据、该行的下标（多个系列时按添加顺序；K 线图依次为开、高、低、收）以及该行的数值：
+`LineChart`、`AreaChart`、`BarChart`、`RadarChart` 和 `CandlestickChart` 默认用悬停处的 X 值、分类名或维度名作为 tooltip 标题，每行的数值直接显示原始数字。`tooltip_title` 和 `tooltip_value` 根据光标下的数据替换这些文字，`tooltip_value_color` 为每行的数值着色，比如按正负显示绿色或红色。两个闭包都会收到数据和该行的数值；`AreaChart`、`RadarChart` 和 `CandlestickChart` 有多行，闭包在这两者之间还会收到该行的下标（多个系列时按添加顺序；K 线图依次为开、高、低、收）：
 
 ```rust
 BarChart::new(flows)
     .band(|d| d.month.clone())
     .value(|d| d.net)
     .tooltip_title(|d| format!("{} 2025", d.month).into())
-    .tooltip_value(|_, _, value| format!("${value:.2}").into())
-    .tooltip_value_color(move |_, _, value| if value >= 0. { gain } else { loss })
+    .tooltip_value(|_, value| format!("${value:.2}").into())
+    .tooltip_value_color(move |_, value| if value >= 0. { gain } else { loss })
 ```
 
-标题加若干行表达不了的版式（比如表格），用 `render_tooltip` 根据数据自行绘制浮层里的内容。图表的悬停标记（十字线、圆点、高亮带）和浮层的位置仍由图表负责，上面三个文字选项此时不再生效：
+标题加若干行表达不了的版式（比如表格），用 `tooltip_content` 根据数据自行绘制浮层里的内容。图表的悬停标记（十字线、圆点、高亮带）和浮层的位置仍由图表负责，上面三个文字选项此时不再生效：
 
 ```rust
 AreaChart::new(data)
     .x(|d| d.month.clone())
     .y(|d| d.last_year)
     .y(|d| d.revenue)
-    .render_tooltip(|d, _, _| {
+    .tooltip_content(|d, _, _| {
         v_flex()
             .child(d.month.clone())
             .child(format!("2025: {}", d.revenue))

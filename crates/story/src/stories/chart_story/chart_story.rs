@@ -967,9 +967,9 @@ impl ChartCard {
                             .label_color(move |d| if d.revenue >= 0. { positive } else { negative })
                             .value_axis(true)
                             .tooltip_title(|d| format!("{} 2025", d.month).into())
-                            .tooltip_value(|_, _, value| money(value).into())
+                            .tooltip_value(|_, value| money(value).into())
                             .tooltip_value_color(
-                                move |_, _, value| {
+                                move |_, value| {
                                     if value >= 0. { positive } else { negative }
                                 },
                             )
@@ -1110,7 +1110,7 @@ impl ChartCard {
                         .y_axis(true)
                         .y_tick_format(money)
                         .x_tick_count(4)
-                        .tooltip_value(|_, _, value| money(value).into())
+                        .tooltip_value(|_, value| money(value).into())
                         .id("line-chart"),
                 )
                 .trend(
@@ -1215,7 +1215,7 @@ impl ChartCard {
                         .stroke(accent)
                         .fill(area_gradient(accent))
                         .name("2025")
-                        .render_tooltip(|d, _, cx| {
+                        .tooltip_content(|d, _, cx| {
                             let change = change_percent(d.revenue, d.last_year);
                             let change_color = if change >= 0. {
                                 cx.theme().chart_bullish

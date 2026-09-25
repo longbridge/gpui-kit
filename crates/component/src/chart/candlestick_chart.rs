@@ -133,14 +133,14 @@ where
     /// The highlight band and where the box sits stay the chart's, and
     /// [`tooltip_title`](Self::tooltip_title), [`tooltip_value`](Self::tooltip_value)
     /// and [`tooltip_value_color`](Self::tooltip_value_color) no longer apply.
-    pub fn render_tooltip<E>(
+    pub fn tooltip_content<E>(
         mut self,
-        render: impl Fn(&T, &mut Window, &mut App) -> E + 'static,
+        content: impl Fn(&T, &mut Window, &mut App) -> E + 'static,
     ) -> Self
     where
         E: IntoElement,
     {
-        self.tooltip_content.set_render(render);
+        self.tooltip_content.set_content(content);
         self
     }
 

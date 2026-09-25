@@ -158,28 +158,25 @@ where
         self
     }
 
-    /// Set the text of each tooltip row's value; the raw number by default.
+    /// Set the text of the tooltip row's value; the raw number by default.
     ///
-    /// The closure receives the datum, the row's index (always 0, the chart has one row) and the
-    /// value the row reads.
-    pub fn tooltip_value(
-        mut self,
-        value: impl Fn(&T, usize, f64) -> SharedString + 'static,
-    ) -> Self {
-        self.tooltip_content.set_value(value);
+    /// The closure receives the datum and the value the row reads.
+    pub fn tooltip_value(mut self, value: impl Fn(&T, f64) -> SharedString + 'static) -> Self {
+        self.tooltip_content.set_value(move |d, _, v| value(d, v));
         self
     }
 
-    /// Color each tooltip row's value, such as green or red by its sign; the
+    /// Color the tooltip row's value, such as green or red by its sign; the
     /// tooltip's text color by default.
     ///
     /// The closure receives the same arguments as
     /// [`tooltip_value`](Self::tooltip_value).
-    pub fn tooltip_value_color<H>(mut self, color: impl Fn(&T, usize, f64) -> H + 'static) -> Self
+    pub fn tooltip_value_color<H>(mut self, color: impl Fn(&T, f64) -> H + 'static) -> Self
     where
         H: Into<Hsla>,
     {
-        self.tooltip_content.set_value_color(color);
+        self.tooltip_content
+            .set_value_color(move |d, _, value| color(d, value));
         self
     }
 
@@ -189,14 +186,14 @@ where
     /// The highlight band and where the box sits stay the chart's, and
     /// [`tooltip_title`](Self::tooltip_title), [`tooltip_value`](Self::tooltip_value)
     /// and [`tooltip_value_color`](Self::tooltip_value_color) no longer apply.
-    pub fn render_tooltip<E>(
+    pub fn tooltip_content<E>(
         mut self,
-        render: impl Fn(&T, &mut Window, &mut App) -> E + 'static,
+        content: impl Fn(&T, &mut Window, &mut App) -> E + 'static,
     ) -> Self
     where
         E: IntoElement,
     {
-        self.tooltip_content.set_render(render);
+        self.tooltip_content.set_content(content);
         self
     }
 

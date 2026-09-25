@@ -721,25 +721,25 @@ PieChart::new(holdings)
 
 ### Tooltip Content
 
-`LineChart`, `AreaChart`, `BarChart`, `RadarChart` and `CandlestickChart` title their tooltip with the hovered x, band or dimension value and write each row's value as the raw number. `tooltip_title` and `tooltip_value` replace that text from the datum under the cursor, and `tooltip_value_color` colors each row's value, such as green or red by its sign. Both closures receive the datum, the row's index — the series in the order they were added, or open, high, low and close for a candlestick — and the value the row reads:
+`LineChart`, `AreaChart`, `BarChart`, `RadarChart` and `CandlestickChart` title their tooltip with the hovered x, band or dimension value and write each row's value as the raw number. `tooltip_title` and `tooltip_value` replace that text from the datum under the cursor, and `tooltip_value_color` colors each row's value, such as green or red by its sign. Both closures receive the datum and the value the row reads; on `AreaChart`, `RadarChart` and `CandlestickChart`, which show several rows, they also receive the row's index between the two — the series in the order they were added, or open, high, low and close for a candlestick:
 
 ```rust
 BarChart::new(flows)
     .band(|d| d.month.clone())
     .value(|d| d.net)
     .tooltip_title(|d| format!("{} 2025", d.month).into())
-    .tooltip_value(|_, _, value| format!("${value:.2}").into())
-    .tooltip_value_color(move |_, _, value| if value >= 0. { gain } else { loss })
+    .tooltip_value(|_, value| format!("${value:.2}").into())
+    .tooltip_value_color(move |_, value| if value >= 0. { gain } else { loss })
 ```
 
-For a layout the title and rows cannot express, such as a table, `render_tooltip` draws the box's content from the datum. The chart's hover marks — crosshair, dots, highlight band — and where the box sits stay the chart's, and the three text options no longer apply:
+For a layout the title and rows cannot express, such as a table, `tooltip_content` draws the box's content from the datum. The chart's hover marks — crosshair, dots, highlight band — and where the box sits stay the chart's, and the three text options no longer apply:
 
 ```rust
 AreaChart::new(data)
     .x(|d| d.month.clone())
     .y(|d| d.last_year)
     .y(|d| d.revenue)
-    .render_tooltip(|d, _, _| {
+    .tooltip_content(|d, _, _| {
         v_flex()
             .child(d.month.clone())
             .child(format!("2025: {}", d.revenue))
