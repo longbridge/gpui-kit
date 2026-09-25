@@ -1,11 +1,12 @@
 use std::{rc::Rc, time::Duration};
 
 use gpui::{
-    AbsoluteLength, AnyElement, App, Axis, ClickEvent, ElementId, Hsla, ImageSource,
-    InteractiveElement as _, IntoElement, MouseButton, ObjectFit, ParentElement, Pixels,
-    Refineable as _, RenderOnce, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    StyleRefinement, Styled, StyledImage as _, Window, black, div, img, linear_color_stop,
-    linear_gradient, prelude::FluentBuilder as _, px, relative, rems, white,
+    AbsoluteLength, AnyElement, App, Axis, Bounds, ClickEvent, ElementId, Hsla, ImageSource,
+    InteractiveElement as _, IntoElement, MouseButton, ObjectFit, ParentElement, Path, PathBuilder,
+    Pixels, Refineable as _, RenderOnce, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, StyledImage as _, Window, black,
+    canvas, div, img, linear_color_stop, linear_gradient, point, prelude::FluentBuilder as _, px,
+    relative, rems, white,
 };
 use gpui_base::{
     is_mobile,
@@ -457,28 +458,10 @@ impl RenderOnce for Attachment {
             })
             .when_some(self.media, |this, media| this.child(media))
             .when_some(self.content, |this, content| this.child(content))
-            // A thin bar along the bottom edge tracks the upload. gpui clips
-            // rectangularly, so the bar cannot follow the corner curve; it
-            // starts where the curve crosses the bar's bottom row (one border
-            // width up the corner: r - sqrt(r² - (r - 1)²) ≈ 0.55 r for r = 8)
-            // so it reads as running from the edge without poking out.
+            // A thin bar along the bottom edge tracks the upload, hugging the
+            // card's rounded corners.
             .when_some(progress_bar, |this, percent| {
-                let inset = radius * 0.55;
-                this.child(
-                    div()
-                        .absolute()
-                        .bottom_0()
-                        .left(inset)
-                        .right(inset)
-                        .h(px(2.))
-                        .child(
-                            div()
-                                .h_full()
-                                .w(relative(percent / 100.))
-                                .rounded(px(1.))
-                                .bg(tokens.colors.primary),
-                        ),
-                )
+                this.child(upload_bar(percent, radius, tokens.colors.primary))
             })
             .when_some(self.id.zip(self.on_click), |this, (id, on_click)| {
                 // The click layer is painted before the actions slot, so the
@@ -528,6 +511,71 @@ impl RenderOnce for Attachment {
             )
             .into_any_element()
     }
+}
+
+/// The upload bar's thickness.
+const UPLOAD_BAR_THICKNESS: f32 = 2.;
+/// The card's border width, which the bar and the media sit inside.
+const CARD_BORDER: f32 = 1.;
+
+/// The upload bar along a card's bottom edge. gpui clips rectangularly, so a
+/// plain rectangle could not follow the corner curve; the bar is a filled path
+/// whose ends trace the inner corner arcs, as CSS `overflow: hidden` would.
+fn upload_bar(percent: f32, radius: Pixels, color: Hsla) -> impl IntoElement {
+    canvas(
+        |_: Bounds<Pixels>, _: &mut Window, _: &mut App| (),
+        move |bounds: Bounds<Pixels>, _: (), window: &mut Window, _: &mut App| {
+            if let Some(path) = upload_bar_path(bounds, percent, radius) {
+                window.paint_path(path, color);
+            }
+        },
+    )
+    .absolute()
+    .inset_0()
+}
+
+/// The bar as the intersection of its rectangle with the card's inner rounded
+/// rectangle: both ends are sampled along the corner arcs.
+fn upload_bar_path(bounds: Bounds<Pixels>, percent: f32, radius: Pixels) -> Option<Path<Pixels>> {
+    const STEPS: usize = 6;
+    let width = bounds.size.width.as_f32();
+    let height = bounds.size.height.as_f32();
+    let radius =
+        (radius.as_f32() - CARD_BORDER).clamp(0., (width.min(height) / 2. - CARD_BORDER).max(0.));
+    let inner_left = CARD_BORDER;
+    let inner_right = width - CARD_BORDER;
+    let inner_bottom = height - CARD_BORDER;
+    let top = inner_bottom - UPLOAD_BAR_THICKNESS;
+    let end = inner_left + (inner_right - inner_left) * (percent / 100.).clamp(0., 1.);
+    if end <= inner_left || top <= 0. {
+        return None;
+    }
+    // The corner circles' centre line; rows below it lie in the arcs.
+    let centre_y = inner_bottom - radius;
+    let arc_dx = |y: f32| {
+        if radius > 0. && y > centre_y {
+            (radius * radius - (y - centre_y) * (y - centre_y))
+                .max(0.)
+                .sqrt()
+        } else {
+            radius
+        }
+    };
+    let left_at = |y: f32| inner_left + radius - arc_dx(y);
+    let right_at = |y: f32| (inner_right - radius + arc_dx(y)).min(end);
+    let at = |x: f32, y: f32| point(bounds.origin.x + px(x), bounds.origin.y + px(y));
+    let rows = (0..=STEPS).map(|i| top + UPLOAD_BAR_THICKNESS * i as f32 / STEPS as f32);
+
+    let mut builder = PathBuilder::fill();
+    builder.move_to(at(left_at(top), top));
+    // Down the right end, then back up the left arc.
+    for y in rows.clone() {
+        builder.line_to(at(right_at(y), y));
+    }
+    for y in rows.rev() {
+        builder.line_to(at(left_at(y), y));
+    }
+    builder.build().ok()
 }
 
 /// The corner remove control: a surface-colored disc with a hairline border
