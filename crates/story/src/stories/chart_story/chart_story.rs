@@ -695,7 +695,7 @@ impl ChartCard {
                             .fill(accent.opacity(0.3))
                             .name("Alpha")
                             .max_value(100.)
-                            .tooltip_value(|_, value| format!("{value:.0} / 100").into())
+                            .tooltip_value(|_, _, value| format!("{value:.0} / 100").into())
                             .id("radar-chart"),
                     )
                     .headline(format!("Scores {average:.0} on average"))
@@ -967,9 +967,9 @@ impl ChartCard {
                             .label_color(move |d| if d.revenue >= 0. { positive } else { negative })
                             .value_axis(true)
                             .tooltip_title(|d| format!("{} 2025", d.month).into())
-                            .tooltip_value(|_, value| money(value).into())
+                            .tooltip_value(|_, _, value| money(value).into())
                             .tooltip_value_color(
-                                move |_, value| {
+                                move |_, _, value| {
                                     if value >= 0. { positive } else { negative }
                                 },
                             )
@@ -1110,7 +1110,7 @@ impl ChartCard {
                         .y_axis(true)
                         .y_tick_format(money)
                         .x_tick_count(4)
-                        .tooltip_value(|_, value| money(value).into())
+                        .tooltip_value(|_, _, value| money(value).into())
                         .id("line-chart"),
                 )
                 .trend(
@@ -1405,7 +1405,7 @@ impl ChartCard {
                 .close(|d| d.close)
                 .body_width_ratio(body_width_ratio)
                 .tick_margin(tick_margin)
-                .tooltip_value(|_, value| format!("${value:.2}").into())
+                .tooltip_value(|_, _, value| format!("${value:.2}").into())
                 .id(id),
         )
         .trend(change_percent(last.close, first.open), "over 40 sessions")

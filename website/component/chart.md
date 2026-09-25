@@ -721,15 +721,15 @@ PieChart::new(holdings)
 
 ### Tooltip Content
 
-`LineChart`, `AreaChart`, `BarChart`, `RadarChart` and `CandlestickChart` title their tooltip with the hovered x, band or dimension value and write each row's value as the raw number. `tooltip_title` and `tooltip_value` replace that text from the datum under the cursor, and `tooltip_value_color` colors each row's value, such as green or red by its sign:
+`LineChart`, `AreaChart`, `BarChart`, `RadarChart` and `CandlestickChart` title their tooltip with the hovered x, band or dimension value and write each row's value as the raw number. `tooltip_title` and `tooltip_value` replace that text from the datum under the cursor, and `tooltip_value_color` colors each row's value, such as green or red by its sign. Both closures receive the datum, the row's index — the series in the order they were added, or open, high, low and close for a candlestick — and the value the row reads:
 
 ```rust
 BarChart::new(flows)
     .band(|d| d.month.clone())
     .value(|d| d.net)
     .tooltip_title(|d| format!("{} 2025", d.month).into())
-    .tooltip_value(|_, value| format!("${value:.2}").into())
-    .tooltip_value_color(move |_, value| if value >= 0. { gain } else { loss })
+    .tooltip_value(|_, _, value| format!("${value:.2}").into())
+    .tooltip_value_color(move |_, _, value| if value >= 0. { gain } else { loss })
 ```
 
 For a layout the title and rows cannot express, such as a table, `render_tooltip` draws the box's content from the datum. The chart's hover marks — crosshair, dots, highlight band — and where the box sits stay the chart's, and the three text options no longer apply:
@@ -792,7 +792,7 @@ fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pi
 }
 ```
 
-A row's value takes a color with `value_color`, which colors the row added last, such as a change by its sign. `plain_row` adds a row without a swatch, for a figure no series on the plot draws, such as a total or a ratio; beside series rows its label lines up with theirs:
+A row's value takes a color with `value_color`, which colors the row added last, such as a change by its sign; call it right after that row. `plain_row` adds a row without a swatch, for a figure no series on the plot draws, such as a total or a ratio; beside series rows its label lines up with theirs:
 
 ```rust
 Tooltip::new(cursor, bounds.size)

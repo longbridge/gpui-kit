@@ -160,17 +160,24 @@ where
 
     /// Set the text of each tooltip row's value; the raw number by default.
     ///
-    /// The closure receives the datum and the value the row reads.
-    pub fn tooltip_value(mut self, value: impl Fn(&T, f64) -> SharedString + 'static) -> Self {
+    /// The closure receives the datum, the row's index (always 0, the chart has one row) and the
+    /// value the row reads.
+    pub fn tooltip_value(
+        mut self,
+        value: impl Fn(&T, usize, f64) -> SharedString + 'static,
+    ) -> Self {
         self.tooltip_content.set_value(value);
         self
     }
 
     /// Color each tooltip row's value, such as green or red by its sign; the
     /// tooltip's text color by default.
-    pub fn tooltip_value_color<H>(mut self, color: impl Fn(&T, f64) -> H + 'static) -> Self
+    ///
+    /// The closure receives the same arguments as
+    /// [`tooltip_value`](Self::tooltip_value).
+    pub fn tooltip_value_color<H>(mut self, color: impl Fn(&T, usize, f64) -> H + 'static) -> Self
     where
-        H: Into<Hsla> + 'static,
+        H: Into<Hsla>,
     {
         self.tooltip_content.set_value_color(color);
         self
@@ -479,6 +486,85 @@ where
         }
     }
 
+    /// The value axis for `bounds`: the scale the bars grow along, and the
+    /// pixel positions of its baseline and far edge. `paint` lays the bars out
+    /// on it and the tooltip reads the hovered bar's frame from it.
+    fn value_scale(&self, bounds: Bounds<Pixels>) -> Option<(ScaleLinear<V>, f32, f32)> {
+        let value_fn = self.value.as_ref()?;
+        let value_dim = if self.alignment.is_horizontal() {
+            bounds.size.width.as_f32()
+        } else {
+            bounds.size.height.as_f32()
+        };
+        let axis_gap = if self.label_axis { AXIS_GAP } else { 0. };
+        // For horizontal charts the band labels (category names) are rendered
+        // along the value axis and can be arbitrarily wide, so we measure the
+        // actual maximum label width instead of using a fixed constant.
+        // Similarly, value labels (numbers) at the bar ends are measured so the
+        // scale range is always shrunk by exactly the right amount.
+        // Vertical bars keep a line of text clear past the tallest bar when they
+        // carry value labels, so the label above it stays inside the chart.
+        let far_gap = if self.label.is_some() {
+            TEXT_HEIGHT
+        } else {
+            10.
+        };
+        let (band_gap, value_end_gap) = if self.alignment.is_horizontal() {
+            self.horizontal_gaps
+        } else {
+            (axis_gap, far_gap)
+        };
+        // The baseline, and the far edge opposite it.
+        let (baseline, far) = match self.alignment {
+            BarAlignment::Bottom => (value_dim - axis_gap, far_gap),
+            BarAlignment::Top => (axis_gap, value_dim - far_gap),
+            BarAlignment::Left => (band_gap, value_dim - value_end_gap),
+            BarAlignment::Right => (value_dim - band_gap, value_end_gap),
+        };
+        let scale = ScaleLinear::new(
+            self.data
+                .iter()
+                .map(|v| value_fn(v))
+                .chain(Some(V::zero()))
+                .collect(),
+            vec![baseline, far],
+        );
+        Some((scale, baseline, far))
+    }
+
+    /// The frame `paint` gives datum `d`'s bar, the one `fill` receives.
+    fn bar_frame(
+        &self,
+        d: &T,
+        band_scale: &ScaleBand<B>,
+        bounds: Bounds<Pixels>,
+    ) -> Option<Bounds<f32>> {
+        let (band_fn, value_fn) = (self.band.as_ref()?, self.value.as_ref()?);
+        let (value_scale, baseline, _) = self.value_scale(bounds)?;
+        let zero = value_scale.tick(&V::zero()).unwrap_or(baseline);
+        let cross = band_scale.tick(&band_fn(d))? + self.band_offset();
+        let end = bar_end(
+            &value_scale,
+            value_fn(d),
+            zero,
+            self.alignment,
+            self.min_length,
+        )?;
+        let (lo, length) = (end.min(zero), (end - zero).abs());
+        let band_width = band_scale.band_width();
+        Some(if self.alignment.is_horizontal() {
+            Bounds {
+                origin: Point::new(lo, cross),
+                size: Size::new(length, band_width),
+            }
+        } else {
+            Bounds {
+                origin: Point::new(cross, lo),
+                size: Size::new(band_width, length),
+            }
+        })
+    }
+
     /// The data range `fill_gradient` reads, the same for every bar.
     fn gradient_range(&self) -> RangeInclusive<f32> {
         let Some(value_fn) = self.value.as_ref() else {
@@ -497,7 +583,8 @@ where
 
     /// The color a tooltip row shows for datum `d`: its bar's, the first stop
     /// of a gradient, or the default fill when `fill` returns a gradient,
-    /// whose stops can't be read back. `frame` is the bar's band.
+    /// whose stops can't be read back. `frame` is the bar's, as `paint` lays it
+    /// out.
     fn bar_color(&self, d: &T, frame: Bounds<f32>, bounds: Bounds<Pixels>, cx: &App) -> Hsla {
         let default = cx.theme().chart_2;
         if let Some(fill) = self.fill_gradient.as_ref() {
@@ -663,7 +750,6 @@ where
 
         let total_width = bounds.size.width.as_f32();
         let total_height = bounds.size.height.as_f32();
-        let axis_gap = if self.label_axis { AXIS_GAP } else { 0. };
         let alignment = self.alignment;
         let is_horizontal = alignment.is_horizontal();
 
@@ -674,54 +760,9 @@ where
         };
         let band_width = band_scale.band_width();
 
-        let value_dim = if is_horizontal {
-            total_width
-        } else {
-            total_height
+        let Some((value_scale, baseline, far)) = self.value_scale(bounds) else {
+            return;
         };
-        // For horizontal charts the band labels (category names) are rendered
-        // along the value axis and can be arbitrarily wide, so we measure the
-        // actual maximum label width instead of using a fixed constant.
-        // Similarly, value labels (numbers) at the bar ends are measured so the
-        // scale range is always shrunk by exactly the right amount.
-        // Vertical bars keep a line of text clear past the tallest bar when they
-        // carry value labels, so the label above it stays inside the chart.
-        let far_gap = if self.label.is_some() {
-            TEXT_HEIGHT
-        } else {
-            10.
-        };
-        let (band_gap, value_end_gap) = if is_horizontal {
-            self.horizontal_gaps
-        } else {
-            (axis_gap, far_gap)
-        };
-        let (range, baseline) = match alignment {
-            BarAlignment::Bottom => {
-                let baseline = value_dim - axis_gap;
-                (vec![baseline, far_gap], baseline)
-            }
-            BarAlignment::Top => {
-                let baseline = axis_gap;
-                (vec![baseline, value_dim - far_gap], baseline)
-            }
-            BarAlignment::Left => {
-                let baseline = band_gap;
-                (vec![baseline, value_dim - value_end_gap], baseline)
-            }
-            BarAlignment::Right => {
-                let baseline = value_dim - band_gap;
-                (vec![baseline, value_end_gap], baseline)
-            }
-        };
-        let value_scale = ScaleLinear::new(
-            self.data
-                .iter()
-                .map(|v| value_fn(v))
-                .chain(Some(V::zero()))
-                .collect(),
-            range,
-        );
 
         // Where zero sits along the value axis. Bars grow from here rather than from
         // the geometric baseline, so negative values extend to the opposite side. With
@@ -806,14 +847,6 @@ where
             }
         }
         axis.paint(&plot_bounds, window, cx);
-
-        // Far edge of the value axis in pixel space (opposite the baseline).
-        let far = match alignment {
-            BarAlignment::Bottom => far_gap,
-            BarAlignment::Top => value_dim - far_gap,
-            BarAlignment::Left => value_dim - value_end_gap,
-            BarAlignment::Right => value_end_gap,
-        };
 
         let value_ticks = value_tick_positions(far, baseline, self.value_tick_count);
         let steps = value_ticks.len() - 1;
@@ -936,15 +969,13 @@ where
             .cross(move |d| band_scale.tick(&band_fn_cloned(d)).map(|t| t + band_offset))
             .base(move |_| zero_pixel)
             .value(move |d| {
-                let value = value_fn_cloned(d);
-                let tick = value_scale.tick(&value)?;
-                Some(extend_to_min_length(
-                    tick,
+                bar_end(
+                    &value_scale,
+                    value_fn_cloned(d),
                     zero_pixel,
-                    value < V::zero(),
                     alignment,
                     min_length,
-                ))
+                )
             })
             .corner_radii(self.corner_radii);
 
@@ -1081,18 +1112,7 @@ where
                 .band(px(band_width))
         };
 
-        let band_start = band_scale.tick(&band_fn(d)).unwrap_or_default() + self.band_offset();
-        let frame = if self.alignment.is_horizontal() {
-            Bounds {
-                origin: Point::new(start, band_start),
-                size: Size::new(length, band_width),
-            }
-        } else {
-            Bounds {
-                origin: Point::new(band_start, start),
-                size: Size::new(band_width, length),
-            }
-        };
+        let frame = self.bar_frame(d, &band_scale, bounds).unwrap_or_default();
         let swatch = self.bar_color(d, frame, bounds, cx);
 
         // Follow the cursor; `hover` already glides the band.
@@ -1101,7 +1121,7 @@ where
             .gap(px(8.))
             .cross_line(cross_line);
 
-        let tooltip = self.tooltip_content.fill(
+        let tooltip = self.tooltip_content.apply(
             tooltip,
             d,
             || Some(band_fn(d).into()),
@@ -1112,6 +1132,28 @@ where
 
         Some(tooltip.into_any_element())
     }
+}
+
+/// The end a bar showing `value` reaches along the value axis, at least
+/// `min_length` pixels from `zero`.
+fn bar_end<V>(
+    scale: &ScaleLinear<V>,
+    value: V,
+    zero: f32,
+    alignment: BarAlignment,
+    min_length: f32,
+) -> Option<f32>
+where
+    V: Copy + PartialOrd + Num + ToPrimitive + Sealed,
+{
+    let tick = scale.tick(&value)?;
+    Some(extend_to_min_length(
+        tick,
+        zero,
+        value < V::zero(),
+        alignment,
+        min_length,
+    ))
 }
 
 /// Push a bar's value end away from `zero` until the bar is `min` pixels long,
@@ -1378,5 +1420,24 @@ mod tests {
         assert_eq!(solid, gpui::red());
         assert_eq!(gradient, chart_2);
         assert_eq!(stops, gpui::green());
+    }
+
+    /// The tooltip reads each bar's frame as `paint` lays it out, so a `fill`
+    /// that reads the frame colors the swatch as it colors the bar.
+    #[test]
+    fn the_tooltip_reads_the_painted_bar_frame() {
+        let bars = BarChart::new([1., -2.])
+            .band(|d: &f64| SharedString::from(format!("{d}")))
+            .value(|d: &f64| *d);
+        let bounds = Bounds::new(point(px(0.), px(0.)), gpui::size(px(100.), px(100.)));
+        let band_scale = bars.band_scale(bounds).expect("bars have a band scale");
+        let up = bars.bar_frame(&1., &band_scale, bounds).expect("a frame");
+        let down = bars.bar_frame(&-2., &band_scale, bounds).expect("a frame");
+
+        // Both grow from zero: one up, one down twice as far.
+        assert_eq!(up.origin.y + up.size.height, down.origin.y);
+        assert!((down.size.height - 2. * up.size.height).abs() < 0.01);
+        assert!(up.origin.x < down.origin.x);
+        assert_eq!(up.size.width, band_scale.band_width());
     }
 }

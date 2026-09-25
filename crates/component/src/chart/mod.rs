@@ -201,12 +201,13 @@ pub(crate) fn labeled_items(
     }
 }
 
-/// What a series chart (`LineChart`, `AreaChart`, `BarChart`) writes in its hover
-/// tooltip, and the builders the three charts forward to it.
+/// What a series chart (`LineChart`, `AreaChart`, `BarChart`, `RadarChart`,
+/// `CandlestickChart`) writes in its hover tooltip, and the builders the five
+/// charts forward to it.
 pub(crate) struct TooltipContent<T> {
     title: Option<Rc<dyn Fn(&T) -> SharedString>>,
-    value: Option<Rc<dyn Fn(&T, f64) -> SharedString>>,
-    value_color: Option<Rc<dyn Fn(&T, f64) -> Hsla>>,
+    value: Option<Rc<dyn Fn(&T, usize, f64) -> SharedString>>,
+    value_color: Option<Rc<dyn Fn(&T, usize, f64) -> Hsla>>,
     render: Option<Rc<dyn Fn(&T, &mut Window, &mut App) -> AnyElement>>,
 }
 
@@ -226,15 +227,15 @@ impl<T: 'static> TooltipContent<T> {
         self.title = Some(Rc::new(title));
     }
 
-    pub(crate) fn set_value(&mut self, value: impl Fn(&T, f64) -> SharedString + 'static) {
+    pub(crate) fn set_value(&mut self, value: impl Fn(&T, usize, f64) -> SharedString + 'static) {
         self.value = Some(Rc::new(value));
     }
 
     pub(crate) fn set_value_color<H: Into<Hsla>>(
         &mut self,
-        color: impl Fn(&T, f64) -> H + 'static,
+        color: impl Fn(&T, usize, f64) -> H + 'static,
     ) {
-        self.value_color = Some(Rc::new(move |d, value| color(d, value).into()));
+        self.value_color = Some(Rc::new(move |d, ix, value| color(d, ix, value).into()));
     }
 
     pub(crate) fn set_render<E: IntoElement>(
@@ -255,19 +256,19 @@ impl<T: 'static> TooltipContent<T> {
         }
     }
 
-    /// A row's value text: the caller's, or the raw number.
-    fn value_text(&self, d: &T, value: f64) -> SharedString {
+    /// The value text of row `ix`: the caller's, or the raw number.
+    fn value_text(&self, d: &T, ix: usize, value: f64) -> SharedString {
         match self.value.as_ref() {
-            Some(text) => text(d, value),
+            Some(text) => text(d, ix, value),
             None => format!("{}", value).into(),
         }
     }
 
-    /// Fill `tooltip` for datum `d`: the caller's own content when it renders
+    /// Write the content of `tooltip` for datum `d`: the caller's own content when it renders
     /// one, otherwise the chart's `title`, if it has one, and one row per
     /// `(swatch, name, value)`. Neither is built when the caller renders, and
     /// `None` from `rows` means a row has no value to show.
-    pub(crate) fn fill<R>(
+    pub(crate) fn apply<R>(
         &self,
         tooltip: Tooltip,
         d: &T,
@@ -286,10 +287,10 @@ impl<T: 'static> TooltipContent<T> {
             Some(title) => tooltip.title(title),
             None => tooltip,
         };
-        for (swatch, name, value) in rows()? {
-            tooltip = tooltip.row(swatch, name, self.value_text(d, value));
+        for (ix, (swatch, name, value)) in rows()?.into_iter().enumerate() {
+            tooltip = tooltip.row(swatch, name, self.value_text(d, ix, value));
             if let Some(color) = self.value_color.as_ref() {
-                tooltip = tooltip.value_color(color(d, value));
+                tooltip = tooltip.value_color(color(d, ix, value));
             }
         }
         Some(tooltip)
@@ -714,24 +715,25 @@ mod tests {
             Some("Jan".into())
         );
         assert_eq!(content.title_text(&1., None), None);
-        assert_eq!(content.value_text(&1., 1234.5).as_ref(), "1234.5");
+        assert_eq!(content.value_text(&1., 0, 1234.5).as_ref(), "1234.5");
 
         content.set_title(|d| format!("Day {d}").into());
-        content.set_value(|_, value| format!("${value:.2}").into());
+        content.set_value(|_, _, value| format!("${value:.2}").into());
         assert_eq!(content.title_text(&3., None), Some("Day 3".into()));
-        assert_eq!(content.value_text(&3., 1234.5).as_ref(), "$1234.50");
+        assert_eq!(content.value_text(&3., 0, 1234.5).as_ref(), "$1234.50");
     }
 
-    /// Rows read the caller's value text and color, one per series.
+    /// Rows read the caller's value text and color, one per series, each told
+    /// which row it is.
     #[gpui::test]
     fn tooltip_fill_writes_each_row_with_the_value_color(cx: &mut TestAppContext) {
         let mut content = TooltipContent::<f64>::default();
-        content.set_value(|_, value| format!("{value:+}").into());
-        content.set_value_color(|_, value| if value >= 0. { green() } else { red() });
+        content.set_value(|_, ix, value| format!("{ix}: {value:+}").into());
+        content.set_value_color(|_, _, value| if value >= 0. { green() } else { red() });
         let cx = cx.add_empty_window();
         let tooltip = cx
             .update(|window, cx| {
-                content.fill(
+                content.apply(
                     Tooltip::new(point(px(0.), px(0.)), size(px(100.), px(100.))),
                     &1.,
                     || Some("Jan".into()),
@@ -745,7 +747,10 @@ mod tests {
         assert_eq!(tooltip.title_for_test().map(|t| t.as_ref()), Some("Jan"));
         assert_eq!(
             tooltip.rows_for_test(),
-            vec![("+2".into(), Some(green())), ("-1".into(), Some(red()))]
+            vec![
+                ("0: +2".into(), Some(green())),
+                ("1: -1".into(), Some(red()))
+            ]
         );
     }
 
@@ -757,7 +762,7 @@ mod tests {
         let cx = cx.add_empty_window();
         let tooltip = cx
             .update(|window, cx| {
-                content.fill(
+                content.apply(
                     Tooltip::new(point(px(0.), px(0.)), size(px(100.), px(100.))),
                     &1.,
                     || None,
@@ -782,7 +787,7 @@ mod tests {
         let built = Cell::new(false);
         let cx = cx.add_empty_window();
         let tooltip = cx.update(|window, cx| {
-            content.fill(
+            content.apply(
                 Tooltip::new(point(px(0.), px(0.)), size(px(100.), px(100.))),
                 &1.,
                 || {

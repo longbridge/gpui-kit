@@ -104,17 +104,24 @@ where
 
     /// Set the text of each tooltip row's value; the raw number by default.
     ///
-    /// The closure receives the datum and the value the row reads.
-    pub fn tooltip_value(mut self, value: impl Fn(&T, f64) -> SharedString + 'static) -> Self {
+    /// The closure receives the datum, the row's index (0 to 3 for open, high, low and close) and
+    /// the value the row reads.
+    pub fn tooltip_value(
+        mut self,
+        value: impl Fn(&T, usize, f64) -> SharedString + 'static,
+    ) -> Self {
         self.tooltip_content.set_value(value);
         self
     }
 
     /// Color each tooltip row's value, such as green or red by its sign; the
     /// tooltip's text color by default.
-    pub fn tooltip_value_color<H>(mut self, color: impl Fn(&T, f64) -> H + 'static) -> Self
+    ///
+    /// The closure receives the same arguments as
+    /// [`tooltip_value`](Self::tooltip_value).
+    pub fn tooltip_value_color<H>(mut self, color: impl Fn(&T, usize, f64) -> H + 'static) -> Self
     where
-        H: Into<Hsla> + 'static,
+        H: Into<Hsla>,
     {
         self.tooltip_content.set_value_color(color);
         self
@@ -416,7 +423,7 @@ where
         let tooltip = Tooltip::new(cursor, bounds.size)
             .gap(px(8.))
             .cross_line(cross_line);
-        let tooltip = self.tooltip_content.fill(
+        let tooltip = self.tooltip_content.apply(
             tooltip,
             d,
             || Some(x_fn(d).into()),

@@ -560,8 +560,11 @@ impl Tooltip {
         self
     }
 
-    /// Color the value of the row added last, such as green or red by its sign.
-    /// The value reads in the tooltip's text color otherwise.
+    /// Color the value of the row added last — by [`row`](Self::row) or
+    /// [`plain_row`](Self::plain_row) — such as green or red by its sign. The
+    /// value reads in the tooltip's text color otherwise.
+    ///
+    /// Call it right after the row it colors; before any row it does nothing.
     pub fn value_color(mut self, color: impl Into<Hsla>) -> Self {
         if let Some(row) = self.rows.last_mut() {
             row.value_color = Some(color.into());

@@ -171,17 +171,24 @@ where
 
     /// Set the text of each tooltip row's value; the raw number by default.
     ///
-    /// The closure receives the datum and the value the row reads.
-    pub fn tooltip_value(mut self, value: impl Fn(&T, f64) -> SharedString + 'static) -> Self {
+    /// The closure receives the datum, the row's index (the series' index in the order `value`
+    /// added them) and the value the row reads.
+    pub fn tooltip_value(
+        mut self,
+        value: impl Fn(&T, usize, f64) -> SharedString + 'static,
+    ) -> Self {
         self.tooltip_content.set_value(value);
         self
     }
 
     /// Color each tooltip row's value, such as green or red by its sign; the
     /// tooltip's text color by default.
-    pub fn tooltip_value_color<H>(mut self, color: impl Fn(&T, f64) -> H + 'static) -> Self
+    ///
+    /// The closure receives the same arguments as
+    /// [`tooltip_value`](Self::tooltip_value).
+    pub fn tooltip_value_color<H>(mut self, color: impl Fn(&T, usize, f64) -> H + 'static) -> Self
     where
-        H: Into<Hsla> + 'static,
+        H: Into<Hsla>,
     {
         self.tooltip_content.set_value_color(color);
         self
@@ -308,7 +315,7 @@ where
     ///
     /// Defaults to the theme chart colors, cycled per series.
     fn series_stroke(&self, ix: usize, cx: &App) -> Hsla {
-        self.stroke_in(ix, &Self::palette(cx))
+        self.series_stroke_from(&Self::palette(cx), ix)
     }
 
     /// The theme chart colors the series cycle through by default.
@@ -323,7 +330,7 @@ where
     }
 
     /// The stroke color of the series at the given index, set or from `palette`.
-    fn stroke_in(&self, ix: usize, palette: &[Hsla; 5]) -> Hsla {
+    fn series_stroke_from(&self, palette: &[Hsla; 5], ix: usize) -> Hsla {
         self.strokes
             .get(ix)
             .copied()
@@ -627,7 +634,7 @@ where
                 }));
 
         let palette = Self::palette(cx);
-        let tooltip = self.tooltip_content.fill(
+        let tooltip = self.tooltip_content.apply(
             tooltip,
             d,
             // Filled by `prepaint`, which runs first; element labels leave no title.
@@ -639,7 +646,11 @@ where
                     .enumerate()
                     .map(|(i, value_fn)| {
                         let name = self.names.get(i).cloned().unwrap_or_default();
-                        Some((self.stroke_in(i, &palette), name, value_fn(d).to_f64()?))
+                        Some((
+                            self.series_stroke_from(&palette, i),
+                            name,
+                            value_fn(d).to_f64()?,
+                        ))
                     })
                     .collect::<Option<Vec<_>>>()
             },
