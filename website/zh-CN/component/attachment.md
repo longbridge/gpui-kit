@@ -5,7 +5,7 @@ description: 支持上传状态、预览和操作的可组合文件与媒体附�
 
 # Attachment
 
-`Attachment` 用于在会话中展示文件或媒体条目。根组件负责状态、方向、尺寸和整体 surface；`AttachmentMedia`、`AttachmentContent`、`AttachmentActions` 分别提供预览、元数据和操作入口。应用可以在这些 slot 中继续组合 `Button`、`Progress`、`Icon` 和其他 GPUI element。
+`Attachment` 用于在会话中展示文件或媒体条目。根组件负责状态、方向、尺寸和整体 surface，并自带移除与重试两个控件；`AttachmentMedia`、`AttachmentContent`、`AttachmentActions` 分别提供预览、元数据和操作入口。应用可以在这些 slot 中继续组合 `Button`、`Progress`、`Icon` 和其他 GPUI element。
 
 ## 适用场景
 
@@ -80,7 +80,7 @@ Attachment::new()
     )
 ```
 
-`Attachment::new()` 默认状态为 `Complete`、方向为 `Axis::Horizontal`、尺寸为 `Size::Medium`。
+`Attachment::new()` 默认状态为 `Complete`、方向为 `Axis::Horizontal`、尺寸为 `Size::Medium`：一张 56px 高、带内容时 232px 宽的 chip，媒体框 38px，圆角取 `radius_tokens().lg`（`XSmall` 取 `md`），失败时描边为 destructive 实色。
 
 ## 媒体和图片预览
 
@@ -100,7 +100,9 @@ Attachment::new()
     )
 ```
 
-有图片源时，图片使用 `ObjectFit::Cover` 填满媒体区域。没有图片源时，媒体 slot 仍然可以展示图标；如果附件状态为 `Failed`，没有图片源的媒体区域使用 destructive 语义颜色。
+有图片源时，图片使用 `ObjectFit::Cover` 填满媒体区域，圆角由图片自己承担（gpui 的裁剪是矩形的）。没有图片源时，媒体 slot 展示图标；`Uploading` / `Processing` 时图标位置换成主色 Spinner，`Failed` 时媒体区域使用 destructive 语义颜色并换成警示图标，回到 `Complete` 时再显示 child。
+
+纵向且没有 content 的附件是「图片 tile」：一个媒体满铺到描边内侧的方块，媒体圆角比卡片小一个描边宽度，两者同心。
 
 ### 预览上的 overlay
 
@@ -116,7 +118,7 @@ Attachment::new()
     )
 ```
 
-也可以将 overlay 与自定义 `div()`、`Button` 组合。加载、处理和失败状态会降低图片本身的透明度；`Pending` 与 `Complete` 保持完整不透明。
+也可以将 overlay 与自定义 `div()`、`Button` 组合。图片本身不会被调淡：`Uploading` / `Processing` 时图片上压一层半透明暗幕加白色 Spinner，`Failed` 时暗幕更深、中间是重试控件（见[移除与重试控件](#移除与重试控件)）或警示图标；overlay 画在暗幕之上。`Pending` 与 `Complete` 不加暗幕。
 
 ## 上传生命周期
 
@@ -125,9 +127,9 @@ Attachment::new()
 | 状态 | 用途 | 默认视觉提示 |
 | --- | --- | --- |
 | `Pending` | 已选择，等待上传。 | 边框使用 dashed 样式。 |
-| `Uploading` | 正在传输文件。 | 标题显示 shimmer；图片预览变暗。 |
-| `Processing` | 上传完成，服务端正在处理。 | 标题显示 shimmer；图片预览变暗。 |
-| `Failed` | 上传或处理失败。 | 边框与描述使用 destructive 语义色；无图片媒体也使用 destructive 色。 |
+| `Uploading` | 正在传输文件。 | 标题显示 shimmer；媒体显示 Spinner（图片上叠暗幕）。 |
+| `Processing` | 上传完成，服务端正在处理。 | 标题显示 shimmer；媒体显示 Spinner（图片上叠暗幕）。 |
+| `Failed` | 上传或处理失败。 | 边框与描述使用 destructive 语义色；媒体显示警示图标或重试控件。 |
 | `Complete` | 已准备好供用户使用。 | 普通完成状态。 |
 
 状态文字应写入描述，不能只依赖边框颜色：
@@ -170,7 +172,16 @@ Attachment::new()
     )
 ```
 
-尺寸使用共享的 design scale；应根据界面密度选择语义尺寸，避免在应用里为每个附件写独立高度。
+语义尺寸一次给定整套几何（以 rem 计，随根字号缩放）：
+
+| 尺寸 | chip 高 | chip 宽 | 媒体 | 标题 |
+| --- | --- | --- | --- | --- |
+| `XSmall` | 40px | 176px | 28px | 11px |
+| `Small` | 48px | 200px | 32px | 12px |
+| `Medium` | 56px | 232px | 38px | 13px |
+| `Large` | 64px | 272px | 44px | 14px |
+
+横向卡片只在带 content 时取固定宽度，一排 chip 才能对齐、长文件名截断而不是撑开卡片；图片 tile 是边长等于 chip 高的方块。`Size::Size(...)` 按自定义基值等比缩放 `Medium` 的几何。需要别的量度时用普通的 GPUI 宽度 refinement（`w_auto()`、`w_full()`、`w(...)`）；优先用语义尺寸，避免在应用里为每个附件写独立高度。
 
 `Axis::Horizontal` 适合消息中的紧凑附件，`Axis::Vertical` 适合图片预览：
 
@@ -264,6 +275,22 @@ Attachment::new()
 ```
 
 点击状态需要稳定标识，因此 handler 只在配合 `.id(...)` 时生效。可点击的卡片 hover 时会显示 muted 底色，让它读起来是可交互的。点击意味着什么——对话框、浏览器、文件预览还是选择——由应用决定。删除、重试等次要操作应留在 `AttachmentActions` 中，不要依赖整卡点击；同时把卡片的主操作以 `Button` 或 `Link` 的形式提供在键盘可达的位置——点击层只是指针便利，不参与焦点。
+
+## 移除与重试控件
+
+composer 要能移除附件、重试失败的上传。这两个控件是内建的，各产品长得一样，也不用再在外面包一层：
+
+```rust
+Attachment::new()
+    .id(("attachment", item.id))
+    .status(item.status)
+    .on_remove(cx.listener(move |this, _, _, cx| this.remove(item.id, cx)))
+    .on_retry(cx.listener(move |this, _, _, cx| this.retry(item.id, cx)))
+    .axis(Axis::Vertical)
+    .media(AttachmentMedia::new().src(thumbnail))
+```
+
+`on_remove` 是骑在卡片右上角外侧的小圆钮，外围一圈 surface 色让它从图上托出来；桌面端悬停才出现，触屏平台常显。卡片会为探出的部分预留空间，一排卡片仍然对齐。`on_retry` 只在 `Failed` 时生效：图片预览的暗幕里出现圆形重试钮，具名描述后面跟一个本地化的「重试」链接。两者都把元素状态挂在 `.id(...)` 上，所以只在配合 `id` 时生效。移除、重试具体做什么由应用决定。
 
 ## 状态继承与局部覆盖
 
@@ -394,8 +421,10 @@ Attachment::new()
 | 方法 | 说明 |
 | --- | --- |
 | `new()` | 创建 `Complete`、横向、medium 尺寸的附件。 |
-| `id(ElementId)` | 设置整卡点击层的稳定标识。 |
+| `id(ElementId)` | 内建控件（点击层、移除、重试）的稳定标识。 |
 | `on_click(handler)` | 整卡点击；需配合 `id(...)`，绘制在 actions 之下。 |
+| `on_remove(handler)` | 角上的移除控件；需配合 `id(...)`。 |
+| `on_retry(handler)` | `Failed` 时的重试控件；需配合 `id(...)`。 |
 | `status(AttachmentStatus)` | 设置根生命周期状态。 |
 | `axis(Axis)` | 设置 `Horizontal` 或 `Vertical` 布局。 |
 | `media(AttachmentMedia)` | 设置预览 slot。 |
@@ -410,7 +439,7 @@ Attachment::new()
 | --- | --- |
 | `new()` | 创建空媒体 slot。 |
 | `src(ImageSource)` | 设置图片预览源。 |
-| `overlay(element)` | 在媒体区域上方居中添加 overlay。 |
+| `overlay(element)` | 在媒体区域上方居中添加 overlay，画在状态暗幕之上。 |
 | `with_size(Size)` | 覆盖从根组件继承的媒体尺寸。 |
 | `child(element)` | 添加图标或其他媒体 child。 |
 | `Styled` | 调整媒体背景、圆角和尺寸。 |
