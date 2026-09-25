@@ -94,11 +94,13 @@ struct SlotLayout {
     id: Option<ElementId>,
 }
 
-/// How far the remove control's box rides outside the card's upper trailing
+/// How far the remove control's ring rides outside the card's upper trailing
 /// corner: the 18px disc overhangs by 6px, its 2px ring by 8px.
 const REMOVE_OVERHANG: Pixels = px(8.);
-/// The remove control: an 18px black disc plus a 2px white ring.
-const REMOVE_BUTTON_SIZE: Pixels = px(22.);
+/// The remove control's black disc.
+const REMOVE_BUTTON_SIZE: Pixels = px(18.);
+/// The white ring around the remove control.
+const REMOVE_RING_SIZE: Pixels = px(22.);
 /// The retry control over an image preview.
 const RETRY_BUTTON_SIZE: Pixels = px(24.);
 /// The hover group the remove control appears for. Siblings may share the
@@ -458,15 +460,17 @@ impl RenderOnce for Attachment {
             })
             .when_some(self.media, |this, media| this.child(media))
             .when_some(self.content, |this, content| this.child(content))
-            // A thin bar along the bottom edge tracks the upload; it starts
-            // and ends inside the corner radius so nothing pokes out of the curve.
+            // A thin bar along the bottom edge tracks the upload. It starts
+            // where the corner curve passes its height, so it reads as running
+            // from the edge without poking out of the curve.
             .when_some(progress_bar, |this, percent| {
+                let inset = radius * 0.4;
                 this.child(
                     div()
                         .absolute()
                         .bottom_0()
-                        .left(radius)
-                        .right(radius)
+                        .left(inset)
+                        .right(inset)
                         .h(px(2.))
                         .child(
                             div()
@@ -521,15 +525,27 @@ impl RenderOnce for Attachment {
                         this.invisible()
                             .group_hover(REMOVE_GROUP, |this| this.visible())
                     })
-                    .child(remove_button(id, on_remove, cx)),
+                    // The ring is a white disc under the button rather than a
+                    // border on it: a border's rim blends with the black
+                    // behind it and reads as a grey outline.
+                    .child(
+                        div()
+                            .size(REMOVE_RING_SIZE)
+                            .rounded(cx.theme().radius_full())
+                            .bg(white())
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(remove_button(id, on_remove, cx)),
+                    ),
             )
             .into_any_element()
     }
 }
 
-/// The corner remove control: a black disc with a white ring and glyph. It
-/// sits on pictures as often as on cards, so it keeps its own contrast like
-/// a scrim rather than following the theme.
+/// The corner remove control: a black disc with a white glyph, set in a white
+/// ring by its caller. It sits on pictures as often as on cards, so it keeps
+/// its own contrast like a scrim rather than following the theme.
 ///
 /// The glyphs go in as children: an icon-only `Button` scales its icon with
 /// the button, and these discs want a glyph much smaller than that.
@@ -544,13 +560,12 @@ fn remove_button(id: ElementId, on_remove: ControlHandler, cx: &App) -> Button {
                 .foreground(white()),
         )
         .accessibility_label(t!("Attachment.Remove"))
-        .child(Icon::new(IconName::Close).size(px(8.)).text_color(white()))
+        .child(Icon::new(IconName::Close).size(px(10.)).text_color(white()))
         .size(REMOVE_BUTTON_SIZE)
         .p_0()
         .rounded(cx.theme().radius_full())
         .bg(black())
-        .border_2()
-        .border_color(white())
+        .border_0()
         .on_click(move |event, window, cx| on_remove(event, window, cx))
 }
 

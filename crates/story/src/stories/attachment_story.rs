@@ -130,7 +130,7 @@ impl Render for AttachmentStory {
                                     .content(
                                         AttachmentContent::new()
                                             .title(AttachmentTitle::new("Q3 statement.pdf"))
-                                            .description(AttachmentDescription::new("Uploading…")),
+                                            .description(AttachmentDescription::new("Uploading")),
                                     ),
                             )
                             .child(
