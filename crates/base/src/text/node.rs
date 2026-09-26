@@ -1107,14 +1107,20 @@ pub(crate) struct Paragraph {
     pub(super) render_cache: ParagraphRenderCache,
 }
 
-/// Derived state: a clone starts empty and rebuilds, and it is invisible to
-/// `Debug` and equality.
+/// Derived state, invisible to `Debug` and equality.
+///
+/// A clone carries what was cached so far: the cached value is a pure
+/// function of the children and the style it is keyed on, a clone has the
+/// same children, and every mutation of the children replaces the cache
+/// (`invalidate_render_cache`). Streaming reparses deep-clone the document on
+/// every append, and an empty clone made every paragraph rebuild.
 #[derive(Default)]
-pub(super) struct ParagraphRenderCache(Mutex<Option<ParagraphRender>>);
+pub(super) struct ParagraphRenderCache(Mutex<Option<Arc<ParagraphRender>>>);
 
 impl Clone for ParagraphRenderCache {
     fn clone(&self) -> Self {
-        Self::default()
+        let cached = self.0.lock().ok().and_then(|cache| cache.clone());
+        Self(Mutex::new(cached))
     }
 }
 
@@ -1211,13 +1217,13 @@ impl Paragraph {
         }
         let text = SharedString::from(text);
         if let Ok(mut cache) = self.render_cache.0.lock() {
-            *cache = Some(ParagraphRender {
+            *cache = Some(Arc::new(ParagraphRender {
                 style: node_cx.style.clone(),
                 mono_font,
                 text: text.clone(),
                 highlights: highlights.clone(),
                 links: links.clone(),
-            });
+            }));
         }
         (text, highlights, links)
     }
