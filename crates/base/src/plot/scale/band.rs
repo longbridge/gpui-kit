@@ -174,8 +174,8 @@ mod tests {
 
     #[test]
     fn max_band_width_caps_the_width_but_not_the_ticks() {
-        let wide = ScaleBand::new(vec![1, 2], vec![0., 200.]);
-        let capped = ScaleBand::new(vec![1, 2], vec![0., 200.]).max_band_width(30.);
+        let wide = ScaleBand::new(vec![1, 2], [0., 200.]);
+        let capped = ScaleBand::new(vec![1, 2], [0., 200.]).max_band_width(30.);
         assert_eq!(wide.band_width(), 100.);
         assert_eq!(capped.band_width(), 30.);
         assert_eq!(capped.tick(&2), wide.tick(&2));
