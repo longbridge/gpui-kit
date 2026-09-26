@@ -42,6 +42,7 @@ mod number_input;
 mod observe;
 mod otp_input;
 mod pagination;
+pub mod plot;
 mod popover;
 mod popup;
 mod positioner;
@@ -140,6 +141,7 @@ pub use number_input::{
 pub use observe::{ObservedElement, TestSupportExt};
 pub use otp_input::{OtpEvent, OtpInput, OtpState};
 pub use pagination::{Pagination, PaginationItem, PaginationState};
+pub use plot::PlotMotion;
 pub use popover::{Popover, PopoverState};
 pub use popup::{POPUP_PRIORITY, Popup};
 pub use positioner::{Align, Positioner, ResolvedPosition};
@@ -186,7 +188,7 @@ pub use text_selection::{
     TextSelectionRegistration, TextSelectionRun, TextSelectionScopeId, TextSelectionSnapshot,
     TextSelectionWindowPoints, TouchHandleLayout,
 };
-pub use theme::{ResizableTheme, ScrollbarTheme, Theme, ThemeAppearance};
+pub use theme::{PlotTheme, ResizableTheme, ScrollbarTheme, Theme, ThemeAppearance};
 pub use theme_tokens::{
     ColorTokens, RadiusTokens, SemanticThemeTokens, ShadowTokens, SpacingTokens, TextStyleToken,
     TypographyTokens,

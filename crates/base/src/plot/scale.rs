@@ -8,7 +8,11 @@ pub use band::ScaleBand;
 pub use linear::ScaleLinear;
 pub use ordinal::ScaleOrdinal;
 pub use point::ScalePoint;
-pub(crate) use sealed::Sealed;
+/// The value types a linear scale and the charts built on it accept: `f64`,
+/// and `rust_decimal::Decimal` with the `decimal` feature. Not meant to be
+/// implemented outside GPUI Kit.
+#[doc(hidden)]
+pub use sealed::Sealed;
 
 pub trait Scale<T> {
     /// Get the tick of the scale.

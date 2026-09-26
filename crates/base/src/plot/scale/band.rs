@@ -66,7 +66,7 @@ impl<T> ScaleBand<T> {
     /// Lay the range out for `count` bands, the domain taking the leading ones
     /// in order and the rest staying empty. A `count` below the domain's length
     /// has no effect.
-    pub(crate) fn band_count(mut self, count: usize) -> Self {
+    pub fn band_count(mut self, count: usize) -> Self {
         self.band_count = count;
         self
     }

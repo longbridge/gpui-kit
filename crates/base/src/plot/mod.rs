@@ -1,0 +1,209 @@
+//! Unstyled plotting: scales, shapes, axes, grids, labels, and the element and
+//! hover tracking behind every [`Plot`].
+//!
+//! Colors are always handed in by the caller. A styled layer supplies chart
+//! defaults, the tooltip overlay, and hover timing through [`PlotMotion`].
+mod axis;
+mod element;
+mod grid;
+mod hover;
+pub mod label;
+mod path_cache;
+pub mod scale;
+pub mod shape;
+
+use std::{fmt::Debug, ops::Add, time::Duration};
+
+use gpui::{
+    AnyElement, App, Bounds, ElementId, IntoElement, Path, PathBuilder, Pixels, Point, Window,
+    point, px,
+};
+
+use crate::{Spring, motion::Transition};
+
+pub use axis::{AXIS_GAP, AxisLabelPlacement, AxisLabelSide, AxisText, PlotAxis};
+pub use element::PlotElement;
+pub use grid::Grid;
+pub use hover::{PlotHover, TooltipState, hover_focus, is_hover_entering, pointer_spring};
+pub use label::PlotLabel;
+pub use path_cache::{PathCache, PathCaches, ShapeKey};
+
+/// The timing of a plot's hover: how its focus fades in and out, and the
+/// spring a pointer follows the hovered datum with.
+///
+/// Base installs no motion of its own: every duration defaults to zero, so the
+/// hover appears, fades and glides at once. Product timing belongs to the
+/// styled layer, which projects it through [`crate::PlotTheme`].
+#[derive(Clone)]
+pub struct PlotMotion {
+    pointer: Spring,
+    enter: Transition,
+    exit: Transition,
+}
+
+impl Default for PlotMotion {
+    fn default() -> Self {
+        Self {
+            pointer: Spring::new(Duration::ZERO),
+            enter: Transition::new(Duration::ZERO),
+            exit: Transition::new(Duration::ZERO),
+        }
+    }
+}
+
+impl PlotMotion {
+    /// The spring a crosshair, highlight band or hover dot follows the hovered
+    /// datum with.
+    pub fn with_pointer(mut self, pointer: Spring) -> Self {
+        self.pointer = pointer;
+        self
+    }
+
+    /// How the hover fades in when the cursor lands on a datum.
+    pub fn with_enter(mut self, enter: Transition) -> Self {
+        self.enter = enter;
+        self
+    }
+
+    /// How the hover fades out after the cursor leaves.
+    pub fn with_exit(mut self, exit: Transition) -> Self {
+        self.exit = exit;
+        self
+    }
+
+    pub fn pointer(&self) -> Spring {
+        self.pointer
+    }
+
+    pub fn enter(&self) -> &Transition {
+        &self.enter
+    }
+
+    pub fn exit(&self) -> &Transition {
+        &self.exit
+    }
+}
+
+pub trait Plot: IntoElement {
+    /// Lay out and place the child elements this plot hosts (e.g. element labels).
+    ///
+    /// Called during the element's prepaint phase, so implementations may use
+    /// [`AnyElement::layout_as_root`] / [`AnyElement::prepaint_at`] to measure and
+    /// position children — neither is legal from [`Plot::paint`]. The returned
+    /// elements are painted right after `paint`, below the tooltip overlay.
+    ///
+    /// Runs before [`Plot::tooltip_state`] and [`Plot::tooltip`], so anything
+    /// resolved here can be reused by them.
+    ///
+    /// The default returns no children.
+    fn prepaint(
+        &mut self,
+        _bounds: Bounds<Pixels>,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> Vec<AnyElement> {
+        vec![]
+    }
+
+    fn paint(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App);
+
+    /// A stable element id that enables interactive tooltip support for this plot.
+    ///
+    /// Return `Some(id)` to opt in to tooltips and hover motion; the id must be unique
+    /// among sibling elements. Returning `None` (the default for a hand-written plot)
+    /// disables all tooltip behavior, leaving the plot a pure, non-interactive element.
+    ///
+    /// The charts in GPUI Component always return `Some`: their id defaults to the
+    /// source location they were constructed at, and `id` renames it.
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    /// Map the cursor to the tooltip state to display.
+    ///
+    /// `position` is the cursor position relative to the plot's top-left origin (already
+    /// origin-subtracted), and `bounds` is the painted area. Return the [`TooltipState`]
+    /// to display (highlighted index, crosshair point, dots, side), or `None` to show
+    /// nothing. Only called while the cursor is inside `bounds`.
+    ///
+    /// The default returns `None`.
+    fn tooltip_state(
+        &self,
+        _position: Point<Pixels>,
+        _bounds: Bounds<Pixels>,
+        _cx: &App,
+    ) -> Option<TooltipState> {
+        None
+    }
+
+    /// Receive the datum in focus this frame, before [`Plot::tooltip`] and
+    /// [`Plot::paint`] run.
+    ///
+    /// `hover` carries the [`TooltipState`] the cursor resolved to, and it
+    /// lingers after the cursor leaves while [`PlotHover::focus`] eases back to
+    /// zero, so a hover-driven presentation can fade out over the last datum
+    /// instead of vanishing. `None` means nothing is hovered and nothing is
+    /// fading.
+    ///
+    /// Called on every frame the plot has an [`Plot::id`], so this is where a
+    /// plot samples its hover motion ([`crate::motion::transition`],
+    /// [`PlotHover::glide`]) and keeps the result for the other two methods.
+    /// The default ignores the hover.
+    fn hover(&mut self, _hover: Option<&PlotHover>, _window: &mut Window, _cx: &mut App) {}
+
+    /// Render the tooltip overlay for the active [`TooltipState`].
+    ///
+    /// `cursor` is the live cursor position (relative to the plot origin) and `bounds` is the
+    /// plot's painted area, so the tooltip box can follow the cursor (pass `cursor` and
+    /// `bounds.size` to the styled layer's tooltip). Return the overlay element; it is
+    /// painted absolutely positioned above the plot graphics but below sibling content
+    /// drawn after the plot (a box that may overflow the plot should `deferred` itself).
+    /// The default returns `None`.
+    ///
+    /// Also called while the hover fades out, with the lingering `state` and the
+    /// last `cursor`; the overlay renders within the plot's element scope, so it can
+    /// fade with [`hover_focus`].
+    fn tooltip(
+        &self,
+        _state: &TooltipState,
+        _cursor: Point<Pixels>,
+        _bounds: Bounds<Pixels>,
+        _window: &mut Window,
+        _cx: &mut App,
+    ) -> Option<AnyElement> {
+        None
+    }
+}
+
+#[derive(Clone, Copy, Default, Hash, PartialEq, Eq)]
+pub enum StrokeStyle {
+    #[default]
+    Natural,
+    Linear,
+    StepAfter,
+}
+
+pub fn origin_point<T>(x: T, y: T, origin: Point<T>) -> Point<T>
+where
+    T: Default + Clone + Debug + PartialEq + Add<Output = T>,
+{
+    point(x, y) + origin
+}
+
+pub fn polygon<T>(points: &[Point<T>], bounds: &Bounds<Pixels>) -> Option<Path<Pixels>>
+where
+    T: Default + Clone + Copy + Debug + Into<f32> + PartialEq,
+{
+    let mut path = PathBuilder::stroke(px(1.));
+    let points = &points
+        .iter()
+        .map(|p| {
+            point(
+                px(p.x.into() + bounds.origin.x.as_f32()),
+                px(p.y.into() + bounds.origin.y.as_f32()),
+            )
+        })
+        .collect::<Vec<_>>();
+    path.add_polygon(points, false);
+    path.build().ok()
+}

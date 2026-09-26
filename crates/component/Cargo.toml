@@ -16,7 +16,7 @@ doctest = false
 
 [features]
 test-support = ["gpui/test-support", "gpui-base/test-support"]
-decimal = ["dep:rust_decimal"]
+decimal = ["gpui-base/decimal"]
 inspector = ["gpui_macros/inspector", "gpui/inspector", "gpui-base/inspector"]
 tree-sitter = ["dep:tree-sitter", "dep:tree-sitter-json"]
 
@@ -124,7 +124,6 @@ uuid = "1.10"
 
 # Chart
 num-traits = "0.2"
-rust_decimal = { version = "1.37.0", optional = true }
 
 # Calendar
 chrono = "0.4.38"

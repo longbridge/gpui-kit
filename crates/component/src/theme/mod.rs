@@ -85,6 +85,27 @@ const SCROLLBAR_THUMB_ACTIVE_WIDTH: Pixels = px(8.);
 /// Base's hovered and dragged thumb inset, restated for the same reason.
 const SCROLLBAR_THUMB_INSET: Pixels = px(4.);
 
+/// The plot hover motion this design system projects onto Base.
+///
+/// A pointer chases the cursor across neighbouring data, so it has to arrive
+/// well within the time the cursor takes to reach the next datum: ECharts moves
+/// its axis pointer over 200 ms on an exponential ease-out, which is most of
+/// the way there in the first third. The fast tier as a critically damped
+/// response lands in the same place, and the tolerance is sub-pixel so the
+/// spring rests once nothing visible moves. The hover fades on the same tier.
+fn plot_motion(motion: &MotionTokens) -> gpui_base::PlotMotion {
+    gpui_base::PlotMotion::default()
+        .with_pointer(gpui_base::Spring::new(motion.duration_fast).with_epsilon(0.1))
+        .with_enter(
+            gpui_base::motion::Transition::new(motion.duration_fast)
+                .easing(motion.easing_enter.clone()),
+        )
+        .with_exit(
+            gpui_base::motion::Transition::new(motion.duration_fast)
+                .easing(motion.easing_exit.clone()),
+        )
+}
+
 /// The scrollbar motion this design system projects onto Base.
 ///
 /// Scrolling and track hover reveal a scrollbar by fading it in place. In hover
@@ -411,6 +432,7 @@ impl Theme {
                 handle: Some(self.border),
                 active_handle: Some(self.drag_border),
             },
+            plot: gpui_base::PlotTheme::new().with_motion(plot_motion(&self.motion)),
         }
     }
 

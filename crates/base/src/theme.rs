@@ -2,7 +2,7 @@ use gpui::{App, Global};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{ScrollbarMode, ScrollbarMotion, ScrollbarStyles, SemanticThemeTokens};
+use crate::{PlotMotion, ScrollbarMode, ScrollbarMotion, ScrollbarStyles, SemanticThemeTokens};
 
 /// Application-wide defaults for Base behavior modules.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -19,6 +19,7 @@ pub struct Theme {
     pub tokens: SemanticThemeTokens,
     pub scrollbar: ScrollbarTheme,
     pub resizable: ResizableTheme,
+    pub plot: PlotTheme,
 }
 
 impl Global for Theme {}
@@ -89,6 +90,30 @@ impl ScrollbarTheme {
 
     pub fn styles(&self) -> &ScrollbarStyles {
         &self.styles
+    }
+}
+
+/// Global defaults used by [`crate::plot`].
+///
+/// `motion` defaults to motionless. Styled layers project their own timing;
+/// Base never installs a fade or glide of its own.
+#[derive(Clone, Default)]
+pub struct PlotTheme {
+    motion: PlotMotion,
+}
+
+impl PlotTheme {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_motion(mut self, motion: PlotMotion) -> Self {
+        self.motion = motion;
+        self
+    }
+
+    pub fn motion(&self) -> &PlotMotion {
+        &self.motion
     }
 }
 

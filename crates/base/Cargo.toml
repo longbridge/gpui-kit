@@ -25,6 +25,7 @@ name = "text_view_scroll"
 harness = false
 
 [features]
+decimal = ["dep:rust_decimal"]
 test-support = ["gpui/test-support"]
 inspector = ["gpui_macros/inspector", "gpui/inspector"]
 
@@ -37,12 +38,15 @@ futures = "0.3"
 gpui.workspace = true
 gpui_macros.workspace = true
 instant.workspace = true
+itertools = "0.13.0"
 lsp-types.workspace = true
 markdown = { version = "1.0.0", features = ["serde"] }
 html5ever = "0.27"
 markup5ever_rcdom = "0.3.0"
+num-traits = "0.2"
 ropey.workspace = true
 regex = "1"
+rust_decimal = { version = "1.37.0", optional = true }
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
