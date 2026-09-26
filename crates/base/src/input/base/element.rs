@@ -852,8 +852,17 @@ impl<M: InputModeKind> TextElement<M> {
         let ranges = state.search_session.matcher.matched_ranges();
         let current_match_ix = state.search_session.matcher.current_match_index();
 
-        let mut paths = Vec::with_capacity(ranges.as_ref().len());
-        for (index, range) in ranges.as_ref().iter().enumerate() {
+        // Matches are sorted and do not overlap, so only the ones that reach
+        // into the visible range need a layout.
+        let visible_range = &last_layout.visible_range_offset;
+        let first = ranges.partition_point(|range| range.end <= visible_range.start);
+        let mut paths = Vec::new();
+        for (index, range) in ranges
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take_while(|(_, range)| range.start < visible_range.end)
+        {
             if let Some(path) = Self::layout_match_range(range.clone(), last_layout, bounds) {
                 paths.push((path, current_match_ix == index));
             }
