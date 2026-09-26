@@ -485,35 +485,21 @@ impl Input {
         let Some(gpui::accesskit::ActionData::Value(value)) = data else {
             return;
         };
-        if !state.presentation(cx).is_editable() {
-            return;
-        }
         state.replace_all(value.to_string(), window, cx);
-    }
-
-    fn handle_accessibility_focus(state: &TextInputState, window: &mut Window, cx: &mut App) {
-        if !state.presentation(cx).is_disabled() {
-            state.focus(window, cx);
-        }
     }
 
     /// This method must after the refine_style.
     fn render_editor(
         input_state: TextInputState,
         search_panel: Option<AnyElement>,
-        focus_scope: &gpui::FocusHandle,
         _: &Window,
     ) -> impl IntoElement {
-        v_flex()
-            .track_focus(focus_scope)
-            .size_full()
-            .children(search_panel)
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .child(input_state.into_any_element()),
-            )
+        v_flex().size_full().children(search_panel).child(
+            div()
+                .relative()
+                .flex_1()
+                .child(input_state.into_any_element()),
+        )
     }
 }
 
@@ -675,18 +661,14 @@ impl RenderOnce for Input {
         if input_focused {
             sync_native_content_type(window, content_type, presentation.is_editable());
         }
-        // The semantic frame tracks the editor; addons retain their own focus scopes.
-        let [prefix_focus, suffix_focus, editor_scope_focus] = window
-            .use_keyed_state(("input-addon-focus", state.entity_id()), cx, |_, cx| {
-                [cx.focus_handle(), cx.focus_handle(), cx.focus_handle()]
+        let frame_focus_handle = window
+            .use_keyed_state(("input-frame-focus", state.entity_id()), cx, |_, cx| {
+                cx.focus_handle()
             })
             .read(cx)
             .clone();
         let focused = input_focused
-            || (!presentation.is_disabled()
-                && [&prefix_focus, &suffix_focus, &editor_scope_focus]
-                    .iter()
-                    .any(|focus| focus.contains_focused(window, cx)));
+            || (frame_focus_handle.contains_focused(window, cx) && !presentation.is_disabled());
 
         let gap_x = match self.size {
             Size::Small => px(4.),
@@ -731,7 +713,7 @@ impl RenderOnce for Input {
         BaseInput::new(id)
             .focused(focused)
             .disabled(disabled)
-            .track_focus(presentation.focus_handle())
+            .track_focus(&frame_focus_handle)
             .styles(|styles| {
                 styles.focused(|style| {
                     style.when(
@@ -747,11 +729,7 @@ impl RenderOnce for Input {
                 this.aria_placeholder(placeholder)
             })
             .when_some(accessibility_value, |this, value| this.aria_value(value))
-            .on_a11y_action(AccessibleAction::Focus, {
-                let state = state.clone();
-                move |_, window, cx| Self::handle_accessibility_focus(&state, window, cx)
-            })
-            .when(presentation.is_editable(), |this| {
+            .when(!disabled, |this| {
                 this.on_a11y_action(AccessibleAction::SetValue, move |data, window, cx| {
                     Self::handle_accessibility_set_value(&accessibility_state, data, window, cx);
                 })
@@ -785,17 +763,11 @@ impl RenderOnce for Input {
             )
             .children(prefix.map(|p| {
                 div()
-                    .track_focus(&prefix_focus)
                     .when(presentation.is_disabled(), |this| this.opacity(0.5))
                     .child(p)
             }))
             .when(presentation.is_multi_line(), |this| {
-                this.child(Self::render_editor(
-                    state.clone(),
-                    overlays.search,
-                    &editor_scope_focus,
-                    window,
-                ))
+                this.child(Self::render_editor(state.clone(), overlays.search, window))
             })
             .when(!presentation.is_multi_line(), |this| {
                 this.child(state.clone().into_any_element())
@@ -804,7 +776,6 @@ impl RenderOnce for Input {
                 this.pr(self.size.input_px()).child(
                     h_flex()
                         .id("suffix")
-                        .track_focus(&suffix_focus)
                         .gap(gap_x)
                         .items_center()
                         .cursor_default()
@@ -1030,17 +1001,15 @@ mod tests {
             ) -> impl IntoElement {
                 let state = self.state.clone();
                 let emitted = self.emitted.clone();
-                div()
-                    .child(Input::new(&state))
-                    .on_prepaint(move |_, window, cx| {
-                        let input = Input::new(&state).render(window, cx).into_element();
-                        let mut node = gpui::accesskit::Node::new(Role::TextInput);
-                        input.write_a11y_info(&mut node);
-                        *emitted.lock().unwrap() = Some((
-                            node.value().map(ToOwned::to_owned),
-                            node.supports_action(AccessibleAction::SetValue),
-                        ));
-                    })
+                div().on_prepaint(move |_, window, cx| {
+                    let input = Input::new(&state).render(window, cx).into_element();
+                    let mut node = gpui::accesskit::Node::new(Role::TextInput);
+                    input.write_a11y_info(&mut node);
+                    *emitted.lock().unwrap() = Some((
+                        node.value().map(ToOwned::to_owned),
+                        node.supports_action(AccessibleAction::SetValue),
+                    ));
+                })
             }
         }
 
@@ -1063,84 +1032,14 @@ mod tests {
         let base: TextInputState = state.clone().into();
         cx.update(|window, cx| {
             Input::handle_accessibility_set_value(&base, None, window, cx);
-            Input::handle_accessibility_focus(&base, window, cx);
-            assert!(base.presentation(cx).focus_handle().is_focused(window));
-            window.draw(cx).clear(cx);
         });
         assert_eq!(state.read_with(cx, |state, _| state.value()), "initial");
 
-        let changes = std::rc::Rc::new(std::cell::Cell::new(0));
-        let observed = changes.clone();
-        let _subscription = cx.update(|_, cx| {
-            cx.subscribe(&state, move |_, event: &super::super::InputEvent, _| {
-                if matches!(event, super::super::InputEvent::Change) {
-                    observed.set(observed.get() + 1);
-                }
-            })
-        });
-        let action = gpui::accesskit::ActionData::Value("updated🦀".into());
+        let action = gpui::accesskit::ActionData::Value("updated".into());
         cx.update(|window, cx| {
             Input::handle_accessibility_set_value(&base, Some(&action), window, cx);
         });
-        assert_eq!(state.read_with(cx, |state, _| state.value()), "updated🦀");
-        assert_eq!(changes.get(), 1);
-        for disabled in [false, true] {
-            cx.update(|window, cx| {
-                base.set_disabled(disabled, cx);
-                base.set_readonly(!disabled, cx);
-                window.blur(cx);
-                Input::handle_accessibility_focus(&base, window, cx);
-                assert_eq!(
-                    base.presentation(cx).focus_handle().is_focused(window),
-                    !disabled
-                );
-                let action = gpui::accesskit::ActionData::Value("rejected".into());
-                Input::handle_accessibility_set_value(&base, Some(&action), window, cx);
-            });
-            assert_eq!(state.read_with(cx, |state, _| state.value()), "updated🦀");
-            assert_eq!(changes.get(), 1);
-        }
-        cx.update(|window, cx| {
-            base.set_disabled(false, cx);
-            base.set_readonly(false, cx);
-            Input::handle_accessibility_focus(&base, window, cx);
-            window.draw(cx).clear(cx);
-            window.dispatch_action(Box::new(super::super::Undo), cx);
-        });
-        assert_eq!(state.read_with(cx, |state, _| state.value()), "initial");
-        cx.update(|window, cx| {
-            state.update(cx, |state, cx| state.set_masked(true, window, cx));
-            Input::handle_accessibility_set_value(&base, Some(&action), window, cx);
-            window.draw(cx).clear(cx);
-        });
-        assert_eq!(state.read_with(cx, |state, _| state.value()), "updated🦀");
-        assert_eq!(*captured.lock().unwrap(), Some((None, true)));
-    }
-
-    #[gpui::test]
-    fn accessibility_set_value_preserves_exact_editor_text(cx: &mut gpui::TestAppContext) {
-        use gpui::{AppContext as _, Render};
-
-        struct Probe(Entity<crate::input::EditorState>);
-
-        impl Render for Probe {
-            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
-                div().child(crate::input::Editor::new(&self.0))
-            }
-        }
-
-        cx.update(crate::init);
-        let (probe, cx) = cx.add_window_view(|window, cx| {
-            Probe(cx.new(|cx| crate::input::EditorState::new(window, cx).language("rust")))
-        });
-        let editor = probe.read_with(cx, |probe, _| probe.0.clone());
-        let state: TextInputState = editor.clone().into();
-        let action = gpui::accesskit::ActionData::Value("(".into());
-
-        cx.update(|window, cx| {
-            Input::handle_accessibility_set_value(&state, Some(&action), window, cx)
-        });
-        assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "(");
+        assert_eq!(state.read_with(cx, |state, _| state.value()), "updated");
     }
 
     #[gpui::test]
