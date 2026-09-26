@@ -1504,6 +1504,32 @@ pub(crate) struct Table {
     pub(crate) children: Vec<TableRow>,
     pub(crate) column_aligns: Vec<ColumnumnAlign>,
     pub(crate) span: Option<Span>,
+    /// The [`TableData`] handed to the `table_actions` hook, kept between
+    /// frames; see [`Table::cached_table_data`].
+    pub(crate) table_data_cache: TableDataCache,
+}
+
+/// Derived state: a clone starts empty and rebuilds, and it is invisible to
+/// `Debug` and equality.
+#[derive(Default)]
+pub(crate) struct TableDataCache(Mutex<Option<Arc<TableData>>>);
+
+impl Clone for TableDataCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for TableDataCache {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for TableDataCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TableDataCache")
+    }
 }
 
 /// Plain snapshot of a rendered Markdown table, passed to the
@@ -1590,6 +1616,24 @@ impl Table {
             markdown: self.to_markdown(),
             span: self.span.map(|span| span.start..span.end),
         }
+    }
+
+    /// [`Self::table_data`], built on the first render and reused by later
+    /// ones: serializing every cell and the whole table back to Markdown on
+    /// every scroll or stream frame is wasted work, and a parsed table does
+    /// not change after parsing (a reparse builds a new one).
+    fn cached_table_data(&self) -> Arc<TableData> {
+        if let Ok(cache) = self.table_data_cache.0.lock()
+            && let Some(cached) = cache.as_ref()
+        {
+            return cached.clone();
+        }
+
+        let data = Arc::new(self.table_data());
+        if let Ok(mut cache) = self.table_data_cache.0.lock() {
+            *cache = Some(data.clone());
+        }
+        data
     }
 }
 
@@ -3140,7 +3184,7 @@ impl BlockNode {
                 div()
                     .id(block_element_id("table-actions", table.span, options.ix))
                     .mt_1()
-                    .child(f(&table.table_data(), window, cx))
+                    .child(f(&*table.cached_table_data(), window, cx))
             }))
             .into_any_element()
     }
@@ -3235,7 +3279,7 @@ impl BlockNode {
                 div()
                     .id(block_element_id("table-actions", table.span, options.ix))
                     .mt_1()
-                    .child(f(&table.table_data(), window, cx))
+                    .child(f(&*table.cached_table_data(), window, cx))
             }))
             .into_any_element()
     }
@@ -3575,6 +3619,7 @@ mod tests {
             }],
             column_aligns: vec![],
             span: None,
+            table_data_cache: TableDataCache::default(),
         };
         let node_cx = NodeContext::default();
 
@@ -4022,6 +4067,7 @@ mod tests {
             ],
             column_aligns: vec![ColumnumnAlign::Left, ColumnumnAlign::Right],
             span: None,
+            table_data_cache: TableDataCache::default(),
         };
         let block = BlockNode::Table(table);
         assert_eq!(
@@ -4047,6 +4093,7 @@ mod tests {
                 .collect(),
             column_aligns,
             span: None,
+            table_data_cache: TableDataCache::default(),
         }
     }
 
