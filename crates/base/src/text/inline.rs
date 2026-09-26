@@ -223,7 +223,6 @@ pub(super) struct Inline {
 /// The inline text state, used RefCell to keep the selection state.
 #[derive(Debug, Default, PartialEq)]
 pub(crate) struct InlineState {
-    hovered_index: Option<usize>,
     /// The text that actually rendering, matched with selection.
     pub(super) text: SharedString,
     pub(super) selection: Option<Selection>,
@@ -480,6 +479,19 @@ impl Inline {
         }
 
         None
+    }
+
+    /// Get the range of the link at given mouse position.
+    fn link_range_for_position(
+        layout: &TextLayout,
+        links: &[(Range<usize>, LinkMark)],
+        position: Point<Pixels>,
+    ) -> Option<Range<usize>> {
+        let offset = layout.index_for_position(position).ok()?;
+        links
+            .iter()
+            .find(|(range, _)| range.contains(&offset))
+            .map(|(range, _)| range.clone())
     }
 
     /// Paint selected bounds for debug.
@@ -944,8 +956,9 @@ impl Element for Inline {
         }
 
         // link cursor pointer
-        let mouse_position = window.mouse_position();
-        if let Some(_) = Self::link_for_position(&text_layout, &self.links, mouse_position) {
+        let hovered_link =
+            Self::link_range_for_position(&text_layout, &self.links, window.mouse_position());
+        if hovered_link.is_some() {
             window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
         }
 
@@ -1060,25 +1073,29 @@ impl Element for Inline {
             });
         }
 
-        // mouse move, update hovered link
-        window.on_mouse_event({
-            let hitbox = hitbox.clone();
-            let text_layout = text_layout.clone();
-            let mut hovered_index = state.hovered_index;
-            move |event: &MouseMoveEvent, phase, window, cx| {
-                if !phase.bubble() || !hitbox.is_hovered(window) {
-                    return;
-                }
+        // Mouse move: repaint only when the pointer enters, leaves or moves
+        // between links, so the link cursor follows it. Hovering plain text
+        // changes nothing painted.
+        if !self.links.is_empty() {
+            window.on_mouse_event({
+                let hitbox = hitbox.clone();
+                let text_layout = text_layout.clone();
+                let links = self.links.clone();
+                let mut hovered_link = hovered_link;
+                move |event: &MouseMoveEvent, phase, window, cx| {
+                    if !phase.bubble() || !hitbox.is_hovered(window) {
+                        return;
+                    }
 
-                let current = hovered_index;
-                let updated = text_layout.index_for_position(event.position).ok();
-                //  notify update when hovering over different links
-                if current != updated {
-                    hovered_index = updated;
-                    cx.notify(current_view);
+                    let updated =
+                        Self::link_range_for_position(&text_layout, &links, event.position);
+                    if hovered_link != updated {
+                        hovered_link = updated;
+                        cx.notify(current_view);
+                    }
                 }
-            }
-        });
+            });
+        }
 
         if !is_selection {
             // click to open link
