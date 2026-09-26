@@ -81,10 +81,12 @@ impl RenderOnce for Tree {
             .child(
                 gpui_base::Tree::new(&self.state)
                     .item(move |ix, entry, entry_state, window, cx| {
-                        let entry = entry.clone();
+                        // Capture only the id: cloning the entry would deep-clone
+                        // its whole subtree for every visible row on every frame.
+                        let id = entry.item().id.clone();
                         let context_menu_builder = context_menu_builder.clone();
                         let context_menu_state = state.clone();
-                        let item = render_item(ix, &entry, entry_state.is_selected(), window, cx)
+                        let item = render_item(ix, entry, entry_state.is_selected(), window, cx)
                             .disabled(entry.is_disabled())
                             .selected(entry_state.is_selected())
                             .secondary_selected(entry_state.is_right_clicked());
@@ -92,14 +94,20 @@ impl RenderOnce for Tree {
                         div()
                             .child(item)
                             .context_menu(move |menu, window, cx| {
-                                let Some(build) = context_menu_builder
-                                    .as_ref()
-                                    .filter(|_| !entry.is_disabled())
-                                else {
+                                let Some(build) = context_menu_builder.as_ref() else {
                                     return menu;
                                 };
-                                context_menu_state
-                                    .update(cx, |_, cx| build(ix, &entry, menu, window, cx))
+                                context_menu_state.update(cx, |state, cx| {
+                                    let Some(entry) = state
+                                        .entry(ix)
+                                        .filter(|entry| entry.item().id == id)
+                                        .filter(|entry| !entry.is_disabled())
+                                        .cloned()
+                                    else {
+                                        return menu;
+                                    };
+                                    build(ix, &entry, menu, window, cx)
+                                })
                             })
                             .into_any_element()
                     })
