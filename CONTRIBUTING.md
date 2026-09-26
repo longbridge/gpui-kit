@@ -98,8 +98,8 @@ For Windows, you can run the following command in PowerShell:
 
 ### Accessibility-driven UI testing
 
-Use accessibility-driven interaction as the default manual UI testing method
-for focus, keyboard, selection, menu, and input behavior. See
+When manual verification is needed for focus, keyboard, selection, menu, or
+input behavior, use accessibility-driven interaction by default. See
 [Accessibility-driven UI testing](docs/ACCESSIBILITY-UI-TESTING.md) for the
 required Story app launch method, accessibility-tree workflow, and completion
 evidence.
