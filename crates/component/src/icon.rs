@@ -143,6 +143,12 @@ impl Icon {
         &self.source
     }
 
+    /// Whether `other` takes up exactly the same space as this icon. The
+    /// source, color and transformation change only what it paints.
+    pub(crate) fn same_layout(&self, other: &Self) -> bool {
+        self.style == other.style && self.size == other.size
+    }
+
     /// Create a new view for the icon
     pub fn view(self, cx: &mut App) -> Entity<Icon> {
         cx.new(|_| self)
