@@ -519,14 +519,13 @@ where
             if !labeled.get(i).copied().unwrap_or(false) {
                 return None;
             }
-            x_scale.tick(&x_fn(d)).map(|x_tick| {
+            x_scale.tick_at(i).map(|x_tick| {
                 let align = match i {
                     0 if point_count == 1 => TextAlign::Center,
                     0 => TextAlign::Left,
                     i if i == point_count - 1 => TextAlign::Right,
                     _ => TextAlign::Center,
                 };
-                // Call x_fn again to get an owned value for the label text.
                 AxisText::new(x_fn(d).into(), x_tick, color).align(align)
             })
         })
