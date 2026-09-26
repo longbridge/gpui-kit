@@ -10,7 +10,7 @@ use num_traits::{Num, ToPrimitive};
 use crate::{
     ActiveTheme,
     plot::{
-        AXIS_GAP, AxisLabelPlacement, PathCaches, Plot, PlotAxis, StrokeStyle,
+        AxisLabelPlacement, PathCaches, Plot, PlotAxis, StrokeStyle,
         scale::{Scale, ScaleLinear, ScalePoint, Sealed},
         shape::Line,
         tooltip::{CrossLine, Dot, Tooltip, TooltipState},
@@ -18,9 +18,9 @@ use crate::{
 };
 
 use super::{
-    HOVER_DOT_SIZE, HOVER_HALO_SIZE, PointAxes, TooltipContent, ValueExtent, axis_point_count,
-    build_point_x_labels, caller_id, labeled_items, pinned_plot_mask, point_range,
-    point_value_scale,
+    AXIS_GAP, HOVER_DOT_SIZE, HOVER_HALO_SIZE, PointAxes, TooltipContent, ValueExtent,
+    axis_point_count, build_point_x_labels, caller_id, labeled_items, pinned_plot_mask,
+    point_range, point_value_scale,
 };
 
 #[derive(IntoPlot)]
@@ -411,7 +411,7 @@ where
                 label.tick -= px(left);
                 label
             });
-            axis = axis.x(height).x_label(labels);
+            axis = axis.x_axis_at(height).x_label(labels);
         }
         axis.paint(&axis_bounds, window, cx);
 

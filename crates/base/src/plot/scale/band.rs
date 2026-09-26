@@ -17,6 +17,8 @@ pub struct ScaleBand<T> {
     indices: HashMap<T, usize>,
     /// The bands laid out when more than the domain's; see [`Self::band_count`].
     band_count: usize,
+    /// The widest a band may be; see [`Self::max_band_width`].
+    max_band_width: Option<f32>,
     range_diff: f32,
     padding_inner: f32,
     padding_outer: f32,
@@ -42,15 +44,26 @@ impl<T> ScaleBand<T> {
         Self {
             indices,
             band_count: 0,
+            max_band_width: None,
             range_diff,
             padding_inner: 0.,
             padding_outer: 0.,
         }
     }
 
-    /// Get the width of the band.
+    /// The width of a band: the range divided among the bands, less the inner
+    /// padding, and no wider than [`Self::max_band_width`] when set.
     pub fn band_width(&self) -> f32 {
-        (self.avg_width() * (1. - self.padding_inner)).min(30.)
+        let width = self.avg_width() * (1. - self.padding_inner);
+        self.max_band_width
+            .map_or(width, |max_band_width| width.min(max_band_width))
+    }
+
+    /// Cap the band width at `width`, so a few bands in a wide range stay
+    /// narrow; a band still starts where it would uncapped. Unset by default.
+    pub fn max_band_width(mut self, width: f32) -> Self {
+        self.max_band_width = Some(width);
+        self
     }
 
     /// The distance between the starts of two adjacent bands: the band width
@@ -160,6 +173,15 @@ mod tests {
         assert_eq!(scale.tick(&2), Some(30.));
         assert_eq!(scale.tick(&3), Some(60.));
         assert_eq!(scale.band_width(), 30.);
+    }
+
+    #[test]
+    fn max_band_width_caps_the_width_but_not_the_ticks() {
+        let wide = ScaleBand::new(vec![1, 2], vec![0., 200.]);
+        let capped = ScaleBand::new(vec![1, 2], vec![0., 200.]).max_band_width(30.);
+        assert_eq!(wide.band_width(), 100.);
+        assert_eq!(capped.band_width(), 30.);
+        assert_eq!(capped.tick(&2), wide.tick(&2));
     }
 
     #[test]

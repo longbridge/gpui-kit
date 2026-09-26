@@ -142,6 +142,15 @@ where
     (ScaleLinear::new(domain, vec![height - bottom, top]), extent)
 }
 
+/// The height the charts reserve under the plot for x-axis labels, which they
+/// draw at the default [`TEXT_SIZE`]: [`axis_gutter`](crate::plot::axis_gutter)
+/// for that size.
+pub(crate) const AXIS_GAP: f32 = TEXT_SIZE + TEXT_GAP * 4.;
+
+/// The widest a bar or candle is by default, in pixels, however few bands
+/// share the width; see `BarChart::max_band_width`.
+pub(crate) const MAX_BAND_WIDTH: f32 = 30.;
+
 /// The least space kept beside the plot for value-axis tick labels drawn
 /// outside it, in pixels; wider labels widen it (see [`value_axis_gap`]).
 pub(crate) const VALUE_AXIS_GAP: f32 = 32.;

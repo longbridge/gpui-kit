@@ -11,13 +11,15 @@ use rust_i18n::t;
 use crate::{
     ActiveTheme,
     plot::{
-        AXIS_GAP, Grid, Plot, PlotAxis, origin_point,
+        Grid, Plot, PlotAxis, origin_point,
         scale::{Scale, ScaleBand, ScaleLinear, Sealed},
         tooltip::{CrossLine, Tooltip, TooltipState},
     },
 };
 
-use super::{TooltipContent, build_band_labels, caller_id, labeled_items};
+use super::{
+    AXIS_GAP, MAX_BAND_WIDTH, TooltipContent, build_band_labels, caller_id, labeled_items,
+};
 
 #[derive(IntoPlot)]
 pub struct CandlestickChart<T, X, Y>
@@ -34,6 +36,7 @@ where
     close: Option<Rc<dyn Fn(&T) -> Y>>,
     tick_margin: usize,
     body_width_ratio: f32,
+    max_band_width: Pixels,
     x_axis: bool,
     grid: bool,
     bullish: Option<Hsla>,
@@ -62,6 +65,7 @@ where
             close: None,
             tick_margin: 1,
             body_width_ratio: 0.8,
+            max_band_width: px(MAX_BAND_WIDTH),
             x_axis: true,
             grid: true,
             bullish: None,
@@ -179,6 +183,15 @@ where
         self
     }
 
+    /// Keep every candle's band at most `width` wide, so a few candles across
+    /// a wide chart stay narrow.
+    ///
+    /// Default is 30px.
+    pub fn max_band_width(mut self, width: impl Into<Pixels>) -> Self {
+        self.max_band_width = width.into();
+        self
+    }
+
     /// Show or hide the x-axis line and labels.
     ///
     /// Default is true.
@@ -226,6 +239,7 @@ where
                 self.data.iter().map(|v| x_fn(v)).collect(),
                 vec![0., bounds.size.width.as_f32()],
             )
+            .max_band_width(self.max_band_width.as_f32())
             .padding_inner(0.4)
             .padding_outer(0.2),
         )
@@ -280,14 +294,14 @@ where
                 &labeled_items(self.data.len(), None, self.tick_margin),
                 cx.theme().muted_foreground,
             );
-            axis = axis.x(height).x_label(labels);
+            axis = axis.x_axis_at(height).x_label(labels);
         }
         axis.paint(&bounds, window, cx);
 
         // Draw grid
         if self.grid {
             Grid::new()
-                .y((0..=3).map(|i| height * i as f32 / 4.0).collect())
+                .y((0..=3).map(|i| height * i as f32 / 4.0))
                 .stroke(cx.theme().border)
                 .dash_array(&[px(4.), px(2.)])
                 .paint(&bounds, window);

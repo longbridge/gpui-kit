@@ -3,7 +3,8 @@
 use gpui_kit::component::{
     ActiveTheme,
     plot::{
-        AXIS_GAP, AxisText, Grid, IntoPlot, Plot, PlotAxis,
+        AxisText, Grid, IntoPlot, Plot, PlotAxis, axis_gutter,
+        label::TEXT_SIZE,
         scale::{Scale, ScaleBand, ScaleLinear, ScaleOrdinal},
         shape::{Bar, Stack, StackSeries},
         tooltip::{CrossLine, Tooltip, TooltipState},
@@ -12,6 +13,12 @@ use gpui_kit::component::{
 use gpui_kit::*;
 
 use super::DailyDevice;
+
+/// The height kept under the plot for the x-axis labels, drawn at the default
+/// label size.
+fn axis_gap() -> f32 {
+    axis_gutter(px(TEXT_SIZE))
+}
 
 #[derive(IntoPlot)]
 pub struct StackedBarChart {
@@ -41,13 +48,14 @@ impl StackedBarChart {
 impl Plot for StackedBarChart {
     fn paint(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         let width = bounds.size.width.as_f32();
-        let height = bounds.size.height.as_f32() - AXIS_GAP;
+        let height = bounds.size.height.as_f32() - axis_gap();
 
         // 2. Calculate X/Y scales
         let x = ScaleBand::new(
             self.data.iter().map(|v| v.date.clone()).collect(),
             vec![0., width],
         )
+        .max_band_width(30.)
         .padding_inner(0.4)
         .padding_outer(0.2);
         let band_width = x.band_width();
@@ -72,7 +80,7 @@ impl Plot for StackedBarChart {
             })
         });
         PlotAxis::new()
-            .x(height)
+            .x_axis_at(height)
             .x_label(x_label)
             .stroke(cx.theme().border)
             .paint(&bounds, window, cx);
@@ -89,7 +97,7 @@ impl Plot for StackedBarChart {
 
         // 5. Draw grid lines
         Grid::new()
-            .y((0..=3).map(|i| height * i as f32 / 4.0).collect())
+            .y((0..=3).map(|i| height * i as f32 / 4.0))
             .stroke(cx.theme().border)
             .dash_array(&[px(4.), px(2.)])
             .paint(&bounds, window);
@@ -130,12 +138,13 @@ impl Plot for StackedBarChart {
             self.data.iter().map(|v| v.date.clone()).collect(),
             vec![0., bounds.size.width.as_f32()],
         )
+        .max_band_width(30.)
         .padding_inner(0.4)
         .padding_outer(0.2);
         let band_width = x.band_width();
 
         // Ignore the x-axis label gutter so hovering the labels doesn't show a tooltip.
-        if position.y.as_f32() > bounds.size.height.as_f32() - AXIS_GAP {
+        if position.y.as_f32() > bounds.size.height.as_f32() - axis_gap() {
             return None;
         }
 
@@ -177,6 +186,7 @@ impl Plot for StackedBarChart {
             self.data.iter().map(|v| v.date.clone()).collect(),
             vec![0., bounds.size.width.as_f32()],
         )
+        .max_band_width(30.)
         .padding_inner(0.4)
         .padding_outer(0.2)
         .band_width();
@@ -187,7 +197,7 @@ impl Plot for StackedBarChart {
             .gap(px(8.))
             .cross_line(
                 CrossLine::new(state.cross_line)
-                    .height(bounds.size.height.as_f32() - AXIS_GAP)
+                    .height(bounds.size.height.as_f32() - axis_gap())
                     .band(px(band_width)),
             )
             .title(d.date.clone());

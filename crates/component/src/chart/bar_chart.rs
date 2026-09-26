@@ -10,7 +10,7 @@ use num_traits::{Num, ToPrimitive};
 use crate::{
     ActiveTheme,
     plot::{
-        AXIS_GAP, AxisLabelPlacement, AxisLabelSide, AxisText, Grid, Plot, PlotAxis, PlotLabel,
+        AxisLabelPlacement, AxisLabelSide, AxisText, Grid, Plot, PlotAxis, PlotLabel,
         label::{TEXT_GAP, TEXT_HEIGHT, TEXT_SIZE, Text, measure_text_width},
         scale::{Scale, ScaleBand, ScaleLinear, Sealed},
         shape::{Bar, BarAlignment},
@@ -19,8 +19,8 @@ use crate::{
 };
 
 use super::{
-    TickFormat, TooltipContent, VALUE_AXIS_GAP, build_band_labels, caller_id, format_tick,
-    labeled_items, value_axis_gap,
+    AXIS_GAP, MAX_BAND_WIDTH, TickFormat, TooltipContent, VALUE_AXIS_GAP, build_band_labels,
+    caller_id, format_tick, labeled_items, value_axis_gap,
 };
 
 /// How much the bars away from the hovered one fade, as a share of their opacity.
@@ -65,6 +65,7 @@ where
     corner_radii: Corners<Pixels>,
     padding_inner: f32,
     padding_outer: f32,
+    max_band_width: Pixels,
     min_length: f32,
     id: ElementId,
     interactive: bool,
@@ -111,6 +112,7 @@ where
             corner_radii: Corners::all(px(0.)),
             padding_inner: 0.4,
             padding_outer: 0.2,
+            max_band_width: px(MAX_BAND_WIDTH),
             min_length: 0.,
             id: caller_id(),
             interactive: true,
@@ -433,6 +435,15 @@ where
         self
     }
 
+    /// Keep every bar at most `width` wide, so a few bars across a wide chart
+    /// stay narrow instead of filling their bands.
+    ///
+    /// Default is 30px.
+    pub fn max_band_width(mut self, width: impl Into<Pixels>) -> Self {
+        self.max_band_width = width.into();
+        self
+    }
+
     /// Draw every bar at least `length` pixels long, so a zero or tiny value
     /// still shows a stub instead of disappearing into the baseline.
     ///
@@ -464,6 +475,7 @@ where
                 vec![0., extent],
             )
             .band_count(self.band_count.unwrap_or(0))
+            .max_band_width(self.max_band_width.as_f32())
             .padding_inner(self.padding_inner)
             .padding_outer(self.padding_outer),
         )
@@ -788,7 +800,7 @@ where
         if self.label_axis {
             match alignment {
                 BarAlignment::Bottom | BarAlignment::Top => {
-                    axis = axis.x(zero_pixel);
+                    axis = axis.x_axis_at(zero_pixel);
 
                     // Labels are placed one at a time rather than through
                     // `x_label`, because a chart with negative values needs them
@@ -837,7 +849,7 @@ where
                         (AxisLabelSide::End, TextAlign::Left)
                     };
                     axis = axis
-                        .y(zero_pixel)
+                        .y_axis_at(zero_pixel)
                         .y_label_side(side)
                         .y_label(labels.into_iter().map(|t| t.align(align)));
                 }
@@ -885,12 +897,12 @@ where
                     let value_axis = if is_horizontal {
                         PlotAxis::new()
                             .x_axis(false)
-                            .x(px(total_height - VALUE_AXIS_GAP))
+                            .x_axis_at(px(total_height - VALUE_AXIS_GAP))
                             .x_label(labels.map(|t| t.align(TextAlign::Center)))
                     } else {
                         PlotAxis::new()
                             .y_axis(false)
-                            .y(px(value_axis_gap - TEXT_GAP * 2.))
+                            .y_axis_at(px(value_axis_gap - TEXT_GAP * 2.))
                             .y_label(labels.map(|t| t.align(TextAlign::Right)))
                     };
                     value_axis.paint(&bounds, window, cx);
