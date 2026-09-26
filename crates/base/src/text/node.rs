@@ -1509,14 +1509,20 @@ pub(crate) struct Table {
     pub(crate) table_data_cache: TableDataCache,
 }
 
-/// Derived state: a clone starts empty and rebuilds, and it is invisible to
-/// `Debug` and equality.
+/// Derived state, invisible to `Debug` and equality.
+///
+/// A clone carries what was cached so far: a parsed table does not change
+/// after parsing (cell mutations only touch selection state, which
+/// [`TableData`] does not read), so a clone has the same data. Streaming
+/// reparses deep-clone the document on every append, and an empty clone made
+/// every table rebuild.
 #[derive(Default)]
 pub(crate) struct TableDataCache(Mutex<Option<Arc<TableData>>>);
 
 impl Clone for TableDataCache {
     fn clone(&self) -> Self {
-        Self::default()
+        let cached = self.0.lock().ok().and_then(|cache| cache.clone());
+        Self(Mutex::new(cached))
     }
 }
 
@@ -4170,6 +4176,20 @@ mod tests {
         assert_eq!(data.rows, vec![vec!["Alice", "30"]]);
         assert_eq!(data.markdown, table.to_markdown());
         assert_eq!(data.span, Some(4..42));
+    }
+
+    #[test]
+    fn cloned_table_keeps_cached_table_data() {
+        // Streaming appends deep-clone every block; the clone must reuse the
+        // cached snapshot instead of rebuilding it.
+        let table = table_of(
+            vec![vec![plain_cell("Name")], vec![plain_cell("Alice")]],
+            vec![ColumnumnAlign::Left],
+        );
+        let data = table.cached_table_data();
+
+        let cloned = table.clone();
+        assert!(Arc::ptr_eq(&data, &cloned.cached_table_data()));
     }
 
     #[test]
