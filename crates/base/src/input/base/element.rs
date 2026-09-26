@@ -120,6 +120,19 @@ struct EditorScrollbarLayout {
     scroll_size: Size<Pixels>,
 }
 
+/// What the unwrapped width of the longest line depends on. While it holds,
+/// prepaint reuses the stored width instead of copying the line and asking
+/// the text system for it again on every frame.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct LongestLineKey {
+    document_revision: u64,
+    row: usize,
+    len: usize,
+    font: gpui::Font,
+    text_size: Pixels,
+    wrap_width: Option<Pixels>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct EditorScrollbarSnapshot {
     layout: EditorScrollbarLayout,
@@ -2609,23 +2622,44 @@ impl<M: InputModeKind> Element for TextElement<M> {
         // 2. Multi-line with soft wrap disabled.
         if state.is_single_line() || !state.soft_wrap {
             let longest_row = state.display_map.longest_row();
-            let longest_line: SharedString = state.text.slice_line(longest_row).to_string().into();
-            longest_line_width = window
-                .text_system()
-                .shape_line(
-                    longest_line.clone(),
-                    text_size,
-                    &[TextRun {
-                        len: longest_line.len(),
-                        font: style.font(),
-                        color: gpui::black(),
-                        background_color: None,
-                        underline: None,
-                        strikethrough: None,
-                    }],
-                    wrap_width,
-                )
-                .width;
+            let longest_line = state.text.slice_line(longest_row);
+            let key = LongestLineKey {
+                document_revision: state.document_revision,
+                row: longest_row,
+                len: longest_line.len(),
+                font: style.font(),
+                text_size,
+                wrap_width,
+            };
+            let cached = state
+                .longest_line_width
+                .take()
+                .filter(|(cached_key, _)| *cached_key == key);
+            longest_line_width = match cached {
+                Some((_, width)) => width,
+                None => {
+                    let longest_line: SharedString = longest_line.to_string().into();
+                    window
+                        .text_system()
+                        .shape_line(
+                            longest_line.clone(),
+                            text_size,
+                            &[TextRun {
+                                len: longest_line.len(),
+                                font: key.font.clone(),
+                                color: gpui::black(),
+                                background_color: None,
+                                underline: None,
+                                strikethrough: None,
+                            }],
+                            wrap_width,
+                        )
+                        .width
+                }
+            };
+            state
+                .longest_line_width
+                .set(Some((key, longest_line_width)));
         }
         if state.tokens_visible() {
             longest_line_width = if let Some(width) = wrap_width {
