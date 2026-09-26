@@ -465,7 +465,25 @@ fn selection_range_for_run(
         return None;
     }
 
+    if run.text.is_empty() {
+        return None;
+    }
+
     let line_height = run.layout.line_height();
+    // Each character is tested with its row's top and height, so a run whose
+    // rows all miss the band, or all lie strictly inside it with no endpoint
+    // on any row, has the same answer for every character. Decide those
+    // without the walk below, which scans the layout twice per character.
+    let (rows_top, rows_bottom) = text_rows_extent(&run.layout, line_height);
+    let band_top = selection_start.y.min(selection_end.y);
+    let band_bottom = selection_start.y.max(selection_end.y);
+    if rows_bottom <= band_top || rows_top > band_bottom {
+        return None;
+    }
+    if band_top < rows_top && band_bottom >= rows_bottom {
+        return Some(0..run.text.len());
+    }
+
     let mut range = None;
     for (offset, character) in run.text.char_indices() {
         let next_offset = offset + character.len_utf8();
@@ -490,6 +508,28 @@ fn selection_range_for_run(
         }
     }
     range
+}
+
+/// The top of the first laid-out row of `text_layout` and the bottom of its
+/// last one, each row `line_height` tall as a selection band test sees it.
+///
+/// Both ends are accumulated the way [`TextLayout::position_for_index`] places
+/// rows, so comparisons against them agree with a per-character walk to the
+/// bit. The last laid-out row may hold no character such a walk tests (a
+/// trailing empty line, or a row whose only character is placed at the end of
+/// the row before it); callers treat the extent as covering, never as exact.
+pub(crate) fn text_rows_extent(text_layout: &TextLayout, line_height: Pixels) -> (Pixels, Pixels) {
+    let top = text_layout.bounds().top();
+    let layout_line_height = text_layout.line_height();
+    let lines = text_layout.line_layouts();
+    let mut last_line_top = top;
+    for line in lines.iter().take(lines.len().saturating_sub(1)) {
+        last_line_top += line.size(layout_line_height).height;
+    }
+    let last_row_top = lines.last().map_or(top, |line| {
+        last_line_top + line.wrap_boundaries.len() as f32 * layout_line_height
+    });
+    (top, last_row_top + line_height)
 }
 
 fn points_for_multi_click(

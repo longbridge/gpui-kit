@@ -25,6 +25,7 @@ use crate::{
     text::selection::word_range_at,
     text::state::LineSpan,
     text::text_view::{LinkClickHandlerFn, handle_link_click},
+    text_selection::text_rows_extent,
 };
 
 /// The style applied to one range of inline text.
@@ -610,7 +611,7 @@ impl Inline {
         }
         let (rows_top, rows_bottom) = match self.selection_bounds {
             Some(bounds) => (bounds.top(), bounds.top() + bounds.size.height),
-            None => Self::selection_rows_extent(text_layout, line_height),
+            None => text_rows_extent(text_layout, line_height),
         };
         let band_top = selection_start.y.min(selection_end.y);
         let band_bottom = selection_start.y.max(selection_end.y);
@@ -667,28 +668,6 @@ impl Inline {
         }
 
         (true, true, selection)
-    }
-
-    /// The top of the first laid-out row and the bottom of the last one, each
-    /// row `line_height` tall as [`point_in_text_selection`] tests it.
-    ///
-    /// Both ends are accumulated the way [`TextLayout::position_for_index`]
-    /// places rows, so comparisons against them agree with the per-character
-    /// walk to the bit. The last laid-out row may hold no character the walk
-    /// tests (a trailing empty line); covering it only makes the fast paths
-    /// fall back to the walk more often.
-    fn selection_rows_extent(text_layout: &TextLayout, line_height: Pixels) -> (Pixels, Pixels) {
-        let top = text_layout.bounds().top();
-        let layout_line_height = text_layout.line_height();
-        let lines = text_layout.line_layouts();
-        let mut last_line_top = top;
-        for line in lines.iter().take(lines.len().saturating_sub(1)) {
-            last_line_top += line.size(layout_line_height).height;
-        }
-        let last_row_top = lines.last().map_or(top, |line| {
-            last_line_top + line.wrap_boundaries.len() as f32 * layout_line_height
-        });
-        (top, last_row_top + line_height)
     }
 
     /// One box per laid-out row, from the row's start to its last character,
@@ -1619,7 +1598,7 @@ mod range_highlight_tests {
     /// trailing empty line, or a last row whose only character the walk
     /// places at the end of the row before it, holds no row the walk tests.
     #[test]
-    fn selection_rows_extent_matches_the_character_walk() {
+    fn text_rows_extent_matches_the_character_walk() {
         let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
         in_prepaint(&mut app, |window, cx| {
             let style = TextStyle {
@@ -1660,8 +1639,7 @@ mod range_highlight_tests {
                     let top = rows_y.clone().fold(Pixels::MAX, Pixels::min);
                     let bottom = rows_y.fold(Pixels::MIN, Pixels::max) + line_height;
 
-                    let (rows_top, rows_bottom) =
-                        Inline::selection_rows_extent(&layout, line_height);
+                    let (rows_top, rows_bottom) = text_rows_extent(&layout, line_height);
                     let context = format!("{text:?} at {wrap_width}px");
                     assert_eq!(rows_top, top, "top of {context}");
                     assert!(rows_bottom >= bottom, "bottom of {context}");
