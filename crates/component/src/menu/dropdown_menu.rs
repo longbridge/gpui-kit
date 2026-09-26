@@ -155,9 +155,8 @@ where
                         // lives as long as `menu`, which `menu_state` owns, so a
                         // strong capture would close the cycle
                         // `menu_state -> menu -> listener -> menu_state` and leak
-                        // the menu and popover state (keeping the popover's
-                        // deferred context registered) when the trigger stops
-                        // being rendered while the menu is open.
+                        // the `PopupMenu` and `DropdownMenuState` when the trigger
+                        // stops being rendered while the menu is open.
                         let popover_state = cx.entity().downgrade();
                         window
                             .subscribe(&menu, cx, {
@@ -298,10 +297,10 @@ impl Element for TriggerFocus {
 mod tests {
     use super::*;
     use gpui::{
-        KeyBinding, MouseButton, ParentElement as _, Render, TestAppContext, actions, div, point,
-        px,
+        KeyBinding, MouseButton, ParentElement as _, Render, TestAppContext, WeakEntity, actions,
+        div, point, px,
     };
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
     actions!(dropdown_menu_test, [CopyText]);
 
@@ -335,20 +334,44 @@ mod tests {
         }
     }
 
+    /// Records the `PopupMenu` the dropdown builds, so a test can observe
+    /// its release through a weak handle.
+    struct MenuProbeRoot {
+        menu: Rc<RefCell<Option<WeakEntity<PopupMenu>>>>,
+    }
+
+    impl Render for MenuProbeRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let slot = self.menu.clone();
+            div().size_full().child(
+                Button::new("trigger")
+                    .label("Edit")
+                    .w(px(100.))
+                    .h(px(30.))
+                    .dropdown_menu(move |menu, _, cx| {
+                        *slot.borrow_mut() = Some(cx.weak_entity());
+                        menu.menu("Copy", Box::new(CopyText))
+                    }),
+            )
+        }
+    }
+
     /// Opening the menu and closing the window without dismissing it must
-    /// release the `PopupMenu`, `DropdownMenuState` and `PopoverState`
-    /// entities: the dismiss subscription lives as long as the menu, which
-    /// the dropdown state owns, so strong captures in it formed a cycle that
-    /// no element-state collection could break.
+    /// release the `PopupMenu`: the dismiss subscription lives as long as the
+    /// menu, which `DropdownMenuState` owns, so strong captures in it formed
+    /// a cycle that no element-state collection could break. The state still
+    /// holds the menu while it is open, so the menu's release also proves the
+    /// `DropdownMenuState` was released.
+    ///
+    /// This does not assert on `PopoverState`, which gpui-base keeps alive
+    /// through its own self-referencing dismiss subscription.
     #[gpui::test]
-    fn open_without_dismiss_releases_the_menu_entities(cx: &mut TestAppContext) {
+    fn open_without_dismiss_releases_the_menu(cx: &mut TestAppContext) {
         cx.update(|cx| crate::init(cx));
-        let before = cx.update(|cx| cx.leak_detector_snapshot());
+        let menu = Rc::new(RefCell::new(None::<WeakEntity<PopupMenu>>));
 
         {
-            let (_, cx) = cx.add_window_view(|_, _| TestRoot {
-                frames: Rc::new(Cell::new(0)),
-            });
+            let (_, cx) = cx.add_window_view(|_, _| MenuProbeRoot { menu: menu.clone() });
             cx.update(|window, cx| window.draw(cx).clear(cx));
 
             // Click the trigger; the menu opens and is left open.
@@ -358,13 +381,26 @@ mod tests {
                 Default::default(),
             );
             cx.run_until_parked();
+            assert!(
+                menu.borrow()
+                    .as_ref()
+                    .and_then(|menu| menu.upgrade())
+                    .is_some(),
+                "the menu must be open before the window closes"
+            );
 
             // Close the window without dismissing the menu.
             cx.update(|window, _| window.remove_window());
             cx.run_until_parked();
         }
 
-        cx.update(|cx| cx.assert_no_new_leaks(&before));
+        assert!(
+            menu.borrow()
+                .as_ref()
+                .and_then(|menu| menu.upgrade())
+                .is_none(),
+            "the PopupMenu must be released with the window"
+        );
     }
 
     #[gpui::test]
