@@ -196,6 +196,36 @@ fn dock_story_materializes_real_panels_dock_and_tabs(cx: &mut TestAppContext) {
 #[gpui::test]
 fn every_registered_story_example_materializes(cx: &mut TestAppContext) {
     cx.update(gpui_component_shell::init);
+    let surfaces = std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));
+    let registered_surfaces = surfaces.clone();
+    let selected = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
+    let selected_surface = selected.clone();
+    gpui_shell::export_module(
+        gpui_shell::HostModule::new("story-gallery-fixture")
+            .function("register_surfaces", move |args| {
+                *registered_surfaces.borrow_mut() = args
+                    .get(0)
+                    .and_then(gpui_shell::HostValue::as_array)
+                    .expect("fixture surface list")
+                    .iter()
+                    .map(|value| value.as_str().expect("surface name").to_owned())
+                    .collect();
+                Ok(gpui_shell::HostValue::Null)
+            })
+            .function("selected_surface", move |_| {
+                Ok(gpui_shell::HostValue::from(
+                    selected_surface.borrow().clone(),
+                ))
+            }),
+    )
+    .expect("register fixture host module");
+    struct FixtureModule;
+    impl Drop for FixtureModule {
+        fn drop(&mut self) {
+            gpui_shell::clear_exported_modules();
+        }
+    }
+    let _fixture_module = FixtureModule;
     let runtime = gpui_component_shell::new_isolated_runtime().expect("runtime");
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/js_story");
     let loaded = runtime
@@ -212,13 +242,42 @@ fn every_registered_story_example_materializes(cx: &mut TestAppContext) {
         ScriptRoot(view)
     });
     let mut context = VisualTestContext::from_window(*window.deref(), cx);
-    context.update(|window, cx| window.draw(cx).clear(cx));
-    context.run_until_parked();
-    context.update(|window, cx| window.draw(cx).clear(cx));
-
     let view = mounted.borrow().clone().expect("mounted view");
-    context.update(|_, cx| {
-        assert_eq!(view.read(cx).build_error(), None);
-        assert!(view.read(cx).snapshot().is_some());
-    });
+    let surfaces = surfaces.borrow().clone();
+    assert!(
+        surfaces.len() > 1,
+        "fixture must enumerate registered surfaces"
+    );
+    assert_eq!(
+        surfaces
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        surfaces.len(),
+        "fixture surfaces must be unique"
+    );
+    assert!(surfaces.iter().any(|surface| surface == "VirtualList"));
+    assert!(surfaces.iter().any(|surface| surface == "TabBar"));
+    assert!(!surfaces.iter().any(|surface| surface == "Tab"));
+    for surface in surfaces {
+        *selected.borrow_mut() = Some(surface.clone());
+        context.update(|_, cx| view.update(cx, |view, cx| view.refresh(cx)));
+        context.update(|window, cx| window.draw(cx).clear(cx));
+        context.run_until_parked();
+        context.update(|window, cx| window.draw(cx).clear(cx));
+        context.update(|_, cx| {
+            let view = view.read(cx);
+            assert_eq!(view.build_error(), None, "surface: {surface}");
+            let tree = view.snapshot().expect("surface snapshot").debug_tree();
+            if surface == "VirtualList" {
+                assert!(tree.contains("v_virtual_list"), "{surface}: {tree}");
+                assert!(tree.contains("10,000 projects"), "{surface}: {tree}");
+            } else {
+                assert!(
+                    tree.contains(&format!("fixture-{surface}-")),
+                    "{surface}: {tree}"
+                );
+            }
+        });
+    }
 }
