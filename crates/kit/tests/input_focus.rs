@@ -162,25 +162,7 @@ fn tab_cycles_keep_prefix_and_suffix_buttons_focused(cx: &mut TestAppContext) {
             press(handle, key, cx);
             assert_focus(handle, &view, destination, cx);
             if destination.ends_with("-button") {
-                // Native button activation completes on key-up. `press`
-                // dispatches only the keystroke, so send both events here.
-                cx.update_window(handle.into(), |_, window, cx| {
-                    let keystroke = gpui_kit::Keystroke::parse("enter").unwrap();
-                    window.dispatch_event(
-                        gpui_kit::PlatformInput::KeyDown(gpui_kit::KeyDownEvent {
-                            keystroke: keystroke.clone(),
-                            is_held: false,
-                            prefer_character_input: false,
-                        }),
-                        cx,
-                    );
-                    window.dispatch_event(
-                        gpui_kit::PlatformInput::KeyUp(gpui_kit::KeyUpEvent { keystroke }),
-                        cx,
-                    );
-                })
-                .unwrap();
-                cx.run_until_parked();
+                press(handle, "enter", cx);
                 assert_focus(handle, &view, destination, cx);
             } else {
                 cx.update_window(handle.into(), |_, window, cx| window.input("x", cx))

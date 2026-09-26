@@ -195,7 +195,7 @@ assert!(save.visible());
 | `window.scroll(id, delta, cx)` | 原生滚轮事件，`ScrollDelta` 保留 GPUI 的方向与单位。 |
 | `window.drag_to(from_id, to_id, cx)` | 定位两个目标，在其中心之间通过真实命中测试拖拽。 |
 | `window.drag(from, to, cx)` | 窗口坐标之间的左键拖拽，经过真实拖拽创建与放置命中测试。 |
-| `window.press("backspace", cx)` | 使用 GPUI 按键解析器发送特殊键或快捷键。 |
+| `window.press("backspace", cx)` | 使用 GPUI 按键解析器，为特殊键或快捷键发送原生 key-down/key-up 事件。 |
 | `window.input(text, cx)` | 向当前焦点逐字符输入，不自动聚焦或替换整个值。 |
 
 作用域支持 `find`、`try_find`、嵌套 `within`、`click`、`click_at`、`right_click`、
@@ -235,7 +235,8 @@ assert_eq!(window.find("agree").checked(), Some(true)); // New frame.
 ```
 
 同时断言界面状态与业务结果。验证保存的模型或发出的事件也是集成测试的一部分，
-但不能取代相关控件可见状态的验证。文本输入不模拟完整的系统 IME 组合输入；
+但不能取代相关控件可见状态的验证。包括 Enter 在内的命令按键不应通过 IME 回调注入换行文字。
+文本输入不模拟完整的系统 IME 组合输入；
 密码输入框不报告值，需要时通过应用状态验证结果。
 
 ## 查询前完成一帧
@@ -290,6 +291,7 @@ Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用�
 | --- | --- |
 | `test_macro.rs` | 普通 `#[test]` 与同步/异步 `#[gpui_kit::test]` 共存；独立、仅依赖 Kit 的 recipes 包复用相同契约 |
 | `input.rs` 与 `input/` | Input、Textarea、Editor 的编辑、剪贴板、选区、历史记录、只读切换、Unicode、多行视口、搜索替换、补全确认，以及重绘后的状态保留 |
+| `input_focus.rs` | 带静态前后缀的输入框反复 Tab/Shift-Tab 遍历、前后缀按钮的焦点与激活，以及点击 Textarea/Editor 正文后的焦点和编辑 |
 | `search.rs` | Command 禁用项跳过、循环导航、中文关键词、空结果、Action 与原始索引回调、两阶段 Escape；Combobox 搜索、单选/多选、清除、空结果恢复、禁用行为及关闭时仅一次 Confirm |
 | `disclosure.rs` | Accordion 互斥展开、折叠与实际面板几何；Stepper 内容导航；禁用展开与步骤操作；Slider 轨道点击、滑块拖动与禁用行为 |
 | `collections.rs` | Tree 点击展开、键盘展开/折叠与选择；DataTable 行选择、键盘虚拟滚动与滚轮滚动 |
@@ -303,10 +305,24 @@ Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用�
 不支持的属性保持不可用，不提供手填测试值的覆盖入口。
 
 [Input 回归测试范例](https://github.com/longbridge/gpui-kit/tree/main/crates/kit/tests/input)
-展示了如何把手工编辑步骤变成可重复的 UI 测试。运行命令：
-`cargo test -p gpui-kit --features test-support --test input --locked`。
-每个流程都操作实际渲染的组件，并在关键步骤检查结果。范例说明了何时用公开状态读取
-补充原生快照，以及输入法、辅助功能动作和像素显示仍需哪些平台验证。
+展示了如何把手工编辑步骤变成可重复的 UI 测试。在仓库根目录运行编辑和焦点两个目标，
+或选择单个流程：
+
+```sh
+cargo test -p gpui-kit --features test-support --test input --test input_focus --locked
+cargo test -p gpui-kit --features test-support --test input --locked -- history::paste_is_atomic_and_separate_from_surrounding_typing --exact
+cargo test -p gpui-kit --features test-support --test input_focus --locked -- reverse_tab_cycles_three_inputs_with_passive_addons --exact
+```
+
+在合并运行命令后追加 `-- --list`，可列出用例而不执行。
+这些命令用于复现，不代表已有通过记录。报告运行结果时，请注明代码版本、平台、命令和实际结果。
+
+示例流程包括输入 → 粘贴 → 输入 → Undo/Redo、Textarea 的 Enter 提交与 Shift-Enter 换行，
+以及 Editor 补全 → 接受 → Undo。每个流程读取新的快照，必要时结合公开状态或应用事件验证。
+补全使用提供固定响应的 provider，不连接实际语言服务器。
+独立的 `input_focus` 目标在 window update 结束后验证焦点回调。
+这些用例不证明完整的系统 IME、辅助功能动作、系统剪贴板或像素显示正确；
+这些边界需要相应的平台验证。
 
 通过 `WindowExt` 打开 Dialog、Sheet 或 Notification 的视图，需要窗口的根视图是 `Root`。
 `Root` 始终将这三类浮层渲染在应用内容之上，缓存视图也一样，无需手动挂载。

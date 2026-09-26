@@ -5,10 +5,10 @@ under the normal window `Root`. They exercise pointer hit testing, keyboard
 bindings, focus routing and rendered state together. The test target is
 [`input.rs`](../input.rs); the modules here group related user workflows.
 
-Run the complete suite from the repository root:
+Run both editing and focus targets from the repository root:
 
 ```sh
-cargo test -p gpui-kit --features test-support --test input --locked
+cargo test -p gpui-kit --features test-support --test input --test input_focus --locked
 ```
 
 To investigate one area, add its module name after `--`, for example:
@@ -17,9 +17,44 @@ To investigate one area, add its module name after `--`, for example:
 cargo test -p gpui-kit --features test-support --test input --locked -- history::
 ```
 
-The existing CI test matrix runs this target on Linux, macOS and Windows.
+To list the selected cases without executing them, append `-- --list` to the
+combined command above. To rerun one workflow with an exact name:
+
+```sh
+cargo test -p gpui-kit --features test-support --test input --locked -- history::paste_is_atomic_and_separate_from_surrounding_typing --exact
+cargo test -p gpui-kit --features test-support --test input_focus --locked -- reverse_tab_cycles_three_inputs_with_passive_addons --exact
+```
+
+These commands are reproduction instructions, not a record of passing results.
+Record the revision, platform, command and actual outcome when reporting a run.
+
+The existing CI test matrix runs these targets on Linux, macOS and Windows.
 Keyboard cases use each platform's actual command bindings. A local Linux
 pass does not replace the macOS and Windows jobs.
+
+## Known failing contracts
+
+The current branch is not fully passing. Two confirmed defects remain
+intentionally red, without `#[ignore]`, pending separate production fixes.
+Component source remains untouched by this coverage work.
+
+- `constraints::disabled_single_and_double_click_do_not_focus_the_editor`:
+  single and double clicks on a disabled input must not focus its editor.
+  Both currently focus the editor. Enabling is covered separately by
+  `constraints::enabling_a_disabled_input_allows_mouse_focus_and_replacement`.
+- `textarea::selection_across_soft_wraps_copies_and_replaces_buffer_text`:
+  Shift-Down should retain the selection anchor and reach the same visual row as
+  Down. It currently selects the entire logical line instead of one wrapped row.
+
+Reproduce each contract independently from the repository root:
+
+```sh
+cargo test -p gpui-kit --features test-support --test input --locked -- constraints::disabled_single_and_double_click_do_not_focus_the_editor --exact
+cargo test -p gpui-kit --features test-support --test input --locked -- textarea::selection_across_soft_wraps_copies_and_replaces_buffer_text --exact
+```
+
+These failures remain visible in the full `input` run. The workflow index below
+describes asserted contracts, not a claim that every contract currently passes.
 
 ## Recorded workflows
 
@@ -36,21 +71,43 @@ pass does not replace the macOS and Windows jobs.
 The original cases in [`input.rs`](../input.rs) also cover scoped duplicate IDs,
 cross-scope keyboard rejection and masked values. The table is an index to
 concrete tests, not a claim of exhaustive coverage. Inline tokens, touch selection,
-InputGroup composition and language-service providers retain their separate
-Base/component tests; they are not all exercised by this target. The completion
+InputGroup composition and language-service providers are outside this target's
+workflow matrix; inspect their separate Base/component tests for relevant coverage.
+Touch selection also has a separate Kit `touch_selection` target. The completion
 fixture supplies deterministic responses through the public provider interface;
 it does not connect to a language-server process.
+
+The separate [`input_focus.rs`](../input_focus.rs) target covers repeated Tab and
+Shift-Tab cycles with passive prefixes/suffixes, focus and activation of addon
+buttons, and clicking the body of Textarea/Editor before editing. Run it alongside
+`input` when changing focus routing; a module filter on `input` does not select it.
+
+## Example workflows
+
+- History: type a prefix, paste from the test clipboard, then type a suffix;
+  Undo/Redo should preserve the asserted edit boundaries. See
+  `history::paste_is_atomic_and_separate_from_surrounding_typing`.
+- Textarea: enable submit-on-Enter, press Enter, then Shift-Enter; check the
+  emitted submit event and the resulting text separately. See
+  `textarea::submit_on_enter_preserves_text_but_shift_enter_inserts`.
+- Editor: type a completion trigger, inspect the popup, accept with Enter,
+  then verify text and Undo boundaries. See `completions.rs`.
+- Focus: repeatedly traverse decorated inputs in both directions, allow queued
+  focus callbacks to settle, then type into the destination. See `input_focus.rs`.
 
 ## Writing a regression case
 
 Start with the smallest user sequence that demonstrates the bug. Mount the
-real component with retained state and a stable ID, click it, send keyboard or
+real component through `gpui_kit::open_window` after `gpui_kit::init`, retain its
+state and give it a stable ID. Click it, send keyboard or
 pointer events, and assert the result after each meaningful step. See
 [`lifecycle.rs`](lifecycle.rs) for a workflow applied to all three controls.
 
 Use `window.input` for typing and `window.press` for commands such as Enter,
-Backspace and Undo. Prepare clipboard data through the test application's
-clipboard, then send the Paste shortcut. Calling `set_value`, `replace_all`,
+Backspace and Undo. Command presses use native key-down/key-up events; do not
+simulate Enter by injecting a newline through an IME text callback. Unicode
+typing through `window.input` does not establish OS IME coverage. Prepare clipboard
+data through the test application's clipboard, then send the Paste shortcut. Calling `set_value`, `replace_all`,
 `undo` or a private event handler to perform the interaction would bypass
 the routing this suite is intended to protect. Public setters are appropriate
 for initial fixtures and explicit external-owner updates.
@@ -64,7 +121,11 @@ the secret through accessibility.
 
 Leave `update_window` before checking deferred owner callbacks. Use
 `cx.run_until_parked()` for queued work or `wait_for` for a bounded asynchronous
-condition. Do not add wall-clock sleeps. For geometry, check relationships
+condition. History tests that depend on focus/blur callbacks must first activate
+the window with `window.activate_window()` inside `cx.update_window`, then allow
+queued work to settle. See `history::blur_splits_typing_without_moving_the_caret`;
+assigning a focus handle alone does not establish an active-window callback flow.
+Do not add wall-clock sleeps. For geometry, check relationships
 such as caret containment, scroll direction or relative height, rather than
 font-dependent pixel constants.
 
@@ -75,8 +136,9 @@ transition, a no-op edit, or a focus change.
 
 ## What a green run establishes
 
-This suite establishes the recorded interaction contracts for the tested
-configurations. Existing Base tests continue to cover editing algorithms,
+A passing run would establish the recorded interaction contracts for the tested
+configurations; the current failures are listed above. Existing Base tests
+continue to cover editing algorithms,
 IME composition state transitions and language-specific parsing cases.
 Neither set exhausts every document, language, configuration or event order.
 

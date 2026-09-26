@@ -233,7 +233,7 @@ Import `gpui_kit::test::TestWindowExt` for the following methods:
 | `window.scroll(id, delta, cx)` | Native wheel event; `ScrollDelta` retains GPUI units and sign. |
 | `window.drag_to(from_id, to_id, cx)` | Resolve both targets and drag between their centers using native hit testing. |
 | `window.drag(from, to, cx)` | Left-button drag between window-local points, through GPUI drag creation and drop hit testing. |
-| `window.press("backspace", cx)` | Named key or shortcut using GPUI's keystroke parser. |
+| `window.press("backspace", cx)` | Native key-down/key-up for a named key or shortcut using GPUI's keystroke parser. |
 | `window.input(text, cx)` | Per-character text input to the current focus; does not focus or replace the whole value. |
 
 Scoped queries support `find`, `try_find`, nested `within`, `click`, `click_at`,
@@ -279,7 +279,8 @@ Assert native properties and application results together. Checking saved model
 state or an emitted result is a useful part of an integration test; it should
 not replace verifying the relevant visible control state.
 
-Text input does not model complete OS IME composition. Masked inputs report
+Command presses, including Enter, must not inject newline text through an IME
+callback. Text input does not model complete OS IME composition. Masked inputs report
 no value; verify sensitive results through application state.
 
 ## Complete the frame before querying
@@ -342,6 +343,7 @@ that every option or combination of every component has been exhaustively tested
 | --- | --- |
 | `test_macro.rs` | Published `#[gpui_kit::test]` sync/async compatibility alongside ordinary Rust tests; the independent Kit-only recipes package runs the same contract |
 | `input.rs` and `input/` | Input, Textarea and Editor editing, clipboard, selection, history, read-only transitions, Unicode, multiline viewport behavior, search/replace, completion acceptance and retained state across renders |
+| `input_focus.rs` | Repeated Tab/Shift-Tab traversal with passive addons, addon button focus and activation, and Textarea/Editor body-click focus followed by editing |
 | `search.rs` | Command disabled-item skipping, wraparound, Unicode keywords, empty results, Action dispatch and original-index callbacks, two-stage Escape; Combobox search, single/multi selection, clearing, empty-result recovery, disabled behavior and exactly one Confirm on close |
 | `disclosure.rs` | Accordion exclusive expansion/collapse and actual panel geometry; Stepper content navigation; disabled disclosure/steps; Slider track click, thumb drag and disabled behavior |
 | `collections.rs` | Tree pointer expansion, keyboard collapse/expansion and selection; DataTable row selection, keyboard virtualization and wheel scrolling |
@@ -356,11 +358,26 @@ not invented interaction state. Custom parts register their existing native elem
 unsupported properties remain unavailable, with no manual test-only override.
 
 The [Input regression example](https://github.com/longbridge/gpui-kit/tree/main/crates/kit/tests/input)
-shows how to turn a manual editing sequence into a repeatable UI test. Run it with
-`cargo test -p gpui-kit --features test-support --test input --locked`.
-Each workflow drives the rendered component and checks its result at meaningful
-steps. The guide explains when public state reads supplement native snapshots and
-which platform checks remain necessary for IME, accessibility actions and pixels.
+shows how to turn a manual editing sequence into a repeatable UI test. From the
+repository root, run both editing and focus targets, or select one workflow:
+
+```sh
+cargo test -p gpui-kit --features test-support --test input --test input_focus --locked
+cargo test -p gpui-kit --features test-support --test input --locked -- history::paste_is_atomic_and_separate_from_surrounding_typing --exact
+cargo test -p gpui-kit --features test-support --test input_focus --locked -- reverse_tab_cycles_three_inputs_with_passive_addons --exact
+```
+
+Append `-- --list` to the combined command to list cases without executing them.
+These commands are reproduction instructions, not recorded passing results. Report
+the revision, platform, command and observed result for each run.
+
+Example workflows include typing → paste → typing → Undo/Redo, Textarea Enter
+submission versus Shift-Enter insertion, and Editor completion → acceptance → Undo.
+Each checks fresh snapshots plus public state or owner events where needed.
+Completion responses come from a deterministic provider, not a live language server.
+The separate `input_focus` target exercises focus callbacks after window updates.
+These cases do not establish full OS IME, accessibility action, system clipboard
+or pixel correctness; use the corresponding platform checks for those boundaries.
 
 Views that open dialogs, sheets or notifications through `WindowExt` need a `Root`
 as the window's root view. `Root` always renders all three overlay layers above

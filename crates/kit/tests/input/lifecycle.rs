@@ -187,7 +187,9 @@ fn unmounting_focused_controls_removes_targets_and_remount_keeps_retained_values
             for id in &ids {
                 assert!(window.try_find(id.clone()).is_none());
             }
+            let retained = fields.read(cx).values(cx);
             window.input("orphan", cx);
+            assert_eq!(fields.read(cx).values(cx), retained);
             fields.update(cx, |fields, cx| {
                 fields.mounted = true;
                 cx.notify();
@@ -204,4 +206,43 @@ fn unmounting_focused_controls_removes_targets_and_remount_keeps_retained_values
     fields.read_with(cx, |fields, cx| {
         assert_eq!(fields.values(cx), ["restored", "restored", "restored"])
     });
+}
+
+#[gpui_kit::test]
+fn closing_window_releases_input_textarea_and_editor_states(cx: &mut TestAppContext) {
+    let (handle, fields, ids) = mount(cx);
+    let (input, textarea, editor) = fields.read_with(cx, |fields, _| {
+        (
+            fields.input.downgrade(),
+            fields.textarea.downgrade(),
+            fields.editor.downgrade(),
+        )
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        for id in ids {
+            window.click(id, cx);
+            window.input("retained until close", cx);
+        }
+    })
+    .unwrap();
+    cx.run_until_parked();
+    // Release the fixture's strong owner before closing the window. GPUI
+    // disposes dropped entities while flushing an app update; draining the
+    // executor alone does not dispose a parent dropped after that update.
+    drop(fields);
+    cx.update_window(handle.into(), |_, window, _| window.remove_window())
+        .unwrap();
+    cx.run_until_parked();
+    assert!(
+        input.upgrade().is_none(),
+        "closed Input state must be released"
+    );
+    assert!(
+        textarea.upgrade().is_none(),
+        "closed Textarea state must be released"
+    );
+    assert!(
+        editor.upgrade().is_none(),
+        "closed Editor state must be released"
+    );
 }

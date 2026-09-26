@@ -13,6 +13,7 @@ use crate::common;
 
 struct EditorFixture {
     state: Entity<EditorState>,
+    readonly: bool,
 }
 
 impl Render for EditorFixture {
@@ -20,7 +21,7 @@ impl Render for EditorFixture {
         div()
             .size_full()
             .p_4()
-            .child(Editor::new(&self.state).size_full())
+            .child(Editor::new(&self.state).readonly(self.readonly).size_full())
     }
 }
 
@@ -29,9 +30,19 @@ fn editor(
     language: &'static str,
     value: &'static str,
 ) -> (WindowHandle<gpui_kit::base::Root>, Entity<EditorState>) {
+    editor_with_readonly(cx, language, value, false)
+}
+
+fn editor_with_readonly(
+    cx: &mut TestAppContext,
+    language: &'static str,
+    value: &'static str,
+    readonly: bool,
+) -> (WindowHandle<gpui_kit::base::Root>, Entity<EditorState>) {
     cx.update(gpui_kit::init);
     let (handle, view) = common::open_window(cx, Some(size(px(800.), px(480.))), |window, cx| {
         cx.new(|cx| EditorFixture {
+            readonly,
             state: cx.new(|cx| {
                 EditorState::new(window, cx)
                     .language(language)
@@ -212,6 +223,33 @@ fn tab_and_shift_tab_preserve_multiline_selection_and_undo(cx: &mut TestAppConte
         window.press("secondary-z", cx);
         assert_eq!(state.read(cx).value(), "one\n  two");
         assert_eq!(state.read(cx).selected_range(), 0..9);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn readonly_editor_rejects_indentation_and_keeps_multiline_text_copyable(cx: &mut TestAppContext) {
+    let value = "  one\n    中🦀";
+    let (handle, state) = editor_with_readonly(cx, "rust", value, true);
+    cx.update_window(handle.into(), |_, window, cx| {
+        for key in ["tab", "shift-tab"] {
+            window.click(("input", state.entity_id()), cx);
+            window.press("secondary-a", cx);
+            window.press(key, cx);
+            assert_eq!(state.read(cx).value(), value, "read-only {key}");
+            assert_eq!(state.read(cx).selected_range(), 0..value.len());
+            assert_eq!(
+                window.find(("input", state.entity_id())).value(),
+                Some(value)
+            );
+        }
+        window.click(("input", state.entity_id()), cx);
+        window.press("secondary-a", cx);
+        window.press("secondary-c", cx);
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().as_deref(),
+            Some(value)
+        );
     })
     .unwrap();
 }

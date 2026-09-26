@@ -17,7 +17,20 @@ The [Chinese guide](../../website/zh-CN/docs/test.md) covers the same API.
 For a component regression example, start with the
 [Input, Textarea and Editor suite](tests/input/README.md). It groups real editing
 workflows by behavior and explains how to add a case without bypassing focus,
-keyboard bindings or pointer dispatch.
+keyboard bindings or pointer dispatch. The separate `input_focus` target covers
+Tab/Shift-Tab traversal, addon button focus and activation, and Textarea/Editor
+body clicks. Run both from the repository root:
+
+```sh
+cargo test -p gpui-kit --features test-support --test input --test input_focus --locked
+```
+
+For a focused investigation, select a module such as
+`--test input --locked -- history::`, or an exact case as shown in the suite README.
+Append `-- --list` to the combined command to inspect discovery without running
+cases. These are reproduction commands, not recorded test results. A passing run
+establishes only the asserted workflows on that revision and platform; OS IME,
+accessibility actions, system clipboard adapters and pixels need separate evidence.
 
 ## Core semantics
 
@@ -34,6 +47,9 @@ keyboard bindings or pointer dispatch.
   before `.track_focus(&handle)`.
 - `render_frame` refreshes external changes. Synchronous interactions refresh their
   frames; deferred/async effects use `wait_for` outside a window update.
+- `press` sends native key-down/key-up events for commands; Enter must not be
+  emulated by injecting IME newline text. `input` supplies text and does not model
+  a full OS input method.
 - Clicks use real hit testing. `click_at` provides a local offset for clipped targets.
 - Instrumentation adds no layout container, but evaluates computed style an extra time.
   Snapshots cannot infer an unobserved ancestor's opacity or inspect pixels.

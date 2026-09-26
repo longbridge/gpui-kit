@@ -3,7 +3,7 @@ use gpui_kit::{
     App, AppContext, ClipboardItem, Context, Entity, IntoElement, Render, SharedString,
     Subscription, TestAppContext, Window, WindowHandle,
     base::Root,
-    component::input::{Input, InputEvent, InputState},
+    component::input::{Enter, Input, InputEvent, InputState},
     div, point,
     prelude::*,
     px, size,
@@ -15,12 +15,17 @@ struct EditingForm {
     first: Entity<InputState>,
     second: Entity<InputState>,
     submissions: Vec<(SharedString, bool, bool)>,
+    propagated_submissions: Vec<(bool, bool)>,
     _subscription: Subscription,
 }
 
 impl Render for EditingForm {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
+            .on_action(cx.listener(|this, action: &Enter, _, _| {
+                this.propagated_submissions
+                    .push((action.secondary, action.shift));
+            }))
             .size_full()
             .flex()
             .flex_col()
@@ -53,6 +58,7 @@ fn editing_form(cx: &mut TestAppContext) -> (WindowHandle<Root>, Entity<EditingF
                 first,
                 second,
                 submissions: Vec::new(),
+                propagated_submissions: Vec::new(),
                 _subscription: subscription,
             }
         })
@@ -215,6 +221,33 @@ fn cut_removes_selection_and_paste_replaces_destination_selection(cx: &mut TestA
 }
 
 #[gpui_kit::test]
+fn copy_and_cut_without_selection_preserve_clipboard_and_text(cx: &mut TestAppContext) {
+    let (handle, form) = editing_form(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        let input = form.read(cx).first.clone();
+        window.click("editing-first", cx);
+        window.input("keep", cx);
+        window.press("left", cx);
+        cx.write_to_clipboard(ClipboardItem::new_string("saved 🦀".into()));
+        for key in ["secondary-c", "secondary-x"] {
+            window.press(key, cx);
+            assert_edit(&input, "keep", 3..3, 3, cx);
+            assert_eq!(window.find("editing-first").value(), Some("keep"));
+            assert_eq!(
+                cx.read_from_clipboard()
+                    .and_then(|item| item.text())
+                    .as_deref(),
+                Some("saved 🦀")
+            );
+        }
+        window.click("editing-second", cx);
+        window.press("secondary-v", cx);
+        assert_eq!(window.find("editing-second").value(), Some("saved 🦀"));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn multiline_clipboard_normalization_preserves_surrounding_text(cx: &mut TestAppContext) {
     let (handle, form) = editing_form(cx);
     for payload in ["one\ntwo", "one\r\ntwo", "one\rtwo", "\none\r\ntwo\n"] {
@@ -312,6 +345,11 @@ fn enter_reports_modifiers_without_inserting_newlines_or_replacing_selection(
         cx.run_until_parked();
         common::update_content(handle, &form, cx, |view, _, _| {
             assert_eq!(view.submissions.len(), previous_count + 1);
+            assert_eq!(view.propagated_submissions.len(), previous_count + 1);
+            assert_eq!(
+                view.propagated_submissions.last(),
+                Some(&(secondary, shift))
+            );
             assert_eq!(
                 view.submissions.last(),
                 Some(&(SharedString::from("submit"), secondary, shift))

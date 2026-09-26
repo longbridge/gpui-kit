@@ -558,6 +558,81 @@ struct KeyboardFrames {
     renders: Rc<std::cell::Cell<usize>>,
     keys: Rc<RefCell<Vec<String>>>,
 }
+
+struct KeyboardEvents {
+    focus: gpui_kit::FocusHandle,
+    events: Rc<RefCell<Vec<(bool, gpui_kit::Keystroke)>>>,
+    clicks: Rc<std::cell::Cell<usize>>,
+}
+
+impl Render for KeyboardEvents {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let down = self.events.clone();
+        let up = self.events.clone();
+        let clicks = self.clicks.clone();
+        div()
+            .id("keyboard-scope")
+            .child(
+                div()
+                    .id("keys")
+                    .test_support()
+                    .track_focus(&self.focus)
+                    .size(px(40.))
+                    .on_key_down(move |event, _, cx| {
+                        down.borrow_mut().push((true, event.keystroke.clone()));
+                        cx.stop_propagation();
+                    })
+                    .on_key_up(move |event, _, _| {
+                        up.borrow_mut().push((false, event.keystroke.clone()));
+                    }),
+            )
+            .child(
+                gpui_kit::base::Button::new("activate")
+                    .size(px(40.))
+                    .on_click(move |_, _, _| clicks.set(clicks.get() + 1)),
+            )
+    }
+}
+
+#[gpui_kit::test]
+fn press_sends_key_down_and_up_without_synthetic_enter_or_tab_text(cx: &mut TestAppContext) {
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let clicks = Rc::new(std::cell::Cell::new(0));
+    let (handle, _) = common::open_window(cx, None, |_, cx| {
+        cx.new(|cx| KeyboardEvents {
+            focus: cx.focus_handle(),
+            events: events.clone(),
+            clicks: clicks.clone(),
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click("keys", cx);
+        for scoped in [false, true] {
+            for key in ["enter", "shift-enter", "tab", "shift-tab"] {
+                events.borrow_mut().clear();
+                if scoped {
+                    window.within("keyboard-scope").press(key, cx);
+                } else {
+                    window.press(key, cx);
+                }
+                let events = events.borrow();
+                assert_eq!(events.len(), 2, "{key}, scoped={scoped}");
+                assert!(events[0].0);
+                assert!(!events[1].0);
+                assert_eq!(events[0].1, gpui_kit::Keystroke::parse(key).unwrap());
+                assert_eq!(events[0].1, events[1].1);
+                assert_eq!(events[0].1.key_char, None);
+            }
+        }
+        window.click("activate", cx);
+        clicks.set(0);
+        window.press("enter", cx);
+        assert_eq!(clicks.get(), 1);
+        window.within("keyboard-scope").press("space", cx);
+        assert_eq!(clicks.get(), 2);
+    })
+    .unwrap();
+}
 impl Render for KeyboardFrames {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         self.renders.set(self.renders.get() + 1);

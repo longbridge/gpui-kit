@@ -4,8 +4,8 @@
 
 use crate::common;
 use gpui_kit::{
-    App, AppContext, ClipboardItem, Context, Entity, Subscription, TestAppContext, Window,
-    WindowHandle,
+    App, AppContext, ClipboardItem, Context, Entity, Focusable, Subscription, TestAppContext,
+    Window, WindowHandle,
     base::Root,
     component::input::{Input, InputContentType, InputEvent, InputState},
     div,
@@ -441,4 +441,225 @@ fn clear_affordance_tracks_editability_and_emits_one_change(cx: &mut TestAppCont
         assert!(window.within("constrained").find("clean").visible());
     });
     assert_owner(handle, &view, cx, "A", 2);
+}
+
+#[gpui_kit::test]
+fn readonly_mouse_selection_copies_and_becomes_editable_again(cx: &mut TestAppContext) {
+    // Keep the center of the field over a word regardless of font metrics.
+    let word = "word".repeat(24);
+    let (handle, view) = fixture(cx, |input| input.default_value(word.clone()));
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        view.readonly = true;
+        cx.notify();
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| {
+        window.double_click("constrained", cx);
+        assert_eq!(window.find("constrained").focused(), Some(true));
+        shortcut(window, "c", cx);
+        assert_clipboard(cx, &word);
+        window.input("ignored", cx);
+    });
+    assert_owner(handle, &view, cx, &word, 0);
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        assert_eq!(view.input.read(cx).selected_range(), 0..word.len());
+        view.readonly = false;
+        cx.notify();
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| window.input("replacement", cx));
+    assert_owner(handle, &view, cx, "replacement", 11);
+}
+
+#[gpui_kit::test]
+fn disabled_single_and_double_click_do_not_focus_the_editor(cx: &mut TestAppContext) {
+    let (handle, view) = fixture(cx, |input| input.default_value("fixed"));
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        view.disabled = true;
+        cx.notify();
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| {
+        let input = view.read(cx).input.clone();
+        let focus = input.read(cx).focus_handle(cx);
+        let mut editor_focused = Vec::new();
+        let mut frame_focused = Vec::new();
+        for double_click in [false, true] {
+            window.blur(cx);
+            window.render_frame(cx);
+            assert!(!focus.is_focused(window));
+            assert_ne!(window.find("constrained").focused(), Some(true));
+            if double_click {
+                window.double_click("constrained", cx);
+            } else {
+                window.click("constrained", cx);
+            }
+            editor_focused.push(focus.is_focused(window));
+            frame_focused.push(window.find("constrained").focused());
+        }
+        assert_eq!(input.read(cx).value(), "fixed");
+        assert_eq!(
+            editor_focused,
+            [false, false],
+            "editor focus after [single click, double click]; frame snapshots: {frame_focused:?}"
+        );
+        assert!(frame_focused.iter().all(|focused| *focused != Some(true)));
+    });
+    assert_owner(handle, &view, cx, "fixed", 0);
+}
+
+#[gpui_kit::test]
+fn enabling_a_disabled_input_allows_mouse_focus_and_replacement(cx: &mut TestAppContext) {
+    let (handle, view) = fixture(cx, |input| input.default_value("fixed"));
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        view.disabled = true;
+        cx.notify();
+    })
+    .unwrap();
+    // Render the disabled state before enabling the same retained input.
+    ui(handle, cx, |window, cx| window.blur(cx));
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        view.disabled = false;
+        cx.notify();
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| {
+        window.click("constrained", cx);
+        assert!(
+            view.read(cx)
+                .input
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        );
+        shortcut(window, "a", cx);
+        window.input("enabled", cx);
+    });
+    assert_owner(handle, &view, cx, "enabled", 7);
+}
+
+#[gpui_kit::test]
+fn masked_mouse_selection_replaces_whole_secret_and_reveal_keeps_history(cx: &mut TestAppContext) {
+    let (handle, view) = fixture(cx, |input| {
+        input.default_value("first second third").masked(true)
+    });
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        view.mask_toggle = true;
+        cx.notify();
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| {
+        window.double_click("constrained", cx);
+        clipboard(cx, "sentinel");
+        shortcut(window, "c", cx);
+        assert_clipboard(cx, "sentinel");
+        clipboard(cx, "new secret");
+        shortcut(window, "v", cx);
+        assert_eq!(window.find("constrained").value(), None);
+        window.within("constrained").click("toggle-mask", cx);
+        assert_eq!(window.find("constrained").value(), Some("new secret"));
+        window.click("constrained", cx);
+        shortcut(window, "z", cx);
+        assert_eq!(
+            window.find("constrained").value(),
+            Some("first second third")
+        );
+        window.within("constrained").click("toggle-mask", cx);
+        assert_eq!(window.find("constrained").value(), None);
+    });
+    assert_owner(handle, &view, cx, "first second third", 2);
+}
+
+#[gpui_kit::test]
+fn validation_rejects_partial_deletion_but_allows_clear_and_reentry(cx: &mut TestAppContext) {
+    let (handle, view) = fixture(cx, |input| {
+        input
+            .default_value("12")
+            .validate(|value, _| value.len() >= 2)
+    });
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        view.cleanable = true;
+        cx.notify();
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| {
+        window.click("constrained", cx);
+        shortcut(window, "a", cx);
+        window.press("right", cx);
+        window.press("backspace", cx);
+        assert_eq!(window.find("constrained").value(), Some("12"));
+        shortcut(window, "a", cx);
+        window.press("left", cx);
+        window.press("delete", cx);
+        assert_eq!(window.find("constrained").value(), Some("12"));
+    });
+    assert_owner(handle, &view, cx, "12", 0);
+    ui(handle, cx, |window, cx| {
+        // Empty is deliberately accepted independently of the validator.
+        window.within("constrained").click("clean", cx);
+        assert_eq!(window.find("constrained").value(), Some(""));
+        assert_eq!(window.find("constrained").focused(), Some(true));
+        assert!(window.within("constrained").try_find("clean").is_none());
+    });
+    assert_owner(handle, &view, cx, "", 1);
+    ui(handle, cx, |window, cx| {
+        window.input("1", cx);
+        assert_eq!(window.find("constrained").value(), Some(""));
+        clipboard(cx, "34");
+        shortcut(window, "v", cx);
+    });
+    assert_owner(handle, &view, cx, "34", 2);
+}
+
+#[gpui_kit::test]
+fn validation_policy_changes_apply_to_the_existing_selection(cx: &mut TestAppContext) {
+    let (handle, view) = fixture(cx, |input| {
+        input
+            .default_value("12")
+            .validate(|value, _| value.bytes().all(|c| c.is_ascii_digit()))
+    });
+    ui(handle, cx, |window, cx| {
+        window.click("constrained", cx);
+        shortcut(window, "a", cx);
+        window.input("letters", cx);
+    });
+    assert_owner(handle, &view, cx, "12", 0);
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        view.input
+            .update(cx, |input, cx| input.set_validator(|_, _| true, cx));
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| window.input("letters", cx));
+    assert_owner(handle, &view, cx, "letters", 7);
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        view.input.update(cx, |input, cx| {
+            input.set_validator(|value, _| value.bytes().all(|c| c.is_ascii_digit()), cx);
+        });
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| {
+        shortcut(window, "a", cx);
+        clipboard(cx, "bad");
+        shortcut(window, "v", cx);
+        // Existing invalid text stays editable so the user can repair it.
+        assert_eq!(window.find("constrained").value(), Some("bad"));
+    });
+    assert_owner(handle, &view, cx, "bad", 8);
+    ui(handle, cx, |window, cx| {
+        shortcut(window, "a", cx);
+        clipboard(cx, "34");
+        shortcut(window, "v", cx);
+    });
+    assert_owner(handle, &view, cx, "34", 9);
+    ui(handle, cx, |window, cx| {
+        shortcut(window, "a", cx);
+        clipboard(cx, "bad");
+        shortcut(window, "v", cx);
+        assert_eq!(window.find("constrained").value(), Some("34"));
+    });
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        assert_eq!(view.input.read(cx).selected_range(), 0..2);
+    })
+    .unwrap();
+    assert_owner(handle, &view, cx, "34", 9);
 }

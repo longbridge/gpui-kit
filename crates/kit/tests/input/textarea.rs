@@ -218,6 +218,49 @@ fn vertical_arrows_follow_soft_wrapped_rows(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn selection_across_soft_wraps_copies_and_replaces_buffer_text(cx: &mut TestAppContext) {
+    let value = "中🦀 word ".repeat(80);
+    let (handle, _, text) = composer(cx, |state| state.rows(6).default_value(value.clone()));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click(target(&text), cx);
+        window.press(START, cx);
+        let first_row = text.read(cx).cursor_layout().unwrap().0.top();
+        // Measure the native Down destination in this layout instead of
+        // assuming a font-dependent wrap offset. Shift should retain the
+        // anchor while reaching the same destination.
+        window.press("down", cx);
+        let next_row_cursor = text.read(cx).cursor();
+        assert!(next_row_cursor > 0 && next_row_cursor < value.len());
+        assert!(text.read(cx).cursor_layout().unwrap().0.top() > first_row);
+        window.press(START, cx);
+        window.press("shift-down", cx);
+        let selected = text.read(cx).selected_range();
+        assert_eq!(
+            selected,
+            0..next_row_cursor,
+            "Shift-Down should extend selection to the same visual row as Down"
+        );
+        assert_eq!(text.read(cx).cursor_position().line, 0);
+        assert!(text.read(cx).cursor_layout().unwrap().0.top() > first_row);
+        window.press("secondary-c", cx);
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().as_deref(),
+            Some(&value[selected.clone()])
+        );
+        assert_eq!(text.read(cx).value(), value);
+        window.input("X", cx);
+        let expected = format!("X{}", &value[selected.end..]);
+        assert_eq!(text.read(cx).value(), expected);
+        assert_eq!(text.read(cx).selected_range(), 1..1);
+        assert_eq!(window.find(target(&text)).value(), Some(expected.as_str()));
+        window.press("secondary-z", cx);
+        assert_eq!(text.read(cx).value(), value);
+        assert_eq!(text.read(cx).selected_range(), selected);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn document_navigation_reveals_both_ends_of_a_fixed_viewport(cx: &mut TestAppContext) {
     let value = (0..40).map(|n| format!("line {n}\n")).collect::<String>();
     let (handle, _, text) = composer(cx, |state| state.rows(3).default_value(value.clone()));

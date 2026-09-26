@@ -11,9 +11,9 @@
 //! [`ElementSnapshot`] is immutable. Call [`TestWindowExt::render_frame`] after
 //! external changes, or use [`TestAppContextExt::wait_for`] for asynchronous UI.
 use gpui::{
-    AnyWindowHandle, App, AppContext, ElementId, InputEvent, Keystroke, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent,
-    TestAppContext, Window, point, px,
+    AnyWindowHandle, App, AppContext, ElementId, InputEvent, KeyDownEvent, KeyUpEvent, Keystroke,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta,
+    ScrollWheelEvent, TestAppContext, Window, point, px,
 };
 use std::time::Duration;
 
@@ -43,7 +43,8 @@ pub trait TestWindowExt {
     fn drag(&mut self, from: Point<Pixels>, to: Point<Pixels>, cx: &mut App);
     /// Drags between two observed element centers, with native hit testing.
     fn drag_to(&mut self, from: impl Into<ElementId>, to: impl Into<ElementId>, cx: &mut App);
-    /// Sends a parsed GPUI keystroke, such as "backspace" or "cmd-a".
+    /// Sends key-down and key-up for a parsed GPUI key, such as "backspace" or "cmd-a".
+    /// Enter and Tab run key bindings without additionally inserting text.
     fn press(&mut self, key: &str, cx: &mut App);
     /// Sends text to the current focus; does not focus a target or replace its whole value.
     fn input(&mut self, text: &str, cx: &mut App);
@@ -262,7 +263,7 @@ impl TestWindowExt for Window {
         let key =
             Keystroke::parse(key).unwrap_or_else(|error| panic!("invalid test keystroke: {error}"));
         self.render_frame(cx);
-        self.dispatch_keystroke(key, cx);
+        press_key(self, key, cx);
         self.render_frame(cx);
     }
     fn input(&mut self, text: &str, cx: &mut App) {
@@ -350,7 +351,7 @@ impl ScopedWindow<'_> {
             Keystroke::parse(key).unwrap_or_else(|error| panic!("invalid test keystroke: {error}"));
         self.window.render_frame(cx);
         require_scope_focus(self.window, &self.scope);
-        self.window.dispatch_keystroke(key, cx);
+        press_key(self.window, key, cx);
         self.window.render_frame(cx);
     }
     /// Checks scope membership before every character, including after focus-changing handlers.
@@ -365,6 +366,31 @@ fn require_scope_focus(window: &Window, scope: &[ElementId]) {
         "no observed keyboard focus inside scope {:?}; register the focused control with .test_support().track_focus(&handle) inside this scope before press/input",
         scope
     );
+}
+
+fn press_key(window: &mut Window, key: Keystroke, cx: &mut App) {
+    // GPUI's simulated IME supplies text for Enter and Tab. Native control
+    // keys should only dispatch their bindings: an intentionally propagated
+    // submit/completion action must not insert an extra newline afterward.
+    let key = if matches!(key.key.as_str(), "enter" | "tab") {
+        window.dispatch_event(
+            KeyDownEvent {
+                keystroke: key.clone(),
+                is_held: false,
+                prefer_character_input: false,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        key
+    } else {
+        let key = key.with_simulated_ime();
+        window.dispatch_keystroke(key.clone(), cx);
+        key
+    };
+    // Buttons activate on key-up, so every press must complete the pair even
+    // if its key-down handler consumed the event or changed focus.
+    window.dispatch_event(KeyUpEvent { keystroke: key }.to_platform_input(), cx);
 }
 
 fn input_text(window: &mut Window, text: &str, scope: Option<&[ElementId]>, cx: &mut App) {

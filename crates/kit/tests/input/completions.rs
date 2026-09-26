@@ -2,11 +2,16 @@
 //! The popup has no TestWindowExt observation; text, focus, and provider requests
 //! are the public evidence, with acceptance proving that menu actions were routed.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::RefCell,
+    future::poll_fn,
+    rc::Rc,
+    task::{Poll, Waker},
+};
 
 use gpui_kit::{
     App, AppContext, Context, Entity, Result, Task, TestAppContext, Window, WindowHandle,
-    component::input::{CompletionProvider, Editor, EditorState, Rope},
+    component::input::{CompletionProvider, Editor, EditorState, Input, InputState, Rope},
     div,
     prelude::*,
     px, size,
@@ -29,6 +34,40 @@ struct CompletionRequest {
 #[derive(Default)]
 struct Suggestions {
     requests: RefCell<Vec<CompletionRequest>>,
+    deferred: bool,
+    pending: RefCell<Vec<Rc<RefCell<PendingResponse>>>>,
+}
+
+#[derive(Default)]
+struct PendingResponse {
+    response: Option<CompletionResponse>,
+    waker: Option<Waker>,
+}
+
+impl Suggestions {
+    fn respond(&self, index: usize, label: Option<&str>) {
+        let pending = self.pending.borrow()[index].clone();
+        let mut pending = pending.borrow_mut();
+        pending.response = Some(CompletionResponse::Array(
+            label
+                .into_iter()
+                .map(|label| CompletionItem {
+                    label: label.into(),
+                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                        range: Range::new(
+                            Position::new(0, 0),
+                            Position::new(0, self.requests.borrow()[index].offset as u32),
+                        ),
+                        new_text: label.into(),
+                    })),
+                    ..Default::default()
+                })
+                .collect(),
+        ));
+        if let Some(waker) = pending.waker.take() {
+            waker.wake();
+        }
+    }
 }
 
 impl CompletionProvider for Suggestions {
@@ -38,7 +77,7 @@ impl CompletionProvider for Suggestions {
         offset: usize,
         trigger: CompletionContext,
         _: &mut Window,
-        _: &mut App,
+        cx: &mut App,
     ) -> Task<Result<CompletionResponse>> {
         let text = text.to_string();
         // This fixture uses single-line ASCII identifiers; LSP character
@@ -61,7 +100,25 @@ impl CompletionProvider for Suggestions {
             offset,
             trigger,
         });
-        Task::ready(Ok(CompletionResponse::Array(items)))
+        if self.deferred {
+            let pending = Rc::new(RefCell::new(PendingResponse::default()));
+            self.pending.borrow_mut().push(pending.clone());
+            cx.spawn(async move |_| {
+                poll_fn(move |cx| {
+                    let mut pending = pending.borrow_mut();
+                    match pending.response.take() {
+                        Some(response) => Poll::Ready(Ok(response)),
+                        None => {
+                            pending.waker = Some(cx.waker().clone());
+                            Poll::Pending
+                        }
+                    }
+                })
+                .await
+            })
+        } else {
+            Task::ready(Ok(CompletionResponse::Array(items)))
+        }
     }
 
     fn is_completion_trigger(&self, _: usize, new_text: &str, _: &mut App) -> bool {
@@ -71,6 +128,7 @@ impl CompletionProvider for Suggestions {
 
 struct CompletionEditor {
     state: Entity<EditorState>,
+    other: Entity<InputState>,
 }
 
 impl Render for CompletionEditor {
@@ -78,7 +136,10 @@ impl Render for CompletionEditor {
         div()
             .size_full()
             .p_4()
-            .child(Editor::new(&self.state).size_full())
+            .flex()
+            .flex_col()
+            .child(Input::new(&self.other).id("other"))
+            .child(Editor::new(&self.state).flex_1())
     }
 }
 
@@ -90,11 +151,26 @@ struct Fixture {
 
 impl Fixture {
     fn new(cx: &mut TestAppContext) -> Self {
+        Self::with_provider(cx, Suggestions::default())
+    }
+
+    fn deferred(cx: &mut TestAppContext) -> Self {
+        Self::with_provider(
+            cx,
+            Suggestions {
+                deferred: true,
+                ..Default::default()
+            },
+        )
+    }
+
+    fn with_provider(cx: &mut TestAppContext, provider: Suggestions) -> Self {
         cx.update(gpui_kit::init);
-        let provider = Rc::new(Suggestions::default());
+        let provider = Rc::new(provider);
         let (handle, view) =
             common::open_window(cx, Some(size(px(800.), px(480.))), |window, cx| {
                 cx.new(|cx| CompletionEditor {
+                    other: cx.new(|cx| InputState::new(window, cx)),
                     state: cx.new(|cx| {
                         let mut state = EditorState::new(window, cx).language("plaintext");
                         state.lsp_mut().completion_provider = Some(provider.clone());
@@ -238,4 +314,97 @@ fn accepted_completion_is_one_undo_separate_from_the_typed_prefix(cx: &mut TestA
     fixture.assert_editor("", cx);
     // History replay must not issue new completion requests.
     assert_eq!(fixture.provider.requests.borrow().len(), 1);
+}
+
+// Each response is released explicitly. run_until_parked drains runnable work
+// without advancing timers or waiting for a response that the test still owns.
+#[gpui_kit::test]
+fn older_completion_response_cannot_replace_newer_suggestions(cx: &mut TestAppContext) {
+    let fixture = Fixture::deferred(cx);
+    fixture.start_completion(cx);
+    fixture.input("r", cx);
+    assert_eq!(fixture.provider.requests.borrow().len(), 2);
+    fixture.provider.respond(1, Some("private"));
+    fixture.settle(cx);
+    fixture.provider.respond(0, Some("print"));
+    fixture.settle(cx);
+    fixture.press("enter", cx);
+    fixture.assert_editor("private", cx);
+}
+
+#[gpui_kit::test]
+fn empty_newer_response_cannot_be_reopened_by_older_suggestions(cx: &mut TestAppContext) {
+    let fixture = Fixture::deferred(cx);
+    fixture.start_completion(cx);
+    fixture.input("z", cx);
+    assert_eq!(fixture.provider.requests.borrow().len(), 2);
+    fixture.provider.respond(1, None);
+    fixture.settle(cx);
+    fixture.provider.respond(0, Some("print"));
+    fixture.settle(cx);
+    fixture.press("enter", cx);
+    fixture.assert_editor("pz\n", cx);
+}
+
+#[gpui_kit::test]
+fn completion_response_after_focus_loss_cannot_reopen_on_refocus(cx: &mut TestAppContext) {
+    let fixture = Fixture::deferred(cx);
+    fixture.start_completion(cx);
+    cx.update_window(fixture.handle.into(), |_, window, cx| {
+        window.click("other", cx);
+        window.input("other field", cx);
+        assert_eq!(
+            window.find(("input", fixture.state.entity_id())).focused(),
+            Some(false)
+        );
+    })
+    .unwrap();
+    fixture.provider.respond(0, Some("print"));
+    fixture.settle(cx);
+    cx.update_window(fixture.handle.into(), |_, window, cx| {
+        assert_eq!(window.find("other").value(), Some("other field"));
+        assert_eq!(window.find("other").focused(), Some(true));
+        window.click(("input", fixture.state.entity_id()), cx);
+    })
+    .unwrap();
+    fixture.settle(cx);
+    fixture.press("enter", cx);
+    fixture.assert_editor("p\n", cx);
+}
+
+#[gpui_kit::test]
+fn closing_window_disposes_editor_with_completion_in_flight(cx: &mut TestAppContext) {
+    let fixture = Fixture::deferred(cx);
+    fixture.start_completion(cx);
+    let editor = fixture.state.downgrade();
+    cx.update_window(fixture.handle.into(), |_, window, _| window.remove_window())
+        .unwrap();
+    let provider = fixture.provider.clone();
+    drop(fixture);
+    cx.run_until_parked();
+    assert!(editor.upgrade().is_none(), "closed editor must be released");
+    provider.respond(0, Some("print"));
+    cx.run_until_parked();
+    assert!(editor.upgrade().is_none());
+}
+
+#[gpui_kit::test]
+fn focus_round_trip_invalidates_completion_requested_before_blur(cx: &mut TestAppContext) {
+    let fixture = Fixture::deferred(cx);
+    fixture.start_completion(cx);
+    cx.update_window(fixture.handle.into(), |_, window, cx| {
+        window.click("other", cx);
+        assert_eq!(window.find("other").focused(), Some(true));
+    })
+    .unwrap();
+    fixture.settle(cx);
+    cx.update_window(fixture.handle.into(), |_, window, cx| {
+        window.click(("input", fixture.state.entity_id()), cx);
+    })
+    .unwrap();
+    fixture.settle(cx);
+    fixture.provider.respond(0, Some("print"));
+    fixture.settle(cx);
+    fixture.press("enter", cx);
+    fixture.assert_editor("p\n", cx);
 }

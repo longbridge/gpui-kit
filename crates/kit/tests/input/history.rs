@@ -1,6 +1,6 @@
 use gpui_kit::{
     AppContext, ClipboardItem, Context, Entity, TestAppContext, Window, WindowHandle,
-    component::input::{Input, InputState},
+    component::input::{Input, InputEvent, InputState},
     div,
     prelude::*,
     test::TestWindowExt,
@@ -148,6 +148,20 @@ fn undo_selection_replacement_restores_range_and_active_end(cx: &mut TestAppCont
 #[gpui_kit::test]
 fn blur_splits_typing_without_moving_the_caret(cx: &mut TestAppContext) {
     let (handle, content) = inputs(cx);
+    let blur_count = std::rc::Rc::new(std::cell::Cell::new(0));
+    let _subscription = cx.update(|cx| {
+        let blur_count = blur_count.clone();
+        let text = content.read(cx).text.clone();
+        cx.subscribe(&text, move |_, event, _| {
+            if matches!(event, InputEvent::Blur) {
+                blur_count.set(blur_count.get() + 1);
+            }
+        })
+    });
+    // GPUI only delivers focus/blur callbacks for an active platform window.
+    cx.update_window(handle.into(), |_, window, _| window.activate_window())
+        .unwrap();
+    cx.run_until_parked();
     cx.update_window(handle.into(), |_, window, cx| {
         window.click("text", cx);
         window.input("ab", cx);
@@ -159,6 +173,7 @@ fn blur_splits_typing_without_moving_the_caret(cx: &mut TestAppContext) {
     })
     .unwrap();
     cx.run_until_parked();
+    assert_eq!(blur_count.get(), 1);
     cx.update_window(handle.into(), |_, window, cx| {
         window.press("shift-tab", cx);
         assert_eq!(window.find("text").focused(), Some(true));
@@ -192,6 +207,30 @@ fn backspace_at_start_preserves_redo(cx: &mut TestAppContext) {
         window.press(REDO, cx);
         assert_eq!(window.find("text").value(), Some("abc"));
         assert_eq!(content.read(cx).text.read(cx).cursor(), 3);
+        window.press(UNDO, cx);
+        assert_eq!(window.find("text").value(), Some(""));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn empty_paste_at_caret_preserves_redo(cx: &mut TestAppContext) {
+    let (handle, content) = inputs(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click("text", cx);
+        window.input("keep", cx);
+        cx.write_to_clipboard(ClipboardItem::new_string("🦀".into()));
+        window.press(PASTE, cx);
+        window.press(UNDO, cx);
+        assert_eq!(window.find("text").value(), Some("keep"));
+        cx.write_to_clipboard(ClipboardItem::new_string(String::new()));
+        window.press(PASTE, cx);
+        assert_eq!(window.find("text").value(), Some("keep"));
+        assert_eq!(content.read(cx).text.read(cx).selected_range(), 4..4);
+        window.press(REDO, cx);
+        assert_eq!(window.find("text").value(), Some("keep🦀"));
+        window.press(UNDO, cx);
+        assert_eq!(window.find("text").value(), Some("keep"));
         window.press(UNDO, cx);
         assert_eq!(window.find("text").value(), Some(""));
     })
@@ -256,26 +295,25 @@ fn emoji_navigation_and_both_delete_directions_round_trip(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
-fn combining_mark_scalar_navigation_and_deletion_round_trip(cx: &mut TestAppContext) {
+fn unicode_selection_deletion_restores_text_and_active_end_on_undo(cx: &mut TestAppContext) {
     let (handle, content) = inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
         window.click("text", cx);
-        window.input("e\u{301}x", cx);
-        window.press("left", cx);
-        assert_eq!(content.read(cx).text.read(cx).cursor(), "e\u{301}".len());
-        // Input currently navigates Unicode scalars, not extended graphemes.
-        window.press("left", cx);
-        assert_eq!(content.read(cx).text.read(cx).cursor(), "e".len());
-        window.press("right", cx);
-        assert_eq!(content.read(cx).text.read(cx).cursor(), "e\u{301}".len());
+        let text = "e\u{301}👩‍💻中文";
+        window.input(text, cx);
+        window.press("shift-home", cx);
+        assert_eq!(content.read(cx).text.read(cx).selected_value(), text);
         window.press("backspace", cx);
-        assert_eq!(window.find("text").value(), Some("ex"));
-        assert_eq!(content.read(cx).text.read(cx).cursor(), "e".len());
+        assert_eq!(window.find("text").value(), Some(""));
         window.press(UNDO, cx);
-        assert_eq!(window.find("text").value(), Some("e\u{301}x"));
-        assert_eq!(content.read(cx).text.read(cx).cursor(), "e\u{301}".len());
+        assert_eq!(window.find("text").value(), Some(text));
+        let state = content.read(cx).text.read(cx);
+        assert_eq!(state.selected_range(), 0..text.len());
+        assert_eq!(state.selected_value(), text);
+        assert_eq!(state.cursor(), 0);
         window.press(REDO, cx);
-        assert_eq!(window.find("text").value(), Some("ex"));
+        assert_eq!(window.find("text").value(), Some(""));
+        assert_eq!(content.read(cx).text.read(cx).selected_range(), 0..0);
     })
     .unwrap();
 }
