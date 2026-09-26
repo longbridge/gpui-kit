@@ -5,22 +5,21 @@ use gpui::{
     Size, Window, point, px,
 };
 use gpui_component_macros::IntoPlot;
-use num_traits::{Num, ToPrimitive};
 
 use crate::{
     ActiveTheme,
     plot::{
-        AXIS_GAP, AxisLabelPlacement, PathCaches, Plot, PlotAxis, StrokeStyle,
-        scale::{Scale, ScaleLinear, ScalePoint, Sealed},
+        AxisLabelPlacement, Curve, PathCaches, Plot, PlotAxis,
+        scale::{PlotValue, Scale, ScaleLinear, ScalePoint},
         shape::Area,
         tooltip::{CrossLine, Dot, Tooltip, TooltipState},
     },
 };
 
 use super::{
-    HOVER_DOT_SIZE, HOVER_HALO_SIZE, PointAxes, TooltipContent, ValueExtent, axis_point_count,
-    build_point_x_labels, caller_id, labeled_items, pinned_plot_mask, point_range,
-    point_value_scale,
+    AXIS_GAP, HOVER_DOT_SIZE, HOVER_HALO_SIZE, PointAxes, TooltipContent, ValueExtent,
+    axis_point_count, build_point_x_labels, caller_id, labeled_items, pinned_plot_mask,
+    point_range, point_value_scale,
 };
 
 #[derive(IntoPlot)]
@@ -28,13 +27,13 @@ pub struct AreaChart<T, X, Y>
 where
     T: 'static,
     X: Clone + PartialEq + Into<SharedString> + 'static,
-    Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     data: Vec<T>,
     x: Option<Rc<dyn Fn(&T) -> X>>,
     y: Vec<Rc<dyn Fn(&T) -> Y>>,
     strokes: Vec<Hsla>,
-    stroke_styles: Vec<StrokeStyle>,
+    curves: Vec<Curve>,
     fills: Vec<Background>,
     names: Vec<SharedString>,
     tooltip_content: TooltipContent<T>,
@@ -51,7 +50,7 @@ where
 impl<T, X, Y> AreaChart<T, X, Y>
 where
     X: Clone + PartialEq + Into<SharedString> + 'static,
-    Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     #[track_caller]
     pub fn new<I>(data: I) -> Self
@@ -60,7 +59,7 @@ where
     {
         Self {
             data: data.into_iter().collect(),
-            stroke_styles: vec![],
+            curves: vec![],
             strokes: vec![],
             fills: vec![],
             names: vec![],
@@ -179,17 +178,17 @@ where
     }
 
     pub fn natural(mut self) -> Self {
-        self.stroke_styles.push(StrokeStyle::Natural);
+        self.curves.push(Curve::Natural);
         self
     }
 
     pub fn linear(mut self) -> Self {
-        self.stroke_styles.push(StrokeStyle::Linear);
+        self.curves.push(Curve::Linear);
         self
     }
 
     pub fn step_after(mut self) -> Self {
-        self.stroke_styles.push(StrokeStyle::StepAfter);
+        self.curves.push(Curve::StepAfter);
         self
     }
 
@@ -341,7 +340,7 @@ where
 
         let len = self.data.len();
         let x = ScalePoint::new(
-            self.data.iter().map(|v| x_fn(v)).collect(),
+            self.data.iter().map(|v| x_fn(v)),
             point_range(
                 self.axes.plot_left(),
                 width - self.axes.plot_left(),
@@ -365,7 +364,7 @@ where
 impl<T, X, Y> Plot for AreaChart<T, X, Y>
 where
     X: Clone + PartialEq + Into<SharedString> + 'static,
-    Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     fn prepaint(
         &mut self,
@@ -421,7 +420,7 @@ where
                 label.tick -= px(left);
                 label
             });
-            axis = axis.x(height).x_label(labels);
+            axis = axis.x_axis_at(height).x_label(labels);
         }
         axis.paint(&axis_bounds, window, cx);
 
@@ -440,10 +439,10 @@ where
 
             let fill = *self.fills.get(i).unwrap_or(&default_fill);
             let stroke = *self.strokes.get(i).unwrap_or(&default_stroke);
-            let stroke_style = *self
-                .stroke_styles
+            let curve = *self
+                .curves
                 .get(i)
-                .unwrap_or(self.stroke_styles.first().unwrap_or(&Default::default()));
+                .unwrap_or(self.curves.first().unwrap_or(&Default::default()));
 
             Area::new()
                 .data(&self.data)
@@ -451,7 +450,7 @@ where
                 .y0(height)
                 .y1(move |d| y.tick(&y_fn(d)))
                 .stroke(stroke)
-                .stroke_style(stroke_style)
+                .curve(curve)
                 .fill(fill)
         });
 
@@ -504,7 +503,7 @@ where
             return None;
         }
 
-        let index = x.least_index(position.x.as_f32());
+        let index = x.nearest_index(position.x.as_f32());
         let d = self.data.get(index)?;
         let x_tick = x.tick(&x_fn(d))?;
 

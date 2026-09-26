@@ -2,7 +2,7 @@
 
 use gpui::{Background, Bounds, Path, PathBuilder, Pixels, Point, Window, px};
 
-use crate::plot::{PathCache, ShapeKey, StrokeStyle, origin_point};
+use crate::plot::{Curve, PathCache, ShapeKey, origin_point};
 
 #[allow(clippy::type_complexity)]
 pub struct Area<T> {
@@ -12,7 +12,7 @@ pub struct Area<T> {
     y1: Box<dyn Fn(&T) -> Option<f32>>,
     fill: Background,
     stroke: Background,
-    stroke_style: StrokeStyle,
+    curve: Curve,
 }
 
 impl<T> Default for Area<T> {
@@ -24,7 +24,7 @@ impl<T> Default for Area<T> {
             y1: Box::new(|_| None),
             fill: Default::default(),
             stroke: Default::default(),
-            stroke_style: Default::default(),
+            curve: Curve::default(),
         }
     }
 }
@@ -79,9 +79,10 @@ impl<T> Area<T> {
         self
     }
 
-    /// Set the stroke style of the Area.
-    pub fn stroke_style(mut self, stroke_style: StrokeStyle) -> Self {
-        self.stroke_style = stroke_style;
+    /// Set how the Area's top line connects its points. Defaults to
+    /// [`Curve::Natural`].
+    pub fn curve(mut self, curve: Curve) -> Self {
+        self.curve = curve;
         self
     }
 
@@ -121,8 +122,8 @@ impl<T> Area<T> {
             return (area_builder.build().ok(), line_builder.build().ok());
         }
 
-        match self.stroke_style {
-            StrokeStyle::Natural => {
+        match self.curve {
+            Curve::Natural => {
                 area_builder.move_to(points[0]);
                 line_builder.move_to(points[0]);
                 let n = points.len();
@@ -144,7 +145,7 @@ impl<T> Area<T> {
                     line_builder.cubic_bezier_to(p2, c1, c2);
                 }
             }
-            StrokeStyle::Linear => {
+            Curve::Linear => {
                 area_builder.move_to(points[0]);
                 line_builder.move_to(points[0]);
                 for p in &points[1..] {
@@ -152,7 +153,7 @@ impl<T> Area<T> {
                     line_builder.line_to(*p);
                 }
             }
-            StrokeStyle::StepAfter => {
+            Curve::StepAfter => {
                 area_builder.move_to(points[0]);
                 line_builder.move_to(points[0]);
                 for (i, p) in points.windows(2).enumerate() {
@@ -188,7 +189,7 @@ impl<T> Area<T> {
         line: &mut PathCache,
         window: &mut Window,
     ) {
-        let mut key = ShapeKey::new((self.stroke_style, self.y0.map(f32::to_bits)));
+        let mut key = ShapeKey::new((self.curve, self.y0.map(f32::to_bits)));
         for v in self.data.iter() {
             if let (Some(x), Some(y)) = ((self.x)(v), (self.y1)(v)) {
                 key.f32(x).f32(y);

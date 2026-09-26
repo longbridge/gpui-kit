@@ -7,8 +7,17 @@ use gpui::{
 
 use super::origin_point;
 
+/// The default label font size, in pixels, of [`Text`] and
+/// [`AxisText`](super::AxisText).
+///
+/// A default, not a rule: a styled layer passes its own size through
+/// `font_size`, and reserves axis space with [`axis_gutter`](super::axis_gutter)
+/// for that size.
 pub const TEXT_SIZE: f32 = 10.;
+/// The default gap, in pixels, between a label and what it labels.
 pub const TEXT_GAP: f32 = 2.;
+/// The default height, in pixels, a label line takes: [`TEXT_SIZE`] plus
+/// [`TEXT_GAP`].
 pub const TEXT_HEIGHT: f32 = TEXT_SIZE + TEXT_GAP;
 
 fn shape_label(
@@ -92,6 +101,9 @@ pub fn truncate_text_to_width(
     }
 }
 
+/// A label [`PlotLabel`] draws: its text, where it sits relative to the plot
+/// origin and how it is drawn. `font_size` defaults to [`TEXT_SIZE`].
+#[non_exhaustive]
 pub struct Text {
     pub text: SharedString,
     pub origin: Point<Pixels>,

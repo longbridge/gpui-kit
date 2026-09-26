@@ -704,7 +704,7 @@ impl<T> Plot for SankeyChart<T> {
     fn hover(&mut self, hover: Option<&PlotHover>, _window: &mut Window, _cx: &mut App) {
         self.hover = hover.map(|hover| SankeyHover {
             node: hover.state().index,
-            focus: hover.focus(),
+            focus: hover.progress(),
         });
     }
 

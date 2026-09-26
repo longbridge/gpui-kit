@@ -7,6 +7,8 @@ description: A low-level plotting library for creating custom charts and data vi
 
 The `plot` module provides low-level building blocks for creating custom charts. It includes scales, shapes, and utilities that power the high-level `Chart` components.
 
+The primitives live in gpui-base as [`gpui_kit::base::plot`](../base/plot.md) and are re-exported here unchanged, so either path works. GPUI Component adds the styled pieces on top: the `Tooltip`, `CrossLine` and `Dot` overlay in `plot::tooltip`, the `#[derive(IntoPlot)]` shorthand, and the hover motion it projects from its theme.
+
 ## Import
 
 ```rust
@@ -28,7 +30,7 @@ Maps a continuous quantitative domain to a continuous range.
 ```rust
 let scale = ScaleLinear::new(
     vec![0., 100.],   // Domain (data values)
-    vec![0., 500.]    // Range (pixel coordinates)
+    [0., 500.]    // Range (pixel coordinates)
 );
 
 scale.tick(&50.); // Returns pixel position
@@ -41,7 +43,7 @@ Maps a discrete domain to a continuous range, useful for bar charts.
 ```rust
 let scale = ScaleBand::new(
     vec!["A", "B", "C"], // Domain
-    vec![0., 300.]       // Range
+    [0., 300.]       // Range
 )
 .padding_inner(0.1)
 .padding_outer(0.1);
@@ -57,7 +59,7 @@ Maps a discrete domain to a set of points in a continuous range, useful for scat
 ```rust
 let scale = ScalePoint::new(
     vec!["A", "B", "C"], // Domain
-    vec![0., 300.]       // Range
+    [0., 300.]       // Range
 );
 
 scale.tick(&"A"); // Returns position of point "A"
@@ -190,7 +192,7 @@ Renders chart axes with labels and ticks.
 
 ```rust
 PlotAxis::new()
-    .x(height) // Y position for X axis
+    .x_axis_at(height) // Y position for X axis
     .x_label(labels) // Iterator of AxisText
     .stroke(cx.theme().border)
     .paint(&bounds, window, cx);
@@ -228,11 +230,11 @@ impl Plot for StackedBarChart {
     fn paint(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         // 1. Setup Scales
         let x = ScaleBand::new(
-            self.data.iter().map(|v| v.date.clone()).collect(),
-            vec![0., width],
+            self.data.iter().map(|v| v.date.clone()),
+            [0., width],
         );
         
-        let y = ScaleLinear::new(vec![0., max_value], vec![height, 0.]);
+        let y = ScaleLinear::new(vec![0., max_value], [height, 0.]);
 
         // 2. Draw Axis
         // ... (axis rendering logic)

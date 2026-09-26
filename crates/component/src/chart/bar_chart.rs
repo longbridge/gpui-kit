@@ -5,22 +5,21 @@ use gpui::{
     Pixels, Point, SharedString, Size, TextAlign, Window, linear_gradient, point, px,
 };
 use gpui_component_macros::IntoPlot;
-use num_traits::{Num, ToPrimitive};
 
 use crate::{
     ActiveTheme,
     plot::{
-        AXIS_GAP, AxisLabelPlacement, AxisLabelSide, AxisText, Grid, Plot, PlotAxis, PlotLabel,
+        AxisLabelPlacement, AxisLabelSide, AxisText, Grid, Plot, PlotAxis, PlotLabel,
         label::{TEXT_GAP, TEXT_HEIGHT, TEXT_SIZE, Text, measure_text_width},
-        scale::{Scale, ScaleBand, ScaleLinear, Sealed},
+        scale::{PlotValue, Scale, ScaleBand, ScaleLinear},
         shape::{Bar, BarAlignment},
         tooltip::{CrossLine, PlotHover, Tooltip, TooltipState},
     },
 };
 
 use super::{
-    TickFormat, TooltipContent, VALUE_AXIS_GAP, build_band_labels, caller_id, format_tick,
-    labeled_items, value_axis_gap,
+    AXIS_GAP, MAX_BAND_WIDTH, TickFormat, TooltipContent, VALUE_AXIS_GAP, build_band_labels,
+    caller_id, format_tick, labeled_items, value_axis_gap,
 };
 
 /// How much the bars away from the hovered one fade, as a share of their opacity.
@@ -40,7 +39,7 @@ pub struct BarChart<T, B, V>
 where
     T: 'static,
     B: Eq + Hash + Into<SharedString> + 'static,
-    V: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    V: PlotValue,
 {
     data: Vec<T>,
     band: Option<Rc<dyn Fn(&T) -> B>>,
@@ -65,6 +64,7 @@ where
     corner_radii: Corners<Pixels>,
     padding_inner: f32,
     padding_outer: f32,
+    max_band_width: Pixels,
     min_length: f32,
     id: ElementId,
     interactive: bool,
@@ -82,7 +82,7 @@ where
 impl<T, B, V> BarChart<T, B, V>
 where
     B: Eq + Hash + Into<SharedString> + 'static,
-    V: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    V: PlotValue,
 {
     #[track_caller]
     pub fn new<I>(data: I) -> Self
@@ -111,6 +111,7 @@ where
             corner_radii: Corners::all(px(0.)),
             padding_inner: 0.4,
             padding_outer: 0.2,
+            max_band_width: px(MAX_BAND_WIDTH),
             min_length: 0.,
             id: caller_id(),
             interactive: true,
@@ -433,6 +434,15 @@ where
         self
     }
 
+    /// Keep every bar at most `width` wide, so a few bars across a wide chart
+    /// stay narrow instead of filling their bands.
+    ///
+    /// Default is 30px.
+    pub fn max_band_width(mut self, width: impl Into<Pixels>) -> Self {
+        self.max_band_width = width.into();
+        self
+    }
+
     /// Draw every bar at least `length` pixels long, so a zero or tiny value
     /// still shows a stub instead of disappearing into the baseline.
     ///
@@ -459,13 +469,11 @@ where
         // shifts the bands away from that end when it is the leading one.
         let extent = (band_extent - self.value_axis_gap()).max(0.);
         Some(
-            ScaleBand::new(
-                self.data.iter().map(|v| band_fn(v)).collect(),
-                vec![0., extent],
-            )
-            .band_count(self.band_count.unwrap_or(0))
-            .padding_inner(self.padding_inner)
-            .padding_outer(self.padding_outer),
+            ScaleBand::new(self.data.iter().map(|v| band_fn(v)), [0., extent])
+                .band_count(self.band_count.unwrap_or(0))
+                .max_band_width(self.max_band_width.as_f32())
+                .padding_inner(self.padding_inner)
+                .padding_outer(self.padding_outer),
         )
     }
 
@@ -519,12 +527,8 @@ where
             BarAlignment::Right => (value_dim - band_gap, value_end_gap),
         };
         let scale = ScaleLinear::new(
-            self.data
-                .iter()
-                .map(|v| value_fn(v))
-                .chain(Some(V::zero()))
-                .collect(),
-            vec![baseline, far],
+            self.data.iter().map(|v| value_fn(v)).chain(Some(V::zero())),
+            [baseline, far],
         );
         Some((scale, baseline, far))
     }
@@ -721,7 +725,7 @@ where
 impl<T, B, V> Plot for BarChart<T, B, V>
 where
     B: Eq + Hash + Into<SharedString> + 'static,
-    V: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    V: PlotValue,
 {
     fn prepaint(
         &mut self,
@@ -788,7 +792,7 @@ where
         if self.label_axis {
             match alignment {
                 BarAlignment::Bottom | BarAlignment::Top => {
-                    axis = axis.x(zero_pixel);
+                    axis = axis.x_axis_at(zero_pixel);
 
                     // Labels are placed one at a time rather than through
                     // `x_label`, because a chart with negative values needs them
@@ -837,7 +841,7 @@ where
                         (AxisLabelSide::End, TextAlign::Left)
                     };
                     axis = axis
-                        .y(zero_pixel)
+                        .y_axis_at(zero_pixel)
                         .y_label_side(side)
                         .y_label(labels.into_iter().map(|t| t.align(align)));
                 }
@@ -885,12 +889,12 @@ where
                     let value_axis = if is_horizontal {
                         PlotAxis::new()
                             .x_axis(false)
-                            .x(px(total_height - VALUE_AXIS_GAP))
+                            .x_axis_at(px(total_height - VALUE_AXIS_GAP))
                             .x_label(labels.map(|t| t.align(TextAlign::Center)))
                     } else {
                         PlotAxis::new()
                             .y_axis(false)
-                            .y(px(value_axis_gap - TEXT_GAP * 2.))
+                            .y_axis_at(px(value_axis_gap - TEXT_GAP * 2.))
                             .y_label(labels.map(|t| t.align(TextAlign::Right)))
                     };
                     value_axis.paint(&bounds, window, cx);
@@ -1041,7 +1045,7 @@ where
         } else {
             position.x
         };
-        let index = band_scale.least_index(cursor_band.as_f32() - band_offset);
+        let index = band_scale.nearest_index(cursor_band.as_f32() - band_offset);
         let d = self.data.get(index)?;
         let center = band_scale.tick(&band_fn(d))? + band_offset + band_width / 2.;
 
@@ -1068,7 +1072,7 @@ where
             let center = hover.glide(("bar-chart", "band"), target, window, cx);
             BarHover {
                 center: center.as_f32(),
-                focus: hover.focus(),
+                focus: hover.progress(),
             }
         });
     }
@@ -1141,7 +1145,7 @@ fn bar_end<V>(
     min_length: f32,
 ) -> Option<f32>
 where
-    V: Copy + PartialOrd + Num + ToPrimitive + Sealed,
+    V: PlotValue,
 {
     let tick = scale.tick(&value)?;
     Some(extend_to_min_length(

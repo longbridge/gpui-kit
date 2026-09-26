@@ -7,6 +7,8 @@ description: 用于构建自定义图表和数据可视化的底层绘图库。
 
 `plot` 模块提供了构建自定义图表所需的底层能力，包括比例尺、图形和辅助工具。高层 `Chart` 组件也是基于这些原语实现的，适合需要完全控制图表绘制逻辑的场景。
 
+这些原语位于 gpui-base 的 [`gpui_kit::base::plot`](../base/plot.md)，并在这里原样重新导出，两个路径都可以使用。GPUI Component 在其上补充了样式化的部分：`plot::tooltip` 中的 `Tooltip`、`CrossLine` 和 `Dot` 浮层，`#[derive(IntoPlot)]` 简写，以及从主题投射的 hover 动效。
+
 ## 导入
 
 ```rust
@@ -26,7 +28,7 @@ use gpui_kit::component::plot::{
 ```rust
 let scale = ScaleLinear::new(
     vec![0., 100.],
-    vec![0., 500.]
+    [0., 500.]
 );
 
 scale.tick(&50.);
@@ -37,7 +39,7 @@ scale.tick(&50.);
 ```rust
 let scale = ScaleBand::new(
     vec!["A", "B", "C"],
-    vec![0., 300.]
+    [0., 300.]
 )
 .padding_inner(0.1)
 .padding_outer(0.1);
@@ -51,7 +53,7 @@ scale.tick(&"A");
 ```rust
 let scale = ScalePoint::new(
     vec!["A", "B", "C"],
-    vec![0., 300.]
+    [0., 300.]
 );
 
 scale.tick(&"A");
@@ -166,7 +168,7 @@ let series = stack.series();
 
 ```rust
 PlotAxis::new()
-    .x(height)
+    .x_axis_at(height)
     .x_label(labels)
     .stroke(cx.theme().border)
     .paint(&bounds, window, cx);
@@ -202,11 +204,11 @@ impl Plot for StackedBarChart {
     fn paint(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         // 1. 准备比例尺
         let x = ScaleBand::new(
-            self.data.iter().map(|v| v.date.clone()).collect(),
-            vec![0., width],
+            self.data.iter().map(|v| v.date.clone()),
+            [0., width],
         );
 
-        let y = ScaleLinear::new(vec![0., max_value], vec![height, 0.]);
+        let y = ScaleLinear::new(vec![0., max_value], [height, 0.]);
 
         // 2. 绘制坐标轴
         // ...（坐标轴绘制逻辑）

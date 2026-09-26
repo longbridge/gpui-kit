@@ -2,6 +2,7 @@
 
 /// Represents a stacked series data point with lower and upper values
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct StackPoint<T> {
     /// The lower value (baseline)
     pub y0: f32,
@@ -13,6 +14,7 @@ pub struct StackPoint<T> {
 
 /// Represents a stacked series
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct StackSeries<T> {
     /// The key for this series
     pub key: String,

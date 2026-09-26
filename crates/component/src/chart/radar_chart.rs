@@ -8,7 +8,7 @@ use gpui::{
     Point, SharedString, TextAlign, Window, point, px,
 };
 use gpui_component_macros::IntoPlot;
-use num_traits::{Num, ToPrimitive, Zero};
+use num_traits::Zero;
 
 use crate::{
     ActiveTheme,
@@ -16,7 +16,7 @@ use crate::{
         Plot,
         label::{PlotLabel, TEXT_SIZE, Text},
         polygon,
-        scale::{Scale, ScaleLinear, Sealed},
+        scale::{PlotValue, Scale, ScaleLinear},
         shape::RadialLine,
         tooltip::{Dot, Tooltip, TooltipState},
     },
@@ -76,7 +76,7 @@ impl From<AnyElement> for RadarLabel {
 pub struct RadarChart<T, Y>
 where
     T: 'static,
-    Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     data: Vec<T>,
     values: Vec<Rc<dyn Fn(&T) -> Y>>,
@@ -102,7 +102,7 @@ where
 
 impl<T, Y> RadarChart<T, Y>
 where
-    Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     #[track_caller]
     pub fn new<I>(data: I) -> Self
@@ -385,7 +385,7 @@ where
                 .collect()
         };
 
-        ScaleLinear::new(domain, vec![0., outer_radius])
+        ScaleLinear::new(domain, [0., outer_radius])
     }
 
     /// Map a cursor position to the nearest spoke index, or `None` when the
@@ -411,7 +411,7 @@ where
 
 impl<T, Y> Plot for RadarChart<T, Y>
 where
-    Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     /// Resolve every dimension's label, keeping the text ones for `paint` and
     /// laying out the element ones here (measuring is illegal in `paint`).
@@ -490,7 +490,7 @@ where
                     .data(0..n)
                     .angle(move |_, i| Some(i as f32 * angle_step))
                     .radius(move |_, _| Some(radius))
-                    .closed()
+                    .closed(true)
                     .stroke(stroke)
                     .paint(&bounds, window);
             }
@@ -525,12 +525,12 @@ where
                 .data(&self.data)
                 .angle(move |_, i| Some(i as f32 * angle_step))
                 .radius(move |d, _| scale.tick(&value_fn(d)))
-                .closed()
+                .closed(true)
                 .fill(fill)
                 .stroke(stroke)
                 .stroke_width(2.);
             if self.dot {
-                line = line.dot().dot_size(8.).dot_fill_color(stroke);
+                line = line.dot(true).dot_size(8.).dot_fill(stroke);
             }
             line.paint(&bounds, window);
         }

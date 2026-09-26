@@ -289,10 +289,6 @@ impl<T> Plot for PieChart<T> {
         }
 
         let outer_radius = self.resolve_outer_radius(&bounds);
-
-        let arc = Arc::new()
-            .inner_radius(self.inner_radius)
-            .outer_radius(outer_radius);
         let arcs = self.arcs();
 
         // Caching hangs off the chart's own id, which only an interactive chart
@@ -307,26 +303,14 @@ impl<T> Plot for PieChart<T> {
             let (lift, opacity) = self.slice_emphasis(a.index);
             let slice_radius = self.get_outer_radius(a, outer_radius) + HOVER_LIFT * lift;
             let color = self.slice_color(a.data, cx).opacity(opacity);
+            let arc = Arc::new()
+                .inner_radius(inner_radius)
+                .outer_radius(slice_radius);
             match caches.as_ref() {
                 Some(caches) => caches.update(cx, |caches, _| {
-                    arc.paint_cached(
-                        a,
-                        color,
-                        Some(inner_radius),
-                        Some(slice_radius),
-                        &bounds,
-                        caches.slot(ix),
-                        window,
-                    );
+                    arc.paint_cached(a, color, &bounds, caches.slot(ix), window);
                 }),
-                None => arc.paint(
-                    a,
-                    color,
-                    Some(inner_radius),
-                    Some(slice_radius),
-                    &bounds,
-                    window,
-                ),
+                None => arc.paint(a, color, &bounds, window),
             }
         }
 
@@ -434,20 +418,14 @@ impl<T> Plot for PieChart<T> {
         _cx: &App,
     ) -> Option<TooltipState> {
         let outer_radius = self.resolve_outer_radius(&bounds);
-        let arc = Arc::new()
-            .inner_radius(self.inner_radius)
-            .outer_radius(outer_radius);
         let position = point(position.x.as_f32(), position.y.as_f32());
 
         let index = self.arcs().into_iter().find_map(|a| {
-            arc.contains(
-                &a,
-                position,
-                Some(self.get_inner_radius(&a)),
-                Some(self.get_outer_radius(&a, outer_radius)),
-                &bounds,
-            )
-            .then_some(a.index)
+            Arc::new()
+                .inner_radius(self.get_inner_radius(&a))
+                .outer_radius(self.get_outer_radius(&a, outer_radius))
+                .contains(&a, position, &bounds)
+                .then_some(a.index)
         })?;
 
         Some(TooltipState::new(
@@ -479,7 +457,7 @@ impl<T> Plot for PieChart<T> {
                 .collect();
             PieHover {
                 lift,
-                focus: hover.focus(),
+                focus: hover.progress(),
             }
         });
     }
