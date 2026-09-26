@@ -1115,6 +1115,29 @@ mod tests {
     }
 
     #[gpui::test]
+    fn accessibility_set_value_preserves_exact_editor_text(cx: &mut gpui::TestAppContext) {
+        use gpui::{AppContext as _, Render};
+
+        struct Probe(Entity<crate::input::EditorState>);
+
+        impl Render for Probe {
+            fn render(&mut self, _: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+                div().child(crate::input::Editor::new(&self.0))
+            }
+        }
+
+        cx.update(crate::init);
+        let (probe, cx) = cx.add_window_view(|window, cx| {
+            Probe(cx.new(|cx| crate::input::EditorState::new(window, cx).language("rust")))
+        });
+        let editor = probe.read_with(cx, |probe, _| probe.0.clone());
+        let state: TextInputState = editor.clone().into();
+
+        cx.update(|window, cx| state.accessibility_set_value("(", window, cx));
+        assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "(");
+    }
+
+    #[gpui::test]
     fn input_emits_accessibility_id(cx: &mut gpui::TestAppContext) {
         use crate::ElementExt as _;
         use gpui::{AppContext as _, Element as _, IntoElement as _, Render};
