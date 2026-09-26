@@ -5,7 +5,18 @@ under the normal window `Root`. They exercise pointer hit testing, keyboard
 bindings, focus routing and rendered state together. The test target is
 [`input.rs`](../input.rs); the modules here group related user workflows.
 
-Run both editing and focus targets from the repository root:
+For an Input change, run the complete regression gate from the repository root
+(Bash, including Git Bash on Windows):
+
+```sh
+script/test-input
+```
+
+This runs Base editing/IME/token tests, Component InputGroup/overlay tests,
+and Kit input, focus, touch-selection and keyboard-helper workflows. These
+targets also run in the existing Linux, macOS and Windows CI matrix.
+
+For a quicker editing/focus iteration:
 
 ```sh
 cargo test -p gpui-kit --features test-support --test input --test input_focus --locked
@@ -49,7 +60,18 @@ cargo test -p gpui-kit --features test-support --test input --locked -- constrai
 cargo test -p gpui-kit --features test-support --test input --locked -- textarea::selection_across_soft_wraps_copies_and_replaces_buffer_text --exact
 ```
 
-Both regressions run as part of the full `input` target, without `#[ignore]`.
+These and the additional regressions below run in the full `input` target,
+without ignored cases:
+
+- Selection at document edges, the first vertical move after Alt-click,
+  horizontal-to-vertical selection, and soft-wrap End affinity.
+- Drag autoscroll extends into newly revealed text instead of jumping to EOF.
+- Pending completion/inline requests cannot reappear after cancellation,
+  editing, blur, protection changes or popup acceptance.
+- IME selection direction and canceled-preedit undo boundaries on all controls.
+- Replacement-mode toggles preserve replacement focus through the next frame.
+- Keyboard definition requests work without prior hover, survive pointer leave,
+  and reject superseded requests or changed text, caret and focus.
 
 ## Recorded workflows
 
@@ -61,21 +83,62 @@ Both regressions run as part of the full `input` target, without `#[ignore]`.
 | [`textarea.rs`](textarea.rs) | Enter versus submit; multiline clipboard and CRLF; wrapped-row navigation; caret reveal after scrolling; bounded auto-grow; resize reflow |
 | [`editor.rs`](editor.rs) | Generated pairs and closers; Unicode inside quotes; language differences; paired deletion and undo; indentation; multi-cursor replacement; search and replace overlays |
 | [`completions.rs`](completions.rs) | Provider requests through typed input; popup acceptance/cancellation; keyboard selection; filtered suggestions; completion undo boundaries |
+| [`composition.rs`](composition.rs) | IME bridge preedit, commit/cancel, UTF-16 selection direction and history boundaries |
 | [`lifecycle.rs`](lifecycle.rs) | Focus routing across all three controls; selection across parent renders; read-only transitions; unmount/remount with retained state |
 
 The original cases in [`input.rs`](../input.rs) also cover scoped duplicate IDs,
 cross-scope keyboard rejection and masked values. The table is an index to
 concrete tests, not a claim of exhaustive coverage. Inline tokens, touch selection,
-InputGroup composition and language-service providers are outside this target's
-workflow matrix; inspect their separate Base/component tests for relevant coverage.
-Touch selection also has a separate Kit `touch_selection` target. The completion
-fixture supplies deterministic responses through the public provider interface;
-it does not connect to a language-server process.
+InputGroup composition are covered by separate Base/component tests included in
+`script/test-input`.
+Touch selection also has a separate Kit `touch_selection` target. Completion, code-action, inline-suggestion and definition
+fixtures supply deterministic responses through the public provider interfaces;
+they do not connect to a language-server process.
 
-The multi-cursor vertical-selection case establishes preferred columns with
-horizontal arrow keys after Alt-click. Alt-click currently leaves a new cursor's
-column anchor unset; preserving its column on the first vertical move remains a
-separate gap. A passing run does not establish that interaction.
+The composition fixture calls the public `ElementInputHandler` bridge for the
+mounted state. It exercises the IME protocol methods and subsequent rendered
+state, rather than the platform-installed handler or a real input method.
+The in-flight completion disposal fixture is deliberately inactive because
+GPUI TestPlatform retains the active window's input handler after removal;
+active-window disposal needs separate platform evidence.
+
+The multi-cursor vertical-selection case starts directly after Alt-click and
+checks both replacement ranges and their restoration by Undo, without an
+intervening horizontal move to repair a missing preferred column.
+
+## Operation coverage and review gate
+
+| Operation family | Automated evidence |
+| --- | --- |
+| Typing, replacement, direction, empty boundaries | `editing`, `history`, `lifecycle`; text and selection endpoints |
+| Character/word/line/document movement and deletion | `editing`, `textarea`, `editor`; platform bindings, Unicode scalar and CRLF boundaries |
+| Visual-row and page movement | `textarea`; soft wrap, document edges, preferred columns, short rows and reversal |
+| Pointer selection | `editing`, `textarea`, `editor`; clicks, Shift-click, word/paragraph selection, drag direction, autoscroll and multi-cursor placement |
+| Clipboard and history | `history`, `constraints`, `editor`, `lifecycle`; sentinels, normalization, undo/redo branches, restored ranges |
+| Protection, validation and masking | `constraints`, `lifecycle`; rejected edits, selection/history, callbacks, re-enabling and password privacy |
+| Focus and lifecycle | `input_focus`, `lifecycle`; traversal, addons, Focus/Blur events, parent renders, unmount and release |
+| Multiline layout | `textarea`; caret reveal, scrolling, resize, fixed rows and bounded auto-grow |
+| Code editing | `editor`; pairs, language-specific indentation, block selection, folding, multiple cursors, literal search and replacement |
+| Language providers | `completions`; providers, acceptance/cancellation, stale results, failure, focus/protection transitions inline suggestions and definition navigation |
+| IME protocol | `composition` and Base tests; UTF-16 ranges, preedit replacement, commit/cancel, selection direction and undo boundaries on all three controls |
+| Inline tokens and grouped inputs | Base `input::state::tests::test_inline_token_*` and Component `input::group::tests`; atomic edits, clipboard, IME geometry, addons and paste hooks |
+| Touch selection | Kit `touch_selection` and Base touch tests; long press, handles, copying and scrolling |
+
+For a normal editing PR, require the platform CI matrix to pass and require a
+regression case for its changed interaction. Check that the case fails before
+the fix; a green suite alone cannot prove a new behavior. Review assertions for
+text **and** caret/selection/focus or owner callbacks, as appropriate. This is
+the normal gate instead of repeating a manual tour of every input operation.
+
+Do not hide a defect by inserting a click that cancels an asynchronous request,
+reusing clipboard contents from an earlier control, or resetting the caret
+before checking its direction. Focus-cancellation tests activate the window,
+observe Blur, and refocus through Tab. Provider responses are released explicitly.
+
+Text movement currently follows Unicode scalar boundaries, with CRLF treated as
+one newline; it does not promise grapheme-cluster movement for combining marks
+or ZWJ emoji. Tests preserve that existing contract. Duplicate/move-line commands,
+regex search and Shift-Page selection are not implemented operations.
 
 The separate [`input_focus.rs`](../input_focus.rs) target covers repeated Tab and
 Shift-Tab cycles with passive prefixes/suffixes, focus and activation of addon

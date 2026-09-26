@@ -32,6 +32,13 @@ cases. These are reproduction commands, not recorded test results. A passing run
 establishes only the asserted workflows on that revision and platform; OS IME,
 accessibility actions, system clipboard adapters and pixels need separate evidence.
 
+For changes to Input, Textarea or Editor, run `script/test-input` from the
+repository root. It combines Kit UI workflows with Base editing/IME/token
+regressions and Component InputGroup tests. The [operation coverage and review
+gate](tests/input/README.md#operation-coverage-and-review-gate) explains how to
+use these tests when reviewing an input change and which native platform checks
+remain necessary.
+
 ## Core semantics
 
 - `find` requires a target and explains missing/ambiguous paths; `try_find` permits absence.

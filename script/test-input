@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+# Input algorithms, IME protocol, inline tokens and styled InputGroup behavior.
+cargo test -p gpui-base -p gpui-component \
+  --features gpui-component/test-support --lib --locked input::
+
+# Real component workflows, focus routing, touch selection and key-event helpers.
+cargo test -p gpui-kit --features test-support,assets --locked \
+  --test input --test input_focus --test touch_selection --test interactions

@@ -362,6 +362,7 @@ shows how to turn a manual editing sequence into a repeatable UI test. From the
 repository root, run both editing and focus targets, or select one workflow:
 
 ```sh
+script/test-input # Complete Input gate: Base, Component and Kit workflows (Bash).
 cargo test -p gpui-kit --features test-support --test input --test input_focus --locked
 cargo test -p gpui-kit --features test-support --test input --locked -- history::paste_is_atomic_and_separate_from_surrounding_typing --exact
 cargo test -p gpui-kit --features test-support --test input_focus --locked -- reverse_tab_cycles_three_inputs_with_passive_addons --exact
@@ -375,6 +376,10 @@ Example workflows include typing → paste → typing → Undo/Redo, Textarea En
 submission versus Shift-Enter insertion, and Editor completion → acceptance → Undo.
 Each checks fresh snapshots plus public state or owner events where needed.
 Completion responses come from a deterministic provider, not a live language server.
+The suite also exercises the public IME handler protocol (preedit, UTF-16 ranges,
+commit/cancel and history), multi-cursor editing, folding, provider cancellation
+and failure. Its operation matrix is the review checklist for ordinary input
+changes; add a regression for the changed interaction and require platform CI.
 The separate `input_focus` target exercises focus callbacks after window updates.
 These cases do not establish full OS IME, accessibility action, system clipboard
 or pixel correctness; use the corresponding platform checks for those boundaries.

@@ -28,7 +28,6 @@ pub(crate) struct HoverDefinition {
     /// The range of the symbol that triggered the hover.
     symbol_range: Range<usize>,
     pub(crate) locations: Rc<Vec<lsp_types::LocationLink>>,
-    last_location: Option<(Range<usize>, Rc<Vec<lsp_types::LocationLink>>)>,
 }
 
 impl HoverDefinition {
@@ -47,10 +46,6 @@ impl HoverDefinition {
     }
 
     pub(crate) fn clear(&mut self) {
-        if !self.locations.is_empty() {
-            self.last_location = Some((self.symbol_range.clone(), self.locations.clone()));
-        }
-
         self.symbol_range = 0..0;
         self.locations = Rc::new(vec![]);
     }
@@ -113,16 +108,31 @@ impl InputBaseState<EditorMode> {
         cx: &mut Context<Self>,
     ) {
         let offset = self.cursor();
-        if let Some((symbol_range, locations)) = self.extras.hover_definition.last_location.clone()
-        {
-            if !(symbol_range.start..=symbol_range.end).contains(&offset) {
-                return;
-            }
-
-            if let Some(location) = locations.first().cloned() {
-                self.go_to_definition(&location, window, cx);
-            }
-        }
+        // A keyboard action must also work before the symbol has been hovered.
+        let Some(provider) = self.extras.lsp.definition_provider.clone() else {
+            return;
+        };
+        let text = self.text.clone();
+        let response = provider.definitions(&text, offset, window, cx);
+        let blur_subscription = cx.on_blur(&self.focus_handle, window, |editor, _, _| {
+            editor.extras.lsp._definition_task = Task::ready(Ok(()));
+        });
+        self.extras.lsp._definition_task = cx.spawn_in(window, async move |editor, cx| {
+            let _blur_subscription = blur_subscription;
+            let locations = response.await?;
+            editor.update_in(cx, |editor, window, cx| {
+                if editor.cursor() != offset
+                    || editor.text != text
+                    || !editor.focus_handle.is_focused(window)
+                {
+                    return;
+                }
+                if let Some(location) = locations.first() {
+                    editor.go_to_definition(location, window, cx);
+                }
+            })?;
+            Ok(())
+        });
     }
 
     /// Return true if handled.

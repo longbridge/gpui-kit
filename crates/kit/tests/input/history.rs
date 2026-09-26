@@ -317,3 +317,85 @@ fn unicode_selection_deletion_restores_text_and_active_end_on_undo(cx: &mut Test
     })
     .unwrap();
 }
+
+#[gpui_kit::test]
+fn cut_then_paste_replacement_restore_each_selection_and_clipboard(cx: &mut TestAppContext) {
+    let (handle, content) = inputs(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click("text", cx);
+        window.input("abcDEF", cx);
+        for _ in 0..3 {
+            window.press("shift-left", cx);
+        }
+        window.press("secondary-x", cx);
+        assert_eq!(window.find("text").value(), Some("abc"));
+        window.press("home", cx);
+        window.press("shift-right", cx);
+        window.press("shift-right", cx);
+        window.press(PASTE, cx);
+        assert_eq!(window.find("text").value(), Some("DEFc"));
+        window.press(UNDO, cx);
+        assert_eq!(window.find("text").value(), Some("abc"));
+        let state = content.read(cx).text.read(cx);
+        assert_eq!(state.selected_range(), 0..2);
+        assert_eq!(state.cursor(), 2);
+        window.press(UNDO, cx);
+        assert_eq!(window.find("text").value(), Some("abcDEF"));
+        let state = content.read(cx).text.read(cx);
+        assert_eq!(state.selected_range(), 3..6);
+        assert_eq!(state.cursor(), 3);
+        for (value, cursor) in [("abc", 3), ("DEFc", 3)] {
+            window.press(REDO, cx);
+            assert_eq!(window.find("text").value(), Some(value));
+            assert_eq!(
+                content.read(cx).text.read(cx).selected_range(),
+                cursor..cursor
+            );
+        }
+        assert_eq!(
+            cx.read_from_clipboard().unwrap().text().as_deref(),
+            Some("DEF")
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn normalized_paste_undo_restores_unicode_selection_in_both_directions(cx: &mut TestAppContext) {
+    let (handle, content) = inputs(cx);
+    for reversed in [false, true] {
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.click("text", cx);
+            window.press("secondary-a", cx);
+            window.input("[e\u{301}🦀]", cx);
+            // Select the interior using line boundaries, excluding the ASCII
+            // brackets. This isolates history from scalar/grapheme step counts.
+            if reversed {
+                window.press("left", cx);
+                window.press("shift-home", cx);
+                window.press("shift-right", cx);
+            } else {
+                window.press("home", cx);
+                window.press("right", cx);
+                window.press("shift-end", cx);
+                window.press("shift-left", cx);
+            }
+            assert_eq!(
+                content.read(cx).text.read(cx).selected_value(),
+                "e\u{301}🦀"
+            );
+            cx.write_to_clipboard(ClipboardItem::new_string("中\r\n\t文".into()));
+            window.press(PASTE, cx);
+            assert_eq!(window.find("text").value(), Some("[中\t文]"));
+            window.press(UNDO, cx);
+            assert_eq!(window.find("text").value(), Some("[e\u{301}🦀]"));
+            let state = content.read(cx).text.read(cx);
+            assert_eq!(state.selected_range(), 1..8);
+            assert_eq!(state.cursor(), if reversed { 1 } else { 8 });
+            window.press(REDO, cx);
+            assert_eq!(window.find("text").value(), Some("[中\t文]"));
+            assert_eq!(content.read(cx).text.read(cx).selected_range(), 8..8);
+        })
+        .unwrap();
+    }
+}

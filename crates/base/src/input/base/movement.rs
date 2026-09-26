@@ -22,7 +22,7 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Like [`Self::preferred_column_for`], but resolves an offset on a soft wrap
     /// boundary to the row the caret is drawn on.
-    fn preferred_column_for_with_affinity(
+    pub(super) fn preferred_column_for_with_affinity(
         &self,
         offset: usize,
         line_end_affinity: bool,
@@ -138,6 +138,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         display_point.column = 0;
         let mut new_offset = self.display_map.wrap_display_point_to_offset(display_point);
 
+        let column_anchor = column_anchor
+            .or_else(|| self.preferred_column_for_with_affinity(offset, line_end_affinity));
         let mut new_affinity = false;
         if let Some((preferred_x, column)) = column_anchor {
             // Get display point again to update local_row.
@@ -170,6 +172,30 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
 
         (new_offset, new_affinity)
+    }
+
+    /// Extend to the document edge when there is no further visual row. Plain
+    /// movement retains its column there, but selection must still reach the
+    /// remaining text on the first or last row.
+    pub(super) fn vertical_selection_target(
+        &self,
+        offset: usize,
+        column_anchor: Option<(Pixels, usize)>,
+        line_end_affinity: bool,
+        move_lines: isize,
+    ) -> (usize, bool) {
+        let target = self.vertical_target(offset, column_anchor, line_end_affinity, move_lines);
+        if self.last_layout.is_some() {
+            let row = |offset, affinity| {
+                self.display_map
+                    .offset_to_wrap_display_point_with_affinity(offset, affinity)
+                    .row
+            };
+            if row(offset, line_end_affinity) == row(target.0, target.1) {
+                return (if move_lines < 0 { 0 } else { self.text.len() }, false);
+            }
+        }
+        target
     }
 
     /// Move every cursor through `f`, which maps each selection to a
@@ -246,8 +272,15 @@ impl<M: InputModeKind> InputBaseState<M> {
                     (e, s.preferred_column_for(e), false)
                 } else {
                     let e = s.next_boundary(sel.end.saturating_sub(1));
-                    (e, s.preferred_column_for(e), false)
+                    let affinity = s.line_end_affinity_at(e);
+                    (
+                        e,
+                        s.preferred_column_for_with_affinity(e, affinity),
+                        affinity,
+                    )
                 };
+                let anchor =
+                    anchor.or_else(|| s.preferred_column_for_with_affinity(effective, affinity));
                 let (offset, affinity) = s.vertical_target(effective, anchor, affinity, move_lines);
                 (offset, anchor, affinity)
             },

@@ -1,6 +1,8 @@
 mod common;
 #[path = "input/completions.rs"]
 mod completions;
+#[path = "input/composition.rs"]
+mod composition;
 #[path = "input/constraints.rs"]
 mod constraints;
 #[path = "input/editing.rs"]

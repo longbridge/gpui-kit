@@ -255,15 +255,7 @@ impl InputBaseState<EditorMode> {
         };
         let handled = handler(kind, action, window, cx);
         if handled && closes_overlay {
-            match kind {
-                super::InputOverlayKind::Completion => {
-                    self.extras.context_menu_content.completion.open = false
-                }
-                super::InputOverlayKind::CodeAction => {
-                    self.extras.context_menu_content.code_action.open = false
-                }
-            }
-            cx.notify();
+            self.hide_context_menu(cx);
         }
         handled
     }

@@ -1071,6 +1071,10 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
 
         self.disabled = disabled;
+        if disabled {
+            M::hide_context_menu(self, cx);
+            M::clear_inline_completion(self, cx);
+        }
         cx.notify();
     }
 
@@ -1094,6 +1098,8 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         self.readonly = readonly;
         if readonly {
+            M::hide_context_menu(self, cx);
+            M::clear_inline_completion(self, cx);
             self.search_session.replace_mode = false;
         }
         cx.notify();
@@ -1317,13 +1323,14 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
         self.select_all_cursors_to_with_affinity(
             |s, sel| {
-                s.vertical_target(
+                s.vertical_selection_target(
                     sel.cursor_offset(),
                     sel.column_anchor,
                     s.line_end_affinity_for(sel),
                     -1,
                 )
             },
+            true,
             cx,
         );
     }
@@ -1334,13 +1341,14 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
         self.select_all_cursors_to_with_affinity(
             |s, sel| {
-                s.vertical_target(
+                s.vertical_selection_target(
                     sel.cursor_offset(),
                     sel.column_anchor,
                     s.line_end_affinity_for(sel),
                     1,
                 )
             },
+            true,
             cx,
         );
     }
@@ -1395,12 +1403,16 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to(
-            |s, sel| s.end_of_line_at(sel.cursor_offset(), s.line_end_affinity_for(sel)),
+        self.select_all_cursors_to_with_affinity(
+            |s, sel| {
+                (
+                    s.end_of_line_at(sel.cursor_offset(), s.line_end_affinity_for(sel)),
+                    true,
+                )
+            },
+            false,
             cx,
         );
-        // Mirrors MoveEnd: the caret belongs at the end of the visual row it is on.
-        self.cursor_line_end_affinity = true;
     }
 
     pub(super) fn select_to_previous_word(
@@ -2040,6 +2052,9 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         }
 
+        // Escape also dismisses a request whose popup has not arrived yet.
+        M::hide_context_menu(self, cx);
+
         // Collapse extra cursors back to the active one first.
         if !self.selections.is_single() {
             self.undo_manager.break_transaction_coalescing();
@@ -2053,6 +2068,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             M::clear_inline_completion(self, cx);
             return; // Consume the escape, don't propagate
         }
+        M::clear_inline_completion(self, cx);
 
         // The handles and the edit menu are the topmost surface to dismiss.
         if self.touch_selection().is_some() {
@@ -2188,8 +2204,9 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         self.undo_manager.break_transaction_coalescing();
         let id = self.selections.generate_id();
-        self.selections
-            .add(CursorSelection::new(id, offset, offset));
+        let mut selection = CursorSelection::new(id, offset, offset);
+        selection.column_anchor = self.preferred_column_for(offset);
+        self.selections.add(selection);
         cx.notify();
     }
 
@@ -3017,20 +3034,24 @@ impl<M: InputModeKind> InputBaseState<M> {
             last_line_pos = Some(pos);
         }
 
-        // Mouse is below all visible lines, return end of text. A columnar selection
-        // still needs how far right the pointer was, so measure it against the last
-        // line rather than reporting a block that collapses at the bottom edge.
-        let columns_past_line_end = last_layout
+        // Clamp to the last laid-out row. Returning the end of the whole document
+        // would select unseen text before drag autoscroll has reached it.
+        let last_position = last_layout
             .lines
             .last()
             .zip(last_line_pos)
-            .map(|(line_layout, pos)| {
+            .zip(last_layout.visible_line_byte_offsets.last())
+            .map(|((line_layout, pos), line_start)| {
                 let last_row_top = (line_layout.size(line_height).height - line_height).max(px(0.));
-                line_layout.columns_past_line_end(point(pos.x, last_row_top), last_layout)
-            })
-            .unwrap_or(0);
+                let pos = point(pos.x, last_row_top);
+                (
+                    self.resolve_index(line_start + line_layout.len()),
+                    false,
+                    line_layout.columns_past_line_end(pos, last_layout),
+                )
+            });
 
-        (self.text.len(), false, columns_past_line_end)
+        last_position.unwrap_or((self.text.len(), false, 0))
     }
 
     /// Map a display byte index back to a text offset, undoing the mask expansion when the input
@@ -3117,10 +3138,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         f: impl Fn(&Self, &CursorSelection) -> usize,
         cx: &mut Context<Self>,
     ) {
-        self.select_all_cursors_to_with_affinity(|s, sel| (f(s, sel), false), cx);
-        if self.active_selection().is_empty() {
-            self.update_preferred_column();
-        }
+        self.select_all_cursors_to_with_affinity(|s, sel| (f(s, sel), false), false, cx);
     }
 
     /// Extend selections with caret affinity, preserving their column anchors even
@@ -3128,6 +3146,7 @@ impl<M: InputModeKind> InputBaseState<M> {
     fn select_all_cursors_to_with_affinity(
         &mut self,
         f: impl Fn(&Self, &CursorSelection) -> (usize, bool),
+        preserve_column: bool,
         cx: &mut Context<Self>,
     ) {
         self.pause_blink_cursor(cx);
@@ -3149,6 +3168,15 @@ impl<M: InputModeKind> InputBaseState<M> {
                 let range = self.normalize_token_range(new_sel.start..new_sel.end);
                 new_sel.start = range.start;
                 new_sel.end = range.end;
+                if !preserve_column {
+                    new_sel.column_anchor =
+                        self.preferred_column_for_with_affinity(new_sel.cursor_offset(), affinity);
+                } else if new_sel.column_anchor.is_none() {
+                    new_sel.column_anchor = self.preferred_column_for_with_affinity(
+                        sel.cursor_offset(),
+                        self.line_end_affinity_for(sel),
+                    );
+                }
                 new_sel
             })
             .collect();
@@ -3264,6 +3292,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         }
 
+        M::hide_context_menu(self, cx);
         self.undo_manager.break_transaction_coalescing();
 
         // NOTE: Do not cancel select, when blur.
@@ -3550,6 +3579,11 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         }
 
+        // Every edit invalidates provider responses for the previous document,
+        // including deletion and indentation which do not trigger completion.
+        M::hide_context_menu(self, cx);
+        M::clear_inline_completion(self, cx);
+
         // Sort descending by start so applying front-of-vec first edits the
         // highest offsets first, leaving lower offsets unchanged.
         let mut sorted: Vec<(Range<usize>, &str)> = edits
@@ -3786,7 +3820,7 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
     ) -> Option<UTF16Selection> {
         Some(UTF16Selection {
             range: self.range_to_utf16(&self.selected_range()),
-            reversed: false,
+            reversed: self.active_selection().reversed,
         })
     }
 
@@ -4063,6 +4097,9 @@ impl<M: InputModeKind> EntityInputHandler for InputBaseState<M> {
 
         let starts_composition = self.ime_marked_range.is_none();
         if starts_composition {
+            // Even a canceled preedit separates the typing gestures on either
+            // side; its no-op transaction must not reconnect those gestures.
+            self.undo_manager.break_transaction_coalescing();
             self.undo_manager.begin_transaction();
         }
 

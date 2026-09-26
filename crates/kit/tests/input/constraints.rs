@@ -13,6 +13,8 @@ use gpui_kit::{
     test::TestWindowExt,
 };
 
+use std::{cell::RefCell, rc::Rc};
+
 struct Constraints {
     input: Entity<InputState>,
     previous_focus: Option<FocusHandle>,
@@ -22,6 +24,8 @@ struct Constraints {
     mask_toggle: bool,
     content_type: Option<InputContentType>,
     changes: usize,
+    consume_paste: Option<bool>,
+    paste_payloads: Rc<RefCell<Vec<String>>>,
     _subscription: Subscription,
 }
 
@@ -40,6 +44,13 @@ impl Render for Constraints {
                     .readonly(self.readonly)
                     .disabled(self.disabled)
                     .cleanable(self.cleanable)
+                    .when_some(self.consume_paste, |input, consume| {
+                        let payloads = self.paste_payloads.clone();
+                        input.on_paste(move |item, _, _| {
+                            payloads.borrow_mut().push(item.text().unwrap_or_default());
+                            consume
+                        })
+                    })
                     .when(self.mask_toggle, |input| input.mask_toggle())
                     .when_some(self.content_type, |input, kind| input.content_type(kind)),
             )
@@ -68,6 +79,8 @@ fn fixture(
                 mask_toggle: false,
                 content_type: None,
                 changes: 0,
+                consume_paste: None,
+                paste_payloads: Rc::default(),
                 _subscription: subscription,
             }
         })
@@ -693,4 +706,205 @@ fn validation_policy_changes_apply_to_the_existing_selection(cx: &mut TestAppCon
     })
     .unwrap();
     assert_owner(handle, &view, cx, "34", 9);
+}
+
+#[gpui_kit::test]
+fn paste_hook_consumption_preserves_selection_and_redo_then_fallback_normalizes(
+    cx: &mut TestAppContext,
+) {
+    let (handle, view) = fixture(cx, |input| input.default_value("old"));
+    ui(handle, cx, |window, cx| {
+        window.click("constrained", cx);
+        shortcut(window, "a", cx);
+        clipboard(cx, "new");
+        shortcut(window, "v", cx);
+        shortcut(window, "z", cx);
+    });
+    assert_owner(handle, &view, cx, "old", 2);
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        view.consume_paste = Some(true);
+        cx.notify();
+    })
+    .unwrap();
+    let payload = "中\r\n\t文";
+    ui(handle, cx, |window, cx| {
+        clipboard(cx, payload);
+        shortcut(window, "v", cx);
+        assert_eq!(window.find("constrained").value(), Some("old"));
+        assert_clipboard(cx, payload);
+    });
+    assert_owner(handle, &view, cx, "old", 2);
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        assert_eq!(view.input.read(cx).selected_range(), 0..3);
+        assert_eq!(&*view.paste_payloads.borrow(), &[payload]);
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| {
+        shortcut(
+            window,
+            if cfg!(target_os = "macos") {
+                "shift-z"
+            } else {
+                "y"
+            },
+            cx,
+        );
+        assert_eq!(window.find("constrained").value(), Some("new"));
+        shortcut(window, "z", cx);
+    });
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        view.consume_paste = Some(false);
+        cx.notify();
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| {
+        shortcut(window, "v", cx);
+        assert_eq!(window.find("constrained").value(), Some("中\t文"));
+        shortcut(window, "z", cx);
+        assert_eq!(window.find("constrained").value(), Some("old"));
+    });
+    assert_owner(handle, &view, cx, "old", 6);
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        assert_eq!(&*view.paste_payloads.borrow(), &[payload, payload]);
+        assert_eq!(view.input.read(cx).selected_range(), 0..3);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn protected_input_does_not_invoke_paste_hook_and_reenable_restores_it(cx: &mut TestAppContext) {
+    let (handle, view) = fixture(cx, |input| input.default_value("keep"));
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        view.consume_paste = Some(false);
+        cx.notify();
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| {
+        window.click("constrained", cx);
+        shortcut(window, "a", cx);
+        clipboard(cx, "replacement");
+    });
+    for disabled in [false, true] {
+        common::update_content(handle, &view, cx, |view, _, cx| {
+            view.readonly = !disabled;
+            view.disabled = disabled;
+            cx.notify();
+        })
+        .unwrap();
+        ui(handle, cx, |window, cx| {
+            shortcut(window, "v", cx);
+            assert_eq!(window.find("constrained").value(), Some("keep"));
+        });
+        assert_owner(handle, &view, cx, "keep", 0);
+        common::update_content(handle, &view, cx, |view, _, cx| {
+            assert!(view.paste_payloads.borrow().is_empty());
+            view.readonly = false;
+            view.disabled = false;
+            cx.notify();
+        })
+        .unwrap();
+    }
+    ui(handle, cx, |window, cx| {
+        window.click("constrained", cx);
+        shortcut(window, "a", cx);
+        shortcut(window, "v", cx);
+        assert_eq!(window.find("constrained").value(), Some("replacement"));
+    });
+    assert_owner(handle, &view, cx, "replacement", 1);
+    common::update_content(handle, &view, cx, |view, _, _| {
+        assert_eq!(&*view.paste_payloads.borrow(), &["replacement"]);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn masked_word_delete_takes_the_secret_and_undo_preserves_privacy(cx: &mut TestAppContext) {
+    let (handle, view) = fixture(cx, |input| input.default_value("first second").masked(true));
+    ui(handle, cx, |window, cx| {
+        window.click("constrained", cx);
+        window.press("end", cx);
+        let modifier = if cfg!(target_os = "macos") {
+            "alt"
+        } else {
+            "ctrl"
+        };
+        window.press(&format!("{modifier}-backspace"), cx);
+        assert_eq!(window.find("constrained").value(), None);
+    });
+    assert_owner(handle, &view, cx, "", 1);
+    ui(handle, cx, |window, cx| {
+        shortcut(window, "z", cx);
+        window.press("home", cx);
+        let modifier = if cfg!(target_os = "macos") {
+            "alt"
+        } else {
+            "ctrl"
+        };
+        window.press(&format!("{modifier}-delete"), cx);
+        assert_eq!(window.find("constrained").value(), None);
+    });
+    assert_owner(handle, &view, cx, "", 3);
+    ui(handle, cx, |window, cx| {
+        shortcut(window, "z", cx);
+        clipboard(cx, "public");
+        shortcut(window, "a", cx);
+        shortcut(window, "c", cx);
+        assert_clipboard(cx, "public");
+        assert_eq!(window.find("constrained").value(), None);
+    });
+    assert_owner(handle, &view, cx, "first second", 4);
+}
+
+#[gpui_kit::test]
+fn validation_rejection_preserves_redo_and_replacement_selection(cx: &mut TestAppContext) {
+    let (handle, view) = fixture(cx, |input| {
+        input
+            .default_value("12")
+            .validate(|value, _| value.len() <= 3 && value.bytes().all(|c| c.is_ascii_digit()))
+    });
+    ui(handle, cx, |window, cx| {
+        window.click("constrained", cx);
+        window.press("end", cx);
+        clipboard(cx, "3");
+        shortcut(window, "v", cx);
+        shortcut(window, "z", cx);
+        window.press("shift-home", cx);
+        window.input("x", cx);
+        clipboard(cx, "4567");
+        shortcut(window, "v", cx);
+        assert_eq!(window.find("constrained").value(), Some("12"));
+    });
+    assert_owner(handle, &view, cx, "12", 2);
+    common::update_content(handle, &view, cx, |view, _, cx| {
+        assert_eq!(view.input.read(cx).selected_range(), 0..2);
+        assert_eq!(view.input.read(cx).cursor(), 0);
+    })
+    .unwrap();
+    ui(handle, cx, |window, cx| {
+        shortcut(
+            window,
+            if cfg!(target_os = "macos") {
+                "shift-z"
+            } else {
+                "y"
+            },
+            cx,
+        );
+        assert_eq!(window.find("constrained").value(), Some("123"));
+        shortcut(window, "z", cx);
+        shortcut(window, "a", cx);
+        clipboard(cx, "45");
+        shortcut(window, "v", cx);
+        shortcut(
+            window,
+            if cfg!(target_os = "macos") {
+                "shift-z"
+            } else {
+                "y"
+            },
+            cx,
+        );
+        assert_eq!(window.find("constrained").value(), Some("45"));
+    });
+    assert_owner(handle, &view, cx, "45", 5);
 }

@@ -64,6 +64,7 @@ pub struct Lsp {
     /// take effect without a refetch.
     pub(crate) semantic_tokens: Vec<(lsp_types::Range, SharedString)>,
     pub(crate) _hover_task: Task<Result<()>>,
+    pub(crate) _definition_task: Task<Result<()>>,
     pub(crate) _document_color_task: Task<()>,
     pub(crate) _semantic_tokens_task: Task<()>,
 }
@@ -82,6 +83,7 @@ impl Default for Lsp {
             document_colors: vec![],
             semantic_tokens: vec![],
             _hover_task: Task::ready(Ok(())),
+            _definition_task: Task::ready(Ok(())),
             _document_color_task: Task::ready(()),
             _semantic_tokens_task: Task::ready(()),
         }
@@ -105,6 +107,7 @@ impl Lsp {
         self.document_colors.clear();
         self.semantic_tokens.clear();
         self._hover_task = Task::ready(Ok(()));
+        self._definition_task = Task::ready(Ok(()));
         self._document_color_task = Task::ready(());
         self._semantic_tokens_task = Task::ready(());
     }

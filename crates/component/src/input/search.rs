@@ -69,6 +69,10 @@ pub(super) struct SearchPanel<M: crate::input::overlay::OverlayMode> {
 }
 
 impl<M: crate::input::overlay::OverlayMode> SearchPanel<M> {
+    pub(super) fn replace_mode(&self) -> bool {
+        self.session.replace_mode
+    }
+
     pub(super) fn sync_session(&mut self, session: &gpui_base::input::SearchSession) {
         self.session = session.clone();
     }

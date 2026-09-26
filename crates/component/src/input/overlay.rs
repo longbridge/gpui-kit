@@ -319,6 +319,7 @@ impl<M: OverlayMode> InputOverlayHost<M> {
             )
         };
 
+        let panel_replace_mode = self.search.read(cx).replace_mode();
         self.search
             .update(cx, |panel, _| panel.sync_session(&search_session));
 
@@ -330,15 +331,15 @@ impl<M: OverlayMode> InputOverlayHost<M> {
             activation_revision,
         };
         if search_signature != self.search_signature {
-            // The panel writes what the user types back into the session, which
-            // lands here as a changed query on the next frame. Re-showing the
-            // panel for that echo would select the field out from under them, so
-            // recognise it: the same open session, moved only by the query the
-            // panel itself already holds.
+            // The panel writes query and replacement-mode changes back into the
+            // session. Re-showing it for that echo would select the query or steal
+            // focus from replacement, so preserve changes the panel already holds.
+            // External mode changes still move focus out of a hidden replace field.
             let was = &self.search_signature;
             let query_echo = search_open
                 && was.open
-                && was.replace_mode == search_signature.replace_mode
+                && (was.replace_mode == search_signature.replace_mode
+                    || panel_replace_mode == search_signature.replace_mode)
                 && was.anchor_offset == search_signature.anchor_offset
                 && was.activation_revision == search_signature.activation_revision
                 && self.search.read(cx).query(cx) == search_session.query;

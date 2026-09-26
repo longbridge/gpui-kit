@@ -309,6 +309,7 @@ Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用�
 或选择单个流程：
 
 ```sh
+script/test-input # 完整回归入口：Base、Component 和 Kit（使用 Bash）
 cargo test -p gpui-kit --features test-support --test input --test input_focus --locked
 cargo test -p gpui-kit --features test-support --test input --locked -- history::paste_is_atomic_and_separate_from_surrounding_typing --exact
 cargo test -p gpui-kit --features test-support --test input_focus --locked -- reverse_tab_cycles_three_inputs_with_passive_addons --exact
@@ -321,6 +322,8 @@ cargo test -p gpui-kit --features test-support --test input_focus --locked -- re
 以及 Editor 补全 → 接受 → Undo。每个流程读取新的快照，必要时结合公开状态或应用事件验证。
 补全使用提供固定响应的 provider，不连接实际语言服务器。
 独立的 `input_focus` 目标在 window update 结束后验证焦点回调。
+测试还覆盖公开输入法接口的预编辑、UTF-16 范围、提交/取消与 Undo 边界，以及多光标、折叠、异步 provider 的取消和失败。
+普通 Input 改动以操作覆盖表和各平台 CI 为验收依据，并为实际改动补充回归用例，减少重复手工检查整套编辑操作。
 这些用例不证明完整的系统 IME、辅助功能动作、系统剪贴板或像素显示正确；
 这些边界需要相应的平台验证。
 
