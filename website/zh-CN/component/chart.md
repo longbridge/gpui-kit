@@ -778,7 +778,7 @@ Tooltip::new(cursor, bounds.size)
     .value_color(gain)
 ```
 
-如果还要强调 plot 自己的图形——让悬停柱子周围的柱子变淡、让扇区弹出——就实现 `Plot::hover`。它在每帧的 `tooltip` 与 `paint` 之前运行，收到当前聚焦的 [`PlotHover`]；它携带 `TooltipState`，光标离开后会保留一段时间，`hover.focus()` 逐渐回到零，因此在这里采样动效并把结果存到 `self`。`hover.glide` 让一个位置按 tooltip 所用的同一个 spring 移动；把结果交给十字线，并用 `Tooltip::glide(false)` 关掉 tooltip 自己的滑动，避免重复做 spring：
+如果还要强调 plot 自己的图形——让悬停柱子周围的柱子变淡、让扇区弹出——就实现 `Plot::hover`。它在每帧的 `tooltip` 与 `paint` 之前运行，收到当前悬停的 [`PlotHover`]；它携带 `TooltipState`，光标离开后会保留一段时间，`hover.progress()` 逐渐回到零，因此在这里采样动效并把结果存到 `self`。`hover.glide` 让一个位置按 tooltip 所用的同一个 spring 移动；把结果交给十字线，并用 `Tooltip::glide(false)` 关掉 tooltip 自己的滑动，避免重复做 spring：
 
 ```rust
 fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {

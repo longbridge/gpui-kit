@@ -10,10 +10,18 @@ use crate::{
     motion::{TransitionId, spring, transition},
 };
 
-#[derive(Clone)]
+/// The datum the cursor resolved to, returned from
+/// [`Plot::tooltip_state`](super::Plot::tooltip_state).
+///
+/// Positions are relative to the plot's origin.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct TooltipState {
+    /// The hovered datum's index in the plot's data.
     pub index: usize,
+    /// Where a crosshair marking the datum sits.
     pub cross_line: Point<Pixels>,
+    /// The data points to mark, one per series at the hovered datum.
     pub dots: Vec<Point<Pixels>>,
 }
 
@@ -27,21 +35,22 @@ impl TooltipState {
     }
 }
 
-/// The datum a plot has in focus this frame, handed to [`Plot::hover`](super::Plot::hover).
+/// The datum a plot has under the pointer this frame, handed to
+/// [`Plot::hover`](super::Plot::hover).
 ///
-/// Carries the [`TooltipState`] the cursor resolved to and how far the hover has
-/// faded in. After the cursor leaves, the state lingers here while the focus
-/// eases back to zero, so a hover-driven presentation can fade out over the
-/// last datum instead of vanishing.
+/// Carries the [`TooltipState`] the cursor resolved to and how far the hover
+/// has faded in. After the cursor leaves, the state lingers here while the
+/// progress eases back to zero, so a hover-driven presentation can fade out
+/// over the last datum instead of vanishing.
 #[derive(Clone)]
 pub struct PlotHover {
     state: TooltipState,
-    focus: f32,
+    progress: f32,
     hovered: bool,
 }
 
 impl PlotHover {
-    /// The datum in focus: the one under the cursor, or the last one while the
+    /// The hovered datum: the one under the cursor, or the last one while the
     /// hover fades out.
     pub fn state(&self) -> &TooltipState {
         &self.state
@@ -49,11 +58,16 @@ impl PlotHover {
 
     /// How far the hover has faded in, from `0` to `1`.
     ///
-    /// Rises over the styled layer's fast duration when the cursor lands on a
-    /// datum and falls back after it leaves, during which [`Self::is_hovered`]
-    /// is false.
+    /// Rises over the active [`PlotMotion`](crate::PlotMotion)'s enter when the
+    /// cursor lands on a datum and falls back over its exit after it leaves,
+    /// during which [`Self::is_hovered`] is false.
+    pub fn progress(&self) -> f32 {
+        self.progress
+    }
+
+    #[deprecated(since = "0.7.0", note = "use `progress`")]
     pub fn focus(&self) -> f32 {
-        self.focus
+        self.progress()
     }
 
     /// Whether the cursor is on the datum, as opposed to the state lingering
@@ -66,7 +80,7 @@ impl PlotHover {
     /// not started fading in yet. A position that follows the hovered datum
     /// adopts it here instead of travelling from where the last hover ended.
     pub fn is_entering(&self) -> bool {
-        self.hovered && self.focus == 0.
+        self.hovered && self.progress == 0.
     }
 
     /// Follow `target` on the [pointer spring](pointer_spring), adopting the
@@ -97,11 +111,11 @@ pub fn pointer_spring(cx: &App) -> Spring {
 /// The last datum the cursor resolved to, where the cursor was and how far the
 /// hover has faded in, kept in element state so the hover can fade out over it
 /// after the cursor leaves and so an overlay can read the fade without being
-/// handed it; see [`hover_focus`].
+/// handed it; see [`hover_progress`].
 struct HoverMemory {
     state: Option<TooltipState>,
     cursor: Point<Pixels>,
-    focus: f32,
+    progress: f32,
     /// Whether this frame is the first the cursor is on a datum; see
     /// [`PlotHover::is_entering`].
     entering: bool,
@@ -113,7 +127,7 @@ impl Default for HoverMemory {
             state: None,
             cursor: Point::default(),
             // An overlay rendered outside a plot's tracking is fully opaque.
-            focus: 1.,
+            progress: 1.,
             entering: false,
         }
     }
@@ -126,7 +140,7 @@ const HOVER_MEMORY: &str = "__plot-hover";
 /// resolved to.
 ///
 /// While `live` is `Some` it is shown as is. After the cursor leaves, the last
-/// state lingers with its focus easing to zero over the active
+/// state lingers with its progress easing to zero over the active
 /// [`PlotMotion`](crate::PlotMotion)'s exit, then is dropped. Called by
 /// [`PlotElement`](super::PlotElement) within the plot's element scope; the
 /// returned cursor is the live one, or the last one while the state lingers.
@@ -146,8 +160,8 @@ pub(super) fn track_hover(
     } else {
         motion.exit().clone()
     };
-    let focus = transition(
-        (HOVER_MEMORY, "focus"),
+    let progress = transition(
+        (HOVER_MEMORY, "progress"),
         if hovered { 1. } else { 0. },
         policy,
         window,
@@ -159,9 +173,9 @@ pub(super) fn track_hover(
             memory.state = Some(live);
             memory.cursor = cursor;
         }
-        memory.focus = focus;
-        memory.entering = hovered && focus == 0.;
-        if !hovered && focus <= 0. {
+        memory.progress = progress;
+        memory.entering = hovered && progress == 0.;
+        if !hovered && progress <= 0. {
             memory.state = None;
         }
     });
@@ -171,27 +185,37 @@ pub(super) fn track_hover(
     Some((
         PlotHover {
             state,
-            focus,
+            progress,
             hovered,
         },
         memory.cursor,
     ))
 }
 
-/// How far the enclosing plot's hover has faded in this frame, from `0` to `1`.
+/// How far the enclosing plot's hover has faded in this frame, from `0` to `1`;
+/// see [`PlotHover::progress`].
 ///
 /// For an overlay a plot returns from [`Plot::tooltip`](super::Plot::tooltip),
 /// which renders within the plot's element scope and fades with its hover
-/// without being handed the focus. Outside a plot this is `1`.
-pub fn hover_focus(window: &mut Window, cx: &mut App) -> f32 {
+/// without being handed the progress.
+///
+/// This reads the hover the enclosing [`PlotElement`](super::PlotElement)
+/// tracked in its element scope, so it is only meaningful while that plot is
+/// rendering its overlay. Anywhere else it reads no tracked hover and returns
+/// `1`.
+pub fn hover_progress(window: &mut Window, cx: &mut App) -> f32 {
     window
         .use_keyed_state(HOVER_MEMORY, cx, |_, _| HoverMemory::default())
         .read(cx)
-        .focus
+        .progress
 }
 
 /// Whether this frame is the first the enclosing plot's cursor is on a datum;
-/// see [`PlotHover::is_entering`]. Outside a plot this is `false`.
+/// see [`PlotHover::is_entering`].
+///
+/// Like [`hover_progress`], this reads the enclosing plot's element scope and
+/// is only meaningful while that plot is rendering its overlay. Anywhere else
+/// it returns `false`.
 pub fn is_hover_entering(window: &mut Window, cx: &mut App) -> bool {
     window
         .use_keyed_state(HOVER_MEMORY, cx, |_, _| HoverMemory::default())
@@ -210,24 +234,24 @@ mod tests {
         let state = TooltipState::new(2, point(px(10.), px(20.)), vec![]);
         let hover = PlotHover {
             state,
-            focus: 1.,
+            progress: 1.,
             hovered: true,
         };
         assert_eq!(hover.state().index, 2);
         assert!(hover.is_hovered());
-        // Fully in focus: a pointer keeps travelling rather than snapping.
+        // Fully faded in: a pointer keeps travelling rather than snapping.
         assert!(!hover.is_entering());
 
         // The first hovered frame, before the fade has started.
         let entering = PlotHover {
-            focus: 0.,
+            progress: 0.,
             ..hover.clone()
         };
         assert!(entering.is_entering());
 
         // Fading out after the cursor left: neither hovered nor entering.
         let lingering = PlotHover {
-            focus: 0.4,
+            progress: 0.4,
             hovered: false,
             ..hover
         };

@@ -5,7 +5,7 @@ use gpui::{
 };
 use gpui_base::motion::spring;
 pub use gpui_base::plot::{PlotHover, TooltipState};
-use gpui_base::plot::{hover_focus, is_hover_entering, pointer_spring};
+use gpui_base::plot::{hover_progress, is_hover_entering, pointer_spring};
 
 use crate::ThemeStyled as _;
 use crate::{ActiveTheme, Colorize, StyledExt, h_flex, v_flex};
@@ -338,7 +338,7 @@ impl Tooltip {
     ///
     /// A tooltip returned from [`Plot::tooltip`](super::Plot::tooltip) already
     /// follows the plot's hover, easing in when the cursor lands on a datum and
-    /// out after it leaves ([`PlotHover::focus`]); set this to override that,
+    /// out after it leaves ([`PlotHover::progress`]); set this to override that,
     /// or to fade a tooltip rendered outside a plot.
     pub fn focus(mut self, focus: f32) -> Self {
         self.focus = Some(focus.clamp(0., 1.));
@@ -459,7 +459,7 @@ impl RenderOnce for Tooltip {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         // Rendered within the plot's element scope, so this is the fade the
         // derive tracked for it this frame; fully opaque outside a plot.
-        let tracked_focus = hover_focus(window, cx);
+        let tracked_focus = hover_progress(window, cx);
         let entering = is_hover_entering(window, cx);
         let Tooltip {
             base,

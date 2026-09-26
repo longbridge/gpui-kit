@@ -479,7 +479,7 @@ impl<T> Plot for PieChart<T> {
                 .collect();
             PieHover {
                 lift,
-                focus: hover.focus(),
+                focus: hover.progress(),
             }
         });
     }

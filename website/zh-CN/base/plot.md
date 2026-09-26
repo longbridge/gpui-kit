@@ -101,14 +101,14 @@ Plot 的尺寸跟随父元素，因此需要给父元素一个明确的高度。
 Plot 在 `Plot::id` 中返回 id 即可启用 hover。之后 `PlotElement` 每帧跟踪光标（会识别遮挡，Plot 上方打开的弹出层会清除 hover），并依次询问 Plot：
 
 1. `tooltip_state`：把光标映射成 [`TooltipState`]，包括悬停的索引、十字线位置和数据点，或返回 `None`。
-2. `hover`：在绘制前接收当前的 [`PlotHover`]。光标离开后它会继续保留，同时 `focus()` 逐渐回落到零，让强调效果在最后一个数据项上淡出，而不是突然消失。首个悬停帧上 `is_entering()` 为 true。
+2. `hover`：在绘制前接收当前的 [`PlotHover`]。光标离开后它会继续保留，同时 `progress()` 逐渐回落到零，让强调效果在最后一个数据项上淡出，而不是突然消失。首个悬停帧上 `is_entering()` 为 true。
 3. `tooltip`：返回浮层，例如十字线、数据点和提示框。浮层绘制在 Plot 之上；可能超出 Plot 边界的提示框应当用 `deferred` 包裹自身。
 
 Base 本身不绘制任何浮层，浮层由样式层构建。在 `Plot::tooltip` 中，浮层渲染在 Plot 的 element 作用域内，因此无需传参即可读取 hover 状态：
 
 | 函数 | 返回值 |
 | --- | --- |
-| `hover_focus(window, cx)` | hover 淡入的程度，范围 `0..=1`；在 Plot 之外为 `1` |
+| `hover_progress(window, cx)` | hover 淡入的程度，范围 `0..=1`；在 Plot 之外为 `1` |
 | `is_hover_entering(window, cx)` | 当前是否是首个悬停帧 |
 | `pointer_spring(cx)` | 指示器跟随悬停数据项所用的弹簧 |
 | `PlotHover::glide(id, target, window, cx)` | 在指示器弹簧上跟随 `target` 的位置，首个悬停帧直接采用目标值 |

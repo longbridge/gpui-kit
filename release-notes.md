@@ -33,7 +33,7 @@ keep working.
 
 ```rust
 pub struct PlotElement<P>        // gpui_base::plot: the element behind every Plot
-pub fn hover_focus(window: &mut Window, cx: &mut App) -> f32
+pub fn hover_progress(window: &mut Window, cx: &mut App) -> f32
 pub fn is_hover_entering(window: &mut Window, cx: &mut App) -> bool
 pub fn pointer_spring(cx: &App) -> Spring
 pub struct PlotMotion            // pointer spring and hover enter/exit transitions
