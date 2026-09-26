@@ -90,6 +90,20 @@ Scales map a domain of data to a range of pixels, or of any other value.
 
 `Bar`, `Line`, `Area` and `Arc` paint themselves given accessors that turn a datum into pixels; `Pie` lays arcs out from values, and `Stack` computes stacked series for stacked bars and areas. `RadialLine` and the Sankey layout (`Sankey`, `SankeyLink`) serve radar and flow charts. See [Plot in GPUI Component](../component/plot.md) for a tour of each shape.
 
+`Line` and `Area` connect their points by a `Curve`, set with `.curve(..)`: `Curve::Natural` (the default) draws a smooth curve through every point, `Curve::Linear` straight segments, and `Curve::StepAfter` a step that holds each value until the next point. `Curve` was named `StrokeStyle` before 0.7.0, and `.curve` was `.stroke_style`; the old names remain as deprecated aliases for this release.
+
+```rust
+use gpui_kit::base::plot::{Curve, shape::Line};
+
+Line::new()
+    .data(&values)
+    .x(|d| x.tick(&d.label))
+    .y(|d| y.tick(&d.value))
+    .curve(Curve::StepAfter)
+    .stroke(color)
+    .paint(&bounds, window);
+```
+
 Shapes that repaint every frame can keep their tessellated paths across frames with [`PathCaches`], keyed by the plot's id.
 
 ## Axes, grids and labels
