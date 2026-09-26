@@ -655,8 +655,7 @@ impl CommandState {
                     CommandRow::Heading(_) => self.render_row(row_ix, window, cx),
                     CommandRow::Item(matched_ix) => {
                         let binding = self.item_binding(*matched_ix, window, cx);
-                        bindings[*matched_ix] =
-                            binding.as_ref().map(|kbd| kbd.keystroke().clone());
+                        bindings[*matched_ix] = binding.as_ref().map(|kbd| kbd.keystroke().clone());
                         self.render_item_with_binding(*matched_ix, binding, window, cx)
                     }
                 };
@@ -992,9 +991,7 @@ impl Render for CommandState {
                                 row_sizes,
                                 move |this, visible_range, window, cx| {
                                     visible_range
-                                        .map(|row_ix| {
-                                            this.render_visible_row(row_ix, window, cx)
-                                        })
+                                        .map(|row_ix| this.render_visible_row(row_ix, window, cx))
                                         .collect::<Vec<_>>()
                                 },
                             )
@@ -1610,7 +1607,9 @@ mod tests {
                     vec![CommandEntry::Item(item())],
                     vec![CommandEntry::Item(item().icon(icon()))],
                     vec![CommandEntry::Item(item().icon(icon().ml_2()))],
-                    vec![CommandEntry::Item(item().icon(icon().ml_2()).disabled(true))],
+                    vec![CommandEntry::Item(
+                        item().icon(icon().ml_2()).disabled(true),
+                    )],
                 ] {
                     state.needs_measure = false;
                     state.install_model(
