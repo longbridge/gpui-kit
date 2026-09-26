@@ -1,17 +1,8 @@
-use std::sync::LazyLock;
-
 use gpui::SharedString;
-
-/// Read once: measurement is a startup debug flag, and callers such as the
-/// table query it for every rendered cell.
-static MEASUREMENT_ENABLED: LazyLock<bool> = LazyLock::new(|| {
-    std::env::var_os("ZED_MEASUREMENTS").is_some()
-        || std::env::var_os("GPUI_MEASUREMENTS").is_some()
-});
 
 #[inline]
 pub fn measurement_enabled() -> bool {
-    *MEASUREMENT_ENABLED
+    std::env::var("ZED_MEASUREMENTS").is_ok() || std::env::var("GPUI_MEASUREMENTS").is_ok()
 }
 
 /// Measures `f` when `if_` is true and measurement logging is enabled.
