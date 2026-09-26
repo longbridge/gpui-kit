@@ -26,7 +26,7 @@ use gpui::{Bounds, EntityId, Hsla, Pixels, SharedString};
 
 use super::{
     document::ParsedDocument,
-    node::{BlockNode, Paragraph, Table},
+    node::{BlockNode, Paragraph},
     stream_fade::{TextLeaf, TextLeafKey, text_leaves},
 };
 
@@ -404,34 +404,36 @@ impl IndexBuilder {
     }
 }
 
-/// Where the source of the table row holding cell `cell_ix` of the table
-/// starting at `table_start` ends, when the parser recorded it.
-fn row_source_end(blocks: &[BlockNode], table_start: usize, cell_ix: usize) -> Option<usize> {
-    fn find_table(blocks: &[BlockNode], start: usize) -> Option<&Table> {
-        blocks.iter().find_map(|block| match block {
-            BlockNode::Table(table) if table.span.map(|span| span.start) == Some(start) => {
-                Some(table)
+/// The last cell and source end of each table row. Collect them once so
+/// remapping cells neither rescans a table nor recomputes a row's end.
+fn table_row_source_ends(blocks: &[BlockNode], rows: &mut Vec<(TextLeafKey, Option<usize>)>) {
+    for block in blocks {
+        match block {
+            BlockNode::Table(table) => {
+                let Some(span) = table.span else {
+                    continue;
+                };
+                let mut cell_count = 0;
+                for row in &table.children {
+                    if row.children.is_empty() {
+                        continue;
+                    }
+                    cell_count += row.children.len();
+                    let end = row
+                        .children
+                        .iter()
+                        .filter_map(|cell| paragraph_source_end(&cell.children))
+                        .max();
+                    rows.push((TextLeafKey::table_cell(span.start, cell_count - 1), end));
+                }
             }
             BlockNode::Root { children, .. }
             | BlockNode::Blockquote { children, .. }
             | BlockNode::List { children, .. }
-            | BlockNode::ListItem { children, .. } => find_table(children, start),
-            _ => None,
-        })
-    }
-
-    let mut first_cell = 0;
-    for row in &find_table(blocks, table_start)?.children {
-        if cell_ix < first_cell + row.children.len() {
-            return row
-                .children
-                .iter()
-                .filter_map(|cell| paragraph_source_end(&cell.children))
-                .max();
+            | BlockNode::ListItem { children, .. } => table_row_source_ends(children, rows),
+            _ => {}
         }
-        first_cell += row.children.len();
     }
-    None
 }
 
 /// Where the source of `paragraph`'s text ends, when the parser recorded it.
@@ -531,7 +533,6 @@ impl RangeHighlightFrame {
 /// change in length; a block that starts between them is gone. A leaf keeps
 /// its text up to where it first differs from before.
 pub(super) struct LeafRemap<'a> {
-    old: &'a ParsedDocument,
     old_len: usize,
     new_len: usize,
     /// With an append, where the block it parsed again starts: every leaf
@@ -541,6 +542,8 @@ pub(super) struct LeafRemap<'a> {
     unchanged_suffix: usize,
     old_leaves: Vec<(TextLeafKey, TextLeaf<'a>)>,
     new_leaves: Vec<(TextLeafKey, TextLeaf<'a>)>,
+    /// Sorted by each row's last cell. Unneeded for append-only remapping.
+    table_rows: Vec<(TextLeafKey, Option<usize>)>,
 }
 
 impl<'a> LeafRemap<'a> {
@@ -602,8 +605,13 @@ impl<'a> LeafRemap<'a> {
             leaves
         }
 
+        let mut table_rows = Vec::new();
+        if !tail_only {
+            table_row_source_ends(&old.blocks, &mut table_rows);
+            table_rows.sort_by_key(|(key, _)| *key);
+        }
+
         Self {
-            old,
             old_len,
             new_len,
             tail_start,
@@ -611,6 +619,7 @@ impl<'a> LeafRemap<'a> {
             unchanged_suffix,
             old_leaves: leaves_from(old, tail_start),
             new_leaves: leaves_from(new, tail_start),
+            table_rows,
         }
     }
 
@@ -628,16 +637,26 @@ impl<'a> LeafRemap<'a> {
         // A table's cells are only known by their place in it, so after a
         // change inside the table a cell is the same one only when the source
         // of its whole row ends before that change.
-        if let Some(cell_ix) = key.cell_ix()
+        if key.cell_ix().is_some()
             && key.block_start() < self.unchanged_prefix
             && self.tail_start.is_none()
-            && row_source_end(&self.old.blocks, key.block_start(), cell_ix)
+            && self
+                .row_source_end(key)
                 .is_none_or(|end| end > self.unchanged_prefix)
         {
             return None;
         }
         let new_leaf = Self::find(&self.new_leaves, new_key)?;
         Some((new_key, new_leaf.common_prefix_len(old_leaf)))
+    }
+
+    fn row_source_end(&self, key: TextLeafKey) -> Option<usize> {
+        let ix = self.table_rows.partition_point(|(last, _)| *last < key);
+        let (last, end) = self.table_rows.get(ix)?;
+        if last.block_start() != key.block_start() {
+            return None;
+        }
+        *end
     }
 
     /// Where the block starting at `start` in the old document starts in the
@@ -665,7 +684,109 @@ impl<'a> LeafRemap<'a> {
 mod tests {
     use gpui::hsla;
 
-    use super::RangeHighlight;
+    use super::{LeafRemap, RangeHighlight, RangeHighlightFrame, TextLeafKey};
+    use crate::text::{document::ParsedDocument, format::markdown, node::NodeContext};
+
+    fn parse(source: &str) -> ParsedDocument {
+        markdown::parse(source, &mut NodeContext::default()).unwrap()
+    }
+
+    #[test]
+    fn table_row_index_keeps_empty_cells_in_their_row() {
+        let source = "| a | b |\n|---|---|\n| é |   |\n|   |   |\n| c | d |\n";
+        let document = parse(source);
+        let remap = LeafRemap::new(&document, &document, false);
+        assert_eq!(remap.table_rows.len(), 4);
+        let ends = [Some("b"), Some("é"), None, Some("d")];
+        for (row, text) in ends.into_iter().enumerate() {
+            let expected = text.map(|text| source.find(text).unwrap() + text.len());
+            for column in 0..2 {
+                let key = TextLeafKey::table_cell(0, row * 2 + column);
+                assert_eq!(remap.row_source_end(key), expected, "{key:?}");
+            }
+        }
+        assert_eq!(remap.row_source_end(TextLeafKey::table_cell(0, 8)), None);
+    }
+
+    #[test]
+    fn table_row_index_finds_nested_tables_without_crossing_between_them() {
+        let source = concat!(
+            "| a |\n|---|\n| b |\n\n",
+            "> | c |\n> |---|\n> | d |\n\n",
+            "- | e |\n  |---|\n  | f |\n",
+        );
+        let document = parse(source);
+        let remap = LeafRemap::new(&document, &document, false);
+        assert_eq!(remap.table_rows.len(), 6);
+        for (header, body) in [("a", "b"), ("c", "d"), ("e", "f")] {
+            let start = source.find(&format!("| {header} |")).unwrap();
+            for (cell, text) in [header, body].into_iter().enumerate() {
+                let key = TextLeafKey::table_cell(start, cell);
+                assert_eq!(
+                    remap.row_source_end(key),
+                    Some(source.find(text).unwrap() + text.len()),
+                );
+            }
+            assert_eq!(
+                remap.row_source_end(TextLeafKey::table_cell(start, 2)),
+                None
+            );
+            assert_eq!(
+                remap.row_source_end(TextLeafKey::table_cell(start + 1, 0)),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn long_and_wide_tables_remap_highlights_by_whole_rows() {
+        for (rows, columns) in [(4096, 1), (2, 1024), (64, 16)] {
+            let row = format!("|{}\n", " x |".repeat(columns));
+            let separator = format!("|{}\n", "---|".repeat(columns));
+            let source = format!("{row}{separator}{}", row.repeat(rows));
+            let old = parse(&source);
+            let mut changed = source.clone();
+            // Even unchanged cells earlier in the edited row must lose their
+            // highlights, as must the unchanged rows that follow it.
+            let edit = row.len() + separator.len() + row.rfind('x').unwrap();
+            changed.replace_range(edit..edit + 1, "y");
+            let new = parse(&changed);
+            let remap = LeafRemap::new(&old, &new, false);
+            assert_eq!(remap.table_rows.len(), rows + 1);
+            let frame = RangeHighlightFrame {
+                leaves: remap
+                    .old_leaves
+                    .iter()
+                    .map(|(key, _)| (*key, vec![(0..1, hsla(0.15, 1., 0.5, 0.4))]))
+                    .collect(),
+            };
+            assert_eq!(frame.leaves.len(), (rows + 1) * columns);
+            let kept = frame.remap(&remap).unwrap();
+            assert_eq!(kept.leaves.len(), columns);
+            for column in 0..columns {
+                assert_eq!(
+                    kept.backgrounds(TextLeafKey::table_cell(0, column)),
+                    &[(0..1, hsla(0.15, 1., 0.5, 0.4))],
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn append_remapping_does_not_build_a_table_row_index() {
+        let source = "| a |\n|---|\n| b |\n\n| c |\n|---|\n| d |\n";
+        let old = parse(source);
+        let new = parse(&format!("{source}| e |\n"));
+        let remap = LeafRemap::new(&old, &new, true);
+        assert!(remap.table_rows.is_empty());
+        let first = TextLeafKey::table_cell(0, 0);
+        assert_eq!(remap.leaf(first), Some((first, usize::MAX)));
+        let last_start = source.find("| c |").unwrap();
+        for cell in 0..2 {
+            let key = TextLeafKey::table_cell(last_start, cell);
+            assert_eq!(remap.leaf(key), Some((key, 1)));
+        }
+    }
 
     #[test]
     fn a_position_in_an_inline_object_moves_onto_text() {
