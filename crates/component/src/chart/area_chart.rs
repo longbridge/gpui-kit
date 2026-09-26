@@ -33,7 +33,7 @@ where
     x: Option<Rc<dyn Fn(&T) -> X>>,
     y: Vec<Rc<dyn Fn(&T) -> Y>>,
     strokes: Vec<Hsla>,
-    stroke_styles: Vec<Curve>,
+    curves: Vec<Curve>,
     fills: Vec<Background>,
     names: Vec<SharedString>,
     tooltip_content: TooltipContent<T>,
@@ -59,7 +59,7 @@ where
     {
         Self {
             data: data.into_iter().collect(),
-            stroke_styles: vec![],
+            curves: vec![],
             strokes: vec![],
             fills: vec![],
             names: vec![],
@@ -178,17 +178,17 @@ where
     }
 
     pub fn natural(mut self) -> Self {
-        self.stroke_styles.push(Curve::Natural);
+        self.curves.push(Curve::Natural);
         self
     }
 
     pub fn linear(mut self) -> Self {
-        self.stroke_styles.push(Curve::Linear);
+        self.curves.push(Curve::Linear);
         self
     }
 
     pub fn step_after(mut self) -> Self {
-        self.stroke_styles.push(Curve::StepAfter);
+        self.curves.push(Curve::StepAfter);
         self
     }
 
@@ -439,10 +439,10 @@ where
 
             let fill = *self.fills.get(i).unwrap_or(&default_fill);
             let stroke = *self.strokes.get(i).unwrap_or(&default_stroke);
-            let stroke_style = *self
-                .stroke_styles
+            let curve = *self
+                .curves
                 .get(i)
-                .unwrap_or(self.stroke_styles.first().unwrap_or(&Default::default()));
+                .unwrap_or(self.curves.first().unwrap_or(&Default::default()));
 
             Area::new()
                 .data(&self.data)
@@ -450,7 +450,7 @@ where
                 .y0(height)
                 .y1(move |d| y.tick(&y_fn(d)))
                 .stroke(stroke)
-                .curve(stroke_style)
+                .curve(curve)
                 .fill(fill)
         });
 

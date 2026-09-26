@@ -33,7 +33,7 @@ where
     x: Option<Rc<dyn Fn(&T) -> X>>,
     y: Option<Rc<dyn Fn(&T) -> Y>>,
     stroke: Option<Hsla>,
-    stroke_style: Curve,
+    curve: Curve,
     dot: bool,
     tick_margin: usize,
     x_axis: bool,
@@ -60,7 +60,7 @@ where
         Self {
             data: data.into_iter().collect(),
             stroke: None,
-            stroke_style: Default::default(),
+            curve: Default::default(),
             dot: false,
             x: None,
             y: None,
@@ -168,17 +168,17 @@ where
     }
 
     pub fn natural(mut self) -> Self {
-        self.stroke_style = Curve::Natural;
+        self.curve = Curve::Natural;
         self
     }
 
     pub fn linear(mut self) -> Self {
-        self.stroke_style = Curve::Linear;
+        self.curve = Curve::Linear;
         self
     }
 
     pub fn step_after(mut self) -> Self {
-        self.stroke_style = Curve::StepAfter;
+        self.curve = Curve::StepAfter;
         self
     }
 
@@ -427,7 +427,7 @@ where
             .x(move |d| x.tick(&x_fn(d)))
             .y(move |d| y.tick(&y_fn(d)))
             .stroke(stroke)
-            .curve(self.stroke_style)
+            .curve(self.curve)
             .stroke_width(2.);
 
         if self.dot {

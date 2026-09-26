@@ -80,9 +80,9 @@ the new `f32` support. Custom plots built on the primitives need these changes:
 - `#[derive(IntoPlot)]` generates `type Element = PlotElement<Self>` instead of
   an `Element` impl on the plot; `gpui_base::Theme` gains a `plot` field.
 
-Deprecated aliases keep `StrokeStyle`, `AXIS_GAP`, `PlotAxis::x`/`y`,
-`stroke_style`, `dot_fill_color`, `dot_stroke_color` and `focus` compiling for
-this release.
+`StrokeStyle` and `stroke_style` are removed outright. Deprecated aliases keep
+`AXIS_GAP`, `PlotAxis::x`/`y`, `dot_fill_color`, `dot_stroke_color` and `focus`
+compiling for this release.
 
 ```diff
 - let y = ScaleLinear::new(values.collect(), vec![height, 0.]);

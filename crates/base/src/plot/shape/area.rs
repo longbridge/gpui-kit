@@ -86,11 +86,6 @@ impl<T> Area<T> {
         self
     }
 
-    #[deprecated(since = "0.7.0", note = "use `curve`")]
-    pub fn stroke_style(self, curve: Curve) -> Self {
-        self.curve(curve)
-    }
-
     fn path(&self, bounds: &Bounds<Pixels>) -> (Option<Path<Pixels>>, Option<Path<Pixels>>) {
         let origin = bounds.origin;
         let mut area_builder = PathBuilder::fill();

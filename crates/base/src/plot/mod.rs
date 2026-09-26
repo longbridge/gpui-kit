@@ -191,9 +191,6 @@ pub enum Curve {
     StepAfter,
 }
 
-#[deprecated(since = "0.7.0", note = "use `Curve`")]
-pub type StrokeStyle = Curve;
-
 pub fn origin_point<T>(x: T, y: T, origin: Point<T>) -> Point<T>
 where
     T: Default + Clone + Debug + PartialEq + Add<Output = T>,

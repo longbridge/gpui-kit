@@ -88,11 +88,6 @@ impl<T> Line<T> {
         self
     }
 
-    #[deprecated(since = "0.7.0", note = "use `curve`")]
-    pub fn stroke_style(self, curve: Curve) -> Self {
-        self.curve(curve)
-    }
-
     /// Whether to draw a dot on every point. Defaults to `false`.
     pub fn dot(mut self, dot: bool) -> Self {
         self.dot = dot;

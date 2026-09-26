@@ -90,7 +90,7 @@ Plot 的尺寸跟随父元素，因此需要给父元素一个明确的高度。
 
 `Bar`、`Line`、`Area` 和 `Arc` 通过把数据项转换成像素的访问器完成绘制；`Pie` 根据数值计算圆弧布局，`Stack` 为堆叠柱状图和面积图计算堆叠序列。`RadialLine` 与 Sankey 布局（`Sankey`、`SankeyLink`）分别用于雷达图和流向图。各图形的用法见 [GPUI Component 中的 Plot](../component/plot.md)。
 
-`Line` 和 `Area` 用 `Curve` 决定点与点之间怎么连接，通过 `.curve(..)` 设置：`Curve::Natural`（默认）是穿过每个点的平滑曲线，`Curve::Linear` 是直线段，`Curve::StepAfter` 是阶梯线，每个值保持到下一个点。0.7.0 之前 `Curve` 叫 `StrokeStyle`，`.curve` 叫 `.stroke_style`；本版本仍保留旧名作为 deprecated 别名。
+`Line` 和 `Area` 用 `Curve` 决定点与点之间怎么连接，通过 `.curve(..)` 设置：`Curve::Natural`（默认）是穿过每个点的平滑曲线，`Curve::Linear` 是直线段，`Curve::StepAfter` 是阶梯线，每个值保持到下一个点。0.7.0 之前 `Curve` 叫 `StrokeStyle`，`.curve` 叫 `.stroke_style`。
 
 ```rust
 use gpui_kit::base::plot::{Curve, shape::Line};
