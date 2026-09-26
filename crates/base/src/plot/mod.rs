@@ -21,7 +21,9 @@ use gpui::{
 
 use crate::{Spring, motion::Transition};
 
-pub use axis::{AXIS_GAP, AxisLabelPlacement, AxisLabelSide, AxisText, PlotAxis};
+#[allow(deprecated)]
+pub use axis::AXIS_GAP;
+pub use axis::{AxisLabelPlacement, AxisLabelSide, AxisText, PlotAxis, axis_gutter};
 pub use element::PlotElement;
 pub use grid::Grid;
 pub use hover::{PlotHover, TooltipState, hover_focus, is_hover_entering, pointer_spring};

@@ -1,44 +1,40 @@
-use gpui::{Bounds, Hsla, Pixels, Point, Window, fill, point, px, size};
+use gpui::{Background, Bounds, Pixels, Point, Window, fill, point, px, size};
 
 use super::origin_point;
 
+/// Axis-aligned grid lines across a plot, at the given x and y positions.
+#[derive(Default)]
 pub struct Grid {
     x: Vec<Pixels>,
     y: Vec<Pixels>,
-    stroke: Hsla,
+    stroke: Background,
     dash_array: Option<Vec<Pixels>>,
 }
 
 impl Grid {
-    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Self {
-            x: vec![],
-            y: vec![],
-            stroke: Default::default(),
-            dash_array: None,
-        }
+        Self::default()
     }
 
-    /// Set the x of the Grid.
-    pub fn x(mut self, x: Vec<impl Into<Pixels>>) -> Self {
-        self.x = x.into_iter().map(|v| v.into()).collect();
+    /// Set the positions of the vertical lines, from the left of the plot.
+    pub fn x(mut self, x: impl IntoIterator<Item = impl Into<Pixels>>) -> Self {
+        self.x = x.into_iter().map(Into::into).collect();
         self
     }
 
-    /// Set the y of the Grid.
-    pub fn y(mut self, y: Vec<impl Into<Pixels>>) -> Self {
-        self.y = y.into_iter().map(|v| v.into()).collect();
+    /// Set the positions of the horizontal lines, from the top of the plot.
+    pub fn y(mut self, y: impl IntoIterator<Item = impl Into<Pixels>>) -> Self {
+        self.y = y.into_iter().map(Into::into).collect();
         self
     }
 
-    /// Set the stroke color of the Grid.
-    pub fn stroke(mut self, stroke: impl Into<Hsla>) -> Self {
+    /// Set the stroke of the grid lines.
+    pub fn stroke(mut self, stroke: impl Into<Background>) -> Self {
         self.stroke = stroke.into();
         self
     }
 
-    /// Set the dash array of the Grid.
+    /// Set the dash array of the grid lines.
     pub fn dash_array(mut self, dash_array: &[Pixels]) -> Self {
         self.dash_array = Some(dash_array.to_vec());
         self
