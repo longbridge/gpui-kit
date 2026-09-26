@@ -43,18 +43,22 @@ impl InputBaseState<EditorMode> {
             }
         }
 
-        // Currently not implemented.
-        let task = provider.hover(&self.text, offset, window, cx);
+        let text = self.text.clone();
         let mut symbol_range = self.text.word_range(offset).unwrap_or(offset..offset);
         let editor = cx.entity();
         let should_delay = self.extras.hover_popover.is_none();
-        self.extras.lsp._hover_task = cx.spawn_in(window, async move |_, cx| {
+        // Ask the provider only after the delay: every mouse move replaces this
+        // task, so positions the pointer merely passes over never reach it.
+        self.extras.lsp._hover_task = cx.spawn_in(window, async move |this, cx| {
             if should_delay {
                 cx.background_executor()
                     .timer(Duration::from_millis(150))
                     .await;
             }
 
+            let task = this.update_in(cx, |_, window, cx| {
+                provider.hover(&text, offset, window, cx)
+            })?;
             let result = task.await?;
 
             _ = editor.update(cx, |editor, cx| {
@@ -95,10 +99,14 @@ impl InputBaseState<EditorMode> {
         if event.modifiers.secondary() {
             self.handle_hover_definition(offset, window, cx);
         } else {
-            self.extras.hover_definition.clear();
+            // Repaint only when the definition underline goes away; the hover
+            // and definition results notify when they arrive.
+            if !self.extras.hover_definition.is_empty() {
+                self.extras.hover_definition.clear();
+                cx.notify();
+            }
             self.handle_hover_popover(offset, window, cx);
         }
-        cx.notify();
     }
 
     pub fn clear_hover_state(&mut self, cx: &mut Context<Self>) {
