@@ -162,6 +162,10 @@ pub fn derive_into_plot(input: TokenStream) -> TokenStream {
                     // and the state cell.
                     let cell = Self::__plot_tooltip_cursor(global_id, window);
                     let hitbox = hitbox.clone();
+                    // A cursor move re-renders only the view that paints this plot (and its
+                    // ancestors). `window.refresh()` would also discard every sibling view's
+                    // cache, re-rendering the whole window on each pixel of mouse movement.
+                    let view = window.current_view();
 
                     if cfg!(any(target_os = "ios", target_os = "android")) {
                         // A finger has no hover: every touch sets the mouse position, so
@@ -170,7 +174,7 @@ pub fn derive_into_plot(input: TokenStream) -> TokenStream {
                         // opens it; the press then claims the gesture (no scroll) and
                         // drags the crosshair, and the lift closes it.
                         window.on_mouse_event(
-                            move |e: &#gpui::LongPressEvent, phase, window: &mut #gpui::Window, _| {
+                            move |e: &#gpui::LongPressEvent, phase, window: &mut #gpui::Window, cx: &mut #gpui::App| {
                                 if !phase.bubble() {
                                     return;
                                 }
@@ -192,7 +196,7 @@ pub fn derive_into_plot(input: TokenStream) -> TokenStream {
                                 };
                                 if cell.get() != next {
                                     cell.set(next);
-                                    window.refresh();
+                                    cx.notify(view);
                                 }
                             },
                         );
@@ -218,7 +222,7 @@ pub fn derive_into_plot(input: TokenStream) -> TokenStream {
                         }
 
                         window.on_mouse_event(
-                            move |e: &#gpui::MouseMoveEvent, _, window: &mut #gpui::Window, _| {
+                            move |e: &#gpui::MouseMoveEvent, _, window: &mut #gpui::Window, cx: &mut #gpui::App| {
                                 // `is_hovered` is false when an occluding hitbox (popup menu,
                                 // modal, ...) is above the cursor, so the tooltip clears instead
                                 // of tracking the mouse through the overlay.
@@ -230,7 +234,7 @@ pub fn derive_into_plot(input: TokenStream) -> TokenStream {
 
                                 if cell.get() != next {
                                     cell.set(next);
-                                    window.refresh();
+                                    cx.notify(view);
                                 }
                             },
                         );

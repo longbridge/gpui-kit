@@ -13,7 +13,7 @@ use super::caller_id;
 use crate::{
     ActiveTheme,
     plot::{
-        Plot,
+        PathCaches, Plot, ShapeKey,
         label::{PlotLabel, TEXT_GAP, TEXT_SIZE, Text, measure_text_width, truncate_text_to_width},
         origin_point,
         shape::{
@@ -582,15 +582,38 @@ impl<T> Plot for SankeyChart<T> {
 
         // Links first, under the nodes. The links of the hovered node keep their
         // opacity while the rest fade behind them.
-        for link in &graph.links {
+        //
+        // Hovering changes only a ribbon's opacity, so an interactive chart keeps
+        // each tessellated ribbon, slotted by the link's index in the graph so a
+        // skipped zero-value link doesn't shift the others. Without an id, siblings
+        // would share the slots, so a chart that is off tessellates afresh.
+        let min_width = self.min_link_width;
+        let caches = self
+            .interactive
+            .then(|| PathCaches::for_paint("links", window, cx));
+        for (ix, link) in graph.links.iter().enumerate() {
             if link.value <= 0. {
                 continue;
             }
             let source = &graph.nodes[link.source];
             let target = &graph.nodes[link.target];
-            let Some(path) =
-                sankey_link_path(source, target, link, self.min_link_width, bounds.origin)
-            else {
+            let path = match caches.as_ref() {
+                Some(caches) => caches.update(cx, |caches, _| {
+                    let key = ShapeKey::new(())
+                        .f32(source.x1)
+                        .f32(target.x0)
+                        .f32(link.y0)
+                        .f32(link.y1)
+                        .f32(link.source_width.max(min_width))
+                        .f32(link.target_width.max(min_width))
+                        .finish();
+                    caches.slot(ix).get(key, bounds.origin, || {
+                        sankey_link_path(source, target, link, min_width, Point::default())
+                    })
+                }),
+                None => sankey_link_path(source, target, link, min_width, bounds.origin),
+            };
+            let Some(path) = path else {
                 continue;
             };
             let opacity = match self.hover {
