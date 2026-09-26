@@ -166,10 +166,32 @@ impl CommandState {
         }
     }
 
+    /// Apply the presentation of the latest [`crate::command::Command`] render.
+    pub(crate) fn set_options(&mut self, options: CommandOptions) {
+        if self.options.style.text != options.style.text {
+            self.needs_measure = true;
+        }
+        self.options = options;
+    }
+
     pub(crate) fn install_model(&mut self, model: CommandModel, cx: &mut Context<Self>) {
         let selected_index_path = self.selected_index();
+        // The model reinstalls on every host re-render, usually unchanged.
+        // Keep the rows and their measured sizes then: measuring lays out
+        // every row, not only the visible ones.
+        let same_layout = self.model.searchable == model.searchable
+            && self.model.filterable == model.filterable
+            && self.model.entries.len() == model.entries.len()
+            && self
+                .model
+                .entries
+                .iter()
+                .zip(&model.entries)
+                .all(|(entry, other)| entry.same_layout(other));
         self.model = model;
-        self.update_matches(cx);
+        if !same_layout {
+            self.update_matches(cx);
+        }
 
         let preserved_selection = selected_index_path.and_then(|selected_index_path| {
             self.matched
@@ -193,8 +215,6 @@ impl CommandState {
         } else {
             self.reset_selection();
         }
-
-        self.needs_measure = true;
     }
 
     /// The current search query.
@@ -1467,6 +1487,78 @@ mod tests {
                     0,
                 );
                 assert!(matches!(state.rows.first(), Some(CommandRow::Heading(_))));
+            });
+        });
+    }
+
+    fn custom_entries() -> Vec<CommandEntry> {
+        vec![CommandEntry::Item(
+            CommandItem::new().label("Custom").child(|_, _| div()),
+        )]
+    }
+
+    #[gpui::test]
+    fn reinstalling_an_unchanged_model_keeps_the_measured_rows(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+
+        cx.update(|window, cx| {
+            let state = cx.new(|cx| command_state(window, cx, suggestion_entries()));
+
+            state.update(cx, |state, cx| {
+                // A host re-render rebuilds an equal model: nothing to lay out again.
+                state.needs_measure = false;
+                state.install_model(
+                    CommandModel {
+                        entries: suggestion_entries(),
+                        ..CommandModel::default()
+                    },
+                    cx,
+                );
+                assert!(!state.needs_measure);
+                assert_eq!(state.matched_count(), 5);
+
+                // A custom child is a new closure on every render, so it is
+                // always measured again.
+                state.install_model(
+                    CommandModel {
+                        entries: custom_entries(),
+                        ..CommandModel::default()
+                    },
+                    cx,
+                );
+                assert!(state.needs_measure);
+                assert_eq!(state.matched_count(), 1);
+
+                state.needs_measure = false;
+                state.install_model(
+                    CommandModel {
+                        entries: custom_entries(),
+                        ..CommandModel::default()
+                    },
+                    cx,
+                );
+                assert!(state.needs_measure);
+
+                // A changed label can wrap differently, and a changed disabled
+                // flag changes what can be highlighted.
+                for entries in [
+                    vec![CommandEntry::Item(CommandItem::new().label("Renamed"))],
+                    vec![CommandEntry::Item(
+                        CommandItem::new().label("Renamed").disabled(true),
+                    )],
+                ] {
+                    state.needs_measure = false;
+                    state.install_model(
+                        CommandModel {
+                            entries,
+                            ..CommandModel::default()
+                        },
+                        cx,
+                    );
+                    assert!(state.needs_measure);
+                }
+                assert_eq!(state.selected_index(), None);
             });
         });
     }
