@@ -962,24 +962,6 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx.notify();
     }
 
-    /// Replace the whole value as an editable user action, such as an
-    /// accessibility SetValue request. Read-only and disabled inputs reject
-    /// it; validation, change events, and undo still apply. Typing helpers
-    /// such as automatic bracket closing do not run.
-    pub fn replace_editable_value(
-        &mut self,
-        value: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if !self.is_editable() {
-            return;
-        }
-        self.undo_manager.set_pending_intent(EditIntent::Atomic);
-        let range = 0..self.text.len_utf16();
-        self.replace_text_in_range_silent(Some(range), value, window, cx);
-    }
-
     /// Perform `f` with the user-facing edit restrictions lifted.
     ///
     /// The `disabled` and `readonly` modes only reject the changes made by the

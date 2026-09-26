@@ -206,9 +206,9 @@ impl TextInputState {
         ))
     }
 
-    pub(crate) fn accessibility_set_value(&self, value: &str, window: &mut Window, cx: &mut App) {
-        dispatch!(self, |state| state.update(cx, |state, cx| state
-            .replace_editable_value(value, window, cx)))
+    pub(crate) fn replace_all(&self, value: String, window: &mut Window, cx: &mut App) {
+        dispatch!(self, |state| state
+            .update(cx, |state, cx| state.replace_all(value, window, cx)))
     }
 
     /// The text element itself, as a child to place in the frame.

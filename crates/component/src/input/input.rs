@@ -485,7 +485,10 @@ impl Input {
         let Some(gpui::accesskit::ActionData::Value(value)) = data else {
             return;
         };
-        state.accessibility_set_value(value, window, cx);
+        if !state.presentation(cx).is_editable() {
+            return;
+        }
+        state.replace_all(value.to_string(), window, cx);
     }
 
     fn handle_accessibility_focus(state: &TextInputState, window: &mut Window, cx: &mut App) {
@@ -1132,8 +1135,11 @@ mod tests {
         });
         let editor = probe.read_with(cx, |probe, _| probe.0.clone());
         let state: TextInputState = editor.clone().into();
+        let action = gpui::accesskit::ActionData::Value("(".into());
 
-        cx.update(|window, cx| state.accessibility_set_value("(", window, cx));
+        cx.update(|window, cx| {
+            Input::handle_accessibility_set_value(&state, Some(&action), window, cx)
+        });
         assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "(");
     }
 
