@@ -667,6 +667,7 @@ where
             .key_context("List")
             .id("list-state")
             .track_focus(&self.focus_handle)
+            .role(Role::List)
             .size_full()
             .relative()
             .overflow_hidden()
@@ -787,7 +788,6 @@ where
 
         div()
             .id("list")
-            .role(Role::List)
             .size_full()
             .refine_style(&self.style)
             .child(self.state.clone())
@@ -798,7 +798,7 @@ where
 mod measurement_tests {
     use super::*;
     use crate::list::ListItem;
-    use gpui::TestAppContext;
+    use gpui::{Element, TestAppContext};
 
     struct Delegate {
         counts: Vec<usize>,
@@ -881,6 +881,24 @@ mod measurement_tests {
                         }
                         assert_eq!(list.item_to_measure_index, requested);
                     }
+                });
+                div()
+            },
+        );
+    }
+
+    #[gpui::test]
+    fn list_state_has_list_role(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let window = cx.add_empty_window();
+        window.draw(
+            gpui::point(px(0.), px(0.)),
+            size(px(300.), px(300.)),
+            |window, cx| {
+                let list = cx.new(|cx| ListState::new(Delegate { counts: vec![2] }, window, cx));
+                list.update(cx, |list, cx| {
+                    let element = list.render(window, cx).into_element();
+                    assert_eq!(element.a11y_role(), Some(Role::List));
                 });
                 div()
             },
