@@ -16,7 +16,7 @@ GPUI Component 以 `gpui_kit::component::plot` 原样重新导出这个模块，
 
 ```rust
 use gpui_kit::base::plot::{
-    AXIS_GAP, AxisText, Grid, Plot, PlotAxis, PlotElement, PlotHover, TooltipState,
+    AxisText, Grid, Plot, PlotAxis, PlotElement, PlotHover, TooltipState,
     scale::{Scale, ScaleBand, ScaleLinear, ScaleOrdinal, ScalePoint},
     shape::{Arc, Area, Bar, Line, Pie, Stack},
 };
@@ -94,7 +94,7 @@ Plot 的尺寸跟随父元素，因此需要给父元素一个明确的高度。
 
 ## 坐标轴、网格与标签
 
-`PlotAxis` 绘制 x 轴与 y 轴线及 `AxisText` 标签，`Grid` 绘制实线或虚线的水平、垂直网格线，`PlotLabel` 在 Plot 坐标上绘制文字。`AXIS_GAP` 是 x 轴标签在 Plot 下方占用的高度。颜色和字号都是参数，字体取自外层的文字样式。
+`PlotAxis` 绘制 x 轴与 y 轴线及 `AxisText` 标签，`Grid` 绘制实线或虚线的水平、垂直网格线，`PlotLabel` 在 Plot 坐标上绘制文字。`axis_gutter(font_size)` 给出带该字号标签的 x 轴在 Plot 下方占用的高度（默认 `TEXT_SIZE` 时为 18px）。Builder 只记录参数，标签在绘制时才定位，因此调用顺序不影响结果。颜色和字号都是参数，字体取自外层的文字样式。
 
 ## Hover 与 tooltip
 

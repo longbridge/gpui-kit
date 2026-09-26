@@ -192,7 +192,7 @@ Renders chart axes with labels and ticks.
 
 ```rust
 PlotAxis::new()
-    .x(height) // Y position for X axis
+    .x_axis_at(height) // Y position for X axis
     .x_label(labels) // Iterator of AxisText
     .stroke(cx.theme().border)
     .paint(&bounds, window, cx);

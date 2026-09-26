@@ -218,7 +218,7 @@ impl Dot {
     /// which marks the hovered point the way a chart marks its emphasized
     /// symbol.
     ///
-    /// `size` is the ring at full focus: in a [`Tooltip`] the ring grows out of
+    /// `size` is the ring at full hover progress: in a [`Tooltip`] the ring grows out of
     /// the dot as the hover fades in.
     pub fn halo(mut self, size: impl Into<Pixels>) -> Self {
         self.halo = Some(size.into());
@@ -292,8 +292,8 @@ pub struct Tooltip {
     /// Plot size, used to flip the box toward the center near each edge so it never
     /// overflows the near side.
     within: Size<Pixels>,
-    /// Opacity of the whole overlay when set; see [`Self::focus`].
-    focus: Option<f32>,
+    /// Opacity of the whole overlay when set; see [`Self::progress`].
+    progress: Option<f32>,
     /// Whether the crosshair and dots glide between data; see [`Self::glide`].
     glide: bool,
 }
@@ -314,7 +314,7 @@ impl Tooltip {
             rows: Vec::new(),
             cursor,
             within,
-            focus: None,
+            progress: None,
             glide: true,
         }
     }
@@ -334,15 +334,20 @@ impl Tooltip {
         self
     }
 
-    /// Fade the whole overlay — crosshair, dots and box — to `focus` (`0..=1`).
+    /// Fade the whole overlay — crosshair, dots and box — to `progress` (`0..=1`).
     ///
     /// A tooltip returned from [`Plot::tooltip`](super::Plot::tooltip) already
     /// follows the plot's hover, easing in when the cursor lands on a datum and
     /// out after it leaves ([`PlotHover::progress`]); set this to override that,
     /// or to fade a tooltip rendered outside a plot.
-    pub fn focus(mut self, focus: f32) -> Self {
-        self.focus = Some(focus.clamp(0., 1.));
+    pub fn progress(mut self, progress: f32) -> Self {
+        self.progress = Some(progress.clamp(0., 1.));
         self
+    }
+
+    #[deprecated(since = "0.7.0", note = "use `progress`")]
+    pub fn focus(self, focus: f32) -> Self {
+        self.progress(focus)
     }
 
     /// Set a bold title row shown at the top of the tooltip (e.g. the hovered x value).
@@ -458,8 +463,8 @@ impl Tooltip {
 impl RenderOnce for Tooltip {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         // Rendered within the plot's element scope, so this is the fade the
-        // derive tracked for it this frame; fully opaque outside a plot.
-        let tracked_focus = hover_progress(window, cx);
+        // plot tracked for it this frame; fully opaque outside a plot.
+        let tracked_progress = hover_progress(window, cx);
         let entering = is_hover_entering(window, cx);
         let Tooltip {
             base,
@@ -471,10 +476,10 @@ impl RenderOnce for Tooltip {
             rows,
             cursor,
             within,
-            focus,
+            progress,
             glide,
         } = self;
-        let focus = focus.unwrap_or(tracked_focus);
+        let progress = progress.unwrap_or(tracked_progress);
 
         if glide {
             let policy = pointer_spring(cx).with_travel(!entering);
@@ -507,7 +512,7 @@ impl RenderOnce for Tooltip {
         }
         // The ring grows out of the dot as the hover fades in.
         for dot in dots.iter_mut().flatten() {
-            dot.halo = dot.halo.map(|halo| halo * focus);
+            dot.halo = dot.halo.map(|halo| halo * progress);
         }
 
         // Structured content (title + rows) takes precedence over freeform `base` children.
@@ -561,7 +566,7 @@ impl RenderOnce for Tooltip {
             .absolute()
             .top_0()
             .left_0()
-            .opacity(focus)
+            .opacity(progress)
             .when_some(cross_line, |this, cross_line| this.child(cross_line))
             .when_some(dots, |this, dots| this.children(dots))
             // Only the box is deferred: it can overflow the plot bounds and must paint above
@@ -570,7 +575,7 @@ impl RenderOnce for Tooltip {
             // this element's opacity, so the box carries the fade itself.
             .child(deferred(content.map(|mut this| {
                 if !appearance {
-                    return this.size_full().relative().opacity(focus);
+                    return this.size_full().relative().opacity(progress);
                 }
 
                 // Default min width only applies when the caller hasn't set one, so a
@@ -580,7 +585,7 @@ impl RenderOnce for Tooltip {
                 // The box hugs the cursor, flipping toward the center near each edge so it
                 // never overflows the near side.
                 this.absolute()
-                    .opacity(focus)
+                    .opacity(progress)
                     .when(min_w_unset, |c| c.min_w(px(150.)))
                     .popover_style(cx)
                     .p_2()

@@ -168,7 +168,7 @@ let series = stack.series();
 
 ```rust
 PlotAxis::new()
-    .x(height)
+    .x_axis_at(height)
     .x_label(labels)
     .stroke(cx.theme().border)
     .paint(&bounds, window, cx);

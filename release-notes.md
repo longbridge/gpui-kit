@@ -27,9 +27,9 @@ default draws — while the other pages keep the global variant.
 The chart primitives — scales, shapes, `PlotAxis`, `Grid`, `PlotLabel`,
 `PathCaches`, the `Plot` trait and hover tracking — now live in
 `gpui_base::plot`, so a design system built on `gpui-base` alone can draw charts
-without depending on `gpui-component`. `gpui_component::plot` re-exports them
-unchanged; existing imports such as `gpui_kit::component::plot::scale::ScaleLinear`
-keep working.
+without depending on `gpui-component`. `gpui_component::plot` re-exports them,
+so existing import paths such as `gpui_kit::component::plot::scale::ScaleLinear`
+keep working; the API itself is tidied for 0.7.0 (see Breaking changes).
 
 ```rust
 pub struct PlotElement<P>        // gpui_base::plot: the element behind every Plot
@@ -48,6 +48,52 @@ motionless by default, and `gpui-component` projects its motion tokens onto
 moves to `gpui-base`; `gpui-component`'s `decimal` feature forwards to it.
 
 #### Breaking changes
+
+##### Plot API
+
+Charts built from `LineChart`, `BarChart`, `AreaChart`, `PieChart`,
+`RadarChart`, `CandlestickChart` and `SankeyChart` are unaffected apart from
+the new `f32` support. Custom plots built on the primitives need these changes:
+
+- Scale ranges are two-element arrays and domains take any iterator:
+  `ScaleLinear::new(values, [height, 0.])`; the same for `ScalePoint` and
+  `ScaleBand`.
+- The value bound is the documented `PlotValue` (`f32`, `f64`, and `Decimal`
+  with `decimal`), replacing the hidden `Sealed`.
+- `Scale::least_index` is `nearest_index`; `least_index_with_domain` is removed.
+- `ScaleBand::band_width` no longer caps bands at 30px; set
+  `ScaleBand::max_band_width`, or `BarChart`/`CandlestickChart::max_band_width`
+  (30px by default, so charts look the same).
+- `PlotAxis::x`/`y` are `x_axis_at`/`y_axis_at`, and labels are placed at paint
+  time so builder order no longer matters. `AXIS_GAP` is `axis_gutter(font_size)`.
+- `StrokeStyle` is `Curve` and `stroke_style` is `curve`; `dot_fill_color`/
+  `dot_stroke_color` are `dot_fill`/`dot_stroke`; `dot` and `RadialLine::closed`
+  take a `bool`.
+- `Arc::paint`, `paint_cached` and `contains` drop the radius overrides; build
+  another `Arc` for other radii.
+- `PlotHover::focus` and `Tooltip::focus` are `progress`.
+- `Grid::x`/`y` take any iterator of pixels; drop a `.collect()` whose type was
+  only inferred from the old `Vec` parameter.
+- `TooltipState`, `AxisText`, `label::Text`, `ArcData`, `StackPoint`,
+  `StackSeries`, `SankeyLink` and the Sankey layout records are
+  `#[non_exhaustive]`; build them with their constructors.
+- `#[derive(IntoPlot)]` generates `type Element = PlotElement<Self>` instead of
+  an `Element` impl on the plot; `gpui_base::Theme` gains a `plot` field.
+
+Deprecated aliases keep `StrokeStyle`, `AXIS_GAP`, `PlotAxis::x`/`y`,
+`stroke_style`, `dot_fill_color`, `dot_stroke_color` and `focus` compiling for
+this release.
+
+```diff
+- let y = ScaleLinear::new(values.collect(), vec![height, 0.]);
++ let y = ScaleLinear::new(values, [height, 0.]);
+- Line::new().stroke_style(StrokeStyle::Linear).dot()
++ Line::new().curve(Curve::Linear).dot(true)
+- PlotAxis::new().x(height).x_label(labels)
++ PlotAxis::new().x_axis_at(height).x_label(labels)
+```
+
+##### Root layers
 
 The following `gpui-component` APIs have been removed:
 

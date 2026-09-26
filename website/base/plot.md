@@ -16,7 +16,7 @@ GPUI Component re-exports this module unchanged as `gpui_kit::component::plot`, 
 
 ```rust
 use gpui_kit::base::plot::{
-    AXIS_GAP, AxisText, Grid, Plot, PlotAxis, PlotElement, PlotHover, TooltipState,
+    AxisText, Grid, Plot, PlotAxis, PlotElement, PlotHover, TooltipState,
     scale::{Scale, ScaleBand, ScaleLinear, ScaleOrdinal, ScalePoint},
     shape::{Arc, Area, Bar, Line, Pie, Stack},
 };
@@ -94,7 +94,7 @@ Shapes that repaint every frame can keep their tessellated paths across frames w
 
 ## Axes, grids and labels
 
-`PlotAxis` draws an x and y axis line with `AxisText` labels, `Grid` draws horizontal and vertical grid lines, solid or dashed, and `PlotLabel` paints free text at plot coordinates. `AXIS_GAP` is the height the x-axis labels take below the plot. Colors and font sizes are arguments; the text face comes from the surrounding text style.
+`PlotAxis` draws an x and y axis line with `AxisText` labels, `Grid` draws horizontal and vertical grid lines, solid or dashed, and `PlotLabel` paints free text at plot coordinates. `axis_gutter(font_size)` is the height an x-axis with labels of that size takes below the plot (18px at the default `TEXT_SIZE`). Builders only record values; labels are placed when the axis paints, so builder order does not matter. Colors and font sizes are arguments; the text face comes from the surrounding text style.
 
 ## Hover and tooltips
 
