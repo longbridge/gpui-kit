@@ -2409,15 +2409,25 @@ impl<M: InputModeKind> InputBaseState<M> {
         M::on_mouse_move(self, offset, event, window, cx);
 
         if self.is_code_editor() {
-            if let Some(diagnostic) = self
+            // Keep the current popover while the pointer stays on the same
+            // diagnostic, so moving over a squiggle neither repaints nor
+            // rebuilds the popover.
+            match self
                 .mode
                 .diagnostics()
                 .and_then(|set| set.for_offset(offset))
             {
-                self.diagnostic_popover = Some(Rc::new(diagnostic.clone()));
-                cx.notify();
-            } else {
-                self.diagnostic_popover = None;
+                Some(diagnostic) => {
+                    if self.diagnostic_popover.as_deref() != Some(diagnostic) {
+                        self.diagnostic_popover = Some(Rc::new(diagnostic.clone()));
+                        cx.notify();
+                    }
+                }
+                None => {
+                    if self.diagnostic_popover.take().is_some() {
+                        cx.notify();
+                    }
+                }
             }
         }
     }
