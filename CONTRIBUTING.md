@@ -104,6 +104,18 @@ for focus, keyboard, selection, menu, and input behavior. See
 required Story app launch method, accessibility-tree workflow, and completion
 evidence.
 
+### Reviewing UI changes
+
+When reviewing a UI or interaction change, check whether the UI tests exercise
+the behavior claimed by the pull request, including its relevant states and
+edge cases. If coverage is missing, describe the specific gap. Ask for a
+focused manual check only when automated UI tests cannot exercise that scenario;
+name the scenario and platform or integration to check. Do not request manual
+checks for behavior already covered by automated UI tests. Examples that may
+need platform verification include native input methods, operating-system
+accessibility actions, system clipboard integration, and platform-specific
+rendering.
+
 ### Run story
 
 There are a lot of UI test cases in the `crates/story` folder, if you change the existing features you can run the tests to make sure they are working.
