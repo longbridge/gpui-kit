@@ -2627,9 +2627,39 @@ impl<M: InputModeKind> InputBaseState<M> {
         if !self.is_editable() {
             return;
         }
-        let Some(clipboard) = cx.read_from_clipboard() else {
+        if let Some(clipboard) = cx.read_from_clipboard() {
+            self.insert_clipboard(clipboard, window, cx);
             return;
-        };
+        }
+        // The synchronous read is empty on platforms whose clipboard is
+        // asynchronous and permission-gated (the web), so fall back to the
+        // real read. It has to start here, still inside the user activation
+        // that dispatched `Paste`, or the browser refuses the read.
+        let read = cx.read_from_clipboard_async();
+        cx.spawn_in(window, async move |this, cx| match read.await {
+            Ok(Some(clipboard)) => {
+                this.update_in(cx, |this, window, cx| {
+                    if this.is_editable() {
+                        this.insert_clipboard(clipboard, window, cx);
+                    }
+                })
+                .ok();
+            }
+            Ok(None) => {}
+            Err(error) => tracing::warn!("failed to read the clipboard for paste: {error}"),
+        })
+        .detach();
+    }
+
+    /// Inserts the clipboard text the way `Paste` does: one atomic edit,
+    /// newlines dropped on a single-line input, one line per selection when
+    /// the counts match on a multi-line one.
+    fn insert_clipboard(
+        &mut self,
+        clipboard: ClipboardItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let mut new_text = clipboard.text().unwrap_or_default();
         // A paste is one atomic edit, never part of a typing run.
         self.undo_manager.set_pending_intent(EditIntent::Atomic);
