@@ -1,6 +1,7 @@
 use std::rc::{Rc, Weak};
 
 use gpui::{App, Entity, Global, OwnedMenu};
+use web_time::Instant;
 
 use crate::text::TextViewState;
 
@@ -20,7 +21,7 @@ pub struct GlobalState {
     selection_document_order: u64,
     /// When a finger last went down. A tap reaches controls as a mouse press;
     /// this is how they tell it from one.
-    last_touch: Option<std::time::Instant>,
+    last_touch: Option<Instant>,
 }
 
 impl Global for GlobalState {}
@@ -41,7 +42,7 @@ impl GlobalState {
     /// offers on every touch, before it becomes a tap, a long press or a pan.
     pub fn note_touch(cx: &mut App) {
         Self::init(cx);
-        Self::global_mut(cx).last_touch = Some(std::time::Instant::now());
+        Self::global_mut(cx).last_touch = Some(Instant::now());
     }
 
     /// Whether the press being handled came from a finger: a touch went
