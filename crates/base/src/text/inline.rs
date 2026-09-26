@@ -598,6 +598,32 @@ impl Inline {
         // (not scrolled) lies outside that band and is still excluded, while
         // the highlight quads painted for off-screen glyphs are clipped away by
         // GPUI's content mask as before.
+        //
+        // Each character is tested with its row's top and height, so an inline
+        // whose rows all miss the band, or all lie strictly inside it with no
+        // endpoint on any row, has the same answer for every character. Decide
+        // those without the walk below, which scans the layout twice per
+        // character: one long code block alone made every paint of a held
+        // selection cost tens of milliseconds.
+        if self.text.is_empty() {
+            return (true, true, None);
+        }
+        let (rows_top, rows_bottom) = match self.selection_bounds {
+            Some(bounds) => (bounds.top(), bounds.top() + bounds.size.height),
+            None => Self::selection_rows_extent(text_layout, line_height),
+        };
+        let band_top = selection_start.y.min(selection_end.y);
+        let band_bottom = selection_start.y.max(selection_end.y);
+        if rows_bottom <= band_top || rows_top > band_bottom {
+            return (true, true, None);
+        }
+        if band_top < rows_top
+            && band_bottom >= rows_bottom
+            && text_layout.len() >= self.text.len()
+        {
+            return (true, true, Some((0..self.text.len()).into()));
+        }
+
         let mut selection: Option<Selection> = None;
         let mut offset = 0;
         let mut chars = self.text.chars().peekable();
@@ -641,6 +667,28 @@ impl Inline {
         }
 
         (true, true, selection)
+    }
+
+    /// The top of the first laid-out row and the bottom of the last one, each
+    /// row `line_height` tall as [`point_in_text_selection`] tests it.
+    ///
+    /// Both ends are accumulated the way [`TextLayout::position_for_index`]
+    /// places rows, so comparisons against them agree with the per-character
+    /// walk to the bit. The last laid-out row may hold no character the walk
+    /// tests (a trailing empty line); covering it only makes the fast paths
+    /// fall back to the walk more often.
+    fn selection_rows_extent(text_layout: &TextLayout, line_height: Pixels) -> (Pixels, Pixels) {
+        let top = text_layout.bounds().top();
+        let layout_line_height = text_layout.line_height();
+        let lines = text_layout.line_layouts();
+        let mut last_line_top = top;
+        for line in lines.iter().take(lines.len().saturating_sub(1)) {
+            last_line_top += line.size(layout_line_height).height;
+        }
+        let last_row_top = lines.last().map_or(top, |line| {
+            last_line_top + line.wrap_boundaries.len() as f32 * layout_line_height
+        });
+        (top, last_row_top + line_height)
     }
 
     /// One box per laid-out row, from the row's start to its last character,
@@ -1563,6 +1611,63 @@ mod range_highlight_tests {
                 .map(|(row, left, right)| (left, right, row))
                 .collect()
         })
+    }
+
+    /// The selection fast paths decide a whole inline from this extent, so it
+    /// must start exactly at the first row the per-character walk tests and
+    /// reach at least the bottom of the last one. It may reach further: a
+    /// trailing empty line, or a last row whose only character the walk
+    /// places at the end of the row before it, holds no row the walk tests.
+    #[test]
+    fn selection_rows_extent_matches_the_character_walk() {
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        in_prepaint(&mut app, |window, cx| {
+            let style = TextStyle {
+                font_family: BODY.into(),
+                font_size: px(16.).into(),
+                ..Default::default()
+            };
+            let origin = point(px(7.), px(11.3));
+            for text in [
+                "one row",
+                "a long paragraph that wraps onto several rows of eight pixel glyphs",
+                "first line\nsecond line that also wraps around\n\nfourth",
+                "中文与 English 混排的一段文字也会换行",
+                "trailing newline\n",
+            ] {
+                for wrap_width in [40., 100., 1000.] {
+                    let runs = text_runs(text.len(), &style, &[]);
+                    let styled =
+                        StyledText::new(SharedString::from(text.to_string())).with_runs(runs);
+                    let layout = styled.layout().clone();
+                    let mut element = styled.into_any_element();
+                    element.layout_as_root(
+                        size(
+                            AvailableSpace::Definite(px(wrap_width)),
+                            AvailableSpace::MinContent,
+                        ),
+                        window,
+                        cx,
+                    );
+                    element.prepaint_at(origin, window, cx);
+                    // Taller than the layout's rows, as a window line height
+                    // may be.
+                    let line_height = layout.line_height() + px(3.);
+                    let rows_y = text
+                        .char_indices()
+                        .filter_map(|(offset, _)| layout.position_for_index(offset))
+                        .map(|position| position.y);
+                    let top = rows_y.clone().fold(Pixels::MAX, Pixels::min);
+                    let bottom = rows_y.fold(Pixels::MIN, Pixels::max) + line_height;
+
+                    let (rows_top, rows_bottom) =
+                        Inline::selection_rows_extent(&layout, line_height);
+                    let context = format!("{text:?} at {wrap_width}px");
+                    assert_eq!(rows_top, top, "top of {context}");
+                    assert!(rows_bottom >= bottom, "bottom of {context}");
+                }
+            }
+        });
     }
 
     #[test]
