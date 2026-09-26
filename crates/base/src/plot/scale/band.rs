@@ -2,7 +2,6 @@
 
 use std::{collections::HashMap, hash::Hash};
 
-use itertools::Itertools;
 use num_traits::Zero;
 
 use super::Scale;
@@ -17,32 +16,30 @@ pub struct ScaleBand<T> {
     indices: HashMap<T, usize>,
     /// The bands laid out when more than the domain's; see [`Self::band_count`].
     band_count: usize,
+    range_start: f32,
     range_diff: f32,
     padding_inner: f32,
     padding_outer: f32,
 }
 
 impl<T> ScaleBand<T> {
-    pub fn new(domain: Vec<T>, range: Vec<f32>) -> Self
+    /// Lay the distinct values of `domain` out as bands across `range`, from
+    /// its lower end in domain order.
+    pub fn new(domain: impl IntoIterator<Item = T>, range: [f32; 2]) -> Self
     where
         T: Eq + Hash,
     {
-        let mut indices = HashMap::with_capacity(domain.len());
+        let mut indices = HashMap::new();
         for value in domain {
             let next = indices.len();
             indices.entry(value).or_insert(next);
         }
 
-        let range_diff = range
-            .iter()
-            .minmax()
-            .into_option()
-            .map_or(0., |(min, max)| max - min);
-
         Self {
             indices,
             band_count: 0,
-            range_diff,
+            range_start: range[0].min(range[1]),
+            range_diff: (range[1] - range[0]).abs(),
             padding_inner: 0.,
             padding_outer: 0.,
         }
@@ -121,15 +118,15 @@ where
 
         // When there's only one element, place it in the center.
         if domain_len == 1 {
-            return Some((self.range_diff - self.band_width()) / 2.);
+            return Some(self.range_start + (self.range_diff - self.band_width()) / 2.);
         }
 
         let avg_width = self.display_avg_width();
         let padding_outer_width = self.avg_width() * self.padding_outer;
-        Some(index as f32 * avg_width * self.ratio() + padding_outer_width)
+        Some(self.range_start + index as f32 * avg_width * self.ratio() + padding_outer_width)
     }
 
-    fn least_index(&self, tick: f32) -> usize {
+    fn nearest_index(&self, tick: f32) -> usize {
         let domain_len = self.len();
         if domain_len == 0 {
             return 0;
@@ -142,7 +139,7 @@ where
 
         let avg_width = self.display_avg_width();
         let padding_outer_width = self.avg_width() * self.padding_outer;
-        let adjusted_tick = tick - padding_outer_width;
+        let adjusted_tick = tick - self.range_start - padding_outer_width;
         let index = (adjusted_tick / (avg_width * self.ratio())).round() as i32;
 
         (index.max(0) as usize).min(domain_len.saturating_sub(1))
@@ -155,7 +152,7 @@ mod tests {
 
     #[test]
     fn test_scale_band() {
-        let scale = ScaleBand::new(vec![1, 2, 3], vec![0., 90.]);
+        let scale = ScaleBand::new(vec![1, 2, 3], [0., 90.]);
         assert_eq!(scale.tick(&1), Some(0.));
         assert_eq!(scale.tick(&2), Some(30.));
         assert_eq!(scale.tick(&3), Some(60.));
@@ -165,7 +162,7 @@ mod tests {
     #[test]
     fn test_scale_band_dedup() {
         // Simulates grouped bar chart: 2 series × 3 categories = 6 entries, 3 unique.
-        let scale = ScaleBand::new(vec![1, 2, 3, 1, 2, 3], vec![0., 90.]);
+        let scale = ScaleBand::new(vec![1, 2, 3, 1, 2, 3], [0., 90.]);
         assert_eq!(scale.len(), 3);
         assert_eq!(scale.tick(&1), Some(0.));
         assert_eq!(scale.tick(&2), Some(30.));
@@ -176,13 +173,13 @@ mod tests {
     #[test]
     fn test_scale_band_step() {
         // Adjacent bands start one step apart, whatever the padding.
-        let scale = ScaleBand::new(vec![1, 2, 3], vec![0., 90.]);
+        let scale = ScaleBand::new(vec![1, 2, 3], [0., 90.]);
         assert_eq!(
             scale.step(),
             scale.tick(&2).unwrap() - scale.tick(&1).unwrap()
         );
 
-        let padded = ScaleBand::new(vec![1, 2, 3], vec![0., 90.])
+        let padded = ScaleBand::new(vec![1, 2, 3], [0., 90.])
             .padding_inner(0.4)
             .padding_outer(0.2);
         assert!(
@@ -190,13 +187,13 @@ mod tests {
         );
 
         // A single band spans the range.
-        assert_eq!(ScaleBand::new(vec![1], vec![0., 90.]).step(), 90.);
+        assert_eq!(ScaleBand::new(vec![1], [0., 90.]).step(), 90.);
     }
 
     #[test]
     fn test_scale_band_count() {
         let scale = |domain: Vec<i32>| {
-            ScaleBand::new(domain, vec![0., 100.])
+            ScaleBand::new(domain, [0., 100.])
                 .band_count(4)
                 .padding_inner(0.4)
                 .padding_outer(0.2)
@@ -210,28 +207,38 @@ mod tests {
         assert_eq!(short.step(), full.step());
 
         // An empty band resolves past the domain rather than to its last value.
-        assert_eq!(short.least_index(full.tick(&4).unwrap()), 3);
+        assert_eq!(short.nearest_index(full.tick(&4).unwrap()), 3);
 
         // A single value sits in the first band instead of the center.
         assert_eq!(scale(vec![1]).tick(&1), full.tick(&1));
 
         // A count below the domain's length has no effect.
-        let domain = ScaleBand::new(vec![1, 2, 3], vec![0., 90.]);
+        let domain = ScaleBand::new(vec![1, 2, 3], [0., 90.]);
         assert_eq!(domain.band_count(2).tick(&3), Some(60.));
     }
 
     #[test]
     fn test_scale_band_zero() {
-        let scale = ScaleBand::new(vec![], vec![0., 90.]);
+        let scale = ScaleBand::new(vec![], [0., 90.]);
         assert_eq!(scale.tick(&1), None);
         assert_eq!(scale.tick(&2), None);
         assert_eq!(scale.tick(&3), None);
         assert_eq!(scale.band_width(), 0.);
 
-        let scale = ScaleBand::new(vec![1, 2, 3], vec![]);
+        let scale = ScaleBand::new(vec![1, 2, 3], [0., 0.]);
         assert_eq!(scale.tick(&1), Some(0.));
         assert_eq!(scale.tick(&2), Some(0.));
         assert_eq!(scale.tick(&3), Some(0.));
         assert_eq!(scale.band_width(), 0.);
+    }
+
+    #[test]
+    fn test_scale_band_range_start() {
+        let scale = ScaleBand::new([1, 2, 3], [10., 100.]);
+        assert_eq!(scale.tick(&1), Some(10.));
+        assert_eq!(scale.tick(&2), Some(40.));
+        assert_eq!(scale.nearest_index(41.), 1);
+        // The lower end leads whichever way the range is written.
+        assert_eq!(ScaleBand::new([1, 2, 3], [100., 10.]).tick(&1), Some(10.));
     }
 }

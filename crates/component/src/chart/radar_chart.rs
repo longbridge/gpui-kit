@@ -8,7 +8,7 @@ use gpui::{
     Point, SharedString, TextAlign, Window, point, px,
 };
 use gpui_component_macros::IntoPlot;
-use num_traits::{Num, ToPrimitive, Zero};
+use num_traits::Zero;
 
 use crate::{
     ActiveTheme,
@@ -16,7 +16,7 @@ use crate::{
         Plot,
         label::{PlotLabel, TEXT_SIZE, Text},
         polygon,
-        scale::{Scale, ScaleLinear, Sealed},
+        scale::{PlotValue, Scale, ScaleLinear},
         shape::RadialLine,
         tooltip::{Dot, Tooltip, TooltipState},
     },
@@ -76,7 +76,7 @@ impl From<AnyElement> for RadarLabel {
 pub struct RadarChart<T, Y>
 where
     T: 'static,
-    Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     data: Vec<T>,
     values: Vec<Rc<dyn Fn(&T) -> Y>>,
@@ -102,7 +102,7 @@ where
 
 impl<T, Y> RadarChart<T, Y>
 where
-    Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     #[track_caller]
     pub fn new<I>(data: I) -> Self
@@ -385,7 +385,7 @@ where
                 .collect()
         };
 
-        ScaleLinear::new(domain, vec![0., outer_radius])
+        ScaleLinear::new(domain, [0., outer_radius])
     }
 
     /// Map a cursor position to the nearest spoke index, or `None` when the
@@ -411,7 +411,7 @@ where
 
 impl<T, Y> Plot for RadarChart<T, Y>
 where
-    Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     /// Resolve every dimension's label, keeping the text ones for `paint` and
     /// laying out the element ones here (measuring is illegal in `paint`).

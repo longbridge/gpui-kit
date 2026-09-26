@@ -40,8 +40,8 @@ impl Plot for Sparkline {
         let width = bounds.size.width.as_f32();
         let height = bounds.size.height.as_f32();
         let indexes: Vec<usize> = (0..self.values.len()).collect();
-        let x = ScalePoint::new(indexes.clone(), vec![0., width]);
-        let y = ScaleLinear::new(self.values.clone(), vec![height, 0.]);
+        let x = ScalePoint::new(indexes.clone(), [0., width]);
+        let y = ScaleLinear::new(self.values.clone(), [height, 0.]);
         let values = self.values.clone();
 
         Line::new()
@@ -79,12 +79,12 @@ Plot 的尺寸跟随父元素，因此需要给父元素一个明确的高度。
 
 | 比例尺 | 定义域 | 用途 |
 | --- | --- | --- |
-| `ScaleLinear` | 连续数值 | 数值轴；值域可以自上而下（`vec![height, 0.]`） |
+| `ScaleLinear` | 连续数值 | 数值轴；值域可以自上而下（`[height, 0.]`） |
 | `ScaleBand` | 离散类别 | 柱状图：`band_width()` 是每根柱子的宽度，`tick` 是起点 |
 | `ScalePoint` | 离散类别 | 以类别为 x 值的折线图和面积图 |
 | `ScaleOrdinal` | 离散类别 | 把类别映射到颜色 |
 
-`ScaleLinear` 接受 `f64`，启用 `decimal` feature 后也接受 `rust_decimal::Decimal`。
+`ScaleLinear` 和各个图表接受任意 [`PlotValue`](https://docs.rs/gpui-base/latest/gpui_base/plot/trait.PlotValue.html)：`f32`、`f64`，启用 `decimal` feature 后还有 `rust_decimal::Decimal`。整数不在其列，因为线性比例尺要做除法，整数除法会截断位置。
 
 ## 图形
 

@@ -44,12 +44,9 @@ impl Plot for StackedBarChart {
         let height = bounds.size.height.as_f32() - AXIS_GAP;
 
         // 2. Calculate X/Y scales
-        let x = ScaleBand::new(
-            self.data.iter().map(|v| v.date.clone()).collect(),
-            vec![0., width],
-        )
-        .padding_inner(0.4)
-        .padding_outer(0.2);
+        let x = ScaleBand::new(self.data.iter().map(|v| v.date.clone()), [0., width])
+            .padding_inner(0.4)
+            .padding_outer(0.2);
         let band_width = x.band_width();
 
         let max = self
@@ -58,7 +55,7 @@ impl Plot for StackedBarChart {
             .flat_map(|s| s.points.iter().map(|p| p.y1))
             .fold(0., f32::max) as f64;
 
-        let y = ScaleLinear::new(vec![0., max], vec![height, 10.]);
+        let y = ScaleLinear::new(vec![0., max], [height, 10.]);
 
         // 3. Draw X axis labels
         let x_label = self.data.iter().filter_map(|d| {
@@ -127,8 +124,8 @@ impl Plot for StackedBarChart {
     ) -> Option<TooltipState> {
         // Band scale matches `paint`.
         let x = ScaleBand::new(
-            self.data.iter().map(|v| v.date.clone()).collect(),
-            vec![0., bounds.size.width.as_f32()],
+            self.data.iter().map(|v| v.date.clone()),
+            [0., bounds.size.width.as_f32()],
         )
         .padding_inner(0.4)
         .padding_outer(0.2);
@@ -139,7 +136,7 @@ impl Plot for StackedBarChart {
             return None;
         }
 
-        let index = x.least_index(position.x.as_f32());
+        let index = x.nearest_index(position.x.as_f32());
         let d = self.data.get(index)?;
         let center_x = x.tick(&d.date.clone())? + band_width / 2.;
 
@@ -174,8 +171,8 @@ impl Plot for StackedBarChart {
         // Highlight the hovered column with a translucent band the width of the bars,
         // confined to the plot height so it doesn't cover the x-axis labels.
         let band_width = ScaleBand::new(
-            self.data.iter().map(|v| v.date.clone()).collect(),
-            vec![0., bounds.size.width.as_f32()],
+            self.data.iter().map(|v| v.date.clone()),
+            [0., bounds.size.width.as_f32()],
         )
         .padding_inner(0.4)
         .padding_outer(0.2)

@@ -27,6 +27,7 @@ pub use grid::Grid;
 pub use hover::{PlotHover, TooltipState, hover_focus, is_hover_entering, pointer_spring};
 pub use label::PlotLabel;
 pub use path_cache::{PathCache, PathCaches, ShapeKey};
+pub use scale::PlotValue;
 
 /// The timing of a plot's hover: how its focus fades in and out, and the
 /// spring a pointer follows the hovered datum with.

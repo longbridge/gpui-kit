@@ -30,7 +30,7 @@ Maps a continuous quantitative domain to a continuous range.
 ```rust
 let scale = ScaleLinear::new(
     vec![0., 100.],   // Domain (data values)
-    vec![0., 500.]    // Range (pixel coordinates)
+    [0., 500.]    // Range (pixel coordinates)
 );
 
 scale.tick(&50.); // Returns pixel position
@@ -43,7 +43,7 @@ Maps a discrete domain to a continuous range, useful for bar charts.
 ```rust
 let scale = ScaleBand::new(
     vec!["A", "B", "C"], // Domain
-    vec![0., 300.]       // Range
+    [0., 300.]       // Range
 )
 .padding_inner(0.1)
 .padding_outer(0.1);
@@ -59,7 +59,7 @@ Maps a discrete domain to a set of points in a continuous range, useful for scat
 ```rust
 let scale = ScalePoint::new(
     vec!["A", "B", "C"], // Domain
-    vec![0., 300.]       // Range
+    [0., 300.]       // Range
 );
 
 scale.tick(&"A"); // Returns position of point "A"
@@ -230,11 +230,11 @@ impl Plot for StackedBarChart {
     fn paint(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         // 1. Setup Scales
         let x = ScaleBand::new(
-            self.data.iter().map(|v| v.date.clone()).collect(),
-            vec![0., width],
+            self.data.iter().map(|v| v.date.clone()),
+            [0., width],
         );
         
-        let y = ScaleLinear::new(vec![0., max_value], vec![height, 0.]);
+        let y = ScaleLinear::new(vec![0., max_value], [height, 0.]);
 
         // 2. Draw Axis
         // ... (axis rendering logic)

@@ -5,14 +5,13 @@ use gpui::{
     Pixels, Point, SharedString, Size, TextAlign, Window, linear_gradient, point, px,
 };
 use gpui_component_macros::IntoPlot;
-use num_traits::{Num, ToPrimitive};
 
 use crate::{
     ActiveTheme,
     plot::{
         AXIS_GAP, AxisLabelPlacement, AxisLabelSide, AxisText, Grid, Plot, PlotAxis, PlotLabel,
         label::{TEXT_GAP, TEXT_HEIGHT, TEXT_SIZE, Text, measure_text_width},
-        scale::{Scale, ScaleBand, ScaleLinear, Sealed},
+        scale::{PlotValue, Scale, ScaleBand, ScaleLinear},
         shape::{Bar, BarAlignment},
         tooltip::{CrossLine, PlotHover, Tooltip, TooltipState},
     },
@@ -40,7 +39,7 @@ pub struct BarChart<T, B, V>
 where
     T: 'static,
     B: Eq + Hash + Into<SharedString> + 'static,
-    V: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    V: PlotValue,
 {
     data: Vec<T>,
     band: Option<Rc<dyn Fn(&T) -> B>>,
@@ -82,7 +81,7 @@ where
 impl<T, B, V> BarChart<T, B, V>
 where
     B: Eq + Hash + Into<SharedString> + 'static,
-    V: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    V: PlotValue,
 {
     #[track_caller]
     pub fn new<I>(data: I) -> Self
@@ -459,13 +458,10 @@ where
         // shifts the bands away from that end when it is the leading one.
         let extent = (band_extent - self.value_axis_gap()).max(0.);
         Some(
-            ScaleBand::new(
-                self.data.iter().map(|v| band_fn(v)).collect(),
-                vec![0., extent],
-            )
-            .band_count(self.band_count.unwrap_or(0))
-            .padding_inner(self.padding_inner)
-            .padding_outer(self.padding_outer),
+            ScaleBand::new(self.data.iter().map(|v| band_fn(v)), [0., extent])
+                .band_count(self.band_count.unwrap_or(0))
+                .padding_inner(self.padding_inner)
+                .padding_outer(self.padding_outer),
         )
     }
 
@@ -519,12 +515,8 @@ where
             BarAlignment::Right => (value_dim - band_gap, value_end_gap),
         };
         let scale = ScaleLinear::new(
-            self.data
-                .iter()
-                .map(|v| value_fn(v))
-                .chain(Some(V::zero()))
-                .collect(),
-            vec![baseline, far],
+            self.data.iter().map(|v| value_fn(v)).chain(Some(V::zero())),
+            [baseline, far],
         );
         Some((scale, baseline, far))
     }
@@ -721,7 +713,7 @@ where
 impl<T, B, V> Plot for BarChart<T, B, V>
 where
     B: Eq + Hash + Into<SharedString> + 'static,
-    V: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    V: PlotValue,
 {
     fn prepaint(
         &mut self,
@@ -1041,7 +1033,7 @@ where
         } else {
             position.x
         };
-        let index = band_scale.least_index(cursor_band.as_f32() - band_offset);
+        let index = band_scale.nearest_index(cursor_band.as_f32() - band_offset);
         let d = self.data.get(index)?;
         let center = band_scale.tick(&band_fn(d))? + band_offset + band_width / 2.;
 
@@ -1141,7 +1133,7 @@ fn bar_end<V>(
     min_length: f32,
 ) -> Option<f32>
 where
-    V: Copy + PartialOrd + Num + ToPrimitive + Sealed,
+    V: PlotValue,
 {
     let tick = scale.tick(&value)?;
     Some(extend_to_min_length(
