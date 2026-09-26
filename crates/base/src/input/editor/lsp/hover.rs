@@ -56,8 +56,9 @@ impl InputBaseState<EditorMode> {
                     .await;
             }
 
-            let task =
-                this.update_in(cx, |_, window, cx| provider.hover(&text, offset, window, cx))?;
+            let task = this.update_in(cx, |_, window, cx| {
+                provider.hover(&text, offset, window, cx)
+            })?;
             let result = task.await?;
 
             _ = editor.update(cx, |editor, cx| {
