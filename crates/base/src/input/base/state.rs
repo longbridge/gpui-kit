@@ -1132,6 +1132,13 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx.notify();
     }
 
+    /// Whether an input method currently owns uncommitted text. Consumers that
+    /// implement their own Enter shortcut should defer submission until a later
+    /// key press after the composition has been committed.
+    pub fn is_composing(&self) -> bool {
+        self.ime_marked_range.is_some()
+    }
+
     /// Set whether to show whitespace characters.
     #[doc(hidden)]
     pub fn show_whitespaces(mut self, show: bool) -> Self {
@@ -1913,6 +1920,12 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     pub(super) fn enter(&mut self, action: &Enter, window: &mut Window, cx: &mut Context<Self>) {
         if M::handle_context_menu_action(self, Box::new(action.clone()), window, cx) {
+            return;
+        }
+
+        // The same Enter press can confirm an IME candidate. It must not also
+        // insert a newline or emit PressEnter for the host to interpret as send.
+        if self.is_composing() {
             return;
         }
 
@@ -6697,6 +6710,51 @@ mod tests {
                 // One redo re-applies all edits.
                 s.redo(&Redo, window, cx);
                 assert_eq!(s.value(), "X bbb Y");
+            });
+        });
+    }
+
+    /// Confirming an active IME candidate must not insert a newline.
+    #[gpui::test]
+    fn test_enter_confirms_composition_without_inserting_newline(cx: &mut TestAppContext) {
+        let input_view = InputView::build_textarea(cx, |state| state.default_value(""));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_and_mark_text_in_range(None, "ni", Some(2..2), window, cx);
+                assert!(state.is_composing());
+                state.enter(
+                    &Enter {
+                        secondary: false,
+                        shift: false,
+                    },
+                    window,
+                    cx,
+                );
+                assert_eq!(state.value(), "ni");
+                state.enter(
+                    &Enter {
+                        secondary: true,
+                        shift: false,
+                    },
+                    window,
+                    cx,
+                );
+                assert_eq!(state.value(), "ni");
+
+                state.replace_text_in_range(None, "你", window, cx);
+                assert!(!state.is_composing());
+                state.enter(
+                    &Enter {
+                        secondary: false,
+                        shift: false,
+                    },
+                    window,
+                    cx,
+                );
+                assert_eq!(state.value(), "你\n");
             });
         });
     }
