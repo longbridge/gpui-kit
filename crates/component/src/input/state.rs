@@ -1,5 +1,7 @@
 use crate::root::WindowState;
-use gpui::{App, Entity, FocusHandle, Focusable as _, SharedString, Window};
+use gpui::{
+    App, Entity, EntityInputHandler as _, FocusHandle, Focusable as _, SharedString, Window,
+};
 use gpui_base::OtpState;
 use ropey::Rope;
 
@@ -206,9 +208,11 @@ impl TextInputState {
         ))
     }
 
-    pub(crate) fn replace_all(&self, value: String, window: &mut Window, cx: &mut App) {
-        dispatch!(self, |state| state
-            .update(cx, |state, cx| state.replace_all(value, window, cx)))
+    pub(crate) fn accessibility_set_value(&self, value: &str, window: &mut Window, cx: &mut App) {
+        dispatch!(self, |state| state.update(cx, |state, cx| {
+            let range = 0..state.text().len_utf16();
+            state.replace_text_in_range(Some(range), value, window, cx);
+        }))
     }
 
     /// The text element itself, as a child to place in the frame.
