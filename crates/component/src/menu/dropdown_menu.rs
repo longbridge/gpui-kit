@@ -150,15 +150,25 @@ where
                         menu.focus_handle(cx).focus(window, cx);
 
                         // Listen for dismiss events from the PopupMenu to close the popover.
-                        let popover_state = cx.entity();
+                        //
+                        // Hold Weak handles here, not strong clones: the listener
+                        // lives as long as `menu`, which `menu_state` owns, so a
+                        // strong capture would close the cycle
+                        // `menu_state -> menu -> listener -> menu_state` and leak
+                        // the menu and popover state (keeping the popover's
+                        // deferred context registered) when the trigger stops
+                        // being rendered while the menu is open.
+                        let popover_state = cx.entity().downgrade();
                         window
                             .subscribe(&menu, cx, {
-                                let menu_state = menu_state.clone();
+                                let menu_state = menu_state.downgrade();
                                 move |_, _: &DismissEvent, window, cx| {
-                                    popover_state.update(cx, |state, cx| {
-                                        state.dismiss(window, cx);
-                                    });
-                                    menu_state.update(cx, |state, _| {
+                                    if let Some(popover_state) = popover_state.upgrade() {
+                                        popover_state.update(cx, |state, cx| {
+                                            state.dismiss(window, cx);
+                                        });
+                                    }
+                                    _ = menu_state.update(cx, |state, _| {
                                         state.menu = None;
                                     });
                                 }
@@ -323,6 +333,38 @@ mod tests {
                 )
                 .child(div().child("Status"))
         }
+    }
+
+    /// Opening the menu and closing the window without dismissing it must
+    /// release the `PopupMenu`, `DropdownMenuState` and `PopoverState`
+    /// entities: the dismiss subscription lives as long as the menu, which
+    /// the dropdown state owns, so strong captures in it formed a cycle that
+    /// no element-state collection could break.
+    #[gpui::test]
+    fn open_without_dismiss_releases_the_menu_entities(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let before = cx.update(|cx| cx.leak_detector_snapshot());
+
+        {
+            let (_, cx) = cx.add_window_view(|_, _| TestRoot {
+                frames: Rc::new(Cell::new(0)),
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+
+            // Click the trigger; the menu opens and is left open.
+            cx.simulate_mouse_down(
+                point(px(10.), px(10.)),
+                MouseButton::Left,
+                Default::default(),
+            );
+            cx.run_until_parked();
+
+            // Close the window without dismissing the menu.
+            cx.update(|window, _| window.remove_window());
+            cx.run_until_parked();
+        }
+
+        cx.update(|cx| cx.assert_no_new_leaks(&before));
     }
 
     #[gpui::test]
