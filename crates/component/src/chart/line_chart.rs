@@ -10,7 +10,7 @@ use num_traits::{Num, ToPrimitive};
 use crate::{
     ActiveTheme,
     plot::{
-        AXIS_GAP, AxisLabelPlacement, PathCaches, Plot, PlotAxis, StrokeStyle,
+        AXIS_GAP, AxisLabelPlacement, Curve, PathCaches, Plot, PlotAxis,
         scale::{Scale, ScaleLinear, ScalePoint, Sealed},
         shape::Line,
         tooltip::{CrossLine, Dot, Tooltip, TooltipState},
@@ -34,7 +34,7 @@ where
     x: Option<Rc<dyn Fn(&T) -> X>>,
     y: Option<Rc<dyn Fn(&T) -> Y>>,
     stroke: Option<Hsla>,
-    stroke_style: StrokeStyle,
+    stroke_style: Curve,
     dot: bool,
     tick_margin: usize,
     x_axis: bool,
@@ -169,17 +169,17 @@ where
     }
 
     pub fn natural(mut self) -> Self {
-        self.stroke_style = StrokeStyle::Natural;
+        self.stroke_style = Curve::Natural;
         self
     }
 
     pub fn linear(mut self) -> Self {
-        self.stroke_style = StrokeStyle::Linear;
+        self.stroke_style = Curve::Linear;
         self
     }
 
     pub fn step_after(mut self) -> Self {
-        self.stroke_style = StrokeStyle::StepAfter;
+        self.stroke_style = Curve::StepAfter;
         self
     }
 
@@ -428,11 +428,11 @@ where
             .x(move |d| x.tick(&x_fn(d)))
             .y(move |d| y.tick(&y_fn(d)))
             .stroke(stroke)
-            .stroke_style(self.stroke_style)
+            .curve(self.stroke_style)
             .stroke_width(2.);
 
         if self.dot {
-            line = line.dot().dot_size(8.).dot_fill_color(stroke);
+            line = line.dot(true).dot_size(8.).dot_fill(stroke);
         }
 
         let mask = self

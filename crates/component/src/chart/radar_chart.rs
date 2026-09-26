@@ -490,7 +490,7 @@ where
                     .data(0..n)
                     .angle(move |_, i| Some(i as f32 * angle_step))
                     .radius(move |_, _| Some(radius))
-                    .closed()
+                    .closed(true)
                     .stroke(stroke)
                     .paint(&bounds, window);
             }
@@ -525,12 +525,12 @@ where
                 .data(&self.data)
                 .angle(move |_, i| Some(i as f32 * angle_step))
                 .radius(move |d, _| scale.tick(&value_fn(d)))
-                .closed()
+                .closed(true)
                 .fill(fill)
                 .stroke(stroke)
                 .stroke_width(2.);
             if self.dot {
-                line = line.dot().dot_size(8.).dot_fill_color(stroke);
+                line = line.dot(true).dot_size(8.).dot_fill(stroke);
             }
             line.paint(&bounds, window);
         }

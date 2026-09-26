@@ -10,7 +10,7 @@ use num_traits::{Num, ToPrimitive};
 use crate::{
     ActiveTheme,
     plot::{
-        AXIS_GAP, AxisLabelPlacement, PathCaches, Plot, PlotAxis, StrokeStyle,
+        AXIS_GAP, AxisLabelPlacement, Curve, PathCaches, Plot, PlotAxis,
         scale::{Scale, ScaleLinear, ScalePoint, Sealed},
         shape::Area,
         tooltip::{CrossLine, Dot, Tooltip, TooltipState},
@@ -34,7 +34,7 @@ where
     x: Option<Rc<dyn Fn(&T) -> X>>,
     y: Vec<Rc<dyn Fn(&T) -> Y>>,
     strokes: Vec<Hsla>,
-    stroke_styles: Vec<StrokeStyle>,
+    stroke_styles: Vec<Curve>,
     fills: Vec<Background>,
     names: Vec<SharedString>,
     tooltip_content: TooltipContent<T>,
@@ -179,17 +179,17 @@ where
     }
 
     pub fn natural(mut self) -> Self {
-        self.stroke_styles.push(StrokeStyle::Natural);
+        self.stroke_styles.push(Curve::Natural);
         self
     }
 
     pub fn linear(mut self) -> Self {
-        self.stroke_styles.push(StrokeStyle::Linear);
+        self.stroke_styles.push(Curve::Linear);
         self
     }
 
     pub fn step_after(mut self) -> Self {
-        self.stroke_styles.push(StrokeStyle::StepAfter);
+        self.stroke_styles.push(Curve::StepAfter);
         self
     }
 
@@ -451,7 +451,7 @@ where
                 .y0(height)
                 .y1(move |d| y.tick(&y_fn(d)))
                 .stroke(stroke)
-                .stroke_style(stroke_style)
+                .curve(stroke_style)
                 .fill(fill)
         });
 

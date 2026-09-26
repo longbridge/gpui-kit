@@ -175,13 +175,21 @@ pub trait Plot: IntoElement {
     }
 }
 
-#[derive(Clone, Copy, Default, Hash, PartialEq, Eq)]
-pub enum StrokeStyle {
+/// How a [`Line`](shape::Line) or [`Area`](shape::Area) connects its points,
+/// like d3's curve factories.
+#[derive(Clone, Copy, Debug, Default, Hash, PartialEq, Eq)]
+pub enum Curve {
+    /// A smooth curve through every point (`d3.curveNatural`).
     #[default]
     Natural,
+    /// Straight segments between points (`d3.curveLinear`).
     Linear,
+    /// A step that holds each value until the next point (`d3.curveStepAfter`).
     StepAfter,
 }
+
+#[deprecated(since = "0.7.0", note = "use `Curve`")]
+pub type StrokeStyle = Curve;
 
 pub fn origin_point<T>(x: T, y: T, origin: Point<T>) -> Point<T>
 where
