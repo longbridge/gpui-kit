@@ -4,7 +4,7 @@ use gpui::{
 };
 
 use crate::{
-    Sizable, Size,
+    Sizable, Size, StyledExt,
     form::{Field, FieldProps},
     h_flex, v_flex,
 };
@@ -147,6 +147,7 @@ impl RenderOnce for Form {
                         .child(footer),
                 )
             })
+            .refine_style(&self.style)
     }
 }
 
