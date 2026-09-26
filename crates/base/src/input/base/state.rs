@@ -3655,6 +3655,9 @@ impl<M: InputModeKind> InputBaseState<M> {
 
         let auto_closed_pairs_before = self.mode.auto_closed_pairs().clone();
         let mut recorded = false;
+        // Several edits reach the highlighter as one batch, so it reparses
+        // once for the change instead of once per edit.
+        let mut highlighter_edits = Vec::new();
         for (range, new_text) in &sorted {
             let old_text = self.text.clone();
             self.mode.adjust_auto_closed_pair(range, new_text.len());
@@ -3676,22 +3679,43 @@ impl<M: InputModeKind> InputBaseState<M> {
             self.display_map
                 .on_text_changed(&self.text, range, &Rope::from(*new_text), cx);
 
-            self.mode.update_highlighter(
-                super::mode::HighlighterUpdate {
-                    selected_range: range,
-                    old_text: &old_text,
-                    new_text: &self.text,
-                    change_text: new_text,
-                    force: true,
-                },
-                window,
-                cx,
-            );
+            if group {
+                if self.is_code_editor() {
+                    let edit =
+                        super::mode::replacement_input_edit(&old_text, &self.text, range, new_text);
+                    highlighter_edits.push((edit, self.text.clone()));
+                }
+            } else {
+                self.mode.update_highlighter(
+                    super::mode::HighlighterUpdate {
+                        selected_range: range,
+                        old_text: &old_text,
+                        new_text: &self.text,
+                        change_text: new_text,
+                        force: true,
+                    },
+                    window,
+                    cx,
+                );
 
-            self.update_fold_candidates_incremental(range, new_text);
+                self.update_fold_candidates_incremental(range, new_text);
+            }
         }
 
         if group {
+            self.mode
+                .update_highlighter_batch::<M>(&highlighter_edits, window, cx);
+
+            // Fold candidates are read from the reparsed document, so each
+            // edit is located where it ended up once every edit was applied.
+            // `sorted` runs from the highest offset down.
+            let mut shift = 0isize;
+            for (range, new_text) in sorted.iter().rev() {
+                let start = (range.start as isize + shift) as usize;
+                self.update_fold_candidates_incremental(&(start..start), new_text);
+                shift += new_text.len() as isize - range.len() as isize;
+            }
+
             self.undo_manager.commit_transaction();
         }
 
@@ -6787,6 +6811,88 @@ mod tests {
                 assert_eq!(s.value(), "X bbb Y");
             });
         });
+    }
+
+    /// A multi-edit change reaches the highlighter once, with every edit in
+    /// application order and the text right after each, which is what the
+    /// default `update_batch` replays through `update` one edit at a time.
+    #[gpui::test]
+    fn test_replace_text_in_ranges_drives_the_highlighter_once(cx: &mut TestAppContext) {
+        use crate::input::{FoldRange, HighlightStyleResolver, InputEdit, InputHighlighter};
+        use gpui::HighlightStyle;
+        use std::cell::RefCell;
+
+        struct RecordingHighlighter(Rc<RefCell<Vec<Vec<String>>>>);
+
+        impl InputHighlighter for RecordingHighlighter {
+            fn language(&self) -> SharedString {
+                "recording".into()
+            }
+
+            fn update(
+                &mut self,
+                _: Option<InputEdit>,
+                text: &Rope,
+                _: bool,
+                _: &mut Window,
+                _: &mut Context<EditorState>,
+            ) {
+                self.0.borrow_mut().push(vec![text.to_string()]);
+            }
+
+            fn update_batch(
+                &mut self,
+                edits: &[(InputEdit, Rope)],
+                _: bool,
+                _: &mut Window,
+                _: &mut Context<EditorState>,
+            ) {
+                let texts = edits.iter().map(|(_, text)| text.to_string()).collect();
+                self.0.borrow_mut().push(texts);
+            }
+
+            fn styles(
+                &self,
+                range: &Range<usize>,
+                _: &dyn HighlightStyleResolver,
+            ) -> Vec<(Range<usize>, HighlightStyle)> {
+                vec![(range.clone(), HighlightStyle::default())]
+            }
+
+            fn fold_ranges(&self, _: &Rope) -> Vec<FoldRange> {
+                Vec::new()
+            }
+        }
+
+        let updates = Rc::new(RefCell::new(Vec::new()));
+        let input_view = InputView::new(cx);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |s, cx| {
+                s.set_value("aaa bbb ccc", window, cx);
+                let recorded = updates.clone();
+                s.set_highlighter_factory(
+                    Rc::new(move |_: &str| {
+                        let highlighter: Box<dyn InputHighlighter> =
+                            Box::new(RecordingHighlighter(recorded.clone()));
+                        Some(highlighter)
+                    }),
+                    cx,
+                );
+                s.replace_text_in_ranges(
+                    &[(0..3, "X".to_string()), (8..11, "Y".to_string())],
+                    window,
+                    cx,
+                );
+            });
+        });
+
+        assert_eq!(
+            *updates.borrow(),
+            vec![vec!["aaa bbb Y".to_string(), "X bbb Y".to_string()]]
+        );
     }
 
     /// An IME composition (marking then commit) undoes as a single unit.

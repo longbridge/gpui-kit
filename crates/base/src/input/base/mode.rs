@@ -284,19 +284,9 @@ impl LayoutMode {
                 if !update.force && highlighter.borrow().is_some() {
                     return;
                 }
-
-                let mut highlighter_ref = highlighter.borrow_mut();
-                if highlighter_ref.is_none() {
-                    let Some(factory) = highlighter_factory else {
-                        return;
-                    };
-                    *highlighter_ref = factory(&language.name());
-                }
-
-                if highlighter_ref.is_none() {
+                if !ensure_highlighter(highlighter, highlighter_factory.as_ref(), language) {
                     return;
                 }
-                drop(highlighter_ref);
 
                 let edit = replacement_input_edit(
                     update.old_text,
@@ -308,6 +298,30 @@ impl LayoutMode {
             }
             _ => {}
         }
+    }
+
+    /// Drive the highlighter once for several edits applied as one change,
+    /// each paired with the text right after it, in application order.
+    pub(crate) fn update_highlighter_batch<M: InputModeKind>(
+        &mut self,
+        edits: &[(InputEdit, Rope)],
+        window: &mut Window,
+        cx: &mut Context<crate::input::InputBaseState<M>>,
+    ) {
+        let LayoutMode::CodeEditor {
+            language,
+            highlighter,
+            highlighter_factory,
+            folding,
+            ..
+        } = &self
+        else {
+            return;
+        };
+        if !ensure_highlighter(highlighter, highlighter_factory.as_ref(), language) {
+            return;
+        }
+        M::drive_highlighter_batch(highlighter, edits, *folding, window, cx);
     }
 
     #[allow(unused)]
@@ -358,11 +372,27 @@ impl LayoutMode {
     }
 }
 
+/// Create the highlighter from the factory if there is none yet. Returns
+/// whether one is installed.
+fn ensure_highlighter(
+    highlighter: &RefCell<Option<Box<dyn InputHighlighter>>>,
+    highlighter_factory: Option<&InputHighlighterFactory>,
+    language: &EditorLanguage,
+) -> bool {
+    let mut highlighter = highlighter.borrow_mut();
+    if highlighter.is_none()
+        && let Some(factory) = highlighter_factory
+    {
+        *highlighter = factory(&language.name());
+    }
+    highlighter.is_some()
+}
+
 /// Builds the tree-sitter edit for a text replacement.
 ///
 /// Byte offsets and positions for `start`/`old_end` come from `old_text`;
 /// `new_end` byte/position come from the post-edit `text`.
-fn replacement_input_edit(
+pub(super) fn replacement_input_edit(
     old_text: &Rope,
     new_text: &Rope,
     selected_range: &Range<usize>,
