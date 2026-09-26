@@ -1,60 +1,38 @@
 // @reference: https://d3js.org/d3-scale/linear
 
 use itertools::Itertools;
-use num_traits::{Num, ToPrimitive};
 
-use super::{Scale, sealed::Sealed};
+use super::{PlotValue, Scale};
 
 #[derive(Clone)]
 pub struct ScaleLinear<T> {
-    domain_len: usize,
     domain_start: T,
     domain_diff: T,
     range_start: f32,
     range_diff: f32,
 }
 
-impl<T> ScaleLinear<T>
-where
-    T: Copy + PartialOrd + Num + ToPrimitive + Sealed,
-{
-    pub fn new(domain: Vec<T>, range: Vec<f32>) -> Self {
+impl<T: PlotValue> ScaleLinear<T> {
+    /// Map the extent of `domain` onto `range`: the smallest domain value to
+    /// `range[0]` and the largest to `range[1]`, so a reversed range such as
+    /// `[height, 0.]` puts larger values higher.
+    pub fn new(domain: impl IntoIterator<Item = T>, range: [f32; 2]) -> Self {
         let (domain_start, domain_end) = domain
-            .iter()
-            .minmax()
+            .into_iter()
+            .minmax_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
             .into_option()
-            .map_or((T::zero(), T::zero()), |(min, max)| (*min, *max));
-
-        let (range_start, range_end) =
-            range
-                .iter()
-                .minmax()
-                .into_option()
-                .map_or((0., 0.), |(min, max)| {
-                    let min_pos = range.iter().position(|&x| x == *min).unwrap_or(0);
-                    let max_pos = range.iter().position(|&x| x == *max).unwrap_or(0);
-
-                    if min_pos <= max_pos {
-                        (*min, *max)
-                    } else {
-                        (*max, *min)
-                    }
-                });
+            .unwrap_or((T::zero(), T::zero()));
 
         Self {
-            domain_len: domain.len(),
             domain_start,
             domain_diff: domain_end - domain_start,
-            range_start,
-            range_diff: range_end - range_start,
+            range_start: range[0],
+            range_diff: range[1] - range[0],
         }
     }
 }
 
-impl<T> Scale<T> for ScaleLinear<T>
-where
-    T: Copy + PartialOrd + Num + ToPrimitive + Sealed,
-{
+impl<T: PlotValue> Scale<T> for ScaleLinear<T> {
     fn tick(&self, value: &T) -> Option<f32> {
         if self.domain_diff.is_zero() {
             return None;
@@ -64,24 +42,6 @@ where
 
         Some(ratio * self.range_diff + self.range_start)
     }
-
-    fn least_index_with_domain(&self, tick: f32, domain: &[T]) -> (usize, f32) {
-        if self.domain_len == 0 || domain.is_empty() {
-            return (0, 0.);
-        }
-
-        domain
-            .iter()
-            .flat_map(|v| self.tick(v))
-            .enumerate()
-            .min_by(|(_, a), (_, b)| {
-                ((*a) - tick)
-                    .abs()
-                    .partial_cmp(&((*b) - tick).abs())
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .unwrap_or((0, 0.))
-    }
 }
 
 #[cfg(test)]
@@ -90,61 +50,41 @@ mod tests {
 
     #[test]
     fn test_scale_linear() {
-        let scale = ScaleLinear::new(vec![1., 2., 3.], vec![0., 100.]);
+        let scale = ScaleLinear::new(vec![1., 2., 3.], [0., 100.]);
         assert_eq!(scale.tick(&1.), Some(0.));
         assert_eq!(scale.tick(&2.), Some(50.));
         assert_eq!(scale.tick(&3.), Some(100.));
 
-        let scale = ScaleLinear::new(vec![1., 2., 3.], vec![100., 0.]);
+        let scale = ScaleLinear::new(vec![1., 2., 3.], [100., 0.]);
         assert_eq!(scale.tick(&1.), Some(100.));
         assert_eq!(scale.tick(&2.), Some(50.));
         assert_eq!(scale.tick(&3.), Some(0.));
     }
 
     #[test]
-    fn test_scale_linear_multiple_range() {
-        let scale = ScaleLinear::new(vec![1., 2., 3.], vec![0., 50., 100.]);
+    fn test_scale_linear_unordered_domain() {
+        let scale = ScaleLinear::new([3., 1., 2.], [0., 100.]);
         assert_eq!(scale.tick(&1.), Some(0.));
-        assert_eq!(scale.tick(&2.), Some(50.));
         assert_eq!(scale.tick(&3.), Some(100.));
+    }
 
-        let scale = ScaleLinear::new(vec![1., 2., 3.], vec![100., 50., 0.]);
-        assert_eq!(scale.tick(&1.), Some(100.));
-        assert_eq!(scale.tick(&2.), Some(50.));
-        assert_eq!(scale.tick(&3.), Some(0.));
-
-        let scale = ScaleLinear::new(vec![1., 2., 3.], vec![100., 0., 100.]);
-        assert_eq!(scale.tick(&1.), Some(100.));
-        assert_eq!(scale.tick(&2.), Some(50.));
-        assert_eq!(scale.tick(&3.), Some(0.));
-
-        let scale = ScaleLinear::new(vec![1., 2., 3.], vec![0., 100., 0.]);
-        assert_eq!(scale.tick(&1.), Some(0.));
-        assert_eq!(scale.tick(&2.), Some(50.));
-        assert_eq!(scale.tick(&3.), Some(100.));
+    #[test]
+    fn test_scale_linear_f32() {
+        let scale = ScaleLinear::new([0f32, 4.], [0., 100.]);
+        assert_eq!(scale.tick(&1f32), Some(25.));
+        assert_eq!(scale.tick(&4f32), Some(100.));
     }
 
     #[test]
     fn test_scale_linear_empty() {
-        let scale = ScaleLinear::new(vec![], vec![0., 100.]);
+        let scale = ScaleLinear::<f64>::new(vec![], [0., 100.]);
         assert_eq!(scale.tick(&1.), None);
         assert_eq!(scale.tick(&2.), None);
         assert_eq!(scale.tick(&3.), None);
 
-        let scale = ScaleLinear::new(vec![1., 2., 3.], vec![]);
+        let scale = ScaleLinear::new(vec![1., 2., 3.], [0., 0.]);
         assert_eq!(scale.tick(&1.), Some(0.));
         assert_eq!(scale.tick(&2.), Some(0.));
         assert_eq!(scale.tick(&3.), Some(0.));
-    }
-
-    #[test]
-    fn test_scale_linear_least_index_with_domain() {
-        let scale = ScaleLinear::new(vec![1., 2., 3.], vec![0., 100.]);
-        assert_eq!(scale.least_index_with_domain(0., &[1., 2., 3.]), (0, 0.));
-        assert_eq!(scale.least_index_with_domain(50., &[1., 2., 3.]), (1, 50.));
-        assert_eq!(
-            scale.least_index_with_domain(100., &[1., 2., 3.]),
-            (2, 100.)
-        );
     }
 }

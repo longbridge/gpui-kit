@@ -5,14 +5,13 @@ use gpui::{
     SharedString, Window, fill, point, px,
 };
 use gpui_component_macros::IntoPlot;
-use num_traits::{Num, ToPrimitive};
 use rust_i18n::t;
 
 use crate::{
     ActiveTheme,
     plot::{
         Grid, Plot, PlotAxis, origin_point,
-        scale::{Scale, ScaleBand, ScaleLinear, Sealed},
+        scale::{PlotValue, Scale, ScaleBand, ScaleLinear},
         tooltip::{CrossLine, Tooltip, TooltipState},
     },
 };
@@ -26,7 +25,7 @@ pub struct CandlestickChart<T, X, Y>
 where
     T: 'static,
     X: Eq + Hash + Into<SharedString> + 'static,
-    Y: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     data: Vec<T>,
     x: Option<Rc<dyn Fn(&T) -> X>>,
@@ -49,7 +48,7 @@ where
 impl<T, X, Y> CandlestickChart<T, X, Y>
 where
     X: Eq + Hash + Into<SharedString> + 'static,
-    Y: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     #[track_caller]
     pub fn new<I>(data: I) -> Self
@@ -236,8 +235,8 @@ where
         let x_fn = self.x.as_ref()?;
         Some(
             ScaleBand::new(
-                self.data.iter().map(|v| x_fn(v)).collect(),
-                vec![0., bounds.size.width.as_f32()],
+                self.data.iter().map(|v| x_fn(v)),
+                [0., bounds.size.width.as_f32()],
             )
             .max_band_width(self.max_band_width.as_f32())
             .padding_inner(0.4)
@@ -254,7 +253,7 @@ where
 impl<T, X, Y> Plot for CandlestickChart<T, X, Y>
 where
     X: Eq + Hash + Into<SharedString> + 'static,
-    Y: Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     fn paint(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         let (Some(x_fn), Some(open_fn), Some(high_fn), Some(low_fn), Some(close_fn)) = (
@@ -281,7 +280,7 @@ where
             .iter()
             .flat_map(|d| vec![high_fn(d), low_fn(d), open_fn(d), close_fn(d)])
             .collect();
-        let y = ScaleLinear::new(all_values, vec![height, 10.]);
+        let y = ScaleLinear::new(all_values, [height, 10.]);
 
         // Draw X axis
         let mut axis = PlotAxis::new().stroke(cx.theme().border);
@@ -395,7 +394,7 @@ where
             return None;
         }
 
-        let index = x.least_index(position.x.as_f32());
+        let index = x.nearest_index(position.x.as_f32());
         let d = self.data.get(index)?;
         let center = x.tick(&x_fn(d))? + x.band_width() / 2.;
 

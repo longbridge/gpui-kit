@@ -40,8 +40,8 @@ impl Plot for Sparkline {
         let width = bounds.size.width.as_f32();
         let height = bounds.size.height.as_f32();
         let indexes: Vec<usize> = (0..self.values.len()).collect();
-        let x = ScalePoint::new(indexes.clone(), vec![0., width]);
-        let y = ScaleLinear::new(self.values.clone(), vec![height, 0.]);
+        let x = ScalePoint::new(indexes.clone(), [0., width]);
+        let y = ScaleLinear::new(self.values.clone(), [height, 0.]);
         let values = self.values.clone();
 
         Line::new()
@@ -79,12 +79,12 @@ Scales map a domain of data to a range of pixels, or of any other value.
 
 | Scale | Domain | Use |
 | --- | --- | --- |
-| `ScaleLinear` | Continuous numbers | Value axes; the range can run top-down (`vec![height, 0.]`) |
+| `ScaleLinear` | Continuous numbers | Value axes; the range can run top-down (`[height, 0.]`) |
 | `ScaleBand` | Discrete categories | Bars: `band_width()` is each bar's width, `tick` its start |
 | `ScalePoint` | Discrete categories | Line and area charts over categorical x values |
 | `ScaleOrdinal` | Discrete categories | Mapping categories to colors |
 
-`ScaleLinear` accepts `f64`, and `rust_decimal::Decimal` with the `decimal` feature.
+`ScaleLinear` and the charts accept any [`PlotValue`](https://docs.rs/gpui-base/latest/gpui_base/plot/trait.PlotValue.html): `f32`, `f64`, and `rust_decimal::Decimal` with the `decimal` feature. Integers are left out because a linear scale divides values.
 
 ## Shapes
 

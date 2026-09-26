@@ -28,7 +28,7 @@ use gpui_kit::component::plot::{
 ```rust
 let scale = ScaleLinear::new(
     vec![0., 100.],
-    vec![0., 500.]
+    [0., 500.]
 );
 
 scale.tick(&50.);
@@ -39,7 +39,7 @@ scale.tick(&50.);
 ```rust
 let scale = ScaleBand::new(
     vec!["A", "B", "C"],
-    vec![0., 300.]
+    [0., 300.]
 )
 .padding_inner(0.1)
 .padding_outer(0.1);
@@ -53,7 +53,7 @@ scale.tick(&"A");
 ```rust
 let scale = ScalePoint::new(
     vec!["A", "B", "C"],
-    vec![0., 300.]
+    [0., 300.]
 );
 
 scale.tick(&"A");
@@ -204,11 +204,11 @@ impl Plot for StackedBarChart {
     fn paint(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
         // 1. 准备比例尺
         let x = ScaleBand::new(
-            self.data.iter().map(|v| v.date.clone()).collect(),
-            vec![0., width],
+            self.data.iter().map(|v| v.date.clone()),
+            [0., width],
         );
 
-        let y = ScaleLinear::new(vec![0., max_value], vec![height, 0.]);
+        let y = ScaleLinear::new(vec![0., max_value], [height, 0.]);
 
         // 2. 绘制坐标轴
         // ...（坐标轴绘制逻辑）

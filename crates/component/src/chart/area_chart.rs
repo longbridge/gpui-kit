@@ -5,13 +5,12 @@ use gpui::{
     Size, Window, point, px,
 };
 use gpui_component_macros::IntoPlot;
-use num_traits::{Num, ToPrimitive};
 
 use crate::{
     ActiveTheme,
     plot::{
         AxisLabelPlacement, Curve, PathCaches, Plot, PlotAxis,
-        scale::{Scale, ScaleLinear, ScalePoint, Sealed},
+        scale::{PlotValue, Scale, ScaleLinear, ScalePoint},
         shape::Area,
         tooltip::{CrossLine, Dot, Tooltip, TooltipState},
     },
@@ -28,7 +27,7 @@ pub struct AreaChart<T, X, Y>
 where
     T: 'static,
     X: Clone + PartialEq + Into<SharedString> + 'static,
-    Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     data: Vec<T>,
     x: Option<Rc<dyn Fn(&T) -> X>>,
@@ -51,7 +50,7 @@ where
 impl<T, X, Y> AreaChart<T, X, Y>
 where
     X: Clone + PartialEq + Into<SharedString> + 'static,
-    Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     #[track_caller]
     pub fn new<I>(data: I) -> Self
@@ -341,7 +340,7 @@ where
 
         let len = self.data.len();
         let x = ScalePoint::new(
-            self.data.iter().map(|v| x_fn(v)).collect(),
+            self.data.iter().map(|v| x_fn(v)),
             point_range(
                 self.axes.plot_left(),
                 width - self.axes.plot_left(),
@@ -365,7 +364,7 @@ where
 impl<T, X, Y> Plot for AreaChart<T, X, Y>
 where
     X: Clone + PartialEq + Into<SharedString> + 'static,
-    Y: Clone + Copy + PartialOrd + Num + ToPrimitive + Sealed + 'static,
+    Y: PlotValue,
 {
     fn prepaint(
         &mut self,
@@ -504,7 +503,7 @@ where
             return None;
         }
 
-        let index = x.least_index(position.x.as_f32());
+        let index = x.nearest_index(position.x.as_f32());
         let d = self.data.get(index)?;
         let x_tick = x.tick(&x_fn(d))?;
 
