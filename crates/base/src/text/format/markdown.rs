@@ -401,6 +401,16 @@ fn source_segments(
     segments
 }
 
+/// Returns the byte offset of the first `\n` or `\r` in `text` when only
+/// spaces and tabs precede it.
+fn newline_after_blanks(text: &str) -> Option<usize> {
+    let blanks = text
+        .bytes()
+        .take_while(|byte| matches!(byte, b' ' | b'\t'))
+        .count();
+    matches!(text.as_bytes().get(blanks), Some(b'\n' | b'\r')).then_some(blanks)
+}
+
 fn aligned_source_segments(
     raw: &str,
     rendered: &str,
@@ -431,11 +441,10 @@ fn aligned_source_segments(
             .expect("rendered cursor must be on a character boundary");
         let rendered_end = rendered_start + rendered_char.len_utf8();
         let remainder = &raw[raw_cursor..];
+        // Both line-break predicates stop at the first byte that decides
+        // them, so aligning a long node stays linear in its length.
         let (relative_start, source_len) = if rendered_char == ' '
-            && let Some(newline) = remainder.find(['\n', '\r'])
-            && remainder[..newline]
-                .chars()
-                .all(|character| matches!(character, ' ' | '\t'))
+            && let Some(newline) = newline_after_blanks(remainder)
         {
             let newline_len = if remainder[newline..].starts_with("\r\n") {
                 2
@@ -444,8 +453,9 @@ fn aligned_source_segments(
             };
             (newline, newline_len)
         } else if rendered_char == '\n'
-            && remainder.ends_with('\n')
-            && remainder.bytes().filter(|byte| *byte == b'\n').count() == 1
+            && remainder
+                .find('\n')
+                .is_some_and(|newline| newline + 1 == remainder.len())
         {
             (0, remainder.len())
         } else if let Some(escaped) = remainder.strip_prefix('\\')

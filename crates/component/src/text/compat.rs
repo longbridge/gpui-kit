@@ -252,8 +252,8 @@ impl Element for TextView {
                 &style.highlight_theme,
                 &crate::highlighter::HighlightTheme::default_light(),
             ) {
-                inner = inner.code_block_highlighter(super::component_code_block_highlighter(
-                    style.highlight_theme.clone(),
+                inner = inner.shared_code_block_highlighter(super::shared_code_block_highlighter(
+                    &style.highlight_theme,
                 ));
             }
             inner = inner.style(resolve_component_style(

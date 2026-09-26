@@ -5,7 +5,10 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
     collections::HashMap,
     ops::Deref,
-    sync::{Arc, LazyLock, Mutex},
+    sync::{
+        Arc, LazyLock, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use anyhow::Result;
@@ -505,6 +508,8 @@ pub type LanguageParserFactory =
 pub struct LanguageRegistry {
     languages: Mutex<HashMap<SharedString, GrammarConfig>>,
     parser_factories: Mutex<HashMap<SharedString, LanguageParserFactory>>,
+    /// Bumped by every registration; see [`Self::generation`].
+    generation: AtomicU64,
 }
 
 impl LanguageRegistry {
@@ -517,6 +522,7 @@ impl LanguageRegistry {
                     .collect(),
             ),
             parser_factories: Mutex::new(HashMap::new()),
+            generation: AtomicU64::new(0),
         });
         &INSTANCE
     }
@@ -527,6 +533,7 @@ impl LanguageRegistry {
             .lock()
             .unwrap()
             .insert(lang.to_string().into(), config.clone());
+        self.generation.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Registers a parser factory for a dynamically loaded language.
@@ -538,6 +545,14 @@ impl LanguageRegistry {
             .lock()
             .unwrap()
             .insert(lang.to_string().into(), factory);
+        self.generation.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// A counter that changes whenever a language or parser factory is
+    /// registered, so caches of highlighted output can tell when a language
+    /// they could not resolve before may now resolve.
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Relaxed)
     }
 
     /// Returns a fresh parser and grammar for `name`, preferring a registered
@@ -622,6 +637,7 @@ mod tests {
         let registry = super::LanguageRegistry {
             languages: std::sync::Mutex::new(std::collections::HashMap::new()),
             parser_factories: std::sync::Mutex::new(std::collections::HashMap::new()),
+            generation: std::sync::atomic::AtomicU64::new(0),
         };
         registry.register("json", &GrammarConfig::plain("canonical"));
         assert_eq!(registry.language("jsonc").unwrap().name, "canonical");
@@ -645,6 +661,7 @@ mod tests {
         let registry = super::LanguageRegistry {
             languages: std::sync::Mutex::new(std::collections::HashMap::new()),
             parser_factories: std::sync::Mutex::new(std::collections::HashMap::new()),
+            generation: std::sync::atomic::AtomicU64::new(0),
         };
         registry.register("typescript", &GrammarConfig::plain("typescript"));
         assert!(registry.language("ts").is_none());
