@@ -804,7 +804,7 @@ Tooltip::new(cursor, bounds.size)
     .value_color(gain)
 ```
 
-To emphasize the plot's own graphics as well — fade the bars around the hovered one, lift a slice — implement `Plot::hover`, which runs each frame before `tooltip` and `paint` with the [`PlotHover`] in focus. It carries the `TooltipState` and lingers after the cursor leaves while `hover.focus()` eases back to zero, so sample the motion there and keep the result on `self`. `hover.glide` follows a position on the same spring the tooltip uses; hand the result to the crosshair and turn the tooltip's own glide off with `Tooltip::glide(false)`, so it springs once:
+To emphasize the plot's own graphics as well — fade the bars around the hovered one, lift a slice — implement `Plot::hover`, which runs each frame before `tooltip` and `paint` with the hovered [`PlotHover`]. It carries the `TooltipState` and lingers after the cursor leaves while `hover.progress()` eases back to zero, so sample the motion there and keep the result on `self`. `hover.glide` follows a position on the same spring the tooltip uses; hand the result to the crosshair and turn the tooltip's own glide off with `Tooltip::glide(false)`, so it springs once:
 
 ```rust
 fn hover(&mut self, hover: Option<&PlotHover>, window: &mut Window, cx: &mut App) {

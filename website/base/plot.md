@@ -101,14 +101,14 @@ Shapes that repaint every frame can keep their tessellated paths across frames w
 A plot opts into hover by returning an id from `Plot::id`. `PlotElement` then tracks the cursor each frame, occlusion-aware so an open popup above the plot clears it, and asks the plot three questions:
 
 1. `tooltip_state` — map the cursor to a [`TooltipState`]: the hovered index, the crosshair point and the data dots, or `None`.
-2. `hover` — receive the [`PlotHover`] in focus before painting. It lingers after the cursor leaves while `focus()` eases back to zero, so emphasis fades out over the last datum instead of vanishing. `is_entering()` is true on the first hovered frame.
+2. `hover` — receive the hovered [`PlotHover`] before painting. It lingers after the cursor leaves while `progress()` eases back to zero, so emphasis fades out over the last datum instead of vanishing. `is_entering()` is true on the first hovered frame.
 3. `tooltip` — return the overlay: a crosshair, dots, a tooltip box. The overlay paints above the plot; a box that may overflow the plot should wrap itself in `deferred`.
 
 Base draws no overlay of its own; the styled layer builds it. Inside `Plot::tooltip`, an overlay renders within the plot's element scope, so it can read the hover without being handed it:
 
 | Function | Returns |
 | --- | --- |
-| `hover_focus(window, cx)` | How far the hover has faded in, `0..=1`; `1` outside a plot |
+| `hover_progress(window, cx)` | How far the hover has faded in, `0..=1`; `1` outside a plot |
 | `is_hover_entering(window, cx)` | Whether this is the first hovered frame |
 | `pointer_spring(cx)` | The spring a pointer follows the hovered datum with |
 | `PlotHover::glide(id, target, window, cx)` | A position following `target` on the pointer spring, adopted at once on the entering frame |

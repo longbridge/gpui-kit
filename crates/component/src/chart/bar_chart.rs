@@ -1072,7 +1072,7 @@ where
             let center = hover.glide(("bar-chart", "band"), target, window, cx);
             BarHover {
                 center: center.as_f32(),
-                focus: hover.focus(),
+                focus: hover.progress(),
             }
         });
     }

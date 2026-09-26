@@ -26,12 +26,12 @@ pub use axis::AXIS_GAP;
 pub use axis::{AxisLabelPlacement, AxisLabelSide, AxisText, PlotAxis, axis_gutter};
 pub use element::PlotElement;
 pub use grid::Grid;
-pub use hover::{PlotHover, TooltipState, hover_focus, is_hover_entering, pointer_spring};
+pub use hover::{PlotHover, TooltipState, hover_progress, is_hover_entering, pointer_spring};
 pub use label::PlotLabel;
 pub use path_cache::{PathCache, PathCaches, ShapeKey};
 pub use scale::PlotValue;
 
-/// The timing of a plot's hover: how its focus fades in and out, and the
+/// The timing of a plot's hover: how its progress fades in and out, and the
 /// spring a pointer follows the hovered datum with.
 ///
 /// Base installs no motion of its own: every duration defaults to zero, so the
@@ -126,7 +126,7 @@ pub trait Plot: IntoElement {
     ///
     /// `position` is the cursor position relative to the plot's top-left origin (already
     /// origin-subtracted), and `bounds` is the painted area. Return the [`TooltipState`]
-    /// to display (highlighted index, crosshair point, dots, side), or `None` to show
+    /// to display (highlighted index, crosshair point, dots), or `None` to show
     /// nothing. Only called while the cursor is inside `bounds`.
     ///
     /// The default returns `None`.
@@ -139,11 +139,11 @@ pub trait Plot: IntoElement {
         None
     }
 
-    /// Receive the datum in focus this frame, before [`Plot::tooltip`] and
+    /// Receive the hovered datum this frame, before [`Plot::tooltip`] and
     /// [`Plot::paint`] run.
     ///
     /// `hover` carries the [`TooltipState`] the cursor resolved to, and it
-    /// lingers after the cursor leaves while [`PlotHover::focus`] eases back to
+    /// lingers after the cursor leaves while [`PlotHover::progress`] eases back to
     /// zero, so a hover-driven presentation can fade out over the last datum
     /// instead of vanishing. `None` means nothing is hovered and nothing is
     /// fading.
@@ -165,7 +165,7 @@ pub trait Plot: IntoElement {
     ///
     /// Also called while the hover fades out, with the lingering `state` and the
     /// last `cursor`; the overlay renders within the plot's element scope, so it can
-    /// fade with [`hover_focus`].
+    /// fade with [`hover_progress`].
     fn tooltip(
         &self,
         _state: &TooltipState,
