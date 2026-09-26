@@ -289,6 +289,7 @@ Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用�
 | 测试文件 | 验证行为 |
 | --- | --- |
 | `test_macro.rs` | 普通 `#[test]` 与同步/异步 `#[gpui_kit::test]` 共存；独立、仅依赖 Kit 的 recipes 包复用相同契约 |
+| `input.rs` 与 `input/` | Input、Textarea、Editor 的编辑、剪贴板、选区、历史记录、只读切换、Unicode、多行视口、搜索替换、补全确认，以及重绘后的状态保留 |
 | `search.rs` | Command 禁用项跳过、循环导航、中文关键词、空结果、Action 与原始索引回调、两阶段 Escape；Combobox 搜索、单选/多选、清除、空结果恢复、禁用行为及关闭时仅一次 Confirm |
 | `disclosure.rs` | Accordion 互斥展开、折叠与实际面板几何；Stepper 内容导航；禁用展开与步骤操作；Slider 轨道点击、滑块拖动与禁用行为 |
 | `collections.rs` | Tree 点击展开、键盘展开/折叠与选择；DataTable 行选择、键盘虚拟滚动与滚轮滚动 |
@@ -300,6 +301,12 @@ Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用�
 已有表单、Select、HoverCard、虚拟列表、指针、生命周期和隔离测试继续保留。
 纯展示组件通过几何或像素断言验证，不虚构交互状态。自定义部件观察已有原生元素；
 不支持的属性保持不可用，不提供手填测试值的覆盖入口。
+
+[Input 回归测试范例](https://github.com/longbridge/gpui-kit/tree/main/crates/kit/tests/input)
+展示了如何把手工编辑步骤变成可重复的 UI 测试。运行命令：
+`cargo test -p gpui-kit --features test-support --test input --locked`。
+每个流程都操作实际渲染的组件，并在关键步骤检查结果。范例说明了何时用公开状态读取
+补充原生快照，以及输入法、辅助功能动作和像素显示仍需哪些平台验证。
 
 通过 `WindowExt` 打开 Dialog、Sheet 或 Notification 的视图，需要窗口的根视图是 `Root`。
 `Root` 始终将这三类浮层渲染在应用内容之上，缓存视图也一样，无需手动挂载。

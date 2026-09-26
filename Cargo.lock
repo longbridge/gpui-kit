@@ -3947,6 +3947,7 @@ dependencies = [
  "gpui-pre",
  "gpui-pre-platform",
  "gpui-pre-web",
+ "lsp-types 0.97.0",
 ]
 
 [[package]]

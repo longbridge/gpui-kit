@@ -341,6 +341,7 @@ that every option or combination of every component has been exhaustively tested
 | Suite | Behavior exercised |
 | --- | --- |
 | `test_macro.rs` | Published `#[gpui_kit::test]` sync/async compatibility alongside ordinary Rust tests; the independent Kit-only recipes package runs the same contract |
+| `input.rs` and `input/` | Input, Textarea and Editor editing, clipboard, selection, history, read-only transitions, Unicode, multiline viewport behavior, search/replace, completion acceptance and retained state across renders |
 | `search.rs` | Command disabled-item skipping, wraparound, Unicode keywords, empty results, Action dispatch and original-index callbacks, two-stage Escape; Combobox search, single/multi selection, clearing, empty-result recovery, disabled behavior and exactly one Confirm on close |
 | `disclosure.rs` | Accordion exclusive expansion/collapse and actual panel geometry; Stepper content navigation; disabled disclosure/steps; Slider track click, thumb drag and disabled behavior |
 | `collections.rs` | Tree pointer expansion, keyboard collapse/expansion and selection; DataTable row selection, keyboard virtualization and wheel scrolling |
@@ -353,6 +354,13 @@ The existing form, Select, HoverCard, virtual-list, pointer, lifecycle and isola
 suites remain in place. Pure presentation components need geometry or pixel assertions,
 not invented interaction state. Custom parts register their existing native elements;
 unsupported properties remain unavailable, with no manual test-only override.
+
+The [Input regression example](https://github.com/longbridge/gpui-kit/tree/main/crates/kit/tests/input)
+shows how to turn a manual editing sequence into a repeatable UI test. Run it with
+`cargo test -p gpui-kit --features test-support --test input --locked`.
+Each workflow drives the rendered component and checks its result at meaningful
+steps. The guide explains when public state reads supplement native snapshots and
+which platform checks remain necessary for IME, accessibility actions and pixels.
 
 Views that open dialogs, sheets or notifications through `WindowExt` need a `Root`
 as the window's root view. `Root` always renders all three overlay layers above

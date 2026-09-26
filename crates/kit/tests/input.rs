@@ -1,4 +1,18 @@
 mod common;
+#[path = "input/completions.rs"]
+mod completions;
+#[path = "input/constraints.rs"]
+mod constraints;
+#[path = "input/editing.rs"]
+mod editing;
+#[path = "input/editor.rs"]
+mod editor;
+#[path = "input/history.rs"]
+mod history;
+#[path = "input/lifecycle.rs"]
+mod lifecycle;
+#[path = "input/textarea.rs"]
+mod textarea;
 use gpui::{
     AppContext, Context, Entity, TestAppContext, Window, WindowHandle, div, prelude::*, px,
 };

@@ -14,6 +14,11 @@ setup, a compiled application workflow, the control coverage matrix, scoped IDs,
 state assertions, mouse/keyboard/scroll/drag operations, async waits and CI.
 The [Chinese guide](../../website/zh-CN/docs/test.md) covers the same API.
 
+For a component regression example, start with the
+[Input, Textarea and Editor suite](tests/input/README.md). It groups real editing
+workflows by behavior and explains how to add a case without bypassing focus,
+keyboard bindings or pointer dispatch.
+
 ## Core semantics
 
 - `find` requires a target and explains missing/ambiguous paths; `try_find` permits absence.
