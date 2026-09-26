@@ -1,8 +1,8 @@
 use std::{hash::Hash, rc::Rc};
 
 use gpui::{
-    AnyElement, App, Bounds, ElementId, Hsla, IntoElement, PathBuilder, Pixels, Point,
-    SharedString, Window, fill, point, px,
+    AnyElement, App, Bounds, ElementId, Hsla, IntoElement, Pixels, Point, SharedString, Window,
+    fill, point, px,
 };
 use gpui_component_macros::IntoPlot;
 use num_traits::{Num, ToPrimitive};
@@ -336,14 +336,13 @@ where
             let body_left = center_x - body_width / 2.;
             let body_right = center_x + body_width / 2.;
 
-            // Draw wick (high to low line)
-            let mut wick_builder = PathBuilder::stroke(px(1.));
-            wick_builder.move_to(origin_point(px(center_x), px(high_y), origin));
-            wick_builder.line_to(origin_point(px(center_x), px(low_y), origin));
-
-            if let Ok(path) = wick_builder.build() {
-                window.paint_path(path, color);
-            }
+            // Draw wick (high to low line): a 1px quad, so no stroke to tessellate.
+            let (wick_top, wick_bottom) = (high_y.min(low_y), high_y.max(low_y));
+            let wick_bounds = Bounds::from_corners(
+                origin_point(px(center_x - 0.5), px(wick_top), origin),
+                origin_point(px(center_x + 0.5), px(wick_bottom), origin),
+            );
+            window.paint_quad(fill(wick_bounds, color));
 
             // Draw body (open to close rectangle)
             // For bullish: top is close, bottom is open
