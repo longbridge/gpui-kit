@@ -39,7 +39,12 @@ pub fn embedded_themes() -> HashMap<&'static str, &'static str> {
         "mellifluous",
         include_str!("../../../themes/mellifluous.json"),
     );
+    themes.insert("midnight", include_str!("../../../themes/midnight.json"));
     themes.insert("molokai", include_str!("../../../themes/molokai.json"));
+    themes.insert(
+        "osaka-jade",
+        include_str!("../../../themes/osaka-jade.json"),
+    );
     themes.insert("solarized", include_str!("../../../themes/solarized.json"));
     themes.insert("spaceduck", include_str!("../../../themes/spaceduck.json"));
     themes.insert(

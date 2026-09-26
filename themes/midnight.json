@@ -1,0 +1,169 @@
+{
+  "$schema": "https://github.com/longbridge/gpui-kit/raw/refs/heads/main/.theme-schema.json",
+  "name": "Midnight",
+  "author": "Jaxon Wright",
+  "url": "https://github.com/JaxonWright/omarchy-midnight-theme",
+  "themes": [
+    {
+      "name": "Midnight",
+      "mode": "dark",
+      "colors": {
+        "accent.background": "#1E1E1E",
+        "accent.foreground": "#EFEFEF",
+        "background": "#000000",
+        "foreground": "#EFEFEF",
+        "border": "#1E1E1E",
+        "ring": "#407E70",
+        "selection.background": "#407E7077",
+        "input.border": "#2C2C2C",
+        "link.foreground": "#88AABB",
+        "link.hover.foreground": "#A2C4D3",
+        "link.active.foreground": "#88AABB",
+        "list.active.background": "#407E7026",
+        "list.active.border": "#407E70",
+        "list.even.background": "#0D0D0D",
+        "muted.background": "#121212",
+        "muted.foreground": "#8A8A8D",
+        "panel.background": "#0D0D0D",
+        "popover.background": "#0D0D0D",
+        "popover.foreground": "#EFEFEF",
+        "primary.background": "#407E70",
+        "primary.foreground": "#FFFFFF",
+        "info.background": "#8A9FBE",
+        "scrollbar.background": "#00000000",
+        "scrollbar.thumb.background": "#2C2C2C",
+        "scrollbar.thumb.hover.background": "#333333",
+        "secondary.background": "#1E1E1E",
+        "secondary.active.background": "#2C2C2C",
+        "secondary.foreground": "#EFEFEF",
+        "secondary.hover.background": "#262626",
+        "tab.active.background": "#000000",
+        "tab.active.foreground": "#EFEFEF",
+        "tab.background": "#0D0D0D",
+        "tab.foreground": "#8A8A8D",
+        "tab_bar.background": "#0D0D0D",
+        "title_bar.background": "#0D0D0D",
+        "title_bar.border": "#1E1E1E",
+        "base.red": "#D35F5F",
+        "base.red.light": "#B91C1C",
+        "base.yellow": "#FFC107",
+        "base.yellow.light": "#F59E0B",
+        "base.green": "#8A9A7B",
+        "base.green.light": "#A5B799",
+        "base.blue": "#8A9FBE",
+        "base.blue.light": "#A4BBDD",
+        "base.magenta": "#C1A1C1",
+        "base.magenta.light": "#D9B9D9",
+        "base.cyan": "#88AABB",
+        "base.cyan.light": "#A2C4D3"
+      },
+      "highlight": {
+        "editor.foreground": "#EFEFEF",
+        "editor.background": "#000000",
+        "editor.active_line.background": "#121212",
+        "editor.line_number": "#555555",
+        "editor.active_line_number": "#EFEFEF",
+        "editor.invisible": "#33333399",
+        "conflict": "#F59E0B",
+        "created": "#8A9A7B",
+        "deleted": "#D35F5F",
+        "error": "#D35F5F",
+        "hidden": "#555555",
+        "hint": "#C1A1C1",
+        "ignored": "#555555",
+        "info": "#88AABB",
+        "modified": "#F59E0B",
+        "predictive": "#555555",
+        "renamed": "#88AABB",
+        "success": "#8A9A7B",
+        "unreachable": "#555555",
+        "warning": "#F59E0B",
+        "syntax": {
+          "attribute": {
+            "color": "#F59E0B"
+          },
+          "boolean": {
+            "color": "#F59E0B"
+          },
+          "comment": {
+            "color": "#6B6B6E",
+            "font_style": "italic"
+          },
+          "comment.doc": {
+            "color": "#6B6B6E",
+            "font_style": "italic"
+          },
+          "constant": {
+            "color": "#EAEAEA"
+          },
+          "constructor": {
+            "color": "#F59E0B"
+          },
+          "embedded": {
+            "color": "#EAEAEA"
+          },
+          "function": {
+            "color": "#F59E0B"
+          },
+          "keyword": {
+            "color": "#D35F5F"
+          },
+          "link_text": {
+            "color": "#88AABB",
+            "font_style": "underline"
+          },
+          "link_uri": {
+            "color": "#88AABB",
+            "font_style": "italic"
+          },
+          "number": {
+            "color": "#F59E0B"
+          },
+          "operator": {
+            "color": "#FFC107"
+          },
+          "punctuation": {
+            "color": "#8A8A8D"
+          },
+          "string": {
+            "color": "#E68E0D"
+          },
+          "string.escape": {
+            "color": "#FFC107"
+          },
+          "string.regex": {
+            "color": "#E68E0D"
+          },
+          "string.special": {
+            "color": "#E68E0D"
+          },
+          "string.special.symbol": {
+            "color": "#E68E0D"
+          },
+          "tag": {
+            "color": "#D35F5F"
+          },
+          "text.literal": {
+            "color": "#E68E0D"
+          },
+          "title": {
+            "color": "#EFEFEF",
+            "font_weight": 600
+          },
+          "type": {
+            "color": "#EAEAEA"
+          },
+          "property": {
+            "color": "#BEBEBE"
+          },
+          "variable": {
+            "color": "#EAEAEA"
+          },
+          "variable.special": {
+            "color": "#D398A7"
+          }
+        }
+      }
+    }
+  ]
+}

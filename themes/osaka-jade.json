@@ -1,0 +1,169 @@
+{
+  "$schema": "https://github.com/longbridge/gpui-kit/raw/refs/heads/main/.theme-schema.json",
+  "name": "Osaka Jade",
+  "author": "Omarchy",
+  "url": "https://github.com/basecamp/omarchy",
+  "themes": [
+    {
+      "name": "Osaka Jade",
+      "mode": "dark",
+      "colors": {
+        "accent.background": "#23372B",
+        "accent.foreground": "#D6D5BC",
+        "background": "#111C18",
+        "foreground": "#C1C497",
+        "border": "#23372B",
+        "ring": "#509475",
+        "selection.background": "#32473B",
+        "input.border": "#2B4034",
+        "link.foreground": "#2DD5B7",
+        "link.hover.foreground": "#8CD3CB",
+        "link.active.foreground": "#2DD5B7",
+        "list.active.background": "#50947526",
+        "list.active.border": "#509475",
+        "list.even.background": "#0C1512",
+        "muted.background": "#1A2921",
+        "muted.foreground": "#81B8A8",
+        "panel.background": "#0C1512",
+        "popover.background": "#0C1512",
+        "popover.foreground": "#C1C497",
+        "primary.background": "#509475",
+        "primary.foreground": "#F7E8B2",
+        "info.background": "#509475",
+        "scrollbar.background": "#111C1800",
+        "scrollbar.thumb.background": "#23372B",
+        "scrollbar.thumb.hover.background": "#32473B",
+        "secondary.background": "#1A2921",
+        "secondary.active.background": "#23372B",
+        "secondary.foreground": "#C1C497",
+        "secondary.hover.background": "#1F3027",
+        "tab.active.background": "#111C18",
+        "tab.active.foreground": "#D6D5BC",
+        "tab.background": "#0C1512",
+        "tab.foreground": "#81B8A8",
+        "tab_bar.background": "#0C1512",
+        "title_bar.background": "#0C1512",
+        "title_bar.border": "#23372B",
+        "base.red": "#FF5345",
+        "base.red.light": "#DB9F9C",
+        "base.yellow": "#E5C736",
+        "base.yellow.light": "#F7E8B2",
+        "base.green": "#549E6A",
+        "base.green.light": "#63B07A",
+        "base.blue": "#509475",
+        "base.blue.light": "#ACD4CF",
+        "base.magenta": "#D2689C",
+        "base.magenta.light": "#E3A3C2",
+        "base.cyan": "#2DD5B7",
+        "base.cyan.light": "#8CD3CB"
+      },
+      "highlight": {
+        "editor.foreground": "#C1C497",
+        "editor.background": "#111C18",
+        "editor.active_line.background": "#1A2921",
+        "editor.line_number": "#53685B",
+        "editor.active_line_number": "#D6D5BC",
+        "editor.invisible": "#53685B66",
+        "conflict": "#E5C736",
+        "created": "#63B07A",
+        "deleted": "#FF5345",
+        "error": "#FF5345",
+        "hidden": "#53685B",
+        "hint": "#75BBB3",
+        "ignored": "#53685B",
+        "info": "#2DD5B7",
+        "modified": "#E5C736",
+        "predictive": "#53685B",
+        "renamed": "#2DD5B7",
+        "success": "#63B07A",
+        "unreachable": "#53685B",
+        "warning": "#E5C736",
+        "syntax": {
+          "attribute": {
+            "color": "#E5C736"
+          },
+          "boolean": {
+            "color": "#E5C736"
+          },
+          "comment": {
+            "color": "#6B8574",
+            "font_style": "italic"
+          },
+          "comment.doc": {
+            "color": "#6B8574",
+            "font_style": "italic"
+          },
+          "constant": {
+            "color": "#DB9F9C"
+          },
+          "constructor": {
+            "color": "#8CD3CB"
+          },
+          "embedded": {
+            "color": "#C1C497"
+          },
+          "function": {
+            "color": "#2DD5B7"
+          },
+          "keyword": {
+            "color": "#D2689C"
+          },
+          "link_text": {
+            "color": "#2DD5B7",
+            "font_style": "underline"
+          },
+          "link_uri": {
+            "color": "#2DD5B7",
+            "font_style": "italic"
+          },
+          "number": {
+            "color": "#E5C736"
+          },
+          "operator": {
+            "color": "#81B8A8"
+          },
+          "punctuation": {
+            "color": "#81B8A8"
+          },
+          "string": {
+            "color": "#63B07A"
+          },
+          "string.escape": {
+            "color": "#E5C736"
+          },
+          "string.regex": {
+            "color": "#63B07A"
+          },
+          "string.special": {
+            "color": "#63B07A"
+          },
+          "string.special.symbol": {
+            "color": "#E5C736"
+          },
+          "tag": {
+            "color": "#D2689C"
+          },
+          "text.literal": {
+            "color": "#63B07A"
+          },
+          "title": {
+            "color": "#F7E8B2",
+            "font_weight": 600
+          },
+          "type": {
+            "color": "#8CD3CB"
+          },
+          "property": {
+            "color": "#ACD4CF"
+          },
+          "variable": {
+            "color": "#C1C497"
+          },
+          "variable.special": {
+            "color": "#D2689C"
+          }
+        }
+      }
+    }
+  ]
+}
