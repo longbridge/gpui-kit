@@ -7,6 +7,8 @@ description: A low-level plotting library for creating custom charts and data vi
 
 The `plot` module provides low-level building blocks for creating custom charts. It includes scales, shapes, and utilities that power the high-level `Chart` components.
 
+The primitives live in gpui-base as [`gpui_kit::base::plot`](../base/plot.md) and are re-exported here unchanged, so either path works. GPUI Component adds the styled pieces on top: the `Tooltip`, `CrossLine` and `Dot` overlay in `plot::tooltip`, the `#[derive(IntoPlot)]` shorthand, and the hover motion it projects from its theme.
+
 ## Import
 
 ```rust

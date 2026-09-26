@@ -770,7 +770,7 @@ The second matters because a plain hitbox does not block the one behind it: an e
 
 ### Motion
 
-The emphasis is animated with the styled layer's motion tokens (`cx.theme().motion_tokens()`): pointers — crosshair, band, dots — follow the hovered datum on a fast spring, a pie slice lifts on the control spring, and the whole overlay fades in when the cursor lands on a datum and out after it leaves. The motion honors the operating system's reduced-motion preference, under which every value adopts its target at once.
+The emphasis is animated with the styled layer's motion tokens (`cx.theme().motion_tokens()`), which the theme projects onto gpui-base as its [`PlotMotion`](../base/plot.md#motion): pointers — crosshair, band, dots — follow the hovered datum on a fast spring, a pie slice lifts on the control spring, and the whole overlay fades in when the cursor lands on a datum and out after it leaves. The motion honors the operating system's reduced-motion preference, under which every value adopts its target at once.
 
 ### Caching
 
@@ -778,7 +778,7 @@ A chart also keeps its heavy geometry across frames, since it repaints on every 
 
 ### Custom Plots
 
-A custom [`Plot`] opts in by hand — `Plot::id` defaults to `None` there: return an id from it, resolve the datum under the cursor in `Plot::tooltip_state`, and build the overlay in `Plot::tooltip`. The `Tooltip` returned there animates the hover on its own, the same way the built-in charts do: the whole overlay fades with the hover, the crosshair and dots glide to each hovered datum on the pointer spring, adopting it on the frame the cursor lands, and a dot's `halo` grows as the hover fades in. A crosshair glides along the axis it marks only, so a line that also follows the cursor keeps up with it. Pass the data point itself; the tooltip does the rest:
+A custom [`Plot`] opts in by hand — `Plot::id` defaults to `None` there. The trait, `PlotElement` and hover tracking come from [gpui-base](../base/plot.md), so a plot written against `gpui_kit::base::plot` works here unchanged. Return an id from `Plot::id`, resolve the datum under the cursor in `Plot::tooltip_state`, and build the overlay in `Plot::tooltip`. The `Tooltip` returned there animates the hover on its own, the same way the built-in charts do: the whole overlay fades with the hover, the crosshair and dots glide to each hovered datum on the pointer spring, adopting it on the frame the cursor lands, and a dot's `halo` grows as the hover fades in. A crosshair glides along the axis it marks only, so a line that also follows the cursor keeps up with it. Pass the data point itself; the tooltip does the rest:
 
 ```rust
 fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pixels>, _: &mut Window, cx: &mut App) -> Option<AnyElement> {

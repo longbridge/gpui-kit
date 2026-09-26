@@ -22,6 +22,31 @@ applies to every group. Use it when a single page should present its items
 directly — `GroupBoxVariant::Normal` removes the card surface the global
 default draws — while the other pages keep the global variant.
 
+#### Plot moves to `gpui-base`
+
+The chart primitives — scales, shapes, `PlotAxis`, `Grid`, `PlotLabel`,
+`PathCaches`, the `Plot` trait and hover tracking — now live in
+`gpui_base::plot`, so a design system built on `gpui-base` alone can draw charts
+without depending on `gpui-component`. `gpui_component::plot` re-exports them
+unchanged; existing imports such as `gpui_kit::component::plot::scale::ScaleLinear`
+keep working.
+
+```rust
+pub struct PlotElement<P>        // gpui_base::plot: the element behind every Plot
+pub fn hover_focus(window: &mut Window, cx: &mut App) -> f32
+pub fn is_hover_entering(window: &mut Window, cx: &mut App) -> bool
+pub fn pointer_spring(cx: &App) -> Spring
+pub struct PlotMotion            // pointer spring and hover enter/exit transitions
+pub struct PlotTheme             // gpui_base::Theme::plot, carrying PlotMotion
+```
+
+A hand-written plot becomes an element with
+`impl IntoElement for MyPlot { type Element = PlotElement<Self>; … }`;
+`#[derive(IntoPlot)]` now generates exactly that. Base plot motion is
+motionless by default, and `gpui-component` projects its motion tokens onto
+`gpui_base::Theme::plot` whenever its theme is applied. The `decimal` feature
+moves to `gpui-base`; `gpui-component`'s `decimal` feature forwards to it.
+
 #### Breaking changes
 
 The following `gpui-component` APIs have been removed:

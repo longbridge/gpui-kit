@@ -7,6 +7,8 @@ description: 用于构建自定义图表和数据可视化的底层绘图库。
 
 `plot` 模块提供了构建自定义图表所需的底层能力，包括比例尺、图形和辅助工具。高层 `Chart` 组件也是基于这些原语实现的，适合需要完全控制图表绘制逻辑的场景。
 
+这些原语位于 gpui-base 的 [`gpui_kit::base::plot`](../base/plot.md)，并在这里原样重新导出，两个路径都可以使用。GPUI Component 在其上补充了样式化的部分：`plot::tooltip` 中的 `Tooltip`、`CrossLine` 和 `Dot` 浮层，`#[derive(IntoPlot)]` 简写，以及从主题投射的 hover 动效。
+
 ## 导入
 
 ```rust

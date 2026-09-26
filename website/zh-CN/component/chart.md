@@ -744,7 +744,7 @@ AreaChart::new(range).interactive(false)       // 拖拽手柄下面的底图
 
 ### 动效
 
-强调效果使用样式层的 motion tokens（`cx.theme().motion_tokens()`）驱动：十字线、高亮条、圆点等指示器以快速弹簧跟随悬停的数据，饼图扇区以 control 弹簧抬起，整个覆盖层在光标落到数据上时淡入、离开后淡出。动效遵循操作系统的减弱动态效果偏好，开启后所有值立即到达目标。
+强调效果使用样式层的 motion tokens（`cx.theme().motion_tokens()`）驱动，主题会把它们作为 [`PlotMotion`](../base/plot.md) 投射到 gpui-base：十字线、高亮条、圆点等指示器以快速弹簧跟随悬停的数据，饼图扇区以 control 弹簧抬起，整个覆盖层在光标落到数据上时淡入、离开后淡出。动效遵循操作系统的减弱动态效果偏好，开启后所有值立即到达目标。
 
 ### 缓存
 
@@ -752,7 +752,7 @@ AreaChart::new(range).interactive(false)       // 拖拽手柄下面的底图
 
 ### 自定义 Plot
 
-自定义 [`Plot`] 需要手动接入——那里的 `Plot::id` 仍默认返回 `None`：在 `Plot::id` 返回 id，在 `Plot::tooltip_state` 解析光标所在的数据，在 `Plot::tooltip` 构建覆盖层。这里返回的 `Tooltip` 会自己为悬停加动画，和内置图表一样：整个覆盖层随悬停淡入淡出；十字线和圆点按指针 spring 滑到每个悬停的数据点，光标落下的那一帧直接就位；圆点的 `halo` 随悬停淡入逐渐放大。十字线只沿它标记的那条轴滑动，所以同时跟随光标的那条线不会滞后。传入数据点本身即可，其余交给 tooltip：
+自定义 [`Plot`] 需要手动接入——那里的 `Plot::id` 仍默认返回 `None`。这个 trait、`PlotElement` 和 hover 跟踪都来自 [gpui-base](../base/plot.md)，因此基于 `gpui_kit::base::plot` 编写的 Plot 可以直接在这里使用。在 `Plot::id` 返回 id，在 `Plot::tooltip_state` 解析光标所在的数据，在 `Plot::tooltip` 构建覆盖层。这里返回的 `Tooltip` 会自己为悬停加动画，和内置图表一样：整个覆盖层随悬停淡入淡出；十字线和圆点按指针 spring 滑到每个悬停的数据点，光标落下的那一帧直接就位；圆点的 `halo` 随悬停淡入逐渐放大。十字线只沿它标记的那条轴滑动，所以同时跟随光标的那条线不会滞后。传入数据点本身即可，其余交给 tooltip：
 
 ```rust
 fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pixels>, _: &mut Window, cx: &mut App) -> Option<AnyElement> {
