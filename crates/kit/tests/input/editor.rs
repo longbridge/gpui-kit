@@ -1,7 +1,8 @@
 //! Styled editor workflows driven through the production window and native events.
 
 use gpui_kit::{
-    AppContext, Context, Entity, TestAppContext, Window, WindowHandle,
+    AppContext, Context, Entity, InputEvent, Modifiers, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, TestAppContext, Window, WindowHandle,
     component::input::{Editor, EditorState},
     div,
     prelude::*,
@@ -281,6 +282,98 @@ fn keyboard_multicursor_replacement_undo_and_escape_keep_the_active_cursor(
         window.input("!", cx);
         assert_eq!(state.read(cx).value(), "aY!\naY\naY");
         assert_eq!(state.read(cx).selected_range(), 3..3);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn multicursor_vertical_selection_replaces_and_undoes_each_range(cx: &mut TestAppContext) {
+    let value = "abcd\nabcd\nabcd\nabcd\nabcd\nabcd";
+    let (handle, state) = editor(cx, "plaintext", value);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click(("input", state.entity_id()), cx);
+        window.press("secondary-a", cx);
+        window.press("left", cx);
+        window.press("right", cx);
+        window.press("down", cx);
+        assert_eq!(state.read(cx).cursor(), 6);
+        let first = state.read(cx).cursor_layout().unwrap().0.center();
+        for _ in 0..3 {
+            window.press("down", cx);
+        }
+        assert_eq!(state.read(cx).cursor(), 21);
+        let second = state.read(cx).cursor_layout().unwrap().0.center();
+        assert_eq!(state.read(cx).scroll_offset().y, px(0.));
+
+        // Native clicks at measured carets keep the two ranges apart, so
+        // merging adjacent selections cannot hide a lost secondary cursor.
+        for (position, alt) in [(first, false), (second, true)] {
+            let modifiers = Modifiers {
+                alt,
+                ..Default::default()
+            };
+            window.dispatch_event(
+                MouseMoveEvent {
+                    position,
+                    pressed_button: None,
+                    modifiers,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.render_frame(cx);
+            window.dispatch_event(
+                MouseDownEvent {
+                    position,
+                    button: MouseButton::Left,
+                    modifiers,
+                    click_count: 1,
+                    first_mouse: false,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.render_frame(cx);
+            window.dispatch_event(
+                MouseUpEvent {
+                    position,
+                    button: MouseButton::Left,
+                    modifiers,
+                    click_count: 1,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.render_frame(cx);
+        }
+        // Alt-click currently leaves the new cursor's preferred column unset.
+        // Initialize both columns through native movement, returning to 6 and 21,
+        // so this case isolates vertical selection from that existing defect.
+        window.press("right", cx);
+        window.press("left", cx);
+        assert_eq!(state.read(cx).selected_range(), 6..6);
+        assert_eq!(state.read(cx).cursor(), 6);
+        window.press("shift-up", cx);
+        assert_eq!(state.read(cx).selected_range(), 1..6);
+        assert_eq!(state.read(cx).cursor(), 1);
+        assert_eq!(
+            window.find(("input", state.entity_id())).value(),
+            Some(value)
+        );
+        window.input("X", cx);
+        assert_eq!(state.read(cx).value(), "aXbcd\nabcd\naXbcd\nabcd");
+        window.press("secondary-z", cx);
+        assert_eq!(state.read(cx).value(), value);
+        assert_eq!(state.read(cx).selected_range(), 1..6);
+        assert_eq!(state.read(cx).cursor(), 1);
+        // A second replacement proves Undo restored both reversed selections.
+        window.input("Y", cx);
+        let expected = "aYbcd\nabcd\naYbcd\nabcd";
+        assert_eq!(state.read(cx).value(), expected);
+        assert_eq!(
+            window.find(("input", state.entity_id())).value(),
+            Some(expected)
+        );
     })
     .unwrap();
 }

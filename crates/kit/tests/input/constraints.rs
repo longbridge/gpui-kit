@@ -4,17 +4,18 @@
 
 use crate::common;
 use gpui_kit::{
-    App, AppContext, ClipboardItem, Context, Entity, Focusable, Subscription, TestAppContext,
-    Window, WindowHandle,
+    App, AppContext, ClipboardItem, Context, Entity, FocusHandle, Focusable, Subscription,
+    TestAppContext, Window, WindowHandle,
     base::Root,
     component::input::{Input, InputContentType, InputEvent, InputState},
-    div,
+    div, point,
     prelude::*,
     test::TestWindowExt,
 };
 
 struct Constraints {
     input: Entity<InputState>,
+    previous_focus: Option<FocusHandle>,
     readonly: bool,
     disabled: bool,
     cleanable: bool,
@@ -26,16 +27,22 @@ struct Constraints {
 
 impl Render for Constraints {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().size_full().p_4().child(
-            Input::new(&self.input)
-                .id("constrained")
-                .w_64()
-                .readonly(self.readonly)
-                .disabled(self.disabled)
-                .cleanable(self.cleanable)
-                .when(self.mask_toggle, |input| input.mask_toggle())
-                .when_some(self.content_type, |input, kind| input.content_type(kind)),
-        )
+        div()
+            .size_full()
+            .p_4()
+            .when_some(self.previous_focus.as_ref(), |this, focus| {
+                this.track_focus(focus)
+            })
+            .child(
+                Input::new(&self.input)
+                    .id("constrained")
+                    .w_64()
+                    .readonly(self.readonly)
+                    .disabled(self.disabled)
+                    .cleanable(self.cleanable)
+                    .when(self.mask_toggle, |input| input.mask_toggle())
+                    .when_some(self.content_type, |input, kind| input.content_type(kind)),
+            )
     }
 }
 
@@ -54,6 +61,7 @@ fn fixture(
             });
             Constraints {
                 input,
+                previous_focus: None,
                 readonly: false,
                 disabled: false,
                 cleanable: false,
@@ -474,36 +482,59 @@ fn readonly_mouse_selection_copies_and_becomes_editable_again(cx: &mut TestAppCo
 #[gpui_kit::test]
 fn disabled_single_and_double_click_do_not_focus_the_editor(cx: &mut TestAppContext) {
     let (handle, view) = fixture(cx, |input| input.default_value("fixed"));
+    ui(handle, cx, |window, cx| {
+        window.click("constrained", cx);
+        shortcut(window, "a", cx);
+        window.press("left", cx);
+        window.press("right", cx);
+        window.press("shift-right", cx);
+        window.press("shift-right", cx);
+        assert_eq!(view.read(cx).input.read(cx).selected_range(), 1..3);
+    });
     common::update_content(handle, &view, cx, |view, _, cx| {
         view.disabled = true;
+        view.previous_focus = Some(cx.focus_handle());
         cx.notify();
     })
     .unwrap();
     ui(handle, cx, |window, cx| {
         let input = view.read(cx).input.clone();
         let focus = input.read(cx).focus_handle(cx);
-        let mut editor_focused = Vec::new();
-        let mut frame_focused = Vec::new();
-        for double_click in [false, true] {
-            window.blur(cx);
-            window.render_frame(cx);
-            assert!(!focus.is_focused(window));
-            assert_ne!(window.find("constrained").focused(), Some(true));
-            if double_click {
-                window.double_click("constrained", cx);
-            } else {
-                window.click("constrained", cx);
+        let previous_focus = view.read(cx).previous_focus.clone().unwrap();
+        for preserve_focus in [false, true] {
+            for target in ["body", "double-click", "padding"] {
+                if preserve_focus {
+                    previous_focus.focus(window, cx);
+                } else {
+                    window.blur(cx);
+                }
+                window.render_frame(cx);
+                let before = window.focused(cx);
+                assert_eq!(previous_focus.is_focused(window), preserve_focus);
+                assert!(!focus.is_focused(window));
+                match target {
+                    "body" => window.click("constrained", cx),
+                    "double-click" => window.double_click("constrained", cx),
+                    "padding" => {
+                        let frame = window.find("constrained").bounds();
+                        let body = input.read(cx).text_bounds().expect("rendered text bounds");
+                        let position = point((frame.left() + body.left()) / 2., body.center().y);
+                        assert!(frame.contains(&position) && !body.contains(&position));
+                        window.click_at("constrained", position - frame.origin, cx);
+                    }
+                    _ => unreachable!(),
+                }
+                assert_eq!(window.focused(cx), before, "focus after {target}");
+                assert!(!focus.is_focused(window), "editor focus after {target}");
+                assert_ne!(window.find("constrained").focused(), Some(true));
+                assert_eq!(
+                    input.read(cx).selected_range(),
+                    1..3,
+                    "selection after {target}"
+                );
             }
-            editor_focused.push(focus.is_focused(window));
-            frame_focused.push(window.find("constrained").focused());
         }
         assert_eq!(input.read(cx).value(), "fixed");
-        assert_eq!(
-            editor_focused,
-            [false, false],
-            "editor focus after [single click, double click]; frame snapshots: {frame_focused:?}"
-        );
-        assert!(frame_focused.iter().all(|focused| *focused != Some(true)));
     });
     assert_owner(handle, &view, cx, "fixed", 0);
 }

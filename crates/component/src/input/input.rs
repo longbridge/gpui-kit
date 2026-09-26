@@ -714,6 +714,9 @@ impl RenderOnce for Input {
             .focused(focused)
             .disabled(disabled)
             .track_focus(&frame_focus_handle)
+            .when(disabled, |this| {
+                this.capture_any_mouse_down(|_, _, cx| cx.stop_propagation())
+            })
             .styles(|styles| {
                 styles.focused(|style| {
                     style.when(

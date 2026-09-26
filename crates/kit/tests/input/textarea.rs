@@ -261,6 +261,94 @@ fn selection_across_soft_wraps_copies_and_replaces_buffer_text(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
+fn wrapped_selection_repeats_and_reverses_across_its_anchor(cx: &mut TestAppContext) {
+    let value = "中🦀 word ".repeat(80);
+    let (handle, _, text) = composer(cx, |state| state.rows(6).default_value(value.clone()));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click(target(&text), cx);
+        window.press(START, cx);
+        // Measure four visual rows through native movement, without assuming
+        // a font-dependent wrap offset. Start selection on the third row.
+        let mut rows = vec![(
+            text.read(cx).cursor(),
+            text.read(cx).cursor_layout().unwrap().0,
+        )];
+        for _ in 0..3 {
+            window.press("down", cx);
+            let state = text.read(cx);
+            let caret = state.cursor_layout().unwrap().0;
+            assert!(state.cursor() > rows.last().unwrap().0);
+            assert!(caret.top() > rows.last().unwrap().1.top());
+            rows.push((state.cursor(), caret));
+        }
+        window.press(START, cx);
+        window.press("down", cx);
+        window.press("down", cx);
+        let anchor = rows[2].0;
+        assert_eq!(text.read(cx).cursor(), anchor);
+        for (key, row) in [
+            ("shift-up", 1),
+            ("shift-up", 0),
+            ("shift-down", 1),
+            ("shift-down", 2),
+            ("shift-down", 3),
+            ("shift-up", 2),
+        ] {
+            window.press(key, cx);
+            let state = text.read(cx);
+            let cursor = rows[row].0;
+            assert_eq!(state.cursor(), cursor, "{key} to visual row {row}");
+            assert_eq!(
+                state.selected_range(),
+                anchor.min(cursor)..anchor.max(cursor)
+            );
+            assert_eq!(state.cursor_layout().unwrap().0.top(), rows[row].1.top());
+            assert_eq!(state.cursor_position().line, 0);
+            assert_caret_visible(state);
+            assert_eq!(window.find(target(&text)).value(), Some(value.as_str()));
+        }
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn vertical_selection_preserves_column_across_short_and_empty_lines(cx: &mut TestAppContext) {
+    let value = "abcdefghij\nx\n\nabcdefghij";
+    let (handle, _, text) = composer(cx, |state| state.rows(4).default_value(value));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click(target(&text), cx);
+        window.press(START, cx);
+        for _ in 0..6 {
+            window.press("right", cx);
+        }
+        let anchor = 6;
+        assert_eq!(text.read(cx).cursor(), anchor);
+        let original_x = text.read(cx).cursor_layout().unwrap().0.left();
+        // Clamp at the short/empty row, then recover column six in either
+        // direction. The selection anchor stays on the first line throughout.
+        for (key, cursor) in [
+            ("shift-down", 12),
+            ("shift-down", 13),
+            ("shift-down", 20),
+            ("shift-up", 13),
+            ("shift-up", 12),
+            ("shift-up", 6),
+        ] {
+            window.press(key, cx);
+            let state = text.read(cx);
+            assert_eq!(state.cursor(), cursor, "{key}");
+            assert_eq!(state.selected_range(), anchor..cursor);
+            if cursor == 20 || cursor == anchor {
+                assert_eq!(state.cursor_layout().unwrap().0.left(), original_x);
+            }
+            assert_caret_visible(state);
+            assert_eq!(window.find(target(&text)).value(), Some(value));
+        }
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn document_navigation_reveals_both_ends_of_a_fixed_viewport(cx: &mut TestAppContext) {
     let value = (0..40).map(|n| format!("line {n}\n")).collect::<String>();
     let (handle, _, text) = composer(cx, |state| state.rows(3).default_value(value.clone()));

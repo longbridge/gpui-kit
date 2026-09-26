@@ -32,19 +32,15 @@ The existing CI test matrix runs these targets on Linux, macOS and Windows.
 Keyboard cases use each platform's actual command bindings. A local Linux
 pass does not replace the macOS and Windows jobs.
 
-## Known failing contracts
-
-The current branch is not fully passing. Two confirmed defects remain
-intentionally red, without `#[ignore]`, pending separate production fixes.
-Component source remains untouched by this coverage work.
+## Regressions found by this suite
 
 - `constraints::disabled_single_and_double_click_do_not_focus_the_editor`:
   single and double clicks on a disabled input must not focus its editor.
-  Both currently focus the editor. Enabling is covered separately by
+  Enabling is covered separately by
   `constraints::enabling_a_disabled_input_allows_mouse_focus_and_replacement`.
 - `textarea::selection_across_soft_wraps_copies_and_replaces_buffer_text`:
   Shift-Down should retain the selection anchor and reach the same visual row as
-  Down. It currently selects the entire logical line instead of one wrapped row.
+  Down, including when a logical line spans multiple wrapped rows.
 
 Reproduce each contract independently from the repository root:
 
@@ -53,8 +49,7 @@ cargo test -p gpui-kit --features test-support --test input --locked -- constrai
 cargo test -p gpui-kit --features test-support --test input --locked -- textarea::selection_across_soft_wraps_copies_and_replaces_buffer_text --exact
 ```
 
-These failures remain visible in the full `input` run. The workflow index below
-describes asserted contracts, not a claim that every contract currently passes.
+Both regressions run as part of the full `input` target, without `#[ignore]`.
 
 ## Recorded workflows
 
@@ -76,6 +71,11 @@ workflow matrix; inspect their separate Base/component tests for relevant covera
 Touch selection also has a separate Kit `touch_selection` target. The completion
 fixture supplies deterministic responses through the public provider interface;
 it does not connect to a language-server process.
+
+The multi-cursor vertical-selection case establishes preferred columns with
+horizontal arrow keys after Alt-click. Alt-click currently leaves a new cursor's
+column anchor unset; preserving its column on the first vertical move remains a
+separate gap. A passing run does not establish that interaction.
 
 The separate [`input_focus.rs`](../input_focus.rs) target covers repeated Tab and
 Shift-Tab cycles with passive prefixes/suffixes, focus and activation of addon
@@ -136,8 +136,8 @@ transition, a no-op edit, or a focus change.
 
 ## What a green run establishes
 
-A passing run would establish the recorded interaction contracts for the tested
-configurations; the current failures are listed above. Existing Base tests
+A passing run establishes the recorded interaction contracts for the tested
+configurations. Existing Base tests
 continue to cover editing algorithms,
 IME composition state transitions and language-specific parsing cases.
 Neither set exhausts every document, language, configuration or event order.

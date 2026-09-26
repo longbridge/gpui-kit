@@ -1315,13 +1315,14 @@ impl<M: InputModeKind> InputBaseState<M> {
         if self.is_single_line() {
             return;
         }
-        self.undo_manager.break_transaction_coalescing();
-        self.select_all_cursors_to(
+        self.select_all_cursors_to_with_affinity(
             |s, sel| {
-                let offset = s
-                    .start_of_line_at(sel.cursor_offset(), s.line_end_affinity_for(sel))
-                    .saturating_sub(1);
-                s.previous_boundary(offset)
+                s.vertical_target(
+                    sel.cursor_offset(),
+                    sel.column_anchor,
+                    s.line_end_affinity_for(sel),
+                    -1,
+                )
             },
             cx,
         );
@@ -1331,14 +1332,14 @@ impl<M: InputModeKind> InputBaseState<M> {
         if self.is_single_line() {
             return;
         }
-        self.undo_manager.break_transaction_coalescing();
-        let len = self.text.len();
-        self.select_all_cursors_to(
+        self.select_all_cursors_to_with_affinity(
             |s, sel| {
-                let offset = (s.end_of_line_at(sel.cursor_offset(), s.line_end_affinity_for(sel))
-                    + 1)
-                .min(len);
-                s.next_boundary(offset)
+                s.vertical_target(
+                    sel.cursor_offset(),
+                    sel.column_anchor,
+                    s.line_end_affinity_for(sel),
+                    1,
+                )
             },
             cx,
         );
@@ -3116,15 +3117,33 @@ impl<M: InputModeKind> InputBaseState<M> {
         f: impl Fn(&Self, &CursorSelection) -> usize,
         cx: &mut Context<Self>,
     ) {
+        self.select_all_cursors_to_with_affinity(|s, sel| (f(s, sel), false), cx);
+        if self.active_selection().is_empty() {
+            self.update_preferred_column();
+        }
+    }
+
+    /// Extend selections with caret affinity, preserving their column anchors even
+    /// when vertical movement collapses a selection to a cursor.
+    fn select_all_cursors_to_with_affinity(
+        &mut self,
+        f: impl Fn(&Self, &CursorSelection) -> (usize, bool),
+        cx: &mut Context<Self>,
+    ) {
         self.pause_blink_cursor(cx);
         self.undo_manager.break_transaction_coalescing();
         M::clear_inline_completion(self, cx);
 
+        let mut active_affinity = false;
         let new_selections: Vec<CursorSelection> = self
             .selections
             .iter()
             .map(|sel| {
-                let offset = self.cursor_boundary(f(self, sel), Bias::Left);
+                let (offset, affinity) = f(self, sel);
+                if sel.id == self.active_selection().id {
+                    active_affinity = affinity;
+                }
+                let offset = self.cursor_boundary(offset, Bias::Left);
                 let mut new_sel = *sel;
                 Self::extend_selection(&mut new_sel, offset, None);
                 let range = self.normalize_token_range(new_sel.start..new_sel.end);
@@ -3133,14 +3152,10 @@ impl<M: InputModeKind> InputBaseState<M> {
                 new_sel
             })
             .collect();
-        // Resolve targets using the old caret affinity before clearing it.
-        self.cursor_line_end_affinity = false;
+        self.cursor_line_end_affinity = active_affinity;
         self.selections.replace_all(new_selections);
         self.selections.merge_overlapping();
 
-        if self.active_selection().is_empty() {
-            self.update_preferred_column();
-        }
         self.scroll_to(self.cursor(), None, cx);
         cx.notify()
     }
