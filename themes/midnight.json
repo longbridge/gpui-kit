@@ -80,87 +80,135 @@
         "warning": "#F59E0B",
         "syntax": {
           "attribute": {
-            "color": "#F59E0B"
+            "color": "#88AABB"
           },
           "boolean": {
             "color": "#F59E0B"
           },
           "comment": {
-            "color": "#6B6B6E",
+            "color": "#8A8A8D",
             "font_style": "italic"
           },
           "comment.doc": {
-            "color": "#6B6B6E",
+            "color": "#8A8A8D",
             "font_style": "italic"
           },
           "constant": {
-            "color": "#EAEAEA"
+            "color": "#F59E0B"
           },
           "constructor": {
             "color": "#F59E0B"
           },
           "embedded": {
-            "color": "#EAEAEA"
+            "color": "#EFEFEF"
+          },
+          "emphasis": {
+            "color": "#EFEFEF",
+            "font_style": "italic"
+          },
+          "emphasis.strong": {
+            "color": "#EFEFEF",
+            "font_weight": 700
+          },
+          "enum": {
+            "color": "#FFC107"
           },
           "function": {
-            "color": "#F59E0B"
+            "color": "#8A9FBE"
+          },
+          "hint": {
+            "color": "#8A8A8D"
           },
           "keyword": {
-            "color": "#D35F5F"
+            "color": "#D9B9D9"
+          },
+          "label": {
+            "color": "#88AABB"
           },
           "link_text": {
-            "color": "#88AABB",
+            "color": "#8A9FBE",
             "font_style": "underline"
           },
           "link_uri": {
-            "color": "#88AABB",
+            "color": "#8A9FBE",
             "font_style": "italic"
           },
           "number": {
             "color": "#F59E0B"
           },
           "operator": {
-            "color": "#FFC107"
+            "color": "#A4BBDD"
+          },
+          "predictive": {
+            "color": "#8A8A8D",
+            "font_style": "italic"
+          },
+          "preproc": {
+            "color": "#88AABB"
+          },
+          "primary": {
+            "color": "#EFEFEF"
+          },
+          "property": {
+            "color": "#88AABB"
           },
           "punctuation": {
             "color": "#8A8A8D"
           },
+          "punctuation.bracket": {
+            "color": "#8A8A8D"
+          },
+          "punctuation.delimiter": {
+            "color": "#8A8A8D"
+          },
+          "punctuation.list_marker": {
+            "color": "#88AABB"
+          },
+          "punctuation.special": {
+            "color": "#A4BBDD"
+          },
           "string": {
-            "color": "#E68E0D"
+            "color": "#8A9A7B"
           },
           "string.escape": {
-            "color": "#FFC107"
+            "color": "#D9B9D9"
           },
           "string.regex": {
-            "color": "#E68E0D"
+            "color": "#A2C4D3"
           },
           "string.special": {
-            "color": "#E68E0D"
+            "color": "#A4BBDD"
           },
           "string.special.symbol": {
-            "color": "#E68E0D"
+            "color": "#88AABB"
           },
           "tag": {
-            "color": "#D35F5F"
+            "color": "#FFC107"
+          },
+          "tag.doctype": {
+            "color": "#8A8A8D"
+          },
+          "text.code.span": {
+            "color": "#8A9A7B"
           },
           "text.literal": {
-            "color": "#E68E0D"
+            "color": "#8A9A7B"
           },
           "title": {
-            "color": "#EFEFEF",
+            "color": "#8A9FBE",
             "font_weight": 600
           },
           "type": {
-            "color": "#EAEAEA"
-          },
-          "property": {
-            "color": "#BEBEBE"
+            "color": "#FFC107"
           },
           "variable": {
-            "color": "#EAEAEA"
+            "color": "#EFEFEF"
           },
           "variable.special": {
-            "color": "#D398A7"
+            "color": "#EFEFEF"
+          },
+          "variant": {
+            "color": "#F59E0B"
           }
         }
       }
