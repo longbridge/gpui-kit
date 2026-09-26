@@ -136,6 +136,7 @@ impl RenderOnce for Form {
                 self.fields
                     .into_iter()
                     .enumerate()
+                    .filter(|(_, field)| field.is_visible())
                     .map(|(ix, field)| field.props(ix, props)),
             )
             .when_some(self.footer, |this, footer| {
