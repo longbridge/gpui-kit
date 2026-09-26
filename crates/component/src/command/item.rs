@@ -135,21 +135,23 @@ impl CommandItem {
     /// palette can keep its rows and row sizes when a host re-render rebuilds
     /// an unchanged model.
     ///
-    /// A custom child compares by identity: [`Self::child`] makes a new
-    /// closure on every render, so such an item never counts as unchanged.
+    /// An item with a custom child never counts as unchanged, even when it is
+    /// a clone sharing the same closure: the child can read state outside the
+    /// item, so only laying it out again tells whether its height changed.
     pub(crate) fn same_layout(&self, other: &Self) -> bool {
-        self.label == other.label
+        self.content.is_none()
+            && other.content.is_none()
+            && self.label == other.label
             && self.keywords == other.keywords
-            && self.icon.is_some() == other.icon.is_some()
+            && match (&self.icon, &other.icon) {
+                (Some(icon), Some(other)) => icon.same_layout(other),
+                (None, None) => true,
+                _ => false,
+            }
             && self.checked == other.checked
             && self.disabled == other.disabled
             && match (&self.action, &other.action) {
                 (Some(action), Some(other)) => action.partial_eq(other.as_ref()),
-                (None, None) => true,
-                _ => false,
-            }
-            && match (&self.content, &other.content) {
-                (Some(content), Some(other)) => Rc::ptr_eq(content, other),
                 (None, None) => true,
                 _ => false,
             }
