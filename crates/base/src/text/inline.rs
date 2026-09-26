@@ -618,9 +618,7 @@ impl Inline {
         if rows_bottom <= band_top || rows_top > band_bottom {
             return (true, true, None);
         }
-        if band_top < rows_top
-            && band_bottom >= rows_bottom
-            && text_layout.len() >= self.text.len()
+        if band_top < rows_top && band_bottom >= rows_bottom && text_layout.len() >= self.text.len()
         {
             return (true, true, Some((0..self.text.len()).into()));
         }

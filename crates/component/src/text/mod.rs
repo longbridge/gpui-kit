@@ -120,10 +120,9 @@ pub(crate) fn component_code_block_highlighter(
 
 /// The type [`shared_code_block_highlighter`] returns.
 #[cfg(feature = "tree-sitter")]
-pub(crate) type SharedCodeBlockHighlighter =
-    dyn Fn(&gpui_base::text::CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
-        + Send
-        + Sync;
+pub(crate) type SharedCodeBlockHighlighter = dyn Fn(&gpui_base::text::CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
+    + Send
+    + Sync;
 
 /// The [`component_code_block_highlighter`] for `highlight_theme`, built once
 /// and handed out again for the same theme.
@@ -155,7 +154,10 @@ fn shared_code_block_highlighter_at(
     use crate::highlighter::HighlightTheme;
 
     /// The registry generation the entries were built at, and the entries.
-    type SharedHighlighters = (u64, Vec<(Arc<HighlightTheme>, Arc<SharedCodeBlockHighlighter>)>);
+    type SharedHighlighters = (
+        u64,
+        Vec<(Arc<HighlightTheme>, Arc<SharedCodeBlockHighlighter>)>,
+    );
 
     const CAPACITY: usize = 4;
     thread_local! {

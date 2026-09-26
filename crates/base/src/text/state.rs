@@ -191,8 +191,7 @@ impl TextViewState {
                             Ok(content) => {
                                 let append =
                                     parsed_update.selection_compatible && !parsed_update.full_parse;
-                                if append
-                                    && state.full_update_revision <= state.committed_revision
+                                if append && state.full_update_revision <= state.committed_revision
                                 {
                                     state.splice_appended_blocks(&content.document);
                                 }
@@ -726,7 +725,8 @@ impl TextViewState {
         // inside them, and has the next layout measure only the blocks that
         // are not measured.
         self.list_state.remeasure_items(unchanged..old_count);
-        self.list_state.splice(old_count..old_count, new_count - old_count);
+        self.list_state
+            .splice(old_count..old_count, new_count - old_count);
     }
 
     /// Save bounds and unselect if bounds changed.

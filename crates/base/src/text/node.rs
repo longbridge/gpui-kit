@@ -3190,7 +3190,7 @@ impl BlockNode {
                 div()
                     .id(block_element_id("table-actions", table.span, options.ix))
                     .mt_1()
-                    .child(f(&*table.cached_table_data(), window, cx))
+                    .child(f(&table.cached_table_data(), window, cx))
             }))
             .into_any_element()
     }
@@ -3285,7 +3285,7 @@ impl BlockNode {
                 div()
                     .id(block_element_id("table-actions", table.span, options.ix))
                     .mt_1()
-                    .child(f(&*table.cached_table_data(), window, cx))
+                    .child(f(&table.cached_table_data(), window, cx))
             }))
             .into_any_element()
     }
