@@ -421,12 +421,13 @@ where
 
         // Draw line
         let stroke = self.stroke.unwrap_or(cx.theme().chart_2);
-        let x_fn = x_fn.clone();
+        // The x domain holds one entry per datum, so a point's x is its index's
+        // tick; looking its value up in the domain would make each paint O(n^2).
         let y_fn = y_fn.clone();
         let mut line = Line::new()
-            .data(&self.data)
-            .x(move |d| x.tick(&x_fn(d)))
-            .y(move |d| y.tick(&y_fn(d)))
+            .data(self.data.iter().enumerate())
+            .x(move |(i, _)| x.tick_at(*i))
+            .y(move |(_, d)| y.tick(&y_fn(d)))
             .stroke(stroke)
             .stroke_style(self.stroke_style)
             .stroke_width(2.);
@@ -468,7 +469,7 @@ where
         bounds: Bounds<Pixels>,
         _cx: &App,
     ) -> Option<TooltipState> {
-        let (x_fn, y_fn) = (self.x.as_ref()?, self.y.as_ref()?);
+        let y_fn = self.y.as_ref()?;
         let (x, y, _) = self.scales(bounds)?;
 
         // Ignore the x-axis label gutter so hovering the labels doesn't show a tooltip.
@@ -481,7 +482,7 @@ where
 
         let index = x.least_index(position.x.as_f32());
         let d = self.data.get(index)?;
-        let x_tick = x.tick(&x_fn(d))?;
+        let x_tick = x.tick_at(index)?;
         let y_tick = y.tick(&y_fn(d))?;
 
         Some(TooltipState::new(

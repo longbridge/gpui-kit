@@ -1,5 +1,6 @@
 use gpui::App;
 use std::ops::Deref;
+use std::sync::LazyLock;
 
 mod component_traits;
 mod element_ext;
@@ -94,7 +95,6 @@ pub use element_ext::*;
 pub use global_state::GlobalState;
 pub use gpui_base::Root;
 pub use gpui_base::animation;
-pub(crate) use gpui_base::measurement_enabled as measure_enable;
 #[doc(hidden)]
 pub(crate) use gpui_base::resize_handle;
 pub use gpui_base::{
@@ -154,4 +154,14 @@ pub fn locale() -> impl Deref<Target = str> {
 #[inline]
 pub fn set_locale(locale: &str) {
     rust_i18n::set_locale(locale)
+}
+
+/// Whether measurement logging is enabled, read once per process.
+///
+/// Measurement is a startup debug flag, and the table queries it for every
+/// rendered cell, so cache it instead of reading the environment each call.
+#[inline]
+pub(crate) fn measure_enable() -> bool {
+    static MEASURE_ENABLED: LazyLock<bool> = LazyLock::new(gpui_base::measurement_enabled);
+    *MEASURE_ENABLED
 }

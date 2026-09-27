@@ -1107,14 +1107,20 @@ pub(crate) struct Paragraph {
     pub(super) render_cache: ParagraphRenderCache,
 }
 
-/// Derived state: a clone starts empty and rebuilds, and it is invisible to
-/// `Debug` and equality.
+/// Derived state, invisible to `Debug` and equality.
+///
+/// A clone carries what was cached so far: the cached value is a pure
+/// function of the children and the style it is keyed on, a clone has the
+/// same children, and every mutation of the children replaces the cache
+/// (`invalidate_render_cache`). Streaming reparses deep-clone the document on
+/// every append, and an empty clone made every paragraph rebuild.
 #[derive(Default)]
-pub(super) struct ParagraphRenderCache(Mutex<Option<ParagraphRender>>);
+pub(super) struct ParagraphRenderCache(Mutex<Option<Arc<ParagraphRender>>>);
 
 impl Clone for ParagraphRenderCache {
     fn clone(&self) -> Self {
-        Self::default()
+        let cached = self.0.lock().ok().and_then(|cache| cache.clone());
+        Self(Mutex::new(cached))
     }
 }
 
@@ -1211,13 +1217,13 @@ impl Paragraph {
         }
         let text = SharedString::from(text);
         if let Ok(mut cache) = self.render_cache.0.lock() {
-            *cache = Some(ParagraphRender {
+            *cache = Some(Arc::new(ParagraphRender {
                 style: node_cx.style.clone(),
                 mono_font,
                 text: text.clone(),
                 highlights: highlights.clone(),
                 links: links.clone(),
-            });
+            }));
         }
         (text, highlights, links)
     }
@@ -1498,6 +1504,38 @@ pub(crate) struct Table {
     pub(crate) children: Vec<TableRow>,
     pub(crate) column_aligns: Vec<ColumnumnAlign>,
     pub(crate) span: Option<Span>,
+    /// The [`TableData`] handed to the `table_actions` hook, kept between
+    /// frames; see [`Table::cached_table_data`].
+    pub(crate) table_data_cache: TableDataCache,
+}
+
+/// Derived state, invisible to `Debug` and equality.
+///
+/// A clone carries what was cached so far: a parsed table does not change
+/// after parsing (cell mutations only touch selection state, which
+/// [`TableData`] does not read), so a clone has the same data. Streaming
+/// reparses deep-clone the document on every append, and an empty clone made
+/// every table rebuild.
+#[derive(Default)]
+pub(crate) struct TableDataCache(Mutex<Option<Arc<TableData>>>);
+
+impl Clone for TableDataCache {
+    fn clone(&self) -> Self {
+        let cached = self.0.lock().ok().and_then(|cache| cache.clone());
+        Self(Mutex::new(cached))
+    }
+}
+
+impl PartialEq for TableDataCache {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for TableDataCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TableDataCache")
+    }
 }
 
 /// Plain snapshot of a rendered Markdown table, passed to the
@@ -1584,6 +1622,24 @@ impl Table {
             markdown: self.to_markdown(),
             span: self.span.map(|span| span.start..span.end),
         }
+    }
+
+    /// [`Self::table_data`], built on the first render and reused by later
+    /// ones: serializing every cell and the whole table back to Markdown on
+    /// every scroll or stream frame is wasted work, and a parsed table does
+    /// not change after parsing (a reparse builds a new one).
+    fn cached_table_data(&self) -> Arc<TableData> {
+        if let Ok(cache) = self.table_data_cache.0.lock()
+            && let Some(cached) = cache.as_ref()
+        {
+            return cached.clone();
+        }
+
+        let data = Arc::new(self.table_data());
+        if let Ok(mut cache) = self.table_data_cache.0.lock() {
+            *cache = Some(data.clone());
+        }
+        data
     }
 }
 
@@ -3134,7 +3190,7 @@ impl BlockNode {
                 div()
                     .id(block_element_id("table-actions", table.span, options.ix))
                     .mt_1()
-                    .child(f(&table.table_data(), window, cx))
+                    .child(f(&table.cached_table_data(), window, cx))
             }))
             .into_any_element()
     }
@@ -3229,7 +3285,7 @@ impl BlockNode {
                 div()
                     .id(block_element_id("table-actions", table.span, options.ix))
                     .mt_1()
-                    .child(f(&table.table_data(), window, cx))
+                    .child(f(&table.cached_table_data(), window, cx))
             }))
             .into_any_element()
     }
@@ -3569,6 +3625,7 @@ mod tests {
             }],
             column_aligns: vec![],
             span: None,
+            table_data_cache: TableDataCache::default(),
         };
         let node_cx = NodeContext::default();
 
@@ -4016,6 +4073,7 @@ mod tests {
             ],
             column_aligns: vec![ColumnumnAlign::Left, ColumnumnAlign::Right],
             span: None,
+            table_data_cache: TableDataCache::default(),
         };
         let block = BlockNode::Table(table);
         assert_eq!(
@@ -4041,6 +4099,7 @@ mod tests {
                 .collect(),
             column_aligns,
             span: None,
+            table_data_cache: TableDataCache::default(),
         }
     }
 
@@ -4117,6 +4176,20 @@ mod tests {
         assert_eq!(data.rows, vec![vec!["Alice", "30"]]);
         assert_eq!(data.markdown, table.to_markdown());
         assert_eq!(data.span, Some(4..42));
+    }
+
+    #[test]
+    fn cloned_table_keeps_cached_table_data() {
+        // Streaming appends deep-clone every block; the clone must reuse the
+        // cached snapshot instead of rebuilding it.
+        let table = table_of(
+            vec![vec![plain_cell("Name")], vec![plain_cell("Alice")]],
+            vec![ColumnumnAlign::Left],
+        );
+        let data = table.cached_table_data();
+
+        let cloned = table.clone();
+        assert!(Arc::ptr_eq(&data, &cloned.cached_table_data()));
     }
 
     #[test]
