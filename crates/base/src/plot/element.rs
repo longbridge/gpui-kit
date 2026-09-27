@@ -145,35 +145,40 @@ impl<P: Plot + 'static> Element for PlotElement<P> {
         if let (Some(global_id), Some(hitbox)) = (global_id, hitbox.as_ref()) {
             let cell = Self::tooltip_cursor(global_id, window);
             let hitbox = hitbox.clone();
+            // Notify only the view painting this plot: `window.refresh()` would drop
+            // every sibling view's cache on each pixel of mouse movement.
+            let view = window.current_view();
 
             if cfg!(any(target_os = "ios", target_os = "android")) {
                 // A finger has no hover: only a long press opens the tooltip, drags
                 // the crosshair, and closes it on lift.
-                window.on_mouse_event(move |e: &LongPressEvent, phase, window: &mut Window, _| {
-                    if !phase.bubble() {
-                        return;
-                    }
-                    let next = match e.phase {
-                        TouchPhase::Started => {
-                            if window.default_prevented() || !hitbox.is_hovered(window) {
-                                return;
-                            }
-                            window.prevent_default();
-                            Some(e.start_position - bounds.origin)
+                window.on_mouse_event(
+                    move |e: &LongPressEvent, phase, window: &mut Window, cx: &mut App| {
+                        if !phase.bubble() {
+                            return;
                         }
-                        TouchPhase::Moved => {
-                            if cell.get().is_none() {
-                                return;
+                        let next = match e.phase {
+                            TouchPhase::Started => {
+                                if window.default_prevented() || !hitbox.is_hovered(window) {
+                                    return;
+                                }
+                                window.prevent_default();
+                                Some(e.start_position - bounds.origin)
                             }
-                            Some(e.position - bounds.origin)
+                            TouchPhase::Moved => {
+                                if cell.get().is_none() {
+                                    return;
+                                }
+                                Some(e.position - bounds.origin)
+                            }
+                            TouchPhase::Ended | TouchPhase::Cancelled => None,
+                        };
+                        if cell.get() != next {
+                            cell.set(next);
+                            cx.notify(view);
                         }
-                        TouchPhase::Ended | TouchPhase::Cancelled => None,
-                    };
-                    if cell.get() != next {
-                        cell.set(next);
-                        window.refresh();
-                    }
-                });
+                    },
+                );
             } else {
                 // Relayout can move the plot under a still cursor without a move
                 // event, so re-derive hover each frame; only a visibility flip needs
@@ -189,15 +194,17 @@ impl<P: Plot + 'static> Element for PlotElement<P> {
                     }
                 }
 
-                window.on_mouse_event(move |e: &MouseMoveEvent, _, window: &mut Window, _| {
-                    let next = hitbox
-                        .is_hovered(window)
-                        .then(|| e.position - bounds.origin);
-                    if cell.get() != next {
-                        cell.set(next);
-                        window.refresh();
-                    }
-                });
+                window.on_mouse_event(
+                    move |e: &MouseMoveEvent, _, window: &mut Window, cx: &mut App| {
+                        let next = hitbox
+                            .is_hovered(window)
+                            .then(|| e.position - bounds.origin);
+                        if cell.get() != next {
+                            cell.set(next);
+                            cx.notify(view);
+                        }
+                    },
+                );
             }
         }
 

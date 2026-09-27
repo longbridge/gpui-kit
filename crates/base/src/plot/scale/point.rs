@@ -44,6 +44,24 @@ where
             range_tick,
         }
     }
+
+    /// Returns the position of the domain value at `index`.
+    ///
+    /// Equivalent to [`Scale::tick`] on `domain[index]` for a domain of unique
+    /// values, without searching the domain. Charts whose domain is built one
+    /// entry per datum use this to project a series in linear time.
+    pub fn tick_at(&self, index: usize) -> Option<f32> {
+        let len = self.domain.len();
+        if index >= len {
+            return None;
+        }
+
+        if len == 1 {
+            Some(self.range_start + self.range_tick / 2.)
+        } else {
+            Some(self.range_start + index as f32 * self.range_tick)
+        }
+    }
 }
 
 impl<T> Scale<T> for ScalePoint<T>
@@ -52,12 +70,7 @@ where
 {
     fn tick(&self, value: &T) -> Option<f32> {
         let index = self.domain.iter().position(|v| v == value)?;
-
-        if self.domain.len() == 1 {
-            Some(self.range_start + self.range_tick / 2.)
-        } else {
-            Some(self.range_start + index as f32 * self.range_tick)
-        }
+        self.tick_at(index)
     }
 
     fn nearest_index(&self, tick: f32) -> usize {
@@ -112,6 +125,17 @@ mod tests {
     fn test_scale_point_single() {
         let scale = ScalePoint::new(vec![1], [0., 100.]);
         assert_eq!(scale.tick(&1), Some(50.));
+    }
+
+    #[test]
+    fn test_tick_at_matches_tick() {
+        for domain in [vec![], vec![1], vec![1, 2, 3], vec![1, 2, 3, 4, 5]] {
+            let scale = ScalePoint::new(domain.clone(), [40., 80.]);
+            for (i, value) in domain.iter().enumerate() {
+                assert_eq!(scale.tick_at(i), scale.tick(value));
+            }
+            assert_eq!(scale.tick_at(domain.len()), None);
+        }
     }
 
     #[test]

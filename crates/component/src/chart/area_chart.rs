@@ -434,7 +434,6 @@ where
         let areas = self.y.iter().enumerate().map(|(i, y_fn)| {
             let x = x.clone();
             let y = y.clone();
-            let x_fn = x_fn.clone();
             let y_fn = y_fn.clone();
 
             let fill = *self.fills.get(i).unwrap_or(&default_fill);
@@ -445,10 +444,11 @@ where
                 .unwrap_or(self.curves.first().unwrap_or(&Default::default()));
 
             Area::new()
-                .data(&self.data)
-                .x(move |d| x.tick(&x_fn(d)))
+                // One x domain entry per datum: project by index, not by lookup.
+                .data(self.data.iter().enumerate())
+                .x(move |(i, _)| x.tick_at(*i))
                 .y0(height)
-                .y1(move |d| y.tick(&y_fn(d)))
+                .y1(move |(_, d)| y.tick(&y_fn(d)))
                 .stroke(stroke)
                 .curve(curve)
                 .fill(fill)
@@ -492,7 +492,6 @@ where
         bounds: Bounds<Pixels>,
         _cx: &App,
     ) -> Option<TooltipState> {
-        let x_fn = self.x.as_ref()?;
         let (x, y, _) = self.scales(bounds)?;
 
         // Ignore the x-axis label gutter so hovering the labels doesn't show a tooltip.
@@ -505,7 +504,7 @@ where
 
         let index = x.nearest_index(position.x.as_f32());
         let d = self.data.get(index)?;
-        let x_tick = x.tick(&x_fn(d))?;
+        let x_tick = x.tick_at(index)?;
 
         // One dot per series at the hovered x.
         let dots = self

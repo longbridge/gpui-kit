@@ -339,6 +339,23 @@ impl TextView {
         self
     }
 
+    /// Like [`Self::code_block_highlighter`], with a highlighter that can be
+    /// handed to every frame.
+    ///
+    /// A code block reuses its highlights only while the highlighter is the
+    /// same `Arc`, so a view built every frame with a fresh closure
+    /// re-highlights every code block on every frame.
+    #[doc(hidden)]
+    pub fn shared_code_block_highlighter(
+        mut self,
+        highlighter: Arc<
+            dyn Fn(&CodeBlock) -> Vec<(Range<usize>, gpui::HighlightStyle)> + Send + Sync,
+        >,
+    ) -> Self {
+        self.code_block_highlighter = Some(highlighter);
+        self
+    }
+
     /// Set custom actions to be rendered below each Markdown table.
     ///
     /// The closure receives the [`TableData`],

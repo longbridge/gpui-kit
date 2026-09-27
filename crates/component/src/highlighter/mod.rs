@@ -27,6 +27,8 @@ mod languages;
 mod registry;
 
 #[cfg(feature = "tree-sitter")]
+pub(crate) use highlighter::parse_input_bytes;
+#[cfg(feature = "tree-sitter")]
 pub use highlighter::*;
 #[cfg(feature = "tree-sitter")]
 pub use languages::*;

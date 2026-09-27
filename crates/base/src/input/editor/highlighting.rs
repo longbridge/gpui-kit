@@ -39,6 +39,24 @@ pub trait InputHighlighter {
         cx: &mut Context<EditorState>,
     );
 
+    /// Apply several edits made as one change, such as typing with multiple
+    /// cursors. Each entry is an edit with the text as it stood right after
+    /// it, in the order the edits were applied.
+    ///
+    /// The default hands each edit to [`Self::update`] in turn. Override it to
+    /// reparse once for the whole change.
+    fn update_batch(
+        &mut self,
+        edits: &[(InputEdit, Rope)],
+        folding: bool,
+        window: &mut Window,
+        cx: &mut Context<EditorState>,
+    ) {
+        for (edit, text) in edits {
+            self.update(Some(*edit), text, folding, window, cx);
+        }
+    }
+
     /// Return ordered, non-overlapping style runs that fully cover `range`.
     /// Use [`HighlightStyle::default`] for text without a semantic style.
     fn styles(

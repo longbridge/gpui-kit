@@ -216,6 +216,12 @@ struct CarouselGeometry {
 }
 
 impl CarouselGeometry {
+    /// Reads the layout relative to the content `frame` origin.
+    ///
+    /// Window-space bounds move whenever an ancestor scrolls or shifts the
+    /// carousel, while every snap and loop calculation uses only differences
+    /// and sizes. Storing frame-relative bounds keeps those moves from being
+    /// treated as layout changes.
     fn read(
         state: &CarouselState,
         frame: Bounds<Pixels>,
@@ -224,23 +230,40 @@ impl CarouselGeometry {
     ) -> Self {
         let handle = state.scroll_handle();
         let item_offset = usize::from(has_runway);
+        let origin = frame.origin;
+        let relative = |bounds: Bounds<Pixels>| Bounds::new(bounds.origin - origin, bounds.size);
         Self {
-            viewport: handle.bounds(),
-            frame,
+            viewport: relative(handle.bounds()),
+            frame: Bounds::new(Point::default(), frame.size),
             items: (0..state.item_count().min(rendered_item_count))
-                .filter_map(|ix| handle.bounds_for_item(ix + item_offset))
+                .filter_map(|ix| handle.bounds_for_item(ix + item_offset).map(&relative))
                 .collect(),
             has_runway,
             revision: 0,
         }
     }
 
+    /// Compares layouts with a sub-pixel tolerance so float noise from the
+    /// frame-relative subtraction does not register as a layout change.
     fn same_layout(&self, other: &Self) -> bool {
-        self.viewport == other.viewport
-            && self.frame == other.frame
-            && self.items == other.items
-            && self.has_runway == other.has_runway
+        self.has_runway == other.has_runway
+            && same_bounds(self.viewport, other.viewport)
+            && same_bounds(self.frame, other.frame)
+            && self.items.len() == other.items.len()
+            && self
+                .items
+                .iter()
+                .zip(&other.items)
+                .all(|(left, right)| same_bounds(*left, *right))
     }
+}
+
+fn same_bounds(left: Bounds<Pixels>, right: Bounds<Pixels>) -> bool {
+    const TOLERANCE: Pixels = px(0.01);
+    (left.origin.x - right.origin.x).abs() <= TOLERANCE
+        && (left.origin.y - right.origin.y).abs() <= TOLERANCE
+        && (left.size.width - right.size.width).abs() <= TOLERANCE
+        && (left.size.height - right.size.height).abs() <= TOLERANCE
 }
 
 /// The clipped viewport and snap track for Carousel items.
