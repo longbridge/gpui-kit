@@ -38,7 +38,7 @@ Built on `TextWrapper`. Provides buffer ↔ wrap coordinate mapping with prefix 
 
 ### `FoldMap` — Fold projection layer
 
-Maintains `visible_wrap_rows` and reverse mapping. When no folds are active, uses identity mapping (wrap_row == display_row) without Vec allocation.
+Stores the projection as sorted, merged runs of hidden wrap rows (`HiddenRows`), each carrying a running `hidden_before` count of the rows the earlier runs hide. Rebuilding costs O(folds), not O(document rows), and every mapping in either direction is a `partition_point` binary search over the runs. When no folds are active, uses identity mapping (wrap_row == display_row) without any runs.
 
 ### `FoldRange` / `folding` — Fold extraction
 

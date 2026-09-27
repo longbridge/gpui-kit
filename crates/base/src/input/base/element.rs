@@ -120,6 +120,19 @@ struct EditorScrollbarLayout {
     scroll_size: Size<Pixels>,
 }
 
+/// What the unwrapped width of the longest line depends on. While it holds,
+/// prepaint reuses the stored width instead of copying the line and asking
+/// the text system for it again on every frame.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct LongestLineKey {
+    document_revision: u64,
+    row: usize,
+    len: usize,
+    font: gpui::Font,
+    text_size: Pixels,
+    wrap_width: Option<Pixels>,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct EditorScrollbarSnapshot {
     layout: EditorScrollbarLayout,
@@ -852,8 +865,17 @@ impl<M: InputModeKind> TextElement<M> {
         let ranges = state.search_session.matcher.matched_ranges();
         let current_match_ix = state.search_session.matcher.current_match_index();
 
-        let mut paths = Vec::with_capacity(ranges.as_ref().len());
-        for (index, range) in ranges.as_ref().iter().enumerate() {
+        // Matches are sorted and do not overlap, so only the ones that reach
+        // into the visible range need a layout.
+        let visible_range = &last_layout.visible_range_offset;
+        let first = ranges.partition_point(|range| range.end <= visible_range.start);
+        let mut paths = Vec::new();
+        for (index, range) in ranges
+            .iter()
+            .enumerate()
+            .skip(first)
+            .take_while(|(_, range)| range.start < visible_range.end)
+        {
             if let Some(path) = Self::layout_match_range(range.clone(), last_layout, bounds) {
                 paths.push((path, current_match_ix == index));
             }
@@ -1394,6 +1416,17 @@ impl<M: InputModeKind> TextElement<M> {
         cx: &mut App,
     ) {
         let is_hovered = fold_icon_layout.line_number_hitbox.is_hovered(window);
+        if !fold_icon_layout.icons.is_empty() {
+            // Mouse moves do not repaint the editor, so repaint when the pointer
+            // enters or leaves the gutter to show or hide the hover chevrons.
+            let hitbox = fold_icon_layout.line_number_hitbox.clone();
+            let entity_id = self.state.entity_id();
+            window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, cx| {
+                if phase.bubble() && hitbox.is_hovered(window) != is_hovered {
+                    cx.notify(entity_id);
+                }
+            });
+        }
         for (display_row, is_folded, icon) in fold_icon_layout.icons.iter_mut() {
             let is_current_line = current_row == Some(*display_row);
 
@@ -2600,23 +2633,44 @@ impl<M: InputModeKind> Element for TextElement<M> {
         // 2. Multi-line with soft wrap disabled.
         if state.is_single_line() || !state.soft_wrap {
             let longest_row = state.display_map.longest_row();
-            let longest_line: SharedString = state.text.slice_line(longest_row).to_string().into();
-            longest_line_width = window
-                .text_system()
-                .shape_line(
-                    longest_line.clone(),
-                    text_size,
-                    &[TextRun {
-                        len: longest_line.len(),
-                        font: style.font(),
-                        color: gpui::black(),
-                        background_color: None,
-                        underline: None,
-                        strikethrough: None,
-                    }],
-                    wrap_width,
-                )
-                .width;
+            let longest_line = state.text.slice_line(longest_row);
+            let key = LongestLineKey {
+                document_revision: state.document_revision,
+                row: longest_row,
+                len: longest_line.len(),
+                font: style.font(),
+                text_size,
+                wrap_width,
+            };
+            let cached = state
+                .longest_line_width
+                .take()
+                .filter(|(cached_key, _)| *cached_key == key);
+            longest_line_width = match cached {
+                Some((_, width)) => width,
+                None => {
+                    let longest_line: SharedString = longest_line.to_string().into();
+                    window
+                        .text_system()
+                        .shape_line(
+                            longest_line.clone(),
+                            text_size,
+                            &[TextRun {
+                                len: longest_line.len(),
+                                font: key.font.clone(),
+                                color: gpui::black(),
+                                background_color: None,
+                                underline: None,
+                                strikethrough: None,
+                            }],
+                            wrap_width,
+                        )
+                        .width
+                }
+            };
+            state
+                .longest_line_width
+                .set(Some((key, longest_line_width)));
         }
         if state.tokens_visible() {
             longest_line_width = if let Some(width) = wrap_width {
