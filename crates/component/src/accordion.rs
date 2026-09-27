@@ -350,7 +350,13 @@ impl RenderOnce for AccordionItem {
                     BaseAccordionPanel::new()
                         .id(("panel", self.index))
                         .open(self.open)
-                        .keep_mounted(true)
+                        // Mounted while the reveal moves; a settled closed panel
+                        // unmounts, so its content costs no layout or paint. A
+                        // settled spring returns exactly 0, and `!=` keeps a
+                        // bouncy theme spring mounted while it dips below 0.
+                        // Reduced motion reopens straight to full progress, which
+                        // needs the reveal's height from a mounted frame.
+                        .keep_mounted(progress != 0. || cx.reduce_motion())
                         .w_full()
                         .child(MotionReveal::new(
                             ("content", self.index),
@@ -382,6 +388,8 @@ impl RenderOnce for AccordionItem {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use gpui::{Context, Render, TestAppContext, div, px};
 
     use super::*;
@@ -419,5 +427,59 @@ mod tests {
         let second = cx.debug_bounds("second-title").unwrap();
         assert!(first.origin.y < content.origin.y);
         assert!(content.origin.y + content.size.height <= second.origin.y);
+    }
+
+    struct Toggle(bool);
+
+    impl Render for Toggle {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            Accordion::new("accordion-toggle")
+                .w(px(240.))
+                .item(|item| {
+                    item.open(self.0)
+                        .title("Item")
+                        .child(div().debug_selector(|| "toggle-content".into()).h(px(60.)))
+                })
+                .item(|item| item.title("Next"))
+        }
+    }
+
+    fn content_height(cx: &mut gpui::VisualTestContext) -> Option<gpui::Pixels> {
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.debug_bounds("toggle-content")
+            .map(|bounds| bounds.size.height)
+    }
+
+    #[gpui::test]
+    fn settled_closed_panel_unmounts_its_content(cx: &mut TestAppContext) {
+        cx.update(crate::theme::init);
+        let (view, cx) = cx.add_window_view(|_, _| Toggle(false));
+        assert_eq!(content_height(cx), None);
+
+        view.update(cx, |view, cx| {
+            view.0 = true;
+            cx.notify();
+        });
+        assert_eq!(content_height(cx), Some(px(60.)));
+        for _ in 0..100 {
+            cx.executor().advance_clock(Duration::from_millis(16));
+            assert_eq!(content_height(cx), Some(px(60.)));
+        }
+
+        // The closing reveal keeps the content until the spring settles.
+        view.update(cx, |view, cx| {
+            view.0 = false;
+            cx.notify();
+        });
+        let mut closing_frames = 0;
+        while content_height(cx).is_some() {
+            closing_frames += 1;
+            assert!(closing_frames < 100, "closed content stayed mounted");
+            cx.executor().advance_clock(Duration::from_millis(16));
+        }
+        assert!(
+            closing_frames > 1,
+            "content unmounted before the reveal ran"
+        );
     }
 }
