@@ -4,10 +4,10 @@ use std::{
 };
 
 use gpui::{
-    Anchor, AnyElement, App, Context, DismissEvent, Element, ElementId, Entity, FocusHandle,
-    Focusable, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement,
-    IntoElement, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels, Point,
-    StyleRefinement, Styled, Subscription, Window, anchored, deferred, div, prelude::FluentBuilder,
+    Anchor, AnyElement, App, Bounds, Context, DismissEvent, Element, ElementId, Entity,
+    FocusHandle, Focusable, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
+    InteractiveElement, IntoElement, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels,
+    Point, Position, Style, StyleRefinement, Styled, Subscription, Window, anchored, deferred, div,
     px,
 };
 
@@ -159,11 +159,47 @@ impl Default for ContextMenuState {
     }
 }
 
-/// The deferred menu layer, laid out by every trigger that shares the open
-/// state but drawn only by the one whose bounds contain the press.
+/// The deferred menu layer of one trigger.
+///
+/// Every trigger that shares the open state carries one, but only the trigger
+/// whose bounds contain the press builds and lays out the menu, so an open
+/// menu is rendered once per frame rather than once per row.
 struct DeferredMenu {
     draws: Rc<Cell<bool>>,
+    menu_view: Entity<PopupMenu>,
+    position: Point<Pixels>,
+    anchor: Anchor,
     menu: Option<AnyElement>,
+}
+
+impl DeferredMenu {
+    fn build_menu(&self, window: &mut Window, cx: &mut App) -> AnyElement {
+        // Focus the menu, so that can be handle the action.
+        let focus_handle = self.menu_view.focus_handle(cx);
+        if !focus_handle.contains_focused(window, cx) {
+            focus_handle.focus(window, cx);
+        }
+
+        deferred(
+            anchored().child(
+                div()
+                    .w(window.bounds().size.width)
+                    .h(window.bounds().size.height)
+                    .on_scroll_wheel(|_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .child(
+                        anchored()
+                            .position(self.position)
+                            .snap_to_window_with_margin(px(8.))
+                            .anchor(self.anchor)
+                            .child(self.menu_view.clone()),
+                    ),
+            ),
+        )
+        .with_priority(gpui_base::POPUP_PRIORITY)
+        .into_any()
+    }
 }
 
 impl IntoElement for DeferredMenu {
@@ -193,15 +229,20 @@ impl Element for DeferredMenu {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, ()) {
-        let menu = self.menu.as_mut().expect("menu should exist");
-        (menu.request_layout(window, cx), ())
+        // An empty absolute placeholder, where the menu's `anchored` root used
+        // to sit, so the trigger's own layout is unchanged.
+        let style = Style {
+            position: Position::Absolute,
+            ..Style::default()
+        };
+        (window.request_layout(style, None, cx), ())
     }
 
     fn prepaint(
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: gpui::Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
@@ -209,24 +250,21 @@ impl Element for DeferredMenu {
         if !self.draws.get() {
             return;
         }
-        if let Some(menu) = &mut self.menu {
-            menu.prepaint(window, cx);
-        }
+        let mut menu = self.build_menu(window, cx);
+        menu.prepaint_as_root(bounds.origin, window.viewport_size().into(), window, cx);
+        self.menu = Some(menu);
     }
 
     fn paint(
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: gpui::Bounds<Pixels>,
+        _: Bounds<Pixels>,
         _: &mut (),
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
     ) {
-        if !self.draws.get() {
-            return;
-        }
         if let Some(menu) = &mut self.menu {
             menu.paint(window, cx);
         }
@@ -270,51 +308,15 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                     .get_or_insert_with(|| cx.focus_handle());
                 let menu_view = state.shared_state.borrow().menu_view.clone();
                 let draws_menu = Rc::new(Cell::new(false));
-                let mut menu_element = None;
-                if open {
-                    let has_menu_item = menu_view
-                        .as_ref()
-                        .map(|menu| !menu.read(cx).is_empty())
-                        .unwrap_or(false);
-
-                    if has_menu_item {
-                        menu_element = Some(
-                            deferred(
-                                anchored().child(
-                                    div()
-                                        .w(window.bounds().size.width)
-                                        .h(window.bounds().size.height)
-                                        .on_scroll_wheel(|_, _, cx| {
-                                            cx.stop_propagation();
-                                        })
-                                        .child(
-                                            anchored()
-                                                .position(position)
-                                                .snap_to_window_with_margin(px(8.))
-                                                .anchor(anchor)
-                                                .when_some(menu_view, |this, menu| {
-                                                    // Focus the menu, so that can be handle the action.
-                                                    if !menu
-                                                        .focus_handle(cx)
-                                                        .contains_focused(window, cx)
-                                                    {
-                                                        menu.focus_handle(cx).focus(window, cx);
-                                                    }
-
-                                                    this.child(menu.clone())
-                                                }),
-                                        ),
-                                ),
-                            )
-                            .with_priority(gpui_base::POPUP_PRIORITY)
-                            .into_any(),
-                        );
-                    }
-                }
-                let menu_element = menu_element.map(|menu| DeferredMenu {
-                    draws: draws_menu.clone(),
-                    menu: Some(menu),
-                });
+                let menu_element = menu_view
+                    .filter(|menu| open && !menu.read(cx).is_empty())
+                    .map(|menu_view| DeferredMenu {
+                        draws: draws_menu.clone(),
+                        menu_view,
+                        position,
+                        anchor,
+                        menu: None,
+                    });
 
                 let mut element = this
                     .element
