@@ -1,3 +1,4 @@
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, ClickEvent, FocusHandle, InteractiveElement as _, IntoElement, MouseButton, ParentElement,
     Pixels, RenderOnce, Role, StatefulInteractiveElement as _, StyleRefinement, Styled, Window,
@@ -10,6 +11,9 @@ use crate::{Dialog, DialogChangeReason, DialogHandle};
 
 macro_rules! alert_part {
     ($name:ident, $id:literal) => {
+        alert_part!($name, $id, false);
+    };
+    ($name:ident, $id:literal, $occlude:literal) => {
         #[derive(IntoElement)]
         pub struct $name {
             style: StyleRefinement,
@@ -42,6 +46,8 @@ macro_rules! alert_part {
             fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
                 div()
                     .id($id)
+                    // Presses on the popup stay off the backdrop behind it.
+                    .when($occlude, |this| this.occlude())
                     .children(self.children)
                     .refine_style(&self.style)
             }
@@ -50,7 +56,7 @@ macro_rules! alert_part {
 }
 
 alert_part!(AlertDialogBackdrop, "alert-dialog-backdrop");
-alert_part!(AlertDialogPopup, "alert-dialog-popup");
+alert_part!(AlertDialogPopup, "alert-dialog-popup", true);
 alert_part!(AlertDialogTitle, "alert-dialog-title");
 alert_part!(AlertDialogDescription, "alert-dialog-description");
 
@@ -266,6 +272,11 @@ impl AlertDialog {
     }
 }
 
+impl Styled for AlertDialog {
+    fn style(&mut self) -> &mut StyleRefinement {
+        self.0.style()
+    }
+}
 impl ParentElement for AlertDialog {
     fn extend(&mut self, elements: impl IntoIterator<Item = gpui::AnyElement>) {
         self.0.extend(elements);
@@ -310,5 +321,32 @@ mod tests {
         cx.simulate_click(point(px(20.), px(20.)), Default::default());
 
         assert!(!close_requested.get());
+    }
+
+    /// The host centers its popup by default; styling the alert dialog
+    /// replaces that layout just as it does for a plain dialog.
+    #[gpui::test]
+    fn host_style_positions_the_popup(cx: &mut gpui::TestAppContext) {
+        use gpui::{Bounds, canvas};
+
+        struct TopLeft(Rc<Cell<Bounds<Pixels>>>);
+        impl Render for TopLeft {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                let bounds = self.0.clone();
+                AlertDialog::new(cx).items_start().justify_start().popup(
+                    canvas(move |popup, _, _| bounds.set(popup), |_, _, _, _| {}).size(px(100.)),
+                )
+            }
+        }
+
+        cx.update(crate::init);
+        let bounds = Rc::new(Cell::new(Bounds::default()));
+        let (_, cx) = cx.add_window_view({
+            let bounds = bounds.clone();
+            move |_, _| TopLeft(bounds)
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        assert_eq!(bounds.get().origin, point(px(0.), px(0.)));
     }
 }
