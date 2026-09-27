@@ -355,7 +355,8 @@ impl Input {
 
     /// Sets a custom context menu builder for the input, shown as a native OS menu.
     ///
-    /// If set, this overrides the built-in right-click context menu.
+    /// If set, this overrides the built-in right-click context menu. It shows
+    /// only while the state's context menu is enabled, which is the default.
     pub fn context_menu(
         mut self,
         f: impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static,

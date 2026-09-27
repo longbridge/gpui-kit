@@ -766,8 +766,10 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Sets whether the context menu that shows on right-click is enabled.
     ///
-    /// The context menu is enabled by default.
-    /// This value is ignored if a custom context menu builder is defined on the input.
+    /// The context menu is enabled by default. Disabling it turns off the
+    /// right-click menu entirely, including a custom menu set on the element.
+    /// A custom menu already replaces the built-in one, so keep this enabled
+    /// to show only your own items.
     pub fn context_menu(mut self, enable: bool) -> Self {
         self.enable_context_menu = enable;
         self
