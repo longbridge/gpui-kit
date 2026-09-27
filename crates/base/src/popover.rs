@@ -102,7 +102,10 @@ impl PopoverState {
         self.set_open(opening, cx);
 
         if self.open {
-            let state = cx.entity();
+            // Weak: the subscription is stored on this state, so a strong
+            // handle would keep the state, and its deferred-popover
+            // registration, alive after its trigger is gone.
+            let state = cx.entity().downgrade();
             self.tracked_focus_handle
                 .clone()
                 .unwrap_or_else(|| self.focus_handle.clone())
@@ -111,7 +114,7 @@ impl PopoverState {
             self.dismiss_subscription =
                 Some(
                     window.subscribe(&cx.entity(), cx, move |_, _: &DismissEvent, window, cx| {
-                        state.update(cx, |state, cx| state.dismiss(window, cx));
+                        _ = state.update(cx, |state, cx| state.dismiss(window, cx));
                         window.refresh();
                     }),
                 );

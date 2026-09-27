@@ -363,8 +363,9 @@ mod tests {
     /// holds the menu while it is open, so the menu's release also proves the
     /// `DropdownMenuState` was released.
     ///
-    /// This does not assert on `PopoverState`, which gpui-base keeps alive
-    /// through its own self-referencing dismiss subscription.
+    /// The popover must go too: it holds the deferred-popover registration
+    /// while open, and a leaked one keeps every later right-click menu
+    /// stepping aside as if a popup were still showing.
     #[gpui::test]
     fn open_without_dismiss_releases_the_menu(cx: &mut TestAppContext) {
         cx.update(|cx| crate::init(cx));
@@ -401,6 +402,12 @@ mod tests {
                 .is_none(),
             "the PopupMenu must be released with the window"
         );
+        cx.update(|cx| {
+            assert!(
+                !gpui_base::GlobalState::is_in_deferred_context(cx),
+                "the popover's deferred registration must be released with the window"
+            )
+        });
     }
 
     #[gpui::test]
