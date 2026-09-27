@@ -122,13 +122,22 @@ impl RenderOnce for SearchableListItemElement {
             .child(
                 h_flex()
                     .w_full()
+                    .min_w_0()
                     .items_center()
                     .justify_between()
                     .gap_x_1()
-                    .child(h_flex().w_full().items_center().children(self.children))
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .items_center()
+                            .children(self.children),
+                    )
                     .when_some(self.check_icon, |this, icon| {
                         this.child(
                             icon.xsmall()
+                                .flex_shrink_0()
                                 .text_color(cx.theme().foreground)
                                 .when(!self.checked, |this| this.invisible()),
                         )
