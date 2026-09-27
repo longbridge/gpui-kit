@@ -139,7 +139,7 @@ mod tests {
     }
 
     #[test]
-    fn test_least_index_basic() {
+    fn test_nearest_index_basic() {
         let scale = ScalePoint::new(vec![1, 2, 3], [0., 100.]);
 
         // Exact positions
@@ -161,7 +161,7 @@ mod tests {
     }
 
     #[test]
-    fn test_least_index_with_offset() {
+    fn test_nearest_index_with_offset() {
         let scale = ScalePoint::new(vec![1, 2, 3], [40., 80.]);
 
         // Exact positions: 40, 60, 80
@@ -183,7 +183,7 @@ mod tests {
     }
 
     #[test]
-    fn test_least_index_empty() {
+    fn test_nearest_index_empty() {
         let scale = ScalePoint::new(Vec::<i32>::new(), [0., 100.]);
         assert_eq!(scale.nearest_index(0.), 0);
         assert_eq!(scale.nearest_index(50.), 0);
@@ -191,7 +191,7 @@ mod tests {
     }
 
     #[test]
-    fn test_least_index_single() {
+    fn test_nearest_index_single() {
         let scale = ScalePoint::new(vec![1], [0., 100.]);
         assert_eq!(scale.nearest_index(0.), 0);
         assert_eq!(scale.nearest_index(50.), 0);
@@ -199,7 +199,7 @@ mod tests {
     }
 
     #[test]
-    fn test_least_index_empty_range() {
+    fn test_nearest_index_empty_range() {
         let scale = ScalePoint::new(vec![1, 2, 3], [0., 0.]);
         assert_eq!(scale.nearest_index(0.), 0);
         assert_eq!(scale.nearest_index(50.), 0);
