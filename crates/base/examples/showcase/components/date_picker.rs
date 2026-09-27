@@ -22,7 +22,7 @@ impl BaseShowcase {
                 });
             })
             .child("Aug 12, 2026")
-            .child("⌄");
+            .child(super::chevron(false));
         let popup = Popup::new("date-picker-popup", trigger).when(open, |this| {
             this.content(
                 div()

@@ -51,7 +51,11 @@ impl BaseShowcase {
                         }
                     })
                     .child(selected)
-                    .child(div().text_color(super::example_rgb(0x737373)).child("⌄")),
+                    .child(
+                        div()
+                            .text_color(super::example_rgb(0x737373))
+                            .child(super::chevron(false)),
+                    ),
             );
         let popup = div()
             .w_56()

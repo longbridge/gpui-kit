@@ -28,7 +28,7 @@ impl BaseShowcase {
                 });
             })
             .child(labels[selected])
-            .child(if open { "⌃" } else { "⌄" });
+            .child(super::chevron(open));
         let options = div()
             .mt_1()
             .p_1()

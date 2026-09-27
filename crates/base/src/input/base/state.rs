@@ -4536,7 +4536,10 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
                 }
             })
             .flex_1()
-            .when(self.is_multi_line(), |this| this.h_full())
+            .h_full()
+            // A single line fills the frame and sits at its vertical center,
+            // so the frame needs no layout of its own to hold it.
+            .when(!self.is_multi_line(), |this| this.flex().items_center())
             .flex_grow_1()
             .overflow_x_hidden()
             .when(self.is_multi_line(), |this| {
@@ -4908,6 +4911,36 @@ mod tests {
                 f(crate::input::InputState::new(window, cx))
             })
         }
+    }
+
+    /// The frame is laid out by the application, which should not have to
+    /// center a single line inside it.
+    #[gpui::test]
+    fn single_line_is_centered_in_a_taller_frame(cx: &mut TestAppContext) {
+        struct Frame(Entity<InputBaseState<InputMode>>);
+        impl Render for Frame {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                crate::input::InputBase::new("frame")
+                    .h(px(60.))
+                    .child(crate::input::Input::new(&self.0))
+            }
+        }
+
+        cx.update(crate::init);
+        let mut input = None;
+        let window = cx.open_window(size(px(400.), px(100.)), |window, cx| {
+            let state = cx.new(|cx| crate::input::InputState::new(window, cx).default_value("a"));
+            input = Some(state.clone());
+            Frame(state)
+        });
+        let input = input.unwrap();
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        input.read_with(&cx, |state, _| {
+            let line = state.input_bounds;
+            assert_eq!(line.center().y, px(30.), "line {line:?}");
+        });
     }
 
     #[gpui::test]
