@@ -498,6 +498,7 @@ impl CommandState {
     fn set_list_measurement_key(
         &mut self,
         measurement_key: ListMeasurementKey,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if self.list_measurement_key.as_ref() == Some(&measurement_key) {
@@ -505,8 +506,15 @@ impl CommandState {
         }
 
         self.list_measurement_key = Some(measurement_key);
+        self.measure_on_next_frame(window, cx);
+    }
+
+    /// Measure the rows again on the next frame. Called while the list is
+    /// drawn, where a plain notify schedules no new frame.
+    fn measure_on_next_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.needs_measure = true;
-        cx.notify();
+        let entity_id = cx.entity_id();
+        window.on_next_frame(move |_, cx| cx.notify(entity_id));
     }
 
     // MARK: Actions
@@ -755,8 +763,7 @@ impl CommandState {
             .get(matched_ix)
             .and_then(Option::as_ref);
         if !self.needs_measure && measured != binding.as_ref().map(Kbd::keystroke) {
-            self.needs_measure = true;
-            cx.notify();
+            self.measure_on_next_frame(window, cx);
         }
 
         self.render_item_with_binding(matched_ix, binding, window, cx)
@@ -971,6 +978,7 @@ impl Render for CommandState {
                                             line_clamp: text_style.line_clamp,
                                         },
                                     },
+                                    window,
                                     cx,
                                 )
                             })
