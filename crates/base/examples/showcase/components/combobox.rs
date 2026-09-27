@@ -59,7 +59,7 @@ impl BaseShowcase {
             );
         let popup = div()
             .w_56()
-            .p_1()
+            .text_xs()
             .border_1()
             .border_color(super::example_rgb(0xd4d4d4))
             .bg(super::example_rgb(0xffffff))
@@ -68,7 +68,7 @@ impl BaseShowcase {
                     .w_full()
                     .h_7()
                     .px_2()
-                    .border_1()
+                    .border_b_1()
                     .border_color(super::example_rgb(0xe5e5e5))
                     .on_mouse_down(MouseButton::Left, move |_, window, cx| {
                         query_state.update(cx, |state, cx| state.focus(window, cx));
@@ -76,7 +76,7 @@ impl BaseShowcase {
                     .child(self.combobox_query.clone()),
             )
             .child(
-                div().mt_1().children(
+                div().p_1().children(
                     ["GPUI", "React", "SwiftUI", "Vue"]
                         .into_iter()
                         .filter(|label| query.is_empty() || label.to_lowercase().contains(&query))
