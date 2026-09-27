@@ -77,7 +77,7 @@ impl Plot for StackedBarChart {
             })
         });
         PlotAxis::new()
-            .x_axis_at(height)
+            .x(height)
             .x_label(x_label)
             .stroke(cx.theme().border)
             .paint(&bounds, window, cx);

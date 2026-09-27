@@ -420,7 +420,7 @@ where
                 label.tick -= px(left);
                 label
             });
-            axis = axis.x_axis_at(height).x_label(labels);
+            axis = axis.x(height).x_label(labels);
         }
         axis.paint(&axis_bounds, window, cx);
 

@@ -95,10 +95,9 @@ impl<T> RadialLine<T> {
         self
     }
 
-    /// Whether to connect the last point back to the first, like
-    /// `d3.curveLinearClosed`. Defaults to `false`.
-    pub fn closed(mut self, closed: bool) -> Self {
-        self.closed = closed;
+    /// Connect the last point back to the first, like `d3.curveLinearClosed`.
+    pub fn closed(mut self) -> Self {
+        self.closed = true;
         self
     }
 
@@ -122,9 +121,9 @@ impl<T> RadialLine<T> {
         self
     }
 
-    /// Whether to draw a dot on every point. Defaults to `false`.
-    pub fn dot(mut self, dot: bool) -> Self {
-        self.dot = dot;
+    /// Draw a dot on every point.
+    pub fn dot(mut self) -> Self {
+        self.dot = true;
         self
     }
 
@@ -294,9 +293,9 @@ mod tests {
             .data(data)
             .angle(|_, i| Some(i as f32 * TAU / 3.))
             .radius(|v, _| Some(*v * 10.))
-            .closed(true)
+            .closed()
             .fill(gpui::black())
-            .dot(true);
+            .dot();
 
         let (fill_path, stroke_path, dots) = line.path(&bounds);
         assert!(fill_path.is_some());

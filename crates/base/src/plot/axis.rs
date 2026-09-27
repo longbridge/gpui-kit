@@ -120,15 +120,9 @@ impl PlotAxis {
 
     /// Place the x-axis line at `position` from the top of the plot. Without
     /// it the x-axis draws neither its line nor its labels.
-    pub fn x_axis_at(mut self, position: impl Into<Pixels>) -> Self {
+    pub fn x(mut self, position: impl Into<Pixels>) -> Self {
         self.x = Some(position.into());
         self
-    }
-
-    /// Place the x-axis line at `x` from the top of the plot.
-    #[deprecated(since = "0.7.0", note = "use `x_axis_at`")]
-    pub fn x(self, x: impl Into<Pixels>) -> Self {
-        self.x_axis_at(x)
     }
 
     /// Show or hide the x-axis line; its labels are drawn either way.
@@ -153,15 +147,9 @@ impl PlotAxis {
 
     /// Place the y-axis line at `position` from the left of the plot. Without
     /// it the y-axis draws neither its line nor its labels.
-    pub fn y_axis_at(mut self, position: impl Into<Pixels>) -> Self {
+    pub fn y(mut self, position: impl Into<Pixels>) -> Self {
         self.y = Some(position.into());
         self
-    }
-
-    /// Place the y-axis line at `y` from the left of the plot.
-    #[deprecated(since = "0.7.0", note = "use `y_axis_at`")]
-    pub fn y(self, y: impl Into<Pixels>) -> Self {
-        self.y_axis_at(y)
     }
 
     /// Show or hide the y-axis line; its labels are drawn either way.
@@ -284,17 +272,17 @@ mod tests {
     fn builder_order_does_not_move_labels() {
         let labels_first = PlotAxis::new()
             .x_label(labels())
-            .x_axis_at(px(50.))
+            .x(px(50.))
             .x_label_side(AxisLabelSide::Start)
             .y_label(labels())
-            .y_axis_at(px(30.))
+            .y(px(30.))
             .y_label_side(AxisLabelSide::Start);
         let labels_last = PlotAxis::new()
             .x_label_side(AxisLabelSide::Start)
-            .x_axis_at(px(50.))
+            .x(px(50.))
             .x_label(labels())
             .y_label_side(AxisLabelSide::Start)
-            .y_axis_at(px(30.))
+            .y(px(30.))
             .y_label(labels());
 
         assert_eq!(

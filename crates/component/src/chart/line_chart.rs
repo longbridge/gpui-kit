@@ -410,7 +410,7 @@ where
                 label.tick -= px(left);
                 label
             });
-            axis = axis.x_axis_at(height).x_label(labels);
+            axis = axis.x(height).x_label(labels);
         }
         axis.paint(&axis_bounds, window, cx);
 
@@ -432,7 +432,7 @@ where
             .stroke_width(2.);
 
         if self.dot {
-            line = line.dot(true).dot_size(8.).dot_fill(stroke);
+            line = line.dot().dot_size(8.).dot_fill(stroke);
         }
 
         let mask = self

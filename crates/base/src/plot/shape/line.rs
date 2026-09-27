@@ -88,9 +88,9 @@ impl<T> Line<T> {
         self
     }
 
-    /// Whether to draw a dot on every point. Defaults to `false`.
-    pub fn dot(mut self, dot: bool) -> Self {
-        self.dot = dot;
+    /// Draw a dot on every point.
+    pub fn dot(mut self) -> Self {
+        self.dot = true;
         self
     }
 
@@ -282,7 +282,7 @@ mod tests {
             .data(data)
             .x(|v| Some(*v))
             .y(|v| Some(*v * 2.))
-            .dot(true);
+            .dot();
 
         let (_, dots) = line_with_dots.path(&bounds);
         assert_eq!(dots.len(), 3);

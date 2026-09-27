@@ -792,7 +792,7 @@ where
         if self.label_axis {
             match alignment {
                 BarAlignment::Bottom | BarAlignment::Top => {
-                    axis = axis.x_axis_at(zero_pixel);
+                    axis = axis.x(zero_pixel);
 
                     // Labels are placed one at a time rather than through
                     // `x_label`, because a chart with negative values needs them
@@ -841,7 +841,7 @@ where
                         (AxisLabelSide::End, TextAlign::Left)
                     };
                     axis = axis
-                        .y_axis_at(zero_pixel)
+                        .y(zero_pixel)
                         .y_label_side(side)
                         .y_label(labels.into_iter().map(|t| t.align(align)));
                 }
@@ -889,12 +889,12 @@ where
                     let value_axis = if is_horizontal {
                         PlotAxis::new()
                             .x_axis(false)
-                            .x_axis_at(px(total_height - VALUE_AXIS_GAP))
+                            .x(px(total_height - VALUE_AXIS_GAP))
                             .x_label(labels.map(|t| t.align(TextAlign::Center)))
                     } else {
                         PlotAxis::new()
                             .y_axis(false)
-                            .y_axis_at(px(value_axis_gap - TEXT_GAP * 2.))
+                            .y(px(value_axis_gap - TEXT_GAP * 2.))
                             .y_label(labels.map(|t| t.align(TextAlign::Right)))
                     };
                     value_axis.paint(&bounds, window, cx);

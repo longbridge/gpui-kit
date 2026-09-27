@@ -293,7 +293,7 @@ where
                 &labeled_items(self.data.len(), None, self.tick_margin),
                 cx.theme().muted_foreground,
             );
-            axis = axis.x_axis_at(height).x_label(labels);
+            axis = axis.x(height).x_label(labels);
         }
         axis.paint(&bounds, window, cx);
 

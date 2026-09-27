@@ -64,11 +64,10 @@ the new `f32` support. Custom plots built on the primitives need these changes:
 - `ScaleBand::band_width` no longer caps bands at 30px; set
   `ScaleBand::max_band_width`, or `BarChart`/`CandlestickChart::max_band_width`
   (30px by default, so charts look the same).
-- `PlotAxis::x`/`y` are `x_axis_at`/`y_axis_at`, and labels are placed at paint
-  time so builder order no longer matters. `AXIS_GAP` is `axis_gutter(font_size)`.
+- `PlotAxis` places its labels at paint time, so builder order no longer
+  matters. `AXIS_GAP` is `axis_gutter(font_size)`.
 - `StrokeStyle` is `Curve` and `stroke_style` is `curve`; `dot_fill_color`/
-  `dot_stroke_color` are `dot_fill`/`dot_stroke`; `dot` and `RadialLine::closed`
-  take a `bool`.
+  `dot_stroke_color` are `dot_fill`/`dot_stroke`.
 - `Arc::paint`, `paint_cached` and `contains` drop the radius overrides; build
   another `Arc` for other radii.
 - `PlotHover::focus` and `Tooltip::focus` are `progress`.
@@ -81,16 +80,14 @@ the new `f32` support. Custom plots built on the primitives need these changes:
   an `Element` impl on the plot; `gpui_base::Theme` gains a `plot` field.
 
 `StrokeStyle` and `stroke_style` are removed outright. Deprecated aliases keep
-`AXIS_GAP`, `PlotAxis::x`/`y`, `dot_fill_color`, `dot_stroke_color` and `focus`
-compiling for this release.
+`AXIS_GAP`, `dot_fill_color`, `dot_stroke_color` and `focus` compiling for this
+release.
 
 ```diff
 - let y = ScaleLinear::new(values.collect(), vec![height, 0.]);
 + let y = ScaleLinear::new(values, [height, 0.]);
 - Line::new().stroke_style(StrokeStyle::Linear).dot()
-+ Line::new().curve(Curve::Linear).dot(true)
-- PlotAxis::new().x(height).x_label(labels)
-+ PlotAxis::new().x_axis_at(height).x_label(labels)
++ Line::new().curve(Curve::Linear).dot()
 ```
 
 ##### Root layers
