@@ -590,6 +590,18 @@ impl SyntaxHighlighter {
         text: &Rope,
         timeout: Option<Duration>,
     ) -> bool {
+        self.update_edits(edit.as_slice(), text, timeout)
+    }
+
+    /// Like [`Self::update`] for several edits, in the order they were applied
+    /// to reach `text`: the tree takes every edit, then reparses once. No
+    /// edits means the change is unknown, as `None` does for `update`.
+    pub(crate) fn update_edits(
+        &mut self,
+        edits: &[InputEdit],
+        text: &Rope,
+        timeout: Option<Duration>,
+    ) -> bool {
         if self.text.eq(text) {
             return true;
         }
@@ -600,21 +612,32 @@ impl SyntaxHighlighter {
             return true;
         }
 
-        self.edit_injection_layers(edit.as_ref());
-        let edit = edit.unwrap_or(InputEdit {
-            start_byte: 0,
-            old_end_byte: 0,
-            new_end_byte: text.len(),
-            start_position: Point::new(0, 0),
-            old_end_position: Point::new(0, 0),
-            new_end_position: Point::new(0, 0),
-        });
+        let full_edit;
+        let edits = if edits.is_empty() {
+            self.edit_injection_layers(None);
+            full_edit = [InputEdit {
+                start_byte: 0,
+                old_end_byte: 0,
+                new_end_byte: text.len(),
+                start_position: Point::new(0, 0),
+                old_end_position: Point::new(0, 0),
+                new_end_position: Point::new(0, 0),
+            }];
+            &full_edit[..]
+        } else {
+            for edit in edits {
+                self.edit_injection_layers(Some(edit));
+            }
+            edits
+        };
 
         let mut old_tree = self
             .tree
             .take()
             .unwrap_or(self.parser.parse("", None).unwrap());
-        old_tree.edit(&edit);
+        for edit in edits {
+            old_tree.edit(edit);
+        }
 
         let mut timed_out = false;
         let start = Instant::now();
