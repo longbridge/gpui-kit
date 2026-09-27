@@ -2006,7 +2006,6 @@ where
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        let horizontal_scroll_handle = self.horizontal_scroll_handle.clone();
         let is_stripe_row = self.options.stripe && row_ix % 2 != 0;
         // `selected_row()` is `None` outside row mode, so a selected cell or
         // column never highlights its row.
@@ -2273,6 +2272,13 @@ where
                 }))
                 .into_any_element()
         } else {
+            let cols_width: Pixels = self
+                .col_groups
+                .iter()
+                .take(columns_count)
+                .map(|col_group| col_group.width)
+                .sum();
+
             // Render fake rows to fill the rest table space
             self.delegate
                 .render_tr(row_ix, window, cx)
@@ -2292,11 +2298,10 @@ where
                             .table_cell_size(self.options.size),
                     )
                 })
-                .children((0..columns_count).map(|col_ix| {
-                    h_flex()
-                        .left(horizontal_scroll_handle.offset().x)
-                        .child(self.render_cell(None, col_ix, window, cx))
-                }))
+                // The fake cells paint nothing, so a single spacer as wide as all
+                // the columns keeps the last empty column in place without laying
+                // out one element per column.
+                .child(div().flex_shrink_0().h_full().w(cols_width))
                 .child(self.delegate.render_last_empty_col(window, cx))
                 .into_any_element()
         }

@@ -189,10 +189,16 @@ impl TextViewState {
 
                         match parsed_update.result {
                             Ok(content) => {
+                                let append =
+                                    parsed_update.selection_compatible && !parsed_update.full_parse;
+                                if append && state.full_update_revision <= state.committed_revision
+                                {
+                                    state.splice_appended_blocks(&content.document);
+                                }
                                 state.reconcile_range_highlights(
                                     &content.document,
                                     parsed_update.revision,
-                                    parsed_update.selection_compatible && !parsed_update.full_parse,
+                                    append,
                                 );
                                 state.stream_fade.record(
                                     &state.parsed_content.document,
@@ -687,6 +693,42 @@ impl TextViewState {
         }
     }
 
+    /// Tell the scrollable list which blocks an append replaced, before `new`,
+    /// the appended document, replaces the current one.
+    ///
+    /// An append parses only the current document's last block again, so the
+    /// blocks before it keep their spans and their measured heights. Without
+    /// this, `render_root` resets the list whenever the block count changes,
+    /// which scrolled a streaming view back to the top and measured every
+    /// block again on each new block. Only a grown block count is handled
+    /// here; anything else is left to that reset.
+    fn splice_appended_blocks(&self, new: &ParsedDocument) {
+        let old = &self.parsed_content.document.blocks;
+        let (old_count, new_count) = (old.len(), new.blocks.len());
+        if old_count == 0 || new_count <= old_count || self.list_state.item_count() != old_count {
+            return;
+        }
+
+        // The last block is always measured again: it was parsed again, and
+        // it is no longer the last one.
+        let unchanged = old
+            .iter()
+            .zip(new.blocks.iter())
+            .take(old_count - 1)
+            .take_while(|(old_block, new_block)| {
+                old_block
+                    .span()
+                    .is_some_and(|span| new_block.span() == Some(span))
+            })
+            .count();
+        // Keeps the replaced blocks' heights as hints and the scroll offset
+        // inside them, and has the next layout measure only the blocks that
+        // are not measured.
+        self.list_state.remeasure_items(unchanged..old_count);
+        self.list_state
+            .splice(old_count..old_count, new_count - old_count);
+    }
+
     /// Save bounds and unselect if bounds changed.
     pub(super) fn update_bounds(&mut self, bounds: Bounds<Pixels>, _cx: &mut App) {
         self.bounds = bounds;
@@ -1052,7 +1094,7 @@ impl Render for TextViewState {
                 }
             });
         // After `render_root`, which resets the list when the block count
-        // changed, and with it the scroll position.
+        // changed other than by an append, and with it the scroll position.
         if let Some(block_ix) = reveal_block {
             self.list_state.scroll_to_reveal_item(block_ix);
         }
@@ -2631,6 +2673,23 @@ mod tests {
             reveal(&state, "paragraph 3", cx);
             assert!(!is_pending(&state, cx));
             assert!(scroll_top(&state, cx).item_ix <= 3);
+        }
+
+        #[gpui::test]
+        fn an_append_adding_blocks_keeps_the_scroll_position(cx: &mut TestAppContext) {
+            let (state, cx) = window(&paragraphs(200), Container::Scrollable, cx);
+            reveal(&state, "paragraph 100", cx);
+            let top = scroll_top(&state, cx);
+            assert!(top.item_ix > 0, "{top:?}");
+
+            state.update(cx, |state, cx| state.push_str("\n\nparagraph 200", cx));
+            cx.run_until_parked();
+            draw(cx);
+
+            state.read_with(cx, |state, _| {
+                assert_eq!(state.list_state.item_count(), 201);
+            });
+            assert_unmoved(&state, top, cx);
         }
 
         #[gpui::test]

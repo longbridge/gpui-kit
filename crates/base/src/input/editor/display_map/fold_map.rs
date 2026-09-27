@@ -4,18 +4,40 @@
 /// - Filtering out wrap rows that belong to folded regions
 /// - Maintaining bidirectional mapping: wrap_row ↔ display_row
 /// - Handling fold state changes and rebuilding the projection
+use std::ops::Range;
+
 use super::folding::FoldRange;
 use super::wrap_map::WrapMap;
 
+/// A run of wrap rows hidden by folding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HiddenRows {
+    wrap_rows: Range<usize>,
+    /// How many wrap rows the runs before this one hide.
+    hidden_before: usize,
+}
+
+impl HiddenRows {
+    /// The display row of the first visible wrap row after this run.
+    fn display_start(&self) -> usize {
+        self.wrap_rows.start - self.hidden_before
+    }
+}
+
 /// FoldMap projects wrap rows to display rows by hiding folded regions.
 pub(super) struct FoldMap {
-    /// Mapping: display_row → wrap_row
-    /// index = display_row, value = actual wrap_row
-    visible_wrap_rows: Vec<usize>,
+    /// The wrap rows hidden by folding: sorted, disjoint and non-adjacent.
+    ///
+    /// The projection is kept as these runs rather than a table per wrap row,
+    /// so rebuilding it after an edit costs the number of folds, not the
+    /// length of the document, and both directions are a binary search.
+    hidden: Vec<HiddenRows>,
 
-    /// Reverse mapping: wrap_row → display_row
-    /// index = wrap_row, value = Some(display_row) if visible, None if folded
-    wrap_row_to_display_row: Vec<Option<usize>>,
+    /// How many wrap rows `hidden` hides in total.
+    total_hidden: usize,
+
+    /// The wrap row count the projection was last built for.
+    projected_wrap_row_count: usize,
 
     /// Candidate fold ranges (from tree-sitter/LSP)
     /// Sorted by start_line, unique start_line
@@ -37,8 +59,9 @@ pub(super) struct FoldMap {
 impl FoldMap {
     pub(super) fn new() -> Self {
         Self {
-            visible_wrap_rows: Vec::new(),
-            wrap_row_to_display_row: Vec::new(),
+            hidden: Vec::new(),
+            total_hidden: 0,
+            projected_wrap_row_count: 0,
             candidates: Vec::new(),
             folded: Vec::new(),
             needs_rebuild: true,
@@ -58,7 +81,14 @@ impl FoldMap {
         if self.folded.is_empty() {
             return self.cached_wrap_row_count;
         }
-        self.visible_wrap_rows.len()
+        self.projected_wrap_row_count - self.total_hidden
+    }
+
+    /// How many wrap rows the runs before `index` hide.
+    fn hidden_before(&self, index: usize) -> usize {
+        self.hidden
+            .get(index)
+            .map_or(self.total_hidden, |run| run.hidden_before)
     }
 
     /// Convert wrap_row to display_row
@@ -71,10 +101,20 @@ impl FoldMap {
                 None
             };
         }
-        self.wrap_row_to_display_row
-            .get(wrap_row)
-            .copied()
-            .flatten()
+        if wrap_row >= self.projected_wrap_row_count {
+            return None;
+        }
+        let index = self
+            .hidden
+            .partition_point(|run| run.wrap_rows.end <= wrap_row);
+        if self
+            .hidden
+            .get(index)
+            .is_some_and(|run| run.wrap_rows.start <= wrap_row)
+        {
+            return None;
+        }
+        Some(wrap_row - self.hidden_before(index))
     }
 
     /// Convert display_row to wrap_row
@@ -86,7 +126,13 @@ impl FoldMap {
                 None
             };
         }
-        self.visible_wrap_rows.get(display_row).copied()
+        if display_row >= self.display_row_count() {
+            return None;
+        }
+        let index = self
+            .hidden
+            .partition_point(|run| run.display_start() <= display_row);
+        Some(display_row + self.hidden_before(index))
     }
 
     /// Find the nearest visible display_row for a given wrap_row
@@ -99,10 +145,18 @@ impl FoldMap {
             return dr;
         }
 
-        match self.visible_wrap_rows.binary_search(&wrap_row) {
-            Ok(idx) => idx,
-            Err(insert_pos) => insert_pos.saturating_sub(1),
-        }
+        // A hidden row maps to the last visible row before it.
+        let visible_before = if wrap_row >= self.projected_wrap_row_count {
+            self.display_row_count()
+        } else {
+            let index = self
+                .hidden
+                .partition_point(|run| run.wrap_rows.end <= wrap_row);
+            self.hidden
+                .get(index)
+                .map_or(self.display_row_count(), HiddenRows::display_start)
+        };
+        visible_before.saturating_sub(1)
     }
 
     /// Set fold candidates (from tree-sitter/LSP), full replacement.
@@ -253,15 +307,9 @@ impl FoldMap {
 
         self.cached_wrap_row_count = wrap_row_count;
 
-        self.visible_wrap_rows.clear();
-        self.wrap_row_to_display_row = vec![None; wrap_row_count];
-
         if self.folded.is_empty() {
             // Fast path: no folds, all wrap rows are visible
-            self.visible_wrap_rows = (0..wrap_row_count).collect();
-            for (display_row, &wrap_row) in self.visible_wrap_rows.iter().enumerate() {
-                self.wrap_row_to_display_row[wrap_row] = Some(display_row);
-            }
+            self.set_hidden_rows(wrap_row_count, Vec::new());
             self.needs_rebuild = false;
             return;
         }
@@ -291,53 +339,108 @@ impl FoldMap {
             }
         }
 
-        // Merge overlapping hidden ranges
-        hidden_ranges.sort_by_key(|r| r.start);
-        let mut merged_hidden = Vec::new();
-        for range in hidden_ranges {
-            if let Some(last) = merged_hidden.last_mut() {
-                if range.start <= *last {
-                    // Overlapping or adjacent, merge
-                    *last = (*last).max(range.end);
-                } else {
-                    merged_hidden.push(range.start);
-                    merged_hidden.push(range.end);
-                }
-            } else {
-                merged_hidden.push(range.start);
-                merged_hidden.push(range.end);
-            }
-        }
-
-        // Scan all wrap rows and filter out hidden ones
-        let mut display_row = 0;
-        let mut hidden_iter = merged_hidden.chunks_exact(2);
-        let mut current_hidden = hidden_iter.next();
-
-        for wrap_row in 0..wrap_row_count {
-            // Check if wrap_row is in current hidden range
-            let is_hidden = if let Some(&[start, end]) = current_hidden {
-                if wrap_row >= end {
-                    current_hidden = hidden_iter.next();
-                    if let Some(&[new_start, new_end]) = current_hidden {
-                        wrap_row >= new_start && wrap_row < new_end
-                    } else {
-                        false
-                    }
-                } else {
-                    wrap_row >= start && wrap_row < end
-                }
-            } else {
-                false
-            };
-
-            if !is_hidden {
-                self.visible_wrap_rows.push(wrap_row);
-                self.wrap_row_to_display_row[wrap_row] = Some(display_row);
-                display_row += 1;
-            }
-        }
-
+        self.set_hidden_rows(wrap_row_count, hidden_ranges);
         self.needs_rebuild = false;
+    }
+
+    /// Install the projection for `wrap_row_count` wrap rows with
+    /// `hidden_ranges` hidden, merging overlapping and adjacent ranges.
+    fn set_hidden_rows(&mut self, wrap_row_count: usize, mut hidden_ranges: Vec<Range<usize>>) {
+        hidden_ranges.sort_by_key(|range| range.start);
+
+        self.hidden.clear();
+        self.total_hidden = 0;
+        self.projected_wrap_row_count = wrap_row_count;
+        for range in hidden_ranges {
+            let range = range.start..range.end.min(wrap_row_count);
+            if range.is_empty() {
+                continue;
+            }
+            if let Some(last) = self.hidden.last_mut()
+                && range.start <= last.wrap_rows.end
+            {
+                // Overlapping or adjacent, merge
+                if range.end > last.wrap_rows.end {
+                    self.total_hidden += range.end - last.wrap_rows.end;
+                    last.wrap_rows.end = range.end;
+                }
+                continue;
+            }
+            self.total_hidden += range.len();
+            self.hidden.push(HiddenRows {
+                hidden_before: self.total_hidden - range.len(),
+                wrap_rows: range,
+            });
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The per-row tables the projection used to be stored as: display row to
+    /// wrap row, and wrap row to display row.
+    fn dense_projection(
+        wrap_row_count: usize,
+        hidden: &[Range<usize>],
+    ) -> (Vec<usize>, Vec<Option<usize>>) {
+        let mut visible = Vec::new();
+        let mut display_rows = vec![None; wrap_row_count];
+        for (wrap_row, display_row) in display_rows.iter_mut().enumerate() {
+            if !hidden.iter().any(|range| range.contains(&wrap_row)) {
+                *display_row = Some(visible.len());
+                visible.push(wrap_row);
+            }
+        }
+        (visible, display_rows)
+    }
+
+    #[test]
+    fn hidden_runs_match_the_dense_projection() {
+        let wrap_row_count = 10;
+        let cases: &[&[Range<usize>]] = &[
+            &[],
+            &[0..3],
+            &[2..5],
+            &[7..10],
+            &[2..4, 4..6],
+            &[1..5, 3..8],
+            &[6..9, 1..3],
+            &[0..2, 3..4, 8..20],
+            &[0..10],
+        ];
+        for &hidden in cases {
+            let mut fold_map = FoldMap::new();
+            fold_map.folded.push(FoldRange::new(0, 1));
+            fold_map.set_hidden_rows(wrap_row_count, hidden.to_vec());
+            let (visible, display_rows) = dense_projection(wrap_row_count, hidden);
+
+            assert_eq!(fold_map.display_row_count(), visible.len(), "{hidden:?}");
+            for wrap_row in 0..wrap_row_count + 2 {
+                let display_row = display_rows.get(wrap_row).copied().flatten();
+                assert_eq!(
+                    fold_map.wrap_row_to_display_row(wrap_row),
+                    display_row,
+                    "{hidden:?}, wrap row {wrap_row}"
+                );
+                let nearest = match visible.binary_search(&wrap_row) {
+                    Ok(index) => index,
+                    Err(index) => index.saturating_sub(1),
+                };
+                assert_eq!(
+                    fold_map.nearest_visible_display_row(wrap_row),
+                    nearest,
+                    "{hidden:?}, wrap row {wrap_row}"
+                );
+            }
+            for display_row in 0..wrap_row_count + 2 {
+                assert_eq!(
+                    fold_map.display_row_to_wrap_row(display_row),
+                    visible.get(display_row).copied(),
+                    "{hidden:?}, display row {display_row}"
+                );
+            }
+        }
     }
 }

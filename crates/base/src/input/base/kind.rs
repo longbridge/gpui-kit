@@ -170,6 +170,17 @@ pub trait InputModeKind: sealed::Sealed + Sized + 'static {
     ) {
     }
 
+    /// Drives the syntax highlighter once for several edits applied as one
+    /// change, each paired with the text right after it.
+    fn drive_highlighter_batch(
+        _highlighter: &Rc<RefCell<Option<Box<dyn InputHighlighter>>>>,
+        _edits: &[(InputEdit, Rope)],
+        _folding: bool,
+        _window: &mut Window,
+        _cx: &mut gpui::Context<InputBaseState<Self>>,
+    ) {
+    }
+
     /// The range highlighted while Cmd-hovering a symbol, with its style.
     fn hover_definition_style(
         _state: &InputBaseState<Self>,

@@ -212,3 +212,35 @@ fn form_applies_styled_refinements(cx: &mut TestAppContext) {
     assert_eq!(styled_gap - default_gap, px(22.));
 }
 
+#[gpui::test]
+fn hidden_fields_are_not_rendered(cx: &mut TestAppContext) {
+    cx.update(crate::init);
+    struct HiddenFieldHarness {
+        hide: bool,
+    }
+    impl Render for HiddenFieldHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let hide = self.hide;
+            div()
+                .w(px(400.))
+                .child(Form::new().children((0..3).map(|ix| {
+                    Field::new().visible(!(hide && ix == 1)).child(
+                        div()
+                            .debug_selector(move || format!("control-{ix}"))
+                            .w_full()
+                            .h(px(20.)),
+                    )
+                })))
+        }
+    }
+
+    let (_, cx) = cx.add_window_view(|_, _| HiddenFieldHarness { hide: false });
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    let second_row_top = cx.debug_bounds("control-1").unwrap().top();
+
+    let (_, cx) = cx.add_window_view(|_, _| HiddenFieldHarness { hide: true });
+    cx.update(|window, cx| window.draw(cx).clear(cx));
+    assert!(cx.debug_bounds("control-1").is_none());
+    // The hidden field leaves no grid row behind.
+    assert_eq!(cx.debug_bounds("control-2").unwrap().top(), second_row_top);
+}

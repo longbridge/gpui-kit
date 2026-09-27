@@ -30,7 +30,10 @@ pub(crate) fn syntax_context_provider(_language: &str) -> Option<Rc<dyn SyntaxCo
 #[cfg(feature = "tree-sitter")]
 struct TreeSitterSyntaxContext {
     parser: std::cell::RefCell<tree_sitter::Parser>,
-    tree: std::cell::RefCell<Option<(String, tree_sitter::Tree)>>,
+    /// The last queried text and its tree, or `None` when that text's parse
+    /// ran out of budget. Cloning a `Rope` shares its storage, so the cache
+    /// holds no second copy of the document.
+    tree: std::cell::RefCell<Option<(Rope, Option<tree_sitter::Tree>)>>,
 }
 
 #[cfg(feature = "tree-sitter")]
@@ -45,6 +48,15 @@ impl TreeSitterSyntaxContext {
             parser: std::cell::RefCell::new(parser),
             tree: std::cell::RefCell::new(None),
         })
+    }
+
+    /// Whether the comment starting at `start` opens with `#` or `//`.
+    fn starts_line_comment(text: &Rope, start: usize) -> bool {
+        match text.get_byte(start) {
+            Some(b'#') => true,
+            Some(b'/') => text.get_byte(start + 1) == Some(b'/'),
+            _ => false,
+        }
     }
 
     fn classify(kind: &str) -> Option<gpui_base::input::SyntaxContext> {
@@ -66,12 +78,11 @@ impl SyntaxContextProvider for TreeSitterSyntaxContext {
     fn context_at(&self, text: &Rope, offset: usize) -> gpui_base::input::SyntaxContext {
         use std::ops::ControlFlow;
 
-        let source = text.to_string();
-        let offset = offset.min(source.len());
+        let offset = offset.min(text.len());
         let mut cached = self.tree.borrow_mut();
         if cached
             .as_ref()
-            .is_none_or(|(previous, _)| previous != &source)
+            .is_none_or(|(cached_text, _)| cached_text != text)
         {
             let start = std::time::Instant::now();
             let mut progress = |_: &tree_sitter::ParseState| -> ControlFlow<()> {
@@ -86,19 +97,21 @@ impl SyntaxContextProvider for TreeSitterSyntaxContext {
             // No InputEdit is available here, so an old tree cannot be reused
             // after the source changes.
             let tree = parser.parse_with_options(
-                &mut |byte_offset, _| source.get(byte_offset..).unwrap_or(""),
+                &mut |byte_offset, _| crate::highlighter::parse_input_bytes(text, byte_offset),
                 None,
                 Some(options),
             );
-            let Some(tree) = tree else {
+            if tree.is_none() {
                 // A timed-out parse must not resume against a different source.
                 parser.reset();
-                *cached = None;
-                return gpui_base::input::SyntaxContext::Code;
-            };
-            *cached = Some((source, tree));
+            }
+            // Remember a timed-out text too, so repeated queries on it answer
+            // `Code` at once instead of spending the budget again.
+            *cached = Some((text.clone(), tree));
         }
-        let (source, tree) = cached.as_ref().unwrap();
+        let Some((_, Some(tree))) = cached.as_ref() else {
+            return gpui_base::input::SyntaxContext::Code;
+        };
         let mut node = tree.root_node().descendant_for_byte_range(offset, offset);
         // At the very end the range may match nothing; try the last byte.
         if node.is_none() && offset > 0 {
@@ -133,7 +146,7 @@ impl SyntaxContextProvider for TreeSitterSyntaxContext {
         // A zero-width query at a line comment's end may select the enclosing
         // node. Insertion there still extends the comment, unlike insertion
         // after a block comment's closing delimiter.
-        if offset > 0 && !matches!(source.as_bytes()[offset - 1], b'\n' | b'\r') {
+        if offset > 0 && !matches!(text.byte(offset - 1), b'\n' | b'\r') {
             let mut previous = tree
                 .root_node()
                 .descendant_for_byte_range(offset - 1, offset);
@@ -141,10 +154,9 @@ impl SyntaxContextProvider for TreeSitterSyntaxContext {
                 if node.end_byte() == offset
                     && Self::classify(node.kind()) == Some(gpui_base::input::SyntaxContext::Comment)
                 {
-                    let comment = &source[node.start_byte()..node.end_byte()];
                     if node.kind() == "line_comment"
                         || (node.kind() == "comment"
-                            && (comment.starts_with('#') || comment.starts_with("//")))
+                            && Self::starts_line_comment(text, node.start_byte()))
                     {
                         return gpui_base::input::SyntaxContext::Comment;
                     }
