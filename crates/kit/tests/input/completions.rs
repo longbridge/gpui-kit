@@ -741,6 +741,61 @@ fn code_action_selection_routes_to_its_provider_with_selected_range(cx: &mut Tes
     assert_eq!(second.performed.borrow().len(), 1);
 }
 
+/// Offers one action named after the range it was asked about.
+#[derive(Default)]
+struct RangeActions {
+    performed: RefCell<Vec<String>>,
+}
+
+impl CodeActionProvider for RangeActions {
+    fn id(&self) -> SharedString {
+        "range".into()
+    }
+
+    fn code_actions(
+        &self,
+        _: Entity<EditorState>,
+        range: std::ops::Range<usize>,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Task<Result<Vec<CodeAction>>> {
+        Task::ready(Ok(vec![CodeAction {
+            title: format!("{range:?}"),
+            ..Default::default()
+        }]))
+    }
+
+    fn perform_code_action(
+        &self,
+        _: Entity<EditorState>,
+        action: CodeAction,
+        _: bool,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Task<Result<()>> {
+        self.performed.borrow_mut().push(action.title);
+        Task::ready(Ok(()))
+    }
+}
+
+#[gpui_kit::test]
+fn requesting_code_actions_again_replaces_the_open_menu(cx: &mut TestAppContext) {
+    let provider = Rc::new(RangeActions::default());
+    let fixture = Fixture::new(cx);
+    fixture.state.update(cx, |state, _| {
+        state.lsp_mut().completion_provider = None;
+        state.lsp_mut().code_action_providers = vec![provider.clone()];
+    });
+    fixture.input("value", cx);
+    fixture.press("shift-left", cx);
+    fixture.press(CODE_ACTIONS, cx);
+    // Widen the selection with the menu still open and ask again.
+    fixture.press("shift-left", cx);
+    fixture.press(CODE_ACTIONS, cx);
+    fixture.press("enter", cx);
+    assert_eq!(*provider.performed.borrow(), vec!["3..5".to_string()]);
+}
+
 #[gpui_kit::test]
 fn escape_dismisses_code_actions_without_performing_them(cx: &mut TestAppContext) {
     let provider = Actions::new("Action", false);
