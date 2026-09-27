@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{ops::Range, rc::Rc};
 
 use gpui::{
     App, ElementId, IntoElement, ParentElement, RenderOnce, SharedString, StyleRefinement, Styled,
@@ -15,6 +15,24 @@ use crate::{
     icon::IconName,
     menu::{DropdownMenu as _, PopupMenuItem},
 };
+
+/// The most pages an ellipsis menu lists.
+///
+/// The menu renders every item on each frame it is open, so listing every
+/// hidden page of a large set makes each hover repaint thousands of rows.
+const MAX_ELLIPSIS_MENU_PAGES: usize = 100;
+
+/// The pages an ellipsis menu lists: the hidden pages closest to the current
+/// page, at most [`MAX_ELLIPSIS_MENU_PAGES`] of them.
+fn ellipsis_menu_pages(hidden: Range<usize>, current_page: usize) -> Range<usize> {
+    if hidden.len() <= MAX_ELLIPSIS_MENU_PAGES {
+        hidden
+    } else if hidden.start > current_page {
+        hidden.start..hidden.start + MAX_ELLIPSIS_MENU_PAGES
+    } else {
+        hidden.end - MAX_ELLIPSIS_MENU_PAGES..hidden.end
+    }
+}
 
 /// Pagination with page navigation, next and previous links.
 #[derive(IntoElement)]
@@ -218,7 +236,7 @@ impl RenderOnce for Pagination {
                     .dropdown_menu({
                         let state = item_state.clone();
                         move |mut menu, _, _| {
-                            for page in range.clone() {
+                            for page in ellipsis_menu_pages(range.clone(), current_page) {
                                 menu = menu.item(
                                     PopupMenuItem::new(format!("{}", page))
                                         .checked(page == current_page)
@@ -238,5 +256,23 @@ impl RenderOnce for Pagination {
                 })
             })
             .child(self.render_nav_button(&state, false))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_ellipsis_menu_pages() {
+        // Short gaps list every hidden page.
+        assert_eq!(ellipsis_menu_pages(2..8, 1), 2..8);
+        assert_eq!(ellipsis_menu_pages(2..8, 9), 2..8);
+
+        // Long gaps keep the pages next to the current page.
+        assert_eq!(ellipsis_menu_pages(4..10_000, 1), 4..104);
+        assert_eq!(ellipsis_menu_pages(2..9_997, 10_000), 9_897..9_997);
+        assert_eq!(ellipsis_menu_pages(5_003..10_000, 5_000), 5_003..5_103);
+        assert_eq!(ellipsis_menu_pages(2..4_998, 5_000), 4_898..4_998);
     }
 }
