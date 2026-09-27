@@ -507,7 +507,9 @@ impl RenderOnce for ColorPicker {
                         icon: self.icon.clone(),
                         selected: false,
                     })
-                    .child(self.render_colors(window, cx)),
+                    // The popover drops its content while closed, so building the
+                    // palette swatches or slider tracks then is wasted work.
+                    .when(open, |this| this.child(self.render_colors(window, cx))),
             )
     }
 }
