@@ -355,7 +355,8 @@ impl Input {
 
     /// Sets a custom context menu builder for the input, shown as a native OS menu.
     ///
-    /// If set, this overrides the built-in right-click context menu.
+    /// If set, this overrides the built-in right-click context menu. It shows
+    /// only while the state's context menu is enabled, which is the default.
     pub fn context_menu(
         mut self,
         f: impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static,
@@ -374,9 +375,11 @@ impl Input {
     /// belong in app-owned state beside the input (e.g. `Attachment`s), never
     /// inside it.
     ///
-    /// Known limit: on web `read_from_clipboard()` is `None` (text arrives
-    /// through the platform input handler); image paste there needs
-    /// `read_from_clipboard_async` and permission, out of scope here.
+    /// Known limit: on web `read_from_clipboard()` is `None`, so the handler
+    /// is skipped there and the input inserts the plain text itself (a
+    /// keyboard paste arrives through the platform input handler, a menu
+    /// paste through the asynchronous clipboard read); image paste there
+    /// needs `read_from_clipboard_async` and permission, out of scope here.
     pub fn on_paste(
         mut self,
         handler: impl Fn(&gpui::ClipboardItem, &mut Window, &mut App) -> bool + 'static,
@@ -628,9 +631,12 @@ impl RenderOnce for Input {
                         !capabilities.is_copyable(),
                         Box::new(gpui_base::input::Copy),
                     )
+                    // Offered whenever the text can change, without peeking
+                    // at the clipboard: the synchronous read is always empty
+                    // on the web, and an empty clipboard pastes nothing.
                     .menu_with_disabled(
                         t!("Input.Paste"),
-                        !(editable && cx.read_from_clipboard().is_some()),
+                        !editable,
                         Box::new(gpui_base::input::Paste),
                     )
                     .separator()

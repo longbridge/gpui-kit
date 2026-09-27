@@ -199,6 +199,24 @@ div()
     .child(Input::new(&input).appearance(false))
 ```
 
+### 上下文菜单
+
+```rust
+// 完全关闭右键菜单，自定义菜单也不会显示。
+let input = cx.new(|cx| InputState::new(window, cx).context_menu(false));
+
+// 或者用自己的菜单替换内置菜单。state 的上下文菜单需要保持开启（默认即开启）。
+Input::new(&input).context_menu(|menu, window, cx| {
+    // 可以定义自己的操作，也可以直接复用内置操作（剪切、复制、粘贴等），
+    // 不必重新实现这些功能。
+    menu.menu("Custom Action", Box::new(CustomAction))
+        .separator()
+        .menu("Cut", Box::new(input::Cut))
+        .menu("Copy", Box::new(input::Copy))
+        .menu("Paste", Box::new(input::Paste))
+})
+```
+
 ### 触摸选择
 
 在触摸屏上，长按会选中手指下的单词，手指按住不放时选区跟随手指移动。抬起手指后，选区上方会出现编辑菜单，列出当前可用的命令——`剪切`、`复制`、`粘贴` 和 `全选`——并在选区两端各显示一个拖动 handle。拖动 handle 会移动对应的一端，另一端保持不动；多行输入框在手指到达边缘时会自动滚动。长按空白处或空输入框时会放置光标，菜单只提供 `粘贴` 和 `全选`。

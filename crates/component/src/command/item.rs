@@ -130,6 +130,32 @@ impl CommandItem {
     pub(crate) fn label_text(&self) -> Option<&SharedString> {
         self.label.as_ref()
     }
+
+    /// Whether `other` filters and measures exactly like this item, so a
+    /// palette can keep its rows and row sizes when a host re-render rebuilds
+    /// an unchanged model.
+    ///
+    /// An item with a custom child never counts as unchanged, even when it is
+    /// a clone sharing the same closure: the child can read state outside the
+    /// item, so only laying it out again tells whether its height changed.
+    pub(crate) fn same_layout(&self, other: &Self) -> bool {
+        self.content.is_none()
+            && other.content.is_none()
+            && self.label == other.label
+            && self.keywords == other.keywords
+            && match (&self.icon, &other.icon) {
+                (Some(icon), Some(other)) => icon.same_layout(other),
+                (None, None) => true,
+                _ => false,
+            }
+            && self.checked == other.checked
+            && self.disabled == other.disabled
+            && match (&self.action, &other.action) {
+                (Some(action), Some(other)) => action.partial_eq(other.as_ref()),
+                (None, None) => true,
+                _ => false,
+            }
+    }
 }
 
 impl Default for CommandItem {
@@ -195,6 +221,16 @@ impl CommandGroup {
     pub fn heading(&self) -> Option<&SharedString> {
         self.heading.as_ref()
     }
+
+    fn same_layout(&self, other: &Self) -> bool {
+        self.heading == other.heading
+            && self.items.len() == other.items.len()
+            && self
+                .items
+                .iter()
+                .zip(&other.items)
+                .all(|(item, other)| item.same_layout(other))
+    }
 }
 
 /// A top-level entry in a [`crate::command::Command`].
@@ -208,6 +244,19 @@ pub enum CommandEntry {
     /// A separator that ends up leading, trailing, or next to another
     /// separator once the query has filtered the list is not rendered.
     Separator,
+}
+
+impl CommandEntry {
+    /// Whether `other` produces the same rows and row sizes as this entry for
+    /// any query. See [`CommandItem::same_layout`].
+    pub(crate) fn same_layout(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Item(item), Self::Item(other)) => item.same_layout(other),
+            (Self::Group(group), Self::Group(other)) => group.same_layout(other),
+            (Self::Separator, Self::Separator) => true,
+            _ => false,
+        }
+    }
 }
 
 impl Clone for CommandEntry {

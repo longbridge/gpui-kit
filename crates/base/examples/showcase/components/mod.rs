@@ -48,3 +48,26 @@ mod toolbar;
 mod tooltip;
 mod tree;
 mod virtual_list;
+
+/// A disclosure chevron drawn as a path in the current text color. The `⌄` and
+/// `⌃` glyphs sit at the baseline and cap height, so a centered row still shows
+/// them off center; a path is centered in its own box.
+fn chevron(up: bool) -> impl IntoElement {
+    gpui::canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            let center = bounds.center();
+            let (half_width, half_height) = (px(3.5), px(1.75));
+            let tip = if up { -half_height } else { half_height };
+            let mut path = gpui::PathBuilder::stroke(px(1.25));
+            path.move_to(gpui::point(center.x - half_width, center.y - tip));
+            path.line_to(gpui::point(center.x, center.y + tip));
+            path.line_to(gpui::point(center.x + half_width, center.y - tip));
+            if let Ok(path) = path.build() {
+                window.paint_path(path, window.text_style().color);
+            }
+        },
+    )
+    .size(px(12.))
+    .flex_none()
+}

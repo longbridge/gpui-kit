@@ -59,8 +59,6 @@ impl BaseShowcase {
                             .w_40()
                             .h_7()
                             .px_2()
-                            .flex()
-                            .items_center()
                             .border_1()
                             .border_color(example_rgb(0xd4d4d4))
                             .styles(|styles| {

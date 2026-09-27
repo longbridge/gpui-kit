@@ -55,71 +55,66 @@ impl BaseShowcase {
                     )
                     .popup(
                         AlertDialogPopup::new()
-                            .flex()
-                            .items_center()
-                            .justify_center()
+                            .w_72()
+                            .p_3()
+                            .bg(super::example_rgb(0xffffff))
+                            .border_1()
+                            .border_color(super::example_rgb(0x171717))
+                            .child(AlertDialogTitle::new().child("Delete project?"))
+                            .child(
+                                AlertDialogDescription::new()
+                                    .mt_2()
+                                    .text_xs()
+                                    .text_color(super::example_rgb(0x525252))
+                                    .child(
+                                        "This permanently deletes Acme Studio and all of its data.",
+                                    ),
+                            )
                             .child(
                                 div()
-                                    .w_72()
-                                    .p_3()
-                                    .bg(super::example_rgb(0xffffff))
-                                    .border_1()
-                                    .border_color(super::example_rgb(0x171717))
+                                    .mt_3()
+                                    .flex()
+                                    .justify_end()
+                                    .gap_2()
                                     .child(
-                                        AlertDialogTitle::new()
-                                            .child("Delete project?"),
+                                        AlertDialogCancel::new().child(
+                                            Button::new("cancel-delete")
+                                                .px_3()
+                                                .h_7()
+                                                .flex()
+                                                .items_center()
+                                                .text_xs()
+                                                .border_1()
+                                                .border_color(super::example_rgb(0xd4d4d4))
+                                                .on_click(move |_, _, cx| {
+                                                    _ = cancel_entity.update(cx, |this, cx| {
+                                                        this.alert_dialog_open = false;
+                                                        cx.notify();
+                                                    });
+                                                })
+                                                .child("Cancel"),
+                                        ),
                                     )
                                     .child(
-                                        AlertDialogDescription::new()
-                                            .mt_2()
-                                            .text_xs()
-                                            .text_color(super::example_rgb(0x525252))
-                                            .child(
-                                                "This permanently deletes Acme Studio and all of its data.",
-                                            ),
-                                    )
-                                    .child(
-                                        div()
-                                            .mt_3()
-                                            .flex()
-                                            .justify_end()
-                                            .gap_2()
-                                            .child(AlertDialogCancel::new().child(
-                                                Button::new("cancel-delete")
-                                                    .px_3()
-                                                    .h_7()
-                                                    .flex()
-                                                    .items_center()
-                                                    .text_xs()
-                                                    .border_1()
-                                                    .border_color(super::example_rgb(0xd4d4d4))
-                                                    .on_click(move |_, _, cx| {
-                                                        _ = cancel_entity.update(cx, |this, cx| {
-                                                            this.alert_dialog_open = false;
-                                                            cx.notify();
-                                                        });
-                                                    })
-                                                    .child("Cancel"),
-                                            ))
-                                            .child(AlertDialogAction::new().child(
-                                                Button::new("confirm-delete")
-                                                    .px_3()
-                                                    .h_7()
-                                                    .flex()
-                                                    .items_center()
-                                                    .text_xs()
-                                                    .border_1()
-                                                    .border_color(super::example_rgb(0x171717))
-                                                    .bg(super::example_rgb(0x171717))
-                                                    .text_color(super::example_rgb(0xffffff))
-                                                    .on_click(move |_, _, cx| {
-                                                        _ = action_entity.update(cx, |this, cx| {
-                                                            this.alert_dialog_open = false;
-                                                            cx.notify();
-                                                        });
-                                                    })
-                                                    .child("Delete"),
-                                            )),
+                                        AlertDialogAction::new().child(
+                                            Button::new("confirm-delete")
+                                                .px_3()
+                                                .h_7()
+                                                .flex()
+                                                .items_center()
+                                                .text_xs()
+                                                .border_1()
+                                                .border_color(super::example_rgb(0x171717))
+                                                .bg(super::example_rgb(0x171717))
+                                                .text_color(super::example_rgb(0xffffff))
+                                                .on_click(move |_, _, cx| {
+                                                    _ = action_entity.update(cx, |this, cx| {
+                                                        this.alert_dialog_open = false;
+                                                        cx.notify();
+                                                    });
+                                                })
+                                                .child("Delete"),
+                                        ),
                                     ),
                             ),
                     ),

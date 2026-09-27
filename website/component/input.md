@@ -216,10 +216,11 @@ div()
 ### Context Menu
 
 ```rust
-// The built-in context menu can be disabled.
+// Turn off the right-click menu entirely, including a custom one.
 let input = cx.new(|cx| InputState::new(window, cx).context_menu(false));
 
-// Or you can define a custom context menu.
+// Or replace the built-in menu with your own. The state's context menu must
+// stay enabled, which is the default.
 Input::new(&input).context_menu(|menu, window, cx| {
     // You can define your own actions and even utilize
     // built-in actions (cut, copy, paste, etc.)

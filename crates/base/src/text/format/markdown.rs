@@ -1,4 +1,4 @@
-use std::{ops::Range, sync::Arc};
+use std::{collections::BTreeMap, ops::Range, sync::Arc};
 
 use gpui::SharedString;
 use markdown::{
@@ -401,16 +401,6 @@ fn source_segments(
     segments
 }
 
-/// Returns the byte offset of the first `\n` or `\r` in `text` when only
-/// spaces and tabs precede it.
-fn newline_after_blanks(text: &str) -> Option<usize> {
-    let blanks = text
-        .bytes()
-        .take_while(|byte| matches!(byte, b' ' | b'\t'))
-        .count();
-    matches!(text.as_bytes().get(blanks), Some(b'\n' | b'\r')).then_some(blanks)
-}
-
 fn aligned_source_segments(
     raw: &str,
     rendered: &str,
@@ -420,18 +410,36 @@ fn aligned_source_segments(
     let mut segments = Vec::new();
     let mut raw_cursor = 0;
     let mut rendered_start = 0;
+    let mut whitespace_end = 0;
+    let mut source_positions = None;
+    let mut entity_cursor = None;
+    let mut entity = None;
+    // Only the final LF may absorb source-only text before it. Find the
+    // preceding line boundary once instead of recounting the suffix per LF.
+    let final_line_start = raw
+        .strip_suffix('\n')
+        .and_then(|prefix| prefix.rfind('\n'))
+        .map_or(0, |newline| newline + 1);
+
     while rendered_start < rendered.len() {
-        if decode_entities
-            && let Some((decoded, source_len)) = decoded_entity(&raw[raw_cursor..])
-            && rendered[rendered_start..].starts_with(&decoded)
+        if decode_entities && entity_cursor != Some(raw_cursor) {
+            entity = decoded_entity(&raw[raw_cursor..]);
+            entity_cursor = Some(raw_cursor);
+        }
+        if let Some((decoded, source_len)) = &entity
+            && rendered[rendered_start..].starts_with(decoded.as_str())
         {
             let rendered_end = rendered_start + decoded.len();
-            segments.push(SourceSegment {
-                rendered: rendered_start..rendered_end,
-                source: (source_offset + raw_cursor)..(source_offset + raw_cursor + source_len),
-            });
+            push_source_segment(
+                &mut segments,
+                SourceSegment {
+                    rendered: rendered_start..rendered_end,
+                    source: (source_offset + raw_cursor)
+                        ..(source_offset + raw_cursor + *source_len),
+                },
+            );
             rendered_start = rendered_end;
-            raw_cursor += source_len;
+            raw_cursor += *source_len;
             continue;
         }
 
@@ -441,21 +449,27 @@ fn aligned_source_segments(
             .expect("rendered cursor must be on a character boundary");
         let rendered_end = rendered_start + rendered_char.len_utf8();
         let remainder = &raw[raw_cursor..];
-        // Both line-break predicates stop at the first byte that decides
-        // them, so aligning a long node stays linear in its length.
+        if rendered_char == ' ' && raw_cursor >= whitespace_end {
+            // Reuse this boundary while consuming a run of literal spaces.
+            // Otherwise a long horizontal-whitespace run also costs O(n^2).
+            whitespace_end = raw_cursor
+                + remainder
+                    .bytes()
+                    .position(|byte| !matches!(byte, b' ' | b'\t'))
+                    .unwrap_or(remainder.len());
+        }
         let (relative_start, source_len) = if rendered_char == ' '
-            && let Some(newline) = newline_after_blanks(remainder)
+            && matches!(raw.as_bytes().get(whitespace_end), Some(b'\n' | b'\r'))
         {
-            let newline_len = if remainder[newline..].starts_with("\r\n") {
+            let newline_len = if raw[whitespace_end..].starts_with("\r\n") {
                 2
             } else {
                 1
             };
-            (newline, newline_len)
+            (whitespace_end - raw_cursor, newline_len)
         } else if rendered_char == '\n'
-            && remainder
-                .find('\n')
-                .is_some_and(|newline| newline + 1 == remainder.len())
+            && remainder.ends_with('\n')
+            && raw_cursor >= final_line_start
         {
             (0, remainder.len())
         } else if let Some(escaped) = remainder.strip_prefix('\\')
@@ -464,8 +478,10 @@ fn aligned_source_segments(
             (0, 1 + rendered_char.len_utf8())
         } else if remainder.starts_with(rendered_char) {
             (0, rendered_char.len_utf8())
-        } else if let Some(relative_start) = remainder.find(rendered_char) {
-            (relative_start, rendered_char.len_utf8())
+        } else if let Some(source_start) =
+            source_char_offset(raw, raw_cursor, rendered_char, &mut source_positions)
+        {
+            (source_start - raw_cursor, rendered_char.len_utf8())
         } else {
             // Decoded entities and other source-only syntax have no exact
             // rendered-byte mapping. Leave a rendered gap for this
@@ -475,32 +491,61 @@ fn aligned_source_segments(
         };
         let source_start = raw_cursor + relative_start;
         let source_end = source_start + source_len;
-        segments.push(SourceSegment {
-            rendered: rendered_start..rendered_end,
-            source: (source_offset + source_start)..(source_offset + source_end),
-        });
+        push_source_segment(
+            &mut segments,
+            SourceSegment {
+                rendered: rendered_start..rendered_end,
+                source: (source_offset + source_start)..(source_offset + source_end),
+            },
+        );
         raw_cursor = source_end;
         rendered_start = rendered_end;
     }
-    compact_source_segments(segments)
+    segments
 }
 
-fn compact_source_segments(segments: Vec<SourceSegment>) -> Vec<SourceSegment> {
-    let mut compacted: Vec<SourceSegment> = Vec::with_capacity(segments.len());
-    for segment in segments {
-        if let Some(previous) = compacted.last_mut()
-            && previous.rendered.end == segment.rendered.start
-            && previous.source.end == segment.source.start
-            && previous.rendered.len() == previous.source.len()
-            && segment.rendered.len() == segment.source.len()
-        {
-            previous.rendered.end = segment.rendered.end;
-            previous.source.end = segment.source.end;
-        } else {
-            compacted.push(segment);
-        }
+fn source_char_offset(
+    raw: &str,
+    raw_cursor: usize,
+    character: char,
+    positions: &mut Option<BTreeMap<char, Vec<usize>>>,
+) -> Option<usize> {
+    if let Some(positions) = positions.as_ref() {
+        let offsets = positions.get(&character)?;
+        return offsets
+            .get(offsets.partition_point(|&offset| offset < raw_cursor))
+            .copied();
     }
-    compacted
+    if let Some(offset) = raw[raw_cursor..].find(character) {
+        return Some(raw_cursor + offset);
+    }
+
+    // Successful searches advance raw_cursor, so their scans do not overlap.
+    // A missing character does not advance it. Index the remaining source only
+    // after the first miss so later gaps cannot repeatedly scan that suffix.
+    let mut indexed = BTreeMap::<char, Vec<usize>>::new();
+    for (offset, character) in raw[raw_cursor..].char_indices() {
+        indexed
+            .entry(character)
+            .or_default()
+            .push(raw_cursor + offset);
+    }
+    *positions = Some(indexed);
+    None
+}
+
+fn push_source_segment(segments: &mut Vec<SourceSegment>, segment: SourceSegment) {
+    if let Some(previous) = segments.last_mut()
+        && previous.rendered.end == segment.rendered.start
+        && previous.source.end == segment.source.start
+        && previous.rendered.len() == previous.source.len()
+        && segment.rendered.len() == segment.source.len()
+    {
+        previous.rendered.end = segment.rendered.end;
+        previous.source.end = segment.source.end;
+    } else {
+        segments.push(segment);
+    }
 }
 
 fn decoded_entity(source: &str) -> Option<(String, usize)> {
@@ -1164,6 +1209,150 @@ mod tests {
         );
 
         assert_eq!(select_rendered_range(source, 2..7), 2..7);
+    }
+
+    #[test]
+    fn source_alignment_compacts_long_whitespace_runs() {
+        for raw in [
+            "a ".repeat(16_384),
+            format!("a{}b", " ".repeat(32_768)),
+            format!("a{}b\n", " \t".repeat(16_384)),
+        ] {
+            let segments = aligned_source_segments(&raw, &raw, 7, true);
+            assert_eq!(
+                segments,
+                vec![SourceSegment {
+                    rendered: 0..raw.len(),
+                    source: 7..7 + raw.len(),
+                }]
+            );
+            assert!(
+                segments.capacity() < 64,
+                "compaction must not retain a per-character allocation"
+            );
+        }
+    }
+
+    #[test]
+    fn source_alignment_preserves_multiline_code_and_final_newline() {
+        let raw = "x\n".repeat(16_384);
+        let rendered = &raw[..raw.len() - 1];
+        assert_eq!(
+            aligned_source_segments(&raw, rendered, 4, false),
+            vec![SourceSegment {
+                rendered: 0..rendered.len(),
+                source: 4..4 + rendered.len(),
+            }]
+        );
+        assert_eq!(
+            aligned_source_segments("a\n> \n", "a\n\n", 0, false),
+            vec![
+                SourceSegment {
+                    rendered: 0..2,
+                    source: 0..2,
+                },
+                SourceSegment {
+                    rendered: 2..3,
+                    source: 2..5,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn source_alignment_keeps_soft_breaks_and_entities_atomic() {
+        assert_eq!(
+            aligned_source_segments("a \r\nb", "a b", 9, true),
+            vec![
+                SourceSegment {
+                    rendered: 0..1,
+                    source: 9..10,
+                },
+                SourceSegment {
+                    rendered: 1..2,
+                    source: 11..13,
+                },
+                SourceSegment {
+                    rendered: 2..3,
+                    source: 13..14,
+                },
+            ]
+        );
+        let entity = "&NotEqualTilde;";
+        let decoded = "\u{2242}\u{338}";
+        assert_eq!(
+            aligned_source_segments(entity, decoded, 3, true),
+            vec![SourceSegment {
+                rendered: 0..decoded.len(),
+                source: 3..3 + entity.len(),
+            }]
+        );
+    }
+
+    #[test]
+    fn source_alignment_resumes_after_unmapped_characters() {
+        let raw = "abc".repeat(4_096);
+        let mut positions = None;
+        assert_eq!(source_char_offset(&raw, 0, 'b', &mut positions), Some(1));
+        assert!(positions.is_none(), "successful scans need no index");
+        assert_eq!(
+            source_char_offset(&raw, 0, '\u{fffd}', &mut positions),
+            None
+        );
+        assert!(positions.is_some(), "failed scans must not be repeated");
+        assert_eq!(source_char_offset(&raw, 2, 'b', &mut positions), Some(4));
+        assert_eq!(
+            source_char_offset(&raw, raw.len(), 'a', &mut positions),
+            None
+        );
+
+        let missing = "\u{fffd}".repeat(4_096);
+        assert_eq!(
+            aligned_source_segments(&raw, &format!("{missing}abc"), 5, true),
+            vec![SourceSegment {
+                rendered: missing.len()..missing.len() + 3,
+                source: 5..8,
+            }]
+        );
+        assert_eq!(
+            aligned_source_segments("&amp;z", &format!("{missing}&z"), 0, true),
+            vec![
+                SourceSegment {
+                    rendered: missing.len()..missing.len() + 1,
+                    source: 0..5,
+                },
+                SourceSegment {
+                    rendered: missing.len() + 1..missing.len() + 2,
+                    source: 5..6,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn source_alignment_parses_long_text_and_code_without_selection() {
+        let source = format!("{}end", "a ".repeat(4_096));
+        let mut cx = NodeContext::default();
+        let document = parse(&source, &mut cx).unwrap();
+        let paragraph = first_paragraph(&document.blocks[0]).unwrap();
+        assert_eq!(paragraph.text(), source);
+        let segments = &paragraph.children[0].source_segments;
+        assert_eq!(segments.len(), 1);
+        assert!(segments.capacity() < 64);
+        assert_eq!(segments[0].source, 0..source.len());
+        assert_eq!(
+            selected_rendered_range(&source, source.len() - 3..source.len()),
+            Some(source.len() - 3..source.len())
+        );
+
+        let body = "x\n".repeat(4_096);
+        let source = format!("```\n{body}```");
+        let document = parse(&source, &mut cx).unwrap();
+        assert!(first_code_block(&document.blocks[0]).is_some());
+        assert_eq!(
+            selected_code_range(&source, body.len() - 2..body.len() - 1),
+            Some(body.len() + 2..body.len() + 3)
+        );
     }
 
     #[test]

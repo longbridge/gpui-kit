@@ -430,6 +430,8 @@ impl BaseShowcase {
             .update(cx, |state, _| state.set_editor_style(style()));
         self.combobox_query
             .update(cx, |state, _| state.set_editor_style(style()));
+        self.toolbar_search
+            .update(cx, |state, _| state.set_editor_style(style()));
         self.editor.update(cx, |state, _| {
             state.set_editor_style(InputEditorStyle {
                 highlight_styles: Arc::new(ShowcaseHighlightStyles),

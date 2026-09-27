@@ -101,7 +101,9 @@ impl Editor {
     /// Replace the built-in context menu shown on right-click.
     ///
     /// The closure receives an empty menu and returns the one to show, so it
-    /// decides entirely what appears — the default items are not added.
+    /// decides entirely what appears — the default items are not added. It
+    /// shows only while the state's context menu is enabled, which is the
+    /// default.
     pub fn context_menu(
         mut self,
         f: impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static,

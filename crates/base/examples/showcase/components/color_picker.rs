@@ -47,7 +47,7 @@ impl BaseShowcase {
             )
             .child(hex)
             .child(div().flex_1())
-            .child(if open { "⌃" } else { "⌄" });
+            .child(super::chevron(open));
 
         let swatches = div().flex().gap_1().children(
             [0xdc2626u32, 0xd97706, 0x16a34a, 0x2563eb, 0x7c3aed]
@@ -101,8 +101,6 @@ impl BaseShowcase {
                     .w_full()
                     .h_7()
                     .px_2()
-                    .flex()
-                    .items_center()
                     .border_1()
                     .border_color(super::example_rgb(0xd4d4d4))
                     .styles(|styles| {

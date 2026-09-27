@@ -325,6 +325,15 @@ impl ColumnarPoint {
     }
 }
 
+/// The document and selections a paste was asked to replace, taken when the
+/// `Paste` action ran so a clipboard read that resolves later can tell
+/// whether it still applies. See [`InputBaseState::paste_target`].
+#[derive(Debug, PartialEq)]
+struct PasteTarget {
+    document_revision: u64,
+    selections: Vec<CursorSelection>,
+}
+
 /// The shared text-editing engine behind [`crate::input::InputState`],
 /// [`crate::input::TextareaState`] and [`crate::input::EditorState`].
 ///
@@ -766,8 +775,10 @@ impl<M: InputModeKind> InputBaseState<M> {
 
     /// Sets whether the context menu that shows on right-click is enabled.
     ///
-    /// The context menu is enabled by default.
-    /// This value is ignored if a custom context menu builder is defined on the input.
+    /// The context menu is enabled by default. Disabling it turns off the
+    /// right-click menu entirely, including a custom menu set on the element.
+    /// A custom menu already replaces the built-in one, so keep this enabled
+    /// to show only your own items.
     pub fn context_menu(mut self, enable: bool) -> Self {
         self.enable_context_menu = enable;
         self
@@ -2658,10 +2669,64 @@ impl<M: InputModeKind> InputBaseState<M> {
         if !self.is_editable() {
             return;
         }
-        let Some(clipboard) = cx.read_from_clipboard() else {
+        if let Some(clipboard) = cx.read_from_clipboard() {
+            self.insert_clipboard(clipboard, window, cx);
+            return;
+        }
+        // The synchronous read is empty on platforms whose clipboard is
+        // asynchronous and permission-gated (the web), so fall back to the
+        // real read. It has to start here, still inside the user activation
+        // that dispatched `Paste`, or the browser refuses the read.
+        let read = cx.read_from_clipboard_async();
+        let target = self.paste_target();
+        cx.spawn_in(window, async move |this, cx| match read.await {
+            Ok(Some(clipboard)) => {
+                this.update_in(cx, |this, window, cx| {
+                    // The read can sit behind a permission prompt for as
+                    // long as the user likes. If they edited, moved the
+                    // caret or left the input meanwhile, the paste would
+                    // land where they no longer mean it to; drop it, as the
+                    // browser's own paste event only reaches the focused
+                    // input too.
+                    if this.is_editable()
+                        && this.focus_handle.is_focused(window)
+                        && this.paste_target() == target
+                    {
+                        this.insert_clipboard(clipboard, window, cx);
+                    }
+                })
+                .ok();
+            }
+            Ok(None) => {}
+            Err(error) => tracing::warn!("failed to read the clipboard for paste: {error}"),
+        })
+        .detach();
+    }
+
+    /// Where a paste would go right now: the document as edited so far and
+    /// the selections it would replace. Two equal targets mean an edit made
+    /// for one still applies to the other.
+    fn paste_target(&self) -> PasteTarget {
+        PasteTarget {
+            document_revision: self.document_revision,
+            selections: self.selections.iter().copied().collect(),
+        }
+    }
+
+    /// Inserts the clipboard text the way `Paste` does: one atomic edit,
+    /// newlines dropped on a single-line input, one line per selection when
+    /// the counts match on a multi-line one. A clipboard without text (an
+    /// image, say) is left alone rather than replacing the selection with
+    /// nothing.
+    fn insert_clipboard(
+        &mut self,
+        clipboard: ClipboardItem,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(mut new_text) = clipboard.text().filter(|text| !text.is_empty()) else {
             return;
         };
-        let mut new_text = clipboard.text().unwrap_or_default();
         // A paste is one atomic edit, never part of a typing run.
         self.undo_manager.set_pending_intent(EditIntent::Atomic);
 
@@ -4471,7 +4536,10 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
                 }
             })
             .flex_1()
-            .when(self.is_multi_line(), |this| this.h_full())
+            .h_full()
+            // A single line fills the frame and sits at its vertical center,
+            // so the frame needs no layout of its own to hold it.
+            .when(!self.is_multi_line(), |this| this.flex().items_center())
             .flex_grow_1()
             .overflow_x_hidden()
             .when(self.is_multi_line(), |this| {
@@ -4843,6 +4911,36 @@ mod tests {
                 f(crate::input::InputState::new(window, cx))
             })
         }
+    }
+
+    /// The frame is laid out by the application, which should not have to
+    /// center a single line inside it.
+    #[gpui::test]
+    fn single_line_is_centered_in_a_taller_frame(cx: &mut TestAppContext) {
+        struct Frame(Entity<InputBaseState<InputMode>>);
+        impl Render for Frame {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                crate::input::InputBase::new("frame")
+                    .h(px(60.))
+                    .child(crate::input::Input::new(&self.0))
+            }
+        }
+
+        cx.update(crate::init);
+        let mut input = None;
+        let window = cx.open_window(size(px(400.), px(100.)), |window, cx| {
+            let state = cx.new(|cx| crate::input::InputState::new(window, cx).default_value("a"));
+            input = Some(state.clone());
+            Frame(state)
+        });
+        let input = input.unwrap();
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        input.read_with(&cx, |state, _| {
+            let line = state.input_bounds;
+            assert_eq!(line.center().y, px(30.), "line {line:?}");
+        });
     }
 
     #[gpui::test]
@@ -9638,6 +9736,74 @@ mod tests {
         });
         // One clipboard line per cursor.
         assert_cursors(&mut cx, &input, "x|1\ny|2\nz|3");
+    }
+
+    #[gpui::test]
+    fn test_paste_without_text_leaves_the_selection_alone(cx: &mut TestAppContext) {
+        use gpui::{ClipboardEntry, Image, ImageFormat};
+
+        let input_view = InputView::build(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.set_value("hello world", window, cx);
+                state.select_all(window, cx);
+                cx.write_to_clipboard(ClipboardItem {
+                    entries: vec![ClipboardEntry::Image(Image::from_bytes(
+                        ImageFormat::Png,
+                        vec![0x89, b'P', b'N', b'G'],
+                    ))],
+                });
+
+                // An image-only clipboard must not replace the selection
+                // with nothing.
+                state.paste(&Paste, window, cx);
+                assert_eq!(state.value(), "hello world");
+                assert_eq!(state.selected_range(), 0..11);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn test_paste_target_tracks_edits_and_selections(cx: &mut TestAppContext) {
+        let view = multi_line(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        let input = view.input;
+
+        setup_cursors(&mut cx, &input, "ab|c");
+        let target = input.read_with(&cx, |state, _| state.paste_target());
+        // Nothing happened: a paste asked for then still applies.
+        assert_eq!(
+            input.read_with(&cx, |state, _| state.paste_target()),
+            target
+        );
+
+        // Moving the caret changes where the paste would go.
+        cx.update(|_, cx| {
+            input.update(cx, |state, cx| {
+                let id = state.selections.generate_id();
+                state
+                    .selections
+                    .replace_all(vec![CursorSelection::new(id, 1, 1)]);
+                cx.notify();
+            });
+        });
+        let moved = input.read_with(&cx, |state, _| state.paste_target());
+        assert_ne!(moved, target);
+
+        // Editing the text changes it too, even with the caret put back.
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_range_silent(None, "x", window, cx);
+                let id = state.selections.generate_id();
+                state
+                    .selections
+                    .replace_all(vec![CursorSelection::new(id, 1, 1)]);
+            });
+        });
+        assert_ne!(input.read_with(&cx, |state, _| state.paste_target()), moved);
     }
 }
 

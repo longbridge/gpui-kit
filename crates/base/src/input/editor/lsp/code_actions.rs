@@ -82,6 +82,7 @@ impl InputBaseState<EditorMode> {
                 editor.update(cx, |editor, cx| {
                     editor.extras.context_menu_content.code_action.open = false;
                     editor.extras.context_menu_content.code_action.items.clear();
+                    editor.extras.context_menu_content.code_action.bump();
                     cx.notify();
                 })?;
                 return Ok(());
@@ -99,6 +100,9 @@ impl InputBaseState<EditorMode> {
                         .code_action
                         .items
                         .is_empty();
+                    // The overlay rebuilds on a new revision, so a refresh
+                    // while the menu is already open must bump it too.
+                    editor.extras.context_menu_content.code_action.bump();
 
                     cx.notify();
                 })

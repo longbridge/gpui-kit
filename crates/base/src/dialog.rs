@@ -185,6 +185,9 @@ impl RenderOnce for DialogTrigger {
 
 macro_rules! dialog_part {
     ($(#[$meta:meta])* $name:ident, $id:literal) => {
+        dialog_part!($(#[$meta])* $name, $id, false);
+    };
+    ($(#[$meta:meta])* $name:ident, $id:literal, $occlude:literal) => {
         $(#[$meta])*
         #[derive(IntoElement)]
         pub struct $name {
@@ -223,6 +226,9 @@ macro_rules! dialog_part {
             fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
                 div()
                     .id($id)
+                    // The popup sits over the backdrop, whose press dismisses
+                    // the dialog, so it keeps presses on itself from falling through.
+                    .when($occlude, |this| this.occlude())
                     .children(self.children)
                     .refine_style(&self.style)
             }
@@ -239,7 +245,8 @@ dialog_part!(
 dialog_part!(
     /// Unstyled popup part containing dialog content.
     DialogPopup,
-    "dialog-popup"
+    "dialog-popup",
+    true
 );
 
 /// Unstyled title slot for a dialog surface.
@@ -548,6 +555,11 @@ impl RenderOnce for Dialog {
                     .left_0()
                     .w(viewport.width)
                     .h(viewport.height)
+                    // A popup in normal flow lands centered; `refine_style`
+                    // below lets the caller lay the host out differently.
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .role(self.role)
                     .track_focus(&self.focus)
                     .focus_trap(format!("dialog-{}", self.layer), &self.focus)
@@ -715,11 +727,13 @@ mod tests {
                 attempts,
             }
         });
-        cx.update(|window, cx| {
+        let viewport = cx.update(|window, cx| {
             view.read(cx).focus.clone().focus(window, cx);
             window.draw(cx).clear(cx);
+            window.viewport_size()
         });
-        cx.simulate_click(point(px(20.), px(20.)), Default::default());
+        let popup_center = point(viewport.width / 2., viewport.height / 2.);
+        cx.simulate_click(popup_center, Default::default());
         cx.run_until_parked();
         assert_eq!(attempts.get(), 1);
         assert!(handle.is_open(), "on_cancel can veto pointer dismissal");
@@ -820,6 +834,77 @@ mod tests {
             bounds.get().size,
             viewport,
             "a zero-sized backdrop paints no overlay behind the dialog"
+        );
+    }
+
+    /// The backdrop sits under the popup, so a press on the popup must not
+    /// reach it and dismiss the dialog.
+    #[gpui::test]
+    fn pressing_the_popup_does_not_dismiss(cx: &mut gpui::TestAppContext) {
+        struct Harness(DialogHandle);
+        impl Render for Harness {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                Dialog::new(cx)
+                    .handle(self.0.clone())
+                    .backdrop(div().absolute().size_full())
+                    .popup(DialogPopup::new().size(px(100.)))
+            }
+        }
+
+        cx.update(crate::init);
+        let handle = DialogHandle::new(true);
+        let (_, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            move |_, _| Harness(handle)
+        });
+        let viewport = cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            window.viewport_size()
+        });
+
+        cx.simulate_click(
+            point(viewport.width / 2., viewport.height / 2.),
+            Default::default(),
+        );
+        assert!(
+            handle.is_open(),
+            "a press on the popup keeps the dialog open"
+        );
+
+        cx.simulate_click(point(px(5.), px(5.)), Default::default());
+        assert!(!handle.is_open(), "a press on the backdrop still dismisses");
+    }
+
+    #[gpui::test]
+    fn the_popup_is_centered_by_default(cx: &mut gpui::TestAppContext) {
+        use gpui::{Bounds, canvas};
+        use std::cell::Cell;
+
+        struct Harness(Rc<Cell<Bounds<Pixels>>>);
+        impl Render for Harness {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                let bounds = self.0.clone();
+                Dialog::new(cx).popup(
+                    canvas(move |popup, _, _| bounds.set(popup), |_, _, _, _| {}).size(px(100.)),
+                )
+            }
+        }
+
+        cx.update(crate::init);
+        let bounds = Rc::new(Cell::new(Bounds::default()));
+        let (_, cx) = cx.add_window_view({
+            let bounds = bounds.clone();
+            move |_, _| Harness(bounds)
+        });
+        let viewport = cx.update(|window, cx| {
+            let viewport = window.viewport_size();
+            window.draw(cx).clear(cx);
+            viewport
+        });
+
+        assert_eq!(
+            bounds.get().center(),
+            point(viewport.width / 2., viewport.height / 2.)
         );
     }
 }

@@ -465,8 +465,9 @@ mod tests {
     #[gpui::test]
     fn long_press_on_empty_input_places_caret_with_menu(cx: &mut TestAppContext) {
         let (input, cx) = open_input(cx, "");
-        long_press(cx, TouchPhase::Started, (20., 10.), (20., 10.));
-        long_press(cx, TouchPhase::Ended, (20., 10.), (20., 10.));
+        let caret = caret_at(&input, cx, 0);
+        long_press(cx, TouchPhase::Started, caret, caret);
+        long_press(cx, TouchPhase::Ended, caret, caret);
         input.read_with(cx, |state, _| {
             assert_eq!(state.selected_range(), 0..0);
             let snapshot = state.touch_selection().expect("caret still gets a menu");
