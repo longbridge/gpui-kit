@@ -1,7 +1,10 @@
 use std::rc::{Rc, Weak};
+#[cfg(not(target_family = "wasm"))]
+use std::time::Instant;
+#[cfg(target_family = "wasm")]
+use web_time::Instant;
 
 use gpui::{App, Entity, Global, OwnedMenu};
-use web_time::Instant;
 
 use crate::text::TextViewState;
 
