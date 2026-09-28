@@ -2,9 +2,10 @@ use gpui_kit::component::{
     AxisExt, IndexPath, Sizable, Size,
     button::Button,
     checkbox::Checkbox,
-    color_picker::{ColorPicker, ColorPickerState},
+    color_picker::{ColorPickerState, ColorSelect},
     date_picker::{DatePicker, DatePickerState},
     form::{field, v_form},
+    indigo_500,
     input::{Input, InputState, Textarea, TextareaState},
     select::{Select, SelectState},
     separator::Separator,
@@ -77,7 +78,8 @@ impl FormStory {
         });
 
         let name_input = cx.new(|cx| InputState::new(window, cx).default_value("Jason Lee"));
-        let color_state = cx.new(|cx| ColorPickerState::new(window, cx));
+        let color_state =
+            cx.new(|cx| ColorPickerState::new(window, cx).default_value(indigo_500()));
 
         let email_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Enter text here..."));
@@ -223,14 +225,8 @@ impl Render for FormStory {
                     )
                     .child(
                         field()
-                            .when(is_horizontal && is_multi_column, |this| {
-                                this.label_indent(false)
-                            })
-                            .child(
-                                ColorPicker::new(&self.color_state)
-                                    .small()
-                                    .label("Theme color"),
-                            ),
+                            .label("Theme color")
+                            .child(ColorSelect::new(&self.color_state).with_size(self.size)),
                     )
                     .child(
                         field()

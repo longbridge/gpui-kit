@@ -10,7 +10,9 @@ ColorPicker 是一个通用的颜色选择组件，提供直观的颜色选择�
 ## 导入
 
 ```rust
-use gpui_kit::component::color_picker::{ColorPicker, ColorPickerState, ColorPickerEvent};
+use gpui_kit::component::color_picker::{
+    ColorPicker, ColorPickerEvent, ColorPickerState, ColorSelect,
+};
 ```
 
 ## 用法
@@ -108,6 +110,24 @@ ColorPicker::new(&color_picker)
     .anchor(Anchor::TopRight)
 ```
 
+### Color Select
+
+`ColorSelect` 把颜色选择器绘制成一个带边框的字段，外观和 `Select` 一致：左边是当前颜色的色块，中间是 hex 值，右边是 Caret。点击字段任意位置都会打开同一个弹出面板。它适合用在表单里，让颜色字段和周围的输入框保持相同的高度和边框；工具栏里需要紧凑色块时，仍然使用 `ColorPicker`。
+
+```rust
+use gpui_kit::component::{Sizable as _, form::field};
+
+field()
+    .label("Theme color")
+    .child(ColorSelect::new(&color_picker))
+
+// 尺寸与 Input、Select 一致。
+ColorSelect::new(&color_picker).large()
+
+// 未选择颜色时显示的占位文字。
+ColorSelect::new(&color_picker).placeholder("Pick a color")
+```
+
 ## 颜色选择界面
 
 ### 调色板
@@ -197,6 +217,7 @@ ColorPicker 在选择颜色时会保留 alpha 值，也可通过 HSLA 的 alpha 
 ## API 参考
 
 - [ColorPicker]
+- [ColorSelect]
 - [ColorPickerState]
 - [ColorPickerEvent]
 
@@ -355,5 +376,6 @@ let _subscription = cx.subscribe(&color_picker, |this, _, ev, _| match ev {
 ```
 
 [ColorPicker]: https://docs.rs/gpui-component/latest/gpui_component/color_picker/struct.ColorPicker.html
+[ColorSelect]: https://docs.rs/gpui-component/latest/gpui_component/color_picker/struct.ColorSelect.html
 [ColorPickerState]: https://docs.rs/gpui-component/latest/gpui_component/color_picker/struct.ColorPickerState.html
 [ColorPickerEvent]: https://docs.rs/gpui-component/latest/gpui_component/color_picker/enum.ColorPickerEvent.html
