@@ -9,12 +9,14 @@ uvx so no global Python package installation is required.
 """
 
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[3]
 FONTS = ROOT / "crates/story-web/fonts"
+INCLUDE_STR = re.compile(r'include_str!\(\s*"([^"]+)"\s*\)')
 
 
 def project_text() -> str:
@@ -27,7 +29,12 @@ def project_text() -> str:
     text = ""
     for root in roots:
         for path in sorted(root.rglob("*.rs")):
-            text += path.read_text(encoding="utf-8")
+            source = path.read_text(encoding="utf-8")
+            text += source
+            # Files pulled in with `include_str!` are rendered too, such as the
+            # README the welcome story shows with its box-drawing crate tree.
+            for included in INCLUDE_STR.findall(source):
+                text += (path.parent / included).read_text(encoding="utf-8")
     # UI punctuation plus a compact set used by examples and empty/error states.
     # Emoji are not subset: the web platform draws them through the browser.
     return "".join(sorted(set(text + "–—…‘’“”•→←↑↓✓✕⚠★☆❤")))
@@ -36,8 +43,11 @@ def project_text() -> str:
 def subset(source: Path, output: Path, text_file: Path) -> None:
     subprocess.run(
         [
-            "uvx", "--from", "fonttools[woff]", "pyftsubset", str(source),
+            "uvx", "--from", "fonttools[woff]==4.66.0", "pyftsubset", str(source),
             f"--text-file={text_file}", f"--output-file={output}",
+            # Always write uncompressed OpenType, even from the WOFF2 Inter
+            # source: newer FontTools otherwise keeps the input flavor.
+            "--flavor=none",
             "--layout-features=*", "--glyph-names", "--symbol-cmap",
             "--legacy-cmap", "--notdef-glyph", "--notdef-outline",
             "--recommended-glyphs", "--name-IDs=*", "--name-legacy",
