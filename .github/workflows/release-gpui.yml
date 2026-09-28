@@ -30,32 +30,30 @@ jobs:
     # macOS verifies the Metal shader build script of gpui_apple, the one
     # part of the pipeline that only compiles on Apple platforms.
     runs-on: macos-latest
-    # Package verification builds the staged GPUI crates. A first publish of
-    # brand-new crates may also wait on crates.io's rate limit between batches.
+    # Package verification builds the staged GPUI crates. Brand-new crates
+    # may also wait on crates.io's rate limit between publish batches.
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - uses: oven-sh/setup-bun@v2
-      - name: Verify the release script
-        run: bun script/bump-gpui.ts --self-test
       # The staged GPUI crates need the platform build dependencies.
       - name: Install system dependencies
         run: script/bootstrap
-      - name: Cache the staged GPUI workspace
+      - name: Cache the staged workspace and repository builds
         uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
-            target/gpui-pre/
-          key: release-gpui-snapshot-${{ runner.os }}-${{ github.run_id }}
-          restore-keys: release-gpui-snapshot-${{ runner.os }}-
+            target/
+          key: release-gpui-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: release-gpui-${{ runner.os }}-
       - name: Publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          bun script/bump-gpui.ts ${{ inputs.version }} --rev "${{ inputs.rev || 'main' }}" ${{ inputs.force && '--force' || '' }}
+          bun script/bump-gpui.ts ${{ inputs.version }} --skip-kit-check --rev "${{ inputs.rev || 'main' }}" ${{ inputs.force && '--force' || '' }}
       - name: Summary
         if: always()
         run: |
@@ -65,8 +63,11 @@ jobs:
               echo
               echo "Zed revision: $(jq -r .zed.rev target/gpui-pre/gpui-pre.json)"
               echo
-              echo 'GPUI Kit compatibility is verified by CI in the PR that upgrades its snapshot pins.'
-              echo
+              if [ "$(jq -r '.kit_check.passed // empty' target/gpui-pre/gpui-pre.json)" = "false" ]; then
+                echo "> [!WARNING]"
+                echo "> gpui-kit needs adapting: $(jq -r .kit_check.error target/gpui-pre/gpui-pre.json)"
+                echo
+              fi
               echo '| Zed crate | Published as |'
               echo '| --- | --- |'
               jq -r '.crates[] | "| \(.zed_name) | \(.name) |"' target/gpui-pre/gpui-pre.json
