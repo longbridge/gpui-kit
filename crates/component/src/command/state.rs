@@ -700,9 +700,28 @@ impl CommandState {
         });
     }
 
+    /// Row corner radius, concentric with the frame: the list's `p_1` (plus the
+    /// border when bordered) sits between a row and the frame's corner. A
+    /// borderless command without its own radius keeps the theme radius, since
+    /// its frame belongs to the host.
+    fn item_radius(&self, window: &Window, cx: &App) -> Pixels {
+        let theme = cx.theme();
+        let rem_size = window.rem_size();
+        let own_radius = self.options.style.corner_radii.top_left;
+        let (outer, border) = match (self.options.bordered, own_radius) {
+            (true, radius) => (
+                radius.map_or(theme.radius_lg, |r| r.to_pixels(rem_size)),
+                px(1.),
+            ),
+            (false, Some(radius)) => (radius.to_pixels(rem_size), px(0.)),
+            (false, None) => return theme.radius,
+        };
+        (outer - rem_size * 0.25 - border).max(px(0.))
+    }
+
     /// The frame every item row shares, so that the measured height matches the
     /// rendered one.
-    fn item_row(&self, selected: bool, cx: &App) -> gpui::Div {
+    fn item_row(&self, selected: bool, window: &Window, cx: &App) -> gpui::Div {
         div()
             .flex()
             .flex_row()
@@ -712,7 +731,7 @@ impl CommandState {
             .px_2()
             .py_1p5()
             .text_sm()
-            .rounded(cx.theme().radius)
+            .rounded(self.item_radius(window, cx))
             .when(selected, |this| {
                 this.bg(cx.theme().accent)
                     .text_color(cx.theme().accent_foreground)
@@ -824,7 +843,7 @@ impl CommandState {
                 .into_any_element(),
         };
 
-        self.item_row(selected, cx)
+        self.item_row(selected, window, cx)
             .id(self.matched[matched_ix].index_path)
             .test_support()
             .role(Role::ListBoxOption)
