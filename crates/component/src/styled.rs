@@ -10,6 +10,8 @@ use crate::ActiveTheme as _;
 
 const FOCUS_RING_WIDTH: Pixels = px(3.);
 const FOCUS_RING_OPACITY: f32 = 0.5;
+/// Gap between a borderless element's edge and a focus line drawn off it, in rem.
+const FOCUS_LINE_GAP: f32 = 0.125;
 
 /// Ink every layer of a surface's shadow carries — the `rgb(0 0 0 / 0.1)`
 /// shadcn/ui spends at each elevation.
@@ -131,8 +133,8 @@ pub trait ThemeStyled: Styled + Sized {
     /// The ring is dropped when [`crate::Theme::focus_ring`] is off, leaving
     /// the tinted border — an application whose layout clips its containers can
     /// turn it off rather than finding room for the ring in each of them. An
-    /// element without a border draws a 1px ring just inside its edge instead,
-    /// so borderless controls still show focus.
+    /// element without a border draws a 1px line on its edge instead, so
+    /// borderless controls still show focus.
     ///
     /// Calling this turns the ring on; gate it with `when` for the conditions
     /// that decide whether the control shows one at all — its focus state,
@@ -174,29 +176,11 @@ impl<T: Styled + Sized> ThemeStyled for T {
     /// The ring sits outside the element's border, so an ancestor that clips
     /// its content will cut it off — leave it a few pixels of room, or don't
     /// clip.
-    fn focus_ring_style(mut self, window: &Window, cx: &App) -> Self
+    fn focus_ring_style(self, window: &Window, cx: &App) -> Self
     where
         Self: ParentElement,
     {
-        // The ring is painted outside the border, so a clipping ancestor cuts
-        // it off. An application whose layout clips heavily turns it off in the
-        // theme and keeps the tinted border, which takes no space. Without a
-        // border to tint, draw the same 1px line inside the edge.
-        if !cx.theme().focus_ring {
-            let rem_size = window.rem_size();
-            let has_border =
-                border_widths(self.style(), rem_size).any(|width| *width > Pixels::ZERO);
-            if has_border {
-                return self.border_color(cx.theme().ring);
-            }
-            return inset_focus_ring(self, window, cx.theme().ring);
-        }
-
-        focus_ring(
-            self.border_color(cx.theme().ring),
-            window,
-            cx.theme().ring.alpha(FOCUS_RING_OPACITY),
-        )
+        focus_style(self, FocusLine::Edge, window, cx)
     }
 
     fn popover_style(self, cx: &App) -> Self {
@@ -245,13 +229,57 @@ fn corner_radii_refinement(radius: Corners<Pixels>) -> StyleRefinement {
     style
 }
 
-/// Draw a 1px ring just inside a borderless element's edge.
-///
-/// It sits within the element's bounds, so no clipping ancestor can cut it,
-/// and it is an absolute child, so it changes no layout. With no border, the
-/// element's own radius is already concentric with its edge.
-fn inset_focus_ring<T: Styled + ParentElement>(mut element: T, window: &Window, color: Hsla) -> T {
-    let radius = corner_radii(element.style(), window.rem_size());
+/// Where a borderless element draws its 1px focus line when
+/// [`crate::Theme::focus_ring`] is off.
+#[derive(Clone, Copy)]
+pub(crate) enum FocusLine {
+    /// On the element's edge, in the `ring` colour. For elements whose
+    /// content sits clear of the edge and that have no fill of their own.
+    Edge,
+    /// Inset from the edge, in the given colour. For filled elements, where
+    /// the `ring` colour can land close to the fill; pass a colour that
+    /// contrasts with it, such as the element's foreground.
+    Inside(Hsla),
+    /// Just outside the edge, in the `ring` colour. For elements with no
+    /// padding, where a line on the edge would touch their text.
+    Outside,
+}
+
+/// Style a focused element as [`ThemeStyled::focus_ring_style`] does, with
+/// `line` choosing where a borderless element draws its focus line.
+pub(crate) fn focus_style<T: Styled + ParentElement>(
+    mut element: T,
+    line: FocusLine,
+    window: &Window,
+    cx: &App,
+) -> T {
+    let theme = cx.theme();
+    if theme.focus_ring {
+        return focus_ring(
+            element.border_color(theme.ring),
+            window,
+            theme.ring.alpha(FOCUS_RING_OPACITY),
+        );
+    }
+
+    // The ring is painted outside the border, so a clipping ancestor cuts it
+    // off. An application whose layout clips heavily turns it off in the theme
+    // and keeps the tinted border, which takes no space.
+    let rem_size = window.rem_size();
+    if border_widths(element.style(), rem_size).any(|width| *width > Pixels::ZERO) {
+        return element.border_color(theme.ring);
+    }
+
+    let gap = rem_size * FOCUS_LINE_GAP;
+    let (color, inset) = match line {
+        FocusLine::Edge => (theme.ring, Pixels::ZERO),
+        FocusLine::Inside(color) => (color, gap),
+        FocusLine::Outside => (theme.ring, -gap),
+    };
+    // Shrinking or growing the box by `inset` keeps the line concentric with
+    // the element's own corners.
+    let radius = corner_radii(element.style(), rem_size)
+        .map(|value| (*value - inset).max(Pixels::ZERO));
     element.child(
         div()
             .when(cfg!(test), |this| {
@@ -259,10 +287,10 @@ fn inset_focus_ring<T: Styled + ParentElement>(mut element: T, window: &Window, 
             })
             .flex_none()
             .absolute()
-            .top_0()
-            .left_0()
-            .right_0()
-            .bottom_0()
+            .top(inset)
+            .left(inset)
+            .right(inset)
+            .bottom(inset)
             .border_1()
             .border_color(color)
             .refine_style(&corner_radii_refinement(radius)),
