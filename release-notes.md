@@ -47,6 +47,30 @@ motionless by default, and `gpui-component` projects its motion tokens onto
 `gpui_base::Theme::plot` whenever its theme is applied. The `decimal` feature
 moves to `gpui-base`; `gpui-component`'s `decimal` feature forwards to it.
 
+#### Added: chart appear motion
+
+Charts draw their data in the first time they are painted, over 500 ms on the
+theme's enter curve: line, area, candlestick and sankey charts reveal from the
+left, bars grow out of the zero line one after another, a pie sweeps clockwise
+and a radar grows out of its center. Axes, grids and labels are there from the
+first frame, the tooltip waits until the data is whole, and reduced motion
+skips it. New data paints in place, so a chart fed live quotes does not replay.
+
+```rust
+pub fn appear(self, appear: bool) -> Self       // every chart: opt out, e.g. in list rows
+pub fn appear_key(self, key: impl Hash) -> Self // every chart: replay when the key changes
+```
+
+Custom plots opt in through `gpui_base::plot`:
+
+```rust
+pub struct PlotAppear // progress(), staggered(index, count, spread), is_appearing(), complete()
+fn Plot::appear(&mut self, appear: PlotAppear, window: &mut Window, cx: &mut App)
+fn Plot::appear_generation(&self) -> Option<u64> // Some opts in; a new value replays
+fn Plot::interactive(&self) -> bool              // hover and tooltip, apart from the id
+pub fn PlotMotion::with_appear(self, appear: Transition) -> Self
+```
+
 #### Breaking changes
 
 ##### Plot API
@@ -78,6 +102,10 @@ the new `f32` support. Custom plots built on the primitives need these changes:
   `#[non_exhaustive]`; build them with their constructors.
 - `#[derive(IntoPlot)]` generates `type Element = PlotElement<Self>` instead of
   an `Element` impl on the plot; `gpui_base::Theme` gains a `plot` field.
+- `Plot::id` gives a plot element state; whether it tracks hover is
+  `Plot::interactive` (`true` by default, so an existing plot is unchanged).
+  A chart with `interactive(false)` now returns its id, keeping its appear and
+  path caches but still no hitbox.
 
 `StrokeStyle` and `stroke_style` are removed outright. Deprecated aliases keep
 `AXIS_GAP`, `dot_fill_color`, `dot_stroke_color` and `focus` compiling for this
