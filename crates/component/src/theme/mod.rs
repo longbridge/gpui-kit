@@ -63,11 +63,18 @@ const RADIUS_FULL: Pixels = px(9999.);
 
 /// How long a chart's data takes to draw in the first time it is painted.
 ///
-/// ECharts draws a series in over 1000 ms on a cubic ease-out. A desktop
-/// screen full of charts reads that as waiting, so this halves it on the
-/// design system's enter curve: long enough to show the shape of the data
-/// arriving, short enough to be done before the eye settles on it.
-const PLOT_APPEAR: Duration = Duration::from_millis(500);
+/// The mainstream chart libraries agree on about a second: ECharts, Chart.js
+/// and Highcharts all default to 1000 ms, ApexCharts to 800 ms and Recharts to
+/// 1500 ms.
+const PLOT_APPEAR: Duration = Duration::from_millis(1000);
+
+/// The curve a chart's data draws in on: ECharts' `cubicInOut`.
+///
+/// Not the design system's enter curve. That one is an exponential ease-out
+/// built for a popover, done nine-tenths of the way in the first quarter, which
+/// makes a second of drawing in read as a flash. Data growing into place starts
+/// and settles gently instead, as ECharts, Highcharts and ApexCharts draw it.
+const PLOT_APPEAR_EASING: (f32, f32, f32, f32) = (0.645, 0.045, 0.355, 1.0);
 
 /// How long the scrollbar stays visible after the last scroll, drag, or hover.
 const SCROLLBAR_IDLE: Duration = Duration::from_secs(2);
@@ -101,7 +108,7 @@ const SCROLLBAR_THUMB_INSET: Pixels = px(4.);
 /// the way there in the first third. The fast tier as a critically damped
 /// response lands in the same place, and the tolerance is sub-pixel so the
 /// spring rests once nothing visible moves. The hover fades on the same tier.
-/// The data draws in over [`PLOT_APPEAR`].
+/// The data draws in over [`PLOT_APPEAR`] on [`PLOT_APPEAR_EASING`].
 fn plot_motion(motion: &MotionTokens) -> gpui_base::PlotMotion {
     gpui_base::PlotMotion::default()
         .with_pointer(gpui_base::Spring::new(motion.duration_fast).with_epsilon(0.1))
@@ -113,9 +120,11 @@ fn plot_motion(motion: &MotionTokens) -> gpui_base::PlotMotion {
             gpui_base::motion::Transition::new(motion.duration_fast)
                 .easing(motion.easing_exit.clone()),
         )
-        .with_appear(
-            gpui_base::motion::Transition::new(PLOT_APPEAR).easing(motion.easing_enter.clone()),
-        )
+        .with_appear(gpui_base::motion::Transition::new(PLOT_APPEAR).easing({
+            let (x1, y1, x2, y2) = PLOT_APPEAR_EASING;
+            gpui_base::motion::Easing::cubic_bezier(x1, y1, x2, y2)
+                .expect("static appear curve is valid")
+        }))
 }
 
 /// The scrollbar motion this design system projects onto Base.

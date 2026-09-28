@@ -139,7 +139,7 @@ let motion = PlotMotion::default()
     .with_pointer(Spring::new(Duration::from_millis(120)).with_epsilon(0.1))
     .with_enter(Transition::new(Duration::from_millis(120)))
     .with_exit(Transition::new(Duration::from_millis(120)))
-    .with_appear(Transition::new(Duration::from_millis(500)));
+    .with_appear(Transition::new(Duration::from_millis(1000)));
 Theme::global_mut(cx).plot = PlotTheme::new().with_motion(motion);
 ```
 

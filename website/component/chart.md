@@ -776,7 +776,7 @@ The emphasis is animated with the styled layer's motion tokens (`cx.theme().moti
 
 ### Appear
 
-The data draws in the first time a chart is painted, over 500 ms on the enter curve: a line, an area, candlesticks and a sankey diagram are revealed from the left, bars grow out of the zero line one after another, a pie sweeps clockwise from its first slice, and a radar grows out of its center. Axes, grid lines and tick labels are there from the first frame, and the tooltip waits until the data is whole.
+The data draws in the first time a chart is painted, over 1000 ms on ECharts' `cubicInOut` curve, the second that ECharts, Chart.js and Highcharts all default to: a line, an area, candlesticks and a sankey diagram are revealed from the left, bars grow out of the zero line one after another, a pie sweeps clockwise from its first slice, and a radar grows out of its center. Axes, grid lines and tick labels are there from the first frame, and the tooltip waits until the data is whole.
 
 The appear runs once per id. New data paints in place, so a chart fed live quotes does not draw in again on every tick. To replay it when the chart starts showing something else, such as another symbol or period, hand it a key:
 
