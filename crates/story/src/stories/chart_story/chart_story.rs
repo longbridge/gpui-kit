@@ -25,7 +25,7 @@ use gpui_kit::{
 use serde::Deserialize;
 
 use super::StackedBarChart;
-use crate::Story;
+use crate::{Story, story_toolbar_group};
 
 /// The height of one chart card, and the list's overdraw: the virtual list
 /// keeps one row of cards live on either side of the viewport.
@@ -1680,20 +1680,23 @@ impl Render for ChartStory {
             .on_prepaint(move |bounds, _, cx| {
                 story.update(cx, |this, cx| this.measure(bounds.size.width, cx));
             })
+            // The toolbar stays put while the gallery scrolls under it, so the
+            // gap below it belongs to the toolbar, not to the list's padding.
             .child(
-                h_flex()
-                    .w_full()
-                    .justify_end()
+                div()
                     .px(CONTENT_INSET)
                     .pt(CONTENT_INSET)
+                    .pb(CARD_GAP)
                     .child(
-                        Button::new("chart-replay")
-                            .icon(IconName::RotateCw)
-                            .label("Replay")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.appear_generation += 1;
-                                cx.notify();
-                            })),
+                        story_toolbar_group().child(
+                            Button::new("chart-replay")
+                                .icon(IconName::RotateCw)
+                                .label("Replay")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.appear_generation += 1;
+                                    cx.notify();
+                                })),
+                        ),
                     ),
             )
             .child(
@@ -1728,8 +1731,9 @@ impl Render for ChartStory {
                         })
                         .size_full()
                         // The list's own style honours vertical padding only, so the
-                        // horizontal inset rides on each row above.
-                        .py(CONTENT_INSET),
+                        // horizontal inset rides on each row above; the toolbar
+                        // above holds the top gap.
+                        .pb(CONTENT_INSET),
                     )
                     .vertical_scrollbar(&self.list_state),
             )
