@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
-use crate::ThemeStyled as _;
 use crate::{
     ActiveTheme, AxisExt, Sizable, Size, StyledExt, checkbox::checkbox_check_icon, h_flex,
     text::Text, tooltip::ComponentTooltip, v_flex,
 };
+use crate::{StyleSized as _, ThemeStyled as _};
 use gpui::{
     AnyElement, App, Axis, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
     SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window, div,
@@ -217,11 +217,8 @@ impl RenderOnce for Radio {
                 this.focus_ring_style(window, cx)
             })
             .map(|this| match self.size {
-                Size::XSmall => this.text_xs(),
-                Size::Small => this.text_sm(),
-                Size::Medium => this.text_base(),
-                Size::Large => this.text_lg(),
-                _ => this,
+                Size::Size(_) => this,
+                size => this.input_text_size(size),
             })
             .refine_style(&self.style)
             .child(

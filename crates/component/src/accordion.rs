@@ -279,7 +279,7 @@ impl Styled for AccordionItem {
 impl RenderOnce for AccordionItem {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let text_size = match self.size {
-            Size::XSmall => rems(0.8125),
+            Size::XSmall => rems(0.75),
             Size::Large => rems(1.0),
             _ => rems(0.875),
         };
