@@ -54,8 +54,6 @@ jobs:
           restore-keys: release-gpui-${{ runner.os }}-
       - name: Publish
         env:
-          # Needs publish-new and publish-update for gpui-pre and gpui-pre-*:
-          # upstream can add crates to the snapshot's dependency closure.
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
           bun script/bump-gpui.ts ${{ inputs.version }} --rev "${{ inputs.rev || 'main' }}" ${{ inputs.force && '--force' || '' }}
