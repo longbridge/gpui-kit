@@ -169,26 +169,30 @@ impl Render for FormStory {
                     .label_width(px(if is_multi_column { 100. } else { 140. }))
                     .child(
                         field().label_fn(|_, _| "Name").child(
-                            Input::new(&self.name_input).pl_0().prefix(
-                                div().w(px(90.)).child(
-                                    Select::new(&self.name_prefix_state)
-                                        .pr_0()
-                                        .appearance(false),
+                            Input::new(&self.name_input)
+                                .with_size(self.size)
+                                .pl_0()
+                                .prefix(
+                                    div().w(px(90.)).child(
+                                        Select::new(&self.name_prefix_state)
+                                            .with_size(self.size)
+                                            .pr_0()
+                                            .appearance(false),
+                                    ),
                                 ),
-                            ),
                         ),
                     )
                     .child(
                         field()
                             .label("Email")
-                            .child(Input::new(&self.email_input))
+                            .child(Input::new(&self.email_input).with_size(self.size))
                             .required(true),
                     )
                     .child(
                         field()
                             .label("Bio")
                             .when(self.layout.is_vertical(), |this| this.items_start())
-                            .child(Textarea::new(&self.bio_input))
+                            .child(Textarea::new(&self.bio_input).with_size(self.size))
                             .description_fn(|_, _| {
                                 div().child("Use at most 100 words to describe yourself.")
                             }),
@@ -203,7 +207,7 @@ impl Render for FormStory {
                         field()
                             .label("Please select your birthday")
                             .description("Select your birthday, we will send you a gift.")
-                            .child(DatePicker::new(&self.date)),
+                            .child(DatePicker::new(&self.date).with_size(self.size)),
                     )
                     .child(
                         field()
@@ -213,6 +217,7 @@ impl Render for FormStory {
                             .when(is_multi_column, |this| this.col_start(1))
                             .child(
                                 Switch::new("subscribe-newsletter")
+                                    .with_size(self.size)
                                     .label("Subscribe our newsletter")
                                     .checked(self.subscribe_email)
                                     .on_click(cx.listener(|this, checked: &bool, _, cx| {
@@ -223,14 +228,8 @@ impl Render for FormStory {
                     )
                     .child(
                         field()
-                            .when(is_horizontal && is_multi_column, |this| {
-                                this.label_indent(false)
-                            })
-                            .child(
-                                ColorPicker::new(&self.color_state)
-                                    .small()
-                                    .label("Theme color"),
-                            ),
+                            .label("Theme color")
+                            .child(ColorPicker::new(&self.color_state).with_size(self.size)),
                     )
                     .child(
                         field()
@@ -239,6 +238,7 @@ impl Render for FormStory {
                             })
                             .child(
                                 Checkbox::new("use-vertical-layout")
+                                    .with_size(self.size)
                                     .label("Use this color for future events")
                                     .checked(self.subscribe_email)
                                     .on_click(cx.listener(|this, checked: &bool, _, cx| {
