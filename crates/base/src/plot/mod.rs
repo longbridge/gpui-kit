@@ -2,7 +2,9 @@
 //! hover tracking behind every [`Plot`].
 //!
 //! Colors are always handed in by the caller. A styled layer supplies chart
-//! defaults, the tooltip overlay, and hover timing through [`PlotMotion`].
+//! defaults, the tooltip overlay, and hover and appear timing through
+//! [`PlotMotion`].
+mod appear;
 mod axis;
 mod element;
 mod grid;
@@ -21,6 +23,7 @@ use gpui::{
 
 use crate::{Spring, motion::Transition};
 
+pub use appear::PlotAppear;
 #[allow(deprecated)]
 pub use axis::AXIS_GAP;
 pub use axis::{AxisLabelPlacement, AxisLabelSide, AxisText, PlotAxis, axis_gutter};
@@ -31,8 +34,9 @@ pub use label::PlotLabel;
 pub use path_cache::{PathCache, PathCaches, ShapeKey};
 pub use scale::PlotValue;
 
-/// The timing of a plot's hover: how its progress fades in and out, and the
-/// spring a pointer follows the hovered datum with.
+/// The timing of a plot's motion: how its data marks appear when it is first
+/// painted, how its hover progress fades in and out, and the spring a pointer
+/// follows the hovered datum with.
 ///
 /// Base installs no motion of its own: every duration defaults to zero, so the
 /// hover appears, fades and glides at once. Product timing belongs to the
@@ -42,6 +46,7 @@ pub struct PlotMotion {
     pointer: Spring,
     enter: Transition,
     exit: Transition,
+    appear: Transition,
 }
 
 impl Default for PlotMotion {
@@ -50,6 +55,7 @@ impl Default for PlotMotion {
             pointer: Spring::new(Duration::ZERO),
             enter: Transition::new(Duration::ZERO),
             exit: Transition::new(Duration::ZERO),
+            appear: Transition::new(Duration::ZERO),
         }
     }
 }
@@ -74,6 +80,13 @@ impl PlotMotion {
         self
     }
 
+    /// How a plot's data marks appear the first time it is painted; see
+    /// [`PlotAppear`].
+    pub fn with_appear(mut self, appear: Transition) -> Self {
+        self.appear = appear;
+        self
+    }
+
     pub fn pointer(&self) -> Spring {
         self.pointer
     }
@@ -84,6 +97,10 @@ impl PlotMotion {
 
     pub fn exit(&self) -> &Transition {
         &self.exit
+    }
+
+    pub fn appear(&self) -> &Transition {
+        &self.appear
     }
 }
 
@@ -110,15 +127,44 @@ pub trait Plot: IntoElement {
 
     fn paint(&mut self, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App);
 
-    /// A stable element id that enables interactive tooltip support for this plot.
+    /// A stable element id that keeps this plot's state across frames.
     ///
-    /// Return `Some(id)` to opt in to tooltips and hover motion; the id must be unique
-    /// among sibling elements. Returning `None` (the default for a hand-written plot)
-    /// disables all tooltip behavior, leaving the plot a pure, non-interactive element.
+    /// Return `Some(id)` to opt in to appear motion and, unless
+    /// [`Plot::interactive`] says otherwise, tooltips and hover motion; the id
+    /// must be unique among sibling elements. Returning `None` (the default for
+    /// a hand-written plot) leaves the plot a pure element that neither appears
+    /// nor tracks hover.
     ///
     /// The charts in GPUI Component always return `Some`: their id defaults to the
     /// source location they were constructed at, and `id` renames it.
     fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    /// Whether a plot with an [`Plot::id`] tracks hover and shows its tooltip.
+    ///
+    /// `false` keeps the id's state — appear motion and path caches — without
+    /// the hitbox, hover tracking or overlay. The default is `true`, so a plot
+    /// opts in to tooltips by returning an id.
+    fn interactive(&self) -> bool {
+        true
+    }
+
+    /// Receive how far the plot's data marks have appeared this frame, before
+    /// [`Plot::hover`] and [`Plot::paint`] run.
+    ///
+    /// Called on every frame the plot has an [`Plot::id`]; see [`PlotAppear`].
+    /// Without an [`Plot::appear_generation`] the appear is always complete.
+    /// The default ignores it.
+    fn appear(&mut self, _appear: PlotAppear, _window: &mut Window, _cx: &mut App) {}
+
+    /// Opt in to appear motion: `Some` draws the plot in the first time its
+    /// id is painted, and again whenever the value changes, such as when a
+    /// chart switches to another symbol or period.
+    ///
+    /// The default, `None`, tracks no appear, keeps no state for it and asks
+    /// for no frames, so a plot that does not draw in costs nothing.
+    fn appear_generation(&self) -> Option<u64> {
         None
     }
 

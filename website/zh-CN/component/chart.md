@@ -742,17 +742,37 @@ AreaChart::new(range).interactive(false)       // 拖拽手柄下面的底图
 
 第二种尤其要注意：普通 hitbox **不会挡住它后面的 hitbox**，盖在图表上的元素被悬停时，图表**同样**算被悬停，十字线会在它下面继续跟着跑。只能让图表让位。
 
+关闭交互的图表仍保留自己的 id，所以依然有入场动画，也依然保留缓存。
+
 ### 动效
 
 强调效果使用样式层的 motion tokens（`cx.theme().motion_tokens()`）驱动，主题会把它们作为 [`PlotMotion`](../base/plot.md) 投射到 gpui-base：十字线、高亮条、圆点等指示器以快速弹簧跟随悬停的数据，饼图扇区以 control 弹簧抬起，整个覆盖层在光标落到数据上时淡入、离开后淡出。动效遵循操作系统的减弱动态效果偏好，开启后所有值立即到达目标。
 
+### 入场
+
+图表第一次绘制时，数据会按 enter 曲线在 500 ms 内画出来：折线、面积、K 线和桑基图从左往右展开，柱子从零线依次长出，饼图从第一个扇区顺时针扫开，雷达图从中心向外放大。坐标轴、网格线和刻度文字从第一帧起就完整显示，tooltip 等数据画完才出现。
+
+每个 id 只播放一次入场。之后数据变化会原地重绘，所以接实时行情的图表不会每次推送都重播。图表换成展示别的内容（比如换了股票或周期）时，传一个 key 让它重播：
+
+```rust
+LineChart::new(candles).appear_key((&symbol, period))
+```
+
+每次滚入视野都会重新绘制的图表（比如长列表每一行里的图表），每次都会重播入场。这种场景把入场关掉：
+
+```rust
+LineChart::new(intraday).interactive(false).appear(false)
+```
+
+开启减弱动态效果时跳过入场。
+
 ### 缓存
 
-图表还会跨帧保留较重的几何计算，因为它在屏幕上的每一帧都会重绘：折线与面积的描边、饼图扇区在投影点不变时保持已细分的路径，桑基图在数据、设置和尺寸不变时保留布局。这份缓存挂在同一个 id 上，因此共用 id 的图表会互相冲刷缓存——这是同级图表需要分别命名的另一个理由；而 `interactive(false)` 的图表没有自己的 id，每次绘制都会重算几何。
+图表还会跨帧保留较重的几何计算，因为它在屏幕上的每一帧都会重绘：折线与面积的描边、饼图扇区在投影点不变时保持已细分的路径，桑基图在数据、设置和尺寸不变时保留布局。这份缓存挂在同一个 id 上，因此共用 id 的图表会互相冲刷缓存——这是同级图表需要分别命名的另一个理由。饼图和雷达图入场时每一帧都是新的形状，所以入场结束前每帧都重新细分路径。
 
 ### 自定义 Plot
 
-自定义 [`Plot`] 需要手动接入——那里的 `Plot::id` 仍默认返回 `None`。这个 trait、`PlotElement` 和 hover 跟踪都来自 [gpui-base](../base/plot.md)，因此基于 `gpui_kit::base::plot` 编写的 Plot 可以直接在这里使用。在 `Plot::id` 返回 id，在 `Plot::tooltip_state` 解析光标所在的数据，在 `Plot::tooltip` 构建覆盖层。这里返回的 `Tooltip` 会自己为悬停加动画，和内置图表一样：整个覆盖层随悬停淡入淡出；十字线和圆点按指针 spring 滑到每个悬停的数据点，光标落下的那一帧直接就位；圆点的 `halo` 随悬停淡入逐渐放大。十字线只沿它标记的那条轴滑动，所以同时跟随光标的那条线不会滞后。传入数据点本身即可，其余交给 tooltip：
+自定义 [`Plot`] 需要手动接入——那里的 `Plot::id` 仍默认返回 `None`。这个 trait、`PlotElement` 和 hover 跟踪都来自 [gpui-base](../base/plot.md)，因此基于 `gpui_kit::base::plot` 编写的 Plot 可以直接在这里使用。在 `Plot::id` 返回 id，在 `Plot::tooltip_state` 解析光标所在的数据，在 `Plot::tooltip` 构建覆盖层。要做入场，就保存 `Plot::appear` 每帧传入的 `PlotAppear`，用它的进度来绘制。这里返回的 `Tooltip` 会自己为悬停加动画，和内置图表一样：整个覆盖层随悬停淡入淡出；十字线和圆点按指针 spring 滑到每个悬停的数据点，光标落下的那一帧直接就位；圆点的 `halo` 随悬停淡入逐渐放大。十字线只沿它标记的那条轴滑动，所以同时跟随光标的那条线不会滞后。传入数据点本身即可，其余交给 tooltip：
 
 ```rust
 fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pixels>, _: &mut Window, cx: &mut App) -> Option<AnyElement> {

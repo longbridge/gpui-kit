@@ -61,6 +61,14 @@ fn default_true() -> bool {
 /// renderer, so this is simply "as round as it goes".
 const RADIUS_FULL: Pixels = px(9999.);
 
+/// How long a chart's data takes to draw in the first time it is painted.
+///
+/// ECharts draws a series in over 1000 ms on a cubic ease-out. A desktop
+/// screen full of charts reads that as waiting, so this halves it on the
+/// design system's enter curve: long enough to show the shape of the data
+/// arriving, short enough to be done before the eye settles on it.
+const PLOT_APPEAR: Duration = Duration::from_millis(500);
+
 /// How long the scrollbar stays visible after the last scroll, drag, or hover.
 const SCROLLBAR_IDLE: Duration = Duration::from_secs(2);
 /// How long the scrollbar takes to appear.
@@ -93,6 +101,7 @@ const SCROLLBAR_THUMB_INSET: Pixels = px(4.);
 /// the way there in the first third. The fast tier as a critically damped
 /// response lands in the same place, and the tolerance is sub-pixel so the
 /// spring rests once nothing visible moves. The hover fades on the same tier.
+/// The data draws in over [`PLOT_APPEAR`].
 fn plot_motion(motion: &MotionTokens) -> gpui_base::PlotMotion {
     gpui_base::PlotMotion::default()
         .with_pointer(gpui_base::Spring::new(motion.duration_fast).with_epsilon(0.1))
@@ -103,6 +112,9 @@ fn plot_motion(motion: &MotionTokens) -> gpui_base::PlotMotion {
         .with_exit(
             gpui_base::motion::Transition::new(motion.duration_fast)
                 .easing(motion.easing_exit.clone()),
+        )
+        .with_appear(
+            gpui_base::motion::Transition::new(PLOT_APPEAR).easing(motion.easing_enter.clone()),
         )
 }
 

@@ -143,6 +143,12 @@ impl Transition {
         self.easing.sample(progress)
     }
 
+    /// The easing curve, for a caller that samples one timeline at several
+    /// offsets, such as a staggered plot appear.
+    pub(crate) fn curve(&self) -> &Easing {
+        &self.easing
+    }
+
     fn progress(&self, elapsed: Duration, duration: Duration) -> (f32, MotionStatus) {
         let Some(active_elapsed) = self.delay.active_elapsed(elapsed) else {
             return (0.0, MotionStatus::Delayed);

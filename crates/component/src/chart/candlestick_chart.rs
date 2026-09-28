@@ -10,14 +10,15 @@ use rust_i18n::t;
 use crate::{
     ActiveTheme,
     plot::{
-        Grid, Plot, PlotAxis, origin_point,
+        Grid, Plot, PlotAppear, PlotAxis, origin_point,
         scale::{PlotValue, Scale, ScaleBand, ScaleLinear},
         tooltip::{CrossLine, Tooltip, TooltipState},
     },
 };
 
 use super::{
-    AXIS_GAP, MAX_BAND_WIDTH, TooltipContent, build_band_labels, caller_id, labeled_items,
+    AXIS_GAP, ChartAppear, MAX_BAND_WIDTH, TooltipContent, build_band_labels, caller_id,
+    labeled_items, reveal_mask,
 };
 
 #[derive(IntoPlot)]
@@ -42,6 +43,7 @@ where
     bearish: Option<Hsla>,
     id: ElementId,
     interactive: bool,
+    appear: ChartAppear,
     tooltip_content: TooltipContent<T>,
 }
 
@@ -71,6 +73,7 @@ where
             bearish: None,
             id: caller_id(),
             interactive: true,
+            appear: ChartAppear::default(),
             tooltip_content: TooltipContent::default(),
         }
     }
@@ -92,10 +95,29 @@ where
     /// band marks the hovered candle, and a tooltip shows its open, high, low and
     /// close. Turn it off for a chart that only decorates, or one an element
     /// above it wants the cursor for: without a hitbox it neither answers the
-    /// mouse nor takes the hover from what sits over it. A chart that is off also
-    /// drops its path cache, which is keyed on the same id.
+    /// mouse nor takes the hover from what sits over it.
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
+        self
+    }
+
+    /// Draw the data in the first time this chart is painted. On by default.
+    ///
+    /// The theme sets how long it takes, and the system's reduced-motion
+    /// setting skips it. Turn it off for a chart that is painted again and
+    /// again as it scrolls in and out of view, such as one in each row of a
+    /// long list, where it would draw in every time.
+    pub fn appear(mut self, appear: bool) -> Self {
+        self.appear.set_enabled(appear);
+        self
+    }
+
+    /// Draw the data in again whenever `key` changes, such as the symbol or
+    /// period a chart shows.
+    ///
+    /// Without one the data draws in once, and later data paints in place.
+    pub fn appear_key(mut self, key: impl Hash) -> Self {
+        self.appear.set_key(key);
         self
     }
 
@@ -315,68 +337,84 @@ where
         let low_fn = low_fn.clone();
         let close_fn = close_fn.clone();
 
-        for d in &self.data {
-            let x_tick = x.tick(&x_fn(d));
-            let Some(x_tick) = x_tick else {
-                continue;
-            };
+        // The candles draw in from the left under a mask.
+        let reveal = reveal_mask(bounds, 0., self.appear.get().progress());
+        window.with_content_mask(reveal, |window| {
+            for d in &self.data {
+                let x_tick = x.tick(&x_fn(d));
+                let Some(x_tick) = x_tick else {
+                    continue;
+                };
 
-            // Get OHLC values for the current data point
-            let open = open_fn(d);
-            let high = high_fn(d);
-            let low = low_fn(d);
-            let close = close_fn(d);
+                // Get OHLC values for the current data point
+                let open = open_fn(d);
+                let high = high_fn(d);
+                let low = low_fn(d);
+                let close = close_fn(d);
 
-            // Convert values to pixel coordinates
-            let open_y = y.tick(&open);
-            let high_y = y.tick(&high);
-            let low_y = y.tick(&low);
-            let close_y = y.tick(&close);
+                // Convert values to pixel coordinates
+                let open_y = y.tick(&open);
+                let high_y = y.tick(&high);
+                let low_y = y.tick(&low);
+                let close_y = y.tick(&close);
 
-            let (Some(open_y), Some(high_y), Some(low_y), Some(close_y)) =
-                (open_y, high_y, low_y, close_y)
-            else {
-                continue;
-            };
+                let (Some(open_y), Some(high_y), Some(low_y), Some(close_y)) =
+                    (open_y, high_y, low_y, close_y)
+                else {
+                    continue;
+                };
 
-            // Determine if bullish (close > open) or bearish (close < open)
-            let is_bullish = close > open;
-            let color = if is_bullish { bullish } else { bearish };
+                // Determine if bullish (close > open) or bearish (close < open)
+                let is_bullish = close > open;
+                let color = if is_bullish { bullish } else { bearish };
 
-            // Calculate candlestick body dimensions
-            let center_x = x_tick + band_width / 2.;
-            let body_width = band_width * self.body_width_ratio;
-            let body_left = center_x - body_width / 2.;
-            let body_right = center_x + body_width / 2.;
+                // Calculate candlestick body dimensions
+                let center_x = x_tick + band_width / 2.;
+                let body_width = band_width * self.body_width_ratio;
+                let body_left = center_x - body_width / 2.;
+                let body_right = center_x + body_width / 2.;
 
-            // Draw wick (high to low line): a 1px quad, so no stroke to tessellate.
-            let (wick_top, wick_bottom) = (high_y.min(low_y), high_y.max(low_y));
-            let wick_bounds = Bounds::from_corners(
-                origin_point(px(center_x - 0.5), px(wick_top), origin),
-                origin_point(px(center_x + 0.5), px(wick_bottom), origin),
-            );
-            window.paint_quad(fill(wick_bounds, color));
+                // Draw wick (high to low line): a 1px quad, so no stroke to tessellate.
+                let (wick_top, wick_bottom) = (high_y.min(low_y), high_y.max(low_y));
+                let wick_bounds = Bounds::from_corners(
+                    origin_point(px(center_x - 0.5), px(wick_top), origin),
+                    origin_point(px(center_x + 0.5), px(wick_bottom), origin),
+                );
+                window.paint_quad(fill(wick_bounds, color));
 
-            // Draw body (open to close rectangle)
-            // For bullish: top is close, bottom is open
-            // For bearish: top is open, bottom is close
-            let (top, bottom) = if is_bullish {
-                (close_y, open_y)
-            } else {
-                (open_y, close_y)
-            };
+                // Draw body (open to close rectangle)
+                // For bullish: top is close, bottom is open
+                // For bearish: top is open, bottom is close
+                let (top, bottom) = if is_bullish {
+                    (close_y, open_y)
+                } else {
+                    (open_y, close_y)
+                };
 
-            let body_bounds = Bounds::from_corners(
-                origin_point(px(body_left), px(top), origin),
-                origin_point(px(body_right), px(bottom), origin),
-            );
+                let body_bounds = Bounds::from_corners(
+                    origin_point(px(body_left), px(top), origin),
+                    origin_point(px(body_right), px(bottom), origin),
+                );
 
-            window.paint_quad(fill(body_bounds, color));
-        }
+                window.paint_quad(fill(body_bounds, color));
+            }
+        });
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.interactive.then(|| self.id.clone())
+        Some(self.id.clone())
+    }
+
+    fn interactive(&self) -> bool {
+        self.interactive
+    }
+
+    fn appear(&mut self, appear: PlotAppear, _window: &mut Window, _cx: &mut App) {
+        self.appear.update(appear);
+    }
+
+    fn appear_generation(&self) -> Option<u64> {
+        self.appear.generation()
     }
 
     fn tooltip_state(

@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{hash::Hash, rc::Rc};
 
 use gpui::{
     AnyElement, App, Bounds, ElementId, Hsla, IntoElement, Pixels, Point, SharedString, TextAlign,
@@ -8,11 +8,11 @@ use gpui_base::motion::spring;
 use gpui_component_macros::IntoPlot;
 use num_traits::Zero;
 
-use super::caller_id;
+use super::{ChartAppear, caller_id};
 use crate::{
     ActiveTheme,
     plot::{
-        PathCaches, Plot,
+        PathCaches, Plot, PlotAppear,
         label::{PlotLabel, TEXT_HEIGHT, TEXT_SIZE, Text},
         polygon,
         shape::{Arc, ArcData, Pie},
@@ -28,6 +28,9 @@ const HOVER_LIFT: f32 = 6.;
 
 /// How much the slices other than the hovered one fade, as a share of their opacity.
 const HOVER_DIM: f32 = 0.35;
+
+/// How far into the appear the leader-line labels start fading in.
+const LABEL_APPEAR_START: f32 = 0.7;
 
 /// The hover a pie chart paints, sampled once per frame in [`Plot::hover`].
 struct PieHover {
@@ -56,6 +59,7 @@ pub struct PieChart<T: 'static> {
     tooltip_value: Option<Rc<dyn Fn(&T, f32, f32) -> SharedString + 'static>>,
     id: ElementId,
     interactive: bool,
+    appear: ChartAppear,
     name: Option<SharedString>,
     hover: Option<PieHover>,
 }
@@ -83,6 +87,7 @@ impl<T> PieChart<T> {
             tooltip_value: None,
             id: caller_id(),
             interactive: true,
+            appear: ChartAppear::default(),
             name: None,
             hover: None,
         }
@@ -105,10 +110,29 @@ impl<T> PieChart<T> {
     /// slice lifts out of the ring, and a tooltip shows its value and share. Turn
     /// it off for a chart that only decorates, or one an element above it wants
     /// the cursor for: without a hitbox it neither answers the mouse nor takes
-    /// the hover from what sits over it. A chart that is off also drops its path
-    /// cache, which is keyed on the same id.
+    /// the hover from what sits over it.
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
+        self
+    }
+
+    /// Draw the data in the first time this chart is painted. On by default.
+    ///
+    /// The theme sets how long it takes, and the system's reduced-motion
+    /// setting skips it. Turn it off for a chart that is painted again and
+    /// again as it scrolls in and out of view, such as one in each row of a
+    /// long list, where it would draw in every time.
+    pub fn appear(mut self, appear: bool) -> Self {
+        self.appear.set_enabled(appear);
+        self
+    }
+
+    /// Draw the data in again whenever `key` changes, such as the symbol or
+    /// period a chart shows.
+    ///
+    /// Without one the data draws in once, and later data paints in place.
+    pub fn appear_key(mut self, key: impl Hash) -> Self {
+        self.appear.set_key(key);
         self
     }
 
@@ -291,13 +315,25 @@ impl<T> Plot for PieChart<T> {
         let outer_radius = self.resolve_outer_radius(&bounds);
         let arcs = self.arcs();
 
-        // Caching hangs off the chart's own id, which only an interactive chart
-        // puts on the stack; without one, siblings would share a slot and thrash
-        // it, so a chart that is off tessellates afresh each paint.
-        let caches = self
-            .interactive
-            .then(|| PathCaches::for_paint("slices", window, cx));
-        for (ix, a) in arcs.iter().enumerate() {
+        // The ring sweeps clockwise from its first slice as the chart appears.
+        // Every frame of the sweep is a new shape, so the slices tessellate
+        // afresh until it ends rather than churn the cache.
+        let appear = self.appear.get().progress();
+        let swept;
+        let slices = if appear < 1. {
+            let mut arcs = self.arcs();
+            let start = arcs.first().map_or(0., |a| a.start_angle);
+            for a in &mut arcs {
+                a.start_angle = start + (a.start_angle - start) * appear;
+                a.end_angle = start + (a.end_angle - start) * appear;
+            }
+            swept = arcs;
+            &swept
+        } else {
+            &arcs
+        };
+        let caches = (appear >= 1.).then(|| PathCaches::for_paint("slices", window, cx));
+        for (ix, a) in slices.iter().enumerate() {
             let inner_radius = self.get_inner_radius(a);
             // The hovered slice lifts out of the ring while the others fade behind it.
             let (lift, opacity) = self.slice_emphasis(a.index);
@@ -326,7 +362,16 @@ impl<T> Plot for PieChart<T> {
             .inner_radius(label_radius)
             .outer_radius(label_radius);
 
-        let label_color = self.label_color.unwrap_or(cx.theme().foreground);
+        // Labels fade in over the end of the sweep, once their slices are
+        // mostly drawn.
+        let label_opacity = ((appear - LABEL_APPEAR_START) / (1. - LABEL_APPEAR_START)).max(0.);
+        if label_opacity <= 0. {
+            return;
+        }
+        let label_color = self
+            .label_color
+            .unwrap_or(cx.theme().foreground)
+            .opacity(label_opacity);
         let default_line_color = cx.theme().border;
 
         // First pass: collect a layout candidate per visible slice, split by
@@ -355,7 +400,8 @@ impl<T> Plot for PieChart<T> {
                 .label_line_color
                 .as_ref()
                 .map(|f| f(a.data))
-                .unwrap_or(default_line_color);
+                .unwrap_or(default_line_color)
+                .opacity(label_opacity);
 
             let layout = LabelLayout {
                 arc_x: edge.x,
@@ -408,7 +454,19 @@ impl<T> Plot for PieChart<T> {
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.interactive.then(|| self.id.clone())
+        Some(self.id.clone())
+    }
+
+    fn interactive(&self) -> bool {
+        self.interactive
+    }
+
+    fn appear(&mut self, appear: PlotAppear, _window: &mut Window, _cx: &mut App) {
+        self.appear.update(appear);
+    }
+
+    fn appear_generation(&self) -> Option<u64> {
+        self.appear.generation()
     }
 
     fn tooltip_state(

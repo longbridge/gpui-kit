@@ -9,7 +9,7 @@ use gpui_component_macros::IntoPlot;
 use crate::{
     ActiveTheme,
     plot::{
-        AxisLabelPlacement, AxisLabelSide, AxisText, Grid, Plot, PlotAxis, PlotLabel,
+        AxisLabelPlacement, AxisLabelSide, AxisText, Grid, Plot, PlotAppear, PlotAxis, PlotLabel,
         label::{TEXT_GAP, TEXT_HEIGHT, TEXT_SIZE, Text, measure_text_width},
         scale::{PlotValue, Scale, ScaleBand, ScaleLinear},
         shape::{Bar, BarAlignment},
@@ -18,8 +18,8 @@ use crate::{
 };
 
 use super::{
-    AXIS_GAP, MAX_BAND_WIDTH, TickFormat, TooltipContent, VALUE_AXIS_GAP, build_band_labels,
-    caller_id, format_tick, labeled_items, value_axis_gap,
+    AXIS_GAP, ChartAppear, MAX_BAND_WIDTH, TickFormat, TooltipContent, VALUE_AXIS_GAP,
+    build_band_labels, caller_id, format_tick, labeled_items, value_axis_gap,
 };
 
 /// How much the bars away from the hovered one fade, as a share of their opacity.
@@ -68,6 +68,7 @@ where
     min_length: f32,
     id: ElementId,
     interactive: bool,
+    appear: ChartAppear,
     name: Option<SharedString>,
     tooltip_content: TooltipContent<T>,
     /// The label gaps of horizontal bars, measured in `prepaint` for the frame,
@@ -115,6 +116,7 @@ where
             min_length: 0.,
             id: caller_id(),
             interactive: true,
+            appear: ChartAppear::default(),
             name: None,
             tooltip_content: TooltipContent::default(),
             horizontal_gaps: (0., 0.),
@@ -140,10 +142,29 @@ where
     /// marks the hovered band, and a tooltip shows its category and value. Turn
     /// it off for a chart that only decorates, or one an element above it wants
     /// the cursor for: without a hitbox it neither answers the mouse nor takes
-    /// the hover from what sits over it. A chart that is off also drops its path
-    /// cache, which is keyed on the same id.
+    /// the hover from what sits over it.
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
+        self
+    }
+
+    /// Draw the data in the first time this chart is painted. On by default.
+    ///
+    /// The theme sets how long it takes, and the system's reduced-motion
+    /// setting skips it. Turn it off for a chart that is painted again and
+    /// again as it scrolls in and out of view, such as one in each row of a
+    /// long list, where it would draw in every time.
+    pub fn appear(mut self, appear: bool) -> Self {
+        self.appear.set_enabled(appear);
+        self
+    }
+
+    /// Draw the data in again whenever `key` changes, such as the symbol or
+    /// period a chart shows.
+    ///
+    /// Without one the data draws in once, and later data paints in place.
+    pub fn appear_key(mut self, key: impl Hash) -> Self {
+        self.appear.set_key(key);
         self
     }
 
@@ -963,34 +984,42 @@ where
             1. - HOVER_DIM * hover.focus * distance
         };
 
+        // Each bar grows out of the zero line as the chart appears, one after
+        // another across the first half of the appear.
+        let appear = self.appear.get().clone();
+        let count = self.data.len();
+        let label_appear = appear.clone();
+
         let mut bar = Bar::new()
-            .data(&self.data)
+            .data(self.data.iter().enumerate())
             .alignment(alignment)
             .band_width(band_width)
-            .cross(move |d| band_scale.tick(&band_fn_cloned(d)).map(|t| t + band_offset))
+            .cross(move |(_, d)| band_scale.tick(&band_fn_cloned(d)).map(|t| t + band_offset))
             .base(move |_| zero_pixel)
-            .value(move |d| {
-                bar_end(
+            .value(move |(ix, d)| {
+                let end = bar_end(
                     &value_scale,
                     value_fn_cloned(d),
                     zero_pixel,
                     alignment,
                     min_length,
-                )
+                )?;
+                let grown = appear.staggered(*ix, count, APPEAR_SPREAD);
+                Some(zero_pixel + (end - zero_pixel) * grown)
             })
             .corner_radii(self.corner_radii);
 
         bar = match (fill, fill_gradient) {
             (_, Some(fg)) => {
                 let value_fn_for_grad = value_fn.clone();
-                bar.fill(move |d, frame, alignment| {
+                bar.fill(move |(_, d), frame, alignment| {
                     let v = value_fn_for_grad(d).to_f32().unwrap_or(0.);
                     let [s0, s1] = bar_gradient(fg.as_ref(), d, v, chart_range.clone());
                     let bg: Background = linear_gradient(alignment.gradient_angle(), s0, s1);
                     bg.opacity(emphasis(frame))
                 })
             }
-            (Some(f), _) => bar.fill(move |d, frame, alignment| {
+            (Some(f), _) => bar.fill(move |(_, d), frame, alignment| {
                 f(d, frame, chart_bounds, alignment).opacity(emphasis(frame))
             }),
             _ => bar.fill(move |_, frame, _| default_fill.opacity(emphasis(frame))),
@@ -1003,8 +1032,12 @@ where
                 BarAlignment::Left => TextAlign::Left,
                 BarAlignment::Right => TextAlign::Right,
             };
-            bar = bar.label(move |d, p| {
-                let color = label_color_fn.as_ref().map_or(label_color, |f| f(d));
+            bar = bar.label(move |(ix, d), p| {
+                // A value label rides the end of its bar and fades in with it.
+                let color = label_color_fn
+                    .as_ref()
+                    .map_or(label_color, |f| f(d))
+                    .opacity(label_appear.staggered(*ix, count, APPEAR_SPREAD));
                 vec![Text::new(label(d), p, color).align(text_align)]
             });
         }
@@ -1016,7 +1049,19 @@ where
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.interactive.then(|| self.id.clone())
+        Some(self.id.clone())
+    }
+
+    fn interactive(&self) -> bool {
+        self.interactive
+    }
+
+    fn appear(&mut self, appear: PlotAppear, _window: &mut Window, _cx: &mut App) {
+        self.appear.update(appear);
+    }
+
+    fn appear_generation(&self) -> Option<u64> {
+        self.appear.generation()
     }
 
     fn tooltip_state(
@@ -1134,6 +1179,10 @@ where
         Some(tooltip.into_any_element())
     }
 }
+
+/// How much of the appear the bars' starts are spread across; each bar grows
+/// over the rest.
+const APPEAR_SPREAD: f32 = 0.5;
 
 /// The end a bar showing `value` reaches along the value axis, at least
 /// `min_length` pixels from `zero`.

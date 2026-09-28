@@ -112,7 +112,7 @@ Line::new()
 
 ## Hover 与 tooltip
 
-Plot 在 `Plot::id` 中返回 id 即可启用 hover。之后 `PlotElement` 每帧跟踪光标（会识别遮挡，Plot 上方打开的弹出层会清除 hover），并依次询问 Plot：
+Plot 在 `Plot::id` 中返回 id 即可启用 hover；若 `Plot::interactive` 返回 `false`，则保留 id 对应的状态和入场，但没有 hitbox 和 hover。之后 `PlotElement` 每帧跟踪光标（会识别遮挡，Plot 上方打开的弹出层会清除 hover），并依次询问 Plot：
 
 1. `tooltip_state`：把光标映射成 [`TooltipState`]，包括悬停的索引、十字线位置和数据点，或返回 `None`。
 2. `hover`：在绘制前接收当前的 [`PlotHover`]。光标离开后它会继续保留，同时 `progress()` 逐渐回落到零，让强调效果在最后一个数据项上淡出，而不是突然消失。首个悬停帧上 `is_entering()` 为 true。
@@ -138,8 +138,11 @@ use gpui_kit::base::{PlotMotion, PlotTheme, Spring, Theme, motion::Transition};
 let motion = PlotMotion::default()
     .with_pointer(Spring::new(Duration::from_millis(120)).with_epsilon(0.1))
     .with_enter(Transition::new(Duration::from_millis(120)))
-    .with_exit(Transition::new(Duration::from_millis(120)));
+    .with_exit(Transition::new(Duration::from_millis(120)))
+    .with_appear(Transition::new(Duration::from_millis(500)));
 Theme::global_mut(cx).plot = PlotTheme::new().with_motion(motion);
 ```
+
+`with_appear` 设置 plot 的 id 第一次绘制时数据画出来的方式。plot 在 `Plot::appear` 里拿到进度，调用时机在 `Plot::hover` 和 `Plot::paint` 之前；`PlotAppear::staggered` 把进度切给多个图形，每个错开一点开始。plot 在 `Plot::appear_generation` 返回 `Some` 即开启入场，值变化时重播；默认的 `None` 不跟踪任何状态，也不请求帧。有 id 但 `Plot::interactive` 为 false 的 plot 同样会入场；入场结束前不跟踪 hover。
 
 GPUI Component 会在主题变化时把自己的 motion token 投射到这里。动效遵循操作系统的“减少动态效果”设置，开启后所有值都会立即采用目标值。

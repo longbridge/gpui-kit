@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{hash::Hash, rc::Rc};
 
 use gpui::{
     AnyElement, App, Bounds, ElementId, Hsla, IntoElement, Pixels, Point, SharedString, Size,
@@ -9,7 +9,7 @@ use gpui_component_macros::IntoPlot;
 use crate::{
     ActiveTheme,
     plot::{
-        AxisLabelPlacement, Curve, PathCaches, Plot, PlotAxis,
+        AxisLabelPlacement, Curve, PathCaches, Plot, PlotAppear, PlotAxis,
         scale::{PlotValue, Scale, ScaleLinear, ScalePoint},
         shape::Line,
         tooltip::{CrossLine, Dot, Tooltip, TooltipState},
@@ -17,9 +17,9 @@ use crate::{
 };
 
 use super::{
-    AXIS_GAP, HOVER_DOT_SIZE, HOVER_HALO_SIZE, PointAxes, TooltipContent, ValueExtent,
+    AXIS_GAP, ChartAppear, HOVER_DOT_SIZE, HOVER_HALO_SIZE, PointAxes, TooltipContent, ValueExtent,
     axis_point_count, build_point_x_labels, caller_id, labeled_items, pinned_plot_mask,
-    point_range, point_value_scale,
+    point_range, point_value_scale, reveal_mask,
 };
 
 #[derive(IntoPlot)]
@@ -43,6 +43,7 @@ where
     axes: PointAxes,
     id: ElementId,
     interactive: bool,
+    appear: ChartAppear,
     name: Option<SharedString>,
     tooltip_content: TooltipContent<T>,
 }
@@ -72,6 +73,7 @@ where
             axes: PointAxes::default(),
             id: caller_id(),
             interactive: true,
+            appear: ChartAppear::default(),
             name: None,
             tooltip_content: TooltipContent::default(),
         }
@@ -94,10 +96,29 @@ where
     /// and a dot mark the hovered point, and a tooltip shows its value. Turn it
     /// off for a chart that only decorates, or one an element above it wants the
     /// cursor for: without a hitbox it neither answers the mouse nor takes the
-    /// hover from what sits over it. A chart that is off also drops its path
-    /// cache, which is keyed on the same id.
+    /// hover from what sits over it.
     pub fn interactive(mut self, interactive: bool) -> Self {
         self.interactive = interactive;
+        self
+    }
+
+    /// Draw the data in the first time this chart is painted. On by default.
+    ///
+    /// The theme sets how long it takes, and the system's reduced-motion
+    /// setting skips it. Turn it off for a chart that is painted again and
+    /// again as it scrolls in and out of view, such as one in each row of a
+    /// long list, where it would draw in every time.
+    pub fn appear(mut self, appear: bool) -> Self {
+        self.appear.set_enabled(appear);
+        self
+    }
+
+    /// Draw the data in again whenever `key` changes, such as the symbol or
+    /// period a chart shows.
+    ///
+    /// Without one the data draws in once, and later data paints in place.
+    pub fn appear_key(mut self, key: impl Hash) -> Self {
+        self.appear.set_key(key);
         self
     }
 
@@ -439,18 +460,16 @@ where
             .y_domain
             .is_some()
             .then(|| pinned_plot_mask(bounds, height));
+        // The line draws in from the left under a mask, so its shape, and the
+        // cached path, stay the same on every frame of the appear.
+        let reveal = reveal_mask(bounds, left, self.appear.get().progress());
         window.with_content_mask(mask, |window| {
-            // Caching hangs off the chart's own id, which only an interactive chart
-            // puts on the stack; without one, siblings would share a slot and thrash
-            // it, so a chart that is off tessellates afresh each paint.
-            if self.interactive {
+            window.with_content_mask(reveal, |window| {
                 let caches = PathCaches::for_paint("line", window, cx);
                 caches.update(cx, |caches, _| {
                     line.paint_cached(&bounds, caches.slot(0), window);
                 });
-            } else {
-                line.paint(&bounds, window);
-            }
+            });
         });
 
         self.axes
@@ -459,7 +478,19 @@ where
     }
 
     fn id(&self) -> Option<ElementId> {
-        self.interactive.then(|| self.id.clone())
+        Some(self.id.clone())
+    }
+
+    fn interactive(&self) -> bool {
+        self.interactive
+    }
+
+    fn appear(&mut self, appear: PlotAppear, _window: &mut Window, _cx: &mut App) {
+        self.appear.update(appear);
+    }
+
+    fn appear_generation(&self) -> Option<u64> {
+        self.appear.generation()
     }
 
     fn tooltip_state(
