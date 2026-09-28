@@ -34,6 +34,11 @@ version_fingerprint=${WEBSITE_VERSION_BUILD_FINGERPRINT:-$(
 )}
 
 git -C "$repo_root" fetch origin main --depth=1 --tags
+# A released tag is immutable. When its website content needs a correction,
+# push a `website/<tag>` branch cut from the tag; the build takes the docs and
+# homepage from that branch while versions still follow the tag.
+git -C "$repo_root" fetch origin --depth=1 \
+  '+refs/heads/website/*:refs/remotes/origin/website/*' || true
 
 release_tags=()
 while IFS= read -r tag; do
@@ -80,11 +85,19 @@ gpui_kit_version() {
   fi
 }
 
+website_content_ref() {
+  if git -C "$repo_root" rev-parse --verify --quiet "refs/remotes/origin/website/$1" >/dev/null; then
+    printf 'origin/website/%s\n' "$1"
+  else
+    printf '%s\n' "$1"
+  fi
+}
+
 snapshot_website() {
   local tag=$1
   local target=$2
 
-  "$repo_root/script/snapshot-website" "$repo_root" "$tag" "$target"
+  "$repo_root/script/snapshot-website" "$repo_root" "$(website_content_ref "$tag")" "$target"
   bun "$repo_root/script/normalize-website-frontmatter.mjs" "$target"
 }
 
@@ -136,7 +149,8 @@ bunx pagefind --site "$main_output_dir"
 for tag in "${release_tags[@]:1}"; do
   version_dir="$work_dir/$tag"
   output_dir="$repo_root/website/dist/versions/$tag"
-  cached_dir="$version_cache_dir/$tag/$version_fingerprint"
+  content_commit=$(git -C "$repo_root" rev-parse "$(website_content_ref "$tag")^{commit}")
+  cached_dir="$version_cache_dir/$tag/$version_fingerprint-$content_commit"
 
   if [[ -d "$cached_dir" ]]; then
     echo "Reusing cached $tag"
