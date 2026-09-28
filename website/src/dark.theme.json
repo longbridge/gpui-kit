@@ -113,6 +113,18 @@
   },
   "tokenColors": [
     {
+      "scope": "markup.inserted.diff",
+      "settings": { "foreground": "#449444" }
+    },
+    {
+      "scope": "markup.deleted.diff",
+      "settings": { "foreground": "#D9564E" }
+    },
+    {
+      "scope": ["meta.diff.header", "meta.diff.range"],
+      "settings": { "foreground": "#8090e5" }
+    },
+    {
       "settings": {
         "foreground": "#CACCCA",
         "background": "#131313"

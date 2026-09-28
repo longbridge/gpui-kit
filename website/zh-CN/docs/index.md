@@ -78,7 +78,7 @@ GPUI Kit 的桌面组件运行在包括 Longbridge 在内的生产应用中。�
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "{{gpui_kit_version}}"
 ```
 
 将 `src/main.rs` 写成下面的完整程序，运行 `cargo run`。窗口会显示一段文字和按钮；

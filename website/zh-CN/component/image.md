@@ -9,9 +9,9 @@ GPUI 的 `img()` 绘制图片，`svg()` 绘制单色图标。GPUI Kit 从 `gpui_
 
 ## 从可运行示例开始
 
-以下是完整的原生桌面 `src/main.rs`。它使用 GPUI Kit 自带的图标，不需要额外图片文件。在 `Cargo.toml` 加入 `gpui-kit = "0.6"`。同一份资源分别以保留原色的图片和单色 SVG 显示。
+以下是完整的原生桌面 `src/main.rs`。它使用 GPUI Kit 自带的图标，不需要额外图片文件。在 `Cargo.toml` 加入 `gpui-kit = "{{gpui_kit_version}}"`。同一份资源分别以保留原色的图片和单色 SVG 显示。
 
-以下是完整的原生桌面 `src/main.rs`。它使用 GPUI Kit 自带的图标，不需要额外图片文件。在 `Cargo.toml` 加入 `gpui-kit = "0.6"`。同一份 SVG 分别以保留原色的图片和随主题着色的单色图标显示；两者区别见下文。
+以下是完整的原生桌面 `src/main.rs`。它使用 GPUI Kit 自带的图标，不需要额外图片文件。在 `Cargo.toml` 加入 `gpui-kit = "{{gpui_kit_version}}"`。同一份 SVG 分别以保留原色的图片和随主题着色的单色图标显示；两者区别见下文。
 
 ```rust
 use gpui_kit::*;
@@ -84,7 +84,7 @@ img("https://example.com/avatar.png")
 
 ## 可选择图片的画廊
 
-能够切换主图的缩略图是一种操作控件。使用真正的 `Button`，让键盘激活和可访问名称都有效；将选中项保存在视图的持久状态中。下面完整的 `src/main.rs` 使用 GPUI Kit 自带的三个图标；图片画廊可以换成自己注册的资源键名。依赖与前面的示例相同，仍是 `gpui-kit = "0.6"`。
+能够切换主图的缩略图是一种操作控件。使用真正的 `Button`，让键盘激活和可访问名称都有效；将选中项保存在视图的持久状态中。下面完整的 `src/main.rs` 使用 GPUI Kit 自带的三个图标；图片画廊可以换成自己注册的资源键名。依赖与前面的示例相同，仍是 `gpui-kit = "{{gpui_kit_version}}"`。
 
 ```rust
 use gpui_kit::*;

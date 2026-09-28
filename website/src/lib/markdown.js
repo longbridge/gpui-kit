@@ -18,7 +18,7 @@ export const shikiConfig = {
     dark: theme('dark'),
   },
   defaultColor: 'light',
-  langs: ['rust'],
+  langs: ['rust', 'diff'],
   langAlias: { rs: 'rust' },
 };
 

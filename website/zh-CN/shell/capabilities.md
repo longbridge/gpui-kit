@@ -73,7 +73,7 @@ process.exit() is not granted; set capabilities.process.exit to true in the mani
   "id": "com.example.quotes",
   "name": "Quotes",
   "version": "1.0.0",
-  "shell-version": "0.6.0",
+  "shell-version": "{{gpui_kit_version}}",
   "entry": "main.js",
   "dependencies": {
     "omarchy-ui": "huacnlee/omarchy-ui"

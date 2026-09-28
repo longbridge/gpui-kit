@@ -25,6 +25,7 @@ const props = defineProps<{
     starCount: number;
     base: string;
     lang: 'en' | 'zh-CN';
+    kitVersion: string;
 }>();
 
 const isZh = computed(() => props.lang === 'zh-CN');
@@ -77,7 +78,7 @@ const capIcons: Record<string, any> = {
 // `gpui-kit` is the one dependency an application needs: it pins GPUI and
 // carries every layer. The line on screen is what the clipboard gets, with
 // the `[dependencies]` header so it pastes straight into Cargo.toml.
-const installCommand = 'gpui-kit = "0.6.0"';
+const installCommand = `gpui-kit = "${props.kitVersion}"`;
 const installSnippet = ["[dependencies]", installCommand].join("\n");
 
 const copied = ref(false);

@@ -96,7 +96,7 @@ After preparing the platform libraries in [Installation](./installation), create
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "{{gpui_kit_version}}"
 ```
 
 Replace `src/main.rs` with this complete "Hello, World!" application:
