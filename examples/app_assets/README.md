@@ -9,7 +9,7 @@ include `gpui-kit-assets` and GPUI Component:
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "0.7"
 ```
 
 Choose the source that matches the icons the application uses:

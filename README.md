@@ -119,7 +119,7 @@ commercial desktop application rather than designed in isolation.
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "0.7"
 ```
 
 `gpui-kit` always brings in GPUI and `gpui-base`; `gpui-component` and the
