@@ -38,6 +38,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: gpui-pre is pinned exactly
         run: bun script/check-gpui-pin.ts
+      - name: GPUI release script self-tests
+        run: bun script/bump-gpui.ts --self-test
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete@0.9.1
@@ -57,6 +59,8 @@ jobs:
       # crates that the `test` job leaves out.
       - name: Lint
         run: cargo clippy --workspace --exclude gpui-shell --locked -- --deny warnings
+      - name: Check GPUI benchmark compatibility
+        run: cargo check -p gpui-base --bench text_view_scroll --locked
 
   no-default-features:
     name: No default features

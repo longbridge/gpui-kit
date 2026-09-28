@@ -60,6 +60,8 @@ gpui-kit = "0.6"
 
 本文中的 **GPUI** 指 [Zed 的 GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)。`gpui-pre` 是将 Zed 指定提交的 GPUI crate 以一组配套版本发布到 crates.io 时使用的 Cargo 包名，供 GPUI Kit 固定可复现的依赖；它不是另一套渲染实现。发布过程会调整包名及依赖清单以适应 crates.io，所以本文的 API 说明以当前 GPUI Kit 固定的 GPUI 版本为准。本仓库固定 `gpui-pre = {{gpui_pre_version}}`；应用通常只依赖 `gpui-kit`，通过 `gpui_kit::*` 使用 GPUI。`gpui-pre` 发布了更新的快照，也不代表当前 GPUI Kit 版本已支持它。
 
+快照发布会检查上游 GPUI crate 的许可证、打包和编译。Kit 的兼容性由单独的升级 PR 验证：在该 PR 中更新 Kit 固定的快照版本与锁文件，对齐 Criterion 等 benchmark 依赖，并适配上游 API 变化。应用通过经过验证的 Kit 版本获得升级；发布 GPUI 快照不会改变已有 Kit 版本的依赖。未完成的快照发布只能从原来的 Zed 提交续发；不同提交会使用新版本号。
+
 ## 验证安装
 
 如果已检出本仓库，请在仓库根目录运行现有示例：

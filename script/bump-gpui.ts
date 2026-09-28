@@ -28,10 +28,9 @@
  *    dependency graph of the staged workspace must not pull in a copyleft
  *    crate. Zed's own application crates are GPL-3.0-or-later, and one of
  *    them reaching the closure would change the terms for every consumer.
- * 7. Verify with `cargo publish --workspace --dry-run`, build and test
- *    gpui-kit against the staged crates, then publish. A gpui-kit failure
- *    does not hold the snapshot back: it is reported (and recorded in
- *    `gpui-pre.json`) so the repository can be adapted right after.
+ * 7. Verify the staged crates with `cargo publish --workspace --dry-run`,
+ *    then publish. GPUI Kit keeps its current snapshot pins; upgrading those
+ *    pins and adapting Kit happens in a separate pull request checked by CI.
  *
  * crates.io only accepts a handful of brand-new crates per ten minutes. The
  * publish step re-checks crates.io before every attempt, skips versions that
@@ -64,8 +63,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, normalize, relative, resolve } from "node:path";
-import { tmpdir } from "node:os";
-import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
 /**
@@ -1157,18 +1154,6 @@ function stageWorkspace(
   return staging;
 }
 
-/**
- * Add the outcome of the gpui-kit compatibility check to `gpui-pre.json`, so
- * the workflow summary can say whether the repository needs adapting.
- */
-function recordKitCheck(failure: string | undefined) {
-  const path = join(WORK_DIR, "gpui-pre.json");
-  const summary = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-  summary.kit_check =
-    failure === undefined ? { passed: true } : { passed: false, error: failure };
-  writeFileSync(path, `${JSON.stringify(summary, null, 2)}\n`);
-}
-
 const FACADE_PATH_MODULE = "gpui_pre_facade_paths";
 const FACADE_PATH_MARKER = `mod ${FACADE_PATH_MODULE};`;
 const PROC_MACRO_ATTRIBUTE = /^#\[proc_macro(?:_derive\([^\n]*\)|_attribute)?\]$/;
@@ -1432,7 +1417,7 @@ function installFacadeAwareMacroPaths(
   logInfo(`gpui_macros: made ${wrapped.count} proc-macro entry points facade-aware`);
 }
 
-function runSelfTest() {
+async function runSelfTest() {
   const declarativeFixture = [
     "macro_rules! actions {",
     "    ($ns:path, [ $($name:ident),* ]) => { $( #[derive(gpui::Action)] pub struct $name; )* };",
@@ -1527,30 +1512,65 @@ fn helper(input: TokenStream) -> TokenStream { input }
     if (JSON.stringify(actual) !== JSON.stringify(expected))
       throw new BumpError(`self-test relaxed \`${JSON.stringify(input)}\` to \`${JSON.stringify(actual)}\``);
   }
-  const workspaceFixture = [
-    'gpui = { package = "gpui-pre", version = "=0.3.6" }',
-    'gpui_platform = { package = "gpui-pre-platform", version = "=0.3.6", features = ["font-kit"] }',
-    '# gpui_web = { package = "gpui-pre-web", version = "=0.3.6" }',
-    'reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false }',
-    'gpui_kit = { package = "gpui-kit", version = "=0.6.4" }',
-    'serde = { version = "1", features = ["derive"] }',
-    '[profile.dev.package]',
-    'gpui-pre = { opt-level = 3 }',
-  ].join("\n");
-  const snapshotCrates = ["gpui-pre", "gpui-pre-platform", "gpui-pre-web"].map(
-    (publishedName) => ({ publishedName }) as Crate,
-  );
-  const pinned = pinWorkspaceRequirements(workspaceFixture, snapshotCrates, "0.3.7");
-  const expectedPinned = workspaceFixture
-    .replace('"gpui-pre", version = "=0.3.6"', '"gpui-pre", version = "=0.3.7"')
-    .replace('"gpui-pre-platform", version = "=0.3.6"', '"gpui-pre-platform", version = "=0.3.7"');
-  if (pinned !== expectedPinned)
-    throw new BumpError(`self-test pinned the workspace to:\n${pinned}`);
-  const benchmarkFixture = '[dev-dependencies]\ncriterion = "0.5"\ngpui.workspace = true\n';
-  const aligned = pinCriterionRequirement(benchmarkFixture, "0.8.2");
-  if (aligned !== '[dev-dependencies]\ncriterion = "0.8.2"\ngpui.workspace = true\n')
-    throw new BumpError(`self-test did not align the benchmark's Criterion requirement:\n${aligned}`);
+  await runVersionSelfTest();
   logSuccess("Facade-aware gpui_macros transformation self-test passed");
+}
+
+/** Exercise version selection without reaching crates.io. */
+async function runVersionSelfTest() {
+  const originalFetch = globalThis.fetch;
+  const revision = "1a28cff4b409000000000000000000000000000000";
+  const oldDescription = "GPUI (gpui-pre snapshot of zed@bcf6582)";
+  const description = "GPUI (gpui-pre snapshot of zed@1a28cff)";
+  const cases = [
+    { name: "new crate in a newer revision", versions: [[6], []], descriptions: [oldDescription, undefined], expected: { version: "0.3.7", resuming: false } },
+    { name: "partial upload of the same revision", versions: [[6], [5]], descriptions: [description, undefined], expected: { version: "0.3.6", resuming: true } },
+    { name: "partial upload of an older revision", versions: [[6], [5]], descriptions: [oldDescription, undefined], expected: { version: "0.3.7", resuming: false } },
+    { name: "unknown snapshot revision", versions: [[6], []], descriptions: ["GPUI", undefined], expected: { version: "0.3.7", resuming: false } },
+    { name: "inconsistent published revisions", versions: [[6], [5], [6]], descriptions: [description, undefined, oldDescription], expected: { version: "0.3.7", resuming: false } },
+    { name: "complete snapshot", versions: [[6], [6]], descriptions: [description, description], expected: { version: "0.3.7", resuming: false } },
+    { name: "first snapshot", versions: [[], []], descriptions: [undefined, undefined], expected: { version: "0.3.0", resuming: false } },
+    { name: "yanked version cannot be resumed", versions: [[6], []], descriptions: [description, undefined], yanked: true, expected: { version: "0.3.7", resuming: false } },
+  ];
+  try {
+    for (const fixture of cases) {
+      const crates = ["gpui-pre", "gpui-pre-bench-metrics", "gpui-pre-util"]
+        .slice(0, fixture.versions.length)
+        .map((publishedName) => ({ publishedName }) as Crate);
+      globalThis.fetch = (async (input: string | URL | Request) => {
+        const path = String(input).replace(`${CRATES_IO_API}/`, "");
+        const [name, endpoint] = path.split("/");
+        const index = crates.findIndex((crate) => crate.publishedName === name);
+        if (index < 0) throw new BumpError(`unexpected self-test request: ${path}`);
+        if (endpoint === "versions") {
+          return Response.json({ versions: fixture.versions[index].map((patch) => ({ num: `0.3.${patch}` })) });
+        }
+        if (endpoint !== "0.3.6")
+          throw new BumpError(`unexpected self-test request: ${path}`);
+        if (!fixture.versions[index].includes(6))
+          return new Response(null, { status: 404 });
+        return Response.json({ version: { description: fixture.descriptions[index], yanked: fixture.yanked ?? false } });
+      }) as typeof fetch;
+      const actual = await nextVersion("0.3", crates, revision);
+      if (JSON.stringify(actual) !== JSON.stringify(fixture.expected))
+        throw new BumpError(`version self-test (${fixture.name}): expected ${JSON.stringify(fixture.expected)}, got ${JSON.stringify(actual)}`);
+      if (fixture.name === "new crate in a newer revision") {
+        let rejected = false;
+        try {
+          await publish("unused", crates, "0.3.6", false, revision);
+        } catch (error) {
+          rejected = error instanceof BumpError;
+        }
+        if (!rejected)
+          throw new BumpError("self-test allowed an explicit version to mix Zed revisions");
+      }
+      if (fixture.yanked && !(await versionIsPublished(crates[0].publishedName, "0.3.6")))
+        throw new BumpError("self-test treated a yanked version as available for upload");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  logSuccess("Snapshot version selection self-test passed");
 }
 
 const GPUI_APPLE_SIBLING = '.join("../gpui")';
@@ -1756,12 +1776,14 @@ async function cratesIoGet(path: string): Promise<Toml | undefined> {
  *
  * The patch number continues from the highest one any of the crates has; if
  * a previous run stopped part-way (the rate limit, a crash) some crates lack
- * that number, and the run resumes at it instead of starting a new one.
- * Yanked versions still occupy their number.
+ * that number, and the run resumes at it only when every uploaded crate
+ * comes from the requested Zed revision. New upstream dependencies must not
+ * be added to an older snapshot. Yanked versions still occupy their number.
  */
 async function nextVersion(
   base: string,
   crates: Crate[],
+  zedSha: string,
 ): Promise<{ version: string; resuming: boolean }> {
   const pattern = new RegExp(`^${base.replaceAll(".", "\\.")}\\.(\\d+)$`);
   const numbers = new Map<Crate, Set<number>>();
@@ -1782,6 +1804,11 @@ async function nextVersion(
     (crate) => !numbers.get(crate)!.has(highest),
   );
   if (incomplete.length > 0) {
+    const uploaded = crates.filter((crate) => numbers.get(crate)!.has(highest));
+    if (!(await snapshotMatchesRevision(uploaded, `${base}.${highest}`, zedSha))) {
+      logInfo(`Not resuming ${base}.${highest}: its uploaded crates do not match zed@${zedSha.slice(0, 7)}`);
+      return { version: `${base}.${highest + 1}`, resuming: false };
+    }
     logInfo(
       `Resuming ${base}.${highest}: ${incomplete.length} crates are still missing it`,
     );
@@ -1795,7 +1822,24 @@ async function versionIsPublished(
   version: string,
 ): Promise<boolean> {
   const data = await cratesIoGet(`${name}/${version}`);
-  return data?.version !== undefined && !data.version.yanked;
+  // A yanked version still exists and cannot be uploaded again.
+  return data?.version !== undefined;
+}
+
+/** Refuse to mix upstream revisions or reuse a yanked version when resuming. */
+async function snapshotMatchesRevision(
+  crates: Crate[],
+  version: string,
+  zedSha: string,
+): Promise<boolean> {
+  for (const crate of crates) {
+    const detail = await cratesIoGet(`${crate.publishedName}/${version}`);
+    const rev = snapshotRev(String(detail?.version?.description ?? ""));
+    if (detail?.version?.yanked || rev === undefined || !zedSha.startsWith(rev))
+      return false;
+    await Bun.sleep(200);
+  }
+  return true;
 }
 
 async function unpublished(crates: Crate[], version: string): Promise<Crate[]> {
@@ -1848,16 +1892,22 @@ async function publish(
   crates: Crate[],
   version: string,
   wait: boolean,
+  zedSha: string,
 ) {
   for (;;) {
     const pending = await unpublished(crates, version);
+    const already = crates.filter((c) => !pending.includes(c));
+    if (!(await snapshotMatchesRevision(already, version, zedSha)))
+      throw new BumpError(
+        `${version} already contains crates from another or unknown Zed revision, or a yanked crate; ` +
+          "choose a new version or resume with the original --rev",
+      );
     if (pending.length === 0) {
       logSuccess(
         `All ${crates.length} crates are on crates.io at ${bold(version)}`,
       );
       return;
     }
-    const already = crates.filter((c) => !pending.includes(c));
     if (already.length > 0)
       logInfo(
         `Skipping ${already.length} crates already published at ${version}`,
@@ -1910,14 +1960,14 @@ Arguments:
                     where N continues from what crates.io already has
 
 Options:
-  --self-test       test the gpui_macros source transformation and stop
+  --self-test       test source transformations and snapshot version selection
   --rev REV         Zed branch, tag or commit (default: ${ZED_DEFAULT_REV})
   --zed PATH        use this Zed checkout instead of fetching one
   --dry-run         stage and verify, but do not publish
   --stage-only      stage the workspace and stop
   --no-verify       skip \`cargo publish --dry-run\` verification
   --no-wait         abort instead of waiting on the crates.io rate limit
-  --skip-kit-check  do not build and test this repository against the staged crates
+  --skip-kit-check  accepted for compatibility; Kit checks now run in upgrade PRs
   --force           publish even when Zed did not change the published crates
   -h, --help        show this help
 `;
@@ -1930,7 +1980,6 @@ interface Args {
   stageOnly: boolean;
   noVerify: boolean;
   noWait: boolean;
-  skipKitCheck: boolean;
   force: boolean;
   selfTest: boolean;
 }
@@ -1976,179 +2025,21 @@ function parseCommandLine(argv: string[]): Args {
     stageOnly: parsed.values["stage-only"] as boolean,
     noVerify: parsed.values["no-verify"] as boolean,
     noWait: parsed.values["no-wait"] as boolean,
-    skipKitCheck: parsed.values["skip-kit-check"] as boolean,
     force: parsed.values.force as boolean,
     selfTest: parsed.values["self-test"] as boolean,
   };
 }
 
-/**
- * Build and test this repository against the staged crates before anything is
- * uploaded. The workspace pins the snapshot crates to an exact version, so a
- * snapshot whose API drifted away from `gpui-component` never reaches an
- * application on its own; it reaches them through the gpui-kit release that
- * bumps the pin, and this makes the drift visible on the release itself so
- * that bump can carry the adaptation. The snapshot is published either way:
- * the fix is a change to this repository, which can only land against the
- * published crates, so the failure is returned to the caller as a warning
- * rather than thrown.
- *
- * The staged crates are injected with `--config patch.crates-io…`, and the
- * workspace's exact pins are moved onto the staged version for the duration
- * of the check (a `[patch]` only applies to a source that satisfies the
- * requirement); `Cargo.toml` is restored afterwards, so no file in the
- * repository changes. They are patched from a git repository built
- * around a copy outside the repository, not as path dependencies: Cargo
- * treats a path dependency as local code and compiles it without
- * `--cap-lints allow`, so a `RUSTFLAGS=-D warnings` job (the release
- * workflow's toolchain action sets it) would promote Zed's own warnings, such
- * as the deprecated `cocoa` types in `gpui_apple`, to errors that no
- * consumer of the registry crates ever sees. Git dependencies get the same
- * lint capping as registry ones, so the check mirrors what an application
- * building against the published snapshot gets. The copy also has to live
- * outside the repository: a path under the workspace root would be treated
- * as a member of this workspace and lose its own `workspace = true`
- * inheritance. Cargo keeps a locked version when it still satisfies the
- * requirement, so the published crates are moved to the staged version in a
- * scratch copy of `Cargo.lock`, which is restored afterwards.
- */
-/**
- * Move the workspace's exact requirements on the published crates onto
- * `version`, keeping every other byte of the manifest as it is. Only
- * `=x.y.z` requirements on a `package = "gpui-pre-…"` dependency that is part
- * of this snapshot are rewritten; a hand-published crate such as
- * `gpui-pre-reqwest` keeps its own pin.
- */
-function pinWorkspaceRequirements(manifest: string, crates: Crate[], version: string): string {
-  const published = new Set(crates.map((crate) => crate.publishedName));
-  return manifest.replace(
-    /^([A-Za-z0-9_-]+\s*=\s*\{[^\n]*?\bpackage\s*=\s*"([^"]+)"[^\n]*?\bversion\s*=\s*")=[^"]+(")/gm,
-    (line, head: string, name: string, tail: string) =>
-      published.has(name) ? `${head}=${version}${tail}` : line,
-  );
-}
-
-/** GPUI's benchmark macros use the caller's Criterion, which must match GPUI's. */
-function pinCriterionRequirement(manifest: string, version: string): string {
-  return manifest.replace(
-    /^(criterion\s*=\s*")[^"]+(".*)$/m,
-    (_line, head: string, tail: string) => `${head}${version}${tail}`,
-  );
-}
-
-async function verifyKitAgainstStaging(
-  staging: string,
-  crates: Crate[],
-  version: string,
-): Promise<string | undefined> {
-  const mirror = join(tmpdir(), `${PUBLISH_PREFIX}-kit-check`);
-  rmSync(mirror, { recursive: true, force: true });
-  cpSync(staging, mirror, {
-    recursive: true,
-    // Leave the staged workspace's own build directory behind; the path is
-    // judged relative to the staging root, which itself lives under `target/`.
-    filter: (path) => relative(staging, path).split("/")[0] !== "target",
-  });
-  // Ignored files still belong to the mirror: the copy is what gets built, so
-  // nothing from a `.gitignore` Zed ships may be left out of the commit.
-  const git = ["git", "-c", "user.name=gpui-kit", "-c", "user.email=gpui-kit@localhost", "-c", "commit.gpgsign=false"];
-  await run([...git, "init", "-q", "-b", "main"], { cwd: mirror });
-  await run([...git, "add", "--all", "--force"], { cwd: mirror });
-  await run([...git, "commit", "-q", "-m", `gpui-pre ${version} kit check`], { cwd: mirror });
-  const mirrorUrl = pathToFileURL(mirror).href;
-  const patches = crates.flatMap((crate) => [
-    "--config",
-    `patch.crates-io.${crate.publishedName}.git=${JSON.stringify(mirrorUrl)}`,
-  ]);
-  const lockPath = join(REPO_ROOT, "Cargo.lock");
-  const lockBackup = existsSync(lockPath) ? readFileSync(lockPath) : undefined;
-  const manifestPath = join(REPO_ROOT, "Cargo.toml");
-  const manifestBackup = readFileSync(manifestPath, "utf8");
-  const baseManifestPath = join(REPO_ROOT, "crates/base/Cargo.toml");
-  const baseManifestBackup = readFileSync(baseManifestPath, "utf8");
-  const criterion = readToml(join(staging, "Cargo.toml")).workspace.dependencies.criterion;
-  const criterionVersion = typeof criterion === "string" ? criterion : criterion.version;
-  const locked = new Set(
-    [...(lockBackup?.toString() ?? "").matchAll(/^name = "([^"]+)"$/gm)].map((m) => m[1]),
-  );
-  try {
-    writeFileSync(manifestPath, pinWorkspaceRequirements(manifestBackup, crates, version));
-    // The repository stays on the Criterion used by its pinned GPUI snapshot.
-    // Only this check follows the staged snapshot's benchmark dependency.
-    writeFileSync(baseManifestPath, pinCriterionRequirement(baseManifestBackup, criterionVersion));
-    const toUpdate = crates.filter((crate) => locked.has(crate.publishedName));
-    if (toUpdate.length > 0) {
-      await run(
-        ["cargo", "update", ...patches, ...toUpdate.flatMap((crate) => ["-p", crate.publishedName])],
-        { cwd: REPO_ROOT },
-      );
-    }
-
-    const metadata = JSON.parse(
-      await run(["cargo", "metadata", "--format-version", "1", ...patches], { cwd: REPO_ROOT, capture: true }),
-    ) as { packages: { name: string; version: string; source: string | null }[] };
-    // A crate can appear twice when only part of the closure fell back to the
-    // registry (a dependency of a staged crate next to a registry copy), so
-    // every package of the name is inspected, not the first one found. A
-    // staged crate reports the mirror as its source (`git+file://…#sha`);
-    // Cargo checks the repository out under its own cache, so the manifest
-    // path says nothing about where a package came from.
-    const published = new Set(crates.map((crate) => crate.publishedName));
-    const foreign = metadata.packages.filter(
-      (pkg) => published.has(pkg.name) && !(pkg.source ?? "").startsWith(`git+${mirrorUrl}`),
-    );
-    if (foreign.length > 0) {
-      const detail = foreign.map((pkg) => `${pkg.name} ${pkg.version} from ${pkg.source ?? "this workspace"}`).join("\n  ");
-      throw new BumpError(
-        `the workspace resolved these crates from the registry instead of the staged ${version}:\n  ${detail}\n` +
-          "Either the workspace's Cargo.toml requirement excludes the new version, or a " +
-          "dependency of the staged crates conflicts with what the workspace already " +
-          "resolves (an exact `=x.y.z` pin, a missing feature); Cargo then quietly backs " +
-          "off to the previous registry version. The `patch … was not used` warnings and " +
-          "`(available: v…)` notes above show which crates fell back.",
-      );
-    }
-
-    // The same commands the repository's CI runs. Clippy stays scoped to the
-    // crates this repository publishes; `--no-deps` keeps it off the staged
-    // crates, whose warnings are Zed's to fix.
-    const commands = [
-      ["cargo", "check", ...patches, "--workspace", "--all-targets"],
-      ["cargo", "clippy", ...patches, "--no-deps", "-p", "gpui-component", "-p", "gpui-component-story", "-p", "gpui-kit-assets", "-p", "gpui-kit", "--", "--deny", "warnings"],
-      ["cargo", "test", ...patches, "--workspace", "--exclude", "gpui-shell", "--features", "gpui-component-story/test-support"],
-    ];
-    for (const cmd of commands) {
-      const { code } = await runStreaming(cmd, REPO_ROOT);
-      if (code !== 0) {
-        return (
-          `gpui-kit does not build or pass its tests against gpui-pre ${version} ` +
-          `(\`${cmd.filter((arg, i) => arg !== "--config" && cmd[i - 1] !== "--config").join(" ")}\` failed); ` +
-          "adapt the repository to the Zed changes"
-        );
-      }
-    }
-    return undefined;
-  } catch (error) {
-    if (error instanceof BumpError) return error.message;
-    throw error;
-  } finally {
-    writeFileSync(baseManifestPath, baseManifestBackup);
-    writeFileSync(manifestPath, manifestBackup);
-    if (lockBackup !== undefined) writeFileSync(lockPath, lockBackup);
-    else if (existsSync(lockPath)) rmSync(lockPath);
-  }
-}
-
 async function main(argv: string[]): Promise<number> {
   const args = parseCommandLine(argv);
   if (args.selfTest) {
-    runSelfTest();
+    await runSelfTest();
     return 0;
   }
   if (Bun.which("cargo") === null)
     throw new BumpError("cargo is not installed");
 
-  const totalSteps = args.stageOnly ? 4 : args.dryRun ? 6 : 7;
+  const totalSteps = args.stageOnly ? 4 : args.dryRun ? 5 : 6;
   logHeader(`Publishing GPUI from Zed as ${PUBLISH_PREFIX}`);
   mkdirSync(WORK_DIR, { recursive: true });
   rmSync(join(WORK_DIR, "gpui-pre.json"), { force: true });
@@ -2164,7 +2055,7 @@ async function main(argv: string[]): Promise<number> {
   const crates = selectCrates(ws);
   const next =
     args.version === undefined
-      ? await nextVersion(VERSION, crates)
+      ? await nextVersion(VERSION, crates, zedSha)
       : { version: args.version, resuming: false };
   const version = next.version;
   const width = Math.max(...crates.map((c) => c.name.length));
@@ -2224,32 +2115,13 @@ async function main(argv: string[]): Promise<number> {
   }
   console.log();
 
-  let kitCheckFailure: string | undefined;
-  if (args.skipKitCheck) {
-    logWarn("Skipping the gpui-kit compatibility check (--skip-kit-check)");
-  } else {
-    logStep(`6/${totalSteps}`, "Building and testing gpui-kit against the staged crates");
-    kitCheckFailure = await verifyKitAgainstStaging(staging, crates, version);
-    recordKitCheck(kitCheckFailure);
-    if (kitCheckFailure === undefined) {
-      logSuccess(`gpui-kit builds and passes its tests against gpui-pre ${version}`);
-    } else {
-      // The snapshot ships regardless: the repository can only be adapted
-      // against the published crates, so holding the release back would
-      // leave nothing to adapt to.
-      logWarn(`${kitCheckFailure}; publishing anyway`);
-      if (process.env.GITHUB_ACTIONS !== undefined)
-        console.log(`::warning title=gpui-kit needs adapting to gpui-pre ${version}::${kitCheckFailure}`);
-    }
-  }
-  console.log();
   if (args.dryRun) {
     logInfo("Dry run complete; nothing was uploaded");
     return 0;
   }
 
-  logStep(`7/${totalSteps}`, "Publishing to crates.io");
-  await publish(staging, crates, version, !args.noWait);
+  logStep(`6/${totalSteps}`, "Publishing to crates.io");
+  await publish(staging, crates, version, !args.noWait, zedSha);
   console.log();
 
   console.log(paint("1;32", `╔${"═".repeat(56)}╗`));
@@ -2258,10 +2130,6 @@ async function main(argv: string[]): Promise<number> {
   );
   console.log(paint("1;32", `╚${"═".repeat(56)}╝`));
   console.log();
-  if (kitCheckFailure !== undefined) {
-    logWarn(`gpui-kit still needs adapting: ${kitCheckFailure}`);
-    console.log();
-  }
   console.log("Depend on it with:");
   console.log();
   console.log("    [workspace.dependencies]");
