@@ -984,19 +984,17 @@ where
             1. - HOVER_DIM * hover.focus * distance
         };
 
-        // Each bar grows out of the zero line as the chart appears, one after
-        // another across the first half of the appear.
-        let appear = self.appear.get().clone();
-        let count = self.data.len();
-        let label_appear = appear.clone();
+        // Every bar grows out of the zero line together as the chart appears,
+        // the way Chart.js draws bars in.
+        let appear = self.appear.get().progress();
 
         let mut bar = Bar::new()
-            .data(self.data.iter().enumerate())
+            .data(&self.data)
             .alignment(alignment)
             .band_width(band_width)
-            .cross(move |(_, d)| band_scale.tick(&band_fn_cloned(d)).map(|t| t + band_offset))
+            .cross(move |d| band_scale.tick(&band_fn_cloned(d)).map(|t| t + band_offset))
             .base(move |_| zero_pixel)
-            .value(move |(ix, d)| {
+            .value(move |d| {
                 let end = bar_end(
                     &value_scale,
                     value_fn_cloned(d),
@@ -1004,22 +1002,21 @@ where
                     alignment,
                     min_length,
                 )?;
-                let grown = appear.staggered(*ix, count, APPEAR_SPREAD);
-                Some(zero_pixel + (end - zero_pixel) * grown)
+                Some(zero_pixel + (end - zero_pixel) * appear)
             })
             .corner_radii(self.corner_radii);
 
         bar = match (fill, fill_gradient) {
             (_, Some(fg)) => {
                 let value_fn_for_grad = value_fn.clone();
-                bar.fill(move |(_, d), frame, alignment| {
+                bar.fill(move |d, frame, alignment| {
                     let v = value_fn_for_grad(d).to_f32().unwrap_or(0.);
                     let [s0, s1] = bar_gradient(fg.as_ref(), d, v, chart_range.clone());
                     let bg: Background = linear_gradient(alignment.gradient_angle(), s0, s1);
                     bg.opacity(emphasis(frame))
                 })
             }
-            (Some(f), _) => bar.fill(move |(_, d), frame, alignment| {
+            (Some(f), _) => bar.fill(move |d, frame, alignment| {
                 f(d, frame, chart_bounds, alignment).opacity(emphasis(frame))
             }),
             _ => bar.fill(move |_, frame, _| default_fill.opacity(emphasis(frame))),
@@ -1032,12 +1029,12 @@ where
                 BarAlignment::Left => TextAlign::Left,
                 BarAlignment::Right => TextAlign::Right,
             };
-            bar = bar.label(move |(ix, d), p| {
+            bar = bar.label(move |d, p| {
                 // A value label rides the end of its bar and fades in with it.
                 let color = label_color_fn
                     .as_ref()
                     .map_or(label_color, |f| f(d))
-                    .opacity(label_appear.staggered(*ix, count, APPEAR_SPREAD));
+                    .opacity(appear);
                 vec![Text::new(label(d), p, color).align(text_align)]
             });
         }
@@ -1179,10 +1176,6 @@ where
         Some(tooltip.into_any_element())
     }
 }
-
-/// How much of the appear the bars' starts are spread across; each bar grows
-/// over the rest.
-const APPEAR_SPREAD: f32 = 0.5;
 
 /// The end a bar showing `value` reaches along the value axis, at least
 /// `min_length` pixels from `zero`.

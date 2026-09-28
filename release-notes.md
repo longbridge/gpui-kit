@@ -50,8 +50,8 @@ moves to `gpui-base`; `gpui-component`'s `decimal` feature forwards to it.
 #### Added: chart appear motion
 
 Charts draw their data in the first time they are painted, over 1000 ms on
-ECharts' `cubicInOut` curve: line, area, candlestick and sankey charts reveal from the
-left, bars grow out of the zero line one after another, a pie sweeps clockwise
+`easeOutQuart`: line, area, candlestick and sankey charts reveal from the left,
+bars grow out of the zero line together, a pie sweeps clockwise
 and a radar grows out of its center. Axes, grids and labels are there from the
 first frame, the tooltip waits until the data is whole, and reduced motion
 skips it. New data paints in place, so a chart fed live quotes does not replay.
