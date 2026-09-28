@@ -1,11 +1,14 @@
 use gpui_kit::component::{
-    AxisExt, IndexPath, Sizable, Size,
+    AxisExt, Colorize as _, IndexPath, Sizable, Size,
     button::Button,
     checkbox::Checkbox,
-    color_picker::{ColorPicker, ColorPickerState},
+    color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState},
     date_picker::{DatePicker, DatePickerState},
     form::{field, v_form},
-    input::{Input, InputState, Textarea, TextareaState},
+    indigo_500,
+    input::{
+        Input, InputGroup, InputGroupAddon, InputGroupInput, InputState, Textarea, TextareaState,
+    },
     select::{Select, SelectState},
     separator::Separator,
     switch::Switch,
@@ -31,11 +34,13 @@ pub struct FormStory {
     email_input: Entity<InputState>,
     bio_input: Entity<TextareaState>,
     color_state: Entity<ColorPickerState>,
+    color_input: Entity<InputState>,
     subscribe_email: bool,
     date: Entity<DatePickerState>,
     layout: Axis,
     size: Size,
     columns: usize,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl super::Story for FormStory {
@@ -77,7 +82,21 @@ impl FormStory {
         });
 
         let name_input = cx.new(|cx| InputState::new(window, cx).default_value("Jason Lee"));
-        let color_state = cx.new(|cx| ColorPickerState::new(window, cx));
+        let theme_color = indigo_500();
+        let color_state = cx.new(|cx| ColorPickerState::new(window, cx).default_value(theme_color));
+        let color_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(theme_color.to_hex()));
+        let _subscriptions = vec![cx.subscribe_in(
+            &color_state,
+            window,
+            |this, _, event, window, cx| match event {
+                ColorPickerEvent::Change(color) => {
+                    let hex = color.map(|color| color.to_hex()).unwrap_or_default();
+                    this.color_input
+                        .update(cx, |input, cx| input.set_value(hex, window, cx));
+                }
+            },
+        )];
 
         let email_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Enter text here..."));
@@ -97,10 +116,12 @@ impl FormStory {
             bio_input,
             date,
             color_state,
+            color_input,
             subscribe_email: false,
             layout: Axis::Vertical,
             size: Size::default(),
             columns: 1,
+            _subscriptions,
         }
     }
 }
@@ -227,9 +248,16 @@ impl Render for FormStory {
                             ),
                     )
                     .child(
-                        field()
-                            .label("Theme color")
-                            .child(ColorPicker::new(&self.color_state).with_size(self.size)),
+                        field().label("Theme color").child(
+                            InputGroup::new("theme-color")
+                                .with_size(self.size)
+                                .readonly(true)
+                                .addon(
+                                    InputGroupAddon::new("theme-color-swatch")
+                                        .child(ColorPicker::new(&self.color_state).xsmall()),
+                                )
+                                .input(InputGroupInput::new(&self.color_input)),
+                        ),
                     )
                     .child(
                         field()
