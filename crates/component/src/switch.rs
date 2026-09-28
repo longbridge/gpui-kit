@@ -184,10 +184,12 @@ impl RenderOnce for Switch {
 
         let (bg_width, bg_height) = match self.size {
             Size::XSmall | Size::Small => (px(28.), px(16.)),
+            Size::Large => (px(44.), px(24.)),
             _ => (px(36.), px(20.)),
         };
         let bar_width = match self.size {
             Size::XSmall | Size::Small => px(12.),
+            Size::Large => px(20.),
             _ => px(16.),
         };
         let inset = px(2.);
@@ -528,7 +530,11 @@ mod tests {
         }
 
         cx.update(crate::init);
-        for (size, width, height) in [(Size::Small, 28., 16.), (Size::Medium, 36., 20.)] {
+        for (size, width, height) in [
+            (Size::Small, 28., 16.),
+            (Size::Medium, 36., 20.),
+            (Size::Large, 44., 24.),
+        ] {
             for checked in [false, true] {
                 for disabled in [false, true] {
                     let (_, cx) = cx.add_window_view(move |_, _| NarrowSwitch {
