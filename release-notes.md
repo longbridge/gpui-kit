@@ -71,6 +71,12 @@ fn Plot::interactive(&self) -> bool              // hover and tooltip, apart fro
 pub fn PlotMotion::with_appear(self, appear: Transition) -> Self
 ```
 
+Every new `Plot` method has a default, so existing plots compile and behave as
+before: `Plot::interactive` is `true`, and without an `appear_generation` a plot
+tracks no appear and asks for no frames. A chart with `interactive(false)` now
+returns its id from `Plot::id`, keeping its appear and path caches but still no
+hitbox.
+
 #### Breaking changes
 
 ##### Plot API
@@ -102,10 +108,6 @@ the new `f32` support. Custom plots built on the primitives need these changes:
   `#[non_exhaustive]`; build them with their constructors.
 - `#[derive(IntoPlot)]` generates `type Element = PlotElement<Self>` instead of
   an `Element` impl on the plot; `gpui_base::Theme` gains a `plot` field.
-- `Plot::id` gives a plot element state; whether it tracks hover is
-  `Plot::interactive` (`true` by default, so an existing plot is unchanged).
-  A chart with `interactive(false)` now returns its id, keeping its appear and
-  path caches but still no hitbox.
 
 `StrokeStyle` and `stroke_style` are removed outright. Deprecated aliases keep
 `AXIS_GAP`, `dot_fill_color`, `dot_stroke_color` and `focus` compiling for this
