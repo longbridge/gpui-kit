@@ -1432,7 +1432,7 @@ function installFacadeAwareMacroPaths(
   logInfo(`gpui_macros: made ${wrapped.count} proc-macro entry points facade-aware`);
 }
 
-function runSelfTest() {
+async function runSelfTest() {
   const declarativeFixture = [
     "macro_rules! actions {",
     "    ($ns:path, [ $($name:ident),* ]) => { $( #[derive(gpui::Action)] pub struct $name; )* };",
@@ -1546,7 +1546,51 @@ fn helper(input: TokenStream) -> TokenStream { input }
     .replace('"gpui-pre-platform", version = "=0.3.6"', '"gpui-pre-platform", version = "=0.3.7"');
   if (pinned !== expectedPinned)
     throw new BumpError(`self-test pinned the workspace to:\n${pinned}`);
+  await runVersionSelfTest();
   logSuccess("Facade-aware gpui_macros transformation self-test passed");
+}
+
+/** Exercise version selection without reaching crates.io. */
+async function runVersionSelfTest() {
+  const originalFetch = globalThis.fetch;
+  const revision = "1a28cff4b409000000000000000000000000000000";
+  const oldDescription = "GPUI (gpui-pre snapshot of zed@bcf6582)";
+  const description = "GPUI (gpui-pre snapshot of zed@1a28cff)";
+  const cases = [
+    { name: "new crate in a newer revision", versions: [[6], []], descriptions: [oldDescription, undefined], expected: { version: "0.3.7", resuming: false } },
+    { name: "partial upload of the same revision", versions: [[6], [5]], descriptions: [description, undefined], expected: { version: "0.3.6", resuming: true } },
+    { name: "partial upload of an older revision", versions: [[6], [5]], descriptions: [oldDescription, undefined], expected: { version: "0.3.7", resuming: false } },
+    { name: "unknown snapshot revision", versions: [[6], []], descriptions: ["GPUI", undefined], expected: { version: "0.3.7", resuming: false } },
+    { name: "inconsistent published revisions", versions: [[6], [5], [6]], descriptions: [description, undefined, oldDescription], expected: { version: "0.3.7", resuming: false } },
+    { name: "complete snapshot", versions: [[6], [6]], descriptions: [description, description], expected: { version: "0.3.7", resuming: false } },
+    { name: "first snapshot", versions: [[], []], descriptions: [undefined, undefined], expected: { version: "0.3.0", resuming: false } },
+    { name: "yanked version cannot be resumed", versions: [[6], []], descriptions: [description, undefined], yanked: true, expected: { version: "0.3.7", resuming: false } },
+  ];
+  try {
+    for (const fixture of cases) {
+      const crates = ["gpui-pre", "gpui-pre-bench-metrics", "gpui-pre-util"]
+        .slice(0, fixture.versions.length)
+        .map((publishedName) => ({ publishedName }) as Crate);
+      globalThis.fetch = (async (input: string | URL | Request) => {
+        const path = String(input).replace(`${CRATES_IO_API}/`, "");
+        const [name, endpoint] = path.split("/");
+        const index = crates.findIndex((crate) => crate.publishedName === name);
+        if (index < 0) throw new BumpError(`unexpected self-test request: ${path}`);
+        if (endpoint === "versions") {
+          return Response.json({ versions: fixture.versions[index].map((patch) => ({ num: `0.3.${patch}` })) });
+        }
+        if (endpoint !== "0.3.6" || !fixture.versions[index].includes(6))
+          throw new BumpError(`unexpected self-test request: ${path}`);
+        return Response.json({ version: { description: fixture.descriptions[index], yanked: fixture.yanked ?? false } });
+      }) as typeof fetch;
+      const actual = await nextVersion(VERSION, crates, revision);
+      if (JSON.stringify(actual) !== JSON.stringify(fixture.expected))
+        throw new BumpError(`version self-test (${fixture.name}): expected ${JSON.stringify(fixture.expected)}, got ${JSON.stringify(actual)}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  logSuccess("Snapshot version selection self-test passed");
 }
 
 const GPUI_APPLE_SIBLING = '.join("../gpui")';
@@ -1752,12 +1796,15 @@ async function cratesIoGet(path: string): Promise<Toml | undefined> {
  *
  * The patch number continues from the highest one any of the crates has; if
  * a previous run stopped part-way (the rate limit, a crash) some crates lack
- * that number, and the run resumes at it instead of starting a new one.
- * Yanked versions still occupy their number.
+ * that number, and the run resumes at it only when every uploaded crate
+ * comes from the requested Zed revision. A new dependency in a later Zed
+ * revision must not be added to an older, already published snapshot.
+ * Yanked versions still occupy their number and cannot be resumed.
  */
 async function nextVersion(
   base: string,
   crates: Crate[],
+  zedSha: string,
 ): Promise<{ version: string; resuming: boolean }> {
   const pattern = new RegExp(`^${base.replaceAll(".", "\\.")}\\.(\\d+)$`);
   const numbers = new Map<Crate, Set<number>>();
@@ -1778,6 +1825,15 @@ async function nextVersion(
     (crate) => !numbers.get(crate)!.has(highest),
   );
   if (incomplete.length > 0) {
+    for (const crate of crates.filter((crate) => numbers.get(crate)!.has(highest))) {
+      const detail = await cratesIoGet(`${crate.publishedName}/${base}.${highest}`);
+      const rev = snapshotRev(String(detail?.version?.description ?? ""));
+      if (detail?.version?.yanked || rev === undefined || !zedSha.startsWith(rev)) {
+        logInfo(`Not resuming ${base}.${highest}: its published crates are not an unyanked snapshot of zed@${zedSha.slice(0, 7)}`);
+        return { version: `${base}.${highest + 1}`, resuming: false };
+      }
+      await Bun.sleep(200); // be polite to the crates.io API
+    }
     logInfo(
       `Resuming ${base}.${highest}: ${incomplete.length} crates are still missing it`,
     );
@@ -1906,7 +1962,7 @@ Arguments:
                     where N continues from what crates.io already has
 
 Options:
-  --self-test       test the gpui_macros source transformation and stop
+  --self-test       test source transformations and snapshot version selection
   --rev REV         Zed branch, tag or commit (default: ${ZED_DEFAULT_REV})
   --zed PATH        use this Zed checkout instead of fetching one
   --dry-run         stage and verify, but do not publish
@@ -2122,7 +2178,7 @@ async function verifyKitAgainstStaging(
 async function main(argv: string[]): Promise<number> {
   const args = parseCommandLine(argv);
   if (args.selfTest) {
-    runSelfTest();
+    await runSelfTest();
     return 0;
   }
   if (Bun.which("cargo") === null)
@@ -2144,7 +2200,7 @@ async function main(argv: string[]): Promise<number> {
   const crates = selectCrates(ws);
   const next =
     args.version === undefined
-      ? await nextVersion(VERSION, crates)
+      ? await nextVersion(VERSION, crates, zedSha)
       : { version: args.version, resuming: false };
   const version = next.version;
   const width = Math.max(...crates.map((c) => c.name.length));

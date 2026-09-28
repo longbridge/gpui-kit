@@ -38,6 +38,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: gpui-pre is pinned exactly
         run: bun script/check-gpui-pin.ts
+      - name: GPUI release script self-tests
+        run: bun script/bump-gpui.ts --self-test
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete@0.9.1
