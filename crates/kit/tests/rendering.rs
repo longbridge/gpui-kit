@@ -17,6 +17,7 @@ mod macos {
             ActiveTheme, Theme,
             checkbox::Checkbox,
             input::{Input, InputState},
+            text::TextView,
         },
         div,
         prelude::*,
@@ -173,6 +174,77 @@ mod macos {
         );
     }
 
+    // CJK full-width punctuation shapes wider mid-line than on its own, and the
+    // inline code routes the paragraph through the inline flow's own wrapping.
+    const CJK_WITH_CODE: &str = "行情显示 HUT 近 5 日下跌约 18%，成交放大到均量的 2.4 倍。\
+        财报接口这次失败了，改用网页搜索里的季报摘要：前两大客户贡献约 60% 的租约收入，\
+        合约期 10 年以上。可以放一张对比卡 `HUT.US` `MARA.US`，单只行情就不重复放了。";
+
+    const WRAP_PAD: f32 = 8.;
+
+    struct Wrapped {
+        width: f32,
+    }
+    impl Render for Wrapped {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .bg(cx.theme().background)
+                .text_color(cx.theme().foreground)
+                .p(px(WRAP_PAD))
+                .child(
+                    div()
+                        .w(px(self.width))
+                        .child(TextView::markdown("wrapped", CJK_WITH_CODE).text_sm()),
+                )
+        }
+    }
+
+    /// Columns right of the wrap width that hold painted pixels. Ink there
+    /// is a line laid out wider than the space it was wrapped for, which a
+    /// clipping parent would cut off.
+    fn ink_past_wrap_width(width: f32) -> usize {
+        let mut cx = context(Arc::new(Assets));
+        let window_width = width + WRAP_PAD * 2. + 60.;
+        let (handle, _) = cx
+            .update(|cx| {
+                gpui_kit::open_window(
+                    gpui_kit::WindowOptions {
+                        window_bounds: Some(gpui_kit::WindowBounds::Windowed(gpui_kit::Bounds {
+                            origin: Default::default(),
+                            size: size(px(window_width), px(260.)),
+                        })),
+                        focus: false,
+                        show: false,
+                        ..Default::default()
+                    },
+                    cx,
+                    |_, cx| cx.new(|_| Wrapped { width }),
+                )
+            })
+            .unwrap();
+        cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+            .unwrap();
+        let image = cx.capture_screenshot(handle).unwrap();
+        let (w, h) = image.dimensions();
+        let scale = w as f32 / window_width;
+        let background = *image.get_pixel(w - 1, 0);
+        let first = ((WRAP_PAD + width) * scale).ceil() as u32 + 1;
+        (first..w)
+            .filter(|&x| (0..h).any(|y| *image.get_pixel(x, y) != background))
+            .count()
+    }
+
+    fn wrapped_cjk_with_inline_code_stays_within_the_wrap_width() {
+        for width in [300., 330., 360., 390., 420., 450., 480.] {
+            let columns = ink_past_wrap_width(width);
+            assert_eq!(
+                columns, 0,
+                "lines wrapped at {width}px painted {columns} device columns past the wrap width"
+            );
+        }
+    }
+
     pub fn run() {
         println!("running pixels_detect_missing_check_even_when_checked_state_is_correct");
         pixels_detect_missing_check_even_when_checked_state_is_correct();
@@ -180,6 +252,9 @@ mod macos {
         println!("running pixels_detect_missing_input_text_even_when_value_is_correct");
         pixels_detect_missing_input_text_even_when_value_is_correct();
         println!("passed pixels_detect_missing_input_text_even_when_value_is_correct");
-        println!("rendering: 2 passed (Metal)");
+        println!("running wrapped_cjk_with_inline_code_stays_within_the_wrap_width");
+        wrapped_cjk_with_inline_code_stays_within_the_wrap_width();
+        println!("passed wrapped_cjk_with_inline_code_stays_within_the_wrap_width");
+        println!("rendering: 3 passed (Metal)");
     }
 }
