@@ -10,11 +10,12 @@ fn main() {
 #[cfg(target_os = "macos")]
 mod macos {
     use gpui_kit::{
-        AppContext, AssetSource, Context, Entity, HeadlessAppContext, Render, Result, SharedString,
-        Window,
+        AppContext, AssetSource, Bounds, Context, Entity, HeadlessAppContext, Pixels, Render,
+        Result, Rgba, SharedString, Window,
         assets::Assets,
         component::{
-            ActiveTheme, Theme,
+            ActiveTheme, IconName, Theme,
+            button::{Button, ButtonVariants as _},
             checkbox::Checkbox,
             input::{Input, InputState},
             text::TextView,
@@ -245,6 +246,168 @@ mod macos {
         }
     }
 
+    const BUTTON_IDS: [&str; 4] = ["ghost", "text", "link", "primary"];
+
+    struct Buttons;
+    impl Render for Buttons {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            // Lowercase labels without ascenders keep glyph ink away from the
+            // top edge, where the ring is sampled.
+            div()
+                .size_full()
+                .bg(cx.theme().background)
+                .text_color(cx.theme().foreground)
+                .p_4()
+                .flex()
+                .items_center()
+                .gap_4()
+                .child(Button::new("ghost").ghost().icon(IconName::Copy))
+                .child(Button::new("text").text().label("ocean"))
+                .child(Button::new("link").link().label("ocean"))
+                .child(Button::new("primary").primary().label("ocean"))
+        }
+    }
+
+    const BUTTONS_SIZE: (f32, f32) = (320., 64.);
+
+    fn buttons_window(cx: &mut HeadlessAppContext) -> gpui_kit::AnyWindowHandle {
+        cx.update(|cx| Theme::update(cx, |theme| theme.focus_ring = false));
+        let (handle, _) = cx
+            .update(|cx| {
+                gpui_kit::open_window(
+                    gpui_kit::WindowOptions {
+                        window_bounds: Some(gpui_kit::WindowBounds::Windowed(gpui_kit::Bounds {
+                            origin: Default::default(),
+                            size: size(px(BUTTONS_SIZE.0), px(BUTTONS_SIZE.1)),
+                        })),
+                        focus: false,
+                        show: false,
+                        ..Default::default()
+                    },
+                    cx,
+                    |_, cx| cx.new(|_| Buttons),
+                )
+            })
+            .unwrap();
+        cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+            .unwrap();
+        handle
+    }
+
+    /// A window capture as raw RGBA rows.
+    struct Capture {
+        width: u32,
+        height: u32,
+        raw: Vec<u8>,
+    }
+    impl Capture {
+        fn take(cx: &mut HeadlessAppContext, handle: gpui_kit::AnyWindowHandle) -> Self {
+            let image = cx.capture_screenshot(handle).unwrap();
+            let (width, height) = image.dimensions();
+            Self {
+                width,
+                height,
+                raw: image.into_raw(),
+            }
+        }
+        fn scale(&self) -> f32 {
+            self.width as f32 / BUTTONS_SIZE.0
+        }
+        fn get_pixel(&self, x: u32, y: u32) -> &[u8] {
+            let start = ((y * self.width + x) * 4) as usize;
+            &self.raw[start..start + 4]
+        }
+    }
+
+    /// Ring-coloured pixels along the top edge of `bounds`, away from the corners.
+    fn ring_pixels(image: &Capture, bounds: Bounds<Pixels>, ring: Rgba) -> usize {
+        let scale = image.scale();
+        let device = |value: Pixels| (f32::from(value) * scale).round() as u32;
+        let ring = [ring.r, ring.g, ring.b].map(|channel| (channel * 255.).round() as i32);
+        let (left, right) = (device(bounds.left()), device(bounds.right()));
+        let top = device(bounds.top());
+        let quarter = (right - left) / 4;
+        ((left + quarter)..(right - quarter))
+            .flat_map(|x| (top..top + 2).map(move |y| (x, y)))
+            .filter(|&(x, y)| {
+                let pixel = image.get_pixel(x, y);
+                (0..3).all(|i| (pixel[i] as i32 - ring[i]).abs() <= 8)
+            })
+            .count()
+    }
+
+    /// Device pixels that differ between two captures outside `bounds`.
+    fn changes_outside(before: &Capture, after: &Capture, bounds: Bounds<Pixels>) -> usize {
+        let scale = before.scale();
+        let inside = |x: u32, y: u32| {
+            let point = gpui_kit::point(px(x as f32 / scale), px(y as f32 / scale));
+            bounds.contains(&point)
+        };
+        (0..before.height)
+            .flat_map(|y| (0..before.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| !inside(x, y) && after.get_pixel(x, y) != before.get_pixel(x, y))
+            .count()
+    }
+
+    fn borderless_buttons_show_keyboard_focus_inside_when_focus_ring_is_off() {
+        let mut cx = context(Arc::new(Assets));
+        let handle = buttons_window(&mut cx);
+        let ring = cx.update(|cx| Rgba::from(cx.theme().ring));
+        let idle = Capture::take(&mut cx, handle);
+
+        for id in BUTTON_IDS {
+            let bounds = cx
+                .update_window(handle, |_, window, cx| {
+                    // Tab only reaches Root's binding once something inside
+                    // it holds focus, so the first stop is what Tab does.
+                    if window.focused(cx).is_none() {
+                        window.focus_next(cx);
+                    } else {
+                        window.press("tab", cx);
+                    }
+                    window.render_frame(cx);
+                    window.find(id).bounds()
+                })
+                .unwrap();
+            let focused = Capture::take(&mut cx, handle);
+            assert!(
+                ring_pixels(&idle, bounds, ring) == 0,
+                "an unfocused `{id}` button must draw no ring"
+            );
+            assert!(
+                ring_pixels(&focused, bounds, ring) > 0,
+                "a keyboard-focused `{id}` button must draw a ring inside its bounds"
+            );
+            let outside = changes_outside(&idle, &focused, bounds);
+            assert_eq!(
+                outside, 0,
+                "focusing `{id}` changed {outside} device pixels outside its bounds"
+            );
+        }
+    }
+
+    fn clicking_a_button_draws_no_focus_ring() {
+        let mut cx = context(Arc::new(Assets));
+        let handle = buttons_window(&mut cx);
+        let ring = cx.update(|cx| Rgba::from(cx.theme().ring));
+        for id in BUTTON_IDS {
+            let bounds = cx
+                .update_window(handle, |_, window, cx| {
+                    window.click(id, cx);
+                    window.render_frame(cx);
+                    assert!(window.focused(cx).is_none(), "clicking `{id}` took focus");
+                    window.find(id).bounds()
+                })
+                .unwrap();
+            let clicked = Capture::take(&mut cx, handle);
+            assert_eq!(
+                ring_pixels(&clicked, bounds, ring),
+                0,
+                "a clicked `{id}` button must draw no ring"
+            );
+        }
+    }
+
     pub fn run() {
         println!("running pixels_detect_missing_check_even_when_checked_state_is_correct");
         pixels_detect_missing_check_even_when_checked_state_is_correct();
@@ -255,6 +418,12 @@ mod macos {
         println!("running wrapped_cjk_with_inline_code_stays_within_the_wrap_width");
         wrapped_cjk_with_inline_code_stays_within_the_wrap_width();
         println!("passed wrapped_cjk_with_inline_code_stays_within_the_wrap_width");
-        println!("rendering: 3 passed (Metal)");
+        println!("running borderless_buttons_show_keyboard_focus_inside_when_focus_ring_is_off");
+        borderless_buttons_show_keyboard_focus_inside_when_focus_ring_is_off();
+        println!("passed borderless_buttons_show_keyboard_focus_inside_when_focus_ring_is_off");
+        println!("running clicking_a_button_draws_no_focus_ring");
+        clicking_a_button_draws_no_focus_ring();
+        println!("passed clicking_a_button_draws_no_focus_ring");
+        println!("rendering: 5 passed (Metal)");
     }
 }

@@ -172,7 +172,8 @@ pub struct Theme {
     /// The ring is painted outside the element, so any ancestor that clips its
     /// content will cut it off. An application whose layout clips heavily can
     /// turn it off here: focused controls then show only their tinted border,
-    /// which costs no space and cannot be clipped.
+    /// or a 1px ring just inside their edge when they have none. Neither costs
+    /// space or can be clipped.
     #[serde(default = "default_true")]
     pub focus_ring: bool,
     pub transparent: Hsla,
