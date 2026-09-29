@@ -91,7 +91,16 @@ const DEFAULT_FONT: &str = "Consolas";
 // The iOS backend resolves this native family but not the generic monospace alias.
 #[cfg(target_os = "ios")]
 const DEFAULT_FONT: &str = ".SystemUIFont";
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "ios")))]
+// Android's cosmic-text backend has no `monospace` alias either (GPUI panics when
+// neither it nor its desktop fallbacks resolve); every Android ships this family.
+#[cfg(target_os = "android")]
+const DEFAULT_FONT: &str = "Droid Sans Mono";
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "ios",
+    target_os = "android"
+)))]
 const DEFAULT_FONT: &str = "monospace";
 
 /// A realtime performance HUD: frames per second, a rolling frame time chart,
