@@ -6,7 +6,8 @@ use gpui_kit::component::{
 };
 use gpui_kit::test::{TestSupportExt, TestWindowExt};
 use gpui_kit::{
-    AppContext, Context, Entity, TestAppContext, Window, div, point, prelude::*, px, size,
+    AppContext, Context, Entity, InputEvent as _, Pixels, Point, TestAppContext, TouchDragEvent,
+    TouchPhase, Window, div, point, prelude::*, px, size,
 };
 
 struct Settings {
@@ -240,6 +241,54 @@ fn slider_click_and_drag_move_the_actual_thumb(cx: &mut TestAppContext) {
     .unwrap();
 }
 
+/// A finger drag reaches elements as `TouchDragEvent`s, not as mouse drags.
+fn touch_drag(window: &mut Window, cx: &mut gpui_kit::App, from: Point<Pixels>, to: Point<Pixels>) {
+    for (phase, position) in [
+        (TouchPhase::Started, from),
+        (TouchPhase::Moved, to),
+        (TouchPhase::Ended, to),
+    ] {
+        window.dispatch_event(
+            TouchDragEvent {
+                phase,
+                start_position: from,
+                position,
+            }
+            .to_platform_input(),
+            cx,
+        );
+    }
+    window.render_frame(cx);
+}
+
+#[gpui_kit::test]
+fn slider_touch_drag_moves_the_actual_thumb(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(600.))), |_, cx| {
+        cx.new(|cx| Settings {
+            open: vec![],
+            step: 0,
+            disabled: false,
+            advanced_disabled: false,
+            slider: cx.new(|_| SliderState::new().default_value(20.)),
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let before = window.find(("slider-thumb", 0u32)).bounds();
+        let track = window.find("slider-bar-container").bounds();
+        let right = point(track.left() + track.size.width * 0.8, track.center().y);
+        touch_drag(window, cx, before.center(), right);
+        let after = window.find(("slider-thumb", 0u32)).bounds();
+        assert!(after.center().x > before.center().x);
+
+        let left = point(track.left() + track.size.width * 0.3, track.center().y);
+        touch_drag(window, cx, after.center(), left);
+        assert!(window.find(("slider-thumb", 0u32)).bounds().center().x < after.center().x);
+    })
+    .unwrap();
+}
+
 #[gpui_kit::test]
 fn disabled_slider_ignores_pointer_changes(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
@@ -262,6 +311,12 @@ fn disabled_slider_ignores_pointer_changes(cx: &mut TestAppContext) {
             cx,
         );
         window.drag(before.center(), point(track.right(), track.center().y), cx);
+        touch_drag(
+            window,
+            cx,
+            before.center(),
+            point(track.right(), track.center().y),
+        );
         assert_eq!(window.find(("slider-thumb", 0u32)).bounds(), before);
     })
     .unwrap();
