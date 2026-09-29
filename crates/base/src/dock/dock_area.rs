@@ -581,6 +581,24 @@ impl DockArea {
         self.commit(result, window, cx);
     }
 
+    /// Replace the slot sizes of the split at `node` in place.
+    pub fn set_split_sizes(
+        &mut self,
+        node: NodeId,
+        sizes: Vec<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(placement) = self.placement_of_node(node) else {
+            return;
+        };
+        let Some(tree) = self.tree_mut(placement) else {
+            return;
+        };
+        let result = tree.set_sizes(node, sizes.into_iter().map(Some).collect());
+        self.commit(result, window, cx);
+    }
+
     /// Put `panel` in a new tab group beside `node`.
     pub fn split_at(
         &mut self,
@@ -2437,6 +2455,63 @@ mod tests {
             "the written sizes are the ones on screen, not the ones the tree \
              was built from"
         );
+    }
+
+    #[gpui::test]
+    fn set_split_sizes_restores_a_share_and_reports_it(cx: &mut TestAppContext) {
+        let (area, cx) = setup(cx);
+        cx.update(|window, cx| {
+            let alpha = TestPanel::new("Alpha", cx);
+            let beta = TestPanel::new("Beta", cx);
+            area.update(cx, |area, cx| {
+                area.set_center(
+                    DockLayout::h_split()
+                        .child(DockLayout::tabs().panel(alpha), Some(px(300.)))
+                        .child(DockLayout::tabs().panel(beta), Some(px(300.))),
+                    window,
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+
+        let root = cx.read(|cx| {
+            area.read(cx)
+                .layout(DockPlacement::Center)
+                .unwrap()
+                .root()
+                .id()
+        });
+        let events = Rc::new(Cell::new(0));
+        let observed = events.clone();
+        let _subscription = cx.update(|window, cx| {
+            window.subscribe(&area, cx, move |_, event: &DockEvent, _, _| {
+                if matches!(event, DockEvent::LayoutChanged) {
+                    observed.set(observed.get() + 1);
+                }
+            })
+        });
+
+        cx.update(|window, cx| {
+            area.update(cx, |area, cx| {
+                area.set_split_sizes(root, vec![px(100.), px(300.)], window, cx);
+            });
+        });
+        cx.run_until_parked();
+        assert_eq!(events.get(), 1);
+        let measured = cx.read(|cx| area.read(cx).splits[&root].entity.read(cx).sizes().clone());
+        let share = measured[0].as_f32() / (measured[0].as_f32() + measured[1].as_f32());
+        assert!((share - 0.25).abs() < 0.01, "measured {measured:?}");
+
+        cx.update(|window, cx| {
+            area.update(cx, |area, cx| {
+                area.set_split_sizes(root, vec![px(10.)], window, cx);
+            });
+        });
+        cx.run_until_parked();
+        assert_eq!(events.get(), 1);
+        let after = cx.read(|cx| area.read(cx).splits[&root].entity.read(cx).sizes().clone());
+        assert_eq!(after, measured);
     }
 
     /// A drop that splits carries no size — `TabGroup` builds
