@@ -1,9 +1,9 @@
 //! GPUI Kit: one dependency for building desktop applications with GPUI.
 //!
-//! GPUI itself is published as a family of `gpui-pre-*` crates that move
-//! together. This crate depends on the matching set for you, so an
-//! application lists `gpui-kit` alone. `use gpui_kit::*;` is GPUI, and each
-//! layer is reachable by name:
+//! GPUI itself comes from [gpui-fast](https://github.com/longbridge/gpui-fast)
+//! as a family of crates that move together. This crate depends on the
+//! matching set for you, so an application lists `gpui-kit` alone.
+//! `use gpui_kit::*;` is GPUI, and each layer is reachable by name:
 //!
 //! | Path            | Crate             | Feature          |
 //! | --------------- | ----------------- | ---------------- |
