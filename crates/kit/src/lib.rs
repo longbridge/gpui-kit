@@ -1,9 +1,9 @@
 //! GPUI Kit: one dependency for building desktop applications with GPUI.
 //!
-//! GPUI itself comes from [gpui-fast](https://github.com/longbridge/gpui-fast)
-//! as a family of crates that move together. This crate depends on the
-//! matching set for you, so an application lists `gpui-kit` alone.
-//! `use gpui_kit::*;` is GPUI, and each layer is reachable by name:
+//! GPUI itself is published as a family of `gpui-pre-*` crates that move
+//! together. This crate depends on the matching set for you, so an
+//! application lists `gpui-kit` alone. `use gpui_kit::*;` is GPUI, and each
+//! layer is reachable by name:
 //!
 //! | Path            | Crate             | Feature          |
 //! | --------------- | ----------------- | ---------------- |
@@ -85,14 +85,19 @@ macro_rules! actions {
 // A future switch to official GPUI crates is an internal dependency migration,
 // not a reason to steer Kit users toward gpui:: paths or require import changes.
 // Keep the existing gpui namespace re-export hidden for source compatibility;
-// it is not the recommended application API.
+// it is not the recommended application API. It names this crate rather than
+// the GPUI crate: `gpui_kit::gpui::Window` is still GPUI's `Window` through the
+// glob below, and applications can alias the Kit as `gpui`
+// (`extern crate gpui_kit as gpui;`) so GPUI macro output resolves through the
+// Kit whichever GPUI it is built on. Pointing this at the GPUI crate would make
+// that alias ambiguous (E0659) wherever `gpui_kit::*` is glob-imported.
 //
 // With test-support, the glob below includes GPUI's test macro. Test modules
 // should import their Kit types explicitly to avoid shadowing Rust's #[test].
 pub use ::gpui::*;
 
 #[doc(hidden)]
-pub use ::gpui;
+pub use crate as gpui;
 
 /// UI integration testing: render real components in headless windows, dispatch
 /// pointer and keyboard events, and assert state, focus, layout and callbacks.

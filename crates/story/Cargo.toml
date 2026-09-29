@@ -13,7 +13,6 @@ default = ["tree-sitter"]
 [dependencies]
 anyhow.workspace = true
 gpui-kit.workspace = true
-gpui.workspace = true
 gpui-fps.workspace = true
 
 async-channel = "2.3.1"
@@ -58,8 +57,3 @@ gpui-kit = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true
-
-# `gpui` is only named by GPUI macro expansions (`IntoElement`, `actions!` …), which
-# cargo-machete does not see.
-[package.metadata.cargo-machete]
-ignored = ["gpui"]
