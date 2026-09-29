@@ -21,7 +21,7 @@ cd gpui-multi-window
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "{{gpui_kit_version}}"
 ```
 
 用下面的完整示例替换 `src/main.rs`。如果已有单窗口应用，保留 `application().run(...)` 和 `init(cx)`，在启动闭包中创建一次共享 model，再调用第二次 `open_window`，为新窗口创建单独的内容 view。下面的循环会对两个名称各调用一次。

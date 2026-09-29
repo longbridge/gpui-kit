@@ -6,7 +6,7 @@ order: -10.5
 
 # 桌面应用打包与分发
 
-`cargo build --release` 生成可执行文件，不会自动创建应用包或安装程序。GPUI Kit 提供应用框架和组件；应用项目负责选择分发格式、确定应用标识、收集运行时资源、签名并验证安装。本文以仓库现有的 `hello_world` package 为构建示例，示例版本是 `0.6.5`。实际发布时，请用自己的应用名、版本、图标、标识及二进制路径替换示例值。
+`cargo build --release` 生成可执行文件，不会自动创建应用包或安装程序。GPUI Kit 提供应用框架和组件；应用项目负责选择分发格式、确定应用标识、收集运行时资源、签名并验证安装。本文以仓库现有的 `hello_world` package 为构建示例，示例版本是 `{{gpui_kit_version}}`。实际发布时，请用自己的应用名、版本、图标、标识及二进制路径替换示例值。
 
 先完成[安装与本机运行](./installation)，再决定要交付哪一种产物：
 
@@ -66,7 +66,7 @@ cat > dist/HelloWorld.app/Contents/Info.plist <<'PLIST'
   <key>CFBundleDisplayName</key><string>HelloWorld</string>
   <key>CFBundleExecutable</key><string>hello_world</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.6.5</string>
+  <key>CFBundleShortVersionString</key><string>{{gpui_kit_version}}</string>
   <key>CFBundleVersion</key><string>1</string>
 </dict></plist>
 PLIST
@@ -126,7 +126,7 @@ ZIP 不会自动创建开始菜单项、卸载记录或升级规则。需要安�
 [Setup]
 AppId=Example.HelloWorld
 AppName=HelloWorld
-AppVersion=0.6.5
+AppVersion={{gpui_kit_version}}
 DefaultDirName={autopf}\HelloWorld
 DefaultGroupName=HelloWorld
 OutputDir=dist
@@ -317,7 +317,7 @@ install -m 0755 target/release/hello_world \
 
 ```text
 Package: hello-world-gpui
-Version: 0.6.5
+Version: {{gpui_kit_version}}
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -338,14 +338,14 @@ Terminal=false
 把两个文本分别保存到上面的 `control` 与 `.desktop` 路径，复制二进制和图标，设置可执行权限，然后在 Linux 构建机创建并查看包：
 
 ```sh
-dpkg-deb --root-owner-group --build dist/deb-root dist/hello-world-gpui_0.6.5_amd64.deb
-dpkg-deb --info dist/hello-world-gpui_0.6.5_amd64.deb
-dpkg-deb --contents dist/hello-world-gpui_0.6.5_amd64.deb
+dpkg-deb --root-owner-group --build dist/deb-root dist/hello-world-gpui_{{gpui_kit_version}}_amd64.deb
+dpkg-deb --info dist/hello-world-gpui_{{gpui_kit_version}}_amd64.deb
+dpkg-deb --contents dist/hello-world-gpui_{{gpui_kit_version}}_amd64.deb
 ```
 
 用 `readelf -d` 或 `objdump -p` 查看自己的二进制直接依赖的共享库，再用 Debian 的 [`dpkg-shlibdeps`](https://manpages.debian.org/unstable/dpkg-dev/dpkg-shlibdeps.1.en.html) 和目标发行版包信息推导运行时 `Depends`；如果运行时才加载库，也要检查对应路径。桌面入口遵循 [Desktop Entry 规范](https://specifications.freedesktop.org/desktop-entry/latest-single/)，图标放置及系统目录遵循 [Debian Policy](https://www.debian.org/doc/debian-policy/ch-opersys.html)。若还要发布 RPM，应另行制作并测试 RPM，不要直接改 DEB 的扩展名。
 
-`--root-owner-group` 让无 root 权限的暂存构建将包内文件归属设为 root，避免把构建用户的 UID/GID 写进 DEB；参见 [`dpkg-deb` 手册](https://manpages.debian.org/bullseye/dpkg/dpkg-deb.1.en.html)。在干净的 Debian/Ubuntu 测试机使用 `sudo apt install ./dist/hello-world-gpui_0.6.5_amd64.deb` 安装，从桌面菜单启动，再使用 `sudo apt remove hello-world-gpui` 检查卸载。
+`--root-owner-group` 让无 root 权限的暂存构建将包内文件归属设为 root，避免把构建用户的 UID/GID 写进 DEB；参见 [`dpkg-deb` 手册](https://manpages.debian.org/bullseye/dpkg/dpkg-deb.1.en.html)。在干净的 Debian/Ubuntu 测试机使用 `sudo apt install ./dist/hello-world-gpui_{{gpui_kit_version}}_amd64.deb` 安装，从桌面菜单启动，再使用 `sudo apt remove hello-world-gpui` 检查卸载。
 
 ## 发布前验证
 

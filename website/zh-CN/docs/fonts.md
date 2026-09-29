@@ -106,7 +106,7 @@ Theme::update(cx, |theme| theme.font_family = "MyFont".into());
 
 这里要写字体文件**内部**的 family 名称，它可能与文件名不同。若要稳定显示常规、粗体和斜体，应注册所需的各个字体文件；单个常规字体文件不保证所有样式。打包字体也能让桌面应用不依赖用户是否已安装该字体族。分发时要保留相应的字体许可。
 
-[GPUI Kit Web 画廊](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)就这样打包 `Inter Variable`、`JetBrains Mono`、`Noto Sans SC` 子集和 `IBM Plex Sans`。Rust 的 [`include_bytes!`](https://doc.rust-lang.org/std/macro.include_bytes.html) 会把这些字体字节放入 WebAssembly 下载包。画廊所用的 CJK 子集约 25 KB，源字体约 1.2 MB：已知界面文案可以制作子集来控制初始体积，但用户任意输入的文字需要另行安排字体来源。
+[GPUI Kit Web 画廊](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)就这样打包 `Inter Variable`、`JetBrains Mono`、`Noto Sans SC` 子集和 `IBM Plex Sans`。Rust 的 [`include_bytes!`](https://doc.rust-lang.org/std/macro.include_bytes.html) 会把这些字体字节放入 WebAssembly 下载包。画廊所用的 CJK 子集约 42 KB，源字体约 1.2 MB：已知界面文案可以制作子集来控制初始体积，但用户任意输入的文字需要另行安排字体来源。
 
 ### 跟做：在 `hello_world` 中注册打包字体
 

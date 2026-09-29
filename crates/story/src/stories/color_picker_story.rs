@@ -1,6 +1,6 @@
 use gpui_kit::component::{
     ActiveTheme as _, Colorize, Sizable, Size, StyledExt,
-    color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState},
+    color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState, ColorSelect},
     h_flex, indigo_500, v_flex,
 };
 use gpui_kit::{
@@ -13,6 +13,8 @@ use crate::{ChangeStorySize, section, story_toolbar};
 
 pub struct ColorPickerStory {
     color: Entity<ColorPickerState>,
+    select_color: Entity<ColorPickerState>,
+    empty_select_color: Entity<ColorPickerState>,
     selected_color: Option<Hsla>,
     size: Size,
     _subscriptions: Vec<Subscription>,
@@ -40,6 +42,9 @@ impl ColorPickerStory {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let default_color = indigo_500();
         let color = cx.new(|cx| ColorPickerState::new(window, cx).default_value(default_color));
+        let select_color =
+            cx.new(|cx| ColorPickerState::new(window, cx).default_value(default_color));
+        let empty_select_color = cx.new(|cx| ColorPickerState::new(window, cx));
 
         let _subscriptions = vec![cx.subscribe(&color, |this, _, ev, _| match ev {
             ColorPickerEvent::Change(color) => {
@@ -49,6 +54,8 @@ impl ColorPickerStory {
 
         Self {
             color,
+            select_color,
+            empty_select_color,
             selected_color: Some(default_color),
             size: Size::default(),
             _subscriptions,
@@ -144,6 +151,24 @@ impl Render for ColorPickerStory {
                                         ),
                                 )
                             }),
+                    ),
+            )
+            .child(
+                section("Color Select")
+                    .description(
+                        "A framed field for forms: the whole field opens the picker, like a Select.",
+                    )
+                    .w(px(440.))
+                    .child(
+                        v_flex()
+                            .w_full()
+                            .gap_3()
+                            .child(ColorSelect::new(&self.select_color).with_size(self.size))
+                            .child(
+                                ColorSelect::new(&self.empty_select_color)
+                                    .with_size(self.size)
+                                    .placeholder("Pick a color"),
+                            ),
                     ),
             )
     }

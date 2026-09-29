@@ -47,6 +47,46 @@ motionless by default, and `gpui-component` projects its motion tokens onto
 `gpui_base::Theme::plot` whenever its theme is applied. The `decimal` feature
 moves to `gpui-base`; `gpui-component`'s `decimal` feature forwards to it.
 
+#### Added: chart appear motion
+
+Charts draw their data in the first time they are painted, over 1000 ms on
+`easeOutQuart`: line, area, candlestick and sankey charts reveal from the left,
+bars grow out of the zero line together, a pie sweeps clockwise
+and a radar grows out of its center. Axes, grids and labels are there from the
+first frame, the tooltip waits until the data is whole, and reduced motion
+skips it. New data paints in place, so a chart fed live quotes does not replay.
+
+```rust
+pub fn appear(self, appear: bool) -> Self       // every chart: opt out, e.g. in list rows
+pub fn appear_key(self, key: impl Hash) -> Self // every chart: replay when the key changes
+```
+
+Custom plots opt in through `gpui_base::plot`:
+
+```rust
+pub struct PlotAppear // progress(), staggered(index, count, spread), is_appearing(), complete()
+fn Plot::appear(&mut self, appear: PlotAppear, window: &mut Window, cx: &mut App)
+fn Plot::appear_generation(&self) -> Option<u64> // Some opts in; a new value replays
+fn Plot::interactive(&self) -> bool              // hover and tooltip, apart from the id
+pub fn PlotMotion::with_appear(self, appear: Transition) -> Self
+pub struct PlotAppearScope                       // remembers finished appears across remounts
+impl PlotAppearScope {
+    pub fn new(id: impl Into<ElementId>, child: impl IntoElement) -> Self
+}
+```
+
+A chart that stops being painted forgets its appear, so one in a virtual list
+draws in again whenever it scrolls back into view. Wrap the list in a
+`PlotAppearScope` and each chart inside draws in once; the memory lasts while
+the scope is painted, so closing the view or renaming the scope draws the
+charts in afresh.
+
+Every new `Plot` method has a default, so existing plots compile and behave as
+before: `Plot::interactive` is `true`, and without an `appear_generation` a plot
+tracks no appear and asks for no frames. A chart with `interactive(false)` now
+returns its id from `Plot::id`, keeping its appear and path caches but still no
+hitbox.
+
 #### Breaking changes
 
 ##### Plot API

@@ -19,7 +19,7 @@ cd gpui-hello
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "{{gpui_kit_version}}"
 ```
 
 只需这一个依赖，即可使用 GPUI、GPUI Base、带样式的 GPUI Component 和默认图标资源。应用代码通过 `use gpui_kit::*;` 使用 GPUI，通过 `gpui_kit::component` 使用组件。以后可以调整 feature 选择，详见[图标与资源](./assets.md)。

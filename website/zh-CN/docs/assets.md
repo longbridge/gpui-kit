@@ -67,7 +67,7 @@ GPUI Kit 通过 `gpui_kit::assets` 和 `gpui_kit::component` 提供 [IconName] �
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "{{gpui_kit_version}}"
 ```
 
 对于原生桌面应用，应在打开窗口前注册资源源。下面是可作为 `src/main.rs` 使用的完整示例：
@@ -186,7 +186,7 @@ assets/images/cover.png
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "{{gpui_kit_version}}"
 rust-embed = { version = "8.7", features = ["include-exclude"] }
 ```
 
@@ -321,7 +321,7 @@ Button::new("search")
 - [Lucide Icons](https://lucide.dev/) - GPUI Kit 的图标目录主要基于 Lucide 开源图标库。
 
 [rust-embed]: https://docs.rs/rust-embed/latest/rust_embed/
-[IconName]: https://docs.rs/gpui-kit-assets/0.6.5/gpui_kit_assets/enum.IconName.html
+[IconName]: https://docs.rs/gpui-kit-assets/{{gpui_kit_version}}/gpui_kit_assets/enum.IconName.html
 [Icon]: https://docs.rs/gpui-component/latest/gpui_component/struct.Icon.html
 [assets]: https://github.com/longbridge/gpui-kit/tree/main/crates/assets/assets/icons
-[gpui-kit-assets]: https://docs.rs/crate/gpui-kit-assets/0.6.5
+[gpui-kit-assets]: https://docs.rs/crate/gpui-kit-assets/{{gpui_kit_version}}

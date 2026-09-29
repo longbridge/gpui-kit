@@ -71,7 +71,7 @@ Add the umbrella crate to `Cargo.toml`; its default features include `component`
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "{{gpui_kit_version}}"
 ```
 
 For a native desktop app, register the source before opening a window. This complete `src/main.rs` renders a default icon:
@@ -190,7 +190,7 @@ Add [rust-embed] alongside `gpui-kit`:
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "{{gpui_kit_version}}"
 rust-embed = { version = "8.7", features = ["include-exclude"] }
 ```
 
@@ -326,7 +326,7 @@ On WebAssembly, `Assets::new(endpoint)` and `AllAssets::new(endpoint)` use the s
 - [Lucide Icons](https://lucide.dev/) - GPUI Kit's icon catalog is based on the open-source Lucide collection.
 
 [rust-embed]: https://docs.rs/rust-embed/latest/rust_embed/
-[IconName]: https://docs.rs/gpui-kit-assets/0.6.5/gpui_kit_assets/enum.IconName.html
+[IconName]: https://docs.rs/gpui-kit-assets/{{gpui_kit_version}}/gpui_kit_assets/enum.IconName.html
 [Icon]: https://docs.rs/gpui-component/latest/gpui_component/struct.Icon.html
 [assets]: https://github.com/longbridge/gpui-kit/tree/main/crates/assets/assets/icons
-[gpui-kit-assets]: https://docs.rs/crate/gpui-kit-assets/0.6.5
+[gpui-kit-assets]: https://docs.rs/crate/gpui-kit-assets/{{gpui_kit_version}}

@@ -63,7 +63,7 @@ make dev
 
 GPUI Web 平台启动时的字体数据库是**空的**。画廊使用 `include_bytes!` 将四个 TTF 子集嵌入 WASM：Inter 用于界面文字，JetBrains Mono 用于代码，Noto Sans SC 包含故事中用到的汉字，IBM Plex Sans 对应 GPUI 的 `.SystemUIFont` 别名。最后这个字体必须先于首个窗口加载：初始文本测量也可能沿用窗口默认样式，如果对应字体不存在，文本系统就会报错。画廊先调用 `cx.text_system().add_fonts(...)`，再应用主题，并把界面字体与等宽字体强制设回已打包的字体；选中的主题可能指定仅桌面端存在的字体。详见[字体初始化与主题代码](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/src/lib.rs)和[字体](./fonts.md)。
 
-[子集脚本](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/scripts/subset-fonts.py)扫描故事源码，只保留其中出现的字符。当前检出中，Noto Sans SC 子集为 **25,484 字节**，仓库内对应的原始 TTF 为 **1,213,236 字节**。这是字体文件大小，不能当作压缩后 WASM 传输量的差值。访客输入的新文字不一定包含在该子集中。
+[子集脚本](https://github.com/longbridge/gpui-kit/blob/main/crates/story-web/scripts/subset-fonts.py)扫描故事源码，以及这些源码通过 `include_str!` 引入的文件（例如 README），只保留其中出现的字符。当前检出中，Noto Sans SC 子集为 **42,092 字节**，仓库内对应的原始 TTF 为 **1,213,236 字节**。这是字体文件大小，不能当作压缩后 WASM 传输量的差值。访客输入的新文字不一定包含在该子集中。
 
 对于符合条件、打包字体缺少的 emoji，以及横排汉字、假名和现代谚文字素，`CanvasFontFallback::EmojiAndCjk` 可让浏览器用本机字体测量并绘制。GPUI 已加载的字体仍优先。回退按单个字素工作，因此字形覆盖、字距和排版特性取决于浏览器，不能代替完整的中日韩字体。默认策略仅覆盖 emoji，`Disabled` 则只使用已加载字体。策略在构造 `WebPlatform` 时确定，之后不能更改。
 

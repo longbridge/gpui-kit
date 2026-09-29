@@ -4,6 +4,7 @@ use gpui_kit::assets::IconName;
 use gpui_kit::base::ElementExt as _;
 use gpui_kit::component::{
     ActiveTheme, Icon, StyledExt,
+    button::Button,
     chart::{
         AreaChart, BarChart, CandlestickChart, LineChart, PieChart, RadarChart, SankeyChart,
         SankeyLabel,
@@ -16,15 +17,15 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext, Background, Context, Corners, Entity, FocusHandle, Focusable,
-    FontWeight, Hsla, IntoElement, ListAlignment, ListState, ParentElement, Pixels, Render, Rgba,
-    SharedString, Styled, Window, div, linear_color_stop, linear_gradient, list,
-    prelude::FluentBuilder, px,
+    AnyElement, App, AppContext, Background, Context, Corners, ElementId, Entity, FocusHandle,
+    Focusable, FontWeight, Hsla, InteractiveElement as _, IntoElement, ListAlignment, ListState,
+    ParentElement, Pixels, Render, Rgba, SharedString, Styled, Window, div, linear_color_stop,
+    linear_gradient, list, prelude::FluentBuilder, px,
 };
 use serde::Deserialize;
 
 use super::StackedBarChart;
-use crate::Story;
+use crate::{Story, story_toolbar_group};
 
 /// The height of one chart card, and the list's overdraw: the virtual list
 /// keeps one row of cards live on either side of the viewport.
@@ -1475,6 +1476,9 @@ pub struct ChartStory {
     /// the last prepaint.
     columns: usize,
     list_state: ListState,
+    /// Bumped by the replay button. The gallery is keyed on it, so every chart
+    /// gets fresh element state and draws in again.
+    appear_generation: u64,
 }
 
 fn fixture<T: for<'de> Deserialize<'de>>(json: &str) -> T {
@@ -1571,6 +1575,7 @@ impl ChartStory {
             sections,
             columns,
             list_state,
+            appear_generation: 0,
         }
     }
 
@@ -1669,39 +1674,69 @@ impl Render for ChartStory {
 
         let data = self.data.clone();
         let story = cx.entity();
-        div()
+        v_flex()
             .size_full()
             .bg(cx.theme().background)
             .on_prepaint(move |bounds, _, cx| {
                 story.update(cx, |this, cx| this.measure(bounds.size.width, cx));
             })
+            // The toolbar stays put while the gallery scrolls under it, so the
+            // gap below it belongs to the toolbar, not to the list's padding.
             .child(
-                list(self.list_state.clone(), move |index, _, cx| {
-                    let Some(row) = rows.get(index) else {
-                        return div().into_any_element();
-                    };
-
-                    div()
-                        .w_full()
-                        .px(CONTENT_INSET)
-                        // Spacing between rows only, like a CSS gap.
-                        .when(index + 1 < rows.len(), |this| this.pb(CARD_GAP))
-                        .child(match row {
-                            ChartRow::Rule => Separator::horizontal().into_any_element(),
-                            ChartRow::Cards(cards) => h_flex()
-                                .w_full()
-                                .gap(CARD_GAP)
-                                .children(cards.iter().map(|card| card.render(&data, cx)))
-                                .into_any_element(),
-                        })
-                        .into_any_element()
-                })
-                .size_full()
-                // The list's own style honours vertical padding only, so the
-                // horizontal inset rides on each row above.
-                .py(CONTENT_INSET),
+                div()
+                    .px(CONTENT_INSET)
+                    .pt(CONTENT_INSET)
+                    .pb(CARD_GAP)
+                    .child(
+                        story_toolbar_group().child(
+                            Button::new("chart-replay")
+                                .icon(IconName::RotateCw)
+                                .label("Replay")
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.appear_generation += 1;
+                                    cx.notify();
+                                })),
+                        ),
+                    ),
             )
-            .vertical_scrollbar(&self.list_state)
+            .child(
+                div()
+                    .id(ElementId::NamedInteger(
+                        "chart-gallery".into(),
+                        self.appear_generation,
+                    ))
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .child(
+                        list(self.list_state.clone(), move |index, _, cx| {
+                            let Some(row) = rows.get(index) else {
+                                return div().into_any_element();
+                            };
+
+                            div()
+                                .w_full()
+                                .px(CONTENT_INSET)
+                                // Spacing between rows only, like a CSS gap.
+                                .when(index + 1 < rows.len(), |this| this.pb(CARD_GAP))
+                                .child(match row {
+                                    ChartRow::Rule => Separator::horizontal().into_any_element(),
+                                    ChartRow::Cards(cards) => h_flex()
+                                        .w_full()
+                                        .gap(CARD_GAP)
+                                        .children(cards.iter().map(|card| card.render(&data, cx)))
+                                        .into_any_element(),
+                                })
+                                .into_any_element()
+                        })
+                        .size_full()
+                        // The list's own style honours vertical padding only, so the
+                        // horizontal inset rides on each row above; the toolbar
+                        // above holds the top gap.
+                        .pb(CONTENT_INSET),
+                    )
+                    .vertical_scrollbar(&self.list_state),
+            )
     }
 }
 

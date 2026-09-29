@@ -71,6 +71,15 @@ gpui_pre_version() {
     | head -n 1
 }
 
+gpui_kit_version() {
+  if [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf '%s\n' "${1#v}"
+  else
+    git -C "$repo_root" show "$1:crates/kit/Cargo.toml" \
+      | sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' | head -n 1
+  fi
+}
+
 snapshot_website() {
   local tag=$1
   local target=$2
@@ -88,6 +97,7 @@ echo "Building $latest_release at /"
 (
   cd "$latest_dir"
   GPUI_PRE_VERSION="$(gpui_pre_version "$latest_release")" \
+  GPUI_KIT_VERSION="$(gpui_kit_version "$latest_release")" \
   PUBLIC_SITE_VERSION="$latest_release" \
   PUBLIC_SITE_LATEST_VERSION="$latest_release" \
   PUBLIC_SITE_INDEXABLE=true \
@@ -111,6 +121,7 @@ echo "Building main at /versions/main"
   cd "$main_dir"
   ln -s "$repo_root/website/node_modules" node_modules
   GPUI_PRE_VERSION="$(gpui_pre_version origin/main)" \
+  GPUI_KIT_VERSION="$(gpui_kit_version origin/main)" \
   PUBLIC_SITE_VERSION=main \
   PUBLIC_SITE_LATEST_VERSION="$latest_release" \
   PUBLIC_SITE_INDEXABLE=false \
@@ -146,6 +157,7 @@ for tag in "${release_tags[@]:1}"; do
   (
     cd "$version_dir"
     GPUI_PRE_VERSION="$(gpui_pre_version "$tag")" \
+    GPUI_KIT_VERSION="$(gpui_kit_version "$tag")" \
     PUBLIC_SITE_VERSION="$tag" \
     PUBLIC_SITE_LATEST_VERSION="$latest_release" \
     PUBLIC_SITE_INDEXABLE=false \

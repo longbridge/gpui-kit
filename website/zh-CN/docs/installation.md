@@ -51,10 +51,10 @@ cargo --version
 在应用的 `Cargo.toml` 的 `[dependencies]` 中加入：
 
 ```toml
-gpui-kit = "0.6"
+gpui-kit = "{{gpui_kit_version}}"
 ```
 
-`0.6` 要求会选择兼容的 0.6.x 版 Kit；本仓库当前声明的是 `0.6.5`。Kit 的默认特性包含带样式的组件和默认图标资源，并会引入配套的 GPUI crate；按此方式构建的应用无需单独声明 GPUI。`use gpui_kit::*;` 导入 Kit 重导出的 GPUI API；各层分别可通过 `gpui_kit::component`、`gpui_kit::base`、`gpui_kit::assets` 和 `gpui_kit::platform` 访问。
+`{{gpui_kit_version}}` 要求会选择兼容的 Kit 版本。Kit 的默认特性包含带样式的组件和默认图标资源，并会引入配套的 GPUI crate；按此方式构建的应用无需单独声明 GPUI。`use gpui_kit::*;` 导入 Kit 重导出的 GPUI API；各层分别可通过 `gpui_kit::component`、`gpui_kit::base`、`gpui_kit::assets` 和 `gpui_kit::platform` 访问。
 
 ### 为什么依赖名是 `gpui-pre`
 

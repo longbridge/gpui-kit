@@ -21,7 +21,7 @@ In `Cargo.toml`, add the same single dependency used by [Getting Started](./gett
 
 ```toml
 [dependencies]
-gpui-kit = "0.6"
+gpui-kit = "{{gpui_kit_version}}"
 ```
 
 Replace `src/main.rs` with the complete example below. If you already have a single-window application, keep its `application().run(...)` and `init(cx)` calls; create the shared model once in that startup closure, then call `open_window` a second time with a new content view. The loop below performs both calls explicitly, once for each name.

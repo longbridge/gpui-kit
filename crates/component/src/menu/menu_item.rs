@@ -10,7 +10,6 @@ use smallvec::SmallVec;
 #[derive(IntoElement)]
 pub(crate) struct MenuItemElement {
     id: ElementId,
-    group_name: SharedString,
     aria_label: Option<SharedString>,
     style: StyleRefinement,
     disabled: bool,
@@ -21,12 +20,11 @@ pub(crate) struct MenuItemElement {
 }
 
 impl MenuItemElement {
-    /// Create a new MenuItem with the given ID and group name.
-    pub(crate) fn new(id: impl Into<ElementId>, group_name: impl Into<SharedString>) -> Self {
+    /// Create a new MenuItem with the given ID.
+    pub(crate) fn new(id: impl Into<ElementId>) -> Self {
         let id: ElementId = id.into();
         Self {
             id: id.clone(),
-            group_name: group_name.into(),
             aria_label: None,
             style: StyleRefinement::default(),
             disabled: false,
@@ -99,7 +97,6 @@ impl RenderOnce for MenuItemElement {
             .role(Role::MenuItem)
             .when_some(self.aria_label, |this, label| this.aria_label(label))
             .aria_selected(self.selected)
-            .group(&self.group_name)
             .gap_x_1()
             .py_1()
             .px_2()
@@ -113,7 +110,10 @@ impl RenderOnce for MenuItemElement {
                 this.on_hover(move |hovered, window, cx| (on_hover)(hovered, window, cx))
             })
             .when(!self.disabled, |this| {
-                this.group_hover(self.group_name, |this| {
+                // Not `group_hover` on the item's own group: GPUI styles an
+                // element before registering its group, and that fallback keeps
+                // the pointer's item lit after a key moves the highlight away.
+                this.hover(|this| {
                     this.bg(cx.theme().tokens.accent)
                         .text_color(cx.theme().accent_foreground)
                 })
@@ -141,7 +141,7 @@ mod tests {
 
     #[gpui::test]
     fn aria_label_sets_accessible_name(_cx: &mut gpui::TestAppContext) {
-        let item = MenuItemElement::new("open", "menu").aria_label("Open");
+        let item = MenuItemElement::new("open").aria_label("Open");
 
         assert_eq!(item.aria_label, Some("Open".into()));
     }

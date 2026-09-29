@@ -1,5 +1,5 @@
 use crate::{
-    ActiveTheme, Sizable, Size,
+    ActiveTheme, Sizable, Size, ThemeStyled as _,
     actions::{
         Cancel, SelectDown, SelectFirst, SelectLast, SelectNextColumn, SelectPageDown,
         SelectPageUp, SelectPrevColumn, SelectUp,
@@ -171,5 +171,11 @@ where
                     .border_color(cx.theme().border)
             })
             .child(self.state)
+            // Clicking a row focuses the table too, so only keyboard focus
+            // shows it, as CSS `:focus-visible` does.
+            .when(
+                focus_handle.is_focused(window) && window.last_input_was_keyboard(),
+                |this| this.focus_ring_style(window, cx),
+            )
     }
 }

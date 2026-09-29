@@ -340,20 +340,26 @@ impl TextViewState {
 
     /// Set the text content.
     ///
-    /// With a streamed fade-in enabled, text that extends the current text
-    /// fades in like [`Self::push_str`] would; any other replacement shows at
-    /// once.
+    /// Markdown that extends the current non-empty text is appended like
+    /// [`Self::push_str`], keeping the selection; any other text replaces it.
+    /// With a streamed fade-in enabled, extended text fades in; a replacement
+    /// shows at once.
     pub fn set_text(&mut self, text: &str, cx: &mut Context<Self>) {
         if self.text.as_str() == text {
             return;
         }
-        if self.stream_fade.is_enabled() {
-            if text.starts_with(self.text.as_str()) {
-                self.stream_fade.note_extend(self.text.len());
-            } else {
-                self.stream_fade.note_replace();
-            }
+        // HTML blocks carry no spans, so an append would parse the delta as a
+        // standalone document. After a failed parse the background parser's
+        // document lacks that text, so only a full parse resynchronizes it.
+        if self.format == TextViewFormat::Markdown
+            && self.parsed_error.is_none()
+            && !self.text.is_empty()
+            && let Some(delta) = text.strip_prefix(self.text.as_str())
+        {
+            self.push_str(delta, cx);
+            return;
         }
+        self.stream_fade.note_replace();
 
         self.text.clear();
         self.text.push_str(text);
@@ -1277,8 +1283,11 @@ fn parse_content(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::text::{MarkdownNode, node::BlockNode};
-    use gpui::TestAppContext;
+    use crate::text::{
+        MarkdownNode,
+        node::{BlockNode, Span},
+    };
+    use gpui::{Entity, TestAppContext};
 
     mod stream_fade {
         use std::{cell::Cell, ops::Range, rc::Rc, time::Duration};
@@ -1738,6 +1747,127 @@ mod tests {
         state.read_with(cx, |state, _| {
             assert!(state.select_all);
             assert_eq!(state.selected_text().trim(), "new text");
+        });
+    }
+
+    fn parsed_blocks(
+        state: &Entity<TextViewState>,
+        cx: &mut TestAppContext,
+    ) -> Vec<(String, Option<Span>)> {
+        state.read_with(cx, |state, _| {
+            state
+                .parsed_content
+                .document
+                .blocks
+                .iter()
+                .map(|block| (block.text(), block.span()))
+                .collect()
+        })
+    }
+
+    #[gpui::test]
+    fn set_text_extending_markdown_appends_and_keeps_selection(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("hello", cx)));
+        cx.run_until_parked();
+        let revisions =
+            |state: &TextViewState| (state.selection_revision, state.full_update_revision);
+        let initial = state.read_with(cx, |state, _| revisions(state));
+
+        state.update(cx, |state, cx| state.set_text("hello world", cx));
+        cx.run_until_parked();
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.source().as_str(), "hello world");
+            assert_eq!(revisions(state), initial);
+        });
+
+        state.update(cx, |state, cx| state.set_text("hello", cx));
+        cx.run_until_parked();
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.source().as_str(), "hello");
+            assert_ne!(state.selection_revision, initial.0);
+            assert_ne!(state.full_update_revision, initial.1);
+        });
+    }
+
+    #[gpui::test]
+    fn set_text_streaming_markdown_matches_a_full_parse(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let streamed = cx.update(|cx| cx.new(|cx| TextViewState::markdown("# Title", cx)));
+        cx.run_until_parked();
+
+        // Chunks continue a heading, a paragraph, an inline code span, a list
+        // and a fenced code block, and the text grows past the synchronous
+        // parse limit.
+        let filler = "word ".repeat(MAX_SYNC_FULL_REPLACE_BYTES / 5 + 1);
+        let chunks = [
+            "\n\nfirst para",
+            "graph with `co",
+            "de`\n\n- one\n",
+            "- two\n\n```rust\nfn main() {",
+            "}\n```\n\n",
+            filler.as_str(),
+            "\n\nlast",
+        ];
+        let full_update_revision = streamed.read_with(cx, |state, _| state.full_update_revision);
+        let mut text = "# Title".to_string();
+        for chunk in chunks {
+            text.push_str(chunk);
+            streamed.update(cx, |state, cx| state.set_text(&text, cx));
+            cx.run_until_parked();
+        }
+        assert_eq!(
+            streamed.read_with(cx, |state, _| state.full_update_revision),
+            full_update_revision
+        );
+
+        let parsed = cx.update(|cx| cx.new(|cx| TextViewState::markdown(&text, cx)));
+        cx.run_until_parked();
+
+        assert_eq!(
+            streamed.read_with(cx, |state, _| state.source()),
+            parsed.read_with(cx, |state, _| state.source())
+        );
+        assert_eq!(parsed_blocks(&streamed, cx), parsed_blocks(&parsed, cx));
+    }
+
+    #[gpui::test]
+    fn set_text_extending_html_parses_it_again(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let streamed = cx.update(|cx| cx.new(|cx| TextViewState::html("<ul><li>a</li>", cx)));
+        cx.run_until_parked();
+
+        let text = "<ul><li>a</li><li>b</li></ul>";
+        streamed.update(cx, |state, cx| state.set_text(text, cx));
+        cx.run_until_parked();
+        assert_ne!(
+            streamed.read_with(cx, |state, _| state.full_update_revision),
+            0
+        );
+
+        let parsed = cx.update(|cx| cx.new(|cx| TextViewState::html(text, cx)));
+        cx.run_until_parked();
+        assert_eq!(parsed_blocks(&streamed, cx), parsed_blocks(&parsed, cx));
+    }
+
+    #[gpui::test]
+    fn set_text_extending_after_a_parse_error_parses_it_again(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("hello", cx)));
+        cx.run_until_parked();
+
+        let full_update_revision = state.read_with(cx, |state, _| state.full_update_revision);
+
+        state.update(cx, |state, cx| {
+            state.parsed_error = Some("failed".into());
+            state.set_text("hello world", cx);
+        });
+        cx.run_until_parked();
+
+        state.read_with(cx, |state, _| {
+            assert!(state.parsed_error.is_none());
+            assert_ne!(state.full_update_revision, full_update_revision);
+            assert_eq!(state.source().as_str(), "hello world");
         });
     }
 

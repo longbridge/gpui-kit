@@ -51,10 +51,10 @@ Both commands should print a version. On Windows, <code>rustup show active-toolc
 Add GPUI Kit to the application's `Cargo.toml` under `[dependencies]`:
 
 ```toml
-gpui-kit = "0.6"
+gpui-kit = "{{gpui_kit_version}}"
 ```
 
-The `0.6` requirement selects a compatible 0.6.x Kit release; this repository currently declares version `0.6.5`. Kit's default features include the styled components and default icon assets. It brings in matching GPUI crates, so an application using this setup does not need to list GPUI separately. `use gpui_kit::*;` imports GPUI's re-exported API; the layers are reachable as `gpui_kit::component`, `gpui_kit::base`, `gpui_kit::assets`, and `gpui_kit::platform`.
+The `{{gpui_kit_version}}` requirement selects a compatible Kit release. Kit's default features include the styled components and default icon assets. It brings in matching GPUI crates, so an application using this setup does not need to list GPUI separately. `use gpui_kit::*;` imports GPUI's re-exported API; the layers are reachable as `gpui_kit::component`, `gpui_kit::base`, `gpui_kit::assets`, and `gpui_kit::platform`.
 
 ### Why the dependency is named `gpui-pre`
 

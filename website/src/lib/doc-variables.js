@@ -3,15 +3,26 @@ import { resolve } from 'node:path';
 import { visit } from 'unist-util-visit';
 
 // Values that change with a release but appear throughout the documentation.
-// Pages write `{{gpui_pre_version}}` instead of a literal, so the prose, the
-// docs.rs links and both locales always name the GPUI snapshot that the
-// documented GPUI Kit revision builds against.
+// Pages write `{{gpui_kit_version}}` and `{{gpui_pre_version}}` instead of
+// literals, so prose, docs.rs links and both locales follow the documented
+// Kit release and its matching GPUI snapshot.
 //
 // The workspace `Cargo.toml` is the single source. A versioned build copies
 // the website out of the checkout and sets `GPUI_PRE_VERSION` from the
 // `Cargo.toml` of the revision it documents.
+// Versioned builds also set `GPUI_KIT_VERSION` from the selected release tag
+// or main's Kit manifest; local development reads the workspace manifest.
 
 const VARIABLE = /\{\{\s*([a-z_]+)\s*\}\}/g;
+
+function readGpuiKitVersion() {
+  if (process.env.GPUI_KIT_VERSION) return process.env.GPUI_KIT_VERSION;
+  const tag = process.env.PUBLIC_SITE_VERSION?.match(/^v(\d+\.\d+\.\d+)$/);
+  if (tag) return tag[1];
+  const manifest = resolve(process.cwd(), '..', 'crates', 'kit', 'Cargo.toml');
+  if (!existsSync(manifest)) return undefined;
+  return readFileSync(manifest, 'utf8').match(/^version\s*=\s*"([^"]+)"/m)?.[1];
+}
 
 function readGpuiPreVersion() {
   if (process.env.GPUI_PRE_VERSION) return process.env.GPUI_PRE_VERSION;
@@ -23,6 +34,7 @@ function readGpuiPreVersion() {
 }
 
 const resolvers = {
+  gpui_kit_version: readGpuiKitVersion,
   gpui_pre_version: readGpuiPreVersion,
 };
 

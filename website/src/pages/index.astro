@@ -4,6 +4,7 @@ import Nav from '../components/Nav.astro';
 import SiteFooter from '../components/SiteFooter.astro';
 import HomeApp from '../components/HomeApp.vue';
 import { fetchStarCount } from '../lib/github';
+import { docVariable } from '../lib/doc-variables.js';
 
 let starCount = 0;
 try { starCount = await fetchStarCount(); } catch {}
@@ -18,7 +19,7 @@ const base = import.meta.env.BASE_URL;
 >
   <Nav lang="en" currentPath={Astro.url.pathname} starCount={starCount} />
 
-  <HomeApp client:load starCount={starCount} base={base} lang="en" />
+  <HomeApp client:load starCount={starCount} base={base} lang="en" kitVersion={docVariable('gpui_kit_version')} />
 
   <SiteFooter lang="en" />
 </HomeLayout>

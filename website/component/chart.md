@@ -768,17 +768,43 @@ AreaChart::new(range).interactive(false)       // A backdrop under drag handles
 
 The second matters because a plain hitbox does not block the one behind it: an element painted over an interactive chart is hovered *and so is the chart*, so the crosshair keeps tracking under it. The chart has to stand down.
 
+A chart that is off keeps its id, so it still draws in and keeps its cache.
+
 ### Motion
 
 The emphasis is animated with the styled layer's motion tokens (`cx.theme().motion_tokens()`), which the theme projects onto gpui-base as its [`PlotMotion`](../base/plot.md#motion): pointers — crosshair, band, dots — follow the hovered datum on a fast spring, a pie slice lifts on the control spring, and the whole overlay fades in when the cursor lands on a datum and out after it leaves. The motion honors the operating system's reduced-motion preference, under which every value adopts its target at once.
 
+### Appear
+
+The data draws in the first time a chart is painted, over 1000 ms on `easeOutQuart`, Chart.js' default curve: lines, areas, candlesticks and a sankey diagram are revealed from the left the way ECharts, Highcharts and Recharts draw them, bars grow out of the zero line together, a pie sweeps clockwise from its first slice, and a radar grows out of its center. Axes, grid lines and tick labels are there from the first frame, and the tooltip waits until the data is whole.
+
+The appear runs once per id. New data paints in place, so a chart fed live quotes does not draw in again on every tick. To replay it when the chart starts showing something else, such as another symbol or period, hand it a key:
+
+```rust
+LineChart::new(candles).appear_key((&symbol, period))
+```
+
+A chart that stops being painted forgets its appear, so one in a virtual list draws in again every time it scrolls back into view. Wrap the list in a [`PlotAppearScope`](../base/plot.md#appear-scope) to have each chart draw in once and show whole when it returns; name the scope after what the list shows, such as a conversation or a watchlist, so moving to another one, or closing the view, draws its charts in afresh:
+
+```rust
+PlotAppearScope::new(("rows", list_id), list(state, render_row).flex_1())
+```
+
+Where a chart should never draw in, turn the appear off:
+
+```rust
+LineChart::new(intraday).interactive(false).appear(false)
+```
+
+Reduced motion skips the appear.
+
 ### Caching
 
-A chart also keeps its heavy geometry across frames, since it repaints on every frame it is on screen: line and area strokes and pie slices stay tessellated while their projected points are unchanged, and a sankey diagram keeps its placement while its data, settings and size are unchanged. This cache hangs off the same id, so charts sharing one share the cache and thrash it — another reason to name siblings apart — and a chart with `interactive(false)`, having no id of its own, rebuilds its geometry on each paint.
+A chart also keeps its heavy geometry across frames, since it repaints on every frame it is on screen: line and area strokes and pie slices stay tessellated while their projected points are unchanged, and a sankey diagram keeps its placement while its data, settings and size are unchanged. This cache hangs off the same id, so charts sharing one share the cache and thrash it — another reason to name siblings apart. A pie or radar being drawn in is a new shape on every frame, so it tessellates afresh until the appear ends.
 
 ### Custom Plots
 
-A custom [`Plot`] opts in by hand — `Plot::id` defaults to `None` there. The trait, `PlotElement` and hover tracking come from [gpui-base](../base/plot.md), so a plot written against `gpui_kit::base::plot` works here unchanged. Return an id from `Plot::id`, resolve the datum under the cursor in `Plot::tooltip_state`, and build the overlay in `Plot::tooltip`. The `Tooltip` returned there animates the hover on its own, the same way the built-in charts do: the whole overlay fades with the hover, the crosshair and dots glide to each hovered datum on the pointer spring, adopting it on the frame the cursor lands, and a dot's `halo` grows as the hover fades in. A crosshair glides along the axis it marks only, so a line that also follows the cursor keeps up with it. Pass the data point itself; the tooltip does the rest:
+A custom [`Plot`] opts in by hand — `Plot::id` defaults to `None` there. The trait, `PlotElement` and hover tracking come from [gpui-base](../base/plot.md), so a plot written against `gpui_kit::base::plot` works here unchanged. Return an id from `Plot::id`, resolve the datum under the cursor in `Plot::tooltip_state`, and build the overlay in `Plot::tooltip`. To draw in, keep the `PlotAppear` that `Plot::appear` hands over on every frame and paint with its progress. The `Tooltip` returned there animates the hover on its own, the same way the built-in charts do: the whole overlay fades with the hover, the crosshair and dots glide to each hovered datum on the pointer spring, adopting it on the frame the cursor lands, and a dot's `halo` grows as the hover fades in. A crosshair glides along the axis it marks only, so a line that also follows the cursor keeps up with it. Pass the data point itself; the tooltip does the rest:
 
 ```rust
 fn tooltip(&self, state: &TooltipState, cursor: Point<Pixels>, bounds: Bounds<Pixels>, _: &mut Window, cx: &mut App) -> Option<AnyElement> {

@@ -53,7 +53,7 @@ cat > dist/HelloWorld.app/Contents/Info.plist <<'PLIST'
   <key>CFBundleIdentifier</key><string>com.example.helloworld</string>
   <key>CFBundleExecutable</key><string>hello_world</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.6.5</string>
+  <key>CFBundleShortVersionString</key><string>{{gpui_kit_version}}</string>
   <key>CFBundleVersion</key><string>1</string>
 </dict></plist>
 PLIST
@@ -95,7 +95,7 @@ Test by extracting the ZIP into a fresh directory and launching the extracted `.
 [Setup]
 AppId=Example.HelloWorld
 AppName=HelloWorld
-AppVersion=0.6.5
+AppVersion={{gpui_kit_version}}
 DefaultDirName={autopf}\HelloWorld
 DefaultGroupName=HelloWorld
 OutputDir=dist
@@ -268,7 +268,7 @@ Use a stable package name and an architecture/version that match the binary. A m
 
 ```text
 Package: hello-world-gpui
-Version: 0.6.5
+Version: {{gpui_kit_version}}
 Section: utils
 Priority: optional
 Architecture: amd64
@@ -291,12 +291,12 @@ Categories=Utility;
 When all staged files are present, build and inspect the package. The [documented `--root-owner-group` option](https://manpages.debian.org/unstable/dpkg/dpkg-deb.1.en.html) records root ownership for staged package files even when you build as a regular user; use it when all packaged files should be root-owned.
 
 ```sh
-dpkg-deb --root-owner-group --build dist/deb-root dist/hello-world-gpui_0.6.5_amd64.deb
-dpkg-deb --info dist/hello-world-gpui_0.6.5_amd64.deb
-dpkg-deb --contents dist/hello-world-gpui_0.6.5_amd64.deb
+dpkg-deb --root-owner-group --build dist/deb-root dist/hello-world-gpui_{{gpui_kit_version}}_amd64.deb
+dpkg-deb --info dist/hello-world-gpui_{{gpui_kit_version}}_amd64.deb
+dpkg-deb --contents dist/hello-world-gpui_{{gpui_kit_version}}_amd64.deb
 ```
 
-Install a copy on a clean test machine with `sudo apt install ./dist/hello-world-gpui_0.6.5_amd64.deb`, launch it from the desktop menu, then remove it with `sudo apt remove hello-world-gpui`. [Debian policy](https://www.debian.org/doc/debian-policy/ch-opersys.html) prohibits packages from placing their files in `/usr/local`; the [Desktop Entry specification](https://specifications.freedesktop.org/desktop-entry/latest-single/) defines the launcher keys. Use a separate RPM packaging recipe for RPM distributions.
+Install a copy on a clean test machine with `sudo apt install ./dist/hello-world-gpui_{{gpui_kit_version}}_amd64.deb`, launch it from the desktop menu, then remove it with `sudo apt remove hello-world-gpui`. [Debian policy](https://www.debian.org/doc/debian-policy/ch-opersys.html) prohibits packages from placing their files in `/usr/local`; the [Desktop Entry specification](https://specifications.freedesktop.org/desktop-entry/latest-single/) defines the launcher keys. Use a separate RPM packaging recipe for RPM distributions.
 
 ## Verify the release artifact
 

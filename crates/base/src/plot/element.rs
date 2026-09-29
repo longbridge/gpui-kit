@@ -1,5 +1,5 @@
-//! The element behind every [`Plot`]: layout, hover tracking and the overlay
-//! the plot returns from [`Plot::tooltip`].
+//! The element behind every [`Plot`]: layout, appear and hover tracking and
+//! the overlay the plot returns from [`Plot::tooltip`].
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
@@ -8,10 +8,11 @@ use gpui::{
     Style, TouchPhase, Window,
 };
 
-use super::{Plot, hover::track_hover};
+use super::{Plot, PlotAppear, appear::track_appear, hover::track_hover};
 
-/// Paints a [`Plot`] filling its container, with hover tracking and the plot's
-/// tooltip overlay when the plot has an [`Plot::id`].
+/// Paints a [`Plot`] filling its container, with appear tracking when the plot
+/// has an [`Plot::id`], and hover tracking and the plot's tooltip overlay when
+/// it is also [`Plot::interactive`].
 ///
 /// A plot becomes an element through this type:
 ///
@@ -60,7 +61,8 @@ impl<P: Plot + 'static> Element for PlotElement<P> {
     type PrepaintState = (Option<Hitbox>, Vec<AnyElement>, Option<AnyElement>);
 
     fn id(&self) -> Option<ElementId> {
-        // `Some` opts the plot in to interactive tooltips.
+        // `Some` gives the plot element state: appear motion and, when
+        // interactive, tooltips.
         self.0.id()
     }
 
@@ -99,6 +101,17 @@ impl<P: Plot + 'static> Element for PlotElement<P> {
             return (None, children, None);
         };
 
+        let appear = match self.0.appear_generation() {
+            Some(generation) => track_appear(global_id, generation, window, cx),
+            None => PlotAppear::complete(),
+        };
+        let appearing = appear.is_appearing();
+        self.0.appear(appear, window, cx);
+
+        if !self.0.interactive() {
+            return (None, children, None);
+        }
+
         // `Hitbox::is_hovered` is false while an open popup or modal covers the plot.
         let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
 
@@ -109,7 +122,11 @@ impl<P: Plot + 'static> Element for PlotElement<P> {
             .map(|_| window.mouse_position())
             .filter(|mouse| bounds.contains(mouse))
             .map(|mouse| mouse - bounds.origin);
-        let live = cursor.and_then(|position| self.0.tooltip_state(position, bounds, cx));
+        // No tooltip while the marks draw in: its dots would land on data not
+        // painted yet.
+        let live = cursor
+            .filter(|_| !appearing)
+            .and_then(|position| self.0.tooltip_state(position, bounds, cx));
 
         // The datum under the cursor, or the last one while its hover fades out.
         let hover = track_hover(live, cursor, window, cx);

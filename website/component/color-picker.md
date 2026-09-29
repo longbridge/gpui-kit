@@ -10,7 +10,9 @@ A versatile color picker component that provides an intuitive interface for colo
 ## Import
 
 ```rust
-use gpui_kit::component::color_picker::{ColorPicker, ColorPickerState, ColorPickerEvent};
+use gpui_kit::component::color_picker::{
+    ColorPicker, ColorPickerEvent, ColorPickerState, ColorSelect,
+};
 ```
 
 ## Usage
@@ -118,6 +120,28 @@ ColorPicker::new(&color_picker)
     .anchor(Anchor::TopRight) // Dropdown opens to top-right
 ```
 
+### Color Select
+
+`ColorSelect` draws the picker as a framed field, like a `Select`: a swatch of
+the current color, its hex value and a caret. Clicking anywhere on the field
+opens the same popover. Use it in forms, where the control should share the
+height and frame of the inputs around it; keep `ColorPicker` for a compact
+swatch in a toolbar.
+
+```rust
+use gpui_kit::component::{Sizable as _, form::field};
+
+field()
+    .label("Theme color")
+    .child(ColorSelect::new(&color_picker))
+
+// Follows the same sizes as Input and Select.
+ColorSelect::new(&color_picker).large()
+
+// Shown while no color is selected.
+ColorSelect::new(&color_picker).placeholder("Pick a color")
+```
+
 ## Color Selection Interface
 
 ### Color Palettes
@@ -213,6 +237,7 @@ The color picker preserves alpha values when selecting colors and allows modific
 ## API Reference
 
 - [ColorPicker]
+- [ColorSelect]
 - [ColorPickerState]
 - [ColorPickerEvent]
 
@@ -373,5 +398,6 @@ let _subscription = cx.subscribe(&color_picker, |this, _, ev, _| match ev {
 ```
 
 [ColorPicker]: https://docs.rs/gpui-component/latest/gpui_component/color_picker/struct.ColorPicker.html
+[ColorSelect]: https://docs.rs/gpui-component/latest/gpui_component/color_picker/struct.ColorSelect.html
 [ColorPickerState]: https://docs.rs/gpui-component/latest/gpui_component/color_picker/struct.ColorPickerState.html
 [ColorPickerEvent]: https://docs.rs/gpui-component/latest/gpui_component/color_picker/enum.ColorPickerEvent.html
