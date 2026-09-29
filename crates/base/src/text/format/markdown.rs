@@ -389,7 +389,7 @@ fn source_segments(
         return Vec::new();
     };
 
-    let mut segments = aligned_source_segments(raw, rendered, span.start, true);
+    let mut segments = aligned_source_segments(raw, rendered, span.start, true, true);
 
     // The text node of an escaped character starts after its backslash. The
     // backslash and the character map as a whole; the rest of the run stays
@@ -425,6 +425,7 @@ fn aligned_source_segments(
     rendered: &str,
     source_offset: usize,
     decode_entities: bool,
+    decode_escapes: bool,
 ) -> Vec<SourceSegment> {
     let mut segments = Vec::new();
     let mut raw_cursor = 0;
@@ -494,7 +495,8 @@ fn aligned_source_segments(
             && raw_cursor >= final_line_start
         {
             (0, remainder.len())
-        } else if let Some(escaped) = remainder.strip_prefix('\\')
+        } else if decode_escapes
+            && let Some(escaped) = remainder.strip_prefix('\\')
             && escaped.starts_with(rendered_char)
         {
             (0, 1 + rendered_char.len_utf8())
@@ -642,6 +644,7 @@ fn code_source_segments(
         &raw[body_start..body_end],
         code,
         span.start + body_start,
+        false,
         false,
     )
 }
@@ -1245,7 +1248,7 @@ mod tests {
             format!("a{}b", " ".repeat(32_768)),
             format!("a{}b\n", " \t".repeat(16_384)),
         ] {
-            let segments = aligned_source_segments(&raw, &raw, 7, true);
+            let segments = aligned_source_segments(&raw, &raw, 7, true, true);
             assert_eq!(
                 segments,
                 vec![SourceSegment {
@@ -1266,7 +1269,7 @@ mod tests {
         let raw = "x\n".repeat(16_384);
         let rendered = &raw[..raw.len() - 1];
         assert_eq!(
-            aligned_source_segments(&raw, rendered, 4, false),
+            aligned_source_segments(&raw, rendered, 4, false, false),
             vec![SourceSegment {
                 rendered: 0..rendered.len(),
                 source: 4..4 + rendered.len(),
@@ -1274,7 +1277,7 @@ mod tests {
             }]
         );
         assert_eq!(
-            aligned_source_segments("a\n> \n", "a\n\n", 0, false),
+            aligned_source_segments("a\n> \n", "a\n\n", 0, false, false),
             vec![
                 SourceSegment {
                     rendered: 0..2,
@@ -1293,7 +1296,7 @@ mod tests {
     #[test]
     fn source_alignment_keeps_soft_breaks_and_entities_atomic() {
         assert_eq!(
-            aligned_source_segments("a \r\nb", "a b", 9, true),
+            aligned_source_segments("a \r\nb", "a b", 9, true, true),
             vec![
                 SourceSegment {
                     rendered: 0..1,
@@ -1315,7 +1318,7 @@ mod tests {
         let entity = "&NotEqualTilde;";
         let decoded = "\u{2242}\u{338}";
         assert_eq!(
-            aligned_source_segments(entity, decoded, 3, true),
+            aligned_source_segments(entity, decoded, 3, true, true),
             vec![SourceSegment {
                 rendered: 0..decoded.len(),
                 source: 3..3 + entity.len(),
@@ -1343,7 +1346,7 @@ mod tests {
 
         let missing = "\u{fffd}".repeat(4_096);
         assert_eq!(
-            aligned_source_segments(&raw, &format!("{missing}abc"), 5, true),
+            aligned_source_segments(&raw, &format!("{missing}abc"), 5, true, true),
             vec![SourceSegment {
                 rendered: missing.len()..missing.len() + 3,
                 source: 5..8,
@@ -1351,7 +1354,7 @@ mod tests {
             }]
         );
         assert_eq!(
-            aligned_source_segments("&amp;z", &format!("{missing}&z"), 0, true),
+            aligned_source_segments("&amp;z", &format!("{missing}&z"), 0, true, true),
             vec![
                 SourceSegment {
                     rendered: missing.len()..missing.len() + 1,
@@ -1480,6 +1483,16 @@ mod tests {
     }
 
     #[test]
+    fn selected_source_range_keeps_inline_code_escapes_literal() {
+        assert_eq!(select_rendered_range("`a\\\\b`", 1..2), 2..3);
+        assert_eq!(select_rendered_range("`a\\\\b`", 2..3), 3..4);
+        assert_eq!(select_rendered_range(r"`a\*b`", 1..2), 2..3);
+        assert_eq!(select_rendered_range(r"`a\*b`", 2..3), 3..4);
+        // The same punctuation is still an escape outside code.
+        assert_eq!(select_rendered_range(r"a\*b", 1..2), 1..3);
+    }
+
+    #[test]
     fn selected_source_range_maps_footnote_reference_syntax() {
         let source = "before[^note] after\n\n[^note]: body";
         assert_eq!(selected_rendered_range(source, 0..6), Some(0..6));
@@ -1542,6 +1555,23 @@ mod tests {
     }
 
     #[test]
+    fn selected_source_range_maps_each_literal_backslash_in_fenced_code() {
+        let source = "```\na\\\\b\n```";
+        assert_eq!(selected_code_range(source, 1..2), Some(5..6));
+        assert_eq!(selected_code_range(source, 2..3), Some(6..7));
+        assert_eq!(selected_code_range(source, 1..3), Some(5..7));
+        let punctuation = "```\na\\*b\n```";
+        assert_eq!(selected_code_range(punctuation, 1..2), Some(5..6));
+        assert_eq!(selected_code_range(punctuation, 2..3), Some(6..7));
+        assert_eq!(selected_code_range("```\na\\\\b\r\n```", 1..3), Some(5..7));
+        let multiline = "```\na\\\\\nb\n```";
+        assert_eq!(selected_code_range(multiline, 1..2), Some(5..6));
+        assert_eq!(selected_code_range(multiline, 2..3), Some(6..7));
+        assert_eq!(selected_code_range(multiline, 3..4), Some(7..8));
+        assert_eq!(selected_code_range(multiline, 4..5), Some(8..9));
+    }
+
+    #[test]
     fn selected_source_range_excludes_closing_fence_candidate() {
         let source = "````text\n```\n````";
         let mut cx = NodeContext::default();
@@ -1576,11 +1606,27 @@ mod tests {
     }
 
     #[test]
+    fn selected_source_range_maps_literal_backslashes_in_indented_code() {
+        let source = "    one\n    a\\\\b";
+        assert_eq!(selected_code_range(source, 5..6), Some(13..14));
+        assert_eq!(selected_code_range(source, 6..7), Some(14..15));
+        assert_eq!(selected_code_range(source, 5..7), Some(13..15));
+    }
+
+    #[test]
     fn selected_source_range_maps_fenced_code_nested_in_a_list() {
         let source = "- ```rust\n  one\n  two\n  ```";
         assert_eq!(selected_code_range(source, 0..3), Some(12..15));
         assert_eq!(selected_code_range(source, 4..7), Some(18..21));
         assert_eq!(selected_code_range(source, 0..7), Some(12..21));
+    }
+
+    #[test]
+    fn selected_source_range_maps_literal_backslashes_in_nested_fences() {
+        for source in ["- ```\n  a\\\\b\n  ```", "> ```\n> a\\\\b\n> ```"] {
+            assert_eq!(selected_code_range(source, 1..2), Some(9..10));
+            assert_eq!(selected_code_range(source, 2..3), Some(10..11));
+        }
     }
 
     #[test]

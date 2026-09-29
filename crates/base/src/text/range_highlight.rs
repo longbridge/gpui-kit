@@ -1055,6 +1055,47 @@ mod tests {
     }
 
     #[test]
+    fn fenced_code_backslashes_convert_individually() {
+        let markdown = "```\na\\\\b\n```";
+        let text = rendered(parse(markdown));
+        assert_eq!(text.range_for_source(5..6), Some(1..2));
+        assert_eq!(text.range_for_source(6..7), Some(2..3));
+        assert_eq!(text.range_for_source(5..7), Some(1..3));
+    }
+
+    #[test]
+    fn literal_code_escapes_convert_individually() {
+        for (markdown, first, second, rendered_start) in [
+            ("`a\\\\b`", 2, 3, 1),
+            (r"`a\*b`", 2, 3, 1),
+            ("    one\n    a\\\\b", 13, 14, 5),
+            ("- ```\n  a\\\\b\n  ```", 9, 10, 1),
+            ("> ```\n> a\\\\b\n> ```", 9, 10, 1),
+            ("```\na\\*b\n```", 5, 6, 1),
+            ("```\na\\\\b\r\n```", 5, 6, 1),
+            ("```\na\\\\\nb\n```", 5, 6, 1),
+        ] {
+            let text = rendered(parse(markdown));
+            assert_eq!(
+                text.range_for_source(first..first + 1),
+                Some(rendered_start..rendered_start + 1),
+                "{markdown:?}"
+            );
+            assert_eq!(
+                text.range_for_source(second..second + 1),
+                Some(rendered_start + 1..rendered_start + 2),
+                "{markdown:?}"
+            );
+        }
+        let text = rendered(parse(r"a\*b"));
+        assert_eq!(text.range_for_source(1..2), Some(1..2));
+        assert_eq!(text.range_for_source(2..3), Some(1..2));
+        let text = rendered(parse("```\na\\\\\nb\n```"));
+        assert_eq!(text.range_for_source(7..8), Some(3..4));
+        assert_eq!(text.range_for_source(8..9), Some(4..5));
+    }
+
+    #[test]
     fn a_character_converts_when_any_of_its_source_is_in_the_range() {
         // `&amp;` renders `&`: its name alone still renders that `&`.
         assert_eq!(converted_needle("a &amp; b", "amp").as_deref(), Some("&"));
