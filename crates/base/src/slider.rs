@@ -5,8 +5,8 @@ use gpui::{
     AccessibleAction, Along, AnyElement, App, AppContext as _, Axis, Bounds, Context, Div,
     DragMoveEvent, Empty, Entity, EntityId, EventEmitter, InteractiveElement, IntoElement,
     MouseButton, MouseDownEvent, Orientation, ParentElement, Pixels, Point, Render, RenderOnce,
-    Role, StatefulInteractiveElement, StyleRefinement, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
+    Role, StatefulInteractiveElement, StyleRefinement, Styled, TouchDragEvent, TouchPhase, Window,
+    div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{element_ext::ElementExt, geometry::AxisExt};
@@ -180,6 +180,8 @@ pub struct SliderState {
     /// Tracks whether the user is currently interacting with the slider so we
     /// only emit [`SliderEvent::Release`] after a real press/drag.
     dragging: bool,
+    /// The thumb a claimed touch drag moves (`true` = range start), while one is live.
+    touch_drag: Option<bool>,
 }
 
 impl SliderState {
@@ -194,6 +196,7 @@ impl SliderState {
             bounds: Bounds::default(),
             scale: SliderScale::default(),
             dragging: false,
+            touch_drag: None,
         }
     }
 
@@ -378,6 +381,19 @@ impl SliderState {
         }
         cx.emit(SliderEvent::Change(self.value));
         cx.notify();
+    }
+
+    /// Whether `position` is closer to the range start thumb than to the end thumb.
+    fn is_nearer_start(&self, axis: Axis, position: Point<Pixels>) -> bool {
+        let size = self.bounds.size.along(axis);
+        let along = if axis.is_horizontal() {
+            position.x - self.bounds.left()
+        } else {
+            self.bounds.bottom() - position.y
+        };
+        let center =
+            ((self.percentage.end - self.percentage.start) / 2. + self.percentage.start) * size;
+        along < center
     }
 
     /// Emit [`SliderEvent::Release`] if the user was actively interacting
@@ -576,10 +592,70 @@ impl RenderOnce for SliderTrack {
         let state = self.state.read(cx);
         let is_range = state.value().is_range();
         let percentage = state.percentage();
+        // Touch: GPUI routes a finger drag to `TouchDragEvent` (claimed with
+        // `prevent_default`) or to scrolling; `on_drag` below is mouse-only. Claim
+        // drags that start on the track, as the scrollbar thumb does.
+        let touch_layer = (!self.disabled).then(|| {
+            let slider_state = self.state.clone();
+            gpui::canvas(
+                |bounds, _, _| bounds,
+                move |bounds, _, window, _| {
+                    let slider_state = slider_state.clone();
+                    window.on_mouse_event(move |event: &TouchDragEvent, phase, window, cx| {
+                        if !phase.bubble() {
+                            return;
+                        }
+                        match event.phase {
+                            TouchPhase::Started => {
+                                if window.default_prevented()
+                                    || !bounds.contains(&event.start_position)
+                                {
+                                    return;
+                                }
+                                window.prevent_default();
+                                slider_state.update(cx, |state, cx| {
+                                    let is_start = is_range
+                                        && state.is_nearer_start(axis, event.start_position);
+                                    state.touch_drag = Some(is_start);
+                                    state.update_value_by_position(
+                                        axis,
+                                        event.position,
+                                        is_start,
+                                        window,
+                                        cx,
+                                    );
+                                });
+                            }
+                            TouchPhase::Moved => slider_state.update(cx, |state, cx| {
+                                if let Some(is_start) = state.touch_drag {
+                                    state.update_value_by_position(
+                                        axis,
+                                        event.position,
+                                        is_start,
+                                        window,
+                                        cx,
+                                    );
+                                }
+                            }),
+                            TouchPhase::Ended | TouchPhase::Cancelled => {
+                                slider_state.update(cx, |state, cx| {
+                                    if state.touch_drag.take().is_some() {
+                                        state.handle_release(cx);
+                                    }
+                                })
+                            }
+                        }
+                    });
+                },
+            )
+            .absolute()
+            .size_full()
+        });
         self.base
             .id("slider-bar-container")
             .test_support()
             .children(self.children)
+            .children(touch_layer)
             .when(!self.disabled, |this| {
                 this.on_mouse_down(
                     MouseButton::Left,
