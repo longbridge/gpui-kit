@@ -23,7 +23,7 @@ use gpui::{
 
 use crate::{Spring, motion::Transition};
 
-pub use appear::PlotAppear;
+pub use appear::{PlotAppear, PlotAppearScope};
 #[allow(deprecated)]
 pub use axis::AXIS_GAP;
 pub use axis::{AxisLabelPlacement, AxisLabelSide, AxisText, PlotAxis, axis_gutter};

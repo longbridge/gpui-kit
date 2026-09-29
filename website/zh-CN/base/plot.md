@@ -145,4 +145,14 @@ Theme::global_mut(cx).plot = PlotTheme::new().with_motion(motion);
 
 `with_appear` 设置 plot 的 id 第一次绘制时数据画出来的方式。plot 在 `Plot::appear` 里拿到进度，调用时机在 `Plot::hover` 和 `Plot::paint` 之前；`PlotAppear::staggered` 把进度切给多个图形，每个错开一点开始。plot 在 `Plot::appear_generation` 返回 `Some` 即开启入场，值变化时重播；默认的 `None` 不跟踪任何状态，也不请求帧。有 id 但 `Plot::interactive` 为 false 的 plot 同样会入场；入场结束前不跟踪 hover。
 
+### Appear scope
+
+入场状态存在 plot 的元素状态里，所以 plot 一旦不再绘制（比如虚拟列表滚走的一行），回来时会重新入场。`PlotAppearScope` 按全局元素 id 和入场 generation 记下其中已经入场完毕的 plot，之后直接交给它们完成态的入场，不请求帧：
+
+```rust
+PlotAppearScope::new(("transcript", conversation_id), list(state, render_row).flex_1())
+```
+
+generation 变化仍会重播；入场到一半被移走的 plot 回来后从头入场。记录存在作用域自己的元素状态里，只要作用域每帧都在绘制就一直保留：关闭视图，或给作用域换一个 id，其中的 plot 就会重新入场。嵌套时最内层的作用域生效。作用域不参与布局，自带尺寸的子元素（比如 `list`）照常生效。
+
 GPUI Component 会在主题变化时把自己的 motion token 投射到这里。动效遵循操作系统的“减少动态效果”设置，开启后所有值都会立即采用目标值。

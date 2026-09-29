@@ -758,7 +758,13 @@ AreaChart::new(range).interactive(false)       // 拖拽手柄下面的底图
 LineChart::new(candles).appear_key((&symbol, period))
 ```
 
-每次滚入视野都会重新绘制的图表（比如长列表每一行里的图表），每次都会重播入场。这种场景把入场关掉：
+图表一旦不再绘制就会忘掉自己的入场，所以虚拟列表里的图表每次滚回视野都会重播。把列表包进 [`PlotAppearScope`](../base/plot.md#appear-scope)，每张图表只入场一次，滚回来时直接完整显示。作用域按列表展示的内容命名（比如一段对话、一个自选列表），切到别的内容或关闭视图后，图表会重新入场：
+
+```rust
+PlotAppearScope::new(("rows", list_id), list(state, render_row).flex_1())
+```
+
+图表完全不需要入场时，把它关掉：
 
 ```rust
 LineChart::new(intraday).interactive(false).appear(false)

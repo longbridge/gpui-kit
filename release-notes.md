@@ -69,7 +69,17 @@ fn Plot::appear(&mut self, appear: PlotAppear, window: &mut Window, cx: &mut App
 fn Plot::appear_generation(&self) -> Option<u64> // Some opts in; a new value replays
 fn Plot::interactive(&self) -> bool              // hover and tooltip, apart from the id
 pub fn PlotMotion::with_appear(self, appear: Transition) -> Self
+pub struct PlotAppearScope                       // remembers finished appears across remounts
+impl PlotAppearScope {
+    pub fn new(id: impl Into<ElementId>, child: impl IntoElement) -> Self
+}
 ```
+
+A chart that stops being painted forgets its appear, so one in a virtual list
+draws in again whenever it scrolls back into view. Wrap the list in a
+`PlotAppearScope` and each chart inside draws in once; the memory lasts while
+the scope is painted, so closing the view or renaming the scope draws the
+charts in afresh.
 
 Every new `Plot` method has a default, so existing plots compile and behave as
 before: `Plot::interactive` is `true`, and without an `appear_generation` a plot

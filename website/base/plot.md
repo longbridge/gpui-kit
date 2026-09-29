@@ -145,4 +145,14 @@ Theme::global_mut(cx).plot = PlotTheme::new().with_motion(motion);
 
 `with_appear` sets how a plot's data draws in the first time its id is painted. A plot receives the progress in `Plot::appear`, before `Plot::hover` and `Plot::paint`; `PlotAppear::staggered` gives each of several marks its own slice of it. A plot opts in by returning `Some` from `Plot::appear_generation`, and a new value replays the appear; the default `None` tracks nothing and asks for no frames. A plot with an id that is not `Plot::interactive` still appears, and hover tracking waits until the appear is done.
 
+### Appear scope
+
+The appear lives in the plot's element state, so a plot that stops being painted — a row a virtual list scrolled away — draws in again when it comes back. `PlotAppearScope` remembers which plots inside it have finished, by global element id and appear generation, and hands those a complete appear at once, with no frames asked for:
+
+```rust
+PlotAppearScope::new(("transcript", conversation_id), list(state, render_row).flex_1())
+```
+
+A new generation still replays, and a plot taken away mid-appear draws in again from the start. The memory is the scope's own element state, so it lasts while the scope is painted every frame: close the view, or give the scope another id, and its plots draw in afresh. The innermost scope wins. The scope takes no part in layout, so a child that sizes itself, such as a `list`, keeps doing so.
+
 GPUI Component projects its motion tokens here whenever its theme changes. Motion honors the operating system's reduced-motion preference, under which every value adopts its target at once.

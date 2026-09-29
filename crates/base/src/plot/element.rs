@@ -102,7 +102,7 @@ impl<P: Plot + 'static> Element for PlotElement<P> {
         };
 
         let appear = match self.0.appear_generation() {
-            Some(generation) => track_appear(generation, window, cx),
+            Some(generation) => track_appear(global_id, generation, window, cx),
             None => PlotAppear::complete(),
         };
         let appearing = appear.is_appearing();

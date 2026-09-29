@@ -784,7 +784,13 @@ The appear runs once per id. New data paints in place, so a chart fed live quote
 LineChart::new(candles).appear_key((&symbol, period))
 ```
 
-A chart that is painted again each time it scrolls into view — one in each row of a long list — draws in every time it does. Turn the appear off there:
+A chart that stops being painted forgets its appear, so one in a virtual list draws in again every time it scrolls back into view. Wrap the list in a [`PlotAppearScope`](../base/plot.md#appear-scope) to have each chart draw in once and show whole when it returns; name the scope after what the list shows, such as a conversation or a watchlist, so moving to another one, or closing the view, draws its charts in afresh:
+
+```rust
+PlotAppearScope::new(("rows", list_id), list(state, render_row).flex_1())
+```
+
+Where a chart should never draw in, turn the appear off:
 
 ```rust
 LineChart::new(intraday).interactive(false).appear(false)
