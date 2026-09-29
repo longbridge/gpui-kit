@@ -9,6 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 gpui-kit.workspace = true
+gpui.workspace = true
 gpui-component-story = { path = "../story", default-features = false }
 
 # Web specific dependencies

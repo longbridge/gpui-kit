@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 gpui-kit = { workspace = true, features = ["tree-sitter-languages"] }
+gpui.workspace = true
 gpui-component-story = { path = "../../crates/story" }
 autocorrect = "2.14.2"
 chrono = "0.4"

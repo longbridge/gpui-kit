@@ -13,6 +13,7 @@ default = ["tree-sitter"]
 [dependencies]
 anyhow.workspace = true
 gpui-kit.workspace = true
+gpui.workspace = true
 gpui-fps.workspace = true
 
 async-channel = "2.3.1"

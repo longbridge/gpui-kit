@@ -8,6 +8,7 @@ edition.workspace = true
 [dependencies]
 anyhow.workspace = true
 gpui-kit.workspace = true
+gpui.workspace = true
 
 [lints]
 workspace = true

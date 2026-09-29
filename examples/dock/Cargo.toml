@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 gpui-kit.workspace = true
+gpui.workspace = true
 gpui-component-story = { path = "../../crates/story" }
 anyhow.workspace = true
 rand = "0.8"
