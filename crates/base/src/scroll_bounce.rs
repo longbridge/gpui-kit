@@ -144,12 +144,34 @@ struct State {
     sampled_at: Option<Instant>,
     ongoing_scroll: OngoingScroll,
     short_drag_distance: Option<f32>,
+    last_wheel_at: Option<Instant>,
+    /// Sign of the stream being suppressed, when it is known to be momentum
+    /// that cannot reverse. `None` suppresses both directions.
+    suppressed_direction: Option<f32>,
+}
+
+impl State {
+    /// Release the edge. A stretch made outside a gesture is momentum (or a
+    /// phaseless wheel) hitting the edge; that stream only pushes outward,
+    /// so an inward packet is a new scroll and ends the suppression. After a
+    /// gesture's own release the suppressed momentum may point either way.
+    fn release(&mut self, from_rest: bool) {
+        self.physics.release();
+        self.suppressed_direction =
+            (from_rest && self.physics.suppress_momentum).then(|| self.physics.offset().signum());
+    }
 }
 
 // GPUI starts a normal touch pan only after its 8 px touch slop, but a touch
 // catching a fling starts at zero displacement. A short catch should stop the
 // old fling rather than turn a few fast pixels into a new one.
 const CATCH_DRAG_SLOP: f32 = 8.;
+
+// Momentum arrives once per frame until it stops, so a longer silence means
+// the suppressed stream has ended. Smooth-scrolling mouse drivers on macOS
+// send precise deltas with no phase: they never send the `Started` that
+// otherwise ends suppression, and would stay locked after one bounce.
+const MOMENTUM_GAP: Duration = Duration::from_millis(250);
 
 /// `ScrollbarHandle` has no `max_offset`; recover it from the definition
 /// `content_size = viewport + max_offset`. Both dispatch phases clamp against
@@ -292,11 +314,29 @@ impl Element for ScrollBounce {
                     // The current Ended packet may still cross an edge; only
                     // momentum packets after it should be suppressed.
                     allow_end_bounce = suppress_short_drag_momentum;
+                    let now = cx.background_executor().now();
+                    let paused = state
+                        .last_wheel_at
+                        .replace(now)
+                        .is_some_and(|at| now.saturating_duration_since(at) >= MOMENTUM_GAP);
+                    let reversed = state.suppressed_direction.is_some_and(|direction| {
+                        delta.y != px(0.) && delta.y.as_f32().signum() != direction
+                    });
+                    if paused || reversed {
+                        state.physics.suppress_momentum = false;
+                    }
                     if state.physics.suppress_momentum {
                         cx.stop_propagation();
                         return;
                     }
                     if state.physics.offset() != 0. {
+                        // Outside a gesture (a phaseless wheel once suppression
+                        // lifts) a packet grabs the returning edge and lets it
+                        // go again, as it would at rest.
+                        let from_rest = !state.physics.dragging;
+                        if from_rest {
+                            state.physics.begin(bounds.size.height.as_f32());
+                        }
                         let remainder = state.physics.pull(delta.y.as_f32());
                         if remainder != 0. {
                             let max = max_scroll_extent(handle.as_ref());
@@ -305,8 +345,8 @@ impl Element for ScrollBounce {
                             handle.set_offset(offset);
                             scrolled = true;
                         }
-                        if ended {
-                            state.physics.release();
+                        if ended || from_rest {
+                            state.release(from_rest);
                         }
                         changed = true;
                         cx.stop_propagation();
@@ -315,6 +355,7 @@ impl Element for ScrollBounce {
                     }
                     if suppress_short_drag_momentum {
                         state.physics.suppress_momentum = true;
+                        state.suppressed_direction = None;
                     }
                 } else {
                     // Div applies deltas immediately but clamps during its next
@@ -347,7 +388,7 @@ impl Element for ScrollBounce {
                         }
                         state.physics.pull(residual);
                         if !dragging || ended {
-                            state.physics.release();
+                            state.release(!dragging);
                         }
                         changed = true;
                     }
@@ -671,6 +712,53 @@ mod tests {
         draw(cx);
         assert!(handle.offset().y < px(0.));
         assert_eq!(handle.bounds().origin.y, origin);
+    }
+
+    #[gpui::test]
+    fn phaseless_wheel_scrolls_back_right_after_bouncing(cx: &mut TestAppContext) {
+        let handle = gpui::ListState::new(30, gpui::ListAlignment::Top, px(0.)).measure_all();
+        let (_, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            move |_, _| ListTest(handle)
+        });
+        draw(cx);
+        handle.set_offset(point(px(0.), px(-1000.)));
+        draw(cx);
+        let origin = handle.viewport_bounds().origin.y;
+        // Smooth-scrolling mouse drivers on macOS: precise deltas, no phase.
+        scroll(cx, -50., TouchPhase::Moved);
+        draw(cx);
+        assert!(handle.viewport_bounds().origin.y < origin);
+        scroll(cx, 200., TouchPhase::Moved);
+        draw(cx);
+        assert!(handle.offset().y > px(-1000.));
+        assert_eq!(handle.viewport_bounds().origin.y, origin);
+    }
+
+    #[gpui::test]
+    fn phaseless_wheel_bounces_again_only_after_a_pause(cx: &mut TestAppContext) {
+        let handle = ScrollHandle::new();
+        let (_, cx) = cx.add_window_view({
+            let handle = handle.clone();
+            move |_, _| ScrollTest {
+                handle,
+                enabled: true,
+            }
+        });
+        draw(cx);
+        scroll(cx, 50., TouchPhase::Moved);
+        draw(cx);
+        let bounced = handle.bounds().origin.y;
+        // Momentum after an edge hit keeps pushing outward; it must not
+        // stretch further.
+        scroll(cx, 50., TouchPhase::Moved);
+        draw(cx);
+        assert!(handle.bounds().origin.y <= bounced);
+        cx.executor().advance_clock(MOMENTUM_GAP);
+        scroll(cx, 50., TouchPhase::Moved);
+        draw(cx);
+        assert!(handle.bounds().origin.y > bounced);
+        assert_eq!(handle.offset().y, px(0.));
     }
 
     #[gpui::test]
