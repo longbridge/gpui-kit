@@ -3030,6 +3030,31 @@ impl BlockNode {
         }
     }
 
+    /// Corner radii for the first and last table rows, derived from the
+    /// frame radius in `style.table()`.
+    ///
+    /// GPUI clips children with a rectangular content mask, so a square row
+    /// background (e.g. the header fill) pokes out of a rounded table frame
+    /// at the corners. Rounding the first row's top and the last row's
+    /// bottom corners to the frame radius — inset by the frame's 1px border
+    /// sitting between frame and rows — keeps the row fills inside the
+    /// frame. (A horizontally scrolled track can still meet the viewport
+    /// corner with a square edge mid-scroll; only a rounded content mask
+    /// could clip that, and gpui masks are rectangular.)
+    fn table_row_corner_radii(style: &TextViewStyle, window: &Window) -> [Option<Pixels>; 4] {
+        let rem_size = window.rem_size();
+        let inset = |radius: Option<gpui::AbsoluteLength>| {
+            radius.map(|radius| (radius.to_pixels(rem_size) - px(1.)).max(px(0.)))
+        };
+        let radii = &style.table().corner_radii;
+        [
+            inset(radii.top_left),
+            inset(radii.top_right),
+            inset(radii.bottom_left),
+            inset(radii.bottom_right),
+        ]
+    }
+
     /// Horizontally scrollable table layout (opt-in via `style.table`
     /// overflow-x: scroll).
     ///
@@ -3095,6 +3120,8 @@ impl BlockNode {
             .read(cx)
             .clone();
         let row_count = table.children.len();
+        let [top_left, top_right, bottom_left, bottom_right] =
+            Self::table_row_corner_radii(style, window);
         let mut rows = Vec::with_capacity(row_count);
         let mut cell_ordinal = 0;
         for (row_ix, row) in table.children.iter().enumerate() {
@@ -3145,7 +3172,13 @@ impl BlockNode {
                     .when(row_ix == 0, |this| {
                         this.bg(style.code_background())
                             .text_color(style.foreground())
+                            .when_some(top_left, |this, radius| this.rounded_tl(radius))
+                            .when_some(top_right, |this, radius| this.rounded_tr(radius))
                             .refine_style(&style.table_head())
+                    })
+                    .when(row_ix + 1 == row_count, |this| {
+                        this.when_some(bottom_left, |this, radius| this.rounded_bl(radius))
+                            .when_some(bottom_right, |this, radius| this.rounded_br(radius))
                     })
                     .children(cells),
             );
@@ -3209,6 +3242,8 @@ impl BlockNode {
 
         let style = &node_cx.style;
         let row_count = table.children.len();
+        let [top_left, top_right, bottom_left, bottom_right] =
+            Self::table_row_corner_radii(style, window);
         let mut rows = Vec::with_capacity(row_count);
         let mut cell_ordinal = 0;
         for (row_ix, row) in table.children.iter().enumerate() {
@@ -3256,7 +3291,13 @@ impl BlockNode {
                     .when(row_ix == 0, |this| {
                         this.bg(style.code_background())
                             .text_color(style.foreground())
+                            .when_some(top_left, |this, radius| this.rounded_tl(radius))
+                            .when_some(top_right, |this, radius| this.rounded_tr(radius))
                             .refine_style(&style.table_head())
+                    })
+                    .when(row_ix + 1 == row_count, |this| {
+                        this.when_some(bottom_left, |this, radius| this.rounded_bl(radius))
+                            .when_some(bottom_right, |this, radius| this.rounded_br(radius))
                     })
                     .children(cells),
             );
