@@ -188,10 +188,15 @@ fn injection_ranges_within_limits(ranges: &[tree_sitter::Range]) -> bool {
 /// Read a captured injection language without ever allocating an unbounded
 /// amount of source text. Language identifiers in fenced code blocks are tiny;
 /// longer captures cannot name a registered language and are ignored.
+///
+/// The range comes from a tree that can be stale relative to `text`; one that
+/// no longer lands on char boundaries cannot name a language either.
 fn captured_injection_language(text: &Rope, range: Range<usize>) -> Option<SharedString> {
     if range.end > text.len()
         || range.start >= range.end
         || range.end.saturating_sub(range.start) > MAX_INJECTION_LANGUAGE_BYTES
+        || !text.is_char_boundary(range.start)
+        || !text.is_char_boundary(range.end)
     {
         return None;
     }
@@ -276,8 +281,13 @@ fn should_include_injection_range(
 /// spans, links, images, autolinks). If that query gains a construct with a new
 /// trigger character (e.g. GFM bare autolinks), add it here or the construct
 /// will silently lose highlighting.
+///
+/// The range comes from a tree that can be stale relative to `text`, so it is
+/// clipped to the text's char boundaries before slicing.
 fn markdown_inline_range_has_trigger(text: &Rope, range: Range<usize>) -> bool {
-    text.slice(range).bytes().any(|byte| {
+    let start = text.clip_offset(range.start, Bias::Left);
+    let end = text.clip_offset(range.end, Bias::Right).max(start);
+    text.slice(start..end).bytes().any(|byte| {
         matches!(
             byte,
             b'*' | b'_' | b'`' | b'[' | b']' | b'(' | b')' | b'<' | b'>' | b'!' | b'~' | b'$'
@@ -1351,6 +1361,34 @@ mod tests {
         );
         assert_eq!(parse_input_bytes(&rope, rope.len()), b"");
         assert_eq!(parse_input_bytes(&rope, rope.len() + 4), b"");
+    }
+
+    #[test]
+    fn test_injection_ranges_inside_multibyte_char() {
+        // Injection ranges come from a tree that can be stale relative to the
+        // text, so they may start or end inside a character (#3315).
+        let rope = Rope::from("# 你\n*a*");
+        let inside = "# ".len() + 1;
+
+        assert!(!markdown_inline_range_has_trigger(
+            &rope,
+            inside..inside + 1
+        ));
+        assert!(markdown_inline_range_has_trigger(&rope, inside..rope.len()));
+        assert!(markdown_inline_range_has_trigger(
+            &rope,
+            inside..rope.len() + 4
+        ));
+        assert!(!markdown_inline_range_has_trigger(
+            &rope,
+            rope.len() + 1..rope.len() + 4
+        ));
+
+        assert_eq!(captured_injection_language(&rope, inside..rope.len()), None);
+        assert_eq!(
+            captured_injection_language(&rope, "# ".len()..inside + 2),
+            Some("你".into())
+        );
     }
 
     #[test]
