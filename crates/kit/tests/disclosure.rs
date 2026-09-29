@@ -289,6 +289,99 @@ fn slider_touch_drag_moves_the_actual_thumb(cx: &mut TestAppContext) {
     .unwrap();
 }
 
+/// A slider under a layer that covers it, as a dialog or sheet would.
+struct CoveredSlider {
+    slider: Entity<SliderState>,
+}
+impl Render for CoveredSlider {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .p_4()
+            .child(Slider::new(&self.slider).w_64())
+            .child(div().id("cover").absolute().inset_0().occlude())
+    }
+}
+
+#[gpui_kit::test]
+fn slider_ignores_touch_drags_on_a_covering_layer(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(600.))), |_, cx| {
+        cx.new(|cx| CoveredSlider {
+            slider: cx.new(|_| SliderState::new().default_value(20.)),
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let before = window.find(("slider-thumb", 0u32)).bounds();
+        let track = window.find("slider-bar-container").bounds();
+        touch_drag(
+            window,
+            cx,
+            before.center(),
+            point(track.right(), track.center().y),
+        );
+        assert_eq!(window.find(("slider-thumb", 0u32)).bounds(), before);
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn slider_drops_a_touch_drag_whose_end_never_arrived(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, settings) = common::open_window(cx, Some(size(px(640.), px(600.))), |_, cx| {
+        cx.new(|cx| Settings {
+            open: vec![],
+            step: 0,
+            disabled: false,
+            advanced_disabled: false,
+            slider: cx.new(|_| SliderState::new().default_value(20.)),
+        })
+    });
+    let set_disabled = |disabled: bool, window: &mut Window, cx: &mut gpui_kit::App| {
+        settings.update(cx, |settings, cx| {
+            settings.disabled = disabled;
+            cx.notify();
+        });
+        window.render_frame(cx);
+    };
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let thumb = window.find(("slider-thumb", 0u32)).bounds().center();
+        let track = window.find("slider-bar-container").bounds();
+        let dispatch = |phase, from, to, window: &mut Window, cx: &mut gpui_kit::App| {
+            window.dispatch_event(
+                TouchDragEvent {
+                    phase,
+                    start_position: from,
+                    position: to,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.render_frame(cx);
+        };
+        // The slider is disabled mid-drag, so it never sees the drag end.
+        dispatch(TouchPhase::Started, thumb, thumb, window, cx);
+        set_disabled(true, window, cx);
+        dispatch(TouchPhase::Ended, thumb, thumb, window, cx);
+        set_disabled(false, window, cx);
+
+        // A later drag another element claimed must not move it.
+        let before = window.find(("slider-thumb", 0u32)).bounds();
+        let elsewhere = point(track.left(), track.bottom() + px(200.));
+        dispatch(
+            TouchPhase::Moved,
+            elsewhere,
+            point(track.right(), track.center().y),
+            window,
+            cx,
+        );
+        assert_eq!(window.find(("slider-thumb", 0u32)).bounds(), before);
+    })
+    .unwrap();
+}
+
 #[gpui_kit::test]
 fn disabled_slider_ignores_pointer_changes(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
