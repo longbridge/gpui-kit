@@ -1,7 +1,8 @@
 use gpui::{
-    AnyElement, App, IntoElement, ParentElement, RenderOnce, StyleRefinement, Styled, Window, div,
-    prelude::FluentBuilder as _, relative, rems,
+    AnyElement, App, HighlightStyle, Hsla, IntoElement, ParentElement, RenderOnce, StyleRefinement,
+    Styled, Window, div, prelude::FluentBuilder as _, relative, rems,
 };
+use gpui_base::TextViewStyle;
 
 use crate::{
     ActiveTheme as _, Colorize as _, StyledExt as _, button::Button, message::MessageAlignment,
@@ -26,6 +27,51 @@ pub enum BubbleVariant {
     Ghost,
     /// A destructive surface for failed or invalid content.
     Destructive,
+}
+
+impl BubbleVariant {
+    /// The text color this variant paints on its surface.
+    fn text_color(self, cx: &App) -> Hsla {
+        let colors = &cx.theme().semantic_tokens().colors;
+        match self {
+            BubbleVariant::Filled => colors.primary_foreground,
+            BubbleVariant::Secondary => colors.secondary_foreground,
+            BubbleVariant::Destructive => colors.destructive,
+            BubbleVariant::Muted
+            | BubbleVariant::Tinted
+            | BubbleVariant::Outline
+            | BubbleVariant::Ghost => colors.foreground,
+        }
+    }
+
+    /// A [`TextViewStyle`] whose colors match this bubble's surface.
+    ///
+    /// `TextView` paints its own text color instead of inheriting the one a
+    /// bubble sets, so rich text needs this style to stay readable, especially
+    /// on the `primary` surface of [`BubbleVariant::Filled`]:
+    ///
+    /// ```ignore
+    /// Bubble::new().child(
+    ///     TextView::markdown("reply", text).style(BubbleVariant::Filled.text_view_style(cx)),
+    /// )
+    /// ```
+    pub fn text_view_style(self, cx: &App) -> TextViewStyle {
+        let text = self.text_color(cx);
+        let style = crate::text::base_text_view_style(cx.theme()).with_foreground(text);
+        if self != BubbleVariant::Filled {
+            return style;
+        }
+        // Links and code use `primary`/`accent` roles that disappear on a
+        // `primary` surface; derive them from the text color instead.
+        let code_background = text.opacity(0.12);
+        style
+            .with_link(text)
+            .with_code_background(code_background)
+            .with_inline_code(HighlightStyle {
+                background_color: Some(code_background),
+                ..Default::default()
+            })
+    }
 }
 
 /// Edge on which reaction feedback is attached.
@@ -210,43 +256,30 @@ impl RenderOnce for BubbleContent {
                 MessageAlignment::Start => this.self_start(),
                 MessageAlignment::End => this.self_end(),
             })
+            .text_color(self.variant.text_color(cx))
             .map(|this| match self.variant {
-                BubbleVariant::Filled => this
-                    .bg(tokens.colors.primary)
-                    .text_color(tokens.colors.primary_foreground),
+                BubbleVariant::Filled => this.bg(tokens.colors.primary),
                 // The theme's `secondary` role is tuned for buttons and sits a
                 // tier darker than shadcn's conversation secondary; the
                 // near-background `muted` tier matches shadcn's value in both
                 // light and dark themes.
-                BubbleVariant::Secondary => this
-                    .bg(tokens.colors.muted)
-                    .text_color(tokens.colors.secondary_foreground),
-                BubbleVariant::Muted => this
-                    .bg(tokens.colors.muted)
-                    .text_color(tokens.colors.foreground),
-                BubbleVariant::Tinted => this
-                    .bg(tokens.colors.primary.mix_oklab(
-                        tokens.colors.background,
-                        if cx.theme().is_dark() { 0.24 } else { 0.12 },
-                    ))
-                    .text_color(tokens.colors.foreground),
+                BubbleVariant::Secondary | BubbleVariant::Muted => this.bg(tokens.colors.muted),
+                BubbleVariant::Tinted => this.bg(tokens.colors.primary.mix_oklab(
+                    tokens.colors.background,
+                    if cx.theme().is_dark() { 0.24 } else { 0.12 },
+                )),
                 BubbleVariant::Outline => this
                     .border_color(tokens.colors.border)
-                    .bg(tokens.colors.background)
-                    .text_color(tokens.colors.foreground),
+                    .bg(tokens.colors.background),
                 BubbleVariant::Ghost => this
                     .rounded(tokens.radius.none)
                     .border_0()
                     .bg(cx.theme().transparent)
-                    .text_color(tokens.colors.foreground)
                     .p_0(),
-                BubbleVariant::Destructive => this
-                    .bg(tokens.colors.destructive.opacity(if cx.theme().is_dark() {
-                        0.2
-                    } else {
-                        0.1
-                    }))
-                    .text_color(tokens.colors.destructive),
+                BubbleVariant::Destructive => this.bg(tokens
+                    .colors
+                    .destructive
+                    .opacity(if cx.theme().is_dark() { 0.2 } else { 0.1 })),
             })
             .refine_style(&self.style)
             .children(self.children)
@@ -423,6 +456,40 @@ impl RenderOnce for BubbleReactions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{Theme, ThemeMode};
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn text_view_style_matches_the_bubble_surface(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            Theme::change(ThemeMode::Dark, None, cx);
+            let colors = &cx.theme().semantic_tokens().colors;
+            let (primary, primary_foreground, foreground) =
+                (colors.primary, colors.primary_foreground, colors.foreground);
+
+            // On a `primary` surface the default text (`foreground`) and link
+            // (`link`) colors are unreadable, so the style swaps them.
+            let filled = BubbleVariant::Filled.text_view_style(cx);
+            assert_eq!(filled.foreground(), primary_foreground);
+            assert_eq!(filled.link(), primary_foreground);
+            assert_ne!(filled.code_background(), primary);
+            assert_eq!(
+                filled.inline_code().background_color,
+                Some(filled.code_background())
+            );
+
+            let outline = BubbleVariant::Outline.text_view_style(cx);
+            assert_eq!(outline.foreground(), foreground);
+            assert_eq!(outline.link(), cx.theme().link);
+
+            let destructive = BubbleVariant::Destructive.text_view_style(cx);
+            assert_eq!(
+                destructive.foreground(),
+                cx.theme().semantic_tokens().colors.destructive
+            );
+        });
+    }
 
     #[test]
     fn test_bubble_builder() {
