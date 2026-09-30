@@ -10,6 +10,8 @@ use crate::{ActiveTheme as _, Colorize as _, StyledExt as _};
 
 const SHIMMER_LAYER_COUNT: usize = 12;
 const DEFAULT_SHIMMER_SPREAD: f32 = 0.3;
+/// Lightness difference below which a highlight would be indistinguishable from the text.
+const MIN_HIGHLIGHT_LIGHTNESS_GAP: f32 = 0.1;
 
 /// The shimmer highlight half-width.
 ///
@@ -438,11 +440,19 @@ fn shimmer_highlight_color(
     override_color: Option<Hsla>,
 ) -> Hsla {
     let highlight = override_color.unwrap_or_else(|| {
-        if dark {
-            text.mix_oklab(foreground, 0.2)
+        let (target, opposite) = if dark {
+            (foreground, background)
         } else {
-            text.mix_oklab(background, 0.2)
-        }
+            (background, foreground)
+        };
+        // Text already in the target's lightness (e.g. `foreground` text in a dark
+        // theme) would get a band in its own color; sweep toward the other end.
+        let target = if (target.l - text.l).abs() < MIN_HIGHLIGHT_LIGHTNESS_GAP {
+            opposite
+        } else {
+            target
+        };
+        text.mix_oklab(target, 0.2)
     });
     let peak_opacity: f32 = if dark { 0.6 } else { 0.75 };
     let layer_opacity = 1. - (1. - peak_opacity).powf(1. / SHIMMER_LAYER_COUNT as f32);
@@ -620,6 +630,13 @@ mod tests {
         assert!(light.a > dark.a);
         assert!((1. - (1. - light.a).powi(SHIMMER_LAYER_COUNT as i32) - 0.75).abs() < 0.001);
         assert!((1. - (1. - dark.a).powi(SHIMMER_LAYER_COUNT as i32) - 0.6).abs() < 0.001);
+
+        // Text that already has the target's lightness sweeps toward the other end
+        // instead of getting a band in its own color.
+        let on_dark_foreground = shimmer_highlight_color(white, black, white, true, None);
+        assert!(white.l - on_dark_foreground.l > 0.3);
+        let on_light_background = shimmer_highlight_color(white, white, black, false, None);
+        assert!(white.l - on_light_background.l > 0.3);
 
         let custom = shimmer_highlight_color(black, white, black, false, Some(muted));
         assert_eq!(custom.h, muted.h);
