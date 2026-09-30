@@ -24,6 +24,35 @@ gpui-kit = "{{gpui_kit_version}}"
 
 This single dependency includes GPUI, GPUI Base, the styled GPUI Component library and its default icon assets. Application code accesses GPUI through `use gpui_kit::*;` and components through `gpui_kit::component`. You can change the feature selection later; see [Icons & Assets](./assets.md).
 
+### macOS text rendering: `font-kit`
+
+**macOS needs the `font-kit` feature on `gpui-pre-platform` to render text.**
+The `gpui-kit` dependency above already enables it, so this guide needs no
+additional dependency or feature setting.
+
+If you maintain an application that depends on GPUI directly, enable the feature
+on the `gpui_platform` dependency instead. For a macOS-only GPUI application,
+the dependency entries are:
+
+```toml
+[dependencies]
+gpui = { package = "gpui-pre", version = "={{gpui_pre_version}}" }
+gpui_platform = { package = "gpui-pre-platform", version = "={{gpui_pre_version}}", features = ["font-kit"] }
+```
+
+Keep any other platform features your application uses, and keep the GPUI
+snapshot versions aligned. This is an alternative for direct GPUI users; keep
+the single `gpui-kit` dependency for the Kit example below. Do not add
+`features = ["font-kit"]` to `gpui` or `gpui-kit`, or add a separate `font-kit`
+dependency: the feature belongs to `gpui-pre-platform` and enables
+`gpui-pre-macos/font-kit`.
+
+`gpui-pre-platform` does not enable `font-kit` by default. Without it, the macOS
+backend uses `NoopTextSystem`: a window can open while no text is rendered,
+and `all_font_names()` returns an empty list. After updating your manifest,
+rebuild with `cargo run`. On macOS, `cargo tree -e features -i gpui-pre-macos`
+shows which dependencies enable the backend's features; check for `font-kit`.
+
 ## Add a view
 
 Replace `src/main.rs` with:

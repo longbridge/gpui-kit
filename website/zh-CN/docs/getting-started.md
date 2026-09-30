@@ -24,6 +24,30 @@ gpui-kit = "{{gpui_kit_version}}"
 
 只需这一个依赖，即可使用 GPUI、GPUI Base、带样式的 GPUI Component 和默认图标资源。应用代码通过 `use gpui_kit::*;` 使用 GPUI，通过 `gpui_kit::component` 使用组件。以后可以调整 feature 选择，详见[图标与资源](./assets.md)。
 
+### macOS 文字渲染：`font-kit`
+
+**macOS 需要启用 `gpui-pre-platform` 的 `font-kit` feature 才能渲染文字。**
+上面的 `gpui-kit` 依赖已经启用了它，按本指南创建应用时无需额外添加依赖或配置 feature。
+
+如果你维护的应用直接依赖 GPUI，需要在 `gpui_platform` 依赖上启用这个 feature。
+仅面向 macOS 的 GPUI 应用可使用以下依赖配置：
+
+```toml
+[dependencies]
+gpui = { package = "gpui-pre", version = "={{gpui_pre_version}}" }
+gpui_platform = { package = "gpui-pre-platform", version = "={{gpui_pre_version}}", features = ["font-kit"] }
+```
+
+保留应用原有的其他平台 features，并保持 GPUI 快照版本一致。这是直接使用 GPUI 时的配置；
+本页后续 Kit 示例仍只需 `gpui-kit` 一个依赖。不要把 `features = ["font-kit"]` 加到
+`gpui` 或 `gpui-kit` 上，也无需单独添加 `font-kit` crate：这个 feature 属于
+`gpui-pre-platform`，会启用 `gpui-pre-macos/font-kit`。
+
+`gpui-pre-platform` 默认不启用 `font-kit`。未启用时，macOS 后端会使用 `NoopTextSystem`：
+窗口可以打开，但不会渲染文字，`all_font_names()` 也会返回空列表。修改 manifest 后，
+重新运行 `cargo run`。在 macOS 上，可以用 `cargo tree -e features -i gpui-pre-macos`
+查看后端的 features 由哪些依赖启用，确认其中包含 `font-kit`。
+
 ## 添加视图
 
 将 `src/main.rs` 替换为：
