@@ -299,3 +299,19 @@ markdown(source)
         gpui_kit::div().child(format!("Run {}", code_block.lang().unwrap_or_default()))
     })
 ```
+
+## 语法高亮
+
+启用 `tree-sitter` feature 时，组件初始化后每个 `TextView` 都会用当前主题的
+`highlight_theme` 高亮代码块。
+需要让某一个视图换一种高亮方式时，使用 `code_block_highlighter`。返回空范围即可让
+这个视图的代码块显示为纯文本，其他视图保持默认高亮：
+
+```rust
+TextView::markdown("notes", source).code_block_highlighter(|_| Vec::new())
+```
+
+高亮器接收每个 `CodeBlock`，返回相对于 `CodeBlock::code()` 的 UTF-8 字节范围；
+无效范围会被丢弃。它优先于应用默认高亮器，也优先于 `.style(...)` 所传样式中的
+`highlight_theme`。完整约定见
+[GPUI Base TextView](../base/text-view.md#语法高亮由使用者开启)。

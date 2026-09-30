@@ -426,3 +426,22 @@ markdown(source)
         gpui_kit::div().child(format!("Run {}", code_block.lang().unwrap_or_default()))
     })
 ```
+
+## Syntax Highlighting
+
+With the `tree-sitter` feature enabled, component initialization highlights
+fenced code blocks for every `TextView` with the active theme's
+`highlight_theme`. Use `code_block_highlighter` to
+highlight one view differently. Return no ranges to show that view's code
+blocks as plain text while other views keep the default:
+
+```rust
+TextView::markdown("notes", source).code_block_highlighter(|_| Vec::new())
+```
+
+The highlighter receives each `CodeBlock` and returns UTF-8 byte ranges
+relative to `CodeBlock::code()`; invalid ranges are discarded. It takes
+precedence over the application default and over the `highlight_theme` of a
+style passed to `.style(...)`. See
+[GPUI Base TextView](../base/text-view.md#syntax-highlighting-is-opt-in) for
+the full contract.

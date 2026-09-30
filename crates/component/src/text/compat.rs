@@ -4,11 +4,11 @@ use gpui::{
     SharedString, StyleRefinement, Styled, Window,
 };
 
-use std::time::Duration;
+use std::{ops::Range, sync::Arc, time::Duration};
 
 use super::{
     MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin, SelectionFormat,
-    TableData, TextViewMotion, TextViewState, TextViewStyle,
+    SharedCodeBlockHighlighter, TableData, TextViewMotion, TextViewState, TextViewStyle,
 };
 use gpui_base::{Easing, text::CodeBlock};
 
@@ -45,6 +45,9 @@ pub struct TextView {
     /// `None` leaves the state's own policy alone; `Some(false)` turns a
     /// fade off that an earlier frame turned on.
     stream_fade: Option<bool>,
+    /// Takes precedence over the highlighter derived from `text_style` and
+    /// the application default.
+    code_block_highlighter: Option<Arc<SharedCodeBlockHighlighter>>,
 }
 
 impl Styled for TextView {
@@ -62,6 +65,7 @@ impl TextView {
             text_style: None,
             motion: None,
             stream_fade: None,
+            code_block_highlighter: None,
         }
     }
     /// Creates a text view that parses `text` as Markdown.
@@ -73,6 +77,7 @@ impl TextView {
             text_style: None,
             motion: None,
             stream_fade: None,
+            code_block_highlighter: None,
         }
     }
     /// Creates a text view that parses `text` as HTML.
@@ -84,6 +89,7 @@ impl TextView {
             text_style: None,
             motion: None,
             stream_fade: None,
+            code_block_highlighter: None,
         }
     }
     /// Sets the style, folded onto the one derived from the active theme.
@@ -134,6 +140,28 @@ impl TextView {
         E: IntoElement,
     {
         self.inner = self.inner.code_block_actions(f);
+        self
+    }
+    /// Highlights fenced code blocks with `highlighter` instead of the
+    /// application default or the highlight theme of [`Self::style`].
+    ///
+    /// The highlighter returns UTF-8 byte ranges relative to
+    /// [`CodeBlock::code`]; invalid ranges are discarded. Return no ranges to
+    /// render code blocks as plain text in this view while others keep the
+    /// default highlighting:
+    ///
+    /// ```ignore
+    /// TextView::markdown("notes", source).code_block_highlighter(|_| Vec::new())
+    /// ```
+    ///
+    /// A code block reuses its highlights only while the highlighter is the
+    /// same one, so a view built in `render` runs its highlighter for every
+    /// code block each time it is built.
+    pub fn code_block_highlighter<F>(mut self, highlighter: F) -> Self
+    where
+        F: Fn(&CodeBlock) -> Vec<(Range<usize>, HighlightStyle)> + Send + Sync + 'static,
+    {
+        self.code_block_highlighter = Some(Arc::new(highlighter));
         self
     }
     /// Renders an element in the corner of every table.
@@ -260,6 +288,10 @@ impl Element for TextView {
                 crate::ActiveTheme::theme(cx),
                 style,
             ));
+        }
+        // After the style, whose highlight theme it overrides.
+        if let Some(highlighter) = self.code_block_highlighter.clone() {
+            inner = inner.shared_code_block_highlighter(highlighter);
         }
         let motion = self.motion.clone().or_else(|| {
             self.stream_fade.map(|fade| {
@@ -472,13 +504,28 @@ pub fn html(source: impl Into<SharedString>) -> TextView {
 #[cfg(test)]
 mod tests {
     use std::sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
     };
 
     use gpui::{
-        Context, IntoElement, ParentElement as _, Render, TestAppContext, VisualTestContext, div,
+        Context, IntoElement, ParentElement as _, Render, SharedString, TestAppContext,
+        VisualTestContext, div,
     };
+
+    use super::{TextView, TextViewStyle};
+
+    /// The code of every block a highlighter was asked to highlight.
+    type SeenBlocks = Arc<Mutex<Vec<SharedString>>>;
+
+    fn seen(blocks: &SeenBlocks) -> Vec<String> {
+        blocks
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|code| code.trim().to_string())
+            .collect()
+    }
 
     struct StatelessMarkdown {
         renders: Arc<AtomicUsize>,
@@ -512,6 +559,66 @@ mod tests {
             renders.load(Ordering::Relaxed),
             renders_after_redraw,
             "an unchanged compatibility TextView must not schedule another render after its parse",
+        );
+    }
+
+    struct DefaultAndOverride {
+        overridden: SeenBlocks,
+    }
+
+    impl Render for DefaultAndOverride {
+        fn render(&mut self, _: &mut gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
+            let overridden = self.overridden.clone();
+            // A custom highlight theme would install its own highlighter;
+            // the explicit one must still win.
+            let mut style = TextViewStyle::default();
+            style.highlight_theme = crate::highlighter::HighlightTheme::default_dark();
+            div()
+                .child(TextView::markdown("default", "```rust\nby_default()\n```"))
+                .child(
+                    TextView::markdown("override", "```rust\nby_override()\n```")
+                        .style(style)
+                        .code_block_highlighter(move |block| {
+                            overridden.lock().unwrap().push(block.code());
+                            Vec::new()
+                        }),
+                )
+        }
+    }
+
+    #[gpui::test]
+    fn code_block_highlighter_replaces_the_default_for_one_view(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let defaulted = SeenBlocks::default();
+        let overridden = SeenBlocks::default();
+        cx.update(|cx| {
+            let defaulted = defaulted.clone();
+            gpui_base::TextViewDefaults::global(cx)
+                .with_code_block_highlighter(move |block| {
+                    defaulted.lock().unwrap().push(block.code());
+                    Vec::new()
+                })
+                .install(cx);
+        });
+        let (_, cx) = cx.add_window_view({
+            let overridden = overridden.clone();
+            move |_, _| DefaultAndOverride { overridden }
+        });
+        let cx: &mut VisualTestContext = cx;
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let defaulted = seen(&defaulted);
+        let overridden = seen(&overridden);
+        assert!(defaulted.iter().all(|code| code == "by_default()"));
+        assert!(
+            defaulted.iter().any(|code| code == "by_default()"),
+            "a view without an override keeps the application default",
+        );
+        assert!(overridden.iter().all(|code| code == "by_override()"));
+        assert!(
+            overridden.iter().any(|code| code == "by_override()"),
+            "the override must reach the view's code blocks, ahead of its style's theme",
         );
     }
 }

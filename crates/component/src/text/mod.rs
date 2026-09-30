@@ -118,8 +118,8 @@ pub(crate) fn component_code_block_highlighter(
     }
 }
 
-/// The type [`shared_code_block_highlighter`] returns.
-#[cfg(feature = "tree-sitter")]
+/// A code block highlighter shared by `Arc`, as [`shared_code_block_highlighter`]
+/// returns and [`TextView::code_block_highlighter`] keeps.
 pub(crate) type SharedCodeBlockHighlighter = dyn Fn(&gpui_base::text::CodeBlock) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)>
     + Send
     + Sync;
