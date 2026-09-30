@@ -1,0 +1,22 @@
+[package]
+name = "gpui-kit-backend-platform"
+description = "GPUI's `gpui_platform` from whichever implementation `gpui-kit-backend` picks."
+version = "0.0.0"
+license = "Apache-2.0"
+publish = false
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+path = "lib.rs"
+doctest = false
+
+[features]
+gpui-fast = ["gpui-kit-backend/gpui-fast"]
+test-support = ["gpui-kit-backend/platform-test-support"]
+bench-support = ["gpui-kit-backend/platform-bench-support"]
+
+[dependencies]
+gpui-kit-backend.workspace = true

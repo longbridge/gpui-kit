@@ -23,6 +23,10 @@ component = ["dep:gpui-component"]
 assets = ["dep:gpui-kit-assets"]
 # GPUI's test harness, native-platform rendering, and Kit UI test helpers.
 test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui-base/test-support", "gpui-component?/test-support"]
+# Experimental: build on gpui-fast (github.com/longbridge/gpui-fast) instead of
+# the gpui-pre snapshots, for every GPUI crate in the graph. Git dependencies of
+# gpui-kit only; the published crate does not have it.
+gpui-fast = ["gpui/gpui-fast", "gpui-component?/gpui-fast"]
 # Frame-event instrumentation remains opt-in for performance builds.
 profiler = ["gpui/profiler"]
 inspector = ["gpui/inspector", "gpui-base/inspector", "gpui-component?/inspector"]

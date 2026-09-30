@@ -12,6 +12,13 @@ members = [
     "crates/assets",
     "crates/fps",
     "crates/webview",
+    "crates/backend",
+    "crates/backend/gpui",
+    "crates/backend/platform",
+    "crates/backend/web",
+    "crates/backend/macros",
+    "crates/backend/reqwest-client",
+    "crates/backend/sum-tree",
     "examples/app_assets",
     "examples/fps_monitor",
     "examples/hello_world",
@@ -65,12 +72,36 @@ story = { path = "crates/story" }
 # onto a newer snapshot that gpui-component did not compile with (#3156). Bump
 # every snapshot crate together with its Cargo.lock entry; `script/check-gpui-pin.ts`
 # fails CI when a pin is not exact.
-gpui = { package = "gpui-pre", version = "=0.3.7" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { package = "gpui-pre-web", version = "=0.3.7" }
-gpui_macros = { package = "gpui-pre-macros", version = "=0.3.7" }
-reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.7" }
-sum-tree = { package = "gpui-pre-sum-tree", version = "=0.3.7" }
+gpui_pre = { package = "gpui-pre", version = "=0.3.7" }
+gpui_pre_platform = { package = "gpui-pre-platform", version = "=0.3.7", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_pre_web = { package = "gpui-pre-web", version = "=0.3.7" }
+gpui_pre_macros = { package = "gpui-pre-macros", version = "=0.3.7" }
+gpui_pre_reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.7" }
+gpui_pre_sum_tree = { package = "gpui-pre-sum-tree", version = "=0.3.7" }
+
+# gpui-fast (github.com/longbridge/gpui-fast), the experimental GPUI behind the
+# `gpui-kit/gpui-fast` feature. Only git users of gpui-kit can turn it on:
+# crates.io rejects git dependencies, so `script/published-manifest.ts` drops the
+# feature before publishing.
+gpui_fast = { package = "gpui", git = "https://github.com/longbridge/gpui-fast", branch = "main" }
+gpui_fast_platform = { package = "gpui_platform", git = "https://github.com/longbridge/gpui-fast", branch = "main", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_fast_web = { package = "gpui_web", git = "https://github.com/longbridge/gpui-fast", branch = "main" }
+gpui_fast_macros = { package = "gpui_macros", git = "https://github.com/longbridge/gpui-fast", branch = "main" }
+gpui_fast_reqwest_client = { package = "reqwest_client", git = "https://github.com/longbridge/gpui-fast", branch = "main" }
+gpui_fast_sum_tree = { package = "sum_tree", git = "https://github.com/longbridge/gpui-fast", branch = "main" }
+
+# What the crates depend on: `crates/backend`'s selectors, each re-exporting one
+# GPUI crate from whichever implementation `gpui-kit-backend` picks. The names
+# are GPUI's own, so the code keeps writing `gpui::`, `gpui_platform::` and so
+# on. `script/published-manifest.ts` swaps each for its `gpui_pre*` entry above
+# before publishing.
+gpui = { package = "gpui-kit-backend-gpui", path = "crates/backend/gpui" }
+gpui_platform = { package = "gpui-kit-backend-platform", path = "crates/backend/platform" }
+gpui_web = { package = "gpui-kit-backend-web", path = "crates/backend/web" }
+gpui_macros = { package = "gpui-kit-backend-macros", path = "crates/backend/macros" }
+reqwest_client = { package = "gpui-kit-backend-reqwest-client", path = "crates/backend/reqwest-client" }
+sum-tree = { package = "gpui-kit-backend-sum-tree", path = "crates/backend/sum-tree" }
+gpui-kit-backend = { path = "crates/backend" }
 reqwest = { package = "gpui-pre-reqwest", version = "=0.12.15", default-features = false, features = [
     "charset",
     "http2",

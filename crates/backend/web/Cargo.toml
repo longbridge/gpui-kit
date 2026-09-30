@@ -1,0 +1,20 @@
+[package]
+name = "gpui-kit-backend-web"
+description = "GPUI's `gpui_web` from whichever implementation `gpui-kit-backend` picks."
+version = "0.0.0"
+license = "Apache-2.0"
+publish = false
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+path = "lib.rs"
+doctest = false
+
+[features]
+gpui-fast = ["gpui-kit-backend/gpui-fast"]
+
+[dependencies]
+gpui-kit-backend.workspace = true

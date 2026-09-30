@@ -55,4 +55,9 @@ available without the feature: `.test_support()` keeps production render chains
 intact and returns the original element in normal builds. Snapshots read native
 accessibility properties without hand-supplied state. See [UI integration testing](TESTING.md) for usage.
 The independent `profiler` feature enables GPUI frame-event instrumentation and is off by default.
+Git dependencies of gpui-kit also have an experimental `gpui-fast` feature, which builds
+every GPUI crate from [gpui-fast](https://github.com/longbridge/gpui-fast) instead of the
+`gpui-pre` snapshots; the crates.io release does not have it. GPUI's macros then expand to
+plain `gpui::` paths, so an application that depends on gpui-kit alone aliases it at each
+crate root: `extern crate gpui_kit as gpui;`.
 See <https://gpui-kit.com> for the guides.

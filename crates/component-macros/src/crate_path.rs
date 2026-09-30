@@ -9,20 +9,27 @@ use quote::quote;
 /// preserves standalone `gpui-component` consumers, including dependencies
 /// that rename that package to `gpui` (the conventional name).
 pub(crate) fn gpui() -> syn::Result<TokenStream> {
-    match crate_name("gpui-kit") {
-        Ok(found) => Ok(found_crate_path(found)),
-        Err(kit_error) => crate_name("gpui-pre")
-            .map(found_crate_path)
-            .map_err(|gpui_error| {
-                syn::Error::new(
-                    Span::call_site(),
-                    format!(
-                        "IntoPlot requires a direct dependency on `gpui-kit` or `gpui-pre`: \
-                         gpui-kit lookup failed: {kit_error}; gpui-pre lookup failed: {gpui_error}"
-                    ),
-                )
-            }),
-    }
+    let kit_error = match crate_name("gpui-kit") {
+        Ok(found) => return Ok(found_crate_path(found)),
+        Err(error) => error,
+    };
+    let gpui_error = match crate_name("gpui-pre") {
+        Ok(found) => return Ok(found_crate_path(found)),
+        Err(error) => error,
+    };
+    // gpui-kit's own crates, inside its repository, take GPUI through the
+    // `crates/backend` selector; published, they depend on `gpui-pre` again.
+    crate_name("gpui-kit-backend-gpui")
+        .map(found_crate_path)
+        .map_err(|_| {
+            syn::Error::new(
+                Span::call_site(),
+                format!(
+                    "IntoPlot requires a direct dependency on `gpui-kit` or `gpui-pre`: \
+                     gpui-kit lookup failed: {kit_error}; gpui-pre lookup failed: {gpui_error}"
+                ),
+            )
+        })
 }
 
 fn found_crate_path(found: FoundCrate) -> TokenStream {

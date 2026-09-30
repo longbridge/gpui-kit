@@ -1,0 +1,24 @@
+[package]
+name = "gpui-kit-backend-gpui"
+description = "GPUI's `gpui` from whichever implementation `gpui-kit-backend` picks."
+version = "0.0.0"
+license = "Apache-2.0"
+publish = false
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+path = "lib.rs"
+doctest = false
+
+[features]
+gpui-fast = ["gpui-kit-backend/gpui-fast"]
+test-support = ["gpui-kit-backend/gpui-test-support"]
+bench-support = ["gpui-kit-backend/gpui-bench-support"]
+inspector = ["gpui-kit-backend/gpui-inspector"]
+profiler = ["gpui-kit-backend/gpui-profiler"]
+
+[dependencies]
+gpui-kit-backend.workspace = true

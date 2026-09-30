@@ -15,6 +15,9 @@ edition.workspace = true
 doctest = false
 
 [features]
+# Set by `gpui-kit/gpui-fast`: GPUI comes from gpui-fast, whose API differs from
+# gpui-pre in a few places. Not published (see script/published-manifest.ts).
+gpui-fast = ["gpui/gpui-fast"]
 test-support = ["gpui/test-support", "gpui-base/test-support"]
 decimal = ["gpui-base/decimal"]
 inspector = ["gpui_macros/inspector", "gpui/inspector", "gpui-base/inspector"]

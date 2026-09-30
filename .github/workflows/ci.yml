@@ -38,6 +38,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - name: gpui-pre is pinned exactly
         run: bun script/check-gpui-pin.ts
+      - name: Published manifests depend on gpui-pre
+        run: bun script/published-manifest.ts --check
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-machete@0.9.1
@@ -76,6 +78,26 @@ jobs:
       # feature set, so they reuse the build above.
       - name: Test without default features
         run: python3 script/check-ai rust
+
+  gpui-fast:
+    name: gpui-fast
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+      # Replaces the system `ld` on Linux and is a no-op elsewhere.
+      - uses: rui314/setup-mold@v1
+      - name: Install system dependencies
+        run: script/bootstrap
+      # The experimental `gpui-kit/gpui-fast` feature must keep compiling. Only
+      # compiling: gpui-fast is a different GPUI, and the suite is written
+      # against gpui-pre's behavior.
+      - name: Check the workspace on gpui-fast
+        run: >-
+          cargo check --workspace --exclude gpui-shell --lib --bins --tests --examples
+          --features gpui-component-story/test-support,gpui-kit/gpui-fast --locked
 
   test:
     name: Test

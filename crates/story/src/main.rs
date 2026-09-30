@@ -1,3 +1,7 @@
+// GPUI's macros expand to `gpui::` paths and this crate depends on gpui-kit alone:
+// alias the Kit as `gpui` so they resolve on any GPUI (see `gpui_kit`'s lib.rs).
+extern crate gpui_kit as gpui;
+
 use gpui_component_story::{Gallery, create_new_window, init};
 use gpui_kit::assets::AllAssets;
 

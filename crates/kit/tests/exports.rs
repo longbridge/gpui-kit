@@ -9,6 +9,10 @@
 /// `use gpui_kit::*;` alone is GPUI, so a file needs nothing else for it.
 mod glob_is_gpui {
     use gpui_kit::*;
+    // gpui-fast's macros expand to `gpui::` without gpui-pre's rewrite to the
+    // Kit, and this test crate also has GPUI itself as `gpui`; name the Kit's.
+    #[cfg(feature = "gpui-fast")]
+    use gpui_kit::gpui;
 
     type Element = Div;
     type Window_ = Window;

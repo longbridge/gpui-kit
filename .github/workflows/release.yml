@@ -12,6 +12,8 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
       - name: Install system dependencies
         run: script/bootstrap
+      # `script/publish-crates` rewrites the manifests with a bun script first.
+      - uses: oven-sh/setup-bun@v2
       - name: Release Crate
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

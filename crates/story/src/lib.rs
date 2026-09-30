@@ -1,3 +1,7 @@
+// GPUI's macros expand to `gpui::` paths and this crate depends on gpui-kit alone:
+// alias the Kit as `gpui` so they resolve on any GPUI (see `gpui_kit`'s lib.rs).
+extern crate gpui_kit as gpui;
+
 use gpui_fps::fps_monitor;
 use gpui_kit::component::{
     ActiveTheme, IconName, Root, Sizable as _, Size as ComponentSize, StyledExt as _,

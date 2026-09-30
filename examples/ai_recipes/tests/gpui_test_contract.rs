@@ -1,3 +1,7 @@
+// GPUI's macros expand to `gpui::` paths and this crate depends on gpui-kit alone:
+// alias the Kit as `gpui` so they resolve on any GPUI (see `gpui_kit`'s lib.rs).
+extern crate gpui_kit as gpui;
+
 // Preserve the published #[gpui_kit::test] API.
 // This package depends only on gpui-kit, without a direct GPUI dependency.
 // Running the same contract here prevents Kit's own GPUI dependency from hiding

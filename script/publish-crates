@@ -4,6 +4,11 @@ set -euo pipefail
 publish_log=$(mktemp)
 trap 'rm -f "$publish_log"' EXIT
 
+# The repository's manifests take GPUI through `crates/backend`'s selectors and
+# carry the git-only `gpui-fast` feature; publish the gpui-pre ones instead.
+# `--allow-dirty` below is for this rewrite alone.
+bun script/published-manifest.ts
+
 # Publish dependencies first so a partially completed release can be resumed.
 for package in \
   gpui-kit-assets \
@@ -15,7 +20,7 @@ for package in \
   gpui-kit
 do
   # CI forces colored Cargo output; keep diagnostics plain for matching below.
-  if cargo publish -p "$package" --color never 2>&1 | tee "$publish_log"; then
+  if cargo publish -p "$package" --allow-dirty --color never 2>&1 | tee "$publish_log"; then
     continue
   else
     publish_status=$?

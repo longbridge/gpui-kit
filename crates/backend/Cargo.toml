@@ -1,0 +1,56 @@
+[package]
+name = "gpui-kit-backend"
+description = "Picks the GPUI implementation gpui-kit builds on: the gpui-pre snapshots, or gpui-fast behind the `gpui-fast` feature."
+version = "0.0.0"
+license = "Apache-2.0"
+publish = false
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[features]
+# Build every GPUI crate from gpui-fast instead of gpui-pre. This is the only
+# switch: the selectors in `crates/backend/*` re-export from here, so turning it
+# on anywhere in the graph moves all of GPUI together.
+gpui-fast = [
+    "dep:gpui_fast",
+    "dep:gpui_fast_macros",
+    "dep:gpui_fast_sum_tree",
+    "dep:gpui_fast_platform",
+    "dep:gpui_fast_reqwest_client",
+    "dep:gpui_fast_web",
+]
+# Each GPUI crate's features, forwarded to both implementations for the
+# selectors to expose under GPUI's own names.
+gpui-test-support = ["gpui_pre/test-support", "gpui_fast?/test-support"]
+gpui-bench-support = ["gpui_pre/bench-support", "gpui_fast?/bench-support"]
+gpui-inspector = ["gpui_pre/inspector", "gpui_fast?/inspector"]
+gpui-profiler = ["gpui_pre/profiler", "gpui_fast?/profiler"]
+macros-inspector = ["gpui_pre_macros/inspector", "gpui_fast_macros?/inspector"]
+platform-test-support = ["gpui_pre_platform/test-support", "gpui_fast_platform?/test-support"]
+platform-bench-support = ["gpui_pre_platform/bench-support", "gpui_fast_platform?/bench-support"]
+
+[dependencies]
+gpui_pre.workspace = true
+gpui_pre_macros.workspace = true
+gpui_pre_sum_tree.workspace = true
+gpui_fast = { workspace = true, optional = true }
+gpui_fast_macros = { workspace = true, optional = true }
+gpui_fast_sum_tree = { workspace = true, optional = true }
+
+# The same targets `gpui-kit` takes these crates on.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+gpui_pre_platform.workspace = true
+gpui_fast_platform = { workspace = true, optional = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+gpui_pre_reqwest_client.workspace = true
+gpui_fast_reqwest_client = { workspace = true, optional = true }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+gpui_pre_web.workspace = true
+gpui_fast_web = { workspace = true, optional = true }
