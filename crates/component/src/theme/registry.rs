@@ -194,11 +194,7 @@ impl ThemeRegistry {
         let mut watcher = notify::RecommendedWatcher::new(
             move |res: notify::Result<notify::Event>| match res {
                 Ok(event) => {
-                    let touched = event.need_rescan()
-                        || event.paths.iter().any(|path| {
-                            path.extension().and_then(|ext| ext.to_str()) == Some("json")
-                        });
-                    if touched {
+                    if should_reload_themes(&event) {
                         let _ = tx.try_send(());
                     }
                 }
@@ -288,5 +284,64 @@ impl ThemeRegistry {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn should_reload_themes(event: &notify::Event) -> bool {
+    // Reloading reads the theme files, so access events would feed back into this watcher.
+    event.need_rescan()
+        || matches!(
+            event.kind,
+            notify::EventKind::Any
+                | notify::EventKind::Create(_)
+                | notify::EventKind::Modify(_)
+                | notify::EventKind::Remove(_)
+        )
+}
+
+#[cfg(all(test, not(target_family = "wasm")))]
+mod tests {
+    use super::should_reload_themes;
+    use notify::{
+        Event, EventKind,
+        event::{AccessKind, AccessMode, CreateKind, Flag, ModifyKind, RemoveKind, RenameMode},
+    };
+
+    #[test]
+    fn theme_reads_do_not_trigger_reload() {
+        for access in [
+            AccessKind::Open(AccessMode::Any),
+            AccessKind::Read,
+            AccessKind::Close(AccessMode::Read),
+        ] {
+            let event = Event::new(EventKind::Access(access)).add_path("themes/theme.json".into());
+            assert!(!should_reload_themes(&event), "{event:?}");
+        }
+    }
+
+    #[test]
+    fn theme_mutations_and_root_rename_trigger_reload() {
+        for kind in [
+            EventKind::Create(CreateKind::File),
+            EventKind::Modify(ModifyKind::Any),
+            EventKind::Remove(RemoveKind::File),
+        ] {
+            let event = Event::new(kind).add_path("themes/theme.json".into());
+            assert!(should_reload_themes(&event), "{event:?}");
+        }
+
+        // Moving the watched directory reports its path, not each JSON file.
+        let event = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::From)))
+            .add_path("themes".into());
+        assert!(should_reload_themes(&event));
+    }
+
+    #[test]
+    fn unspecified_changes_and_rescans_trigger_reload_without_paths() {
+        assert!(should_reload_themes(&Event::new(EventKind::Any)));
+        let rescan = Event::new(EventKind::Other).set_flag(Flag::Rescan);
+        assert!(should_reload_themes(&rescan));
+        assert!(!should_reload_themes(&Event::new(EventKind::Other)));
     }
 }
