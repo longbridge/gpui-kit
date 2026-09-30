@@ -184,35 +184,40 @@ impl ThemeRegistry {
 
     #[cfg(not(target_family = "wasm"))]
     fn _watch_themes_dir(themes_dir: PathBuf, cx: &mut App) -> anyhow::Result<()> {
+        use notify::Watcher as _;
+
         if !themes_dir.exists() {
             std::fs::create_dir_all(&themes_dir)?;
         }
 
-        let (tx, rx) = smol::channel::bounded(100);
-        let mut watcher =
-            notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                if let Ok(event) = &res {
-                    match event.kind {
-                        notify::EventKind::Create(_)
-                        | notify::EventKind::Modify(_)
-                        | notify::EventKind::Remove(_) => {
-                            if let Err(err) = tx.send_blocking(res) {
-                                tracing::error!("Failed to send theme event: {:?}", err);
-                            }
-                        }
-                        _ => {}
+        let (tx, rx) = smol::channel::bounded(1);
+        let mut watcher = notify::RecommendedWatcher::new(
+            move |res: notify::Result<notify::Event>| match res {
+                Ok(event) => {
+                    let touched = event.need_rescan()
+                        || event.paths.iter().any(|path| {
+                            path.extension().and_then(|ext| ext.to_str()) == Some("json")
+                        });
+                    if touched {
+                        let _ = tx.try_send(());
                     }
                 }
-            })?;
+                Err(err) => tracing::error!("Failed to receive theme event: {err}"),
+            },
+            notify::Config::default().with_follow_symlinks(false),
+        )?;
 
         cx.spawn(async move |cx| {
-            use notify::Watcher as _;
-
-            if let Err(err) = watcher.watch(&themes_dir, notify::RecursiveMode::Recursive) {
-                tracing::error!("Failed to watch themes directory: {:?}", err);
+            if let Err(err) = watcher.watch(&themes_dir, notify::RecursiveMode::NonRecursive) {
+                match err.kind {
+                    notify::ErrorKind::MaxFilesWatch => tracing::error!(
+                        "Theme file watch limit reached, theme hot reload is disabled: {err}"
+                    ),
+                    _ => tracing::error!("Failed to watch themes directory: {err}"),
+                }
             }
 
-            while (rx.recv().await).is_ok() {
+            while rx.recv().await.is_ok() {
                 tracing::info!("Reloading themes...");
                 _ = cx.update(Self::reload_themes);
             }
