@@ -7,7 +7,7 @@ use gpui_kit::{
     div, point,
     prelude::*,
     px, size,
-    test::TestWindowExt,
+    test::{TestSupportExt, TestWindowExt},
 };
 
 use crate::common;
@@ -1093,6 +1093,43 @@ fn shift_line_end_then_down_retains_wrapped_textarea_selection_and_caret(cx: &mu
         assert_eq!(text.read(cx).cursor(), end);
         assert_eq!(text.read(cx).cursor_layout().unwrap().0, end_caret);
         assert_caret_visible(text.read(cx));
+    })
+    .unwrap();
+}
+
+struct RowCounts {
+    one: Entity<TextareaState>,
+    two: Entity<TextareaState>,
+    five: Entity<TextareaState>,
+}
+
+impl Render for RowCounts {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().flex().flex_col().gap_4().children(
+            [
+                ("rows-one", &self.one),
+                ("rows-two", &self.two),
+                ("rows-five", &self.five),
+            ]
+            .map(|(id, state)| div().id(id).child(Textarea::new(state)).test_support()),
+        )
+    }
+}
+
+#[gpui_kit::test]
+fn rows_set_the_minimum_height_of_a_plain_textarea(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, _) = common::open_window(cx, Some(size(px(480.), px(480.))), |window, cx| {
+        let one = cx.new(|cx| TextareaState::new(window, cx).rows(1));
+        let two = cx.new(|cx| TextareaState::new(window, cx).rows(2));
+        let five = cx.new(|cx| TextareaState::new(window, cx).rows(5));
+        cx.new(|_| RowCounts { one, two, five })
+    });
+    cx.update_window(handle.into(), |_, window, _| {
+        let height = |id: &'static str| window.find(id).bounds().size.height;
+        let line = height("rows-two") - height("rows-one");
+        assert!(line > px(0.), "a second row adds height");
+        assert_eq!(height("rows-five") - height("rows-one"), line * 4.);
     })
     .unwrap();
 }

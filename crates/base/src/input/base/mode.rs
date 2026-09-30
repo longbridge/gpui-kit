@@ -222,8 +222,12 @@ impl LayoutMode {
     /// Grow the row count to fit the content.
     ///
     /// Callers gate this on the input being multi-line; a single-line field
-    /// keeps its one row.
+    /// keeps its one row. Only auto grow follows the content: in the other
+    /// modes `rows` is the configured height.
     pub(super) fn update_auto_grow(&mut self, display_map: &DisplayMap) {
+        if !self.is_auto_grow() {
+            return;
+        }
         let wrapped_lines = display_map.wrap_row_count();
         self.set_rows(wrapped_lines);
     }

@@ -2396,13 +2396,10 @@ impl<M: InputModeKind> Element for TextElement<M> {
         if state.is_multi_line() {
             style.flex_grow = 1.0;
             style.size.height = relative(1.).into();
-            if state.mode.is_auto_grow() {
-                // Auto grow to let height match to rows, but not exceed max rows.
-                let rows = state.mode.max_rows().min(state.mode.rows());
-                style.min_size.height = (rows * line_height).into();
-            } else {
-                style.min_size.height = line_height.into();
-            }
+            // At least `rows` tall (auto grow: the content's rows, capped at
+            // `max_rows`); a taller parent still fills it.
+            let rows = state.mode.max_rows().min(state.mode.rows());
+            style.min_size.height = (rows * line_height).into();
         } else {
             // For single-line inputs, the minimum height should be the line height
             style.size.height = line_height.into();
