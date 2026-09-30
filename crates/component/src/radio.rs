@@ -403,12 +403,13 @@ impl RenderOnce for RadioGroup {
                         radio.id = ix.into();
                         radio.position_in_set = Some(ix + 1);
                         radio.size_of_set = Some(total);
-                        radio.disabled(disabled).checked(checked).when_some(
-                            on_click.clone(),
-                            |this, on_click| {
+                        let item_disabled = radio.disabled;
+                        radio
+                            .disabled(disabled || item_disabled)
+                            .checked(checked)
+                            .when_some(on_click.clone(), |this, on_click| {
                                 this.on_click(move |_, window, cx| on_click(&ix, window, cx))
-                            },
-                        )
+                            })
                     })),
             )
     }

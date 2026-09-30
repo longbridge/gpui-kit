@@ -2,6 +2,7 @@ mod common;
 use gpui_kit::component::{
     Disableable, IndexPath,
     checkbox::Checkbox,
+    radio::{Radio, RadioGroup},
     select::{SearchableVec, Select, SelectEvent, SelectState},
     switch::Switch,
     tab::{Tab, TabBar},
@@ -428,4 +429,67 @@ async fn searchable_select_next_open_after_confirm_shows_all_items(cx: &mut Test
     press_language_keys(cx, handle, &["up", "enter"]);
     wait_select_closed(cx, handle).await;
     assert_eq!(select_value(cx, handle).as_deref(), Some("French"));
+}
+
+struct Plans {
+    group_disabled: bool,
+    selected: Option<usize>,
+}
+impl Render for Plans {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        RadioGroup::vertical("plan")
+            .disabled(self.group_disabled)
+            .selected_index(self.selected)
+            .child(Radio::new("free").label("Free"))
+            .child(Radio::new("pro").label("Pro").disabled(true))
+            .on_click(cx.listener(|this, ix: &usize, _, cx| {
+                this.selected = Some(*ix);
+                cx.notify();
+            }))
+    }
+}
+
+#[gpui_kit::test]
+fn radio_group_keeps_a_disabled_item_disabled(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (window, view) = common::open_window(cx, Some(size(px(320.), px(240.))), |_, cx| {
+        cx.new(|_| Plans {
+            group_disabled: false,
+            selected: None,
+        })
+    });
+    let selected = |cx: &mut TestAppContext| view.read_with(cx, |view, _| view.selected);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.within("plan").click(1usize, cx)
+    })
+    .unwrap();
+    assert_eq!(
+        selected(cx),
+        None,
+        "a disabled item inside an enabled group"
+    );
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.within("plan").click(0usize, cx)
+    })
+    .unwrap();
+    assert_eq!(selected(cx), Some(0));
+
+    // A disabled group still disables every item.
+    view.update(cx, |view, cx| {
+        view.group_disabled = true;
+        view.selected = None;
+        cx.notify();
+    });
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.within("plan").click(0usize, cx);
+    })
+    .unwrap();
+    assert_eq!(
+        selected(cx),
+        None,
+        "an enabled item inside a disabled group"
+    );
 }
