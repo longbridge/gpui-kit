@@ -46,6 +46,14 @@ TextView::markdown("preview", markdown_source)
 TextView::html("html-preview", "<strong>Hello</strong>")
 ```
 
+### 放在有底色的容器里
+
+没有显式设置 `.style()` 的 `TextView` 会跟随容器的文字颜色。如果底色与页面明暗相反，例如 `Filled` 样式的 [Bubble](bubble.md)，链接、次要文字、代码和表格背景、边框、选择色也会从这个颜色推算，并且不使用语法高亮，所以内容不需要额外设置样式：
+
+```rust
+Bubble::new().child(TextView::markdown("reply", text))
+```
+
 ### 流式文字淡入
 
 聊天回复是分块到达的。`stream_fade(true)` 会让每一块新文字在落点处淡入，而不是直接蹦出来，观感与 Claude 展示回复的方式一致：

@@ -25,6 +25,10 @@ pub struct TextViewStyle {
     table_head: StyleRefinement,
     table_cell: StyleRefinement,
     inline_code: HighlightStyle,
+    /// The table body background, or the theme surface when `None`. Only
+    /// [`Self::on_text_color`] sets it, to let a table on an inverted surface
+    /// show that surface.
+    table_background: Option<Hsla>,
     is_dark: bool,
 }
 
@@ -43,6 +47,7 @@ impl PartialEq for TextViewStyle {
             && self.table_head == other.table_head
             && self.table_cell == other.table_cell
             && self.inline_code == other.inline_code
+            && self.table_background == other.table_background
             && self.is_dark == other.is_dark
     }
 }
@@ -85,6 +90,7 @@ impl TextViewStyle {
                 background_color: Some(colors.accent),
                 ..Default::default()
             },
+            table_background: None,
             is_dark,
         }
     }
@@ -264,6 +270,11 @@ impl TextViewStyle {
         self.is_dark
     }
 
+    /// The table body background, when it is not the theme surface.
+    pub(crate) fn table_background(&self) -> Option<Hsla> {
+        self.table_background
+    }
+
     /// Returns the [`HighlightStyle`] to use for inline code, falling back to
     /// the code background when no custom background was supplied.
     pub(crate) fn inline_code_highlight(&self) -> HighlightStyle {
@@ -273,6 +284,67 @@ impl TextViewStyle {
         }
         style
     }
+
+    /// This style adapted to body text drawn in `color`, the text color a
+    /// container sets for its surface.
+    ///
+    /// The body text always takes `color`. When `color` is far from this
+    /// style's foreground in lightness, the surface is inverted from the one
+    /// this style was made for (a `primary` fill, say): the link, muted text,
+    /// code, border and selection colors would vanish on it, so they are all
+    /// derived from `color`, and [`Self::is_dark`] flips.
+    pub(crate) fn on_text_color(&self, color: Hsla) -> Self {
+        let style = self.clone().with_foreground(color);
+        if !self.is_inverted_by(color) {
+            return style;
+        }
+
+        let code_background = color.opacity(0.12);
+        let mut table_head = self.table_head.clone();
+        table_head.background = Some(code_background.into());
+        table_head.text.color = Some(color);
+        let mut style = style
+            .with_muted_foreground(color.opacity(0.7))
+            .with_link(color)
+            .with_selection(color.opacity(0.25))
+            .with_code_background(code_background)
+            .with_border(color.opacity(0.2))
+            .with_inline_code(HighlightStyle {
+                background_color: Some(code_background),
+                ..self.inline_code
+            })
+            .with_table_head(table_head)
+            .with_dark(!self.is_dark);
+        style.table_background = Some(gpui::transparent_black());
+        style
+    }
+
+    /// Whether body text in `color` sits on a surface inverted from the one
+    /// this style was made for.
+    ///
+    /// Mid-tone text such as a destructive red reads on either kind of surface,
+    /// so only a lightness gap wider than that counts as inverted.
+    pub(crate) fn is_inverted_by(&self, color: Hsla) -> bool {
+        const INVERTED_LIGHTNESS_GAP: f32 = 0.6;
+        (oklab_lightness(color) - oklab_lightness(self.foreground)).abs() > INVERTED_LIGHTNESS_GAP
+    }
+}
+
+/// The perceptual (Oklab) lightness of `color`, from 0 (black) to 1 (white).
+fn oklab_lightness(color: Hsla) -> f32 {
+    let rgb = color.to_rgb();
+    let linear = |c: f32| {
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    let (r, g, b) = (linear(rgb.r), linear(rgb.g), linear(rgb.b));
+    let l = (0.412_221_46 * r + 0.536_332_55 * g + 0.051_445_995 * b).cbrt();
+    let m = (0.211_903_5 * r + 0.680_699_5 * g + 0.107_396_96 * b).cbrt();
+    let s = (0.088_302_46 * r + 0.281_718_85 * g + 0.629_978_7 * b).cbrt();
+    0.210_454_26 * l + 0.793_617_8 * m - 0.004_072_047 * s
 }
 
 #[cfg(test)]
@@ -358,6 +430,43 @@ mod tests {
             style.inline_code_highlight().background_color,
             Some(gpui::rgb(0x123456).into())
         );
+    }
+
+    #[test]
+    fn text_color_of_a_matching_surface_only_replaces_the_body_text() {
+        let style = TextViewStyle::from_colors(&ColorTokens::light(), false);
+        let destructive = ColorTokens::light().destructive;
+
+        let adapted = style.on_text_color(destructive);
+        assert_eq!(adapted.foreground(), destructive);
+        assert_eq!(adapted.link(), style.link());
+        assert_eq!(adapted.muted_foreground(), style.muted_foreground());
+        assert_eq!(adapted.code_background(), style.code_background());
+        assert_eq!(adapted.table_background(), None);
+        assert!(!adapted.is_dark());
+    }
+
+    #[test]
+    fn text_color_of_an_inverted_surface_derives_every_color_from_it() {
+        for (colors, is_dark) in [(ColorTokens::light(), false), (ColorTokens::dark(), true)] {
+            let style = TextViewStyle::from_colors(&colors, is_dark);
+            let text = colors.primary_foreground;
+
+            let adapted = style.on_text_color(text);
+            assert_eq!(adapted.foreground(), text);
+            assert_eq!(adapted.link(), text);
+            assert_eq!(adapted.muted_foreground(), text.opacity(0.7));
+            assert_eq!(adapted.code_background(), text.opacity(0.12));
+            assert_eq!(
+                adapted.inline_code_highlight().background_color,
+                Some(text.opacity(0.12))
+            );
+            assert_eq!(adapted.border(), text.opacity(0.2));
+            assert_eq!(adapted.selection(), text.opacity(0.25));
+            assert_eq!(adapted.table_background(), Some(gpui::transparent_black()));
+            assert_eq!(adapted.table_head().text.color, Some(text));
+            assert_eq!(adapted.is_dark(), !is_dark);
+        }
     }
 
     #[test]

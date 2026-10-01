@@ -87,6 +87,26 @@ let style = TextViewStyle::default().with_heading(|level| match level {
 
 `TextViewStyle::from_theme(&theme)` maps the semantic colors from a `gpui_kit::base::Theme`. Applications using the higher-level component theme can use `gpui_kit::component::text::text_view_style(cx.theme())`.
 
+A text view without an explicit `.style()` can follow the text color its
+container sets, so rich text stays readable on a filled surface such as a chat
+bubble. Turn it on in the application defaults:
+
+```rust
+use gpui_kit::base::{TextViewDefaults, TextViewStyle};
+
+TextViewDefaults::new()
+    .with_style(TextViewStyle::default())
+    .with_inherit_text_color(true)
+    .install(cx);
+```
+
+The body text takes the inherited color. When that color is far from the
+style's foreground in lightness, the surface is inverted from the page, so
+links, muted text, code and table backgrounds, borders and selection are derived
+from it too, and the installed syntax highlighter is left out. Enable this only
+when every window sets a text color at its root; GPUI Component's Root does,
+and Component turns it on.
+
 ## Syntax highlighting is opt-in
 
 `gpui-base` does not enable syntax highlighting and has no tree-sitter language dependency. Fenced code blocks use the neutral code surface and plain foreground until the application supplies `code_block_highlighter`.

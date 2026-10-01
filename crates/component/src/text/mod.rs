@@ -63,7 +63,11 @@ pub(crate) fn base_text_view_style(theme: &crate::Theme) -> gpui_base::TextViewS
 }
 
 pub(crate) fn install_text_view_defaults(theme: &crate::Theme, cx: &mut gpui::App) {
-    let defaults = gpui_base::TextViewDefaults::new().with_style(base_text_view_style(theme));
+    // Component's Root sets the theme foreground, so every container that
+    // sets its own text color is one a text view should follow.
+    let defaults = gpui_base::TextViewDefaults::new()
+        .with_style(base_text_view_style(theme))
+        .with_inherit_text_color(true);
 
     #[cfg(feature = "tree-sitter")]
     let defaults = defaults.with_code_block_highlighter(component_code_block_highlighter(

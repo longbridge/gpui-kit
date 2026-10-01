@@ -30,6 +30,7 @@ pub(crate) type CodeBlockHighlighterFn =
 pub struct TextViewDefaults {
     style: Option<TextViewStyle>,
     code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
+    inherit_text_color: bool,
 }
 
 impl Global for TextViewDefaults {}
@@ -55,6 +56,19 @@ impl TextViewDefaults {
         self
     }
 
+    /// Sets whether text views without an explicit [`TextView::style`] follow
+    /// the text color their container sets, default false.
+    ///
+    /// The body text takes that color. On a surface inverted from the page,
+    /// such as a `primary` fill, links, muted text, code, borders and
+    /// selection are derived from it too, and the installed syntax highlighter
+    /// is left out because its colors are made for the page. Enable this only
+    /// when every window sets a text color at its root, as Component's does.
+    pub fn with_inherit_text_color(mut self, inherit: bool) -> Self {
+        self.inherit_text_color = inherit;
+        self
+    }
+
     /// Installs these defaults for the whole application.
     pub fn install(self, cx: &mut App) {
         cx.set_global(self);
@@ -68,6 +82,11 @@ impl TextViewDefaults {
     /// Whether a syntax highlighter was installed.
     pub fn has_code_block_highlighter(&self) -> bool {
         self.code_block_highlighter.is_some()
+    }
+
+    /// Whether text views follow the text color their container sets.
+    pub fn inherit_text_color(&self) -> bool {
+        self.inherit_text_color
     }
 }
 
@@ -617,7 +636,7 @@ impl Element for TextView {
         // style only reaches the state when it changed.
         let defaults = cx.try_global::<TextViewDefaults>();
         let theme_style;
-        let text_view_style = match (
+        let mut text_view_style = match (
             &self.text_view_style,
             defaults.and_then(|d| d.style.as_ref()),
         ) {
@@ -627,13 +646,30 @@ impl Element for TextView {
                 &theme_style
             }
         };
+        // Follow the text color the container sets for its surface, so rich
+        // text stays readable in a filled bubble or a selected row.
+        let surface_style;
+        let mut on_inverted_surface = false;
+        if self.text_view_style.is_none() && defaults.is_some_and(|d| d.inherit_text_color) {
+            let color = self
+                .style
+                .text
+                .color
+                .unwrap_or_else(|| window.text_style().color);
+            if color != text_view_style.foreground() {
+                on_inverted_surface = text_view_style.is_inverted_by(color);
+                surface_style = text_view_style.on_text_color(color);
+                text_view_style = &surface_style;
+            }
+        }
         let foreground = text_view_style.foreground();
         let text_view_style = (*state.read(cx).text_view_style != *text_view_style)
             .then(|| Arc::new(text_view_style.clone()));
-        let code_block_highlighter = self
-            .code_block_highlighter
-            .clone()
-            .or_else(|| defaults.and_then(|d| d.code_block_highlighter.clone()));
+        let code_block_highlighter = self.code_block_highlighter.clone().or_else(|| {
+            defaults
+                .filter(|_| !on_inverted_surface)
+                .and_then(|d| d.code_block_highlighter.clone())
+        });
 
         state.update(cx, |state, cx| {
             state.code_block_actions = self.code_block_actions.clone();
@@ -934,6 +970,57 @@ mod tests {
                         ),
                 )
         }
+    }
+
+    #[gpui::test]
+    fn text_view_follows_the_text_color_of_its_container(cx: &mut TestAppContext) {
+        struct Root {
+            inherited: Entity<TextViewState>,
+            explicit: Entity<TextViewState>,
+            surface_text: gpui::Hsla,
+        }
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(300.))
+                    .text_color(crate::ColorTokens::light().foreground)
+                    .child(
+                        div()
+                            .text_color(self.surface_text)
+                            .child(TextView::new(&self.inherited))
+                            .child(TextView::new(&self.explicit).style(TextViewStyle::default())),
+                    )
+            }
+        }
+
+        let colors = crate::ColorTokens::light();
+        cx.update(|cx| {
+            crate::init(cx);
+            super::TextViewDefaults::new()
+                .with_style(TextViewStyle::default())
+                .with_inherit_text_color(true)
+                .install(cx);
+        });
+        let (root, cx) = cx.add_window_view(|_, cx| Root {
+            inherited: cx.new(|cx| TextViewState::markdown("[link](https://a.b) `code`", cx)),
+            explicit: cx.new(|cx| TextViewState::markdown("text", cx)),
+            surface_text: colors.primary_foreground,
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+
+        root.read_with(cx, |root, cx| {
+            let inherited = &root.inherited.read(cx).text_view_style;
+            assert_eq!(inherited.foreground(), colors.primary_foreground);
+            assert_eq!(inherited.link(), colors.primary_foreground);
+            assert!(inherited.is_dark());
+
+            let explicit = &root.explicit.read(cx).text_view_style;
+            assert_eq!(explicit.foreground(), colors.foreground);
+            assert_eq!(explicit.link(), TextViewStyle::default().link());
+        });
     }
 
     #[gpui::test]

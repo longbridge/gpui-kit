@@ -164,6 +164,10 @@ Bubble::new()
     )
 ```
 
+A `TextView` child follows the variant's text color, including links, code and
+tables on the `primary` surface of `Filled`, so Markdown replies need no
+per-variant style.
+
 For a long response, keep the child `min_w_0()` and choose wrapping or
 truncation at the content boundary. `Bubble` does not truncate arbitrary
 children. An application layout can expose a `Show more` affordance by

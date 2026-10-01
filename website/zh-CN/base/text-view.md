@@ -75,6 +75,19 @@ TextView::markdown("themed", source).style(style)
 
 `TextViewStyle::from_theme(&theme)` 可读取 `gpui_kit::base::Theme` 的语义颜色。使用上层组件主题时，可调用 `gpui_kit::component::text::text_view_style(cx.theme())`。
 
+没有显式设置 `.style()` 的 TextView 可以跟随容器设置的文字颜色，这样放在聊天气泡这类有填充底色的容器里也能看清。在应用默认值里开启：
+
+```rust
+use gpui_kit::base::{TextViewDefaults, TextViewStyle};
+
+TextViewDefaults::new()
+    .with_style(TextViewStyle::default())
+    .with_inherit_text_color(true)
+    .install(cx);
+```
+
+正文使用继承来的颜色。如果这个颜色和样式的正文颜色在明度上相差很大，说明底色与页面明暗相反，此时链接、次要文字、代码和表格背景、边框、选择色也都从它推算，并且不再使用已安装的语法高亮。只有在每个窗口的根部都设置了文字颜色时才开启；GPUI Component 的 Root 会设置，Component 也默认开启了这一项。
+
 ## 语法高亮由使用者开启
 
 `gpui-base` 默认不启用语法高亮，也不包含 tree-sitter 语言依赖。应用未提供 `code_block_highlighter` 时，围栏代码块只使用中性的代码背景和普通前景色。

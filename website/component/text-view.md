@@ -44,6 +44,18 @@ TextView::markdown("preview", markdown_source)
 TextView::html("html-preview", "<strong>Hello</strong>")
 ```
 
+### Inside a colored surface
+
+A `TextView` without an explicit `.style()` follows the text color of its
+container. On a surface that is inverted from the page, such as a `Filled`
+[Bubble](bubble.md), links, muted text, code and table backgrounds, borders and
+selection are derived from that color as well, and syntax highlighting is left
+out, so the content needs no extra styling:
+
+```rust
+Bubble::new().child(TextView::markdown("reply", text))
+```
+
 ### Clamp to a number of lines
 
 Use `max_lines` to render a bounded preview of rich content — for example a

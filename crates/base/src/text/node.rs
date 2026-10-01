@@ -3168,7 +3168,9 @@ impl BlockNode {
                     block_element_id("table", table.span, options.ix),
                     &scroll_handle,
                     &StyleRefinement::default()
-                        .bg(cx.theme().tokens.colors.surface)
+                        .bg(style
+                            .table_background()
+                            .unwrap_or(cx.theme().tokens.colors.surface))
                         .border_1()
                         .border_color(style.border())
                         .refine_style(style.table()),
@@ -3268,7 +3270,9 @@ impl BlockNode {
             .child(
                 div()
                     .w_full()
-                    .bg(cx.theme().tokens.colors.surface)
+                    .bg(style
+                        .table_background()
+                        .unwrap_or(cx.theme().tokens.colors.surface))
                     .border_1()
                     .border_color(style.border())
                     .overflow_hidden()
