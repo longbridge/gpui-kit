@@ -23,3 +23,5 @@ if git -C "$repo_root" cat-file -e "$ref:website/src/components/HomeApp.vue" 2>/
   git -C "$repo_root" archive "$ref" website/src/components/HomeApp.vue \
     | tar -x --strip-components=3 -C "$target/src/components"
 fi
+
+bun "$(dirname "$0")/../website/src/lib/normalize-doc-versions.js" "$target"

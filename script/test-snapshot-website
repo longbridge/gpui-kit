@@ -7,11 +7,32 @@ trap 'rm -rf "$test_root"' EXIT
 
 fixture_repo="$test_root/repo"
 target="$test_root/target"
-mkdir -p "$fixture_repo/website/docs" "$fixture_repo/website/src/components"
+mkdir -p "$fixture_repo/website/docs" "$fixture_repo/website/zh-CN/docs" "$fixture_repo/website/src/components"
 
 git -C "$fixture_repo" init -q
 git -C "$fixture_repo" config user.email test@example.com
 git -C "$fixture_repo" config user.name Test
+
+# Old release tags predate documentation variables. Keep their API examples,
+# but bind the onboarding dependency to the version selected by the build.
+for locale in '' 'zh-CN/'; do
+  cat > "$fixture_repo/website/${locale}docs/getting-started.md" <<'EOF'
+gpui-kit = "0.6"
+gpui-kit = { version = "0.6", default-features = false, features = ["component"] }
+// The example belongs to this release, not main.
+cx.open_window(WindowOptions::default(), |window, cx| {})
+EOF
+done
+cat > "$fixture_repo/website/docs/installation.md" <<'EOF'
+gpui-kit = "0.6"
+The `0.6` requirement selects a compatible 0.6.x Kit release; this repository currently declares version `0.6.5`. Kit's default features include assets.
+The Linux dependency is `oo7 0.6.0`.
+gpui-kit = { opt-level = 3 }
+EOF
+cat > "$fixture_repo/website/zh-CN/docs/installation.md" <<'EOF'
+gpui-kit = "0.6"
+`0.6` 要求会选择兼容的 0.6.x 版 Kit；本仓库当前声明的是 `0.6.5`。Kit 的默认特性包含图标资源。
+EOF
 
 printf '%s\n' 'released documentation' > "$fixture_repo/website/docs/existing.md"
 git -C "$fixture_repo" add website
@@ -38,5 +59,39 @@ test "$(cat "$target/src/components/HomeApp.vue")" = 'released home'
 printf '%s\n' 'current home fallback' > "$target/src/components/HomeApp.vue"
 "$project_root/script/snapshot-website" "$fixture_repo" v0.6.0 "$target"
 test "$(cat "$target/src/components/HomeApp.vue")" = 'current home fallback'
+
+for locale in '' 'zh-CN/'; do
+  for page in installation getting-started; do
+    grep -Fq 'gpui-kit = "{{gpui_kit_version}}"' "$target/${locale}docs/$page.md"
+  done
+  grep -Fq 'gpui-kit = { version = "{{gpui_kit_version}}", default-features = false, features = ["component"] }' "$target/${locale}docs/getting-started.md"
+  grep -Fq 'cx.open_window(WindowOptions::default(), |window, cx| {})' "$target/${locale}docs/getting-started.md"
+done
+grep -Fq 'The `{{gpui_kit_version}}` requirement selects a compatible Kit release.' "$target/docs/installation.md"
+grep -Fq '`{{gpui_kit_version}}` 要求会选择兼容的 Kit 版本。' "$target/zh-CN/docs/installation.md"
+grep -Fq 'The Linux dependency is `oo7 0.6.0`.' "$target/docs/installation.md"
+grep -Fq 'gpui-kit = { opt-level = 3 }' "$target/docs/installation.md"
+
+# The same normalized snapshot must resolve to its own tag, never main's
+# current manifest or a hardcoded fix for the latest release.
+for version in 0.6.0 0.7.0 0.8.1; do
+  resolved=$(cd "$project_root/website" && GPUI_KIT_VERSION="$version" bun --eval "
+    import { expandDocVariables } from './src/lib/doc-variables.js';
+    console.log(expandDocVariables(await Bun.file('$target/docs/installation.md').text()));
+  ")
+  grep -Fq "gpui-kit = \"$version\"" <<< "$resolved"
+  grep -Fq "The \`$version\` requirement selects a compatible Kit release." <<< "$resolved"
+done
+
+# Missing pages in early releases are not replaced with main's content.
+rm "$fixture_repo/website/zh-CN/docs/installation.md"
+
+# New tags and main already use variables; preserve those sources verbatim.
+cp "$target/docs/installation.md" "$fixture_repo/website/docs/installation.md"
+git -C "$fixture_repo" add website
+git -C "$fixture_repo" commit -qm 'variable-based documentation'
+"$project_root/script/snapshot-website" "$fixture_repo" HEAD "$target"
+cmp "$fixture_repo/website/docs/installation.md" "$target/docs/installation.md"
+test ! -e "$target/zh-CN/docs/installation.md"
 
 echo 'snapshot-website test passed'
