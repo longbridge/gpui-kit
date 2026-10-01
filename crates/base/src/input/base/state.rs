@@ -4536,10 +4536,18 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
                 }
             })
             .flex_1()
-            .h_full()
             // A single line fills the frame and sits at its vertical center,
-            // so the frame needs no layout of its own to hold it.
-            .when(!self.is_multi_line(), |this| this.flex().items_center())
+            // so the frame needs no layout of its own to hold it. It is never
+            // shorter than its line, though: this root clips (overflow-x
+            // hidden clips both axes), and a frame whose padding leaves less
+            // than a line, like Component's Input, would cut off descenders.
+            .map(|this| {
+                if self.is_multi_line() {
+                    this.h_full()
+                } else {
+                    this.min_h_full().flex().items_center()
+                }
+            })
             .flex_grow_1()
             .overflow_x_hidden()
             .when(self.is_multi_line(), |this| {
