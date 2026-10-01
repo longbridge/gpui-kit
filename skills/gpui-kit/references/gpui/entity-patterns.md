@@ -279,26 +279,24 @@ impl ImageProcessor {
         self.processing = true;
         cx.notify();
 
-        let entity = cx.entity().downgrade();
+        cx.spawn(async move |this, cx| {
+            let processed = cx
+                .background_spawn(async move {
+                    let mut processed = Vec::new();
 
-        cx.background_spawn({
-            let paths = paths.clone();
-            async move {
-                let mut processed = Vec::new();
+                    for path in paths {
+                        // Process image on background thread
+                        let thumbnail = generate_thumbnail(&path).await;
+                        processed.push((path, thumbnail));
+                    }
 
-                for path in paths {
-                    // Process image on background thread
-                    let thumbnail = generate_thumbnail(&path).await;
-                    processed.push((path, thumbnail));
-                }
+                    // Send results back to foreground
+                    processed
+                })
+                .await;
 
-                // Send results back to foreground
-                processed
-            }
-        })
-        .then(cx.spawn(move |processed, cx| {
             // Update entity on foreground thread
-            let _ = entity.update(cx, |state, cx| {
+            let _ = this.update(cx, |state, cx| {
                 for (path, thumbnail) in processed {
                     state.images.push(ProcessedImage {
                         path,
@@ -308,7 +306,7 @@ impl ImageProcessor {
                 state.processing = false;
                 cx.notify();
             });
-        }))
+        })
         .detach();
     }
 }

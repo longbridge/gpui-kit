@@ -38,15 +38,15 @@ impl MyComponent {
 
 ```rust
 fn main() {
-    let app = Application::new();
-    app.run(|cx: &mut App| {
+    gpui_kit::application().run(|cx: &mut App| {
+        gpui_kit::init(cx);
+
         // Create entities
         let entity = cx.new(|cx| MyState::default());
 
-        // Open windows
-        cx.open_window(WindowOptions::default(), |window, cx| {
-            cx.new(|cx| Root::new(view, window, cx))
-        });
+        // Open windows (wraps the view in a `Root`)
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| cx.new(|_| MyView))
+            .expect("failed to open window");
     });
 }
 ```
