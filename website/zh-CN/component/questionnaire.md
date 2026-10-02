@@ -175,8 +175,12 @@ let _rendered_choice = QuestionnaireChoice::new(&state, "direction", "delegation
 
 ## 选项
 
-item 默认单选：激活某个选项后即有答案，`Next` 可以继续；`with_multiple` 则保留
-所有已选项。答案 reader 按 schema 顺序返回结果，后续被禁用的 choice 会从
+item 默认单选。激活某个选项（点击、在选项上按 Space 或 Enter，或按它的快捷键）
+即回答并确认该 item：选中状态短暂停留以便看清后，问卷移动到下一个 enabled item；
+最后一个 item 则直接提交。答案未通过校验时停留在原 item 并显示错误。再次选择已选中
+的答案（例如返回上一题后）会立即确认。开启减弱动态效果时跳过这段停留。方向键只在
+item 内移动选中项而不确认，在自由输入中打字也不会确认。`with_multiple` 则保留
+所有已选项，激活选项只会切换其选中状态，由 `Next` 继续。答案 reader 按 schema 顺序返回结果，后续被禁用的 choice 会从
 effective answer 中排除。
 
 definition builder 承载初始快照：choice 可以初始选中，item、choice 和 input 都
@@ -351,8 +355,9 @@ state.update(cx, |state, cx| {
 });
 ```
 
-用户意图应使用 `activate_choice`、`confirm_current`、`go_previous`、`go_next`、
-`skip_current` 和 `submit`。这些路径会发出相应的 `QuestionnaireEvent`。宿主也
+用户意图应使用 `choose`、`confirm_current`、`go_previous`、`go_next`、
+`skip_current` 和 `submit`。点击和快捷键走的就是 `choose`，因此在单选 item 上它
+也会确认；`activate_choice` 只修改答案，不会确认。这些路径会发出相应的 `QuestionnaireEvent`。宿主也
 可以使用 `set_item_disabled` 和 `set_choice_disabled`；禁用当前 item 后，焦点会
 移动到下一个 enabled item；没有下一个时移动到前一个。
 
@@ -423,7 +428,8 @@ Questionnaire 按原生单选交互处理 radio 的移动。其他场景下，Up
 非空文本 input 获得焦点时保留正常文本编辑行为。只有焦点不在文本 input 或单选
 radio 上时，Left/Right 才会在 item 之间移动；Right 要求当前 item 可确认。
 
-Enter 确认已填写的答案。Command/Ctrl+Enter 确认当前 item。空答案不会隐式提交。
+Enter 确认已填写的答案；在未选中的选项上按 Space 或 Enter 会选择它，并确认所在的
+单选 item。Command/Ctrl+Enter 确认当前 item。空答案不会隐式提交。
 快捷键标签按 enabled choice 顺序分配（`A`–`Z` 或 `1`–`9`），disabled choice
 不会分配标签。
 

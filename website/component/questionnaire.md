@@ -180,8 +180,16 @@ custom rendering.
 
 ## Choices
 
-An item is single-selection by default: activating a choice answers it and
-makes `Next` available. `with_multiple` keeps every selected choice instead.
+An item is single-selection by default. Activating a choice — clicking it,
+pressing Space or Enter on it, or pressing its shortcut — answers the item and
+confirms it: after a brief pause that keeps the selection visible, the
+questionnaire moves to the next enabled item, or submits on the last one. An
+answer that fails validation stays on its item with the error shown. Choosing
+the answer that is already selected, for example after going back, confirms at
+once. With reduced motion the pause is skipped. Arrow keys move the selection
+within the item without confirming it, and typing in a freeform input never
+confirms. `with_multiple` keeps every selected choice instead; activating a
+choice there only toggles it, and `Next` continues.
 The answer reader preserves schema order, and a choice disabled later leaves
 the effective answer.
 
@@ -371,8 +379,10 @@ state.update(cx, |state, cx| {
 });
 ```
 
-Use `activate_choice`, `confirm_current`, `go_previous`, `go_next`,
-`skip_current`, and `submit` for user intent. Those paths emit the relevant
+Use `choose`, `confirm_current`, `go_previous`, `go_next`, `skip_current`,
+and `submit` for user intent. `choose` is what a click or shortcut runs, so on a
+single-choice item it also confirms; `activate_choice` changes the answer
+without confirming. Those paths emit the relevant
 `QuestionnaireEvent` values. A host can also use `set_item_disabled` and
 `set_choice_disabled`; disabling the current item moves focus to the next
 enabled item, or to the previous one when there is no next item.
@@ -452,7 +462,9 @@ When a non-empty text input has focus, its normal text-editing behavior is
 preserved. Left and Right move between items only outside text inputs and
 single-choice radio controls; Right requires a confirmable current item.
 
-Enter confirms a filled answer. Command/Ctrl+Enter confirms the current item.
+Enter confirms a filled answer, and Space or Enter on an unselected choice
+chooses it and confirms its single-choice item. Command/Ctrl+Enter confirms the
+current item.
 An empty answer does not implicitly submit. Shortcut labels are assigned in
 enabled-choice order (`A`–`Z` or `1`–`9`), and disabled choices receive no label.
 

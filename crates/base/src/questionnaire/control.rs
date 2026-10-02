@@ -11,7 +11,9 @@ use crate::{Checkbox, CheckboxState, Radio};
 /// A multiple-answer item hands back a `Checkbox` and a single-answer item a
 /// `Radio`, each already carrying its checked state, disabled state,
 /// accessibility name, position in set, focus handle, confirm key and change
-/// handler. The skin decides what the control looks like and what it contains.
+/// handler. Activation goes through [`QuestionnaireState::choose`], so a
+/// `Radio` confirms its item once chosen. The skin decides what the control
+/// looks like and what it contains.
 // The value is handed straight to the caller's `match` and dropped into an
 // element; boxing either variant would buy an allocation on every choice to
 // even out a difference that never outlives one render.
@@ -85,9 +87,7 @@ impl QuestionnaireChoiceControl {
                     .capture_key_down(confirm)
                     .on_change(move |_, _, window, cx| {
                         let _ = change_state.update(cx, |state, cx| {
-                            let result = state.activate_choice(&change_item, &change_value, cx);
-                            state.focus_choice(&change_item, &change_value, window, cx);
-                            result
+                            state.choose(&change_item, &change_value, window, cx)
                         });
                     }),
             )
@@ -108,12 +108,13 @@ impl QuestionnaireChoiceControl {
                         this.track_focus(&focus_handle)
                     })
                     .capture_key_down(confirm)
-                    .on_change(move |_, _, window, cx| {
-                        let _ = change_state.update(cx, |state, cx| {
-                            let result = state.activate_choice(&item, &value, cx);
-                            state.focus_choice(&item, &value, window, cx);
-                            result
-                        });
+                    // `on_change` would leave a checked radio inert, but
+                    // choosing the selected answer again still confirms it.
+                    .when(!disabled, |this| {
+                        this.on_click(move |_, window, cx| {
+                            let _ = change_state
+                                .update(cx, |state, cx| state.choose(&item, &value, window, cx));
+                        })
                     }),
             )
         })

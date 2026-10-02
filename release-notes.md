@@ -11,6 +11,27 @@ layers above application content. Opening a dialog, sheet or notification no
 longer depends on the application's view rendering its layer. Notifications use
 the Root's full bounds, and cached content does not duplicate or suppress layers.
 
+#### Questionnaire: choosing a single answer confirms the item
+
+```rust
+pub fn choose(
+    &mut self,
+    item: &str,
+    value: &str,
+    window: &mut Window,
+    cx: &mut Context<Self>,
+) -> Result<(), QuestionnaireSchemaError>
+```
+
+Clicking a choice of a single-choice item, pressing Space or Enter on it, or
+pressing its shortcut now confirms the item: after a 150 ms pause that keeps the
+selection visible (none with reduced motion), the questionnaire moves to the
+next enabled item, or submits on the last one. Validation still applies, and
+choosing the already selected answer confirms at once. Arrow keys still move
+the selection without confirming, multiple-choice items still only toggle, and
+freeform input is unchanged. `QuestionnaireState::choose` is the new activation
+path; `activate_choice` keeps changing the answer without confirming.
+
 #### Added: `SettingGroup::variant`
 
 ```rust

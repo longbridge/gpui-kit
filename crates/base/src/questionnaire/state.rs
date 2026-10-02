@@ -1,12 +1,17 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 
 use crate::input::{InputEvent, InputState};
 use gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable as _, SharedString, Subscription,
-    Window,
+    Task, Window,
 };
 
 use super::types::*;
+
+/// How long a newly chosen single answer stays on screen, selected, before the
+/// item confirms. Long enough to register the selection, short enough not to
+/// read as a wait.
+const CHOICE_CONFIRM_DELAY: Duration = Duration::from_millis(150);
 
 struct ItemRuntime {
     disabled: bool,
@@ -32,6 +37,9 @@ pub struct QuestionnaireState {
     initial_current: Option<SharedString>,
     shortcut_mode: Option<QuestionnaireShortcutMode>,
     complete: bool,
+    /// The confirm a chosen single answer scheduled. Changing an answer or the
+    /// current item, or confirming by any other path, drops it first.
+    pending_confirm: Option<Task<()>>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -112,6 +120,7 @@ impl QuestionnaireState {
             initial_current,
             shortcut_mode: None,
             complete: false,
+            pending_confirm: None,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         })
@@ -379,10 +388,7 @@ impl QuestionnaireState {
         let Some(choice) = self.choice_for_shortcut(&item, key).cloned() else {
             return false;
         };
-        if self.activate_choice(&item, &choice, cx).is_err() {
-            return false;
-        }
-        self.focus_choice(&item, &choice, window, cx)
+        self.choose(&item, &choice, window, cx).is_ok()
     }
 
     pub fn set_current_item(
@@ -393,6 +399,7 @@ impl QuestionnaireState {
     ) -> Result<(), QuestionnaireSchemaError> {
         let ix = self.item_ix(name)?;
         if !self.runtime[ix].disabled {
+            self.pending_confirm = None;
             self.current = Some(ix);
             self.focus_current_item(window, cx);
             cx.notify();
@@ -473,6 +480,7 @@ impl QuestionnaireState {
             return Ok(());
         }
         self.runtime[ix].disabled = disabled;
+        self.pending_confirm = None;
         if let Some(input) = self.items[ix].input() {
             let input_disabled = disabled || self.runtime[ix].input_disabled;
             input
@@ -559,6 +567,7 @@ impl QuestionnaireState {
             }
         }
         self.complete = false;
+        self.pending_confirm = None;
         self.current = self
             .initial_current
             .as_ref()
@@ -571,6 +580,9 @@ impl QuestionnaireState {
         cx.notify();
     }
 
+    /// Selects a choice, or toggles it on a multiple-answer item, without
+    /// confirming the item. Arrow-key movement inside a radio group uses this;
+    /// a person's click, Space, Enter or shortcut goes through [`Self::choose`].
     pub fn activate_choice(
         &mut self,
         item: &str,
@@ -608,6 +620,65 @@ impl QuestionnaireState {
         Ok(())
     }
 
+    /// Applies a person's activation of a choice: a click, Space or Enter on the
+    /// focused choice, or its shortcut.
+    ///
+    /// A multiple-answer item only toggles the choice. A single-answer item
+    /// selects it and then confirms the current item as [`Self::confirm_current`]
+    /// does: it moves to the next enabled item, or submits on the last one,
+    /// unless validation fails. A choice that changes the answer stays selected
+    /// on screen for a moment before the confirm runs, so the person sees what
+    /// they picked; with reduced motion the confirm runs as soon as the answer
+    /// change has been delivered. Choosing the selected answer again confirms
+    /// at once. Disabled items and choices ignore activation.
+    ///
+    /// Arrow-key movement inside a radio group uses [`Self::activate_choice`]
+    /// and never confirms.
+    pub fn choose(
+        &mut self,
+        item: &str,
+        value: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Result<(), QuestionnaireSchemaError> {
+        let item_ix = self.item_ix(item)?;
+        let choice_ix = self.choice_ix(item_ix, value)?;
+        if self.runtime[item_ix].disabled || self.runtime[item_ix].choice_disabled[choice_ix] {
+            return Ok(());
+        }
+        let before = self.effective_answer(item_ix);
+        self.activate_choice(item, value, cx)?;
+        self.focus_choice(item, value, window, cx);
+        if self.items[item_ix].is_multiple() || self.current != Some(item_ix) {
+            return Ok(());
+        }
+        if before == self.effective_answer(item_ix) {
+            self.confirm_current(window, cx);
+        } else {
+            self.schedule_confirm(item_ix, window, cx);
+        }
+        Ok(())
+    }
+
+    /// Confirms `item_ix` after the selection has had time to show. The task
+    /// runs on the next turn of the event loop at the earliest, after
+    /// `AnswerChanged` subscribers have reacted (a host enabling a follow-up
+    /// item, say), and does nothing if another item became current meanwhile.
+    fn schedule_confirm(&mut self, item_ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let delay = (!cx.reduce_motion()).then_some(CHOICE_CONFIRM_DELAY);
+        self.pending_confirm = Some(cx.spawn_in(window, async move |this, cx| {
+            if let Some(delay) = delay {
+                cx.background_executor().timer(delay).await;
+            }
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.pending_confirm = None;
+                if this.current == Some(item_ix) {
+                    this.confirm_current(window, cx);
+                }
+            });
+        }));
+    }
+
     pub fn confirm_current(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(current_ix) = self.current_ix() else {
             return false;
@@ -620,6 +691,7 @@ impl QuestionnaireState {
     }
 
     pub fn go_previous(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.pending_confirm = None;
         let Some(ix) = self.current_ix() else {
             return false;
         };
@@ -632,6 +704,7 @@ impl QuestionnaireState {
     }
 
     pub fn go_next(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.pending_confirm = None;
         let Some(current) = self.current else {
             return false;
         };
@@ -671,6 +744,7 @@ impl QuestionnaireState {
     }
 
     pub fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        self.pending_confirm = None;
         let enabled: Vec<_> = self.enabled_indices().collect();
         let mut first_invalid = None;
         for ix in enabled {
@@ -961,6 +1035,7 @@ impl QuestionnaireState {
     }
 
     fn answer_did_change(&mut self, item_ix: usize, emit: bool, cx: &mut Context<Self>) {
+        self.pending_confirm = None;
         if self.runtime[item_ix].validation_attempted {
             self.validate_item(item_ix);
         } else {
@@ -1104,6 +1179,7 @@ impl QuestionnaireState {
         if self.current == next {
             return;
         }
+        self.pending_confirm = None;
         let previous = self.current.map(|ix| self.items[ix].name().clone());
         self.current = next;
         self.focus_current_item(window, cx);
@@ -1215,12 +1291,7 @@ mod tests {
                     .with_shortcuts(QuestionnaireShortcutMode::Letters)
             });
             let subscription = cx.subscribe(&state, |this, _, event, _| {
-                this.events.push(match event {
-                    QuestionnaireEvent::CurrentItemChanged { .. } => "current",
-                    QuestionnaireEvent::AnswerChanged(_) => "answer",
-                    QuestionnaireEvent::Completed(_) => "completed",
-                    QuestionnaireEvent::Submit(_) => "submit",
-                });
+                this.events.push(event_name(event));
             });
             Self {
                 state,
@@ -1229,6 +1300,15 @@ mod tests {
                 events: Vec::new(),
                 _subscription: subscription,
             }
+        }
+    }
+
+    fn event_name(event: &QuestionnaireEvent) -> &'static str {
+        match event {
+            QuestionnaireEvent::CurrentItemChanged { .. } => "current",
+            QuestionnaireEvent::AnswerChanged(_) => "answer",
+            QuestionnaireEvent::Completed(_) => "completed",
+            QuestionnaireEvent::Submit(_) => "submit",
         }
     }
 
@@ -1699,5 +1779,228 @@ mod tests {
             before_disable,
             "programmatic disable and fallback are silent"
         );
+    }
+
+    /// Two single-answer items around a multiple-answer one; `rejected` fails
+    /// validation on the first item.
+    struct ChooseHarness {
+        state: Entity<QuestionnaireState>,
+        input: Entity<InputState>,
+        events: Vec<&'static str>,
+        _subscription: Subscription,
+    }
+
+    impl Render for ChooseHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+        }
+    }
+
+    fn choose_harness(
+        cx: &mut TestAppContext,
+    ) -> (
+        Entity<ChooseHarness>,
+        Entity<QuestionnaireState>,
+        &mut VisualTestContext,
+    ) {
+        cx.update(crate::init);
+        let (harness, cx) = cx.add_window_view(|window, cx| {
+            let input = cx.new(|cx| InputState::new(window, cx));
+            let items = vec![
+                QuestionnaireItemDefinition::new("first", "First")
+                    .with_choices([
+                        QuestionnaireChoiceDefinition::new("a", "A"),
+                        QuestionnaireChoiceDefinition::new("b", "B"),
+                        QuestionnaireChoiceDefinition::new("rejected", "Rejected"),
+                        QuestionnaireChoiceDefinition::new("off", "Off").with_disabled(true),
+                    ])
+                    .with_input(QuestionnaireInputDefinition::new(input.clone(), "Other"))
+                    .with_validator(|context| {
+                        (!context.answer().choices().iter().any(|c| c == "rejected"))
+                            .then_some(())
+                            .ok_or_else(|| SharedString::from("Pick another answer"))
+                    }),
+                QuestionnaireItemDefinition::new("second", "Second")
+                    .with_multiple(true)
+                    .with_choices([
+                        QuestionnaireChoiceDefinition::new("x", "X"),
+                        QuestionnaireChoiceDefinition::new("y", "Y"),
+                    ]),
+                QuestionnaireItemDefinition::new("third", "Third").with_choices([
+                    QuestionnaireChoiceDefinition::new("c", "C"),
+                    QuestionnaireChoiceDefinition::new("d", "D"),
+                ]),
+            ];
+            let state = cx.new(|cx| QuestionnaireState::new(items, cx).unwrap());
+            let subscription = cx.subscribe(&state, |this: &mut ChooseHarness, _, event, _| {
+                this.events.push(event_name(event));
+            });
+            ChooseHarness {
+                state,
+                input,
+                events: Vec::new(),
+                _subscription: subscription,
+            }
+        });
+        let state = harness.read_with(cx, |harness, _| harness.state.clone());
+        (harness, state, cx)
+    }
+
+    fn choose(
+        cx: &mut VisualTestContext,
+        state: &Entity<QuestionnaireState>,
+        item: &str,
+        value: &str,
+    ) {
+        cx.update(|window, cx| {
+            state
+                .update(cx, |state, cx| state.choose(item, value, window, cx))
+                .unwrap();
+        });
+    }
+
+    fn current(cx: &mut VisualTestContext, state: &Entity<QuestionnaireState>) -> SharedString {
+        cx.read(|cx| state.read(cx).current_item().unwrap().clone())
+    }
+
+    fn wait_out_hold(cx: &mut VisualTestContext) {
+        cx.executor().advance_clock(CHOICE_CONFIRM_DELAY);
+        cx.run_until_parked();
+    }
+
+    fn count(cx: &mut VisualTestContext, harness: &Entity<ChooseHarness>, name: &str) -> usize {
+        cx.read(|cx| {
+            harness
+                .read(cx)
+                .events
+                .iter()
+                .filter(|event| **event == name)
+                .count()
+        })
+    }
+
+    #[gpui::test]
+    fn choosing_a_single_answer_holds_it_then_confirms(cx: &mut TestAppContext) {
+        let (harness, state, cx) = choose_harness(cx);
+
+        choose(cx, &state, "first", "a");
+        cx.run_until_parked();
+        assert_eq!(
+            current(cx, &state),
+            "first",
+            "the choice is shown before moving"
+        );
+        assert_eq!(
+            cx.read(|cx| state.read(cx).answer("first").unwrap().choices().to_vec()),
+            vec![SharedString::from("a")]
+        );
+        wait_out_hold(cx);
+        assert_eq!(current(cx, &state), "second");
+
+        // Going back and choosing the selected answer again confirms at once.
+        cx.update(|window, cx| state.update(cx, |state, cx| state.go_previous(window, cx)));
+        choose(cx, &state, "first", "a");
+        assert_eq!(current(cx, &state), "second");
+
+        // The last item submits once, even when activated twice in a row.
+        choose(cx, &state, "second", "x");
+        cx.update(|window, cx| state.update(cx, |state, cx| state.go_next(window, cx)));
+        assert_eq!(current(cx, &state), "third");
+        choose(cx, &state, "third", "c");
+        choose(cx, &state, "third", "c");
+        wait_out_hold(cx);
+        assert_eq!(count(cx, &harness, "submit"), 1);
+        assert_eq!(count(cx, &harness, "completed"), 1);
+
+        // A second answer replaces the pending confirm instead of adding one.
+        choose(cx, &state, "third", "d");
+        choose(cx, &state, "third", "c");
+        wait_out_hold(cx);
+        assert_eq!(count(cx, &harness, "submit"), 2);
+    }
+
+    #[gpui::test]
+    fn arrows_multiple_choices_and_typing_never_confirm(cx: &mut TestAppContext) {
+        let (harness, state, cx) = choose_harness(cx);
+
+        cx.update(|window, cx| {
+            state.update(cx, |state, cx| {
+                state.focus_choice("first", "a", window, cx);
+                assert!(state.move_current_radio(1, window, cx));
+            });
+        });
+        wait_out_hold(cx);
+        assert_eq!(
+            cx.read(|cx| state.read(cx).answer("first").unwrap().choices().to_vec()),
+            vec![SharedString::from("b")],
+            "an arrow moves the selection"
+        );
+        assert_eq!(current(cx, &state), "first", "an arrow never confirms");
+
+        // Typing after choosing drops the pending confirm.
+        choose(cx, &state, "first", "a");
+        let input = cx.read(|cx| harness.read(cx).input.clone());
+        cx.update(|window, cx| {
+            input.update(cx, |input, cx| input.replace_all("draft", window, cx))
+        });
+        wait_out_hold(cx);
+        assert_eq!(current(cx, &state), "first");
+        assert!(cx.read(|cx| state.read(cx).answer("first").unwrap().freeform().is_some()));
+
+        // A disabled choice ignores activation.
+        choose(cx, &state, "first", "off");
+        wait_out_hold(cx);
+        assert_eq!(current(cx, &state), "first");
+
+        cx.update(|window, cx| state.update(cx, |state, cx| state.go_next(window, cx)));
+        choose(cx, &state, "second", "x");
+        choose(cx, &state, "second", "y");
+        choose(cx, &state, "second", "x");
+        wait_out_hold(cx);
+        assert_eq!(
+            current(cx, &state),
+            "second",
+            "a multiple-answer item only toggles"
+        );
+        assert_eq!(
+            cx.read(|cx| state.read(cx).answer("second").unwrap().choices().to_vec()),
+            vec![SharedString::from("y")]
+        );
+    }
+
+    #[gpui::test]
+    fn a_rejected_choice_stays_on_its_item(cx: &mut TestAppContext) {
+        let (harness, state, cx) = choose_harness(cx);
+
+        choose(cx, &state, "first", "rejected");
+        wait_out_hold(cx);
+        assert_eq!(current(cx, &state), "first");
+        assert_eq!(
+            cx.read(|cx| state.read(cx).error("first").cloned()),
+            Some(QuestionnaireValidationError::Message(
+                "Pick another answer".into()
+            ))
+        );
+        assert_eq!(
+            cx.update(|window, cx| state.read(cx).focused_current_choice(window).cloned()),
+            Some("rejected".into()),
+            "the invalid answer keeps focus"
+        );
+        assert_eq!(count(cx, &harness, "current"), 0);
+    }
+
+    #[gpui::test]
+    fn reduced_motion_confirms_without_the_hold(cx: &mut TestAppContext) {
+        let (_, state, cx) = choose_harness(cx);
+        cx.update(|_, cx| cx.set_reduce_motion(true));
+
+        choose(cx, &state, "first", "a");
+        assert_eq!(
+            current(cx, &state),
+            "first",
+            "the confirm waits for the answer change to be delivered"
+        );
+        cx.run_until_parked();
+        assert_eq!(current(cx, &state), "second");
     }
 }
