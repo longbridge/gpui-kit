@@ -23,8 +23,10 @@ System recognizer, by language:
 
 ## Trying it
 
-- **Demo** types a scripted passage while it hears audio. It needs no service,
-  network, or speech permission, so it works on every platform, Linux included.
+- **Demo** types a scripted passage as you speak: tokens appear only while you
+  talk, and a pause ends the sentence. It recognizes no words and needs no
+  service, network, or speech permission, so it works on every platform, Linux
+  included.
   Use it to check the capture, waveform, and event flow.
 - **System** uses the operating system's recognizer in the language you pick.
 - Click the microphone or press <kbd>⇧⌘D</kbd> (<kbd>Ctrl+Shift+D</kbd> on

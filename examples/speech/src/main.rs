@@ -339,8 +339,8 @@ impl SpeechApp {
                  on Windows it uses Microsoft’s online service."
             }
             Engine::Demo => {
-                "Types a scripted passage while it hears audio. Needs no service, network or \
-                 speech permission."
+                "Types a scripted passage as you speak and ends a sentence when you pause. \
+                 Needs no service, network or speech permission."
             }
         };
 
