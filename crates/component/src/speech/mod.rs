@@ -11,6 +11,7 @@
 //! only with an application recognizer.
 
 mod button;
+mod level;
 mod recognizer;
 mod state;
 mod waveform;

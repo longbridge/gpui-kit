@@ -1,6 +1,6 @@
 use gpui_kit::{
     App, AppContext, Context, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Render,
-    Styled, Subscription, Window, div, prelude::FluentBuilder as _,
+    Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use gpui_kit::component::{
@@ -180,7 +180,7 @@ impl Dictation {
                     h_flex()
                         .gap_2()
                         .when(status.is_capturing(), |this| {
-                            this.child(SpeechWaveform::new(&self.speech).bars(12).xsmall())
+                            this.child(SpeechWaveform::new(&self.speech).w(px(48.)).xsmall())
                         })
                         .child(
                             SpeechButton::new(&self.speech)

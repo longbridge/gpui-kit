@@ -1,11 +1,11 @@
-use std::{cell::OnceCell, collections::VecDeque, rc::Rc, time::Duration};
+use std::{cell::OnceCell, rc::Rc, time::Duration};
 
 use gpui::{App, Context, EventEmitter, SharedString, Subscription, Task, WeakEntity};
 
-use super::{AudioInput, AudioSink, RecognitionSession, SpeechError, SpeechRecognizer, SpeechSink};
-
-/// How many recent input levels a [`SpeechState`] keeps for a waveform.
-pub(super) const LEVEL_HISTORY: usize = 48;
+use super::{
+    AudioInput, AudioSink, RecognitionSession, SpeechError, SpeechRecognizer, SpeechSink,
+    level::LevelMeter,
+};
 
 /// Default time [`SpeechState::stop`] waits for the final result.
 const DEFAULT_STOP_TIMEOUT: Duration = Duration::from_secs(3);
@@ -83,7 +83,7 @@ pub struct SpeechState {
     next_session: usize,
     committed: String,
     hypothesis: SharedString,
-    levels: VecDeque<f32>,
+    meter: LevelMeter,
 }
 
 impl EventEmitter<SpeechEvent> for SpeechState {}
@@ -102,7 +102,7 @@ impl SpeechState {
             next_session: 0,
             committed: String::new(),
             hypothesis: SharedString::default(),
-            levels: VecDeque::with_capacity(LEVEL_HISTORY),
+            meter: LevelMeter::new(),
         }
     }
 
@@ -165,9 +165,15 @@ impl SpeechState {
         }
     }
 
-    /// Recent input levels in `0.0..=1.0`, oldest first.
+    /// Recent input levels in `0.0..=1.0`, oldest first, one per 25 ms of
+    /// audio. Peaks rise at once and fall back smoothly; background noise reads
+    /// as `0.0`.
     pub fn levels(&self) -> impl ExactSizeIterator<Item = f32> + '_ {
-        self.levels.iter().copied()
+        self.meter.levels()
+    }
+
+    pub(super) fn last_level_at(&self) -> Option<instant::Instant> {
+        self.meter.last_level_at()
     }
 
     /// Start a session. Does nothing while one is running.
@@ -212,7 +218,7 @@ impl SpeechState {
         self.status = SpeechStatus::Connecting;
         self.committed.clear();
         self.hypothesis = SharedString::default();
-        self.levels.clear();
+        self.meter.reset(format.sample_rate(), format.channels());
         self.session = Some(Session {
             id,
             capture: Some(capture),
@@ -302,11 +308,11 @@ impl SpeechState {
         if let Some(session) = self.session.as_mut() {
             session.recognition.push_audio(samples, cx);
         }
-        if self.levels.len() == LEVEL_HISTORY {
-            self.levels.pop_front();
+        // Redraw once per new level, not per push: levels are what the
+        // waveform shows.
+        if self.meter.push(samples) {
+            cx.notify();
         }
-        self.levels.push_back(level(samples));
-        cx.notify();
     }
 
     pub(super) fn on_hypothesis(&mut self, text: SharedString, cx: &mut Context<Self>) {
@@ -336,7 +342,7 @@ impl SpeechState {
             session.capture = None;
         }
         self.status = SpeechStatus::Idle;
-        self.levels.clear();
+        self.meter = LevelMeter::new();
         cx.emit(event);
         cx.notify();
     }
@@ -358,27 +364,6 @@ pub(super) fn defer_session_update(
             }
         });
     });
-}
-
-/// The loudness of `samples` in `0.0..=1.0`, mapping -50 dBFS..0 dBFS linearly
-/// so that normal speech fills most of the range.
-fn level(samples: &[i16]) -> f32 {
-    if samples.is_empty() {
-        return 0.;
-    }
-    let sum: f64 = samples
-        .iter()
-        .map(|&sample| {
-            let sample = sample as f64 / i16::MAX as f64;
-            sample * sample
-        })
-        .sum();
-    let rms = (sum / samples.len() as f64).sqrt();
-    if rms <= 0. {
-        return 0.;
-    }
-    let db = 20. * rms.log10();
-    ((db + 50.) / 50.).clamp(0., 1.) as f32
 }
 
 #[cfg(test)]
@@ -532,15 +517,16 @@ mod tests {
 
         cx.update(|cx| {
             f.sink().ready(cx);
-            f.audio().push(vec![i16::MAX / 2; 160], cx);
+            // Two levels' worth: 25 ms is 400 samples at 16 kHz.
+            f.audio().push(vec![i16::MAX / 2; 800], cx);
             f.sink().hypothesis("hello", cx);
         });
         cx.run_until_parked();
         assert_eq!(f.status(cx), SpeechStatus::Recording);
-        assert_eq!(f.recognizer.recorded.borrow().samples, 160);
+        assert_eq!(f.recognizer.recorded.borrow().samples, 800);
         cx.read(|cx| {
             let state = f.state.read(cx);
-            assert_eq!(state.levels().len(), 1);
+            assert_eq!(state.levels().len(), 2);
             assert!(state.levels().next().unwrap() > 0.5);
         });
 
@@ -675,15 +661,5 @@ mod tests {
             assert!(!state.read(cx).has_recognizer());
             assert!(!state.read(cx).is_available(cx));
         });
-    }
-
-    #[test]
-    fn level_maps_decibels_to_the_unit_range() {
-        assert_eq!(level(&[]), 0.);
-        assert_eq!(level(&[0; 16]), 0.);
-        assert_eq!(level(&[i16::MAX; 16]), 1.);
-        // -20 dBFS sits at 0.6 on the -50..0 dB scale.
-        let quiet = level(&[i16::MAX / 10; 16]);
-        assert!((quiet - 0.6).abs() < 0.01, "{quiet}");
     }
 }

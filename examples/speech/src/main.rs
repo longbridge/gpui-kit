@@ -559,7 +559,7 @@ impl SpeechApp {
                     ),
             )
             .when(status.is_active(), |this| {
-                this.child(SpeechWaveform::new(&self.speech).bars(28).small())
+                this.child(SpeechWaveform::new(&self.speech).w(px(112.)).small())
             })
             .map(|this| {
                 if status.is_active() {

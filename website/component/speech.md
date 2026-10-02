@@ -84,7 +84,7 @@ Input::new(&self.input).suffix(
     h_flex()
         .gap_2()
         .when(capturing, |this| {
-            this.child(SpeechWaveform::new(&self.speech).bars(12).xsmall())
+            this.child(SpeechWaveform::new(&self.speech).w(px(48.)).xsmall())
         })
         .child(SpeechButton::new(&self.speech).xsmall()),
 )
@@ -328,8 +328,9 @@ let speech = cx.new(|cx| SpeechState::new(cx).recognizer(recognizer).input(Silen
 ```
 
 `levels()` exposes the recent input levels that `SpeechWaveform` draws, in
-`0.0..=1.0` with the oldest first, for an application that renders its own
-meter.
+`0.0..=1.0` with the oldest first, one per 25 ms of audio, for an application
+that renders its own meter. Peaks rise at once and fall back smoothly, and
+background noise reads as `0.0`.
 
 ## Platform support
 
@@ -385,7 +386,7 @@ application recognizer; without one, `SpeechButton` renders nothing. The
   `has_recognizer`, `is_available`, `transcript`, `levels`
 - [SpeechEvent] and [SpeechStatus]
 - [SpeechButton] — `show_when_unsupported`, plus `Sizable` and `Disableable`
-- [SpeechWaveform] — `bars` (default 24, at most 48), plus `Sizable`
+- [SpeechWaveform] — a live waveform that fills its width (96 px unless styled) and scrolls while capturing; `Sizable` sets its height, `Styled` its width
 - [SpeechRecognizer], [RecognitionSession] and [SpeechSink] — the recognition
   seam
 - [AudioInput], [AudioSink] and [AudioFormat] — the audio seam
