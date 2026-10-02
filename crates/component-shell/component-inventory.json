@@ -954,6 +954,12 @@
     },
     {
       "source": "ui",
+      "name": "speech",
+      "classification": "infrastructure",
+      "explanation": "Speech input depends on an application-supplied SpeechRecognizer or the `speech` feature's microphone and system recognizer, which the frozen catalog cannot construct from script; it is not registered as a component yet."
+    },
+    {
+      "source": "ui",
       "name": "spinner",
       "classification": "component",
       "registration": {
@@ -2271,6 +2277,12 @@
           }
         ]
       }
+    },
+    {
+      "source": "story",
+      "name": "speech",
+      "classification": "infrastructure",
+      "explanation": "The Speech story drives a Rust SpeechRecognizer and the `speech` feature's platform services rather than a catalog constructor."
     },
     {
       "source": "story",
