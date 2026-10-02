@@ -1,8 +1,8 @@
-use gpui::{App, ElementId, Entity, IntoElement, RenderOnce, Window, div};
+use gpui::{App, ElementId, Entity, IntoElement, RenderOnce, StyleRefinement, Styled, Window, div};
 use rust_i18n::t;
 
 use crate::{
-    Disableable, IconName, Selectable as _, Sizable, Size,
+    Disableable, IconName, Selectable as _, Sizable, Size, StyledExt as _,
     button::{Button, ButtonVariants as _},
 };
 
@@ -24,6 +24,7 @@ pub struct SpeechButton {
     size: Size,
     disabled: bool,
     show_when_unsupported: bool,
+    style: StyleRefinement,
 }
 
 impl SpeechButton {
@@ -35,6 +36,7 @@ impl SpeechButton {
             size: Size::default(),
             disabled: false,
             show_when_unsupported: false,
+            style: StyleRefinement::default(),
         }
     }
 
@@ -50,6 +52,14 @@ impl Sizable for SpeechButton {
     fn with_size(mut self, size: impl Into<Size>) -> Self {
         self.size = size.into();
         self
+    }
+}
+
+impl Styled for SpeechButton {
+    /// Refines the button, e.g. its size or corner radius, to match the
+    /// controls around it.
+    fn style(&mut self) -> &mut StyleRefinement {
+        &mut self.style
     }
 }
 
@@ -93,6 +103,7 @@ impl RenderOnce for SpeechButton {
             .disabled(self.disabled || !available)
             .tooltip(label.clone())
             .accessibility_label(label)
+            .refine_style(&self.style)
             .on_click({
                 let state = self.state.clone();
                 move |_, _, cx| state.update(cx, |state, cx| state.toggle(cx))
