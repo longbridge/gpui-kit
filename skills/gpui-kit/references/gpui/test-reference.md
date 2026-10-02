@@ -209,116 +209,234 @@ The most dangerous class of GPUI bugs is **entity re-entrancy**: code that tries
 **Key properties of re-entrancy panics:**
 - Triggered by user interaction (click, key press), not during static rendering.
 - `#[should_panic]` only confirms the bug exists — tests must pass *without* panicking.
-- `cx.run_until_parked()` is required after the triggering action to let deferred callbacks (`defer_in`) execute.
+- `Select` commits through `defer_in` after the key or click dispatch returns. Wait for the result with `cx.wait_for` instead of asserting straight after the interaction.
 
-### Pattern: Drive `confirm` / `cancel` through the real delegate
+Drive the component the way a user does. `SelectState` keeps its list state `pub(crate)`, so a test outside `gpui-component` opens the menu, presses keys, and observes through `selected_value()`, the element snapshot, and the delegate's own hooks.
+
+### Pattern: Confirm through the real UI
 
 ```rust
+use gpui_kit::test::{TestAppContextExt, TestWindowExt};
+use gpui_kit::{
+    AnyWindowHandle, AppContext, Context, Entity, TestAppContext, Window,
+    component::{
+        IndexPath, Root,
+        searchable_list::SearchableListChange,
+        select::{SearchableVec, Select, SelectDelegate, SelectItem, SelectState},
+    },
+    div,
+    prelude::*,
+    px, size,
+};
+use std::{cell::RefCell, rc::Rc, time::Duration};
+
+struct Form {
+    language: Entity<SelectState<SearchableVec<&'static str>>>,
+}
+
+impl Render for Form {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(Select::new(&self.language).id("language").w(px(240.)))
+    }
+}
+
 #[gpui_kit::test]
-fn test_confirm_does_not_panic(cx: &mut TestAppContext) {
-    // Build the component state the same way the real app does.
-    let state = cx.new(|cx| {
-        SelectState::new(MyDelegate::default(), None, &mut cx.window_handle(), cx)
-    });
-
-    // Simulate the user clicking the first item — this exercises on_confirm
-    // and its deferred callback, which is where re-entrancy bugs hide.
-    state.update(cx, |this, cx| {
-        this.state.list.update(cx, |list, cx| {
-            list.delegate_mut().set_selected_index(Some(IndexPath::new(0)), window, cx);
-            list.delegate_mut().confirm(false, window, cx);
+async fn confirming_from_the_keyboard_commits_the_value(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let mut language = None;
+    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
+        let state = cx.new(|cx| {
+            SelectState::new(
+                SearchableVec::new(vec!["Rust", "Go"]),
+                Some(IndexPath::new(0)),
+                window,
+                cx,
+            )
         });
+        language = Some(state.clone());
+        let view = cx.new(|_| Form { language: state });
+        Root::new(view, window, cx)
     });
+    let language = language.unwrap();
 
-    // Let defer_in callbacks execute — required to trigger the crash.
-    cx.run_until_parked();
+    // Open the menu, move to "Go" and confirm — the same path a user takes.
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.within("language").click("input", cx);
+        window.press("down", cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
 
-    // If we reach here without panicking, the re-entrancy is fixed.
-    let selected = state.read_with(cx, |s, _| s.selected_value().cloned());
-    assert!(selected.is_some());
+    // Select commits through `defer_in` after the key dispatch returns, so
+    // wait for the closed menu instead of asserting straight away.
+    cx.wait_for(handle.into(), Duration::from_millis(500), |window, _| {
+        window.find("language").expanded() == Some(false)
+            && window.find("language").value() == Some("Go")
+    })
+    .await;
+
+    cx.update(|cx| assert_eq!(language.read(cx).selected_value(), Some(&"Go")));
 }
 ```
 
-### Pattern: Verify `on_will_change` and `on_confirm` hooks are called correctly
+### Pattern: Record `on_will_change` and `on_confirm`
 
-Use a recording delegate to assert that hooks fire with the right arguments and in the right order:
+A recording delegate shows which changes the selection strategy proposed and what was committed. `on_will_change` receives the proposed changes and the selection to edit; the delegate applies them itself (the trait's default applies all of them). It has no `cx`, because it runs while the list entity is borrowed, so put side effects that need `cx` in `on_confirm`.
 
 ```rust
-#[derive(Default)]
-struct RecordingDelegate {
-    items: Vec<MyItem>,
-    will_change_calls: Vec<Vec<IndexPath>>,
-    confirm_calls: Vec<Vec<IndexPath>>,
+type Log = Rc<RefCell<Vec<String>>>;
+
+/// Records each hook call; `accept: false` vetoes every change.
+struct Recording {
+    items: Vec<&'static str>,
+    accept: bool,
+    log: Log,
 }
 
-impl SearchableListDelegate for RecordingDelegate {
-    // … required impls …
+impl SelectDelegate for Recording {
+    type Item = &'static str;
+
+    fn items_count(&self, _: usize) -> usize {
+        self.items.len()
+    }
+
+    fn item(&self, ix: IndexPath) -> Option<&Self::Item> {
+        self.items.get(ix.row)
+    }
+
+    fn position<V>(&self, value: &V) -> Option<IndexPath>
+    where
+        Self::Item: SelectItem<Value = V>,
+        V: PartialEq,
+    {
+        self.items
+            .iter()
+            .position(|item| item.value() == value)
+            .map(IndexPath::new)
+    }
 
     fn on_will_change(
         &mut self,
-        change: &mut SearchableListChange<Self>,
-        _current: &[(IndexPath, Self::Item)],
+        selection: &mut Vec<(IndexPath, Self::Item)>,
+        changes: &[SearchableListChange],
     ) {
-        self.will_change_calls.push(
-            change.select_queue.iter().map(|(ix, _)| *ix).collect()
-        );
+        for change in changes {
+            match *change {
+                SearchableListChange::Select { index } => {
+                    self.log.borrow_mut().push(format!("select {}", index.row));
+                    if self.accept
+                        && let Some(item) = self.item(index)
+                    {
+                        selection.push((index, *item));
+                    }
+                }
+                SearchableListChange::Deselect { index } => {
+                    self.log.borrow_mut().push(format!("deselect {}", index.row));
+                    if self.accept {
+                        selection.retain(|(ix, _)| *ix != index);
+                    }
+                }
+            }
+        }
     }
 
     fn on_confirm(&mut self, final_selection: &[(IndexPath, Self::Item)]) {
-        self.confirm_calls.push(
-            final_selection.iter().map(|(ix, _)| *ix).collect()
-        );
+        let values: Vec<_> = final_selection.iter().map(|(_, item)| *item).collect();
+        self.log.borrow_mut().push(format!("confirm {values:?}"));
     }
 }
 
+struct Picker {
+    language: Entity<SelectState<Recording>>,
+}
+
+impl Render for Picker {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(Select::new(&self.language).id("language").w(px(240.)))
+    }
+}
+
+fn open_picker(
+    cx: &mut TestAppContext,
+    accept: bool,
+) -> (AnyWindowHandle, Entity<SelectState<Recording>>, Log) {
+    cx.update(gpui_kit::init);
+    let log = Rc::new(RefCell::new(Vec::new()));
+    let mut language = None;
+    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
+        let delegate = Recording {
+            items: vec!["Rust", "Go"],
+            accept,
+            log: log.clone(),
+        };
+        let state = cx.new(|cx| SelectState::new(delegate, Some(IndexPath::new(0)), window, cx));
+        language = Some(state.clone());
+        let view = cx.new(|_| Picker { language: state });
+        Root::new(view, window, cx)
+    });
+    (handle.into(), language.unwrap(), log)
+}
+
+fn confirm_next(cx: &mut TestAppContext, handle: AnyWindowHandle) {
+    cx.update_window(handle, |_, window, cx| {
+        window.render_frame(cx);
+        window.within("language").click("input", cx);
+        window.press("down", cx);
+        window.press("enter", cx);
+    })
+    .unwrap();
+}
+
 #[gpui_kit::test]
-fn test_hooks_fire_in_correct_order(cx: &mut TestAppContext) {
-    let state = cx.new(|cx| SelectState::new(RecordingDelegate::with_items(3), None, window, cx));
-
-    // Simulate confirm on item 0
-    state.update(cx, |this, cx| {
-        // … trigger confirm …
-    });
-    cx.run_until_parked();
-
-    state.read_with(cx, |s, cx| {
-        let delegate = s.state.list.read(cx).delegate().delegate;
-        assert_eq!(delegate.will_change_calls.len(), 1);
-        assert_eq!(delegate.confirm_calls.len(), 1);
-        assert_eq!(delegate.confirm_calls[0], vec![IndexPath::new(0)]);
-    });
+async fn hooks_fire_in_order_with_the_final_selection(cx: &mut TestAppContext) {
+    let (handle, language, log) = open_picker(cx, true);
+    confirm_next(cx, handle);
+    cx.wait_for(handle, Duration::from_millis(500), |window, _| {
+        window.find("language").expanded() == Some(false)
+    })
+    .await;
+    // Single selection proposes replacing the old item, then commits once.
+    assert_eq!(*log.borrow(), ["deselect 0", "select 1", r#"confirm ["Go"]"#]);
+    cx.update(|cx| assert_eq!(language.read(cx).selected_value(), Some(&"Go")));
 }
 ```
 
-### Pattern: Rapid multiple confirms (snapshot consistency)
+### Pattern: A vetoing delegate keeps the selection
+
+The same delegate with `accept: false` applies none of the proposed changes:
 
 ```rust
 #[gpui_kit::test]
-fn test_rapid_confirms_keep_consistent_snapshot(cx: &mut TestAppContext) {
-    let state = cx.new(|cx| SelectState::new(MyDelegate::with_items(5), None, window, cx));
-
-    for i in 0..5 {
-        state.update(cx, |this, cx| {
-            // trigger confirm on item i
-        });
-        cx.run_until_parked();
-
-        state.read_with(cx, |s, cx| {
-            let snapshot = s.state.list.read(cx).delegate().selection_snapshot.clone();
-            let selection = s.state.selection.clone();
-            assert_eq!(snapshot, selection, "snapshot out of sync after confirm {i}");
-        });
-    }
+async fn a_vetoing_delegate_keeps_the_selection(cx: &mut TestAppContext) {
+    let (handle, language, log) = open_picker(cx, false);
+    confirm_next(cx, handle);
+    cx.wait_for(handle, Duration::from_millis(500), |window, _| {
+        window.find("language").expanded() == Some(false)
+    })
+    .await;
+    // The same changes are proposed, but the delegate applied none of them:
+    // `on_confirm` still runs, with the selection the user started from.
+    assert_eq!(*log.borrow(), ["deselect 0", "select 1", r#"confirm ["Rust"]"#]);
+    cx.update(|cx| assert_eq!(language.read(cx).selected_value(), Some(&"Rust")));
+    cx.update_window(handle, |_, window, _| {
+        assert_eq!(window.find("language").value(), Some("Rust"));
+    })
+    .unwrap();
 }
 ```
 
 ### Checklist: What to test for each component that uses `defer_in`
 
-- [ ] `confirm` path: no panic, correct final selection, snapshot matches selection
-- [ ] `cancel` path: no panic, selection unchanged, popover closed
-- [ ] `on_will_change` veto: selection not changed, `on_confirm` not called
-- [ ] `on_will_change` mutating the change: final selection reflects delegate's modification
-- [ ] Rapid consecutive confirms: each one leaves snapshot consistent with selection
+- [ ] `confirm` path: no panic, the value is committed, and `selected_value()` agrees with the trigger's `value()`
+- [ ] `cancel` path (Escape, click outside): no panic, selection unchanged, menu closed (`expanded() == Some(false)`)
+- [ ] `on_will_change` veto: selection unchanged; `on_confirm` still runs, with the unchanged selection
+- [ ] `on_will_change` editing the selection: the final selection reflects the delegate's edit
+- [ ] Repeated confirms: each one leaves `selected_value()` matching the displayed value
 - [ ] `render_item` never panics even when called immediately after a mutation
 
 ## Property Testing
