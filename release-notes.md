@@ -43,6 +43,28 @@ applies to every group. Use it when a single page should present its items
 directly — `GroupBoxVariant::Normal` removes the card surface the global
 default draws — while the other pages keep the global variant.
 
+#### Added: standalone `resize_handle`
+
+```rust
+pub fn resize_handle(id: impl Into<ElementId>, axis: Axis) -> ResizeHandle // gpui_base: the band
+pub fn resize_handle(id: impl Into<ElementId>, axis: Axis) -> ResizeHandle // gpui_component: with the divider appearance
+impl InteractiveElement for ResizeHandle
+impl StatefulInteractiveElement for ResizeHandle
+impl InteractiveElementExt for ResizeHandle
+```
+
+The handle `h_resizable` and the Dock put on their dividers can now edge
+anything else, such as an application's own sidebar. It keeps the band, the
+cursor and the hovered / pressed / dragging indicator; what a drag resizes is
+the caller's, through `on_drag` and `on_drag_move`, and any other listener —
+`on_hover`, `on_double_click` — goes on the handle the usual way. The builder
+had been hidden: it drops its type parameters and its own
+`on_drag(value, Fn(Rc<T>, &Point<Pixels>, ..))` in favour of
+`StatefulInteractiveElement::on_drag`.
+
+The divider's hairline is drawn in the new `resizable.border` theme color
+(`ThemeColor::resizable_border`), which falls back to `border`.
+
 #### Plot moves to `gpui-base`
 
 The chart primitives — scales, shapes, `PlotAxis`, `Grid`, `PlotLabel`,

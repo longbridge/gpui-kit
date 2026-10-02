@@ -16,7 +16,8 @@ use gpui_base::{
 };
 
 pub use gpui_base::{
-    ResizablePanel, ResizablePanelEvent, ResizablePanelGroup, ResizableState, resizable_panel,
+    HandleEdge, ResizablePanel, ResizablePanelEvent, ResizablePanelGroup, ResizableState,
+    ResizeHandle, resizable_panel,
 };
 
 use crate::theme::ActiveTheme as _;
@@ -32,6 +33,14 @@ pub fn h_resizable(id: impl Into<ElementId>) -> ResizablePanelGroup {
 /// Create a [`ResizablePanelGroup`] with vertical resizing.
 pub fn v_resizable(id: impl Into<ElementId>) -> ResizablePanelGroup {
     gpui_base::v_resizable(id).with_handle_appearance(resize_handle_appearance())
+}
+
+/// Create a standalone [`ResizeHandle`] wearing this design system's divider,
+/// for an edge no [`ResizablePanelGroup`] owns -- an application's sidebar,
+/// say. What the drag resizes is the caller's; see
+/// [`gpui_base::resize_handle`].
+pub fn resize_handle(id: impl Into<ElementId>, axis: Axis) -> ResizeHandle {
+    gpui_base::resize_handle(id, axis).with_appearance(resize_handle_appearance())
 }
 
 /// This design system's divider appearance, for a handle that base does not
@@ -90,7 +99,7 @@ pub(crate) fn render_resize_handle(
         // nothing to give: shrinking it collapses the divider.
         .flex_none()
         .flex()
-        .bg(cx.theme().border)
+        .bg(cx.theme().resizable_border)
         // Along the hairline the pill is far shorter than the line, so centring
         // it there is safe. Across the hairline it is thicker than the line and
         // has to overhang, and neither flex alignment can be trusted to centre

@@ -11,8 +11,8 @@ Resizable 组件系统用于构建可拖拽调整大小的面板布局，支持�
 
 ```rust
 use gpui_kit::component::resizable::{
-    h_resizable, v_resizable, resizable_panel,
-    ResizablePanelGroup, ResizablePanel, ResizableState, ResizablePanelEvent
+    h_resizable, v_resizable, resizable_panel, resize_handle,
+    ResizablePanelGroup, ResizablePanel, ResizableState, ResizablePanelEvent, HandleEdge
 };
 ```
 
@@ -72,6 +72,37 @@ gpui_kit::base::h_resizable("my-layout")
 ```
 
 指示条的时长与缓动取自主题的 motion token；系统开启了减弱动态效果时，它直接到位，不播过渡。
+
+细线颜色取自主题的 `resizable.border`，未设置时回退到 `border`。
+
+### 独立手柄
+
+不属于任何面板组的边缘——比如应用自己的侧栏——可以单独使用 `resize_handle`。手柄负责命中带、光标和指示条；拖拽改变什么由你决定：用 `on_drag` 给它一个拖拽负载，用 `on_drag_move` 跟踪这个负载，其他监听也照样挂在手柄上：
+
+```rust
+use gpui_kit::component::resizable::{HandleEdge, resize_handle};
+
+div()
+    .relative()
+    .w(self.sidebar_width)
+    .h_full()
+    .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizeSidebar>, _, cx| {
+        this.sidebar_width = e.event.position.x;
+        cx.notify();
+    }))
+    .child(sidebar_content)
+    .child(
+        resize_handle("sidebar-edge", Axis::Horizontal)
+            .inside(HandleEdge::Trailing)
+            .on_drag(ResizeSidebar, |drag, _, _, cx| cx.new(|_| drag.clone()))
+            .on_double_click(cx.listener(|this, _, _, cx| {
+                this.sidebar_width = DEFAULT_SIDEBAR_WIDTH;
+                cx.notify();
+            })),
+    )
+```
+
+`inside` 让整条命中带留在容器内，贴住指定的边；不调用时，命中带骑在边界上，两侧各占一半。命中带会遮挡身后的元素：指针停在上面时，它身后的元素（包括所在容器）都不再算作悬停。容器如果需要知道指针还在自己上方，要在手柄上也挂一个监听。
 
 ### 面板尺寸约束
 

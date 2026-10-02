@@ -200,6 +200,7 @@ fetch the component's `.md` doc.
 | `Collapsible`     | `collapsible::Collapsible`                                               | Single collapsible        |
 | `GroupBox`        | `group_box::GroupBox`                                                    | Labeled container         |
 | `Resizable`       | `resizable::{h_resizable, v_resizable, resizable_panel, ResizableState}` | Draggable split panes     |
+| `ResizeHandle`    | `resizable::{resize_handle, HandleEdge}`                                 | Standalone resize edge    |
 | `Scrollbar`       | `scroll::Scrollbar`                                                      | Custom scrollbar          |
 
 ### Data Display

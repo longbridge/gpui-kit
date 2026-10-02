@@ -1,13 +1,10 @@
-use std::{
-    ops::{Deref, Range},
-    rc::Rc,
-};
+use std::{ops::Range, rc::Rc};
 
 use gpui::{
     Along, AnyElement, App, AppContext, Axis, Bounds, Context, Element, ElementId, Empty, Entity,
     EventEmitter, InteractiveElement as _, IntoElement, IsZero as _, MouseMoveEvent, MouseUpEvent,
-    ParentElement, Pixels, Render, RenderOnce, Style, StyleRefinement, Styled, Window, div,
-    prelude::FluentBuilder,
+    ParentElement, Pixels, Render, RenderOnce, StatefulInteractiveElement as _, Style,
+    StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
 };
 
 use crate::{AxisExt, ElementExt, StyledExt as _, h_flex, resizable::PANEL_MIN_SIZE, v_flex};
@@ -373,7 +370,7 @@ impl RenderOnce for ResizablePanel {
                             state.update(cx, |state, _| {
                                 state.resizing_panel_ix = Some(ix);
                             });
-                            cx.new(|_| drag_panel.deref().clone())
+                            cx.new(|_| drag_panel.clone())
                         }),
                 )
             })

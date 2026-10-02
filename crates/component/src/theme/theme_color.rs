@@ -209,6 +209,8 @@ pub struct ThemeColor {
     pub primary_hover: Hsla,
     /// Progress bar background color.
     pub progress_bar: Hsla,
+    /// The hairline a resize handle draws at rest.
+    pub resizable_border: Hsla,
     /// Used for focus ring.
     pub ring: Hsla,
     /// Scrollbar background color.
@@ -479,6 +481,7 @@ define_theme_tokens! {
     primary_foreground,
     primary_hover,
     progress_bar,
+    resizable_border,
     ring,
     scrollbar,
     scrollbar_thumb,

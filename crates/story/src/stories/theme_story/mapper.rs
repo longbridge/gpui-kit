@@ -131,6 +131,9 @@ pub fn parse_theme_key(key: &str) -> ParsedKey {
         "switch" => ("Switch", "Background", "switch.background"),
         "switch_thumb" => ("Switch", "Thumb", "switch.thumb.background"),
 
+        // Resizable
+        "resizable_border" => ("Resizable", "Border", "resizable.border"),
+
         // Muted / Skeleton
         "muted" => ("Muted", "Background", "muted.background"),
         "muted_foreground" => ("Muted", "Foreground", "muted.foreground"),

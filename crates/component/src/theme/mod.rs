@@ -449,7 +449,7 @@ impl Theme {
                         }),
                 ),
             resizable: gpui_base::ResizableTheme {
-                handle: Some(self.border),
+                handle: Some(self.resizable_border),
                 active_handle: Some(self.drag_border),
             },
             plot: gpui_base::PlotTheme::new().with_motion(plot_motion(&self.motion)),
@@ -1089,7 +1089,7 @@ mod base_theme_projection_tests {
             base.scrollbar.motion(),
             scrollbar_motion(theme.scrollbar_mode)
         );
-        assert_eq!(base.resizable.handle, Some(theme.border));
+        assert_eq!(base.resizable.handle, Some(theme.resizable_border));
         assert_eq!(base.resizable.active_handle, Some(theme.drag_border));
     }
 

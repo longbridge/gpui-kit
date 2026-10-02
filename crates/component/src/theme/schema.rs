@@ -482,6 +482,9 @@ pub struct ThemeConfigColors {
     /// Progress bar background color.
     #[serde(rename = "progress.bar.background")]
     pub progress_bar: Option<SharedString>,
+    /// The hairline a resize handle draws at rest.
+    #[serde(rename = "resizable.border")]
+    pub resizable_border: Option<SharedString>,
     /// Used for focus ring.
     #[serde(rename = "ring")]
     pub ring: Option<SharedString>,
@@ -974,6 +977,7 @@ impl ThemeColor {
         apply_background_color!(popover, fallback = tokens.background);
         apply_color!(popover_foreground, fallback = self.foreground);
         apply_background_color!(progress_bar, fallback = tokens.primary);
+        apply_color!(resizable_border, fallback = self.border);
         apply_color!(ring, fallback = self.blue);
         apply_background_color!(scrollbar, fallback = tokens.background);
         apply_background_color!(scrollbar_thumb, fallback = tokens.accent);
@@ -1224,6 +1228,27 @@ mod tests {
 
         theme.apply_config(&std::rc::Rc::new(ThemeConfig::default()));
         assert_eq!(theme.chart_grid, theme.border.opacity(0.6));
+    }
+
+    #[test]
+    fn test_apply_config_reads_the_resizable_border() {
+        let config = serde_json::from_value::<ThemeConfig>(serde_json::json!({
+            "name": "Palette",
+            "mode": "light",
+            "colors": {
+                "border": "#cccccc",
+                "resizable.border": "#eeeeee"
+            }
+        }))
+        .unwrap();
+
+        let mut theme = Theme::default();
+        theme.apply_config(&std::rc::Rc::new(config));
+        assert_eq!(theme.resizable_border, try_parse_color("#eeeeee").unwrap());
+
+        // Left unset, a divider keeps drawing in the border color it always had.
+        theme.apply_config(&std::rc::Rc::new(ThemeConfig::default()));
+        assert_eq!(theme.resizable_border, theme.border);
     }
 
     #[test]

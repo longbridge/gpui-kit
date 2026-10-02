@@ -325,6 +325,10 @@
           "description": "Progress bar background color.",
           "type": ["string", "null"]
         },
+        "resizable.border": {
+          "description": "The hairline a resize handle draws at rest. Falls back to `border`.",
+          "type": ["string", "null"]
+        },
         "ring": {
           "description": "Used for focus ring.",
           "type": ["string", "null"]

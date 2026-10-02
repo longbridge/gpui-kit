@@ -42,6 +42,10 @@ Base owns a handle's hit band, its cursor and the drag; what is painted inside i
 
 Returning `None` keeps base's own one-pixel line, so a renderer can override some handles and leave the rest alone.
 
+## Standalone handle
+
+`resize_handle(id, axis)` builds the same handle for an edge no panel group owns. It implements `InteractiveElement` and `StatefulInteractiveElement`, so the drag and anything else — `on_drag`, `on_drag_move`, `on_hover`, `on_double_click` — are attached the usual way, and what the drag resizes stays with the caller. `inside(HandleEdge)` keeps the band within its container; without it the band straddles the boundary.
+
 ## Complete Rust example
 
 The complete implementation used by the runnable showcase is embedded directly from Rust source:
