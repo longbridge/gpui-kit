@@ -265,9 +265,18 @@ async fn dictate(
                 };
             }
             // Stopping flushes the last phrase, then completes the session.
-            Message::Finish => action(continuous.StopAsync().map_err(speech_error)?)
-                .await
-                .map_err(speech_error)?,
+            Message::Finish => {
+                let stopped = match continuous.StopAsync() {
+                    Ok(stop) => action(stop).await,
+                    Err(error) => Err(error),
+                };
+                // The session may have ended by itself, e.g. after the silence
+                // timeout, with its `Completed` still queued behind this; stopping
+                // it then fails, and that queued event ends the session instead.
+                if let Err(error) = stopped {
+                    log::debug!("speech: stopping dictation failed: {error}");
+                }
+            }
         }
     }
     Ok(())

@@ -425,7 +425,7 @@ impl Recognition {
     /// text. Commit that utterance as a phrase only once it is dropped.
     fn on_result(&mut self, text: String, is_final: bool, ends_utterance: bool, cx: &mut App) {
         if let Some(utterance) = self.utterance.take()
-            && !text.starts_with(&utterance)
+            && starts_over(&utterance, &text)
         {
             self.commit(&utterance, cx);
         }
@@ -463,6 +463,22 @@ impl Recognition {
     }
 }
 
+/// Whether `text`, the result after the one that ended `utterance`, starts a new
+/// utterance instead of carrying `utterance` on.
+///
+/// A result that carries it on may still revise its words, punctuation or case
+/// ("Hello word" becomes "Hello world, how"), so an exact prefix is too strict;
+/// a result that starts over shares almost nothing with it. Less than half of
+/// `utterance` in common means it started over.
+fn starts_over(utterance: &str, text: &str) -> bool {
+    let common = utterance
+        .chars()
+        .zip(text.chars())
+        .take_while(|(a, b)| a == b)
+        .count();
+    common * 2 < utterance.chars().count()
+}
+
 /// Whether two phrases ending and starting with these characters need a space
 /// between them.
 fn needs_space(before: char, after: char) -> bool {
@@ -483,4 +499,30 @@ fn is_unspaced_script(c: char) -> bool {
         | '\u{F900}'..='\u{FAFF}'
         | '\u{FF00}'..='\u{FFEF}'
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_revised_utterance_carries_on() {
+        assert!(!starts_over("Hello word", "Hello world, how"));
+        assert!(!starts_over("Hello world", "Hello world. How are you"));
+        assert!(!starts_over("今天天气", "今天天气很好"));
+    }
+
+    #[test]
+    fn a_reset_result_starts_over() {
+        assert!(starts_over("Hello world.", "How"));
+        assert!(starts_over("今天天气很好。", "明天"));
+    }
+
+    #[test]
+    fn phrases_are_spaced_by_script() {
+        assert!(needs_space('.', 'H'));
+        assert!(!needs_space('d', ','));
+        assert!(!needs_space('。', '明'));
+        assert!(!needs_space('好', 'O'));
+    }
 }
