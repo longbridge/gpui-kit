@@ -112,6 +112,16 @@ export const stories = [
     api: "Slider",
   }),
   pendingStory({
+    id: "speech",
+    title: "Speech",
+    group: "Inputs",
+    rustStory: "SpeechStory",
+    description: "Dictation through a Rust speech recognizer.",
+    states: ["idle", "recording", "unsupported"],
+    availability: "infrastructure",
+    api: "SpeechButton",
+  }),
+  pendingStory({
     id: "color-picker",
     title: "ColorPicker",
     group: "Inputs",

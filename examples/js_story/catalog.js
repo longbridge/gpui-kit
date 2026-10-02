@@ -90,6 +90,7 @@ const RUST_STORY_ORDER = [
   "SidebarStory",
   "SkeletonStory",
   "SliderStory",
+  "SpeechStory",
   "SpinnerStory",
   "StatusBarStory",
   "StepperStory",

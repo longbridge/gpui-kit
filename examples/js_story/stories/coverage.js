@@ -62,6 +62,7 @@ export const coveredBy = [
   { route: "sidebar", registrations: ["Sidebar"] },
   { route: "skeleton", registrations: ["Skeleton"] },
   { route: "slider", registrations: ["Slider"] },
+  { route: "speech", registrations: [] },
   { route: "spinner", registrations: ["Spinner"] },
   { route: "status-bar", registrations: ["StatusBar"] },
   { route: "stepper", registrations: ["Stepper"] },
