@@ -2151,7 +2151,14 @@ mod tests {
     fn setup_modal(
         cx: &mut TestAppContext,
     ) -> (Entity<ModalScopeTestView>, &mut VisualTestContext) {
-        cx.update(crate::init);
+        // Modal entrance animations run on wall-clock time, which
+        // `advance_clock` does not move. Reduce motion so they settle on the
+        // first frame; otherwise a slow runner drags at stale bounds while the
+        // modal is still sliding in.
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
         let (root, cx) = cx.add_window_view(|window, cx| {
             let view = cx.new(ModalScopeTestView::new);
             Root::new(view, window, cx)
