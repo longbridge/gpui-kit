@@ -1,6 +1,6 @@
 [package]
 name = "speech"
-description = "A dictation notepad for trying out and testing GPUI Component speech input."
+description = "A notepad you can talk into, for trying out and testing GPUI Component speech input."
 version = "0.7.0"
 publish = false
 edition.workspace = true

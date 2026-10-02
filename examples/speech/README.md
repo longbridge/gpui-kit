@@ -1,6 +1,6 @@
 # Speech
 
-Dictation, a notepad you can talk into, built on GPUI Component's speech input. It is also
+A notepad you can talk into, built on GPUI Component's speech input. It is also
 the test bench for the platform recognizers: the sidebar shows what this machine
 supports, and the session log records every `SpeechEvent`.
 

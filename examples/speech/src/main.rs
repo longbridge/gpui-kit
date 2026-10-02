@@ -1,4 +1,4 @@
-//! Dictation: a notepad you can talk into, built on GPUI Component's speech
+//! Speech: a notepad you can talk into, built on GPUI Component's speech
 //! input. It doubles as a test bench for the platform recognizers: the sidebar
 //! reports what this machine supports and the session log records every event.
 //!
@@ -55,7 +55,7 @@ impl AssetSource for AppAssets {
     }
 }
 
-actions!(dictation, [ToggleDictation]);
+actions!(speech, [ToggleSpeech]);
 
 const TOGGLE_KEYS: &str = "secondary-shift-d";
 /// Most log entries kept; older ones scroll away.
@@ -154,7 +154,7 @@ fn platform_name() -> &'static str {
     }
 }
 
-struct DictationApp {
+struct SpeechApp {
     focus_handle: FocusHandle,
     engine: Engine,
     language: SharedString,
@@ -171,7 +171,7 @@ struct DictationApp {
     _subscriptions: Vec<Subscription>,
 }
 
-impl DictationApp {
+impl SpeechApp {
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let engine = Engine::System;
         let language = SharedString::from("en-US");
@@ -246,7 +246,7 @@ impl DictationApp {
         }
     }
 
-    fn toggle_dictation(&mut self, _: &ToggleDictation, _: &mut Window, cx: &mut Context<Self>) {
+    fn toggle_speech(&mut self, _: &ToggleSpeech, _: &mut Window, cx: &mut Context<Self>) {
         self.speech.update(cx, |speech, cx| speech.toggle(cx));
     }
 
@@ -470,8 +470,8 @@ impl DictationApp {
             )
     }
 
-    /// The bar that runs dictation: button, level, live text and controls.
-    fn render_dictation_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
+    /// The bar that runs a speech session: button, level, live text and controls.
+    fn render_speech_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let speech = self.speech.read(cx);
         let status = speech.status();
         let transcript = speech.transcript();
@@ -642,19 +642,19 @@ impl DictationApp {
     }
 }
 
-impl Focusable for DictationApp {
+impl Focusable for SpeechApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl Render for DictationApp {
+impl Render for SpeechApp {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
             .bg(cx.theme().background)
             .text_color(cx.theme().foreground)
-            .on_action(cx.listener(Self::toggle_dictation))
+            .on_action(cx.listener(Self::toggle_speech))
             .child(
                 TitleBar::new().child(
                     h_flex()
@@ -667,7 +667,7 @@ impl Render for DictationApp {
                                 .small()
                                 .text_color(cx.theme().primary),
                         )
-                        .child("Dictation"),
+                        .child("Speech"),
                 ),
             )
             .child(
@@ -689,7 +689,7 @@ impl Render for DictationApp {
                                     .min_h_0()
                                     .child(Textarea::new(&self.notes).h_full()),
                             )
-                            .child(self.render_dictation_bar(cx))
+                            .child(self.render_speech_bar(cx))
                             .child(self.render_log(cx)),
                     ),
             )
@@ -829,7 +829,7 @@ fn main() {
             return;
         }
 
-        cx.bind_keys([KeyBinding::new(TOGGLE_KEYS, ToggleDictation, None)]);
+        cx.bind_keys([KeyBinding::new(TOGGLE_KEYS, ToggleSpeech, None)]);
         cx.activate(true);
 
         let window_options = WindowOptions {
@@ -838,7 +838,7 @@ fn main() {
             ..TitleBar::window_options()
         };
         gpui_kit::open_window(window_options, cx, |window, cx| {
-            cx.new(|cx| DictationApp::new(window, cx))
+            cx.new(|cx| SpeechApp::new(window, cx))
         })
         .expect("Failed to open window");
     });

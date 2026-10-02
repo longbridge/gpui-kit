@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Dictation listens to the microphone to turn what you say into text.</string>
+	<string>Speech listens to the microphone to turn what you say into text.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Dictation recognizes speech on this Mac to type what you say.</string>
+	<string>Speech recognizes what you say on this Mac to type what you say.</string>
 </dict>
 </plist>
