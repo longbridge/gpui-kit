@@ -532,7 +532,15 @@ impl SpeechApp {
             )
             .child(
                 v_flex()
-                    .flex_1()
+                    // While recording the waveform takes the rest of the row, so the
+                    // text keeps a fixed column and truncates the live transcript.
+                    .map(|this| {
+                        if status.is_active() {
+                            this.w(px(220.)).flex_shrink_0()
+                        } else {
+                            this.flex_1()
+                        }
+                    })
                     .min_w_0()
                     .gap_0p5()
                     .child(
@@ -559,7 +567,7 @@ impl SpeechApp {
                     ),
             )
             .when(status.is_active(), |this| {
-                this.child(SpeechWaveform::new(&self.speech).w(px(112.)).small())
+                this.child(SpeechWaveform::new(&self.speech).flex_1().min_w_0().small())
             })
             .map(|this| {
                 if status.is_active() {

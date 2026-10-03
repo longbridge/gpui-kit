@@ -273,7 +273,7 @@ impl AudioInput for Silence {
 let speech = cx.new(|cx| SpeechState::new(cx).recognizer(recognizer).input(Silence));
 ```
 
-`levels()` 返回 `SpeechWaveform` 绘制所用的近期输入音量，取值 `0.0..=1.0`，按时间从旧到新排列，每 25 ms 音频一个值，适合需要自绘音量表的应用。音量升高时立即跟上、回落时平滑下降，背景噪音记为 `0.0`。
+`levels()` 返回 `SpeechWaveform` 绘制所用的近期输入音量，取值 `0.0..=1.0`，按时间从旧到新排列，每 80 ms 音频一个值，适合需要自绘音量表的应用。音量升高时立即跟上、回落时平滑下降，背景噪音记为 `0.0`。
 
 ## 平台支持
 
@@ -314,7 +314,7 @@ Linux 没有系统识别器，只有在应用提供识别器时才能使用语�
 - [SpeechState]：会话本身，包括 `recognizer`、`input`、`system_fallback`、`stop_timeout`、`start`、`stop`、`cancel`、`toggle`、`status`、`has_recognizer`、`is_available`、`transcript`、`levels`
 - [SpeechEvent] 与 [SpeechStatus]
 - [SpeechButton]：`show_when_unsupported`，以及 `Sizable` 和 `Disableable`
-- [SpeechWaveform]：铺满自身宽度的实时波形（不设宽度时为 96 px），采集期间滚动；`Sizable` 决定高度，`Styled` 决定宽度
+- [SpeechWaveform]：实时波形。有音频进来后从末端开始出现，以固定速度滚动（每 80 ms 一根），直到铺满自身宽度（不设宽度时为 96 px）；静音时显示为圆点。`Sizable` 决定高度，`Styled` 决定宽度
 - [SpeechRecognizer]、[RecognitionSession] 与 [SpeechSink]：识别的扩展点
 - [AudioInput]、[AudioSink] 与 [AudioFormat]：音频的扩展点
 - [SpeechError]

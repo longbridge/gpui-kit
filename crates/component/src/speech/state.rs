@@ -165,15 +165,17 @@ impl SpeechState {
         }
     }
 
-    /// Recent input levels in `0.0..=1.0`, oldest first, one per 25 ms of
+    /// Recent input levels in `0.0..=1.0`, oldest first, one per 80 ms of
     /// audio. Peaks rise at once and fall back smoothly; background noise reads
     /// as `0.0`.
     pub fn levels(&self) -> impl ExactSizeIterator<Item = f32> + '_ {
         self.meter.levels()
     }
 
-    pub(super) fn last_level_at(&self) -> Option<instant::Instant> {
-        self.meter.last_level_at()
+    /// How far past the waveform's trailing edge the newest level sits at
+    /// `now`, in levels; see `LevelMeter::lead_at`.
+    pub(super) fn level_lead_at(&self, now: instant::Instant) -> Option<f32> {
+        self.meter.lead_at(now)
     }
 
     /// Start a session. Does nothing while one is running.
@@ -517,13 +519,13 @@ mod tests {
 
         cx.update(|cx| {
             f.sink().ready(cx);
-            // Two levels' worth: 25 ms is 400 samples at 16 kHz.
-            f.audio().push(vec![i16::MAX / 2; 800], cx);
+            // Two levels' worth: 80 ms is 1 280 samples at 16 kHz.
+            f.audio().push(vec![i16::MAX / 2; 2_560], cx);
             f.sink().hypothesis("hello", cx);
         });
         cx.run_until_parked();
         assert_eq!(f.status(cx), SpeechStatus::Recording);
-        assert_eq!(f.recognizer.recorded.borrow().samples, 800);
+        assert_eq!(f.recognizer.recorded.borrow().samples, 2_560);
         cx.read(|cx| {
             let state = f.state.read(cx);
             assert_eq!(state.levels().len(), 2);

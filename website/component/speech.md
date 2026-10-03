@@ -328,7 +328,7 @@ let speech = cx.new(|cx| SpeechState::new(cx).recognizer(recognizer).input(Silen
 ```
 
 `levels()` exposes the recent input levels that `SpeechWaveform` draws, in
-`0.0..=1.0` with the oldest first, one per 25 ms of audio, for an application
+`0.0..=1.0` with the oldest first, one per 80 ms of audio, for an application
 that renders its own meter. Peaks rise at once and fall back smoothly, and
 background noise reads as `0.0`.
 
@@ -386,7 +386,7 @@ application recognizer; without one, `SpeechButton` renders nothing. The
   `has_recognizer`, `is_available`, `transcript`, `levels`
 - [SpeechEvent] and [SpeechStatus]
 - [SpeechButton] — `show_when_unsupported`, plus `Sizable` and `Disableable`
-- [SpeechWaveform] — a live waveform that fills its width (96 px unless styled) and scrolls while capturing; `Sizable` sets its height, `Styled` its width
+- [SpeechWaveform] — a live waveform that grows from its trailing edge as audio arrives and scrolls at a steady pace (one bar per 80 ms) until it fills its width (96 px unless styled); silence shows as dots; `Sizable` sets its height, `Styled` its width
 - [SpeechRecognizer], [RecognitionSession] and [SpeechSink] — the recognition
   seam
 - [AudioInput], [AudioSink] and [AudioFormat] — the audio seam
