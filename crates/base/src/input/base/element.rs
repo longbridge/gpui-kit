@@ -3520,6 +3520,66 @@ mod tests {
     }
 
     #[gpui::test]
+    fn row_bounds_cover_soft_wrapped_rows_that_are_laid_out(cx: &mut TestAppContext) {
+        let text = format!(
+            "{}\nshort\ntop\nhidden\nend\n{}",
+            "word ".repeat(8),
+            "x\n".repeat(60)
+        );
+        let (editor, window) = decoration_editor(cx, &text, true);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let unpainted = cx.new(|cx| EditorState::new(window, cx).default_value("a"));
+            assert!(
+                unpainted.read(cx).row_bounds(0).is_none(),
+                "nothing laid out"
+            );
+
+            editor.update(cx, |state, cx| {
+                state.apply_highlighter_fold_candidates(vec![FoldRange::new(2, 4)], cx);
+                state.display_map.set_folded(2, true);
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+            {
+                let state = editor.read(cx);
+                let layout = state.last_layout.as_ref().unwrap();
+                let wrapped = state.row_bounds(0).unwrap();
+                assert_eq!(
+                    wrapped.origin,
+                    point(
+                        state.input_bounds.origin.x,
+                        state.last_bounds.unwrap().origin.y + layout.visible_top
+                    )
+                );
+                assert_eq!(wrapped.size.width, state.input_bounds.size.width);
+                assert!(wrapped.size.height > layout.line_height, "{wrapped:?}");
+
+                let next = state.row_bounds(1).unwrap();
+                assert_eq!(next.origin.y, wrapped.bottom());
+                assert_eq!(next.size.height, layout.line_height);
+                assert!(state.row_bounds(3).is_none(), "folded away");
+                assert_eq!(
+                    state.row_bounds(4).unwrap().origin.y,
+                    state.row_bounds(2).unwrap().bottom()
+                );
+            }
+
+            editor.update(cx, |state, cx| {
+                let height = state.last_layout.as_ref().unwrap().line_height;
+                state.set_scroll_offset(point(px(0.), -height * 30.), cx);
+            });
+            // Deferred scroll is committed by prepaint and reflected next frame.
+            window.draw(cx).clear(cx);
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let visible = state.visible_row_range().unwrap();
+            assert!(state.row_bounds(0).is_none(), "scrolled out of view");
+            assert!(state.row_bounds(visible.start + 1).is_some());
+        });
+    }
+
+    #[gpui::test]
     fn editor_line_number_gutter_resizes_with_document_lines(cx: &mut TestAppContext) {
         let (editor, window) = decoration_editor(cx, &"x\n".repeat(8), false);
         let mut cx = VisualTestContext::from_window(window.into(), cx);

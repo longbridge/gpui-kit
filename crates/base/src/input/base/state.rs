@@ -3646,6 +3646,31 @@ impl<M: InputModeKind> InputBaseState<M> {
         ))
     }
 
+    /// Return the rendered bounds of a zero-based buffer row.
+    ///
+    /// The bounds span the input from its left edge, gutter included, to its
+    /// right edge, and are as tall as all the row's soft-wrapped lines: the band
+    /// a line-decoration background covers. Returns `None` when the row is not
+    /// currently laid out: before the first layout, scrolled out of view, or
+    /// folded away.
+    pub fn row_bounds(&self, row: usize) -> Option<Bounds<Pixels>> {
+        let last_layout = self.last_layout.as_ref()?;
+        let last_bounds = self.last_bounds?;
+        let ix = last_layout.visible_buffer_lines.binary_search(&row).ok()?;
+        let line_height = last_layout.line_height;
+        let height = last_layout.lines.get(ix)?.size(line_height).height;
+        let top = last_layout.visible_top
+            + last_layout.lines[..ix]
+                .iter()
+                .map(|line| line.size(line_height).height)
+                .sum::<Pixels>();
+
+        Some(Bounds::new(
+            point(self.input_bounds.origin.x, last_bounds.origin.y + top),
+            gpui::size(self.input_bounds.size.width, height),
+        ))
+    }
+
     /// Replace text in range in silent.
     ///
     /// This will not trigger any UI interaction, such as auto-completion.
