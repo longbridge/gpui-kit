@@ -265,6 +265,21 @@ impl Fixture {
         self.settle(cx);
     }
 
+    fn set_value(&self, value: &str, cx: &mut TestAppContext) {
+        cx.update_window(self.handle.into(), |_, window, cx| {
+            self.state
+                .update(cx, |state, cx| state.set_value(value, window, cx));
+        })
+        .unwrap();
+        self.settle(cx);
+    }
+
+    fn select(&self, range: std::ops::Range<usize>, cx: &mut TestAppContext) {
+        self.state
+            .update(cx, |state, cx| state.set_selected_range(range, cx));
+        self.settle(cx);
+    }
+
     fn press(&self, key: &str, cx: &mut TestAppContext) {
         cx.update_window(self.handle.into(), |_, window, cx| window.press(key, cx))
             .unwrap();
@@ -357,6 +372,94 @@ fn continued_typing_refreshes_provider_filtered_suggestions(cx: &mut TestAppCont
     // selection does not leave the refreshed one-item list out of bounds.
     fixture.press("enter", cx);
     fixture.assert_editor("private", cx);
+}
+
+#[gpui_kit::test]
+fn typing_over_a_selection_measures_the_prefix_from_where_the_text_begins(cx: &mut TestAppContext) {
+    let fixture = Fixture::new(cx);
+    // No menu has opened yet, so nothing but the replaced range locates the
+    // typed text. Replacing a longer span used to drop the request; replacing
+    // one of equal length used to hand the provider an empty prefix.
+    fixture.set_value("print", cx);
+    fixture.select(2..5, cx);
+    fixture.input("x", cx);
+    fixture.assert_editor("prx", cx);
+    fixture.select(0..1, cx);
+    fixture.input("q", cx);
+    fixture.assert_editor("qrx", cx);
+    assert_eq!(
+        *fixture.provider.requests.borrow(),
+        vec![
+            CompletionRequest {
+                text: "prx".into(),
+                offset: 3,
+                trigger: CompletionContext {
+                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                    trigger_character: Some("x".into()),
+                },
+            },
+            CompletionRequest {
+                text: "qrx".into(),
+                offset: 1,
+                trigger: CompletionContext {
+                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
+                    trigger_character: Some("q".into()),
+                },
+            },
+        ]
+    );
+}
+
+#[gpui_kit::test]
+fn deleting_back_into_the_word_keeps_refining_the_same_query(cx: &mut TestAppContext) {
+    let fixture = Fixture::new(cx);
+    fixture.start_completion(cx);
+    fixture.input("ri", cx);
+    fixture.press("backspace", cx);
+    fixture.input("v", cx);
+    fixture.assert_editor("prv", cx);
+    let requests = fixture.provider.requests.borrow();
+    let request = requests
+        .last()
+        .expect("completion requested after retyping");
+    assert_eq!(request.text, "prv");
+    assert_eq!(request.trigger.trigger_character.as_deref(), Some("prv"));
+}
+
+#[gpui_kit::test]
+fn typing_elsewhere_does_not_reuse_a_stale_trigger_offset(cx: &mut TestAppContext) {
+    let fixture = Fixture::new(cx);
+    fixture.start_completion(cx);
+    // Delete the word the menu opened for, then type non-trigger text and a
+    // newline. The earlier trigger offset still points at the start of the
+    // document, but nothing typed since continues that word.
+    fixture.press("backspace", cx);
+    fixture.input("!", cx);
+    fixture.press("enter", cx);
+    fixture.input("a", cx);
+    fixture.assert_editor("!\na", cx);
+    let requests = fixture.provider.requests.borrow();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].text, "!\na");
+    assert_eq!(requests[1].offset, 3);
+    assert_eq!(requests[1].trigger.trigger_character.as_deref(), Some("a"));
+}
+
+#[gpui_kit::test]
+fn replacing_the_document_starts_a_new_query_at_the_edit(cx: &mut TestAppContext) {
+    let fixture = Fixture::new(cx);
+    fixture.start_completion(cx);
+    // The trigger offset latched for "p" survives a programmatic replacement
+    // of the whole document; the new text at that offset is not the word the
+    // menu opened for, so typing measures from the edit, not from offset 0.
+    fixture.set_value("hello", cx);
+    fixture.select(5..5, cx);
+    fixture.input("x", cx);
+    fixture.assert_editor("hellox", cx);
+    let requests = fixture.provider.requests.borrow();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].offset, 6);
+    assert_eq!(requests[1].trigger.trigger_character.as_deref(), Some("x"));
 }
 
 #[gpui_kit::test]
