@@ -16,7 +16,7 @@ pub use gpui_kit_assets::IconNamed;
 /// Conversion to [`Icon`] currently copies the bytes through [`Icon::data`].
 ///
 /// ```
-/// use gpui_kit::component::{Icon, SvgIcon, button::Button};
+/// use gpui_component::{Icon, SvgIcon, button::Button};
 ///
 /// let icon = Icon::new(SvgIcon::ACCESSIBILITY);
 /// let button = Button::new("alarm").icon(SvgIcon::ALARM_CLOCK);
