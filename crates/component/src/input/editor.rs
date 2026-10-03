@@ -400,6 +400,73 @@ mod tests {
         });
     }
 
+    /// The styled editor projects a presentation for every gutter marker, and
+    /// paints them through the editor's own prepaint.
+    #[gpui::test]
+    fn line_decorations_paint_every_marker_kind(cx: &mut TestAppContext) {
+        use crate::IconName;
+        use crate::input::{GutterMarker, LineDecoration, LineDecorationProvider};
+        use gpui_kit_assets::IconNamed as _;
+        use std::{cell::Cell, ops::Range};
+
+        struct EveryKind(Rc<Cell<usize>>);
+
+        impl LineDecorationProvider for EveryKind {
+            fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
+                self.0.set(self.0.get() + 1);
+                let markers = [
+                    GutterMarker::DiffAdded,
+                    GutterMarker::DiffRemoved,
+                    GutterMarker::DiffChanged,
+                    GutterMarker::Conflict,
+                    GutterMarker::Bookmark,
+                    GutterMarker::Breakpoint,
+                    GutterMarker::Custom {
+                        icon: IconName::Star.path(),
+                        color: cx.theme().primary,
+                    },
+                ];
+                rows.zip(markers)
+                    .map(|(row, marker)| {
+                        LineDecoration::new(row)
+                            .with_background(cx.theme().success.opacity(0.16))
+                            .with_marker(marker)
+                    })
+                    .collect()
+            }
+        }
+
+        cx.update(crate::init);
+        let asked = Rc::new(Cell::new(0));
+        let mut state = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| EditorState::new(window, cx).default_value("a\n".repeat(7)));
+            editor.update(cx, |state, cx| {
+                state.create_line_decorations_collection(Rc::new(EveryKind(asked.clone())), cx);
+            });
+            state = Some(editor.clone());
+            Harness {
+                state: editor,
+                text_size: None,
+            }
+        });
+        let state = state.unwrap();
+        VisualTestContext::update(cx, |window, cx| window.draw(cx).clear(cx));
+
+        assert!(asked.get() > 0, "the provider was never asked");
+        cx.read(|cx| {
+            let first = state
+                .read(cx)
+                .row_bounds(0)
+                .expect("the first row is laid out");
+            let second = state
+                .read(cx)
+                .row_bounds(1)
+                .expect("the second row is laid out");
+            assert_eq!(second.origin.y, first.bottom());
+        });
+    }
+
     #[gpui::test]
     fn test_on_paste_builder(cx: &mut TestAppContext) {
         use gpui::{AppContext as _, Render};
