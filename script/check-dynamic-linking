@@ -1,0 +1,31 @@
+#!/usr/bin/env python3
+"""Verify that dynamic linking preserves Kit's optional dependency layers."""
+
+from pathlib import Path
+import subprocess
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def packages(features):
+    command = [
+        "cargo", "tree", "-p", "gpui-kit", "--locked", "--no-default-features",
+        "--edges", "normal", "--prefix", "none", "--format", "{p}",
+    ]
+    if features:
+        command.extend(["--features", ",".join(features)])
+    result = subprocess.run(command, cwd=ROOT, check=True, capture_output=True, text=True)
+    return {line.split()[0] for line in result.stdout.splitlines() if line.strip()}
+
+
+for layers in ((), ("component",), ("assets",), ("component", "assets")):
+    static = packages(layers)
+    dynamic = packages(("dynlib", *layers))
+    assert "gpui-kit-dylib" not in static, layers
+    assert "gpui-kit-dylib" in dynamic, layers
+    # Component already depends on assets. Compare against the same static
+    # feature selection instead of assuming every layer has no transitive deps.
+    assert dynamic - {"gpui-kit-dylib"} == static, (
+        layers, "added", dynamic - static, "removed", static - dynamic,
+    )
+    print(f"Verified dynamic linking layers: {', '.join(layers) or 'base only'}")

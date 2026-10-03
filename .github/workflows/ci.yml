@@ -143,6 +143,48 @@ jobs:
           --features gpui-component-story/test-support --locked
           $TEST_EXCLUDES --test rendering
 
+  dynamic-linking:
+    name: Dynamic linking (${{ matrix.run_on }}, ${{ matrix.layers }})
+    strategy:
+      fail-fast: false
+      matrix:
+        run_on: [ubuntu-latest, macos-latest, windows-latest]
+        layers: [default]
+        include:
+          - run_on: ubuntu-latest
+            layers: base
+    runs-on: ${{ matrix.run_on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-shared-key: dynamic-linking-${{ matrix.layers }}
+      - uses: rui314/setup-mold@v1
+      - name: Install system dependencies
+        if: ${{ matrix.run_on != 'windows-latest' }}
+        run: script/bootstrap
+      - name: Verify optional dependency layers
+        if: ${{ matrix.layers == 'base' }}
+        run: python3 script/check-dynamic-linking
+      # Actually link and load the shared library; cargo check cannot catch
+      # missing symbols, Windows export limits, or loader failures.
+      - name: Link and run headless smoke example
+        run: |
+          features=()
+          if [[ "${{ matrix.layers }}" == base ]]; then
+            features+=(--no-default-features)
+          fi
+          config=()
+          if [[ "${{ matrix.run_on }}" == windows-latest ]]; then
+            config+=(--config script/dynamic-linking-windows.toml)
+          fi
+          cargo run -p dynlib --locked \
+            --features dynlib "${features[@]}" "${config[@]}"
+
   gpui-shell-core:
     name: GPUI Shell Core
     runs-on: ubuntu-latest

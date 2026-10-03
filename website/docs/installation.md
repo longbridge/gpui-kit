@@ -86,6 +86,39 @@ For a new project instead, follow [Getting Started](./getting-started). It creat
 
 For errors after a window opens, continue with [Getting Started](./getting-started) and inspect the relevant guide for the feature you are using.
 
+## Faster development linking
+
+To try dynamic linking, add an application feature:
+
+```toml
+[features]
+dev = ["gpui-kit/dynlib"]
+```
+
+Run with `cargo run --features dev`. This can reduce incremental linking time;
+the first build still compiles the shared library. Kit's `component` and `assets`
+features remain independent, including with `default-features = false`.
+
+Cargo sets the dynamic library search path for programs it launches. It does not
+enable RPATH by default, so running or copying the executable directly may fail
+without the matching shared libraries and loader configuration. For production,
+omit `dev` and `dynlib`; `--release` does not disable enabled features.
+Wasm builds exclude the dynamic dependency.
+
+On Windows, optimize development dependencies to avoid MSVC's DLL import-library
+member limit (`LNK1189`). Add this to the application's root `Cargo.toml`:
+
+```toml
+[profile.dev.package."*"]
+opt-level = 3
+```
+
+The first build takes longer; application code remains in the normal development
+profile. The wildcard excludes workspace members, so local Kit framework crates
+need explicit overrides too. This repository provides those in
+`script/dynamic-linking-windows.toml`. If your dependency graph still exceeds the
+limit, disable `dynlib`.
+
 ## Improve development runtime performance
 
 Rust Debug builds leave GPUI, the component library, layout, and text rendering

@@ -12,6 +12,7 @@ for package in \
   gpui-fps \
   gpui-component \
   gpui-wry \
+  gpui-kit-dylib \
   gpui-kit
 do
   # CI forces colored Cargo output; keep diagnostics plain for matching below.

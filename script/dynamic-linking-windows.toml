@@ -1,0 +1,21 @@
+# Windows DLL import libraries have a 65,535-member limit. Optimize framework
+# dependencies to reduce exported generic instances while keeping app code debug.
+[profile.dev.package."*"]
+opt-level = 3
+
+# The wildcard excludes workspace members. These are dependencies of the smoke
+# consumer, but local members when testing this repository.
+[profile.dev.package.gpui-base]
+opt-level = 3
+
+[profile.dev.package.gpui-component]
+opt-level = 3
+
+[profile.dev.package.gpui-kit-assets]
+opt-level = 3
+
+[profile.dev.package.gpui-kit]
+opt-level = 3
+
+[profile.dev.package.gpui-kit-dylib]
+opt-level = 3
