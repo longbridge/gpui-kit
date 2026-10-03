@@ -1090,7 +1090,108 @@ mod tests {
     use super::*;
     use std::rc::Rc;
 
+    #[cfg(target_os = "linux")]
+    use gpui::TestAppContext;
     use gpui::{Boundary, FontFeatures, FontStyle, FontWeight, px};
+
+    #[cfg(target_os = "linux")]
+    fn shaped_width(text: &str, font: &Font, font_size: Pixels, cx: &App) -> Pixels {
+        gpui::WindowTextSystem::new(cx.text_system().clone())
+            .layout_line(
+                text,
+                font_size,
+                &[gpui::TextRun {
+                    len: text.len(),
+                    font: font.clone(),
+                    color: gpui::black(),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                }],
+                None,
+            )
+            .width
+    }
+
+    // Linux exposes its native text engine without creating a desktop window.
+    // macOS platform creation requires the main thread, and Windows headless
+    // mode uses NoopTextSystem rather than native shaping.
+    #[cfg(target_os = "linux")]
+    fn shaping_test_context() -> TestAppContext {
+        let platform = gpui_platform::current_platform(true);
+        TestAppContext::build_with_text_system(
+            gpui::TestDispatcher::new(0),
+            None,
+            platform.text_system(),
+        )
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn production_wrap_keeps_shaped_cjk_latin_boundary_during_edits() {
+        let cx = shaping_test_context();
+        cx.update(|cx| {
+            let font = test_font();
+            let font_size = px(14.);
+            let prefix = "abcd的";
+            let width = shaped_width(prefix, &font, font_size, cx);
+            assert!(shaped_width("abcd的s", &font, font_size, cx) > width);
+            let mut wrapper = TextWrapper::new(font.clone(), font_size, Some(width));
+            let mut previous = Rope::new();
+
+            for value in ["abcd的", "abcd的s", "abcd的ss", "abcd的s", "abcd的"] {
+                let text = Rope::from(value);
+                let start = previous.len().min(text.len());
+                let inserted = Rope::from(text.slice(start..).to_string());
+                wrapper.update(&text, &(start..previous.len()), &inserted, cx);
+                let expected = if value.ends_with('s') {
+                    vec![0..prefix.len(), prefix.len()..value.len()]
+                } else {
+                    vec![0..prefix.len()]
+                };
+                assert_eq!(wrapper.line(0).unwrap().wrapped_lines.as_slice(), expected);
+                for range in &wrapper.line(0).unwrap().wrapped_lines {
+                    assert!(shaped_width(&value[range.clone()], &font, font_size, cx) <= width);
+                }
+                assert_eq!(
+                    wrapper.offset_to_display_point(value.len()).row,
+                    usize::from(value.ends_with('s'))
+                );
+                previous = text;
+            }
+        });
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn production_wrap_preserves_words_and_complete_graphemes() {
+        let cx = shaping_test_context();
+        cx.update(|cx| {
+            let font = test_font();
+            let font_size = px(14.);
+            for (value, prefix) in [("hello world", "hello "), ("a👩‍💻b", "a👩‍💻")] {
+                // Either complete row must fit even when the native font makes
+                // the second word wider than the first word and its space.
+                let width = shaped_width(prefix, &font, font_size, cx).max(shaped_width(
+                    &value[prefix.len()..],
+                    &font,
+                    font_size,
+                    cx,
+                ));
+                assert!(shaped_width(value, &font, font_size, cx) > width);
+                let text = Rope::from(value);
+                let mut wrapper = TextWrapper::new(font.clone(), font_size, Some(width));
+                wrapper.update(&text, &(0..0), &text, cx);
+                assert_eq!(
+                    wrapper.line(0).unwrap().wrapped_lines.as_slice(),
+                    [0..prefix.len(), prefix.len()..value.len()]
+                );
+                for range in &wrapper.line(0).unwrap().wrapped_lines {
+                    assert!(shaped_width(&value[range.clone()], &font, font_size, cx) <= width);
+                }
+            }
+        });
+    }
 
     #[test]
     fn measured_wrap_keeps_cjk_latin_boundary_stable_during_edits() {

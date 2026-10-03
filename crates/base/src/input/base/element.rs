@@ -3576,6 +3576,108 @@ mod tests {
     }
 
     #[gpui::test]
+    fn aligned_horizontal_scroll_clamps_deferred_targets(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, &"wide text ".repeat(80), false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let mut layout = editor.read(cx).last_layout.clone().unwrap();
+            let input_bounds = editor.read(cx).input_bounds;
+            let element = TextElement::new(editor.clone());
+
+            for alignment in [TextAlign::Left, TextAlign::Right, TextAlign::Center] {
+                layout.text_align = alignment;
+                for overflow in [px(0.), px(120.)] {
+                    let scroll_size =
+                        size(input_bounds.size.width + overflow, input_bounds.size.height);
+                    let minimum = if alignment == TextAlign::Left {
+                        -overflow
+                    } else {
+                        -overflow - CURSOR_WIDTH
+                    };
+                    editor.update(cx, |state, _| {
+                        state.text_align = alignment;
+                        state.last_selected_range = Some(*state.active_selection());
+                        state.deferred_scroll_offset = Some(point(minimum, px(0.)));
+                    });
+                    let mut bounds = input_bounds;
+                    let (expected, _, _) =
+                        element.layout_cursors(&layout, &mut bounds, scroll_size, window, cx);
+
+                    for target in [minimum - px(100.), px(100.)] {
+                        editor.update(cx, |state, _| {
+                            state.deferred_scroll_offset = Some(point(target, px(0.)));
+                        });
+                        let mut bounds = input_bounds;
+                        let (carets, offset, _) =
+                            element.layout_cursors(&layout, &mut bounds, scroll_size, window, cx);
+                        let expected_offset = if target < minimum { minimum } else { px(0.) };
+                        assert_eq!(offset.x, expected_offset);
+                        assert_eq!(bounds.left(), input_bounds.left() + expected_offset);
+                        if target < minimum {
+                            assert_eq!(carets[0].bounds, expected[0].bounds);
+                        }
+                        if alignment == TextAlign::Right {
+                            assert!(carets[0].bounds.right() <= input_bounds.right());
+                        }
+                        editor.update(cx, |state, cx| {
+                            state.scroll_size = scroll_size;
+                            state.update_scroll_offset(Some(offset), cx);
+                            assert_eq!(state.scroll_handle.offset().x, expected_offset);
+                        });
+                    }
+                }
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn deferred_horizontal_scroll_moves_every_caret(cx: &mut TestAppContext) {
+        use super::super::{cursor::CursorSelection, selection::CursorId};
+
+        let (editor, window) = decoration_editor(cx, &"wide text ".repeat(80), false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let layout = editor.read(cx).last_layout.clone().unwrap();
+            let input_bounds = editor.read(cx).input_bounds;
+            let scroll_size = size(input_bounds.size.width + px(120.), input_bounds.size.height);
+            let element = TextElement::new(editor.clone());
+
+            for offsets in [[0, 2, 4], [0, 4, 2], [4, 0, 2]] {
+                editor.update(cx, |state, _| {
+                    state.selections.replace_all(
+                        offsets
+                            .into_iter()
+                            .enumerate()
+                            .map(|(id, offset)| {
+                                CursorSelection::new(CursorId::new(id), offset, offset)
+                            })
+                            .collect(),
+                    );
+                    state.last_selected_range = Some(*state.active_selection());
+                    state.scroll_handle.set_offset(point(px(0.), px(0.)));
+                    state.deferred_scroll_offset = None;
+                });
+                let mut bounds = input_bounds;
+                let (baseline, _, _) =
+                    element.layout_cursors(&layout, &mut bounds, scroll_size, window, cx);
+                editor.update(cx, |state, _| {
+                    state.deferred_scroll_offset = Some(point(px(-60.), px(0.)));
+                });
+                let mut bounds = input_bounds;
+                let (carets, offset, _) =
+                    element.layout_cursors(&layout, &mut bounds, scroll_size, window, cx);
+                assert_eq!(offset.x, px(-60.));
+                assert_eq!(carets.len(), 3);
+                for (caret, original) in carets.iter().zip(baseline) {
+                    assert_eq!(caret.bounds.left(), original.bounds.left() - px(60.));
+                }
+            }
+        });
+    }
+
+    #[gpui::test]
     fn editor_line_number_gutter_resizes_with_document_lines(cx: &mut TestAppContext) {
         let (editor, window) = decoration_editor(cx, &"x\n".repeat(8), false);
         let mut cx = VisualTestContext::from_window(window.into(), cx);
