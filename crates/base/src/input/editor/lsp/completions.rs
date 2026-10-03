@@ -138,19 +138,35 @@ impl InputBaseState<EditorMode> {
         // It will check if menu is open before showing the suggestion.
         self.schedule_inline_completion(window, cx);
 
-        let start = range.end;
+        // The new text begins where the replaced range begins. Both ends agree
+        // for a collapsed caret, but typing over a selection or committing an
+        // IME composition replaces `range`, and measuring from its end handed
+        // the provider an empty prefix or dropped the request outright.
+        let start = range.start;
         let new_offset = self.cursor();
 
         if !provider.is_completion_trigger(start, new_text, cx) {
             return;
         }
 
-        let start_offset = self
-            .extras
-            .context_menu_content
-            .completion
-            .trigger_start_offset
-            .unwrap_or(start);
+        // `trigger_start_offset` latches where the word a menu was opened for
+        // begins, so later keystrokes refine the same query instead of starting
+        // over at each character. It only describes this edit while the edit
+        // continues that word: the document between the latch and the edit
+        // must still read as a prefix of the last query. Deleting back into
+        // the word keeps it; typing somewhere else, or into a document that
+        // has since been replaced, starts a new query at this edit instead of
+        // handing the provider text the user never typed as a prefix.
+        let completion = &self.extras.context_menu_content.completion;
+        let latched = completion.trigger_start_offset.filter(|&latched| {
+            latched <= start
+                && start <= latched + completion.query.len()
+                && self.text.is_char_boundary(latched)
+                && completion
+                    .query
+                    .starts_with(self.text.slice(latched..start).to_string().as_str())
+        });
+        let start_offset = latched.unwrap_or(start);
         if new_offset < start_offset {
             return;
         }
