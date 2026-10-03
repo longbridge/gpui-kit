@@ -3321,6 +3321,15 @@ impl<M: InputModeKind> Element for TextElement<M> {
             marker.paint(window, cx);
         }
 
+        // The line-number gutter is not text, so it takes the arrow rather than
+        // the I-beam the rest of the input sets.
+        if prepaint.line_numbers.is_some() {
+            window.set_cursor_style(
+                gpui::CursorStyle::Arrow,
+                &prepaint.fold_icon_layout.line_number_hitbox,
+            );
+        }
+
         self.state.update(cx, |state, cx| {
             let geometry_changed = state.last_bounds != Some(bounds)
                 || state.input_bounds != input_bounds
