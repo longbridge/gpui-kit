@@ -2671,6 +2671,74 @@ mod tests {
         );
     }
 
+    #[test]
+    fn table_row_backgrounds_follow_the_frame_corner_radius() {
+        use gpui::TestApp;
+
+        const HEAD_BACKGROUND: u32 = 0x11aa77;
+        const RADIUS: f32 = 8.;
+
+        struct RoundedTableRoot {
+            text_view: Entity<TextViewState>,
+            scroll: bool,
+        }
+
+        impl Render for RoundedTableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let mut table = StyleRefinement::default();
+                table.corner_radii.top_left = Some(px(RADIUS).into());
+                table.corner_radii.top_right = Some(px(RADIUS).into());
+                table.corner_radii.bottom_left = Some(px(RADIUS).into());
+                table.corner_radii.bottom_right = Some(px(RADIUS).into());
+                if self.scroll {
+                    table.overflow.x = Some(gpui::Overflow::Scroll);
+                }
+                let style = TextViewStyle::default()
+                    .with_code_background(gpui::rgb(HEAD_BACKGROUND).into())
+                    .with_table(table);
+                div()
+                    .w(px(400.))
+                    .child(TextView::new(&self.text_view).style(style))
+            }
+        }
+
+        for scroll in [false, true] {
+            let mode = if scroll { "scroll" } else { "wrap" };
+            let mut app = TestApp::new();
+            app.update(crate::init);
+            let mut window = app.open_window(|_, cx| RoundedTableRoot {
+                text_view: cx
+                    .new(|cx| TextViewState::markdown("| a | b |\n| --- | --- |\n| 1 | 2 |", cx)),
+                scroll,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+
+            let (quad, scale) = window.update(|_, window, _| {
+                let head: gpui::Background = gpui::rgb(HEAD_BACKGROUND).into();
+                let quad = window
+                    .painted_quads()
+                    .into_iter()
+                    .find(|quad| quad.background == head)
+                    .unwrap_or_else(|| panic!("{mode}: the header background quad is painted"));
+                (quad, window.scale_factor())
+            });
+
+            // GPUI clips children with a rectangular mask, so the header fill
+            // must carry the frame radius itself, inset by the 1px border.
+            let expected = px(RADIUS - 1.).scale(scale);
+            assert_eq!(quad.corner_radii.top_left, expected, "{mode}: top left");
+            assert_eq!(quad.corner_radii.top_right, expected, "{mode}: top right");
+            let square = px(0.).scale(scale);
+            assert_eq!(quad.corner_radii.bottom_left, square, "{mode}: bottom left");
+            assert_eq!(
+                quad.corner_radii.bottom_right, square,
+                "{mode}: bottom right"
+            );
+        }
+    }
+
     #[gpui::test]
     fn markdown_link_opens_url_without_handler(cx: &mut TestAppContext) {
         cx.update(crate::init);
