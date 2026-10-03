@@ -5,7 +5,7 @@ description: 以不同尺寸、颜色和变换方式显示 SVG 图标。
 
 # Icon
 
-Icon 支持通过资源路径或内存中的字节渲染 SVG 图标，并可定制尺寸、颜色与变换。内置的 Lucide 图标使用资源包；自定义 SVG 字节可以通过 `Icon::data` 直接传入。
+Icon 支持通过资源路径或内存中的字节渲染 SVG 图标，并可定制尺寸、颜色与变换。Lucide 图标可通过资源路径或 `SvgIcon` 的独立字节常量使用；自定义 SVG 字节可以通过 `Icon::data` 直接传入。
 
 在开始之前，建议先阅读 [Icons & Assets](../docs/assets.md)，了解如何在 GPUI 与 GPUI Component 应用中使用 SVG。
 
@@ -50,9 +50,23 @@ Icon 支持通过资源路径或内存中的字节渲染 SVG 图标，并可定�
 :::
 
 
+## 独立嵌入的目录图标
+
+```rust
+use gpui_kit::component::{Icon, SvgIcon, button::Button};
+
+Icon::new(SvgIcon::ACCESSIBILITY);
+Button::new("alarm").icon(SvgIcon::ALARM_CLOCK).label("设置闹钟");
+```
+
+`SvgIcon` 的每个常量只引用自己的 SVG，无须额外注册资源或维护宏清单。
+支持直接 `.child(SvgIcon::ACCESSIBILITY)` 和 `.view(cx)`；样式通过
+`Icon::new(...)` 调整。默认组件图标仍使用原有 `Assets`。
+资源裁剪、WASM 和当前复制成本见 [Icons & Assets](../docs/assets.md#使用独立嵌入的图标)。
+
 ## 应用额外图标
 
-照常注册默认 `Assets`。如果要使用目录中的额外图标，请按照
+照常注册默认 `Assets`。如果要按路径加载目录中的额外图标，请按照
 [选取图标教程](../docs/assets.md#用-icon_assets-选择更多目录图标)操作：`icon_assets!` 只为列出的
 SVG 创建资源源，应用还需将它与默认资源源组合并注册。应用自己的 SVG 文件请参阅
 [自定义资源](../docs/assets.md#自定义资源)。

@@ -8,6 +8,61 @@ use gpui::{
 };
 pub use gpui_kit_assets::IconNamed;
 
+/// An embedded SVG selected by its Rust references, without an asset source.
+///
+/// Each associated constant references only its own SVG. There is no catalog
+/// lookup or `ALL` array retaining every icon. Unreferenced SVGs can be omitted
+/// from optimized binaries. Default component icons still need the usual assets.
+/// Conversion to [`Icon`] currently copies the bytes through [`Icon::data`].
+///
+/// ```
+/// use gpui_kit::component::{Icon, SvgIcon, button::Button};
+///
+/// let icon = Icon::new(SvgIcon::ACCESSIBILITY);
+/// let button = Button::new("alarm").icon(SvgIcon::ALARM_CLOCK);
+/// ```
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, IntoElement)]
+pub struct SvgIcon {
+    bytes: &'static [u8],
+}
+
+impl SvgIcon {
+    /// Borrow a custom embedded SVG, such as `include_bytes!("logo.svg")`.
+    pub const fn new(bytes: &'static [u8]) -> Self {
+        Self { bytes }
+    }
+
+    /// Return the original SVG bytes.
+    pub const fn bytes(self) -> &'static [u8] {
+        self.bytes
+    }
+
+    /// Return the icon as an entity, using the same presentation as [`Icon`].
+    pub fn view(self, cx: &mut App) -> Entity<Icon> {
+        Icon::from(self).view(cx)
+    }
+}
+
+gpui_kit_assets::__component_svg_icons!(SvgIcon);
+
+impl From<SvgIcon> for Icon {
+    fn from(icon: SvgIcon) -> Self {
+        Self::default().data(icon.bytes)
+    }
+}
+
+impl RenderOnce for SvgIcon {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        Icon::from(self)
+    }
+}
+
+impl From<SvgIcon> for AnyElement {
+    fn from(icon: SvgIcon) -> Self {
+        icon.into_any_element()
+    }
+}
+
 // Preserve the original enum (including exhaustive matches and inherent view)
 // while the complete, shared catalog is owned by gpui-kit-assets.
 macro_rules! component_icon_names {
@@ -245,6 +300,28 @@ mod tests {
     use gpui::{px, size};
 
     const SVG: &[u8] = include_bytes!("../../assets/assets/icons/arrow-up.svg");
+
+    #[test]
+    fn test_svg_icon_builder_uses_bytes_without_asset_lookup() {
+        const CUSTOM: SvgIcon = SvgIcon::new(SVG);
+        for embedded in [CUSTOM, SvgIcon::ACCESSIBILITY, SvgIcon::ALARM_CLOCK] {
+            let icon = Icon::new(embedded).large().text_color(gpui::red());
+            assert!(
+                matches!(icon.source_ref(), IconSource::Data(bytes) if bytes.as_ref() == embedded.bytes())
+            );
+            let mut svg = icon.into_svg(px(12.), gpui::blue());
+            assert_eq!(svg.style().text.color, Some(gpui::red()));
+        }
+        assert_eq!(SvgIcon::ARROW_UP.bytes(), SVG);
+        assert_eq!(
+            SvgIcon::SQUARE_ARROW_OUT_UP_RIGHT.bytes(),
+            include_bytes!("../../assets/assets/icons/square-arrow-out-up-right.svg")
+        );
+        assert_eq!(
+            SvgIcon::ALARM_CLOCK.bytes(),
+            include_bytes!("../../assets/assets/icons/alarm-clock.svg")
+        );
+    }
 
     #[test]
     fn test_icon_builder_preserves_owned_data_and_transform_on_clone() {
