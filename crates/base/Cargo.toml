@@ -53,6 +53,7 @@ serde_json.workspace = true
 smallvec.workspace = true
 sum-tree.workspace = true
 tracing.workspace = true
+unicode-linebreak = "0.1.5"
 unicode-segmentation = "1.12.0"
 web-time = "1"
 

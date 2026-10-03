@@ -291,6 +291,22 @@ impl<M: InputModeKind> Element for EditorScrollbar<M> {
     }
 }
 
+// Prepaint and retained state must use the same range, including after content shrinks.
+pub(super) fn clamp_horizontal_scroll_offset(
+    offset: Pixels,
+    scroll_width: Pixels,
+    input_width: Pixels,
+    text_align: TextAlign,
+) -> Pixels {
+    let caret_clearance = if text_align == TextAlign::Left {
+        px(0.)
+    } else {
+        -CURSOR_WIDTH
+    };
+    let min_offset = (input_width - scroll_width + caret_clearance).min(caret_clearance);
+    offset.clamp(min_offset, px(0.))
+}
+
 fn clamp_auto_grow_vertical_scroll_offset(
     mode: &LayoutMode,
     scroll_top: Pixels,
@@ -616,7 +632,7 @@ impl<M: InputModeKind> TextElement<M> {
                         bounds.size.width - line_number_width - safety_margin - cursor_pos.x
                     } else if scroll_offset.x + cursor_pos.x < px(0.) {
                         // cursor is out of left
-                        scroll_offset.x - cursor_pos.x
+                        -cursor_pos.x
                     } else {
                         scroll_offset.x
                     };
@@ -666,22 +682,9 @@ impl<M: InputModeKind> TextElement<M> {
                 }
             }
 
-            // Match the caret to the deferred scroll target (applied below) that
-            // the text paints at; otherwise the caret follows the cursor-scroll
-            // while the text uses the deferred offset, flashing it mid-field.
-            let cursor_scroll_x = state
-                .deferred_scroll_offset
-                .map(|offset| offset.x)
-                .unwrap_or(scroll_offset.x);
-
-            // For Right alignment, clamp cursor within the right edge of bounds so it
-            // stays visible without having to shift the text via scroll_offset.
-            let cursor_x = bounds.left() + cursor_pos.x + line_number_width + cursor_scroll_x;
-            let cursor_x = if last_layout.text_align == TextAlign::Right {
-                cursor_x.min(bounds.right() - CURSOR_WIDTH)
-            } else {
-                cursor_x
-            };
+            // Apply the final horizontal offset to every caret after cursor-follow and
+            // deferred scrolling have been resolved, regardless of selection order.
+            let cursor_x = bounds.left() + cursor_pos.x + line_number_width;
             cursor_infos.push(CursorRenderInfo {
                 bounds: Bounds::new(
                     point(
@@ -696,6 +699,19 @@ impl<M: InputModeKind> TextElement<M> {
 
         if let Some(deferred_scroll_offset) = state.deferred_scroll_offset {
             scroll_offset = deferred_scroll_offset;
+        }
+        scroll_offset.x = clamp_horizontal_scroll_offset(
+            scroll_offset.x,
+            scroll_size.width,
+            bounds.size.width,
+            last_layout.text_align,
+        );
+        for info in &mut cursor_infos {
+            info.bounds.origin.x += scroll_offset.x;
+            // Right-aligned text keeps the caret inside the viewport edge.
+            if last_layout.text_align == TextAlign::Right {
+                info.bounds.origin.x = info.bounds.origin.x.min(bounds.right() - CURSOR_WIDTH);
+            }
         }
         scroll_offset.y = clamp_auto_grow_vertical_scroll_offset(
             &state.mode,
@@ -3517,6 +3533,46 @@ mod tests {
             DecorationHarness(state)
         });
         (editor.unwrap(), window)
+    }
+
+    #[gpui::test]
+    fn horizontal_scroll_is_clamped_before_text_and_caret_layout(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "short text", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let layout = state.last_layout.clone().unwrap();
+            let input_bounds = state.input_bounds;
+            let scroll_size = input_bounds.size;
+            let element = TextElement::new(editor.clone());
+            let mut bounds = input_bounds;
+            let (baseline, _, _) =
+                element.layout_cursors(&layout, &mut bounds, scroll_size, window, cx);
+
+            // Both a stale offset after deletion and a deferred scroll target must
+            // be limited before either text or carets are positioned this frame.
+            for deferred in [None, Some(point(px(-80.), px(0.)))] {
+                editor.update(cx, |state, _| {
+                    state.scroll_handle.set_offset(point(px(-40.), px(0.)));
+                    state.deferred_scroll_offset = deferred;
+                });
+                let mut bounds = input_bounds;
+                let (carets, offset, _) =
+                    element.layout_cursors(&layout, &mut bounds, scroll_size, window, cx);
+                assert_eq!(offset.x, px(0.));
+                assert_eq!(bounds.origin.x, input_bounds.origin.x);
+                assert_eq!(carets.len(), baseline.len());
+                for (caret, original) in carets.iter().zip(&baseline) {
+                    assert_eq!(caret.bounds.origin.x, original.bounds.origin.x);
+                }
+                editor.update(cx, |state, cx| {
+                    state.scroll_size = scroll_size;
+                    state.update_scroll_offset(Some(offset), cx);
+                    assert_eq!(state.scroll_handle.offset().x, offset.x);
+                });
+            }
+        });
     }
 
     #[gpui::test]

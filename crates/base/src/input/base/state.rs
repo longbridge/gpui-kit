@@ -25,7 +25,10 @@ use super::{
     blink_cursor::BlinkCursor,
     change::Change,
     cursor::{CursorSelection, Selections},
-    element::{EditorScrollbar, EditorScrollbarSnapshot, LongestLineKey, TextElement},
+    element::{
+        EditorScrollbar, EditorScrollbarSnapshot, LongestLineKey, TextElement,
+        clamp_horizontal_scroll_offset,
+    },
     kind::InputModeKind,
     mask_pattern::normalize_number_input,
     mode::LayoutMode,
@@ -2481,24 +2484,20 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         let mut offset = offset.unwrap_or(self.scroll_handle.offset());
-        // In addition to left alignment, a cursor position will be reserved on the right side
-        let safe_x_offset = if self.text_align == TextAlign::Left {
-            px(0.)
-        } else {
-            -CURSOR_WIDTH
-        };
-
         let safe_y_range =
             (-self.scroll_size.height + self.input_bounds.size.height).min(px(0.0))..px(0.);
-        let safe_x_range = (-self.scroll_size.width + self.input_bounds.size.width + safe_x_offset)
-            .min(safe_x_offset)..px(0.);
 
         offset.y = if self.is_single_line() {
             px(0.)
         } else {
             offset.y.clamp(safe_y_range.start, safe_y_range.end)
         };
-        offset.x = offset.x.clamp(safe_x_range.start, safe_x_range.end);
+        offset.x = clamp_horizontal_scroll_offset(
+            offset.x,
+            self.scroll_size.width,
+            self.input_bounds.size.width,
+            self.text_align,
+        );
         if self.scroll_handle.offset() != offset {
             self.scroll_handle.set_offset(offset);
             cx.notify();
