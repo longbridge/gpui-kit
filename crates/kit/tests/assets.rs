@@ -29,3 +29,26 @@ fn component_accepts_shared_names_and_preserves_legacy_views() {
     let _ = Icon::new(LegacyIconName::Search);
     let _: fn(IconName, &mut gpui_kit::App) -> gpui_kit::Entity<Icon> = IconNameExt::view;
 }
+
+#[cfg(feature = "component")]
+#[test]
+fn embedded_icons_compose_with_existing_icon_inputs() {
+    use gpui_kit::component::{Icon, IconNamed, SvgIcon, button::Button, menu::PopupMenuItem};
+
+    struct CustomPath;
+    impl IconNamed for CustomPath {
+        fn path(self) -> gpui_kit::SharedString {
+            "icons/custom.svg".into()
+        }
+    }
+
+    let _ = Icon::new(CustomPath);
+    let _ = Button::new("embedded").icon(SvgIcon::ACCESSIBILITY);
+    let _ = PopupMenuItem::new("Alarm").icon(SvgIcon::ALARM_CLOCK);
+    let _ = gpui_kit::div()
+        .child(SvgIcon::ACCESSIBILITY)
+        .into_any_element();
+    let _: gpui_kit::AnyElement = SvgIcon::ALARM_CLOCK.into();
+    let _: fn(SvgIcon, &mut gpui_kit::App) -> gpui_kit::Entity<Icon> = SvgIcon::view;
+    assert!(SvgIcon::ACCESSIBILITY.bytes().starts_with(b"<svg"));
+}

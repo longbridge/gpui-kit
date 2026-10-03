@@ -5,7 +5,7 @@ description: Display SVG icons with various sizes, colors, and transformations.
 
 # Icon
 
-A flexible icon component that renders SVG icons from asset paths or in-memory bytes, with customizable size, color, and transformations. The built-in Lucide icons use the assets bundle; custom SVG bytes can be supplied directly with `Icon::data`.
+A flexible icon component that renders SVG icons from asset paths or in-memory bytes, with customizable size, color, and transformations. Lucide icons can use asset paths or independently embedded `SvgIcon` constants; custom SVG bytes can be supplied directly with `Icon::data`.
 
 Before you start, please make sure you have read: [Icons & Assets](../docs/assets.md) to understand how use SVG in GPUI & GPUI Component application.
 
@@ -57,9 +57,24 @@ on-demand CDN loader instead of embedding the complete bundle.
 :::
 
 
+## Independently embedded catalog icons
+
+```rust
+use gpui_kit::component::{Icon, SvgIcon, button::Button};
+
+Icon::new(SvgIcon::ACCESSIBILITY);
+Button::new("alarm").icon(SvgIcon::ALARM_CLOCK).label("Set alarm");
+```
+
+Each `SvgIcon` constant references only its own SVG, without an additional asset
+source or selection macro. Direct `.child(SvgIcon::ACCESSIBILITY)` and `.view(cx)`
+are also supported; apply styling through `Icon::new(...)`. Default component
+icons still use the existing `Assets` source. See [Icons & Assets](../docs/assets.md#use-independently-embedded-icons)
+for resource selection, WASM behavior, and current copying costs.
+
 ## Additional application icons
 
-Keep the default `Assets` registration. For extra catalog icons, follow the
+Keep the default `Assets` registration. For path-based access to extra catalog icons, follow the
 [selected-icons recipe](../docs/assets.md#pick-additional-catalog-icons-with-icon_assets):
 `icon_assets!` creates a source for exactly the named SVGs, and the application
 registers it together with the default source. For your own SVG files, see

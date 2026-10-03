@@ -98,6 +98,43 @@ fn main() {
 
 `with_assets` 为整个应用安装一个资源源。`gpui_kit::init(cx)` 在创建窗口前初始化组件层。`IconName::Inbox` 对应 `icons/inbox.svg`，GPUI 将这个精确路径交给资源源。仅添加 crate 依赖不会注册资源源。完整应用初始化流程见[快速开始](./getting-started.md)。
 
+## 使用独立嵌入的图标
+
+在 Rust 代码中直接选择目录图标时，可以使用 `gpui_kit::component::SvgIcon`：
+
+```rust
+use gpui_kit::component::{Icon, SvgIcon, button::Button};
+
+Icon::new(SvgIcon::ACCESSIBILITY);
+Button::new("alarm").icon(SvgIcon::ALARM_CLOCK).label("设置闹钟");
+
+let icon = if expanded {
+    SvgIcon::CHEVRON_DOWN
+} else {
+    SvgIcon::CHEVRON_RIGHT
+};
+Icon::new(icon);
+```
+
+`SvgIcon` 是持有静态 SVG 字节、可复制的小型值类型。其常量覆盖与
+`assets::IconName` 相同的目录，使用下划线分隔的大写名称：`AlarmClock`
+对应 `ALARM_CLOCK`，`CircleArrowOutUpRight` 对应 `CIRCLE_ARROW_OUT_UP_RIGHT`。
+也支持直接放入 `.child(...)` 和调用 `.view(cx)`。尺寸、颜色等样式照常通过
+`Icon::new(...)` 调整。`SvgIcon::new(include_bytes!("logo.svg"))` 可以包装自备
+SVG，`.bytes()` 返回原始字节。
+
+每个常量只引用自己的 SVG，无须维护与使用处同步的选择清单，也没有运行时目录
+查询或引用整个目录的 `ALL` 数组。优化构建可以剔除未被引用的 SVG；其他资源源或
+集合仍在引用的图标会继续保留。下载的 crate 和中间构建产物仍包含完整目录。
+
+这些图标无须注册 `AssetSource`。组件内部按路径加载的图标仍需默认 `Assets`。
+原有两个 `IconName` 枚举、`AllAssets` 和 `icon_assets!` 均可继续使用。
+WASM 中，`SvgIcon` 会将选中的字节嵌入模块；需要 CDN 加载时使用原有路径资源源。
+
+这不是零复制渲染 API：转换时会通过 `Icon::data` 复制字节，创建底层 GPUI `Svg`
+时还会再次复制并准备内容缓存键。解析和栅格化使用 GPUI 原有的渲染缓存。
+独立选择资源的能力不依赖上游 SVG API 变更。
+
 ## 用 `icon_assets!` 选择更多目录图标
 
 应用已经依赖 `gpui-kit` 时，直接使用 `gpui_kit::assets::icon_assets!`；默认启用的 `assets` feature 已经提供宏和共享目录。**只为使用该宏，无须再添加一项 `gpui-kit-assets` 依赖。** 如果某个 crate 有意独立使用资产层，而不依赖门面 crate，可以直接依赖 `gpui-kit-assets`，调用 `gpui_kit_assets::icon_assets!`。
