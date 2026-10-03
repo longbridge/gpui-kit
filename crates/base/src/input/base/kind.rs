@@ -89,8 +89,7 @@ pub trait InputExtras: Default + 'static {
         Vec::new()
     }
 
-    /// Whole-line decorations for the visible buffer rows `rows`, from every
-    /// line-decoration collection in creation order.
+    /// Line decorations for the visible buffer rows, in collection order.
     fn line_decorations(
         &self,
         _rows: std::ops::Range<usize>,

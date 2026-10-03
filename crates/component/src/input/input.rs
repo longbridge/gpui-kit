@@ -515,9 +515,7 @@ impl Input {
     }
 }
 
-/// Presents each kind of line-decoration gutter marker as an icon in a
-/// theme color. The colors are read when the style is projected, so a theme
-/// change repaints the markers with the rest of the editor.
+/// Renders each line decoration gutter marker as an icon in a theme color.
 fn gutter_marker_renderer(cx: &App) -> gpui_base::input::GutterMarkerRenderer {
     use gpui_base::input::GutterMarker;
 
@@ -534,7 +532,7 @@ fn gutter_marker_renderer(cx: &App) -> gpui_base::input::GutterMarkerRenderer {
             GutterMarker::Custom { icon, color } => (Icon::empty().path(icon.clone()), *color),
             _ => return gpui::Empty.into_any_element(),
         };
-        // The editor places the marker in a 12px square.
+        // 12px, the size the editor gives a marker.
         icon.size_3().text_color(color).into_any_element()
     })
 }

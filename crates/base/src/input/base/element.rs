@@ -51,9 +51,7 @@ pub(super) const RIGHT_MARGIN: Pixels = px(10.);
 pub(super) const LINE_NUMBER_RIGHT_MARGIN: Pixels = px(6.);
 const FOLD_ICON_WIDTH: Pixels = px(14.);
 const FOLD_ICON_HITBOX_WIDTH: Pixels = px(18.);
-/// Edge of the square a line-decoration gutter marker is painted in, at the
-/// left edge of the gutter, padding included. A line-number column of three
-/// digits or more runs under it, as in JetBrains editors.
+/// Width and height of a line decoration gutter marker.
 const GUTTER_MARKER_SIZE: Pixels = px(12.);
 const MAX_HIGHLIGHT_LINE_LENGTH: usize = 10_000;
 const MIN_LINE_NUMBER_DIGITS: usize = 3;
@@ -425,13 +423,12 @@ struct FoldIconLayout {
     icons: Vec<(usize, bool, gpui::AnyElement)>,
 }
 
-/// Line decorations of the visible rows, laid out in prepaint.
+/// Layout information for line decorations.
 #[derive(Default)]
 struct LineDecorationLayout {
-    /// Background bands as (top, height, color), in paint order. The top is
-    /// relative to the scrolled content origin, as the text is painted.
+    /// List of (top, height, color) background bands, top relative to the content origin
     backgrounds: Vec<(Pixels, Pixels, Hsla)>,
-    /// Prepainted gutter markers, in paint order.
+    /// Prepainted gutter marker elements
     markers: Vec<AnyElement>,
 }
 
@@ -1415,13 +1412,10 @@ impl<M: InputModeKind> TextElement<M> {
         icon_layout
     }
 
-    /// Ask the line-decoration providers about the visible rows, and lay out
-    /// their backgrounds and gutter markers.
+    /// Layout line decoration backgrounds and gutter markers for the visible rows.
     ///
-    /// Rows are placed the way the text is painted, so ghost lines of an inline
-    /// completion push the rows after the cursor down with it. Rows inside the
-    /// asked range that are folded away are skipped. Markers need a renderer
-    /// and the line-number gutter; backgrounds need neither.
+    /// Rows after the cursor row are shifted by inline completion ghost lines, as
+    /// the text is. Markers are only laid out while line numbers are shown.
     #[allow(clippy::too_many_arguments)]
     fn layout_line_decorations(
         &self,
@@ -1446,8 +1440,7 @@ impl<M: InputModeKind> TextElement<M> {
                 .line_number()
                 .then(|| state.editor_style.gutter_marker_renderer.clone())
                 .flatten();
-            // The gutter background covers the left padding too; starting
-            // there keeps a marker clear of numbers under three digits.
+            // Start in the gutter's left padding, clear of numbers under three digits.
             let marker_x = origin_x - state.editor_paddings.left;
             (
                 state.extras.line_decorations(first..last + 1, cx),
@@ -2313,6 +2306,7 @@ pub(super) struct PrepaintState {
     bounds: Bounds<Pixels>,
     /// Fold icon layout data
     fold_icon_layout: FoldIconLayout,
+    /// Line decoration layout data
     line_decoration_layout: LineDecorationLayout,
     // Inline completion rendering data
     /// Shaped ghost lines to paint after cursor row (completion lines 2+)
@@ -3048,8 +3042,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             })
             .collect::<Vec<_>>();
 
-        // Line-decoration backgrounds span the row under the active line,
-        // indent guides, selections and text.
+        // Paint line decoration backgrounds under everything else on the row.
         for &(y, height, color) in &line_backgrounds {
             window.paint_quad(fill(
                 Bounds::new(
@@ -3271,7 +3264,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 editor_paddings,
             );
             window.paint_quad(fill(gutter_bounds, gutter_bg));
-            // The opaque gutter covered the start of each band; carry it on.
+            // Repaint line decoration backgrounds over the gutter background.
             for &(y, height, color) in &line_backgrounds {
                 window.paint_quad(fill(
                     Bounds::new(
@@ -3328,8 +3321,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
             marker.paint(window, cx);
         }
 
-        // The line-number gutter is not text, so it takes the arrow rather than
-        // the I-beam the rest of the input sets.
+        // Show the arrow cursor over the line number area.
         if prepaint.line_numbers.is_some() {
             window.set_cursor_style(
                 gpui::CursorStyle::Arrow,

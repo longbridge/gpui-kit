@@ -4,11 +4,10 @@ use gpui::{App, Context, Hsla, SharedString, WeakEntity};
 
 use super::{EditorMode, InputBaseState};
 
-/// What a gutter marker beside a row means.
+/// The meaning of a gutter marker beside a row.
 ///
-/// Base keeps the meaning; the presentation layer chooses how it looks through
+/// How a marker looks is chosen by
 /// [`InputEditorStyle::gutter_marker_renderer`](super::InputEditorStyle::gutter_marker_renderer).
-/// GPUI Component paints each kind as an icon in a theme color.
 #[non_exhaustive]
 #[derive(Clone, Debug, PartialEq)]
 pub enum GutterMarker {
@@ -33,14 +32,7 @@ pub enum GutterMarker {
     },
 }
 
-/// A decoration covering one whole buffer row: a background band across the
-/// row, a marker in its gutter, or both.
-///
-/// Neither affects text layout, hit testing or focus. A background spans the
-/// editor from the gutter to the right edge, covers every soft-wrapped line of
-/// the row, and paints under the active line, the indent guides, the selection
-/// and the text. A marker is painted at the left edge of the line-number gutter,
-/// so it is only shown while line numbers are.
+/// A decoration of one whole buffer row: a background band, a gutter marker, or both.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineDecoration {
     row: usize,
@@ -86,16 +78,11 @@ impl LineDecoration {
     }
 }
 
-/// Supplies the line decorations of the rows an editor is about to paint.
+/// Supplies the line decorations of the rows an editor paints.
 ///
-/// The editor asks on every frame it paints, with the range of buffer rows the
-/// frame shows, and paints what comes back; decorations outside that range are
-/// ignored. Nothing is cached between frames, so an implementation must be
-/// cheap and should answer from data already indexed by row.
-///
-/// Because the provider is asked again on every frame, it owns its rows: the
-/// editor does not move them when the text is edited. Colors may be read from
-/// `cx` when asked, which keeps them in step with theme changes.
+/// The editor asks on every frame with the visible buffer rows and ignores
+/// decorations outside them, so an implementation must be cheap. Colors may be
+/// read from `cx`, so they follow theme changes.
 pub trait LineDecorationProvider {
     /// Return the decorations for rows within `rows`.
     fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration>;
@@ -104,13 +91,11 @@ pub trait LineDecorationProvider {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct LineDecorationCollectionId(usize);
 
-/// One owner's line decorations in an editor, supplied by a
+/// An independently managed collection of line decorations, supplied by a
 /// [`LineDecorationProvider`].
 ///
-/// Clones address the same collection. Each owner creates its own, so
-/// independent features cannot replace one another's decorations; later
-/// collections paint over earlier ones. Dropping a handle does not clear it;
-/// use [`Self::clear`] to stop painting or [`Self::dispose`] to release it.
+/// Clones address the same collection. Dropping a handle does not clear it; use
+/// [`Self::clear`] to stop painting it or [`Self::dispose`] to release it permanently.
 /// Operations on a disposed collection or a dropped editor are harmless no-ops.
 #[derive(Clone, Debug)]
 pub struct LineDecorationCollection {
@@ -138,9 +123,7 @@ impl LineDecorationCollection {
         });
     }
 
-    /// Whether this collection has a provider to ask.
-    ///
-    /// `false` once cleared or disposed, and once the editor is dropped.
+    /// Whether this collection has a provider; `false` once cleared, disposed or dropped.
     pub fn has_provider(&self, cx: &App) -> bool {
         self.state
             .read_with(cx, |state, _| {
@@ -213,15 +196,19 @@ impl LineDecorationProviders {
 }
 
 impl InputBaseState<EditorMode> {
-    /// Create an independently owned collection of whole-line decorations,
-    /// supplied by `provider`.
+    /// Create an independently owned collection of line decorations, supplied by
+    /// `provider`.
     ///
-    /// The provider is asked for the visible rows on every frame; see
-    /// [`LineDecorationProvider`]. Unlike text and range decorations, nothing
-    /// is tracked across edits or cleared when the text is replaced: the
-    /// provider answers for the document as it is when asked.
+    /// The provider is asked for the visible rows on every frame. Unlike text and
+    /// range decorations, rows are not tracked across edits: the provider answers
+    /// for the text as it is when asked.
     ///
-    /// Collections live until explicitly disposed or the editor is dropped.
+    /// A background spans the row from the gutter to the right edge, across its
+    /// soft wraps, under the active line, indent guides, selections and text. A
+    /// marker is painted at the left of the line number area, only while line
+    /// numbers are shown. Later collections paint over earlier ones. Neither
+    /// affects text layout, hit testing or focus. Collections live until
+    /// explicitly disposed or the editor is dropped.
     pub fn create_line_decorations_collection(
         &mut self,
         provider: Rc<dyn LineDecorationProvider>,

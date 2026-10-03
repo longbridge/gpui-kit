@@ -3646,13 +3646,10 @@ impl<M: InputModeKind> InputBaseState<M> {
         ))
     }
 
-    /// Return the rendered bounds of a zero-based buffer row.
+    /// Return the rendered bounds of a zero-based buffer row, across its soft wraps.
     ///
-    /// The bounds span the input from its left edge, gutter included, to its
-    /// right edge, and are as tall as all the row's soft-wrapped lines: the band
-    /// a line-decoration background covers. Returns `None` when the row is not
-    /// currently laid out: before the first layout, scrolled out of view, or
-    /// folded away.
+    /// The bounds span the input from the gutter to the right edge. Returns `None`
+    /// when the row is not currently laid out or visible.
     pub fn row_bounds(&self, row: usize) -> Option<Bounds<Pixels>> {
         let last_layout = self.last_layout.as_ref()?;
         let last_bounds = self.last_bounds?;
