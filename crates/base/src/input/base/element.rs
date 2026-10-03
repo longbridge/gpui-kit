@@ -52,8 +52,8 @@ pub(super) const LINE_NUMBER_RIGHT_MARGIN: Pixels = px(6.);
 const FOLD_ICON_WIDTH: Pixels = px(14.);
 const FOLD_ICON_HITBOX_WIDTH: Pixels = px(18.);
 /// Edge of the square a line-decoration gutter marker is painted in, at the
-/// left edge of the gutter. A line-number column wider than three digits runs
-/// under it, as in JetBrains editors.
+/// left edge of the gutter, padding included. A line-number column of three
+/// digits or more runs under it, as in JetBrains editors.
 const GUTTER_MARKER_SIZE: Pixels = px(12.);
 const MAX_HIGHLIGHT_LINE_LENGTH: usize = 10_000;
 const MIN_LINE_NUMBER_DIGITS: usize = 3;
@@ -1439,14 +1439,21 @@ impl<M: InputModeKind> TextElement<M> {
         ) else {
             return LineDecorationLayout::default();
         };
-        let (decorations, renderer) = {
+        let (decorations, renderer, marker_x) = {
             let state = self.state.read(cx);
             let renderer = state
                 .mode
                 .line_number()
                 .then(|| state.editor_style.gutter_marker_renderer.clone())
                 .flatten();
-            (state.extras.line_decorations(first..last + 1, cx), renderer)
+            // The gutter background covers the left padding too; starting
+            // there keeps a marker clear of numbers under three digits.
+            let marker_x = origin_x - state.editor_paddings.left;
+            (
+                state.extras.line_decorations(first..last + 1, cx),
+                renderer,
+                marker_x,
+            )
         };
         if decorations.is_empty() {
             return LineDecorationLayout::default();
@@ -1484,7 +1491,7 @@ impl<M: InputModeKind> TextElement<M> {
             }
             if let (Some(marker), Some(render)) = (decoration.marker(), renderer.as_ref()) {
                 let origin = point(
-                    origin_x,
+                    marker_x,
                     bounds.origin.y + top + (line_height - GUTTER_MARKER_SIZE).half(),
                 );
                 let mut element = render(marker);
