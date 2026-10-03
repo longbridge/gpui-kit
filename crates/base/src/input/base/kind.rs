@@ -27,10 +27,11 @@ use gpui::{Div, Entity, Stateful, Window};
 use ropey::Rope;
 
 use super::decorations::DecorationCollections;
+use super::line_decorations::LineDecorationProviders;
 use super::lsp::{ContextMenuContent, HoverDefinition, InlineCompletion};
 use crate::input::{
-    HighlightStyleResolver, InputEdit, InputHighlighter, RangeDecoration, SyntaxContext,
-    TextDecoration,
+    HighlightStyleResolver, InputEdit, InputHighlighter, LineDecoration, RangeDecoration,
+    SyntaxContext, TextDecoration,
 };
 use crate::input::{HoverPopoverState, Lsp};
 use gpui::Task;
@@ -85,6 +86,16 @@ pub trait InputExtras: Default + 'static {
 
     /// Geometric decorations intersecting visible, non-folded buffer spans.
     fn range_decorations(&self, _ranges: &[std::ops::Range<usize>]) -> Vec<&RangeDecoration> {
+        Vec::new()
+    }
+
+    /// Whole-line decorations for the visible buffer rows `rows`, from every
+    /// line-decoration collection in creation order.
+    fn line_decorations(
+        &self,
+        _rows: std::ops::Range<usize>,
+        _cx: &gpui::App,
+    ) -> Vec<LineDecoration> {
         Vec::new()
     }
 
@@ -354,6 +365,7 @@ pub struct EditorExtras {
     pub(crate) lsp: Lsp,
     pub(crate) decorations: DecorationCollections,
     pub(crate) range_decorations: DecorationCollections<RangeDecoration>,
+    pub(crate) line_decorations: LineDecorationProviders,
     pub(crate) inline_completion: InlineCompletion,
     pub(crate) context_menu_content: ContextMenuContent,
     pub(crate) hover_popover: Option<HoverPopoverState>,
@@ -367,6 +379,7 @@ impl Default for EditorExtras {
             lsp: Lsp::default(),
             decorations: DecorationCollections::default(),
             range_decorations: DecorationCollections::default(),
+            line_decorations: LineDecorationProviders::default(),
             inline_completion: InlineCompletion::default(),
             context_menu_content: ContextMenuContent::default(),
             hover_popover: None,

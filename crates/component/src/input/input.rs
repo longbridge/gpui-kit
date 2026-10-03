@@ -14,7 +14,7 @@ use crate::native_menu::NativeMenu;
 use crate::spinner::Spinner;
 use crate::touch_selection::{EditMenuItem, TouchSelectionOverlay};
 use crate::{ActiveTheme, Colorize, v_flex};
-use crate::{IconName, Size};
+use crate::{Icon, IconName, Size};
 use crate::{RoleOverride, Selectable, StyledExt, h_flex};
 use crate::{Sizable, StyleSized};
 use gpui_base::InputBase as BaseInput;
@@ -515,6 +515,30 @@ impl Input {
     }
 }
 
+/// Presents each kind of line-decoration gutter marker as an icon in a
+/// theme color. The colors are read when the style is projected, so a theme
+/// change repaints the markers with the rest of the editor.
+fn gutter_marker_renderer(cx: &App) -> gpui_base::input::GutterMarkerRenderer {
+    use gpui_base::input::GutterMarker;
+
+    let theme = cx.theme();
+    let (success, danger, warning, info) = (theme.success, theme.danger, theme.warning, theme.info);
+    Rc::new(move |marker| {
+        let (icon, color) = match marker {
+            GutterMarker::DiffAdded => (Icon::new(IconName::Plus), success),
+            GutterMarker::DiffRemoved => (Icon::new(IconName::Minus), danger),
+            GutterMarker::DiffChanged => (Icon::new(IconName::Asterisk), warning),
+            GutterMarker::Conflict => (Icon::new(IconName::TriangleAlert), warning),
+            GutterMarker::Bookmark => (Icon::new(IconName::StarFill), info),
+            GutterMarker::Breakpoint => (Icon::new(IconName::CircleX), danger),
+            GutterMarker::Custom { icon, color } => (Icon::empty().path(icon.clone()), *color),
+            _ => return gpui::Empty.into_any_element(),
+        };
+        // The editor places the marker in a 12px square.
+        icon.size_3().text_color(color).into_any_element()
+    })
+}
+
 impl Styled for Input {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
@@ -573,6 +597,7 @@ impl RenderOnce for Input {
                         .selected(is_folded)
                         .into_any_element()
                 })),
+                gutter_marker_renderer: Some(gutter_marker_renderer(cx)),
             },
             cx,
         );

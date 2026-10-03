@@ -261,6 +261,61 @@ review_ranges.dispose(cx); // 释放集合，使该句柄及其克隆全部失�
 会重建对应集合的索引；编辑文本时线性更新受影响的集合，不重新排序。
 Editor 展示页的 **Decorations** 标签演示了两种集合的组合使用。
 
+### 行装饰
+
+`LineDecorationCollection` 以整行为单位绘制：横跨该行的背景色带、行号槽中的标记，或两者兼有。
+条目由 `LineDecorationProvider` 提供：编辑器每绘制一帧，都会以当前可见的缓冲区行范围询问它。
+
+```rust
+use std::{ops::Range, rc::Rc};
+
+use gpui_kit::App;
+use gpui_kit::component::{
+    ActiveTheme as _,
+    input::{GutterMarker, LineDecoration, LineDecorationProvider},
+};
+
+/// 从零开始的缓冲区行，已排序。
+struct AddedRows(Vec<usize>);
+
+impl LineDecorationProvider for AddedRows {
+    fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
+        let start = self.0.partition_point(|&row| row < rows.start);
+        let end = self.0.partition_point(|&row| row < rows.end);
+        self.0[start..end]
+            .iter()
+            .map(|&row| {
+                LineDecoration::new(row)
+                    .with_background(cx.theme().success.opacity(0.16))
+                    .with_marker(GutterMarker::DiffAdded)
+            })
+            .collect()
+    }
+}
+
+let added = editor.update(cx, |state, cx| {
+    state.create_line_decorations_collection(Rc::new(AddedRows(vec![2, 3, 7])), cx)
+});
+
+added.set_provider(Rc::new(AddedRows(vec![4])), cx); // 下一帧改为询问它。
+added.clear(cx);   // 停止绘制，但保留集合以便复用。
+added.dispose(cx); // 释放集合，使该句柄及其克隆全部失效。
+```
+
+由于每一帧都会重新询问 provider，行由 provider 自己维护：编辑器不会随编辑移动这些行，
+替换全文时也不会清空它们，并且会忽略询问范围之外的装饰。请按行为数据建立索引，让回答保持轻量；
+在被询问时从 `cx` 读取颜色，使其跟随主题变化。与其他装饰集合一样，各集合相互独立；
+后创建的集合绘制在先创建的集合之上。
+
+背景从行号槽一直延伸到右边缘，覆盖该行软换行后的全部显示行，位于当前行高亮、缩进参考线、
+选区和文字下方。标记绘制在行号槽的左边缘，因此只在显示行号时出现。`DiffAdded`、`DiffRemoved`、
+`DiffChanged`、`Conflict`、`Bookmark` 和 `Breakpoint` 使用主题的 success、danger、warning 和
+info 颜色；`GutterMarker::Custom { icon, color }` 按原样绘制给定的图标资源路径。两者都不改变
+文本布局、命中测试或焦点，也不提供鼠标或键盘操作。
+
+`EditorState::row_bounds(row)` 返回某一行在窗口坐标中占据的区域；该行尚未布局时返回 `None`。
+Editor 展示页的 **Decorations** 标签用 provider 标记了最后三行。
+
 ## 值与事件
 
 ```rust

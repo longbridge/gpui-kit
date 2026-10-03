@@ -59,6 +59,10 @@ Editor::new(&editor)
 [几何范围装饰](../../component/editor.md#几何范围装饰)；直接使用 Base 时，从
 `gpui_kit::base::input` 导入相同的类型。
 
+`create_line_decorations_collection` 挂载一个 `LineDecorationProvider`，编辑器每一帧都会向它
+询问整行背景和行号槽标记。背景由 Base 直接绘制；标记只通过 `InputEditorStyle::gutter_marker_renderer`
+绘制，样式化编辑器会提供该渲染器。参见[行装饰](../../component/editor.md#行装饰)。
+
 ## 高亮与语言功能
 
 `InputHighlighterFactory`、`InputHighlighter`、诊断类型和 LSP provider trait 是提供给设计系统作者的底层扩展点，作用于共享的 `InputBaseState`。样式组件的应用通常应通过编辑器集成配置它们，而不是普通文本框。

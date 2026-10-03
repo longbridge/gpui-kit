@@ -87,6 +87,12 @@ share UTF-8 normalization and edit tracking. See
 for ownership, boundary affinity, deletion, undo/redo, folding, layering, and
 indexing semantics; import the same types from `gpui_kit::base::input`.
 
+`create_line_decorations_collection` attaches a `LineDecorationProvider`, which is
+asked for whole-row backgrounds and gutter markers on every frame. Base paints the
+backgrounds itself; markers are painted only through
+`InputEditorStyle::gutter_marker_renderer`, which the styled editor projects. See
+[Line decorations](../../component/editor.md#line-decorations).
+
 ## Highlighting and language features
 
 `InputHighlighterFactory`, `InputHighlighter`, diagnostic types, and the LSP

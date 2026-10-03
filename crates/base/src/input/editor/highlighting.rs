@@ -3,7 +3,7 @@ use std::{ops::Range, rc::Rc, sync::Arc};
 use gpui::{AnyElement, Context, HighlightStyle, Hsla, SharedString, Window};
 use ropey::Rope;
 
-use super::{EditorState, FoldRange, InputEdit};
+use super::{EditorState, FoldRange, GutterMarker, InputEdit};
 use crate::SemanticThemeTokens;
 
 /// Resolves semantic highlight names into renderable GPUI styles.
@@ -76,6 +76,9 @@ pub trait InputHighlighter {
 pub type InputHighlighterFactory = Rc<dyn Fn(&str) -> Option<Box<dyn InputHighlighter>>>;
 pub type SharedHighlightStyleResolver = Arc<dyn HighlightStyleResolver>;
 pub type FoldIconRenderer = Rc<dyn Fn(usize, bool) -> AnyElement>;
+/// Builds the element painted for a [`GutterMarker`]. The editor sizes and
+/// places it at the left edge of the line-number gutter.
+pub type GutterMarkerRenderer = Rc<dyn Fn(&GutterMarker) -> AnyElement>;
 
 /// Where in the syntax tree an offset sits, for editing decisions.
 ///
@@ -119,6 +122,9 @@ pub struct InputEditorStyle {
     pub editor_active_line: Option<Hsla>,
     pub editor_gutter_background: Option<Hsla>,
     pub fold_icon_renderer: Option<FoldIconRenderer>,
+    /// Presents line-decoration gutter markers. Without one, markers are not
+    /// painted; line-decoration backgrounds are painted either way.
+    pub gutter_marker_renderer: Option<GutterMarkerRenderer>,
 }
 
 impl InputEditorStyle {
@@ -174,6 +180,7 @@ impl Default for InputEditorStyle {
             editor_active_line: None,
             editor_gutter_background: None,
             fold_icon_renderer: None,
+            gutter_marker_renderer: None,
         }
     }
 }
