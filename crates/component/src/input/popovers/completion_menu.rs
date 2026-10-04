@@ -204,7 +204,7 @@ impl CompletionMenu {
                     cx.subscribe(&list, |this: &mut Self, _, ev: &ListEvent, cx| {
                         match ev {
                             ListEvent::Confirm(_) => {
-                                this.hide(cx);
+                                this.dismiss(cx);
                             }
                             _ => {}
                         }
@@ -237,7 +237,7 @@ impl CompletionMenu {
         })
         .detach();
 
-        self.hide(cx);
+        self.dismiss(cx);
     }
 
     pub(crate) fn handle_action(
@@ -274,7 +274,7 @@ impl CompletionMenu {
     }
 
     fn on_action_escape(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        self.hide(cx);
+        self.dismiss(cx);
     }
 
     fn on_action_up(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -289,16 +289,21 @@ impl CompletionMenu {
         });
     }
 
-    /// Hide the completion menu and reset the trigger start offset.
+    /// Synchronize a hidden editor menu without dismissing a newer response.
     pub(crate) fn hide(&mut self, cx: &mut Context<Self>) {
         self.open = false;
         self.trigger_start_offset = None;
+        cx.notify();
+    }
+
+    /// Dismiss the menu in response to a user action.
+    fn dismiss(&mut self, cx: &mut Context<Self>) {
+        self.hide(cx);
         let editor = self.editor.clone();
         cx.spawn(async move |_, cx| {
             let _ = editor.update(cx, |editor, cx| editor.dismiss_completion_overlay(cx));
         })
         .detach();
-        cx.notify();
     }
 
     /// Sets the trigger start offset if it is not already set.
@@ -422,9 +427,64 @@ impl Render for CompletionMenu {
                     )
                 })
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                    this.hide(cx);
+                    this.dismiss(cx);
                 })),
         )
         .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gpui::test]
+    fn hiding_an_old_menu_does_not_dismiss_a_new_completion_response(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let window = cx.add_empty_window();
+        let (editor, menu) = window.update(|window, cx| {
+            let editor = cx.new(|cx| EditorState::new(window, cx).default_value("co"));
+            let menu = CompletionMenu::new(editor.clone(), window, cx);
+            let old_items = vec![CompletionItem {
+                label: "const".into(),
+                ..Default::default()
+            }];
+            editor.update(cx, |editor, cx| {
+                editor.present_completion_items(0, "c", old_items.clone(), cx);
+            });
+            menu.update(cx, |menu, cx| {
+                menu.update_query(0, "c");
+                menu.show(1, old_items, window, cx);
+                // The overlay observes the old request being hidden while a
+                // replacement request is pending. Its deferred dismissal must
+                // not act on the replacement response that arrives next.
+                menu.hide(cx);
+            });
+            editor.update(cx, |editor, cx| {
+                editor.present_completion_items(
+                    0,
+                    "co",
+                    vec![CompletionItem {
+                        label: "const".into(),
+                        ..Default::default()
+                    }],
+                    cx,
+                );
+            });
+            (editor, menu)
+        });
+
+        cx.run_until_parked();
+
+        cx.read(|cx| {
+            let completion = editor.read(cx).completion_menu_state();
+            assert!(completion.open, "an old menu dismissed the new response");
+            assert_eq!(completion.query, "co");
+            assert_eq!(completion.items.len(), 1);
+            assert_eq!(completion.items[0].label, "const");
+        });
+        drop(menu);
     }
 }

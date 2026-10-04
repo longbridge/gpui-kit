@@ -479,6 +479,28 @@ fn accepted_completion_is_one_undo_separate_from_the_typed_prefix(cx: &mut TestA
 // Each response is released explicitly. run_until_parked drains runnable work
 // without advancing timers or waiting for a response that the test still owns.
 #[gpui_kit::test]
+fn typing_after_visible_completion_keeps_the_refreshed_request_alive(cx: &mut TestAppContext) {
+    let fixture = Fixture::deferred(cx);
+    fixture.start_completion(cx);
+    fixture.provider.respond(0, Some("print"));
+    fixture.settle(cx);
+
+    // Continue typing with a visible popup, then release the refreshed response
+    // after drawing its temporarily closed state.
+    cx.update_window(fixture.handle.into(), |_, window, cx| {
+        window.input("r", cx);
+        assert_eq!(fixture.provider.requests.borrow().len(), 2);
+        fixture.provider.respond(1, Some("private"));
+    })
+    .unwrap();
+    fixture.settle(cx);
+    fixture.assert_editor("pr", cx);
+
+    fixture.press("enter", cx);
+    fixture.assert_editor("private", cx);
+}
+
+#[gpui_kit::test]
 fn older_completion_response_cannot_replace_newer_suggestions(cx: &mut TestAppContext) {
     let fixture = Fixture::deferred(cx);
     fixture.start_completion(cx);
