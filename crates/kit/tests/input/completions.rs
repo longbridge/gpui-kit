@@ -342,6 +342,58 @@ fn escape_cancels_completion_and_preserves_editor_text_and_focus(cx: &mut TestAp
 }
 
 #[gpui_kit::test]
+fn ctrl_space_opens_completion_for_the_word_before_the_caret(cx: &mut TestAppContext) {
+    let fixture = Fixture::new(cx);
+    fixture.start_completion(cx);
+    fixture.input("ri", cx);
+    fixture.press("escape", cx);
+    fixture.assert_editor("pri", cx);
+    let typed = fixture.provider.requests.borrow().len();
+
+    fixture.press("ctrl-space", cx);
+    assert_eq!(
+        fixture.provider.requests.borrow().get(typed),
+        Some(&CompletionRequest {
+            text: "pri".into(),
+            offset: 3,
+            trigger: CompletionContext {
+                trigger_kind: CompletionTriggerKind::INVOKED,
+                trigger_character: Some("pri".into()),
+            },
+        })
+    );
+    fixture.press("enter", cx);
+    fixture.assert_editor("print", cx);
+}
+
+#[gpui_kit::test]
+fn ctrl_space_with_no_word_before_the_caret_asks_with_an_empty_query(cx: &mut TestAppContext) {
+    let fixture = Fixture::new(cx);
+    fixture.press("ctrl-space", cx);
+    assert_eq!(
+        *fixture.provider.requests.borrow(),
+        vec![CompletionRequest {
+            text: "".into(),
+            offset: 0,
+            trigger: CompletionContext {
+                trigger_kind: CompletionTriggerKind::INVOKED,
+                trigger_character: Some("".into()),
+            },
+        }]
+    );
+    fixture.press("enter", cx);
+    fixture.assert_editor("print", cx);
+}
+
+#[gpui_kit::test]
+fn ctrl_space_asks_nothing_of_a_readonly_editor(cx: &mut TestAppContext) {
+    let fixture = Fixture::new(cx);
+    fixture.protect(true, false, cx);
+    fixture.press("ctrl-space", cx);
+    assert!(fixture.provider.requests.borrow().is_empty());
+}
+
+#[gpui_kit::test]
 fn arrow_navigation_accepts_the_selected_completion(cx: &mut TestAppContext) {
     let fixture = Fixture::new(cx);
     fixture.start_completion(cx);

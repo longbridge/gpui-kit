@@ -131,6 +131,7 @@ modifier. Linux uses no Super/Win bindings for these operations.
 | Add a cursor with the mouse | Option+left click | Alt+left click | Alt+left click |
 | Select a rectangular block | Option+Shift+left drag | Alt+Shift+left drag | Alt+Shift+left drag |
 | Keep only the active cursor | Escape | Escape | Escape |
+| Show completions without typing (`ShowCompletions`) | Ctrl+Space | Ctrl+Space | Ctrl+Space |
 
 Linux also accepts Ctrl+Alt+left drag for rectangular selection, matching
 Ghostty, and Alt+Shift+Left / Right for word selection. Windows additionally

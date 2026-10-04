@@ -187,6 +187,7 @@ impl InputModeKind for EditorMode {
     ) -> Stateful<Div> {
         element
             .on_action(window.listener_for(entity, InputBaseState::on_action_toggle_code_actions))
+            .on_action(window.listener_for(entity, InputBaseState::on_action_show_completions))
             .on_action(window.listener_for(entity, InputBaseState::on_action_go_to_definition))
     }
 }

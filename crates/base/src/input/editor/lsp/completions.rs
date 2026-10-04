@@ -9,7 +9,7 @@ use lsp_types::{
 use ropey::Rope;
 use std::{cell::RefCell, ops::Range, rc::Rc, time::Duration};
 
-use crate::input::InputBaseState;
+use crate::input::{InputBaseState, ShowCompletions};
 
 /// Default debounce duration for inline completions.
 const DEFAULT_INLINE_COMPLETION_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -183,6 +183,71 @@ impl InputBaseState<EditorMode> {
             )
             .map(|s| s.trim().to_string())
             .unwrap_or_default();
+        self.request_completions(
+            provider,
+            start_offset,
+            query,
+            lsp_types::CompletionTriggerKind::TRIGGER_CHARACTER,
+            window,
+            cx,
+        );
+    }
+
+    pub(crate) fn on_action_show_completions(
+        &mut self,
+        _: &ShowCompletions,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.show_completions(window, cx);
+    }
+
+    /// Ask the completion provider for suggestions at the caret, as typing
+    /// would, without typing anything.
+    ///
+    /// The query is the word the caret ends, so the menu opened in the middle
+    /// of `pri|` refines as `pri` does when typed; with no word before the
+    /// caret it is empty, and the provider offers whatever fits there.
+    pub fn show_completions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled || self.readonly || self.completion_inserting {
+            return;
+        }
+        let Some(provider) = self.extras.lsp.completion_provider.clone() else {
+            return;
+        };
+
+        let offset = self.cursor();
+        let before = self.text.slice(0..offset).to_string();
+        let word_len: usize = before
+            .chars()
+            .rev()
+            .take_while(|ch| ch.is_alphanumeric() || *ch == '_')
+            .map(char::len_utf8)
+            .sum();
+        let start_offset = offset - word_len;
+        let query = before[start_offset..].to_string();
+
+        self.request_completions(
+            provider,
+            start_offset,
+            query,
+            lsp_types::CompletionTriggerKind::INVOKED,
+            window,
+            cx,
+        );
+    }
+
+    /// Record the word a menu is for and ask `provider` about the caret.
+    fn request_completions(
+        &mut self,
+        provider: Rc<dyn CompletionProvider>,
+        start_offset: usize,
+        query: String,
+        trigger_kind: lsp_types::CompletionTriggerKind,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let new_offset = self.cursor();
         self.extras
             .context_menu_content
             .completion
@@ -194,7 +259,7 @@ impl InputBaseState<EditorMode> {
             .clone_from(&query);
 
         let completion_context = CompletionContext {
-            trigger_kind: lsp_types::CompletionTriggerKind::TRIGGER_CHARACTER,
+            trigger_kind,
             trigger_character: Some(query),
         };
 

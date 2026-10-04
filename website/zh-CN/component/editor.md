@@ -116,6 +116,7 @@ let editor = cx.new(|cx| {
 | 鼠标添加光标 | Option+左键点击 | Alt+左键点击 | Alt+左键点击 |
 | 矩形列选 | Option+Shift+左键拖动 | Alt+Shift+左键拖动 | Alt+Shift+左键拖动 |
 | 只保留活动光标 | Escape | Escape | Escape |
+| 不输入也显示补全（`ShowCompletions`） | Ctrl+Space | Ctrl+Space | Ctrl+Space |
 
 Linux 额外支持与 Ghostty 一致的 Ctrl+Alt+左键拖动列选，以及 Alt+Shift+← / → 按词选择。Windows 额外支持 Alt+Shift+← / → 逐字符选择。三个平台都兼容 Alt/Option+左键拖动列选：单击添加光标，继续拖动则以鼠标按下位置为起点建立新的矩形选区。
 
