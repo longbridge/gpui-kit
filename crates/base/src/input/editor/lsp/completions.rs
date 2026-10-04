@@ -121,7 +121,7 @@ impl Default for InlineCompletion {
 impl InputBaseState<EditorMode> {
     pub(crate) fn handle_completion_trigger(
         &mut self,
-        range: &Range<usize>,
+        _range: &Range<usize>,
         new_text: &str,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -138,12 +138,14 @@ impl InputBaseState<EditorMode> {
         // It will check if menu is open before showing the suggestion.
         self.schedule_inline_completion(window, cx);
 
-        // The new text begins where the replaced range begins. Both ends agree
-        // for a collapsed caret, but typing over a selection or committing an
-        // IME composition replaces `range`, and measuring from its end handed
-        // the provider an empty prefix or dropped the request outright.
-        let start = range.start;
         let new_offset = self.cursor();
+        // Measure the inserted text in the current document. The replaced range
+        // uses pre-edit coordinates, which preceding multi-cursor edits can
+        // shift. The active caret ends immediately after the normalized input,
+        // including selection replacements and IME commits.
+        let Some(start) = new_offset.checked_sub(new_text.len()) else {
+            return;
+        };
 
         if !provider.is_completion_trigger(start, new_text, cx) {
             return;
@@ -162,6 +164,7 @@ impl InputBaseState<EditorMode> {
             latched <= start
                 && start <= latched + completion.query.len()
                 && self.text.is_char_boundary(latched)
+                && self.text.is_char_boundary(start)
                 && completion
                     .query
                     .starts_with(self.text.slice(latched..start).to_string().as_str())
