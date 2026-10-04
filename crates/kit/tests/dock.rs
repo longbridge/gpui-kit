@@ -172,3 +172,88 @@ async fn dock_moves_a_tab_between_groups_and_zooms_the_result(cx: &mut TestAppCo
     })
     .await;
 }
+
+struct TwoTabs {
+    area: Entity<DockArea>,
+    alpha: Entity<Document>,
+    beta: Entity<Document>,
+    elsewhere: FocusHandle,
+}
+impl Render for TwoTabs {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(div().track_focus(&self.elsewhere).h(px(20.)))
+            .child(self.area.clone())
+    }
+}
+
+fn two_tabs(cx: &mut TestAppContext) -> (gpui_kit::AnyWindowHandle, Entity<TwoTabs>) {
+    cx.update(gpui_kit::init);
+    let (handle, view) = common::open_window(cx, Some(size(px(900.), px(600.))), |window, cx| {
+        let (area, _) = DockSkin::dock_area("editor", None, window, cx);
+        let alpha = cx.new(|cx| Document {
+            name: "alpha",
+            focus: cx.focus_handle(),
+        });
+        let beta = cx.new(|cx| Document {
+            name: "beta",
+            focus: cx.focus_handle(),
+        });
+        let layout = DockLayout::tabs()
+            .panel_view(panel_handle(alpha.clone()), cx)
+            .panel_view(panel_handle(beta.clone()), cx);
+        area.update(cx, |area, cx| area.set_center(layout, window, cx));
+        cx.new(|cx| TwoTabs {
+            area,
+            alpha,
+            beta,
+            elsewhere: cx.focus_handle(),
+        })
+    });
+    (handle.into(), view)
+}
+
+#[gpui_kit::test]
+fn dock_hands_the_focus_to_the_tab_that_replaces_a_closed_one(cx: &mut TestAppContext) {
+    let (handle, view) = two_tabs(cx);
+    cx.update_window(handle, |_, window, cx| {
+        let view = view.read(cx);
+        let (area, alpha, beta) = (view.area.clone(), view.alpha.clone(), view.beta.clone());
+        window.render_frame(cx);
+        let alpha_focus = alpha.read(cx).focus.clone();
+        alpha_focus.focus(window, cx);
+        window.render_frame(cx);
+        assert!(alpha.read(cx).focus.is_focused(window));
+
+        area.update(cx, |area, cx| area.remove_panel(alpha, window, cx));
+        window.render_frame(cx);
+        assert!(window.find("beta").visible());
+        assert!(
+            beta.read(cx).focus.is_focused(window),
+            "closing the focused tab must leave the keyboard on the one shown in its place"
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn dock_leaves_the_focus_alone_when_a_tab_without_it_closes(cx: &mut TestAppContext) {
+    let (handle, view) = two_tabs(cx);
+    cx.update_window(handle, |_, window, cx| {
+        let view = view.read(cx);
+        let (area, alpha, elsewhere) = (
+            view.area.clone(),
+            view.alpha.clone(),
+            view.elsewhere.clone(),
+        );
+        window.render_frame(cx);
+        elsewhere.focus(window, cx);
+        window.render_frame(cx);
+
+        area.update(cx, |area, cx| area.remove_panel(alpha, window, cx));
+        window.render_frame(cx);
+        assert!(elsewhere.is_focused(window));
+    })
+    .unwrap();
+}

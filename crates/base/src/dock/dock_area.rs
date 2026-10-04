@@ -623,11 +623,28 @@ impl DockArea {
         let Some(region) = self.placement_of_panel(panel) else {
             return;
         };
+        // A panel takes the keyboard with it when it goes. If it had it, the
+        // panel its group displays in its place takes it over, or the next
+        // keystroke would land nowhere.
+        let had_focus = self
+            .panel(panel)
+            .is_some_and(|view| view.focus_handle(cx).contains_focused(window, cx));
+        let node = self
+            .layout(region)
+            .and_then(|tree| tree.find_panel_node(panel));
         let Some(tree) = self.tree_mut(region) else {
             return;
         };
         let result = tree.remove_panel(panel);
         self.commit(result, window, cx);
+
+        if had_focus
+            && let Some(next) = node
+                .and_then(|node| self.groups.get(&node))
+                .and_then(|group| group.entity.read(cx).active_panel(cx))
+        {
+            next.focus_handle(cx).focus(window, cx);
+        }
     }
 }
 
