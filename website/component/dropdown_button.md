@@ -9,6 +9,8 @@ A [DropdownButton] is a combination of a button and a trigger button. It allows 
 
 Shared variant and size can be set on the DropdownButton. Action-specific options such as its label, icon, tooltip, loading state and click handler belong to the inner [Button].
 
+The menu trigger shows only a caret, so it has a localized "More options" accessible name by default. Use `menu_accessibility_label` when the context needs a more specific name, such as "More save options".
+
 ## Import
 
 ```rust

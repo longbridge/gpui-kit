@@ -9,6 +9,8 @@ description: DropdownButton 由一个主按钮和一个触发下拉菜单的按�
 
 共享变体和尺寸可以设置在 DropdownButton 上。文案、图标、提示、加载状态和点击回调等动作自身的选项属于内层 [Button]。
 
+菜单触发按钮只显示一个下拉箭头，因此默认使用本地化的“更多选项”作为无障碍名称。如果需要更明确的名称，可用 `menu_accessibility_label` 指定，例如“更多保存选项”。
+
 ## 导入
 
 ```rust

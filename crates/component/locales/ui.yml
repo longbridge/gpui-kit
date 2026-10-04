@@ -162,6 +162,12 @@ ComboBox:
     zh-HK: "暫無數據"
     zh-TW: "沒有結果"
     it: "Nessun risultato"
+DropdownButton:
+  more_options:
+    en: More options
+    zh-CN: 更多选项
+    zh-HK: 更多選項
+    zh-TW: 更多選項
 Dock:
   Unnamed:
     en: Unnamed

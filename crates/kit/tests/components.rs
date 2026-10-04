@@ -1,7 +1,7 @@
 mod common;
 use gpui_component::{
     Disableable, TitleBar,
-    button::Button,
+    button::{Button, DropdownButton},
     clipboard::Clipboard,
     input::{Input, InputState},
     popover::Popover,
@@ -126,6 +126,43 @@ fn clipboard_reports_default_and_explicit_accessibility_names(cx: &mut TestAppCo
             window.find("copy-plain").label(),
             Some("Copy"),
             "an icon-only Clipboard needs a name without a caller-provided label"
+        );
+    })
+    .unwrap();
+}
+
+struct NamedDropdownButtons;
+impl Render for NamedDropdownButtons {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .child(
+                DropdownButton::new("save")
+                    .button(Button::new("save-action").label("Save"))
+                    .menu_accessibility_label("More save options")
+                    .dropdown_menu(|menu, _, _| menu),
+            )
+            .child(
+                DropdownButton::new("plain")
+                    .button(Button::new("plain-action").label("Run"))
+                    .dropdown_menu(|menu, _, _| menu),
+            )
+    }
+}
+
+#[gpui_kit::test]
+fn dropdown_button_names_its_menu_trigger(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let (handle, _) = common::open_window(cx, None, |_, cx| cx.new(|_| NamedDropdownButtons));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.draw(cx).clear(cx);
+        assert_eq!(
+            window.within("save").find("popup").label(),
+            Some("More save options")
+        );
+        assert_eq!(
+            window.within("plain").find("popup").label(),
+            Some("More options"),
+            "the caret-only trigger needs a name without a caller-provided label"
         );
     })
     .unwrap();
