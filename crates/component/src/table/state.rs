@@ -529,6 +529,11 @@ where
         self.right_clicked_row
     }
 
+    /// Returns the cell that has been right clicked, as `(row_ix, col_ix)`.
+    pub fn right_clicked_cell(&self) -> Option<(usize, usize)> {
+        self.right_clicked_cell
+    }
+
     /// Set or clear the right-clicked row state.
     ///
     /// Pass `None` to clear — useful when opening a header context menu
@@ -591,6 +596,7 @@ where
     pub fn set_selected_cell(&mut self, row_ix: usize, col_ix: usize, cx: &mut Context<Self>) {
         self.selection_mode = SelectionMode::Cell;
         self.selected_cell = Some((row_ix, col_ix));
+        self.right_clicked_cell = None;
 
         // Scroll to the cell
         self.vertical_scroll_handle
@@ -2449,7 +2455,7 @@ where
         } else {
             rows_count
         };
-        let right_clicked_row = self.right_clicked_row;
+        let has_right_click = self.right_clicked_row.is_some() || self.right_clicked_cell.is_some();
         let is_filled = total_height > Pixels::ZERO && total_height <= actual_height;
 
         let loading_view = if loading {
@@ -2591,7 +2597,7 @@ where
                             &self.vertical_scroll_handle.0.borrow().base_handle,
                         ))
                     })
-                    .when(right_clicked_row.is_some(), |this| {
+                    .when(has_right_click, |this| {
                         this.on_mouse_down_out(cx.listener(|this, e, window, cx| {
                             this.on_row_right_click(e, None, window, cx);
                             cx.notify();

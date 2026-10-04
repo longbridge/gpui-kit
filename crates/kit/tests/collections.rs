@@ -5,9 +5,9 @@ use gpui_kit::component::{
     table::{Column, ColumnSort, DataTable, TableDelegate, TableSelection, TableState},
     tree::{Tree, TreeItem, TreeState},
 };
-use gpui_kit::test::TestWindowExt;
+use gpui_kit::test::{TestSupportExt, TestWindowExt};
 use gpui_kit::{
-    App, AppContext, Context, Entity, Focusable, Modifiers, TestAppContext, Window, div,
+    App, AppContext, Context, Entity, Focusable, Modifiers, TestAppContext, Window, div, point,
     prelude::*, px, size,
 };
 
@@ -161,6 +161,97 @@ fn table_selection_getters_follow_the_active_mode(cx: &mut TestAppContext) {
             }
             assert_eq!(selection(table), (TableSelection::None, None, None, None));
         });
+    })
+    .unwrap();
+}
+
+struct RecordsBelowLabel {
+    table: Entity<TableState<Rows>>,
+}
+impl Render for RecordsBelowLabel {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .child(
+                div()
+                    .id("outside")
+                    .test_support()
+                    .h(px(40.))
+                    .child("outside"),
+            )
+            .child(div().h(px(280.)).child(DataTable::new(&self.table)))
+    }
+}
+
+/// Right clicks the first cell of `row`, past the row header; the cells
+/// themselves are not observed.
+fn right_click_row(window: &mut Window, row: usize, cx: &mut App) {
+    use gpui_kit::InputEvent as _;
+    let position = window.find(("row", row)).bounds().origin + point(px(100.), px(5.));
+    window.dispatch_event(
+        gpui_kit::MouseMoveEvent {
+            position,
+            pressed_button: None,
+            modifiers: Default::default(),
+        }
+        .to_platform_input(),
+        cx,
+    );
+    window.render_frame(cx);
+    window.dispatch_event(
+        gpui_kit::MouseDownEvent {
+            button: gpui_kit::MouseButton::Right,
+            position,
+            modifiers: Default::default(),
+            click_count: 1,
+            first_mouse: false,
+        }
+        .to_platform_input(),
+        cx,
+    );
+    window.dispatch_event(
+        gpui_kit::MouseUpEvent {
+            button: gpui_kit::MouseButton::Right,
+            position,
+            modifiers: Default::default(),
+            click_count: 1,
+        }
+        .to_platform_input(),
+        cx,
+    );
+    window.render_frame(cx);
+}
+
+#[gpui_kit::test]
+fn table_forgets_a_right_clicked_cell_on_the_next_click(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, handle_content) =
+        common::open_window(cx, Some(size(px(640.), px(320.))), |window, cx| {
+            cx.new(|cx| RecordsBelowLabel {
+                table: cx.new(|cx| TableState::new(Rows, window, cx).cell_selectable(true)),
+            })
+        });
+    cx.update_window(handle.into(), |_, window, cx| {
+        let table = handle_content.clone().read(cx).table.clone();
+        window.render_frame(cx);
+
+        right_click_row(window, 1, cx);
+        assert_eq!(table.read(cx).right_clicked_cell(), Some((1, 0)));
+        window.click_at(("row", 2usize), point(px(100.), px(5.)), cx);
+        assert_eq!(
+            table.read(cx).right_clicked_cell(),
+            None,
+            "selecting another cell must clear the right-click outline"
+        );
+
+        right_click_row(window, 1, cx);
+        assert_eq!(table.read(cx).right_clicked_cell(), Some((1, 0)));
+        window.click("outside", cx);
+        assert_eq!(
+            table.read(cx).right_clicked_cell(),
+            None,
+            "a click outside the table must clear the right-click outline"
+        );
     })
     .unwrap();
 }
