@@ -6413,6 +6413,25 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_mask_pattern_accepts_non_ascii_text(cx: &mut TestAppContext) {
+        let input_view = InputView::build(cx, |state| state.mask_pattern("9999年99月"));
+        let mut cx = VisualTestContext::from_window(input_view.window_handle.into(), cx);
+        let input = input_view.input;
+
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| {
+                state.replace_text_in_range(None, "2024年12月", window, cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| {
+            input.read_with(cx, |state, _| {
+                assert_eq!(state.value(), "2024年12月");
+            });
+        });
+    }
+
+    #[gpui::test]
     fn test_number_input_normalization_with_separator(cx: &mut TestAppContext) {
         let input_view = InputView::build(cx, |state| {
             state.mask_pattern(MaskPattern::Number {
