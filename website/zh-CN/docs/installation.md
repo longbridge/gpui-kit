@@ -86,6 +86,35 @@ cargo run -p hello_world
 
 窗口打开后的功能问题，可继续阅读[Getting Started](./getting-started)以及对应功能指南。
 
+## 加快开发阶段链接
+
+可以在应用中添加一个 feature，尝试动态链接：
+
+```toml
+[features]
+dev = ["gpui-kit/dynlib"]
+```
+
+运行 `cargo run --features dev`。这可能缩短增量链接时间，但首次构建仍需编译共享库。
+Kit 的 `component` 和 `assets` feature 仍然独立，使用 `default-features = false` 时也是如此。
+
+Cargo 会为其启动的程序设置动态库搜索路径，但默认不启用 RPATH。
+直接运行或复制可执行文件时，如果缺少匹配的共享库或 loader 配置，程序可能无法启动。
+生产构建应省略 `dev` 和 `dynlib`；`--release` 不会关闭已启用的 feature。
+Wasm 构建会排除动态库依赖。
+
+Windows 上需要优化开发依赖，以避免超过 MSVC 的 DLL 导入库成员数量上限（`LNK1189`）。
+在应用的根 `Cargo.toml` 中添加：
+
+```toml
+[profile.dev.package."*"]
+opt-level = 3
+```
+
+首次构建会更慢，应用代码仍使用普通开发 profile。通配符不包含 workspace 成员，
+因此本地的 Kit 框架 crate 还需要显式覆盖；本仓库的 `script/dynamic-linking-windows.toml`
+提供了这些配置。如果依赖图仍超过限制，请关闭 `dynlib`。
+
 ## 提升开发模式运行性能
 
 Rust Debug 构建下，GPUI、组件库、布局和文字渲染相关 crate 基本没有优化，因此通过 `cargo run` 启动的应用，其渲染与交互性能会明显低于 release build。下面的配置只优化这些框架依赖，应用自身代码仍保持 Debug mode，可以继续使用正常的调试流程。

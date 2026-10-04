@@ -1,0 +1,33 @@
+[package]
+name = "gpui-kit-dylib"
+version = "0.7.0"
+description = "Forces dynamic linking of GPUI Kit for faster incremental compile times."
+keywords = ["desktop", "gpui", "dylib", "dynamic-linking"]
+categories = ["gui"]
+license = "Apache-2.0"
+documentation = "https://docs.rs/gpui-kit-dylib"
+homepage = "https://gpui-kit.com"
+repository = "https://github.com/longbridge/gpui-kit"
+readme = "README.md"
+publish = true
+edition.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["dylib"]
+
+[dependencies]
+gpui = { workspace = true }
+gpui-base = { workspace = true }
+gpui-component = { workspace = true, optional = true }
+gpui-kit-assets = { workspace = true, optional = true }
+
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+gpui_platform = { workspace = true }
+
+[features]
+default = ["component", "assets"]
+component = ["dep:gpui-component"]
+assets = ["dep:gpui-kit-assets"]

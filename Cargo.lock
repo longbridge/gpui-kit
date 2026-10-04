@@ -2624,6 +2624,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 
 [[package]]
+name = "dynlib"
+version = "0.7.0"
+dependencies = [
+ "gpui-kit",
+]
+
+[[package]]
 name = "ecdsa"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4063,6 +4070,7 @@ dependencies = [
  "gpui-base",
  "gpui-component",
  "gpui-kit-assets",
+ "gpui-kit-dylib",
  "gpui-pre",
  "gpui-pre-platform",
  "gpui-pre-web",
@@ -4081,6 +4089,17 @@ dependencies = [
  "rust-embed",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "gpui-kit-dylib"
+version = "0.7.0"
+dependencies = [
+ "gpui-base",
+ "gpui-component",
+ "gpui-kit-assets",
+ "gpui-pre",
+ "gpui-pre-platform",
 ]
 
 [[package]]

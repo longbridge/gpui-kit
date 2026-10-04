@@ -18,9 +18,11 @@ workspace = true
 [features]
 default = ["component", "assets"]
 # The styled component library, `gpui_kit::component`. Initializes `gpui-base` too.
-component = ["dep:gpui-component"]
+component = ["dep:gpui-component", "gpui-kit-dylib?/component"]
 # The default icon set for `gpui-component`, `gpui_kit::assets`.
-assets = ["dep:gpui-kit-assets"]
+assets = ["dep:gpui-kit-assets", "gpui-kit-dylib?/assets"]
+# Force dynamic linking, which drastically improves iterative compile times.
+dynlib = ["dep:gpui-kit-dylib"]
 # GPUI's test harness, native-platform rendering, and Kit UI test helpers.
 test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui-base/test-support", "gpui-component?/test-support"]
 # Frame-event instrumentation remains opt-in for performance builds.
@@ -79,6 +81,9 @@ gpui_platform.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 gpui_web.workspace = true
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+gpui-kit-dylib = { workspace = true, optional = true }
 
 [dev-dependencies]
 chrono = "0.4.38"

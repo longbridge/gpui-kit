@@ -181,3 +181,9 @@ pub fn init(cx: &mut App) {
 
 /// Fluent UI test observation, inert unless `test-support` is enabled.
 pub use gpui_base::TestSupportExt;
+
+// Forces dynamic linking of the GPUI Kit engine when the `dynlib` feature is enabled.
+// This causes rustc to link against libgpui_kit_dylib instead of static rlibs.
+#[cfg(all(feature = "dynlib", not(target_family = "wasm")))]
+#[allow(unused_imports, clippy::single_component_path_imports)]
+use gpui_kit_dylib as _;

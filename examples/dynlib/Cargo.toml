@@ -1,0 +1,19 @@
+[package]
+name = "dynlib"
+description = "Headless smoke test for development dynamic linking."
+version = "0.7.0"
+publish = false
+edition.workspace = true
+
+[dependencies]
+# Keep the consumer independent of Kit's test-support dev dependencies.
+gpui-kit = { path = "../../crates/kit", version = "0.7.0", default-features = false }
+
+[features]
+default = ["component", "assets"]
+component = ["gpui-kit/component"]
+assets = ["gpui-kit/assets"]
+dynlib = ["gpui-kit/dynlib"]
+
+[lints]
+workspace = true
