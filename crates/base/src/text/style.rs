@@ -80,7 +80,7 @@ impl TextViewStyle {
             selection: colors.selection,
             code_background: colors.accent,
             border: colors.border,
-            paragraph_gap: rems(1.),
+            paragraph_gap: rems(0.75),
             heading: Arc::new(|_| StyleRefinement::default()),
             code_block: StyleRefinement::default(),
             table: StyleRefinement::default(),
@@ -134,7 +134,7 @@ impl TextViewStyle {
         self
     }
 
-    /// Sets the gap between paragraphs. Defaults to 1 rem.
+    /// Sets the gap between paragraphs. Defaults to 0.75 rem.
     pub fn with_paragraph_gap(mut self, gap: Rems) -> Self {
         self.paragraph_gap = gap;
         self

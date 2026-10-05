@@ -11,9 +11,12 @@ use crate::highlighter::HighlightTheme;
 /// themed value rather than overriding it with a neutral one.
 #[derive(Clone)]
 pub struct TextViewStyle {
-    /// Gap of each paragraphs, default is 1 rem.
+    /// Gap of each paragraphs, default is 0.75 rem.
     pub paragraph_gap: Rems,
     /// Base font size for headings, default is 14px.
+    ///
+    /// Left at the default together with [`Self::heading_font_size`], headings
+    /// follow the text view's own scale, proportional to the body text.
     pub heading_base_font_size: Pixels,
     /// Function to calculate heading font size based on heading level (1-6).
     ///
@@ -58,7 +61,7 @@ pub struct TextViewStyle {
 impl Default for TextViewStyle {
     fn default() -> Self {
         Self {
-            paragraph_gap: rems(1.),
+            paragraph_gap: rems(0.75),
             heading_base_font_size: px(14.),
             heading_font_size: None,
             highlight_theme: HighlightTheme::default_light().clone(),
@@ -95,7 +98,7 @@ impl PartialEq for TextViewStyle {
 }
 
 impl TextViewStyle {
-    /// Set paragraph gap, default is 1 rem.
+    /// Set paragraph gap, default is 0.75 rem.
     pub fn paragraph_gap(mut self, gap: Rems) -> Self {
         self.paragraph_gap = gap;
         self

@@ -730,7 +730,9 @@ mod tests {
         let bounds = cx
             .debug_bounds("scrollable-text-view")
             .expect("scrollable TextView bounds");
-        let start = point(bounds.left() + px(30.), bounds.top() + px(30.));
+        // On the first paragraph's line: a drag that neither starts nor
+        // lands on text selects nothing, and the edge may sit in a gap.
+        let start = point(bounds.left() + px(30.), bounds.top() + px(10.));
         let edge = point(bounds.left() + px(60.), bounds.bottom() - px(2.));
         cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
         cx.simulate_mouse_move(edge, Some(MouseButton::Left), Modifiers::default());

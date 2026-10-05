@@ -338,9 +338,17 @@ pub(super) fn resolve_component_style(
 
     let heading_base_font_size = legacy.heading_base_font_size;
     let heading_font_size = legacy.heading_font_size;
+    // A style that never touched heading sizes keeps the Base default, which
+    // scales headings with the body text; only an explicit base size or
+    // resolver pins them to pixels.
+    let pins_heading_size = heading_font_size.is_some()
+        || heading_base_font_size != TextViewStyle::default().heading_base_font_size;
     let style = themed
         .with_paragraph_gap(legacy.paragraph_gap)
         .with_heading(move |level| {
+            if !pins_heading_size {
+                return StyleRefinement::default();
+            }
             let default_size = match level {
                 1 => gpui::rems(2.),
                 2 => gpui::rems(1.5),

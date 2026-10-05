@@ -2272,8 +2272,9 @@ mod tests {
         cx.run_until_parked();
         cx.simulate_click(point(px(10.), px(10.)), Modifiers::default());
         assert_eq!(cx.opened_url(), Some("https://example.com".to_string()));
+        // Just past the code span's leading padding, on its first glyph.
         cx.simulate_mouse_down(
-            point(px(3.), px(8.)),
+            point(px(5.), px(8.)),
             MouseButton::Left,
             Modifiers::default(),
         );
@@ -2457,7 +2458,7 @@ mod tests {
 
             let mut markers = shaped_lines
                 .into_iter()
-                .filter(|line| line.ends_with(". "))
+                .filter(|line| line.len() <= 3 && line.ends_with('.'))
                 .collect::<Vec<_>>();
             markers.dedup();
             markers
@@ -2466,28 +2467,28 @@ mod tests {
         let starts_at_one = "1. one\n2. two";
         assert_eq!(
             shaped_markers(Format::Markdown, starts_at_one),
-            ["1. ", "2. "]
+            ["1.", "2."]
         );
         assert_eq!(
             shaped_markers(Format::Html, "<ol><li>one</li><li>two</li></ol>"),
-            ["1. ", "2. "]
+            ["1.", "2."]
         );
 
         assert_eq!(
             shaped_markers(Format::Markdown, "3. hello\n4. world"),
-            ["3. ", "4. "]
+            ["3.", "4."]
         );
 
         let nested_starts_at_four = "1. outer\n\n   4. nested\n   5. again";
         assert_eq!(
             shaped_markers(Format::Markdown, nested_starts_at_four),
-            ["1. ", "D. ", "E. "]
+            ["1.", "D.", "E."]
         );
 
         let nested_starts_at_zero = "1. outer\n\n   0. zero";
         assert_eq!(
             shaped_markers(Format::Markdown, nested_starts_at_zero),
-            ["1. ", "0. "]
+            ["1.", "0."]
         );
     }
 
@@ -2793,7 +2794,10 @@ mod tests {
                             })
                         })
                         .render_with(|_, context, _, _| {
-                            assert_eq!(context.text_style().font_weight, gpui::FontWeight::BOLD);
+                            assert_eq!(
+                                context.text_style().font_weight,
+                                gpui::FontWeight::SEMIBOLD
+                            );
                             Some(super::super::InlineElement::new(div().child("formula")))
                         }),
                 );

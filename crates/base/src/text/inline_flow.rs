@@ -24,7 +24,7 @@ use super::{
 };
 
 const IMAGE_LEN: usize = 1;
-pub(super) const INLINE_CODE_PADDING: f32 = 2.;
+pub(super) const INLINE_CODE_PADDING: f32 = 4.;
 
 pub(super) struct InlineFlow {
     id: ElementId,
