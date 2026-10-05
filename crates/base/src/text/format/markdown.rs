@@ -11,8 +11,8 @@ use crate::text::{
     document::ParsedDocument,
     markdown_ext::MarkdownParseContext,
     node::{
-        self, BlockNode, CodeBlock, ImageNode, InlineNode, LinkMark, NodeContext, Paragraph,
-        SourceSegment, Span, Table, TableRow, TextMark,
+        self, BlockNode, CodeBlock, CustomBlock, ImageNode, InlineNode, LinkMark, NodeContext,
+        Paragraph, SourceSegment, Span, Table, TableRow, TextMark,
     },
 };
 
@@ -933,7 +933,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
     let parse_cx = MarkdownParseContext::new(source, cx.offset);
     if let Some(mut node) = cx.markdown_extensions.parse_block(&value, &parse_cx) {
         node.set_span(span);
-        return BlockNode::Custom(node);
+        return BlockNode::Custom(CustomBlock::new(node));
     }
 
     match value {
@@ -2107,9 +2107,10 @@ mod tests {
         };
         let document = parse("$TSLA.US", &mut cx).unwrap();
 
-        let BlockNode::Custom(node) = &document.blocks[0] else {
+        let BlockNode::Custom(block) = &document.blocks[0] else {
             panic!("expected custom markdown node");
         };
+        let node = &block.node;
         assert_eq!(node.name(), "ticker");
         assert_eq!(node.as_text(), "$TSLA.US");
         assert_eq!(node.as_markdown(), "$TSLA.US");
@@ -2422,9 +2423,10 @@ mod tests {
         };
         let document = parse("$TSLA.US", &mut cx).unwrap();
 
-        let BlockNode::Custom(node) = &document.blocks[0] else {
+        let BlockNode::Custom(block) = &document.blocks[0] else {
             panic!("expected custom markdown node");
         };
+        let node = &block.node;
         assert_eq!(node.name(), "ticker");
         assert_eq!(
             node.data::<Ticker>(),

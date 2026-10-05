@@ -456,7 +456,8 @@ impl IndexBuilder {
                     Vec::new(),
                 );
             }
-            BlockNode::Custom(node) => {
+            BlockNode::Custom(block) => {
+                let node = &block.node;
                 self.push_object_source(self.text.len(), node.as_text(), node.source_range());
                 self.text.push_str(node.as_text());
             }

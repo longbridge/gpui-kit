@@ -1,29 +1,30 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     ops::Range,
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
 use gpui::{
-    AnyElement, App, Axis, DefiniteLength, Div, ElementId, FontStyle, FontWeight, HighlightStyle,
-    Hsla, Image, ImageFormat, ImageSource, InteractiveElement as _, IntoElement, IsZero as _,
-    Length, ObjectFit, Overflow, ParentElement, Pixels, Rems, ScrollHandle, SharedString,
-    SharedUri, StatefulInteractiveElement, StyleRefinement, Styled, StyledImage as _,
-    TextStyleRefinement, WhiteSpace, Window, div, img, prelude::FluentBuilder as _, px, relative,
-    rems,
+    AnyElement, App, Axis, Bounds, DefiniteLength, Div, Element, ElementId, FontStyle, FontWeight,
+    GlobalElementId, HighlightStyle, Hsla, Image, ImageFormat, ImageSource, InspectorElementId,
+    InteractiveElement as _, IntoElement, IsZero as _, LayoutId, Length, ObjectFit, Overflow,
+    ParentElement, Pixels, Point, Rems, ScrollHandle, SharedString, SharedUri,
+    StatefulInteractiveElement, StyleRefinement, Styled, StyledImage as _, TextStyleRefinement,
+    WhiteSpace, Window, div, img, prelude::FluentBuilder as _, px, relative, rems,
 };
 use markdown::mdast;
 
 use crate::{
-    ScrollableMask, Scrollbar, StyledExt, h_flex,
+    GlobalState, ScrollableMask, Scrollbar, StyledExt, h_flex,
     scrollable_mask::horizontal_scroll_area,
     text::{
         CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
         MarkdownNode, TableActionsFn,
         document::{NodeRenderOptions, PrevBlock, flow_position},
         inline::{
-            Inline, InlineHighlight, InlineState, combine_highlights, fade_highlights, text_runs,
-            text_size_ranges,
+            Inline, InlineHighlight, InlineState, combine_highlights, fade_highlights,
+            point_in_text_selection, text_runs, text_size_ranges,
         },
         inline_flow::{InlineFlow, InlineFlowItem, slice_ranges},
         range_highlight::{RangeHighlightFrame, RevealAt, RevealRequest},
@@ -76,7 +77,7 @@ pub(crate) enum BlockNode {
     },
     CodeBlock(CodeBlock),
     /// A custom Markdown node produced by [`MarkdownExtensions`].
-    Custom(MarkdownNode),
+    Custom(CustomBlock),
     Table(Table),
     Break {
         html: bool,
@@ -93,6 +94,157 @@ pub(crate) enum BlockNode {
         span: Option<Span>,
     },
     Unknown,
+}
+
+/// Selection belongs to the parsed block, not the public plugin payload.
+#[derive(Debug, Clone)]
+pub(crate) struct CustomBlock {
+    pub(super) node: MarkdownNode,
+    // Like InlineState::selection, Some(false) records an empty, painted
+    // endpoint. None lets a virtualized block be copied whole when enclosed.
+    selection: Arc<Mutex<Option<bool>>>,
+}
+
+impl CustomBlock {
+    pub(super) fn new(node: MarkdownNode) -> Self {
+        Self {
+            node,
+            selection: Arc::default(),
+        }
+    }
+
+    fn is_selected(&self) -> bool {
+        self.selection
+            .lock()
+            .is_ok_and(|selection| *selection == Some(true))
+    }
+}
+
+impl PartialEq for CustomBlock {
+    fn eq(&self, other: &Self) -> bool {
+        self.node == other.node
+    }
+}
+
+/// Observe the plugin's own bounds without changing its layout or listeners.
+struct CustomBlockElement {
+    content: AnyElement,
+    selection: Arc<Mutex<Option<bool>>>,
+}
+
+impl IntoElement for CustomBlockElement {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for CustomBlockElement {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        (self.content.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.content.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let view = GlobalState::global(cx).text_view_state().cloned();
+        let selection = view.as_ref().and_then(|view| {
+            let state = view.read(cx);
+            if !state.is_selectable() {
+                return None;
+            }
+            if state.is_all_selected() {
+                return Some(true);
+            }
+            if state.preserve_inline_selection {
+                return self.selection.lock().ok().and_then(|selection| *selection);
+            }
+            let (start, end) = state.selection_points(cx)?;
+            // Selection uses the full content bounds, not the visible clip or
+            // the paragraph gap outside this element.
+            if bounds.size.width <= Pixels::ZERO
+                || bounds.size.height <= Pixels::ZERO
+                || bounds.bottom() <= start.y.min(end.y)
+                || bounds.top() > start.y.max(end.y)
+            {
+                return None;
+            }
+            Some(custom_block_is_selected(bounds, start, end))
+        });
+        if let Ok(mut stored) = self.selection.lock() {
+            *stored = selection;
+        }
+        if let Some(view) = &view {
+            let visible = bounds.intersect(&window.content_mask().bounds);
+            if view.read(cx).is_selectable()
+                && visible.size.width > Pixels::ZERO
+                && visible.size.height > Pixels::ZERO
+            {
+                view.update(cx, |state, _| {
+                    state.selection_adapter.register_inline(vec![visible]);
+                });
+            }
+        }
+        self.content.paint(window, cx);
+        if selection == Some(true) {
+            let color = view.as_ref().unwrap().read(cx).text_view_style.selection();
+            window.paint_quad(gpui::fill(bounds, color));
+        }
+    }
+}
+
+fn custom_block_is_selected(
+    bounds: Bounds<Pixels>,
+    start: Point<Pixels>,
+    end: Point<Pixels>,
+) -> bool {
+    start != end
+        && (bounds.contains(&start)
+            || bounds.contains(&end)
+            || point_in_text_selection(
+                bounds.origin,
+                bounds.size.width,
+                start,
+                end,
+                bounds.size.height,
+            ))
 }
 
 #[derive(Clone, Copy)]
@@ -127,7 +279,7 @@ impl BlockNode {
             BlockNode::List { span, .. } => *span,
             BlockNode::ListItem { span, .. } => *span,
             BlockNode::CodeBlock(code_block) => code_block.span,
-            BlockNode::Custom(el) => el.span,
+            BlockNode::Custom(block) => block.node.span,
             BlockNode::Table(table) => table.span,
             BlockNode::Break { span, .. } => *span,
             BlockNode::HorizontalRule { span, .. } => *span,
@@ -172,8 +324,15 @@ impl BlockNode {
                 }
             }
             BlockNode::CodeBlock(code_block) => selected = code_block.selected_source_range(),
-            BlockNode::Custom(_)
-            | BlockNode::Definition { .. }
+            BlockNode::Custom(block) => {
+                if block.is_selected() {
+                    selected = block
+                        .node
+                        .source_range()
+                        .map_or(SourceRangeSelection::Unmapped, SourceRangeSelection::Mapped);
+                }
+            }
+            BlockNode::Definition { .. }
             | BlockNode::Break { .. }
             | BlockNode::HorizontalRule { .. }
             | BlockNode::Unknown => {}
@@ -305,11 +464,14 @@ impl BlockNode {
                     text.push('\n');
                 }
             }
-            BlockNode::Custom(node) => {
-                if let BlockTextKind::All = kind {
-                    let content = node.as_text();
+            BlockNode::Custom(block) => {
+                if matches!(kind, BlockTextKind::All) || block.is_selected() {
+                    let content = match kind {
+                        BlockTextKind::SelectedSource => Cow::Owned(block.node.to_markdown()),
+                        _ => Cow::Borrowed(block.node.as_text()),
+                    };
                     if !content.is_empty() {
-                        text.push_str(content);
+                        text.push_str(&content);
                         text.push('\n');
                     }
                 }
@@ -358,8 +520,11 @@ impl BlockNode {
                     .any(|cell| cell.children.has_selection())
             }),
             BlockNode::CodeBlock(code_block) => code_block.has_selection(),
-            BlockNode::Custom { .. }
-            | BlockNode::Definition { .. }
+            BlockNode::Custom(block) => block
+                .selection
+                .lock()
+                .is_ok_and(|selection| selection.is_some()),
+            BlockNode::Definition { .. }
             | BlockNode::Break { .. }
             | BlockNode::HorizontalRule { .. }
             | BlockNode::Unknown { .. } => false,
@@ -386,8 +551,12 @@ impl BlockNode {
                 }
             }
             BlockNode::CodeBlock(code_block) => code_block.clear_selection(),
-            BlockNode::Custom { .. }
-            | BlockNode::Definition { .. }
+            BlockNode::Custom(block) => {
+                if let Ok(mut selection) = block.selection.lock() {
+                    *selection = None;
+                }
+            }
+            BlockNode::Definition { .. }
             | BlockNode::Break { .. }
             | BlockNode::HorizontalRule { .. }
             | BlockNode::Unknown { .. } => {}
@@ -2996,7 +3165,7 @@ impl BlockNode {
                 }
             }
             BlockNode::HorizontalRule { .. } => "---".to_string(),
-            BlockNode::Custom(node) => node.to_markdown(),
+            BlockNode::Custom(block) => block.node.to_markdown(),
             BlockNode::Definition {
                 identifier,
                 url,
@@ -3720,13 +3889,24 @@ impl BlockNode {
                 })
                 .into_any_element(),
             BlockNode::CodeBlock(code_block) => code_block.render(&options, node_cx, window, cx),
-            BlockNode::Custom(node) => {
-                let inner = match node_cx.markdown_extensions.render_block(node, window, cx) {
+            BlockNode::Custom(block) => {
+                let inner = match node_cx
+                    .markdown_extensions
+                    .render_block(&block.node, window, cx)
+                {
                     Some(rendered) => rendered,
-                    None => div().child(node.as_text().to_string()).into_any_element(),
+                    None => div()
+                        .child(block.node.as_text().to_string())
+                        .into_any_element(),
                 };
 
-                div().pb(mb).child(inner).into_any_element()
+                div()
+                    .pb(mb)
+                    .child(CustomBlockElement {
+                        content: inner,
+                        selection: block.selection.clone(),
+                    })
+                    .into_any_element()
             }
             BlockNode::Table { .. } => {
                 // Tables are data and read a step denser than the body. The
