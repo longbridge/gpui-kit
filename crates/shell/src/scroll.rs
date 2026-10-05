@@ -212,12 +212,18 @@ fn render_scrollbar(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Context, Render, TestAppContext, VisualTestContext, px};
+    use gpui::{Bounds, Context, Pixels, Render, TestAppContext, VisualTestContext, canvas, px};
+    use std::{cell::Cell, rc::Rc};
 
-    struct FlexItemScrollableTest;
+    struct FlexItemScrollableTest {
+        header_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+        footer_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    }
 
     impl Render for FlexItemScrollableTest {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let header_bounds = self.header_bounds.clone();
+            let footer_bounds = self.footer_bounds.clone();
             // A fixed-height column of header, flexible scroll area, footer.
             // The content is far taller than the room left for the area, so
             // the area must shrink into the remaining 60px and scroll.
@@ -225,10 +231,13 @@ mod tests {
                 .w(px(100.))
                 .h(px(100.))
                 .child(
-                    div()
-                        .h(px(20.))
-                        .flex_shrink_0()
-                        .debug_selector(|| "shell-header".to_string()),
+                    div().h(px(20.)).flex_shrink_0().child(
+                        canvas(
+                            move |bounds, _, _| header_bounds.set(Some(bounds)),
+                            |_, _, _, _| {},
+                        )
+                        .size_full(),
+                    ),
                 )
                 .child(Scrollable::new(
                     gpui_base::v_flex()
@@ -237,17 +246,27 @@ mod tests {
                     ScrollbarAxis::Vertical,
                 ))
                 .child(
-                    div()
-                        .h(px(20.))
-                        .flex_shrink_0()
-                        .debug_selector(|| "shell-footer".to_string()),
+                    div().h(px(20.)).flex_shrink_0().child(
+                        canvas(
+                            move |bounds, _, _| footer_bounds.set(Some(bounds)),
+                            |_, _, _, _| {},
+                        )
+                        .size_full(),
+                    ),
                 )
         }
     }
 
     #[gpui::test]
     fn scrollable_flex_item_shrinks_below_its_content(cx: &mut TestAppContext) {
-        let (_, cx) = cx.add_window_view(|_, _| FlexItemScrollableTest);
+        // Debug selectors are disabled in release builds; capture laid-out
+        // bounds directly so the Shell's release test suite checks the layout.
+        let header_bounds = Rc::new(Cell::new(None));
+        let footer_bounds = Rc::new(Cell::new(None));
+        let (_, cx) = cx.add_window_view(|_, _| FlexItemScrollableTest {
+            header_bounds: header_bounds.clone(),
+            footer_bounds: footer_bounds.clone(),
+        });
         let cx: &mut VisualTestContext = cx;
         cx.run_until_parked();
         cx.update(|window, cx| {
@@ -256,7 +275,13 @@ mod tests {
 
         // Header and footer stay inside the 100px column, so the area took the
         // 60px left over instead of its content height.
-        assert_eq!(cx.debug_bounds("shell-header").unwrap().top(), px(0.));
-        assert_eq!(cx.debug_bounds("shell-footer").unwrap().top(), px(80.));
+        assert_eq!(
+            header_bounds.get().expect("header was laid out").top(),
+            px(0.)
+        );
+        assert_eq!(
+            footer_bounds.get().expect("footer was laid out").top(),
+            px(80.)
+        );
     }
 }
