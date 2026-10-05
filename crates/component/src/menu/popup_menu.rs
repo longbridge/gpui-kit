@@ -1104,6 +1104,8 @@ impl PopupMenu {
             return;
         }
 
+        // An outside press dismisses the menu without activating the surface beneath it.
+        cx.stop_propagation();
         self.dismiss(&Cancel, window, cx);
     }
 
