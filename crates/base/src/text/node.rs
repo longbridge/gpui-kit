@@ -20,7 +20,7 @@ use crate::{
     text::{
         CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
         MarkdownNode, TableActionsFn,
-        document::{NodeRenderOptions, PrevBlock},
+        document::{NodeRenderOptions, PrevBlock, flow_position},
         inline::{
             Inline, InlineHighlight, InlineState, combine_highlights, fade_highlights, text_runs,
             text_size_ranges,
@@ -2624,6 +2624,33 @@ fn body_font_size(node_cx: &NodeContext, window: &Window) -> Pixels {
     }
 }
 
+/// A heading's `(size scale, line height, section gap)`, the size relative to
+/// the body text and the gap above it relative to the heading itself.
+/// Hierarchy comes from weight rather than size: every level is semibold and
+/// the sizes step down gently from the body.
+fn heading_metrics(level: u8) -> (f32, f32, f32) {
+    match level {
+        1 => (1.8, 1.25, 1.1),
+        2 => (4. / 3., 1.35, 1.6),
+        3 => (17. / 15., 1.35, 1.4),
+        4 => (1., 1.35, 1.4),
+        5 => (14. / 15., 1.35, 1.4),
+        _ => (13. / 15., 1.35, 1.4),
+    }
+}
+
+/// The gap below a heading, relative to the heading's size.
+const HEADING_BOTTOM_GAP: f32 = 0.35;
+
+/// The size a heading renders at, including one a caller's heading
+/// refinement pins, which its gaps follow.
+fn heading_size(level: u8, node_cx: &NodeContext, window: &Window) -> Pixels {
+    node_cx.style.heading(level).text.font_size.map_or_else(
+        || body_font_size(node_cx, window) * heading_metrics(level).0,
+        |size| size.to_pixels(window.rem_size()),
+    )
+}
+
 /// The room above and below a horizontal rule.
 fn rule_space(body_font_size: Pixels) -> Pixels {
     body_font_size * 1.6
@@ -3229,6 +3256,7 @@ impl BlockNode {
         item: &BlockNode,
         options: &NodeRenderOptions,
         node_cx: &NodeContext,
+        text_size: Pixels,
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
@@ -3247,7 +3275,9 @@ impl BlockNode {
                 .map(|row| row.children.len())
                 .max()
                 .unwrap_or(0);
-            return Self::render_scroll_table(table, col_count, options, node_cx, window, cx);
+            return Self::render_scroll_table(
+                table, col_count, options, node_cx, text_size, window, cx,
+            );
         }
 
         // Per-column max text length (in chars), used to proportion the columns
@@ -3262,7 +3292,7 @@ impl BlockNode {
             }
         }
 
-        Self::render_wrap_table(table, &col_lens, options, node_cx, window, cx)
+        Self::render_wrap_table(table, &col_lens, options, node_cx, text_size, window, cx)
     }
 
     /// Horizontally scrollable table layout (opt-in via `style.table`
@@ -3288,6 +3318,7 @@ impl BlockNode {
         col_count: usize,
         options: &NodeRenderOptions,
         node_cx: &NodeContext,
+        text_size: Pixels,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -3403,6 +3434,7 @@ impl BlockNode {
                     block_element_id("table", table.span, options.ix),
                     &scroll_handle,
                     &StyleRefinement::default()
+                        .text_size(text_size)
                         .bg(style
                             .table_background()
                             .unwrap_or(cx.theme().tokens.colors.surface))
@@ -3439,6 +3471,7 @@ impl BlockNode {
         col_lens: &[usize],
         options: &NodeRenderOptions,
         node_cx: &NodeContext,
+        text_size: Pixels,
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
@@ -3505,6 +3538,7 @@ impl BlockNode {
             .child(
                 div()
                     .w_full()
+                    .text_size(text_size)
                     .bg(style
                         .table_background()
                         .unwrap_or(cx.theme().tokens.colors.surface))
@@ -3542,17 +3576,18 @@ impl BlockNode {
             BlockNode::Root { children, .. } => div()
                 .children(children.into_iter().enumerate().map(move |(ix, node)| {
                     // A nested root (an HTML block container) continues the
-                    // flow around it: only its first child takes its place.
-                    let (is_first, prev) = if ix == 0 {
-                        (options.is_first, options.prev)
-                    } else {
-                        (false, PrevBlock::before(children, ix))
+                    // flow around it: until it shows a block of its own, it
+                    // stands where the container stands.
+                    let (is_first, prev) = match flow_position(children, ix) {
+                        (true, _) => (options.is_first, options.prev),
+                        (false, prev) => (false, prev),
                     };
                     node.render_block(
                         NodeRenderOptions {
                             ix,
                             is_first,
                             prev,
+                            is_last: options.is_last && ix + 1 == children.len(),
                             ..options
                         },
                         node_cx,
@@ -3575,23 +3610,9 @@ impl BlockNode {
                 children,
                 span,
             } => {
-                // Hierarchy comes from weight rather than size: every level
-                // is semibold and the sizes step down gently from the body.
-                let (scale, line_height, section_gap) = match level {
-                    1 => (1.8, 1.25, 1.1),
-                    2 => (4. / 3., 1.35, 1.6),
-                    3 => (17. / 15., 1.35, 1.4),
-                    4 => (1., 1.35, 1.4),
-                    5 => (14. / 15., 1.35, 1.4),
-                    _ => (13. / 15., 1.35, 1.4),
-                };
-                // The gaps follow the size the heading actually renders at,
-                // including one a caller's heading refinement pins.
+                let (_, line_height, section_gap) = heading_metrics(*level);
                 let refinement = node_cx.style.heading(*level);
-                let text_size = refinement.text.font_size.map_or_else(
-                    || body_font_size(node_cx, window) * scale,
-                    |size| size.to_pixels(window.rem_size()),
-                );
+                let text_size = heading_size(*level, node_cx, window);
                 // The previous block already leaves a gap below itself, so
                 // only the rest of the section gap is added here -- the two
                 // collapse like CSS margins. A heading right after another one
@@ -3601,7 +3622,7 @@ impl BlockNode {
                     px(0.)
                 } else {
                     match options.prev {
-                        PrevBlock::Heading => text_size * 0.25,
+                        PrevBlock::Heading(_) => text_size * 0.25,
                         PrevBlock::Rule => (text_size * section_gap
                             - rule_space(body_font_size(node_cx, window)))
                         .max(px(0.)),
@@ -3613,7 +3634,7 @@ impl BlockNode {
                 let bottom = if options.is_last {
                     px(0.)
                 } else {
-                    text_size * 0.35
+                    text_size * HEADING_BOTTOM_GAP
                 };
 
                 div()
@@ -3646,10 +3667,11 @@ impl BlockNode {
                         let children_len = children.len();
                         children.into_iter().enumerate().map(move |(index, c)| {
                             let is_last = index == children_len - 1;
+                            let (is_first, prev) = flow_position(children, index);
                             c.render_block(
                                 NodeRenderOptions {
-                                    is_first: index == 0,
-                                    prev: PrevBlock::before(children, index),
+                                    is_first,
+                                    prev,
                                     ..options.is_last(is_last)
                                 },
                                 node_cx,
@@ -3709,22 +3731,19 @@ impl BlockNode {
             BlockNode::Table { .. } => {
                 // Tables are data and read a step denser than the body. The
                 // columns are measured while rendering, so they are measured
-                // at the same size the cells are laid out with.
+                // at the same size the cells are laid out with; the actions
+                // row below keeps the body size.
                 let text_size = body_font_size(node_cx, window) * (14. / 15.);
-                let table = window.with_text_style(
+                window.with_text_style(
                     Some(TextStyleRefinement {
                         font_size: Some(text_size.into()),
                         ..Default::default()
                     }),
                     |window| {
-                        Self::render_table(self, &options, node_cx, window, cx).into_any_element()
+                        Self::render_table(self, &options, node_cx, text_size, window, cx)
+                            .into_any_element()
                     },
-                );
-                div()
-                    .w_full()
-                    .text_size(text_size)
-                    .child(table)
-                    .into_any_element()
+                )
             }
             BlockNode::HorizontalRule { .. } => {
                 // A section break: a hairline with more room around it than
@@ -3736,7 +3755,10 @@ impl BlockNode {
                 } else {
                     let above = match options.prev {
                         PrevBlock::Rule => space,
-                        PrevBlock::Heading | PrevBlock::Other => {
+                        PrevBlock::Heading(level) => {
+                            heading_size(level, node_cx, window) * HEADING_BOTTOM_GAP
+                        }
+                        PrevBlock::Other => {
                             node_cx.style.paragraph_gap().to_pixels(window.rem_size())
                         }
                     };

@@ -43,18 +43,27 @@ pub(crate) struct NodeRenderOptions {
 pub(crate) enum PrevBlock {
     #[default]
     Other,
-    Heading,
+    /// A heading of the given level.
+    Heading(u8),
     Rule,
 }
 
-impl PrevBlock {
-    /// The kind of the block before `ix` in `blocks`.
-    pub(crate) fn before(blocks: &[BlockNode], ix: usize) -> Self {
-        match ix.checked_sub(1).map(|prev| &blocks[prev]) {
-            Some(BlockNode::Heading { .. }) => Self::Heading,
-            Some(BlockNode::HorizontalRule { .. }) => Self::Rule,
-            _ => Self::Other,
-        }
+/// Where the block at `ix` stands in its flow: whether it is the first block
+/// that shows anything, and the visible block before it. Link definitions
+/// and other blocks that render nothing are skipped, so a document opening
+/// with `[ref]: url` still starts flush.
+pub(crate) fn flow_position(blocks: &[BlockNode], ix: usize) -> (bool, PrevBlock) {
+    let prev = blocks[..ix].iter().rev().find(|block| {
+        !matches!(
+            block,
+            BlockNode::Definition { .. } | BlockNode::Break { .. } | BlockNode::Unknown
+        )
+    });
+    match prev {
+        None => (true, PrevBlock::Other),
+        Some(BlockNode::Heading { level, .. }) => (false, PrevBlock::Heading(*level)),
+        Some(BlockNode::HorizontalRule { .. }) => (false, PrevBlock::Rule),
+        Some(_) => (false, PrevBlock::Other),
     }
 }
 
@@ -225,12 +234,13 @@ impl ParsedDocument {
             let blocks_len = self.blocks.len();
             return div().children(self.blocks.iter().enumerate().map(move |(ix, node)| {
                 let is_last = ix + 1 == blocks_len;
+                let (is_first, prev) = flow_position(&self.blocks, ix);
                 node.render_block(
                     NodeRenderOptions {
                         ix,
                         is_last,
-                        is_first: ix == 0,
-                        prev: PrevBlock::before(&self.blocks, ix),
+                        is_first,
+                        prev,
                         ..Default::default()
                     },
                     node_cx,
@@ -256,13 +266,14 @@ impl ParsedDocument {
                 let blocks = blocks.clone();
                 move |ix, window, cx| {
                     let is_last = ix + 1 == blocks.len();
+                    let (is_first, prev) = flow_position(&blocks, ix);
                     blocks[ix]
                         .render_block(
                             NodeRenderOptions {
                                 ix,
                                 is_last,
-                                is_first: ix == 0,
-                                prev: PrevBlock::before(&blocks, ix),
+                                is_first,
+                                prev,
                                 ..options
                             },
                             &node_cx,
@@ -274,5 +285,40 @@ impl ParsedDocument {
             })
             .size_full(),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PrevBlock, flow_position};
+    use crate::text::{format::markdown, node::NodeContext};
+
+    fn positions(source: &str) -> Vec<(bool, PrevBlock)> {
+        let document = markdown::parse(source, &mut NodeContext::default()).unwrap();
+        (0..document.blocks.len())
+            .map(|ix| flow_position(&document.blocks, ix))
+            .collect()
+    }
+
+    #[test]
+    fn flow_position_skips_blocks_that_render_nothing() {
+        // The definition renders nothing, so the heading still opens the flow.
+        let flow = positions("[ref]: https://example.com\n\n# Title\n\ntext");
+        assert_eq!(flow[1], (true, PrevBlock::Other));
+        assert_eq!(flow[2], (false, PrevBlock::Heading(1)));
+    }
+
+    #[test]
+    fn flow_position_reports_the_previous_heading_or_rule() {
+        let flow = positions("text\n\n## A\n\n---\n\n### B");
+        assert_eq!(
+            flow,
+            [
+                (true, PrevBlock::Other),
+                (false, PrevBlock::Other),
+                (false, PrevBlock::Heading(2)),
+                (false, PrevBlock::Rule),
+            ]
+        );
     }
 }
