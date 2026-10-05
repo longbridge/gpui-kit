@@ -278,8 +278,8 @@ pub(crate) fn focus_style<T: Styled + ParentElement>(
     };
     // Shrinking or growing the box by `inset` keeps the line concentric with
     // the element's own corners.
-    let radius = corner_radii(element.style(), rem_size)
-        .map(|value| (*value - inset).max(Pixels::ZERO));
+    let radius =
+        corner_radii(element.style(), rem_size).map(|value| (*value - inset).max(Pixels::ZERO));
     element.child(
         div()
             .when(cfg!(test), |this| {

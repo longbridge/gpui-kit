@@ -1,7 +1,7 @@
 [package]
 name = "touch_selection"
 description = "Touch selection handles and edit menu of Input, Textarea and TextView, driven without a touch screen."
-version = "0.7.0"
+version = "0.7.1"
 publish = false
 edition.workspace = true
 

@@ -167,26 +167,24 @@ fn form_applies_styled_refinements(cx: &mut TestAppContext) {
             } else {
                 Form::vertical()
             };
-            div()
-                .w(px(400.))
-                .child(
-                    form.child(
-                        Field::new().child(
-                            div()
-                                .debug_selector(|| "control-0".into())
-                                .w_full()
-                                .h(px(20.)),
-                        ),
-                    )
-                    .child(
-                        Field::new().child(
-                            div()
-                                .debug_selector(|| "control-1".into())
-                                .w_full()
-                                .h(px(20.)),
-                        ),
+            div().w(px(400.)).child(
+                form.child(
+                    Field::new().child(
+                        div()
+                            .debug_selector(|| "control-0".into())
+                            .w_full()
+                            .h(px(20.)),
                     ),
                 )
+                .child(
+                    Field::new().child(
+                        div()
+                            .debug_selector(|| "control-1".into())
+                            .w_full()
+                            .h(px(20.)),
+                    ),
+                ),
+            )
         }
     }
 
