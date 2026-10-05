@@ -28,8 +28,9 @@ pub(crate) struct NodeRenderOptions {
     pub(crate) list_start: Option<u32>,
     pub(crate) depth: usize,
     pub(crate) is_last: bool,
-    /// Whether this is the first block of the document, which takes no gap
-    /// above it.
+    /// Whether this block opens its flow -- the document or a blockquote --
+    /// and so takes no gap above it. An HTML block container passes it on to
+    /// its own first child.
     pub(crate) is_first: bool,
     /// The previous sibling block, whose own bottom gap counts toward the
     /// gap above a heading or a rule.
