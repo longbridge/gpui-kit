@@ -28,9 +28,33 @@ pub(crate) struct NodeRenderOptions {
     pub(crate) list_start: Option<u32>,
     pub(crate) depth: usize,
     pub(crate) is_last: bool,
-    /// Whether the previous sibling block is a heading, so a heading right
-    /// after one takes a smaller top gap than a new section does.
-    pub(crate) after_heading: bool,
+    /// Whether this is the first block of the document, which takes no gap
+    /// above it.
+    pub(crate) is_first: bool,
+    /// The previous sibling block, whose own bottom gap counts toward the
+    /// gap above a heading or a rule.
+    pub(crate) prev: PrevBlock,
+}
+
+/// The kind of block before the one being rendered, as far as the gaps of
+/// headings and rules care.
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum PrevBlock {
+    #[default]
+    Other,
+    Heading,
+    Rule,
+}
+
+impl PrevBlock {
+    /// The kind of the block before `ix` in `blocks`.
+    pub(crate) fn before(blocks: &[BlockNode], ix: usize) -> Self {
+        match ix.checked_sub(1).map(|prev| &blocks[prev]) {
+            Some(BlockNode::Heading { .. }) => Self::Heading,
+            Some(BlockNode::HorizontalRule { .. }) => Self::Rule,
+            _ => Self::Other,
+        }
+    }
 }
 
 impl NodeRenderOptions {
@@ -200,12 +224,12 @@ impl ParsedDocument {
             let blocks_len = self.blocks.len();
             return div().children(self.blocks.iter().enumerate().map(move |(ix, node)| {
                 let is_last = ix + 1 == blocks_len;
-                let after_heading = ix > 0 && self.blocks[ix - 1].is_heading();
                 node.render_block(
                     NodeRenderOptions {
                         ix,
                         is_last,
-                        after_heading,
+                        is_first: ix == 0,
+                        prev: PrevBlock::before(&self.blocks, ix),
                         ..Default::default()
                     },
                     node_cx,
@@ -231,13 +255,13 @@ impl ParsedDocument {
                 let blocks = blocks.clone();
                 move |ix, window, cx| {
                     let is_last = ix + 1 == blocks.len();
-                    let after_heading = ix > 0 && blocks[ix - 1].is_heading();
                     blocks[ix]
                         .render_block(
                             NodeRenderOptions {
                                 ix,
                                 is_last,
-                                after_heading,
+                                is_first: ix == 0,
+                                prev: PrevBlock::before(&blocks, ix),
                                 ..options
                             },
                             &node_cx,

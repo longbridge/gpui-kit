@@ -1019,6 +1019,7 @@ impl TextViewState {
 impl Render for TextViewState {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let typography = (window.text_style(), window.rem_size());
+        let body_font_size = typography.0.font_size.to_pixels(typography.1);
         if self
             .layout_text_style
             .as_ref()
@@ -1058,6 +1059,7 @@ impl Render for TextViewState {
             stream_fade,
             range_highlights: self.range_highlights.clone(),
             reveal,
+            body_font_size,
         };
 
         let content = v_flex()

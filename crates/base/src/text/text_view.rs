@@ -2794,10 +2794,7 @@ mod tests {
                             })
                         })
                         .render_with(|_, context, _, _| {
-                            assert_eq!(
-                                context.text_style().font_weight,
-                                gpui::FontWeight::SEMIBOLD
-                            );
+                            assert_eq!(context.text_style().font_weight, gpui::FontWeight::BOLD);
                             Some(super::super::InlineElement::new(div().child("formula")))
                         }),
                 );

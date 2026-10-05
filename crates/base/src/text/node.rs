@@ -20,7 +20,7 @@ use crate::{
     text::{
         CodeBlockActionsFn, CodeBlockHighlighterFn, LinkClickHandlerFn, MarkdownExtensions,
         MarkdownNode, TableActionsFn,
-        document::NodeRenderOptions,
+        document::{NodeRenderOptions, PrevBlock},
         inline::{
             Inline, InlineHighlight, InlineState, combine_highlights, fade_highlights, text_runs,
             text_size_ranges,
@@ -107,10 +107,6 @@ enum BlockTextKind {
 impl BlockNode {
     pub(super) fn is_list_item(&self) -> bool {
         matches!(self, Self::ListItem { .. })
-    }
-
-    pub(super) fn is_heading(&self) -> bool {
-        matches!(self, Self::Heading { .. })
     }
 
     /// Combine all children, omitting the empt parent nodes.
@@ -1967,7 +1963,8 @@ impl CodeBlock {
         let leaf_key = self.span.map(|span| TextLeafKey::block(span.start));
         // The language sits quietly in the top-right corner, where custom
         // actions go instead when the caller provides them; the top padding
-        // keeps the first line clear of it.
+        // keeps the first line clear of it. Like the actions, it stays out of
+        // the scrolled content so it holds its corner.
         let lang_label = self
             .lang()
             .filter(|lang| !lang.is_empty() && node_cx.code_block_actions.is_none())
@@ -2000,7 +1997,6 @@ impl CodeBlock {
             .text_size(cx.theme().tokens.typography.mono_md.size)
             .line_height(relative(1.6))
             .relative()
-            .children(lang_label)
             .refine_style(&style.code_block())
             .child(
                 Inline::new(
@@ -2064,12 +2060,13 @@ impl CodeBlock {
                         .child(Scrollbar::vertical(&scroll_handle)),
                 )
                 .children(actions)
+                .children(lang_label)
                 .into_any_element()
         } else {
             // Without actions nothing under the block needs element state.
             match actions {
                 Some(actions) => block.id(id).child(actions).into_any_element(),
-                None => block.into_any_element(),
+                None => block.children(lang_label).into_any_element(),
             }
         };
 
@@ -2104,6 +2101,9 @@ pub(crate) struct NodeContext {
     pub(crate) range_highlights: Option<Arc<RangeHighlightFrame>>,
     /// The line being scrolled into view, when there is one.
     pub(crate) reveal: Option<RevealRequest>,
+    /// The font size the text view inherits this frame, or zero when not
+    /// resolved; read it through `body_font_size`.
+    pub(crate) body_font_size: Pixels,
 }
 
 impl NodeContext {
@@ -2155,7 +2155,7 @@ impl PartialEq for NodeContext {
 fn mark_highlight(mark: &TextMark, node_cx: &NodeContext, cx: &App) -> InlineHighlight {
     let mut highlight = HighlightStyle::default();
     if mark.bold {
-        highlight.font_weight = Some(FontWeight::SEMIBOLD);
+        highlight.font_weight = Some(FontWeight::BOLD);
     }
     if mark.italic {
         highlight.font_style = Some(FontStyle::Italic);
@@ -2613,12 +2613,24 @@ fn link_underline(style: &TextViewStyle) -> gpui::UnderlineStyle {
 /// The font size the blocks inherit, which heading sizes and the spacing of
 /// lists, tables and rules are proportional to (like CSS `em`), so a compact
 /// 14px view and a 16px document keep the same rhythm.
-fn body_font_size(window: &Window) -> Pixels {
-    window.text_style().font_size.to_pixels(window.rem_size())
+///
+/// Resolved once per frame into the context; a context built without it
+/// (as in tests) resolves it from the window.
+fn body_font_size(node_cx: &NodeContext, window: &Window) -> Pixels {
+    if node_cx.body_font_size > Pixels::ZERO {
+        node_cx.body_font_size
+    } else {
+        window.text_style().font_size.to_pixels(window.rem_size())
+    }
 }
 
-/// The gap below a table: a paragraph gap, unless nothing follows it.
-fn table_gap(options: &NodeRenderOptions, style: &TextViewStyle) -> Rems {
+/// The room above and below a horizontal rule.
+fn rule_space(body_font_size: Pixels) -> Pixels {
+    body_font_size * 1.6
+}
+
+/// The gap below a block: a paragraph gap, unless nothing follows it.
+fn block_gap(options: &NodeRenderOptions, style: &TextViewStyle) -> Rems {
     if options.in_list || options.is_last {
         rems(0.)
     } else {
@@ -3080,12 +3092,13 @@ impl BlockNode {
                 checked,
                 ..
             } => {
-                let indent = body_font_size(window) * 1.4;
+                let body = body_font_size(node_cx, window);
+                let indent = body * 1.4;
                 div()
                     .w_full()
                     .min_w_0()
                     // Items breathe a little apart, less than paragraphs do.
-                    .when(ix > 0, |this| this.pt(body_font_size(window) * 0.25))
+                    .when(ix > 0, |this| this.pt(body * 0.25))
                     .when(*spread, |this| this.child(div()))
                     .children({
                         let mut items: Vec<Div> = Vec::with_capacity(children.len());
@@ -3367,7 +3380,6 @@ impl BlockNode {
                     .when(row_ix == 0, |this| {
                         this.bg(style.code_background())
                             .text_color(style.foreground())
-                            .font_weight(FontWeight::MEDIUM)
                             .refine_style(&style.table_head())
                     })
                     .children(cells),
@@ -3375,7 +3387,7 @@ impl BlockNode {
         }
 
         div()
-            .pb(table_gap(options, style))
+            .pb(block_gap(options, style))
             .w_full()
             .child(
                 // Scroll viewport owns the visible frame, including any
@@ -3481,7 +3493,6 @@ impl BlockNode {
                     .when(row_ix == 0, |this| {
                         this.bg(style.code_background())
                             .text_color(style.foreground())
-                            .font_weight(FontWeight::MEDIUM)
                             .refine_style(&style.table_head())
                     })
                     .children(cells),
@@ -3489,7 +3500,7 @@ impl BlockNode {
         }
 
         div()
-            .pb(table_gap(options, style))
+            .pb(block_gap(options, style))
             .w_full()
             .child(
                 div()
@@ -3525,20 +3536,23 @@ impl BlockNode {
         window: &mut Window,
         cx: &mut App,
     ) -> AnyElement {
-        let mb = if options.in_list || options.is_last {
-            rems(0.)
-        } else {
-            node_cx.style.paragraph_gap()
-        };
+        let mb = block_gap(&options, &node_cx.style);
 
         match self {
             BlockNode::Root { children, .. } => div()
                 .children(children.into_iter().enumerate().map(move |(ix, node)| {
-                    let after_heading = ix > 0 && children[ix - 1].is_heading();
+                    // A nested root (an HTML block container) continues the
+                    // flow around it: only its first child takes its place.
+                    let (is_first, prev) = if ix == 0 {
+                        (options.is_first, options.prev)
+                    } else {
+                        (false, PrevBlock::before(children, ix))
+                    };
                     node.render_block(
                         NodeRenderOptions {
                             ix,
-                            after_heading,
+                            is_first,
+                            prev,
                             ..options
                         },
                         node_cx,
@@ -3571,18 +3585,30 @@ impl BlockNode {
                     5 => (14. / 15., 1.35, 1.4),
                     _ => (13. / 15., 1.35, 1.4),
                 };
-                let text_size = body_font_size(window) * scale;
-                // The previous block already leaves a paragraph gap below
-                // itself, so only the rest of the section gap is added here --
-                // the two collapse like CSS margins. A heading right after
-                // another one belongs to the same section and stays close.
-                let top = if options.ix == 0 || options.in_list {
+                // The gaps follow the size the heading actually renders at,
+                // including one a caller's heading refinement pins.
+                let refinement = node_cx.style.heading(*level);
+                let text_size = refinement.text.font_size.map_or_else(
+                    || body_font_size(node_cx, window) * scale,
+                    |size| size.to_pixels(window.rem_size()),
+                );
+                // The previous block already leaves a gap below itself, so
+                // only the rest of the section gap is added here -- the two
+                // collapse like CSS margins. A heading right after another one
+                // belongs to the same section and stays close. Nested in a
+                // list item, a heading sits flush with the item.
+                let top = if options.is_first || options.depth > 0 {
                     px(0.)
-                } else if options.after_heading {
-                    text_size * 0.25
                 } else {
-                    let gap = node_cx.style.paragraph_gap().to_pixels(window.rem_size());
-                    (text_size * section_gap - gap).max(px(0.))
+                    match options.prev {
+                        PrevBlock::Heading => text_size * 0.25,
+                        PrevBlock::Rule => (text_size * section_gap
+                            - rule_space(body_font_size(node_cx, window)))
+                        .max(px(0.)),
+                        PrevBlock::Other => (text_size * section_gap
+                            - node_cx.style.paragraph_gap().to_pixels(window.rem_size()))
+                        .max(px(0.)),
+                    }
                 };
                 let bottom = if options.is_last {
                     px(0.)
@@ -3600,7 +3626,7 @@ impl BlockNode {
                     .when(*level >= 6, |this| {
                         this.text_color(node_cx.style.muted_foreground())
                     })
-                    .refine_style(&node_cx.style.heading(*level))
+                    .refine_style(&refinement)
                     .child(children.render(
                         span.map(|span| TextLeafKey::block(span.start)),
                         node_cx,
@@ -3615,16 +3641,15 @@ impl BlockNode {
                     .text_color(node_cx.style.muted_foreground())
                     .border_l_2()
                     .border_color(node_cx.style.border())
-                    .pl(body_font_size(window) * 0.9)
+                    .pl(body_font_size(node_cx, window) * 0.9)
                     .children({
                         let children_len = children.len();
                         children.into_iter().enumerate().map(move |(index, c)| {
                             let is_last = index == children_len - 1;
-                            let after_heading = index > 0 && children[index - 1].is_heading();
                             c.render_block(
                                 NodeRenderOptions {
-                                    ix: index,
-                                    after_heading,
+                                    is_first: index == 0,
+                                    prev: PrevBlock::before(children, index),
                                     ..options.is_last(is_last)
                                 },
                                 node_cx,
@@ -3685,7 +3710,7 @@ impl BlockNode {
                 // Tables are data and read a step denser than the body. The
                 // columns are measured while rendering, so they are measured
                 // at the same size the cells are laid out with.
-                let text_size = body_font_size(window) * (14. / 15.);
+                let text_size = body_font_size(node_cx, window) * (14. / 15.);
                 let table = window.with_text_style(
                     Some(TextStyleRefinement {
                         font_size: Some(text_size.into()),
@@ -3703,12 +3728,22 @@ impl BlockNode {
             }
             BlockNode::HorizontalRule { .. } => {
                 // A section break: a hairline with more room around it than
-                // a paragraph gap. The previous block's gap counts toward the
-                // space above, as with headings.
-                let space = body_font_size(window) * 1.6;
-                let gap = node_cx.style.paragraph_gap().to_pixels(window.rem_size());
+                // a paragraph gap. The previous block's own gap counts toward
+                // the space above, as with headings.
+                let space = rule_space(body_font_size(node_cx, window));
+                let top = if options.is_first || options.depth > 0 {
+                    px(0.)
+                } else {
+                    let above = match options.prev {
+                        PrevBlock::Rule => space,
+                        PrevBlock::Heading | PrevBlock::Other => {
+                            node_cx.style.paragraph_gap().to_pixels(window.rem_size())
+                        }
+                    };
+                    (space - above).max(px(0.))
+                };
                 div()
-                    .when(options.ix > 0, |this| this.pt((space - gap).max(px(0.))))
+                    .pt(top)
                     .when(!options.is_last, |this| this.pb(space))
                     .child(div().bg(node_cx.style.border()).h(px(1.)))
                     .into_any_element()
@@ -3840,7 +3875,7 @@ mod tests {
             let InlineFlowItem::Object { style, link, .. } = &items[0] else {
                 panic!()
             };
-            assert_eq!(style.font_weight, Some(FontWeight::SEMIBOLD));
+            assert_eq!(style.font_weight, Some(FontWeight::BOLD));
             assert_eq!(style.font_style, Some(FontStyle::Italic));
             assert!(style.strikethrough.is_some());
             assert_eq!(link.as_ref().unwrap().url.as_ref(), "https://example.com");
