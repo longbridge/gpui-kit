@@ -56,6 +56,25 @@ gpui-kit = "{{gpui_kit_version}}"
 
 The `{{gpui_kit_version}}` requirement selects a compatible Kit release. Kit's default features include the styled components and default icon assets. It brings in matching GPUI crates, so an application using this setup does not need to list GPUI separately. `use gpui_kit::*;` imports GPUI's re-exported API; the layers are reachable as `gpui_kit::component`, `gpui_kit::base`, `gpui_kit::assets`, and `gpui_kit::platform`.
 
+### Optional GPUI Fast backend
+
+Enable `gpui-fast` to use [GPUI Fast](https://github.com/longbridge/gpui-fast)
+for rendering, layout, and platforms:
+
+```toml
+gpui-kit = { version = "{{gpui_kit_version}}", features = ["gpui-fast"] }
+```
+
+This selects `gpui-fast`, `gpui-fast-platform`, and the matching web backend
+across all enabled Kit layers. Keep the same `gpui_kit::*` imports and startup
+code; no application `[patch]` or crate alias is needed. Without this feature,
+Kit continues to use the upstream snapshot described below. Fast dependencies
+allow compatible `0.1.x` updates through `cargo update`.
+
+Cargo features are additive, so upstream packages still compile when Fast is
+selected. For feature combinations and backend comparison commands, see
+[Getting Started](./getting-started.md#use-gpui-fast).
+
 ### Why the dependency is named `gpui-pre`
 
 Throughout these docs, **GPUI** means [Zed's GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui). `gpui-pre` is the crates.io package name used to publish a snapshot of GPUI from a recorded Zed commit, alongside its related GPUI crates. It provides a reproducible publication and version alignment path for GPUI Kit; it is not another rendering implementation. The publication process adjusts package names and dependency manifests for crates.io, so API references in this manual target the GPUI version pinned by this Kit release. In this repository that is `gpui-pre = {{gpui_pre_version}}`; application code normally depends only on `gpui-kit` and imports GPUI through `gpui_kit::*`. A newer `gpui-pre` snapshot does not by itself mean that the current GPUI Kit release supports it.

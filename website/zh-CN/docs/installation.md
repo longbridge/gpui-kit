@@ -56,6 +56,23 @@ gpui-kit = "{{gpui_kit_version}}"
 
 `{{gpui_kit_version}}` 要求会选择兼容的 Kit 版本。Kit 的默认特性包含带样式的组件和默认图标资源，并会引入配套的 GPUI crate；按此方式构建的应用无需单独声明 GPUI。`use gpui_kit::*;` 导入 Kit 重导出的 GPUI API；各层分别可通过 `gpui_kit::component`、`gpui_kit::base`、`gpui_kit::assets` 和 `gpui_kit::platform` 访问。
 
+### 可选的 GPUI Fast 后端
+
+启用 `gpui-fast` 后，可以使用 [GPUI Fast](https://github.com/longbridge/gpui-fast)
+提供的渲染、布局和平台后端：
+
+```toml
+gpui-kit = { version = "{{gpui_kit_version}}", features = ["gpui-fast"] }
+```
+
+这个 feature 会为所有已启用的 Kit 层统一选择 `gpui-fast`、`gpui-fast-platform`
+及配套的 Web 后端。继续使用原有的 `gpui_kit::*` 导入和启动代码即可，应用无需
+`[patch]` 或 crate 别名。未启用时，Kit 继续使用下文介绍的上游快照。
+Fast 依赖允许通过 `cargo update` 更新到兼容的 `0.1.x` 版本。
+
+Cargo features 是累加的，因此选择 Fast 后，上游包仍会参与编译。
+feature 组合和后端对比命令见 [Getting Started](./getting-started.md#使用-gpui-fast)。
+
 ### 为什么依赖名是 `gpui-pre`
 
 本文中的 **GPUI** 指 [Zed 的 GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)。`gpui-pre` 是将 Zed 指定提交的 GPUI crate 以一组配套版本发布到 crates.io 时使用的 Cargo 包名，供 GPUI Kit 固定可复现的依赖；它不是另一套渲染实现。发布过程会调整包名及依赖清单以适应 crates.io，所以本文的 API 说明以当前 GPUI Kit 固定的 GPUI 版本为准。本仓库固定 `gpui-pre = {{gpui_pre_version}}`；应用通常只依赖 `gpui-kit`，通过 `gpui_kit::*` 使用 GPUI。`gpui-pre` 发布了更新的快照，也不代表当前 GPUI Kit 版本已支持它。
