@@ -1,79 +1,18 @@
-use std::{ops::Range, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    ops::Range,
+    sync::{Arc, OnceLock},
+};
 
-use gpui::SharedString;
-#[cfg(test)]
-use similar::TextDiff;
+use gpui::{HighlightStyle, SharedString};
+use gpui_base::input::HighlightStyleResolver;
 use smallvec::{SmallVec, smallvec};
 use unicode_segmentation::UnicodeSegmentation as _;
 
 use crate::{Rope, highlighter::SyntaxHighlighter};
 
-/// One parsed file side containing only the source fragments in the patch.
-/// An empty side is distinct from a missing side such as `/dev/null`.
-#[derive(Clone, Debug)]
-pub struct DiffFile {
-    name: SharedString,
-    text: SharedString,
-}
-
-impl DiffFile {
-    pub(crate) fn from_patch(name: SharedString, text: SharedString) -> Self {
-        Self { name, text }
-    }
-    /// Retains a file's name and exact source, including line endings.
-    #[cfg(test)]
-    pub(crate) fn new(name: impl Into<SharedString>, text: impl Into<SharedString>) -> Self {
-        Self {
-            name: name.into(),
-            text: text.into(),
-        }
-    }
-
-    pub fn name(&self) -> &SharedString {
-        &self.name
-    }
-    /// Concatenated patch-provided fragments, not the complete file contents.
-    pub fn text(&self) -> &SharedString {
-        &self.text
-    }
-    fn detected_language(&self) -> SharedString {
-        // File paths may come from another platform. Only the final component
-        // determines the language; dots in a directory are not extensions.
-        let name = self
-            .name
-            .rsplit(['/', '\\'])
-            .next()
-            .unwrap_or("")
-            .to_lowercase();
-        let language = match name.as_str() {
-            "makefile" | "gnumakefile" => "make",
-            "cmakelists.txt" => "cmake",
-            _ => match name.rsplit_once('.').map(|(_, extension)| extension) {
-                Some("jsx" | "mjs" | "cjs") => "javascript",
-                Some("mts" | "cts") => "typescript",
-                Some("cc" | "cxx" | "hpp" | "hxx") => "cpp",
-                Some("h") => "c",
-                Some("htm") => "html",
-                Some("gql") => "graphql",
-                Some(
-                    extension @ ("astro" | "sh" | "bash" | "c" | "cmake" | "cs" | "cpp" | "css"
-                    | "scss" | "diff" | "ejs" | "ex" | "exs" | "erb" | "go"
-                    | "graphql" | "html" | "java" | "js" | "json" | "jsonc" | "kt"
-                    | "kts" | "lua" | "md" | "mdx" | "php" | "php3" | "php4" | "php5"
-                    | "phtml" | "proto" | "py" | "pyi" | "rb" | "rs" | "scala" | "sql"
-                    | "svelte" | "swift" | "toml" | "tsx" | "ts" | "yaml" | "yml"
-                    | "zig"),
-                ) => extension,
-                _ => "text",
-            },
-        };
-        crate::highlighter::language_name(if language == "exs" {
-            "elixir"
-        } else {
-            language
-        })
-    }
-}
+/// Lines longer than this are shown without syntax emphasis.
+const MAX_HIGHLIGHTED_LINE: usize = 1000;
 
 /// Which source version a position belongs to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -82,20 +21,35 @@ pub enum DiffSide {
     Modified,
 }
 
-/// A one-based line in a source file, independent of the visual layout.
+impl DiffSide {
+    pub(crate) fn other(self) -> Self {
+        match self {
+            Self::Original => Self::Modified,
+            Self::Modified => Self::Original,
+        }
+    }
+}
+
+/// A one-based source line of one file in a [`super::DiffState`],
+/// independent of the visual layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct DiffLinePosition {
+    file: usize,
     side: DiffSide,
     line: usize,
 }
 
 impl DiffLinePosition {
-    /// Creates a position, clamping the line to at least one.
-    pub fn new(side: DiffSide, line: usize) -> Self {
+    /// Creates a position in the file at index `file`, clamping the line to at least one.
+    pub fn new(file: usize, side: DiffSide, line: usize) -> Self {
         Self {
+            file,
             side,
             line: line.max(1),
         }
+    }
+    pub fn file(&self) -> usize {
+        self.file
     }
     pub fn side(&self) -> DiffSide {
         self.side
@@ -105,9 +59,10 @@ impl DiffLinePosition {
     }
 }
 
-/// A selected inclusive range of source lines on one file side.
+/// An inclusive range of source lines on one side of one file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DiffLineRange {
+    file: usize,
     side: DiffSide,
     start: usize,
     end: usize,
@@ -115,12 +70,16 @@ pub struct DiffLineRange {
 
 impl DiffLineRange {
     /// Normalizes the endpoints and clamps them to one-based line numbers.
-    pub fn new(side: DiffSide, start: usize, end: usize) -> Self {
+    pub fn new(file: usize, side: DiffSide, start: usize, end: usize) -> Self {
         Self {
+            file,
             side,
             start: start.min(end).max(1),
             end: start.max(end).max(1),
         }
+    }
+    pub fn file(&self) -> usize {
+        self.file
     }
     pub fn side(&self) -> DiffSide {
         self.side
@@ -132,28 +91,31 @@ impl DiffLineRange {
         self.end
     }
     pub(crate) fn contains(&self, position: DiffLinePosition) -> bool {
-        self.side == position.side && (self.start..=self.end).contains(&position.line)
+        self.file == position.file
+            && self.side == position.side
+            && (self.start..=self.end).contains(&position.line)
     }
 }
 
+/// One supplied source line and its display form.
 #[derive(Debug)]
 pub(crate) struct SourceLine {
-    pub line_number: usize,
-    pub text: SharedString,
-    pub display: SharedString,
-    pub chunks: SmallVec<[DisplayChunk; 1]>,
-    pub counterpart: Option<usize>,
+    line_number: usize,
+    text: SharedString,
+    display: SharedString,
+    chunks: SmallVec<[DisplayChunk; 1]>,
+    counterpart: Option<usize>,
     // Only expanded tabs need an entry; ordinary UTF-8 bytes map by identity
     // plus the cumulative expansion of earlier tabs.
     display_tabs: Vec<DisplayTab>,
-    pub source: Range<usize>,
-    pub content_end: usize,
+    source: Range<usize>,
+    content_end: usize,
 }
 
 #[derive(Debug)]
-pub(crate) struct DisplayChunk {
-    pub range: Range<usize>,
-    pub text: SharedString,
+struct DisplayChunk {
+    range: Range<usize>,
+    text: SharedString,
 }
 
 #[derive(Debug)]
@@ -164,6 +126,35 @@ struct DisplayTab {
 }
 
 impl SourceLine {
+    /// The one-based line number in the source file.
+    pub(crate) fn line_number(&self) -> usize {
+        self.line_number
+    }
+    /// The source content, without its line ending.
+    pub(crate) fn text(&self) -> &SharedString {
+        &self.text
+    }
+    /// The content with tabs expanded, as painted.
+    pub(crate) fn display(&self) -> &SharedString {
+        &self.display
+    }
+    /// Display ranges painted as separate text runs, bounding shaping cost.
+    pub(crate) fn chunk_ranges(&self) -> impl Iterator<Item = Range<usize>> + '_ {
+        self.chunks.iter().map(|chunk| chunk.range.clone())
+    }
+    /// The index of the paired line on the other side, if any.
+    pub(crate) fn counterpart(&self) -> Option<usize> {
+        self.counterpart
+    }
+    /// The byte range in the side's source, including the line ending.
+    pub(crate) fn source(&self) -> Range<usize> {
+        self.source.clone()
+    }
+    /// The source offset where the line ending begins.
+    pub(crate) fn content_end(&self) -> usize {
+        self.content_end
+    }
+
     /// Reuses the retained text for a projected chunk. The fallback supports
     /// valid partial ranges without making ordinary rendering allocate.
     pub(crate) fn chunk_text(&self, range: &Range<usize>) -> SharedString {
@@ -183,7 +174,7 @@ impl SourceLine {
             .map_or_else(SharedString::default, SharedString::from)
     }
 
-    pub fn source_offset(&self, display_offset: usize) -> usize {
+    pub(crate) fn source_offset(&self, display_offset: usize) -> usize {
         let display_offset = display_offset.min(self.display.len());
         let preceding = self
             .display_tabs
@@ -197,7 +188,7 @@ impl SourceLine {
             display_offset - (tab.display_offset + tab.width - tab.source_offset - 1)
         }
     }
-    pub fn display_range(&self, source: Range<usize>) -> Range<usize> {
+    pub(crate) fn display_range(&self, source: Range<usize>) -> Range<usize> {
         self.display_offset(source.start)..self.display_offset(source.end)
     }
 
@@ -214,73 +205,197 @@ impl SourceLine {
     }
 }
 
+/// One row of the side-by-side alignment: a line on either or both sides.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct LinePair {
-    pub original: Option<usize>,
-    pub modified: Option<usize>,
-    pub changed: bool,
+    original: Option<usize>,
+    modified: Option<usize>,
+    changed: bool,
 }
 
-pub(crate) struct DocumentInner {
-    pub original: Option<DiffFile>,
-    pub modified: Option<DiffFile>,
-    pub original_lines: Vec<SourceLine>,
-    pub modified_lines: Vec<SourceLine>,
-    pub pairs: Vec<LinePair>,
-    pub additions: usize,
-    pub deletions: usize,
-    pub hunk_boundaries: Vec<(usize, SharedString)>,
-    pub metadata: Vec<SharedString>,
-    pub binary: bool,
-    pub original_highlighter: Option<SyntaxHighlighter>,
-    pub modified_highlighter: Option<SyntaxHighlighter>,
+impl LinePair {
+    pub(crate) fn new(original: Option<usize>, modified: Option<usize>, changed: bool) -> Self {
+        Self {
+            original,
+            modified,
+            changed,
+        }
+    }
+    pub(crate) fn original(&self) -> Option<usize> {
+        self.original
+    }
+    pub(crate) fn modified(&self) -> Option<usize> {
+        self.modified
+    }
+    pub(crate) fn is_changed(&self) -> bool {
+        self.changed
+    }
 }
 
-/// Immutable display data parsed from a unified or Git diff.
-/// Only source fragments present in the patch are retained; unavailable context
-/// is never reconstructed or compared.
+/// One `@@` hunk: its pairs and the source lines it supplies on each side.
+#[derive(Clone, Debug)]
+pub(crate) struct Hunk {
+    pairs: Range<usize>,
+    original: Range<usize>,
+    modified: Range<usize>,
+    label: SharedString,
+}
+
+impl Hunk {
+    pub(crate) fn new(
+        pairs: Range<usize>,
+        original: Range<usize>,
+        modified: Range<usize>,
+        label: SharedString,
+    ) -> Self {
+        Self {
+            pairs,
+            original,
+            modified,
+            label,
+        }
+    }
+    pub(crate) fn pairs(&self) -> Range<usize> {
+        self.pairs.clone()
+    }
+    pub(crate) fn lines(&self, side: DiffSide) -> Range<usize> {
+        match side {
+            DiffSide::Original => self.original.clone(),
+            DiffSide::Modified => self.modified.clone(),
+        }
+    }
+    /// The `@@` header line.
+    pub(crate) fn label(&self) -> &SharedString {
+        &self.label
+    }
+}
+
+/// One side of a file: its path, unless the side is missing such as
+/// `/dev/null`, and the source fragments the patch supplies.
+#[derive(Default)]
+pub(crate) struct FileSide {
+    path: Option<SharedString>,
+    source: SharedString,
+    lines: Vec<SourceLine>,
+}
+
+impl FileSide {
+    /// Builds a side from its concatenated source and each line's number and
+    /// byte range in it.
+    pub(crate) fn new(
+        path: Option<SharedString>,
+        source: String,
+        lines: impl IntoIterator<Item = (usize, Range<usize>)>,
+    ) -> Self {
+        let lines = lines
+            .into_iter()
+            .map(|(line_number, range)| source_line(&source, range, line_number))
+            .collect();
+        Self {
+            path,
+            source: source.into(),
+            lines,
+        }
+    }
+}
+
+struct DocumentInner {
+    path: SharedString,
+    original: FileSide,
+    modified: FileSide,
+    pairs: Vec<LinePair>,
+    hunks: Vec<Hunk>,
+    additions: usize,
+    deletions: usize,
+    metadata: Vec<SharedString>,
+    binary: bool,
+    /// Width of the widest line number, in digits.
+    line_number_digits: usize,
+    syntax: OnceLock<DocumentSyntax>,
+}
+
+/// One changed file parsed from a unified or Git diff.
+///
+/// Only source fragments present in the patch are retained; unavailable
+/// context is never reconstructed or compared. Cloning is cheap.
 #[derive(Clone)]
-pub struct DiffDocument(pub(crate) Arc<DocumentInner>);
+pub struct DiffDocument(Arc<DocumentInner>);
 
 impl DiffDocument {
-    /// Compares two existing file versions, including empty files.
-    #[cfg(test)]
-    pub(crate) fn new(original: DiffFile, modified: DiffFile) -> Self {
-        Self::build(Some(original), Some(modified))
-    }
-    /// Compares a newly added file against a deliberately missing original.
-    #[cfg(test)]
-    pub(crate) fn added(modified: DiffFile) -> Self {
-        Self::build(None, Some(modified))
-    }
-    /// Compares a deleted file against a deliberately missing modified version.
-    #[cfg(test)]
-    pub(crate) fn deleted(original: DiffFile) -> Self {
-        Self::build(Some(original), None)
+    /// Parses every file in a unified or Git diff, in patch order, without
+    /// computing differences. Syntax emphasis is prepared later by
+    /// [`super::DiffState`] on a background thread.
+    pub fn parse(patch: &str) -> Result<Vec<Self>, super::parser::DiffParseError> {
+        super::parser::parse(patch)
     }
 
-    /// Parses all files in a unified or Git diff without computing differences.
-    pub fn parse(
-        patch: impl Into<SharedString>,
-    ) -> Result<Vec<Self>, super::parser::DiffParseError> {
-        super::parser::parse(patch.into())
+    /// Assembles a parsed file, pairing counterpart lines and deriving its
+    /// display path, change counts and line-number width.
+    pub(crate) fn new(
+        mut original: FileSide,
+        mut modified: FileSide,
+        pairs: Vec<LinePair>,
+        hunks: Vec<Hunk>,
+        metadata: Vec<SharedString>,
+        binary: bool,
+    ) -> Self {
+        let (mut additions, mut deletions) = (0, 0);
+        for pair in &pairs {
+            if pair.changed {
+                additions += usize::from(pair.modified.is_some());
+                deletions += usize::from(pair.original.is_some());
+            }
+            if let (Some(old), Some(new)) = (pair.original, pair.modified) {
+                original.lines[old].counterpart = Some(new);
+                modified.lines[new].counterpart = Some(old);
+            }
+        }
+        let widest = [&original, &modified]
+            .iter()
+            .filter_map(|side| side.lines.last())
+            .map(|line| line.line_number)
+            .max()
+            .unwrap_or(1);
+        let path = modified
+            .path
+            .clone()
+            .or_else(|| original.path.clone())
+            .unwrap_or_default();
+        Self(Arc::new(DocumentInner {
+            path,
+            original,
+            modified,
+            pairs,
+            hunks,
+            additions,
+            deletions,
+            metadata,
+            binary,
+            line_number_digits: widest.max(1).ilog10() as usize + 1,
+            syntax: OnceLock::new(),
+        }))
     }
 
+    /// The path to show for this file: the modified path, or the original path
+    /// of a deleted file.
+    pub fn path(&self) -> &SharedString {
+        &self.0.path
+    }
+    /// The original path, or `None` for an added file.
+    pub fn original_path(&self) -> Option<&SharedString> {
+        self.0.original.path.as_ref()
+    }
+    /// The modified path, or `None` for a deleted file.
+    pub fn modified_path(&self) -> Option<&SharedString> {
+        self.0.modified.path.as_ref()
+    }
     /// Git metadata such as file modes, similarity and rename headers.
     pub fn metadata(&self) -> &[SharedString] {
         &self.0.metadata
     }
-
     /// Whether the patch reports binary contents rather than textual hunks.
     pub fn is_binary(&self) -> bool {
         self.0.binary
-    }
-
-    pub fn original(&self) -> Option<&DiffFile> {
-        self.0.original.as_ref()
-    }
-    pub fn modified(&self) -> Option<&DiffFile> {
-        self.0.modified.as_ref()
     }
     pub fn additions(&self) -> usize {
         self.0.additions
@@ -288,201 +403,306 @@ impl DiffDocument {
     pub fn deletions(&self) -> usize {
         self.0.deletions
     }
+    /// Whether the file changes, including an added or deleted empty file and
+    /// metadata-only changes such as a mode change or pure rename.
     pub fn has_changes(&self) -> bool {
         self.additions() > 0
             || self.deletions() > 0
             || !self.0.metadata.is_empty()
             || self.0.binary
-            || self.original().is_none()
-            || self.modified().is_none()
+            || self.original_path().is_none()
+            || self.modified_path().is_none()
     }
-    /// Number of retained source lines, excluding unavailable context.
-    pub fn line_count(&self, side: DiffSide) -> usize {
+
+    pub(crate) fn lines_count(&self, side: DiffSide) -> usize {
         self.lines(side).len()
     }
 
-    /// Copies patch-provided lines. Unavailable context is omitted, without inventing source lines.
-    pub fn text_for_range(&self, range: DiffLineRange) -> String {
-        let lines = self.lines(range.side);
-        let start_ix = lines.partition_point(|line| line.line_number < range.start);
-        let end_ix = lines.partition_point(|line| line.line_number <= range.end);
+    /// Copies patch-provided lines. Unavailable context is omitted, without
+    /// inventing source lines.
+    pub(crate) fn text_for_lines(&self, side: DiffSide, start: usize, end: usize) -> String {
+        let lines = self.lines(side);
+        let start_ix = lines.partition_point(|line| line.line_number < start);
+        let end_ix = lines.partition_point(|line| line.line_number <= end);
         let selected = &lines[start_ix..end_ix];
-        if selected.is_empty() {
+        let (Some(first), Some(last)) = (selected.first(), selected.last()) else {
             return String::new();
-        }
-        self.source(range.side)[selected[0].source.start..selected.last().unwrap().source.end]
-            .to_owned()
+        };
+        self.source(side)[first.source.start..last.source.end].to_owned()
     }
 
-    pub(crate) fn position(&self, side: DiffSide, index: usize) -> DiffLinePosition {
-        DiffLinePosition::new(side, self.lines(side)[index].line_number)
+    /// The one-based line number of the line at `index` on `side`.
+    pub(crate) fn line_number(&self, side: DiffSide, index: usize) -> usize {
+        self.lines(side)[index].line_number
     }
-    pub(crate) fn line_index(&self, position: DiffLinePosition) -> Option<usize> {
-        self.lines(position.side)
-            .binary_search_by_key(&position.line, |line| line.line_number)
+    pub(crate) fn line_index(&self, side: DiffSide, line: usize) -> Option<usize> {
+        self.lines(side)
+            .binary_search_by_key(&line, |source| source.line_number)
             .ok()
     }
 
-    pub(crate) fn lines(&self, side: DiffSide) -> &[SourceLine] {
-        match side {
-            DiffSide::Original => &self.0.original_lines,
-            DiffSide::Modified => &self.0.modified_lines,
-        }
+    pub(crate) fn pairs(&self) -> &[LinePair] {
+        &self.0.pairs
     }
-    pub(crate) fn source(&self, side: DiffSide) -> &str {
-        match side {
-            DiffSide::Original => self.original(),
-            DiffSide::Modified => self.modified(),
-        }
-        .map_or("", |file| file.text.as_str())
+    pub(crate) fn hunks(&self) -> &[Hunk] {
+        &self.0.hunks
     }
-    pub(crate) fn highlighter(&self, side: DiffSide) -> Option<&SyntaxHighlighter> {
-        match side {
-            DiffSide::Original => self.0.original_highlighter.as_ref(),
-            DiffSide::Modified => self.0.modified_highlighter.as_ref(),
-        }
+    /// Width of the widest supplied line number, in digits.
+    pub(crate) fn line_number_digits(&self) -> usize {
+        self.0.line_number_digits
     }
 
-    // Existing interaction fixtures use complete strings to generate an input
-    // patch, then exercise the production parser. No comparison ships in UI.
-    #[cfg(test)]
-    fn build(original: Option<DiffFile>, modified: Option<DiffFile>) -> Self {
-        fn path(name: &str) -> String {
-            format!(
-                "\"{}\"",
-                name.replace('\\', "\\\\")
-                    .replace('\"', "\\\"")
-                    .replace('\n', "\\n")
-                    .replace('\r', "\\r")
-                    .replace('\t', "\\t")
-            )
+    fn side(&self, side: DiffSide) -> &FileSide {
+        match side {
+            DiffSide::Original => &self.0.original,
+            DiffSide::Modified => &self.0.modified,
         }
-        let old = original.as_ref().map_or("", |file| file.text.as_str());
-        let new = modified.as_ref().map_or("", |file| file.text.as_str());
-        let old_lines: Vec<&str> = old.split_inclusive('\n').collect();
-        let new_lines: Vec<&str> = new.split_inclusive('\n').collect();
-        let old_name = original
-            .as_ref()
-            .map_or_else(|| "/dev/null".to_owned(), |file| path(&file.name));
-        let new_name = modified
-            .as_ref()
-            .map_or_else(|| "/dev/null".to_owned(), |file| path(&file.name));
-        let diff = TextDiff::from_slices(&old_lines, &new_lines);
-        let mut patch = diff
-            .unified_diff()
-            .context_radius(old_lines.len().max(new_lines.len()))
-            .header(&old_name, &new_name)
-            .to_string();
-        if patch.is_empty() {
-            patch = format!("--- {old_name}\n+++ {new_name}\n");
-            if !old_lines.is_empty() {
-                patch.push_str(&format!(
-                    "@@ -1,{} +1,{} @@\n",
-                    old_lines.len(),
-                    new_lines.len()
-                ));
-                for line in &old_lines {
-                    patch.push(' ');
-                    patch.push_str(line);
-                    if !line.ends_with('\n') {
-                        patch.push_str("\n\\ No newline at end of file\n");
+    }
+    pub(crate) fn lines(&self, side: DiffSide) -> &[SourceLine] {
+        &self.side(side).lines
+    }
+    pub(crate) fn source(&self, side: DiffSide) -> &str {
+        &self.side(side).source
+    }
+
+    pub(crate) fn syntax(&self) -> Option<&DocumentSyntax> {
+        self.0.syntax.get()
+    }
+
+    /// Parses each hunk of each side independently, so an unterminated comment
+    /// or string in one hunk cannot affect the next. Blocking; run it on a
+    /// background thread. Highlighters are reused across documents because
+    /// building one compiles its language's queries.
+    pub(crate) fn prepare_syntax(&self, highlighters: &mut SyntaxHighlighters) {
+        self.0
+            .syntax
+            .get_or_init(|| DocumentSyntax::new(self, highlighters));
+    }
+
+    /// Theme styles for one line, as display ranges.
+    pub(crate) fn line_highlights(
+        &self,
+        side: DiffSide,
+        ix: usize,
+        theme: &dyn HighlightStyleResolver,
+    ) -> Vec<(Range<usize>, HighlightStyle)> {
+        let Some(syntax) = self.syntax() else {
+            return Vec::new();
+        };
+        let line = &self.lines(side)[ix];
+        syntax
+            .spans(side, ix)
+            .iter()
+            .filter_map(|span| {
+                let style = theme.style(&syntax.names[span.name as usize])?;
+                Some((
+                    line.display_range(span.start as usize..span.end as usize),
+                    style,
+                ))
+            })
+            .collect()
+    }
+}
+
+/// Highlighters by language, shared by the documents of one preparation pass.
+pub(crate) type SyntaxHighlighters = HashMap<SharedString, SyntaxHighlighter>;
+
+#[derive(Debug)]
+pub(crate) struct SyntaxSpan {
+    /// Byte range relative to the start of the line's source.
+    start: u32,
+    end: u32,
+    name: u16,
+}
+
+/// Highlight capture names for each supplied line, independent of the theme.
+#[derive(Default)]
+pub(crate) struct DocumentSyntax {
+    names: Vec<SharedString>,
+    sides: [SideSyntax; 2],
+}
+
+#[derive(Default)]
+struct SideSyntax {
+    /// `starts[ix]..starts[ix + 1]` are the spans of line `ix`.
+    starts: Vec<u32>,
+    spans: Vec<SyntaxSpan>,
+}
+
+impl DocumentSyntax {
+    fn new(document: &DiffDocument, highlighters: &mut SyntaxHighlighters) -> Self {
+        let mut syntax = Self::default();
+        let mut name_ixs = HashMap::<SharedString, u16>::new();
+        for side in [DiffSide::Original, DiffSide::Modified] {
+            let file = document.side(side);
+            let lines = &file.lines;
+            let mut per_line: Vec<Vec<SyntaxSpan>> = (0..lines.len()).map(|_| Vec::new()).collect();
+            let language = file
+                .path
+                .as_deref()
+                .map_or_else(|| "text".into(), detected_language);
+            if language.as_str() != "text" && !lines.is_empty() {
+                let highlighter = highlighters
+                    .entry(language.clone())
+                    .or_insert_with(|| SyntaxHighlighter::new(&language));
+                let ranges = if document.hunks().is_empty() {
+                    vec![0..lines.len()]
+                } else {
+                    document
+                        .0
+                        .hunks
+                        .iter()
+                        .map(|hunk| hunk.lines(side))
+                        .collect()
+                };
+                for range in ranges.into_iter().filter(|range| !range.is_empty()) {
+                    let base = lines[range.start].source.start;
+                    let text = &file.source[base..lines[range.end - 1].source.end];
+                    let hunk_lines = &lines[range.clone()];
+                    for (capture, name) in highlighter.capture_names(&Rope::from_str(text)) {
+                        let capture = capture.start + base..capture.end + base;
+                        let first =
+                            hunk_lines.partition_point(|line| line.source.end <= capture.start);
+                        for (offset, line) in hunk_lines[first..].iter().enumerate() {
+                            if line.source.start >= capture.end {
+                                break;
+                            }
+                            if line.content_end - line.source.start > MAX_HIGHLIGHTED_LINE {
+                                continue;
+                            }
+                            let start = capture.start.max(line.source.start);
+                            let end = capture.end.min(line.content_end);
+                            if start >= end {
+                                continue;
+                            }
+                            let next = name_ixs.len().min(u16::MAX as usize) as u16;
+                            let name = *name_ixs.entry(name.clone()).or_insert_with(|| {
+                                syntax.names.push(name.clone());
+                                next
+                            });
+                            per_line[range.start + first + offset].push(SyntaxSpan {
+                                start: (start - line.source.start) as u32,
+                                end: (end - line.source.start) as u32,
+                                name,
+                            });
+                        }
                     }
                 }
             }
+            let side_syntax = &mut syntax.sides[side as usize];
+            side_syntax.starts.reserve(per_line.len() + 1);
+            side_syntax.starts.push(0);
+            for spans in per_line {
+                side_syntax.spans.extend(spans);
+                side_syntax.starts.push(side_syntax.spans.len() as u32);
+            }
         }
-        if original.is_none() {
-            patch.insert_str(0, "diff --git a/fixture b/fixture\nnew file mode 100644\n");
-        } else if modified.is_none() {
-            patch.insert_str(
-                0,
-                "diff --git a/fixture b/fixture\ndeleted file mode 100644\n",
-            );
+        syntax
+    }
+
+    fn spans(&self, side: DiffSide, ix: usize) -> &[SyntaxSpan] {
+        let side = &self.sides[side as usize];
+        match (side.starts.get(ix), side.starts.get(ix + 1)) {
+            (Some(start), Some(end)) => &side.spans[*start as usize..*end as usize],
+            _ => &[],
         }
-        let mut document = Self::parse(patch)
-            .expect("valid generated fixture patch")
-            .remove(0);
-        let inner = Arc::get_mut(&mut document.0).unwrap();
-        // Single full-context fixtures predate hunk navigation; explicit patch
-        // tests retain boundaries and verify their actual UI projection.
-        inner.hunk_boundaries.clear();
-        document
     }
 }
 
-pub(crate) fn prepare_highlighter(file: Option<&DiffFile>) -> Option<SyntaxHighlighter> {
-    let file = file?;
-    let mut highlighter = SyntaxHighlighter::new(&file.detected_language());
-    // This is a host-parser budget, not a bound on highlighter construction:
-    // query compilation and injected-language parsing have their own costs.
-    highlighter.update(
-        None,
-        &Rope::from_str(&file.text),
-        Some(Duration::from_millis(100)),
-    );
-    Some(highlighter)
+/// File paths may come from another platform. Only the final component
+/// determines the language; dots in a directory are not extensions.
+fn detected_language(path: &str) -> SharedString {
+    let name = path.rsplit(['/', '\\']).next().unwrap_or("").to_lowercase();
+    let language = match name.as_str() {
+        "makefile" | "gnumakefile" => "make",
+        "cmakelists.txt" => "cmake",
+        _ => match name.rsplit_once('.').map(|(_, extension)| extension) {
+            Some("jsx" | "mjs" | "cjs") => "javascript",
+            Some("mts" | "cts") => "typescript",
+            Some("cc" | "cxx" | "hpp" | "hxx") => "cpp",
+            Some("h") => "c",
+            Some("htm") => "html",
+            Some("gql") => "graphql",
+            Some("exs") => "elixir",
+            Some(
+                extension @ ("astro" | "sh" | "bash" | "c" | "cmake" | "cs" | "cpp" | "css"
+                | "scss" | "diff" | "ejs" | "ex" | "erb" | "go" | "graphql" | "html"
+                | "java" | "js" | "json" | "jsonc" | "kt" | "kts" | "lua" | "md"
+                | "mdx" | "php" | "php3" | "php4" | "php5" | "phtml" | "proto" | "py"
+                | "pyi" | "rb" | "rs" | "scala" | "sql" | "svelte" | "swift" | "toml"
+                | "tsx" | "ts" | "yaml" | "yml" | "zig"),
+            ) => extension,
+            _ => "text",
+        },
+    };
+    crate::highlighter::language_name(language)
 }
 
+/// Builds the display form of one source line from its range in `source`.
+fn source_line(source: &str, range: Range<usize>, line_number: usize) -> SourceLine {
+    let raw = &source[range.clone()];
+    let content = match raw.strip_suffix('\n') {
+        Some(content) => content.strip_suffix('\r').unwrap_or(content),
+        None => raw,
+    };
+    let text = SharedString::from(content.to_owned());
+    let (display, display_tabs): (SharedString, Vec<DisplayTab>) = if content.contains('\t') {
+        let mut display = String::with_capacity(content.len());
+        let mut display_tabs = Vec::new();
+        let mut column = 0;
+        for (ix, ch) in content.char_indices() {
+            if ch == '\t' {
+                let spaces = 4 - column % 4;
+                display_tabs.push(DisplayTab {
+                    source_offset: ix,
+                    display_offset: display.len(),
+                    width: spaces,
+                });
+                for _ in 0..spaces {
+                    display.push(' ');
+                }
+                column += spaces;
+            } else {
+                display.push(ch);
+                column += 1;
+            }
+        }
+        (display.into(), display_tabs)
+    } else {
+        (text.clone(), Vec::new())
+    };
+    let chunks = display_chunks(&display)
+        .into_iter()
+        .map(|range| {
+            let text = if range.start == 0 && range.end == display.len() {
+                display.clone()
+            } else {
+                SharedString::from(display[range.clone()].to_owned())
+            };
+            DisplayChunk { range, text }
+        })
+        .collect();
+    SourceLine {
+        line_number,
+        text,
+        display,
+        chunks,
+        counterpart: None,
+        display_tabs,
+        content_end: range.start + content.len(),
+        source: range,
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn source_lines(text: &str) -> Vec<SourceLine> {
     let mut offset = 0;
     text.split_inclusive('\n')
         .enumerate()
-        .map(|(index, source)| {
-            let content = source.strip_suffix('\n').unwrap_or(source);
-            let content = if source.ends_with('\n') {
-                content.strip_suffix('\r').unwrap_or(content)
-            } else {
-                content
-            };
-            let text = SharedString::from(content);
-            let (display, display_tabs): (SharedString, Vec<DisplayTab>) = if content.contains('\t')
-            {
-                let mut display = String::with_capacity(content.len());
-                let mut display_tabs = Vec::new();
-                let mut column = 0;
-                for (ix, ch) in content.char_indices() {
-                    if ch == '\t' {
-                        let spaces = 4 - column % 4;
-                        display_tabs.push(DisplayTab {
-                            source_offset: ix,
-                            display_offset: display.len(),
-                            width: spaces,
-                        });
-                        for _ in 0..spaces {
-                            display.push(' ');
-                        }
-                        column += spaces;
-                    } else {
-                        display.push(ch);
-                        column += 1;
-                    }
-                }
-                (display.into(), display_tabs)
-            } else {
-                (text.clone(), Vec::new())
-            };
-            let chunks = display_chunks(&display)
-                .into_iter()
-                .map(|range| {
-                    let text = if range.start == 0 && range.end == display.len() {
-                        display.clone()
-                    } else {
-                        SharedString::from(&display[range.clone()])
-                    };
-                    DisplayChunk { range, text }
-                })
-                .collect();
-            let line = SourceLine {
-                line_number: index + 1,
-                text,
-                display,
-                chunks,
-                counterpart: None,
-                display_tabs,
-                source: offset..offset + source.len(),
-                content_end: offset + content.len(),
-            };
-            offset += source.len();
-            line
+        .map(|(index, line)| {
+            let range = offset..offset + line.len();
+            offset = range.end;
+            source_line(text, range, index + 1)
         })
         .collect()
 }
@@ -519,18 +739,98 @@ pub(crate) fn display_chunks(text: &str) -> SmallVec<[Range<usize>; 1]> {
     chunks
 }
 
+/// Test fixtures describe complete file versions; they are turned into a
+/// full-context patch and pass through the production parser.
+#[cfg(test)]
+pub(crate) mod fixture {
+    use similar::{ChangeTag, TextDiff};
+
+    use super::DiffDocument;
+
+    fn quoted(name: &str) -> String {
+        format!(
+            "\"{}\"",
+            name.replace('\\', "\\\\")
+                .replace('\"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('\t', "\\t")
+        )
+    }
+
+    /// Builds a document from optional complete sources. Hunk rows are
+    /// removed because these fixtures predate hunk navigation.
+    pub(crate) fn document(
+        original: Option<(&str, &str)>,
+        modified: Option<(&str, &str)>,
+    ) -> DiffDocument {
+        let old = original.map_or("", |(_, text)| text);
+        let new = modified.map_or("", |(_, text)| text);
+        let old_lines: Vec<&str> = old.split_inclusive('\n').collect();
+        let new_lines: Vec<&str> = new.split_inclusive('\n').collect();
+        let old_name = original.map_or_else(|| "/dev/null".to_owned(), |(name, _)| quoted(name));
+        let new_name = modified.map_or_else(|| "/dev/null".to_owned(), |(name, _)| quoted(name));
+        // Write one full-context hunk directly: `similar`'s unified writer
+        // does not preserve CRLF line endings.
+        let diff = TextDiff::from_slices(&old_lines, &new_lines);
+        let mut patch = format!("--- {old_name}\n+++ {new_name}\n");
+        if !old_lines.is_empty() || !new_lines.is_empty() {
+            patch.push_str(&format!(
+                "@@ -{},{} +{},{} @@\n",
+                usize::from(!old_lines.is_empty()),
+                old_lines.len(),
+                usize::from(!new_lines.is_empty()),
+                new_lines.len()
+            ));
+            for op in diff.ops() {
+                for change in diff.iter_changes(op) {
+                    patch.push(match change.tag() {
+                        ChangeTag::Equal => ' ',
+                        ChangeTag::Delete => '-',
+                        ChangeTag::Insert => '+',
+                    });
+                    patch.push_str(change.value());
+                    if !change.value().ends_with('\n') {
+                        patch.push_str("\n\\ No newline at end of file\n");
+                    }
+                }
+            }
+        }
+        if original.is_none() {
+            patch.insert_str(0, "diff --git a/fixture b/fixture\nnew file mode 100644\n");
+        } else if modified.is_none() {
+            patch.insert_str(
+                0,
+                "diff --git a/fixture b/fixture\ndeleted file mode 100644\n",
+            );
+        }
+        let mut document = DiffDocument::parse(&patch)
+            .unwrap_or_else(|error| panic!("invalid fixture patch: {error}\n{patch}"))
+            .remove(0);
+        std::sync::Arc::get_mut(&mut document.0)
+            .unwrap()
+            .hunks
+            .clear();
+        document
+    }
+
+    pub(crate) fn modified(name: &str, original: &str, modified: &str) -> DiffDocument {
+        document(Some((name, original)), Some((name, modified)))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{fixture, *};
 
     #[test]
     fn comparison_preserves_source_and_alignment() {
         fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<DiffFile>();
         assert_send_sync::<DiffDocument>();
-        let doc = DiffDocument::new(
-            DiffFile::new("a.rs", "same\r\n旧值\r\nremoved\r\ntail"),
-            DiffFile::new("a.rs", "same\r\n新值\r\ntail\r\n"),
+        let doc = fixture::modified(
+            "a.rs",
+            "same\r\n旧值\r\nremoved\r\ntail",
+            "same\r\n新值\r\ntail\r\n",
         );
         assert_eq!((doc.additions(), doc.deletions()), (2, 3));
         assert_eq!(
@@ -542,20 +842,17 @@ mod tests {
             }
         );
         for side in [DiffSide::Original, DiffSide::Modified] {
-            assert_eq!(
-                doc.text_for_range(DiffLineRange::new(side, 1, usize::MAX)),
-                doc.source(side)
-            );
+            assert_eq!(doc.text_for_lines(side, 1, usize::MAX), doc.source(side));
         }
-        let same = DiffDocument::new(DiffFile::new("empty", ""), DiffFile::new("empty", ""));
+        let same = fixture::modified("empty", "", "");
         assert!(!same.has_changes());
-        assert_eq!(same.line_count(DiffSide::Original), 0);
-        let added = DiffDocument::added(DiffFile::new("new", "one\n\n"));
+        assert_eq!(same.lines_count(DiffSide::Original), 0);
+        let added = fixture::document(None, Some(("new", "one\n\n")));
         assert_eq!((added.additions(), added.deletions()), (2, 0));
         assert!(added.0.pairs.iter().all(|p| p.original.is_none()));
-        let deleted = DiffDocument::deleted(DiffFile::new("old", "one\n"));
+        let deleted = fixture::document(Some(("old", "one\n")), None);
         assert_eq!((deleted.additions(), deleted.deletions()), (0, 1));
-        assert!(DiffDocument::added(DiffFile::new("empty", "")).has_changes());
+        assert!(fixture::document(None, Some(("empty", ""))).has_changes());
     }
 
     #[test]
@@ -575,14 +872,14 @@ mod tests {
             ("", "\n"),
             ("\n", ""),
         ] {
-            let doc = DiffDocument::new(DiffFile::new("a.txt", old), DiffFile::new("a.txt", new));
+            let doc = fixture::modified("a.txt", old, new);
             assert_eq!(
                 doc.0
                     .pairs
                     .iter()
                     .filter_map(|pair| pair.original)
                     .collect::<Vec<_>>(),
-                (0..doc.line_count(DiffSide::Original)).collect::<Vec<_>>()
+                (0..doc.lines_count(DiffSide::Original)).collect::<Vec<_>>()
             );
             assert_eq!(
                 doc.0
@@ -590,7 +887,7 @@ mod tests {
                     .iter()
                     .filter_map(|pair| pair.modified)
                     .collect::<Vec<_>>(),
-                (0..doc.line_count(DiffSide::Modified)).collect::<Vec<_>>()
+                (0..doc.lines_count(DiffSide::Modified)).collect::<Vec<_>>()
             );
             assert_eq!(
                 doc.deletions(),
@@ -617,10 +914,7 @@ mod tests {
                 }
             }
         }
-        let doc = DiffDocument::new(
-            DiffFile::new("a.txt", "same\nold\ntail\n"),
-            DiffFile::new("a.txt", "same\nnew\nextra\ntail\n"),
-        );
+        let doc = fixture::modified("a.txt", "same\nold\ntail\n", "same\nnew\nextra\ntail\n");
         assert_eq!(
             doc.0.pairs[1],
             LinePair {
@@ -637,20 +931,11 @@ mod tests {
                 changed: true
             }
         );
-        assert_eq!(
-            doc.text_for_range(DiffLineRange::new(DiffSide::Modified, 3, 2)),
-            "new\nextra\n"
-        );
-        assert_eq!(
-            doc.text_for_range(DiffLineRange::new(DiffSide::Original, 99, 100)),
-            ""
-        );
-        let bare_cr = DiffDocument::new(
-            DiffFile::new("a.txt", "a\rb"),
-            DiffFile::new("a.txt", "a\rb"),
-        );
+        assert_eq!(doc.text_for_lines(DiffSide::Modified, 2, 3), "new\nextra\n");
+        assert_eq!(doc.text_for_lines(DiffSide::Original, 99, 100), "");
+        let bare_cr = fixture::modified("a.txt", "a\rb", "a\rb");
         assert!(!bare_cr.has_changes());
-        assert_eq!(bare_cr.line_count(DiffSide::Original), 1);
+        assert_eq!(bare_cr.lines_count(DiffSide::Original), 1);
         assert_eq!(bare_cr.0.pairs.len(), 1);
     }
 
@@ -780,10 +1065,32 @@ mod tests {
             ("ts", "text"),
             ("notes.unknown", "text"),
         ] {
-            assert_eq!(
-                DiffFile::new(name, "").detected_language().as_str(),
-                language
-            );
+            assert_eq!(detected_language(name).as_str(), language);
         }
+    }
+
+    #[cfg(feature = "tree-sitter-rust")]
+    #[test]
+    fn syntax_is_parsed_per_hunk() {
+        // Hunks are separated by unavailable source. Parsing their fragments
+        // together would join `/* open` and `close */` into one comment.
+        let document = DiffDocument::parse(
+            "--- a/a.rs\n+++ b/a.rs\n@@ -1,2 +1,2 @@\n-let a = 1;\n+let a = 2;\n /* open\n@@ -10,2 +10,2 @@\n close */\n-fn old() {}\n+fn new() {}\n",
+        )
+        .unwrap()
+        .remove(0);
+        assert!(document.syntax().is_none());
+        document.prepare_syntax(&mut Default::default());
+        let syntax = document.syntax().unwrap();
+        let names = |ix: usize| {
+            syntax
+                .spans(DiffSide::Modified, ix)
+                .iter()
+                .map(|span| syntax.names[span.name as usize].to_string())
+                .collect::<Vec<_>>()
+        };
+        assert!(names(0).iter().any(|name| name == "keyword"));
+        assert!(!names(2).iter().any(|name| name.starts_with("comment")));
+        assert!(names(3).iter().any(|name| name == "function"));
     }
 }

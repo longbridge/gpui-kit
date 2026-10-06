@@ -513,3 +513,7 @@ Diff:
     en: Diff for %{name}
     zh-CN: "%{name} 的差异"
     zh-HK: "%{name} 的差異"
+  ViewerFiles:
+    en: Diff for %{count} files
+    zh-CN: "%{count} 个文件的差异"
+    zh-HK: "%{count} 個檔案的差異"

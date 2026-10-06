@@ -34,11 +34,11 @@ impl Render for Review {
             .child(Button::new("before-diff").label("Before diff"))
             .child(
                 Diff::new(&self.state)
-                    .header(false)
+                    .header_visible(false)
                     .flex_1()
                     .min_h_0()
-                    .with_annotations(self.annotations.clone())
-                    .render_annotation(move |_, _, _| {
+                    .annotations(self.annotations.clone())
+                    .annotation(move |_, _, _| {
                         div()
                             .id("comment-content")
                             .test_support()
@@ -55,7 +55,7 @@ impl Render for Review {
 }
 
 fn patch_document(hunks: &str) -> DiffDocument {
-    DiffDocument::parse(format!("--- a/review.txt\n+++ b/review.txt\n{hunks}"))
+    DiffDocument::parse(&format!("--- a/review.txt\n+++ b/review.txt\n{hunks}"))
         .expect("Test patch is valid")
         .into_iter()
         .next()
@@ -69,15 +69,23 @@ fn review(
     mode: DiffMode,
     annotations: Vec<DiffLineAnnotation>,
 ) -> (WindowHandle<gpui_kit::base::Root>, Entity<DiffState>) {
+    review_documents(cx, vec![patch_document(patch)], context, mode, annotations)
+}
+
+fn review_documents(
+    cx: &mut TestAppContext,
+    documents: Vec<DiffDocument>,
+    context: Option<usize>,
+    mode: DiffMode,
+    annotations: Vec<DiffLineAnnotation>,
+) -> (WindowHandle<gpui_kit::base::Root>, Entity<DiffState>) {
     cx.update(gpui_kit::init);
-    let document = patch_document(patch);
     let (handle, view) = common::open_window(cx, Some(size(px(800.), px(480.))), |_, cx| {
         cx.new(|cx| Review {
             state: cx.new(|cx| {
-                let mut state = DiffState::new(document, cx);
-                state.set_context_lines(context, cx);
-                state.set_mode(mode, cx);
-                state
+                DiffState::new(documents, cx)
+                    .with_context_lines(context)
+                    .with_mode(mode)
             }),
             annotations,
             editor: None,
@@ -222,13 +230,17 @@ fn keyboard_expansion_exposes_original_annotation_on_an_unchanged_unified_line(
         DiffMode::Unified,
         vec![DiffLineAnnotation::new(
             "original-comment",
-            DiffLinePosition::new(DiffSide::Original, 1),
+            DiffLinePosition::new(0, DiffSide::Original, 1),
         )],
     );
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
         assert!(window.try_find("comment-content").is_none());
-        window.click("before-diff", cx);
+        // Tab only reaches Root's binding once something holds focus, and a
+        // button does not take focus on click; start from the first stop.
+        window.focus_next(cx);
+        window.render_frame(cx);
+        assert_eq!(window.find("before-diff").focused(), Some(true));
         // Traverse the real Tab order instead of focusing the fold programmatically.
         for _ in 0..8 {
             if window.find(("expand", 0usize)).focused() == Some(true) {
@@ -298,10 +310,10 @@ fn annotation_input_retains_focus_and_handles_its_own_text_commands(cx: &mut Tes
     cx.update(gpui_kit::init);
     let (handle, view) = common::open_window(cx, Some(size(px(800.), px(480.))), |window, cx| {
         cx.new(|cx| Review {
-            state: cx.new(|cx| DiffState::new(patch_document("@@ -1 +1 @@\n-old\n+new\n"), cx)),
+            state: cx.new(|cx| DiffState::new([patch_document("@@ -1 +1 @@\n-old\n+new\n")], cx)),
             annotations: vec![DiffLineAnnotation::new(
                 "editable-comment",
-                DiffLinePosition::new(DiffSide::Modified, 1),
+                DiffLinePosition::new(0, DiffSide::Modified, 1),
             )],
             editor: Some(cx.new(|cx| InputState::new(window, cx))),
         })
@@ -361,6 +373,28 @@ fn source_accessibility_labels_preserve_raw_tabs_unicode_and_trailing_spaces(
             assert_eq!(source.role(), Some(Role::Label));
             assert_eq!(source.label(), Some(expected));
         }
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn files_share_one_list_and_select_lines_in_their_own_file(cx: &mut TestAppContext) {
+    let documents = DiffDocument::parse(
+        "diff --git a/first.txt b/first.txt\n--- a/first.txt\n+++ b/first.txt\n@@ -1 +1 @@\n-one\n+uno\ndiff --git a/second.txt b/second.txt\n--- a/second.txt\n+++ b/second.txt\n@@ -1 +1 @@\n-two\n+dos\n",
+    )
+    .unwrap();
+    let (handle, state) = review_documents(cx, documents, None, DiffMode::Split, vec![]);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        // Row identities repeat in each file; the file scope keeps them distinct.
+        window
+            .within(("diff-file", 1usize))
+            .within(("new", 0usize))
+            .click(("line", 0usize), cx);
+        let range = state.read(cx).selected_lines().unwrap();
+        assert_eq!((range.file(), range.side()), (1, DiffSide::Modified));
+        window.within("review").press("secondary-c", cx);
+        assert_clipboard(cx, "dos\n");
     })
     .unwrap();
 }

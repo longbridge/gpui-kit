@@ -12,37 +12,54 @@ use gpui::{
     AnyElement, App, Bounds, Element, ElementId, GlobalElementId, HighlightStyle, Hitbox,
     HitboxBehavior, InspectorElementId, IntoElement, LayoutId, ListState, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollHandle, StyledText,
-    TextLayout, Window,
+    TextLayout, Window, px,
 };
 use gpui_base::{
     ScrollbarHandle, TextSelectionHandle, TextSelectionRegistration, TextSelectionRun,
 };
 
 use super::{
-    DiffDocument, DiffLinePosition, DiffSide,
+    DiffDocument, DiffSide,
     state::{decode_key, encode_key},
 };
 
 pub(crate) struct CodeRun {
-    pub side: DiffSide,
-    pub line_ix: usize,
-    pub display_range: Range<usize>,
-    pub layout: TextLayout,
-    pub bounds: Bounds<Pixels>,
-    pub document: DiffDocument,
+    file: usize,
+    side: DiffSide,
+    line_ix: usize,
+    display_range: Range<usize>,
+    layout: TextLayout,
+    bounds: Bounds<Pixels>,
+    document: DiffDocument,
 }
 
 #[derive(Default)]
 pub(crate) struct SelectionGeometry {
-    pub bounds: Bounds<Pixels>,
-    pub scroll_offset: Point<Pixels>,
+    bounds: Bounds<Pixels>,
+    scroll_offset: Point<Pixels>,
     multi_click: Cell<Option<(usize, Point<Pixels>, bool)>>,
-    pub runs: Vec<CodeRun>,
+    runs: Vec<CodeRun>,
 }
 
 impl SelectionGeometry {
     pub fn clear(&mut self) {
         self.runs.clear();
+    }
+
+    /// The widest painted source line, measured from its first text run.
+    pub fn painted_width(&self) -> Pixels {
+        self.runs
+            .iter()
+            .fold((None, px(0.), px(0.)), |(previous, left, widest), run| {
+                let key = (run.file, run.side, run.line_ix);
+                let left = if previous == Some(key) {
+                    left
+                } else {
+                    run.bounds.left()
+                };
+                (Some(key), left, widest.max(run.bounds.right() - left))
+            })
+            .2
     }
     pub fn key_at(&self, point: Point<Pixels>, side: Option<DiffSide>) -> Option<u64> {
         if let Some((count, position, cursor)) = self.multi_click.get() {
@@ -54,15 +71,16 @@ impl SelectionGeometry {
                     .index_for_position(position)
                     .unwrap_or_else(|ix| ix);
             let range = if count >= 3 {
-                0..line.display.len()
+                0..line.display().len()
             } else {
-                word_range(&line.display, ix)?
+                word_range(line.display(), ix)?
             };
             self.multi_click
                 .set((!cursor).then_some((count, position, true)));
             return Some(encode_key(
+                run.file,
                 run.side,
-                line.source.start
+                line.source().start
                     + line.source_offset(if cursor { range.end } else { range.start }),
             ));
         }
@@ -72,8 +90,9 @@ impl SelectionGeometry {
             run.display_range.start + run.layout.index_for_position(point).unwrap_or_else(|ix| ix);
         let line = &run.document.lines(run.side)[run.line_ix];
         Some(encode_key(
+            run.file,
             run.side,
-            line.source.start + line.source_offset(ix),
+            line.source().start + line.source_offset(ix),
         ))
     }
 
@@ -166,50 +185,56 @@ fn distance_to_bounds(point: Point<Pixels>, bounds: Bounds<Pixels>) -> f32 {
     dx * dx + dy * dy
 }
 
+/// The native text selection as a source range within one side of one file.
 pub(crate) fn selected_source_range(
     selection: &TextSelectionHandle,
     cx: &App,
-) -> Option<(DiffSide, Range<usize>)> {
+) -> Option<(usize, DiffSide, Range<usize>)> {
     let snapshot = selection.snapshot(cx)?;
     let entity = Some(selection.entity_id());
     if snapshot.anchor().entity_id() != entity || snapshot.cursor().entity_id() != entity {
         return None;
     }
-    let (side, anchor) = decode_key(snapshot.anchor().content_key()?.value());
-    let (other_side, cursor) = decode_key(snapshot.cursor().content_key()?.value());
-    (side == other_side && anchor != cursor)
-        .then_some((side, anchor.min(cursor)..anchor.max(cursor)))
+    let (file, side, anchor) = decode_key(snapshot.anchor().content_key()?.value());
+    let (other_file, other_side, cursor) = decode_key(snapshot.cursor().content_key()?.value());
+    (file == other_file && side == other_side && anchor != cursor).then_some((
+        file,
+        side,
+        anchor.min(cursor)..anchor.max(cursor),
+    ))
 }
 
 pub(crate) struct CodeText {
-    pub id: ElementId,
-    pub document: DiffDocument,
-    pub side: DiffSide,
-    pub line_ix: usize,
-    pub range: Range<usize>,
-    pub highlights: Vec<(Range<usize>, HighlightStyle)>,
-    pub selection: TextSelectionHandle,
-    pub geometry: Rc<RefCell<SelectionGeometry>>,
+    id: ElementId,
+    document: DiffDocument,
+    file: usize,
+    side: DiffSide,
+    line_ix: usize,
+    range: Range<usize>,
+    highlights: Vec<(Range<usize>, HighlightStyle)>,
+    selection: TextSelectionHandle,
+    geometry: Rc<RefCell<SelectionGeometry>>,
     styled_text: Option<StyledText>,
 }
 
 impl CodeText {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: ElementId,
         document: DiffDocument,
-        position: DiffLinePosition,
+        file: usize,
+        side: DiffSide,
+        line_ix: usize,
         range: Range<usize>,
         highlights: Vec<(Range<usize>, HighlightStyle)>,
         selection: TextSelectionHandle,
         geometry: Rc<RefCell<SelectionGeometry>>,
     ) -> Self {
-        let line_ix = document
-            .line_index(position)
-            .expect("rendered patch line exists");
         Self {
             id,
             document,
-            side: position.side(),
+            file,
+            side,
             line_ix,
             range,
             highlights,
@@ -245,14 +270,15 @@ impl Element for CodeText {
     ) -> (LayoutId, ()) {
         let line = &self.document.lines(self.side)[self.line_ix];
         let mut layers = self.highlights.clone();
-        if let Some((side, range)) = selected_source_range(&self.selection, cx)
+        if let Some((file, side, range)) = selected_source_range(&self.selection, cx)
+            && file == self.file
             && side == self.side
         {
-            let start = range.start.max(line.source.start);
-            let end = range.end.min(line.content_end);
+            let start = range.start.max(line.source().start);
+            let end = range.end.min(line.content_end());
             if start < end {
                 layers.push((
-                    line.display_range(start - line.source.start..end - line.source.start),
+                    line.display_range(start - line.source().start..end - line.source().start),
                     HighlightStyle {
                         background_color: Some(crate::ActiveTheme::theme(cx).selection),
                         ..Default::default()
@@ -286,6 +312,7 @@ impl Element for CodeText {
         let text = self.styled_text.as_mut().unwrap();
         text.prepaint(id, inspector, bounds, &mut (), window, cx);
         self.geometry.borrow_mut().runs.push(CodeRun {
+            file: self.file,
             side: self.side,
             line_ix: self.line_ix,
             display_range: self.range.clone(),
@@ -385,11 +412,29 @@ pub(crate) fn merge_highlights(
 }
 
 pub(crate) struct SelectionLayer {
-    pub child: AnyElement,
-    pub scroll: ListState,
-    pub horizontal: ScrollHandle,
-    pub selection: TextSelectionHandle,
-    pub geometry: Rc<RefCell<SelectionGeometry>>,
+    child: AnyElement,
+    scroll: ListState,
+    horizontal: ScrollHandle,
+    selection: TextSelectionHandle,
+    geometry: Rc<RefCell<SelectionGeometry>>,
+}
+
+impl SelectionLayer {
+    pub fn new(
+        child: AnyElement,
+        scroll: ListState,
+        horizontal: ScrollHandle,
+        selection: TextSelectionHandle,
+        geometry: Rc<RefCell<SelectionGeometry>>,
+    ) -> Self {
+        Self {
+            child,
+            scroll,
+            horizontal,
+            selection,
+            geometry,
+        }
+    }
 }
 
 impl IntoElement for SelectionLayer {
@@ -475,8 +520,9 @@ impl Element for SelectionLayer {
                 let text = run.document.lines(run.side)[run.line_ix].chunk_text(&run.display_range);
                 TextSelectionRun::new(text, run.layout.clone(), run.bounds).with_document_order(
                     encode_key(
+                        run.file,
                         run.side,
-                        run.document.lines(run.side)[run.line_ix].source.start
+                        run.document.lines(run.side)[run.line_ix].source().start
                             + run.document.lines(run.side)[run.line_ix]
                                 .source_offset(run.display_range.start),
                     ),

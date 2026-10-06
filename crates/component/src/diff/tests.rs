@@ -3,18 +3,12 @@ use std::{cell::RefCell, rc::Rc};
 use gpui::{AppContext, Empty, ListOffset, TestAppContext, px, size};
 
 use super::{
-    DiffDocument, DiffEvent, DiffFile, DiffLinePosition, DiffLineRange, DiffMode, DiffSide,
-    DiffState, state::DisplayRow,
+    DiffDocument, DiffEvent, DiffLinePosition, DiffLineRange, DiffMode, DiffSide, DiffState,
+    document::fixture, state::DisplayRow,
 };
 
-fn document(
-    original: impl Into<gpui::SharedString>,
-    modified: impl Into<gpui::SharedString>,
-) -> DiffDocument {
-    DiffDocument::new(
-        DiffFile::new("review.txt", original),
-        DiffFile::new("review.txt", modified),
-    )
+fn document(original: &str, modified: &str) -> DiffDocument {
+    fixture::modified("review.txt", original, modified)
 }
 
 fn context_document() -> DiffDocument {
@@ -22,17 +16,17 @@ fn context_document() -> DiffDocument {
         .map(|line| format!("line {line}\n"))
         .collect::<String>();
     let modified = original.replace("line 15\n", "changed 15\n");
-    document(original, modified)
+    document(&original, &modified)
 }
 
 #[gpui::test]
 fn unified_changes_keep_deletions_before_additions_and_source_selection(cx: &mut TestAppContext) {
     let state = cx.new(|cx| {
         DiffState::new(
-            document(
+            [document(
                 "head\nold one\nold two\ntail\n",
                 "head\nnew one\nnew two\nnew three\ntail\n",
-            ),
+            )],
             cx,
         )
     });
@@ -40,21 +34,22 @@ fn unified_changes_keep_deletions_before_additions_and_source_selection(cx: &mut
         assert_eq!(state.mode(), DiffMode::Unified);
         state.set_mode(DiffMode::Split, cx);
         state.set_context_lines(None, cx);
-        state.set_selected_lines(Some(DiffLineRange::new(DiffSide::Original, 2, 3)), cx);
-        state.list.scroll_to(ListOffset {
-            item_ix: 1,
+        state.set_selected_lines(Some(DiffLineRange::new(0, DiffSide::Original, 2, 3)), cx);
+        state.list().scroll_to(ListOffset {
+            item_ix: 2,
             offset_in_item: px(0.),
         });
         state.set_mode(DiffMode::Unified, cx);
-        assert_eq!(state.list.logical_scroll_top().item_ix, 3);
+        assert_eq!(state.list().logical_scroll_top().item_ix, 4);
         let changes = state
-            .rows
+            .rows()
             .iter()
             .filter_map(|row| match row {
                 DisplayRow::Code {
                     original,
                     modified,
                     changed: true,
+                    ..
                 } => Some((*original, *modified)),
                 _ => None,
             })
@@ -71,20 +66,21 @@ fn unified_changes_keep_deletions_before_additions_and_source_selection(cx: &mut
         );
         assert_eq!(
             state.selected_lines(),
-            Some(DiffLineRange::new(DiffSide::Original, 2, 3))
+            Some(DiffLineRange::new(0, DiffSide::Original, 2, 3))
         );
         assert_eq!(state.selected_text(cx), "old one\nold two\n");
 
         state.set_mode(DiffMode::Split, cx);
-        assert_eq!(state.list.logical_scroll_top().item_ix, 1);
+        assert_eq!(state.list().logical_scroll_top().item_ix, 2);
         let changes = state
-            .rows
+            .rows()
             .iter()
             .filter_map(|row| match row {
                 DisplayRow::Code {
                     original,
                     modified,
                     changed: true,
+                    ..
                 } => Some((*original, *modified)),
                 _ => None,
             })
@@ -99,74 +95,75 @@ fn unified_changes_keep_deletions_before_additions_and_source_selection(cx: &mut
 
 #[gpui::test]
 fn context_disclosures_reveal_source_ranges_without_retargeting_selection(cx: &mut TestAppContext) {
-    let state = cx.new(|cx| DiffState::new(context_document(), cx));
+    let state = cx.new(|cx| DiffState::new([context_document()], cx));
     state.update(cx, |state, cx| {
         state.set_mode(DiffMode::Split, cx);
         state.set_context_lines(Some(1), cx);
         let folds = state
-            .rows
+            .rows()
             .iter()
             .filter_map(|row| match row {
-                DisplayRow::Fold(range) => Some(range.clone()),
+                DisplayRow::Fold { pairs, .. } => Some(pairs.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>();
         assert_eq!(folds, [0..13, 16..30]);
 
-        state.set_selected_lines(Some(DiffLineRange::new(DiffSide::Modified, 14, 16)), cx);
-        state.list.scroll_to(ListOffset {
-            item_ix: 2,
+        state.set_selected_lines(Some(DiffLineRange::new(0, DiffSide::Modified, 14, 16)), cx);
+        state.list().scroll_to(ListOffset {
+            item_ix: 3,
             offset_in_item: px(0.),
         });
-        state.expand(folds[0].clone(), cx);
-        assert_eq!(state.list.logical_scroll_top().item_ix, 14);
+        state.expand(0, folds[0].clone(), cx);
+        assert_eq!(state.list().logical_scroll_top().item_ix, 15);
         assert!(matches!(
-            state.rows.first(),
+            state.rows().get(1),
             Some(DisplayRow::Code {
                 original: Some(0),
                 modified: Some(0),
-                changed: false
+                changed: false,
+                ..
             })
         ));
         assert_eq!(
             state
-                .rows
+                .rows()
                 .iter()
-                .filter(|row| matches!(row, DisplayRow::Fold(_)))
+                .filter(|row| matches!(row, DisplayRow::Fold { .. }))
                 .count(),
             1
         );
         assert_eq!(state.selected_text(cx), "line 14\nchanged 15\nline 16\n");
 
-        state.scroll_to_line(DiffLinePosition::new(DiffSide::Original, 30), cx);
-        assert_eq!(state.list.logical_scroll_top().item_ix, 29);
+        state.scroll_to_line(DiffLinePosition::new(0, DiffSide::Original, 30), cx);
+        assert_eq!(state.list().logical_scroll_top().item_ix, 30);
         assert!(
             !state
-                .rows
+                .rows()
                 .iter()
-                .any(|row| matches!(row, DisplayRow::Fold(_)))
+                .any(|row| matches!(row, DisplayRow::Fold { .. }))
         );
         state.collapse_all(cx);
         assert_eq!(state.context_lines(), Some(1));
         assert_eq!(
             state.selected_lines(),
-            Some(DiffLineRange::new(DiffSide::Modified, 14, 16))
+            Some(DiffLineRange::new(0, DiffSide::Modified, 14, 16))
         );
         state.expand_all(cx);
-        assert_eq!(state.rows.len(), 30);
+        assert_eq!(state.rows().len(), 31);
         assert!(
             !state
-                .rows
+                .rows()
                 .iter()
-                .any(|row| matches!(row, DisplayRow::Fold(_)))
+                .any(|row| matches!(row, DisplayRow::Fold { .. }))
         );
 
         // Rebuilt source maps must distinguish deletion and addition rows in
         // Unified, then point both source sides back to the paired Split row.
         state.set_mode(DiffMode::Unified, cx);
         for side in [DiffSide::Original, DiffSide::Modified] {
-            state.scroll_to_line(DiffLinePosition::new(side, 15), cx);
-            let row = &state.rows[state.list.logical_scroll_top().item_ix];
+            state.scroll_to_line(DiffLinePosition::new(0, side, 15), cx);
+            let row = &state.rows()[state.list().logical_scroll_top().item_ix];
             assert!(match (side, row) {
                 (
                     DiffSide::Original,
@@ -189,40 +186,44 @@ fn context_disclosures_reveal_source_ranges_without_retargeting_selection(cx: &m
         }
         state.set_mode(DiffMode::Split, cx);
         for side in [DiffSide::Original, DiffSide::Modified] {
-            state.scroll_to_line(DiffLinePosition::new(side, 15), cx);
-            assert_eq!(state.list.logical_scroll_top().item_ix, 14);
+            state.scroll_to_line(DiffLinePosition::new(0, side, 15), cx);
+            assert_eq!(state.list().logical_scroll_top().item_ix, 15);
         }
 
         // An unavailable source line must not alter the current disclosure state.
-        let count = state.rows.len();
-        state.scroll_to_line(DiffLinePosition::new(DiffSide::Original, usize::MAX), cx);
-        assert_eq!(state.rows.len(), count);
+        let count = state.rows().len();
+        state.scroll_to_line(DiffLinePosition::new(0, DiffSide::Original, usize::MAX), cx);
+        assert_eq!(state.rows().len(), count);
         state.set_context_lines(Some(0), cx);
-        assert_eq!(state.rows.len(), 3);
+        assert_eq!(state.rows().len(), 4);
         assert_eq!(state.selected_text(cx), "line 14\nchanged 15\nline 16\n");
     });
 }
 
 #[gpui::test]
 fn source_selection_clamps_ranges_and_preserves_original_bytes(cx: &mut TestAppContext) {
-    let state =
-        cx.new(|cx| DiffState::new(document("\t旧值  \r\n\r\nlast", "\t新值  \r\n\r\nlast"), cx));
+    let state = cx.new(|cx| {
+        DiffState::new(
+            [document("\t旧值  \r\n\r\nlast", "\t新值  \r\n\r\nlast")],
+            cx,
+        )
+    });
     state.update(cx, |state, cx| {
         state.set_selected_lines(
-            Some(DiffLineRange::new(DiffSide::Original, usize::MAX, 0)),
+            Some(DiffLineRange::new(0, DiffSide::Original, usize::MAX, 0)),
             cx,
         );
         assert_eq!(
             state.selected_lines(),
-            Some(DiffLineRange::new(DiffSide::Original, 1, 3))
+            Some(DiffLineRange::new(0, DiffSide::Original, 1, 3))
         );
         assert_eq!(state.selected_text(cx), "\t旧值  \r\n\r\nlast");
         state.set_selected_lines(
-            Some(DiffLineRange::new(DiffSide::Modified, 2, usize::MAX)),
+            Some(DiffLineRange::new(0, DiffSide::Modified, 2, usize::MAX)),
             cx,
         );
         assert_eq!(state.selected_text(cx), "\r\nlast");
-        state.set_selected_lines(Some(DiffLineRange::new(DiffSide::Original, 20, 30)), cx);
+        state.set_selected_lines(Some(DiffLineRange::new(0, DiffSide::Original, 20, 30)), cx);
         assert_eq!(state.selected_lines(), None);
         assert_eq!(state.selected_text(cx), "");
         state.set_selected_lines(None, cx);
@@ -230,15 +231,15 @@ fn source_selection_clamps_ranges_and_preserves_original_bytes(cx: &mut TestAppC
     });
 
     let deleted =
-        cx.new(|cx| DiffState::new(DiffDocument::deleted(DiffFile::new("deleted", "one\n")), cx));
+        cx.new(|cx| DiffState::new([fixture::document(Some(("deleted", "one\n")), None)], cx));
     deleted.update(cx, |state, cx| {
-        state.set_selected_lines(Some(DiffLineRange::new(DiffSide::Modified, 1, 2)), cx);
+        state.set_selected_lines(Some(DiffLineRange::new(0, DiffSide::Modified, 1, 2)), cx);
         assert!(state.selected_lines().is_none());
         assert_eq!(state.selected_text(cx), "");
     });
-    let empty = cx.new(|cx| DiffState::new(document("", ""), cx));
+    let empty = cx.new(|cx| DiffState::new([document("", "")], cx));
     empty.update(cx, |state, cx| {
-        state.set_selected_lines(Some(DiffLineRange::new(DiffSide::Original, 1, 1)), cx);
+        state.set_selected_lines(Some(DiffLineRange::new(0, DiffSide::Original, 1, 1)), cx);
         assert!(state.selected_lines().is_none());
         assert_eq!(state.selected_text(cx), "");
     });
@@ -248,45 +249,46 @@ fn source_selection_clamps_ranges_and_preserves_original_bytes(cx: &mut TestAppC
 fn change_navigation_wraps_groups_and_unchanged_documents_stay_in_place(cx: &mut TestAppContext) {
     let state = cx.new(|cx| {
         DiffState::new(
-            document(
+            [document(
                 "head\nold first\nmiddle\nold last\ntail\n",
                 "head\nnew first\nmiddle\nnew last\ntail\n",
-            ),
+            )],
             cx,
         )
     });
     state.update(cx, |state, cx| {
         state.set_mode(DiffMode::Split, cx);
         state.set_context_lines(None, cx);
-        state.list.scroll_to(ListOffset::default());
+        state.list().scroll_to(ListOffset::default());
         state.next_change(cx);
-        assert_eq!(state.list.logical_scroll_top().item_ix, 1);
+        assert_eq!(state.list().logical_scroll_top().item_ix, 2);
         state.next_change(cx);
-        assert_eq!(state.list.logical_scroll_top().item_ix, 3);
+        assert_eq!(state.list().logical_scroll_top().item_ix, 4);
         state.next_change(cx);
-        assert_eq!(state.list.logical_scroll_top().item_ix, 1);
+        assert_eq!(state.list().logical_scroll_top().item_ix, 2);
         state.previous_change(cx);
-        assert_eq!(state.list.logical_scroll_top().item_ix, 3);
+        assert_eq!(state.list().logical_scroll_top().item_ix, 4);
         state.previous_change(cx);
-        assert_eq!(state.list.logical_scroll_top().item_ix, 1);
+        assert_eq!(state.list().logical_scroll_top().item_ix, 2);
     });
 
-    let same = cx.new(|cx| DiffState::new(document("one\ntwo\nthree\n", "one\ntwo\nthree\n"), cx));
+    let same =
+        cx.new(|cx| DiffState::new([document("one\ntwo\nthree\n", "one\ntwo\nthree\n")], cx));
     same.update(cx, |state, cx| {
         state.set_context_lines(None, cx);
-        state.list.scroll_to(ListOffset {
+        state.list().scroll_to(ListOffset {
             item_ix: 1,
             offset_in_item: px(0.),
         });
         state.next_change(cx);
         state.previous_change(cx);
-        assert_eq!(state.list.logical_scroll_top().item_ix, 1);
+        assert_eq!(state.list().logical_scroll_top().item_ix, 1);
     });
 }
 
 #[gpui::test]
 fn controlled_selection_stays_silent_and_coherent_changes_notify(cx: &mut TestAppContext) {
-    let state = cx.new(|cx| DiffState::new(document("old\n", "new\n"), cx));
+    let state = cx.new(|cx| DiffState::new([document("old\n", "new\n")], cx));
     let events = Rc::new(RefCell::new(Vec::new()));
     let notifications = Rc::new(RefCell::new(0));
     let _events = cx.update(|cx| {
@@ -300,7 +302,7 @@ fn controlled_selection_stays_silent_and_coherent_changes_notify(cx: &mut TestAp
         let notifications = notifications.clone();
         cx.observe(&state, move |_, _| *notifications.borrow_mut() += 1)
     });
-    let range = DiffLineRange::new(DiffSide::Modified, 1, 1);
+    let range = DiffLineRange::new(0, DiffSide::Modified, 1, 1);
     state.update(cx, |state, cx| state.set_selected_lines(Some(range), cx));
     assert!(events.borrow().is_empty());
     assert_eq!(*notifications.borrow(), 1);
@@ -325,10 +327,10 @@ fn user_line_selection_extends_on_one_side_and_replacement_resets_silently(
     let window = cx.open_window(size(px(640.), px(480.)), |_, _| Empty);
     let state = cx.new(|cx| {
         DiffState::new(
-            document(
+            [document(
                 "old one\r\nold two\r\nold three",
                 "new one\r\nnew two\r\nnew three",
-            ),
+            )],
             cx,
         )
     });
@@ -343,51 +345,50 @@ fn user_line_selection_extends_on_one_side_and_replacement_resets_silently(
     cx.update_window(window.into(), |_, window, cx| {
         state.update(cx, |state, cx| {
             state.click_line(
-                DiffLinePosition::new(DiffSide::Original, 2),
+                DiffLinePosition::new(0, DiffSide::Original, 2),
                 false,
                 window,
                 cx,
             );
-            assert!(state.selection.has_local_selection(cx));
+            assert!(state.selection().has_local_selection(cx));
             // Base clears local participation synchronously, before its queued
             // notification reaches DiffState. Copy must stop immediately while
             // the retained gutter anchor still supports a subsequent extension.
-            state.selection.set_local_selection(false, cx);
+            state.selection().set_local_selection(false, cx);
             assert_eq!(state.selected_text(cx), "");
             state.keyboard_select(1, true, window, cx);
             assert_eq!(
                 state.selected_lines(),
-                Some(DiffLineRange::new(DiffSide::Original, 2, 3))
+                Some(DiffLineRange::new(0, DiffSide::Original, 2, 3))
             );
             assert_eq!(state.selected_text(cx), "old two\r\nold three");
             state.keyboard_select(-1, true, window, cx);
             assert_eq!(
                 state.selected_lines(),
-                Some(DiffLineRange::new(DiffSide::Original, 2, 2))
+                Some(DiffLineRange::new(0, DiffSide::Original, 2, 2))
             );
             state.click_line(
-                DiffLinePosition::new(DiffSide::Modified, 3),
+                DiffLinePosition::new(0, DiffSide::Modified, 3),
                 true,
                 window,
                 cx,
             );
             assert_eq!(
                 state.selected_lines(),
-                Some(DiffLineRange::new(DiffSide::Modified, 3, 3))
+                Some(DiffLineRange::new(0, DiffSide::Modified, 3, 3))
             );
             state.select_all(window, cx);
             assert_eq!(state.selected_text(cx), "new one\r\nnew two\r\nnew three");
-            state.set_document(
-                DiffDocument::deleted(DiffFile::new("replacement", "one\ntwo\n")),
-                window,
+            state.set_documents(
+                [fixture::document(Some(("replacement", "one\ntwo\n")), None)],
                 cx,
             );
             assert!(state.selected_lines().is_none());
-            assert!(!state.selection.has_local_selection(cx));
+            assert!(!state.selection().has_local_selection(cx));
             assert_eq!(state.selected_text(cx), "");
-            assert_eq!(state.list.logical_scroll_top().item_ix, 0);
+            assert_eq!(state.list().logical_scroll_top().item_ix, 0);
             assert_eq!(
-                state.document().original().unwrap().name().as_str(),
+                state.documents()[0].original_path().unwrap().as_str(),
                 "replacement"
             );
         });
@@ -396,11 +397,11 @@ fn user_line_selection_extends_on_one_side_and_replacement_resets_silently(
     assert_eq!(
         events.borrow().as_slice(),
         &[
-            Some(DiffLineRange::new(DiffSide::Original, 2, 2)),
-            Some(DiffLineRange::new(DiffSide::Original, 2, 3)),
-            Some(DiffLineRange::new(DiffSide::Original, 2, 2)),
-            Some(DiffLineRange::new(DiffSide::Modified, 3, 3)),
-            Some(DiffLineRange::new(DiffSide::Modified, 1, 3)),
+            Some(DiffLineRange::new(0, DiffSide::Original, 2, 2)),
+            Some(DiffLineRange::new(0, DiffSide::Original, 2, 3)),
+            Some(DiffLineRange::new(0, DiffSide::Original, 2, 2)),
+            Some(DiffLineRange::new(0, DiffSide::Modified, 3, 3)),
+            Some(DiffLineRange::new(0, DiffSide::Modified, 1, 3)),
         ]
     );
     cx.update_window(window.into(), |_, window, cx| {
@@ -408,12 +409,12 @@ fn user_line_selection_extends_on_one_side_and_replacement_resets_silently(
             state.keyboard_select(1, true, window, cx);
             assert_eq!(
                 state.selected_lines(),
-                Some(DiffLineRange::new(DiffSide::Original, 1, 1))
+                Some(DiffLineRange::new(0, DiffSide::Original, 1, 1))
             );
             state.keyboard_select(-1, true, window, cx);
             assert_eq!(
                 state.selected_lines(),
-                Some(DiffLineRange::new(DiffSide::Original, 1, 1))
+                Some(DiffLineRange::new(0, DiffSide::Original, 1, 1))
             );
         });
     })
@@ -428,23 +429,23 @@ fn patch_navigation_and_selection_use_supplied_source_coordinates(cx: &mut TestA
     )
     .unwrap()
     .remove(0);
-    let state = cx.new(|cx| DiffState::new(document, cx));
+    let state = cx.new(|cx| DiffState::new([document], cx));
     let window = cx.open_window(size(px(640.), px(480.)), |_, _| Empty);
     cx.update_window(window.into(), |_, window, cx| {
         state.update(cx, |state, cx| {
             assert_eq!(
                 state
-                    .rows
+                    .rows()
                     .iter()
-                    .filter(|row| matches!(row, DisplayRow::Hunk(_)))
+                    .filter(|row| matches!(row, DisplayRow::Hunk { .. }))
                     .count(),
                 2
             );
             assert!(
                 !state
-                    .rows
+                    .rows()
                     .iter()
-                    .any(|row| matches!(row, DisplayRow::Fold(_)))
+                    .any(|row| matches!(row, DisplayRow::Fold { .. }))
             );
             state.keyboard_select(1, false, window, cx);
             assert_eq!(state.selected_lines().unwrap().start(), 100);
@@ -452,19 +453,22 @@ fn patch_navigation_and_selection_use_supplied_source_coordinates(cx: &mut TestA
             state.keyboard_select(1, true, window, cx);
             assert_eq!(
                 state.selected_lines(),
-                Some(DiffLineRange::new(DiffSide::Modified, 100, 200))
+                Some(DiffLineRange::new(0, DiffSide::Modified, 100, 200))
             );
             assert_eq!(
                 state.selected_text(cx),
                 "context 100\nnew 101\ncontext 200\n"
             );
-            state.set_selected_lines(Some(DiffLineRange::new(DiffSide::Modified, 105, 150)), cx);
+            state.set_selected_lines(
+                Some(DiffLineRange::new(0, DiffSide::Modified, 105, 150)),
+                cx,
+            );
             assert_eq!(state.selected_lines(), None);
-            let top = state.list.logical_scroll_top();
-            state.scroll_to_line(DiffLinePosition::new(DiffSide::Modified, 150), cx);
-            assert_eq!(state.list.logical_scroll_top().item_ix, top.item_ix);
+            let top = state.list().logical_scroll_top();
+            state.scroll_to_line(DiffLinePosition::new(0, DiffSide::Modified, 150), cx);
+            assert_eq!(state.list().logical_scroll_top().item_ix, top.item_ix);
             assert_eq!(
-                state.list.logical_scroll_top().offset_in_item,
+                state.list().logical_scroll_top().offset_in_item,
                 top.offset_in_item
             );
         });

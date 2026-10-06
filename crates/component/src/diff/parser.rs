@@ -1,10 +1,8 @@
-use std::{fmt, sync::Arc};
+use std::{fmt, ops::Range};
 
 use gpui::SharedString;
 
-use super::document::{
-    DiffDocument, DiffFile, DocumentInner, LinePair, prepare_highlighter, source_lines,
-};
+use super::document::{DiffDocument, FileSide, Hunk, LinePair};
 
 /// A malformed or unsupported unified diff, with its one-based patch line.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -20,10 +18,10 @@ impl DiffParseError {
     pub fn message(&self) -> &SharedString {
         &self.message
     }
-    fn new(line: usize, message: &str) -> Self {
+    fn new(line: usize, message: &'static str) -> Self {
         Self {
             line,
-            message: message.to_owned().into(),
+            message: SharedString::new_static(message),
         }
     }
 }
@@ -36,82 +34,88 @@ impl std::error::Error for DiffParseError {}
 
 type Result<T> = std::result::Result<T, DiffParseError>;
 
+/// Source prefixes Git writes on each side: the default `a/` and `b/`, the
+/// `diff.mnemonicPrefix` pairs, `--no-index` and `diff.noprefix`.
+const GIT_PREFIXES: [(&str, &str); 7] = [
+    ("a/", "b/"),
+    ("i/", "w/"),
+    ("c/", "w/"),
+    ("c/", "i/"),
+    ("o/", "w/"),
+    ("1/", "2/"),
+    ("", ""),
+];
+
+/// One file side while parsing: patch source is appended once, and lines are
+/// recorded as ranges until the file is complete.
 #[derive(Default)]
-struct File {
-    old_name: Option<String>,
-    new_name: Option<String>,
-    old: Vec<(usize, String)>,
-    new: Vec<(usize, String)>,
-    pairs: Vec<LinePair>,
-    boundaries: Vec<(usize, SharedString)>,
-    metadata: Vec<SharedString>,
-    binary: bool,
-    additions: usize,
-    deletions: usize,
-    headers: bool,
-    old_no_newline: bool,
-    new_no_newline: bool,
+struct SideBuilder {
+    source: String,
+    lines: Vec<(usize, Range<usize>)>,
+    no_newline: bool,
 }
-impl File {
-    fn finish(self) -> DiffDocument {
-        fn side(
-            name: Option<String>,
-            fragments: Vec<(usize, String)>,
-        ) -> (Option<DiffFile>, Vec<super::document::SourceLine>) {
-            let Some(name) = name else {
-                return (None, Vec::new());
-            };
-            let mut source = String::new();
-            let mut lines = Vec::with_capacity(fragments.len());
-            for (number, fragment) in fragments {
-                let offset = source.len();
-                // Even an empty unterminated line has a source position.
-                let mut line =
-                    source_lines(if fragment.is_empty() { "\n" } else { &fragment }).remove(0);
-                if fragment.is_empty() {
-                    line.source = 0..0;
-                    line.content_end = 0;
-                }
-                line.line_number = number;
-                line.source.start += offset;
-                line.source.end += offset;
-                line.content_end += offset;
-                lines.push(line);
-                source.push_str(&fragment);
-            }
-            (
-                Some(DiffFile::from_patch(name.into(), source.into())),
-                lines,
-            )
+
+impl SideBuilder {
+    fn push(&mut self, line_number: usize, content: &str) -> usize {
+        let start = self.source.len();
+        self.source.push_str(content);
+        self.source.push('\n');
+        self.lines.push((line_number, start..self.source.len()));
+        self.lines.len() - 1
+    }
+    fn remove_final_newline(&mut self) {
+        if let Some((_, range)) = self.lines.last_mut() {
+            self.source.pop();
+            range.end -= 1;
         }
-        let (original, mut original_lines) = side(self.old_name, self.old);
-        let (modified, mut modified_lines) = side(self.new_name, self.new);
-        for pair in &self.pairs {
-            if let (Some(old), Some(new)) = (pair.original, pair.modified) {
-                original_lines[old].counterpart = Some(new);
-                modified_lines[new].counterpart = Some(old);
-            }
-        }
-        let original_highlighter = prepare_highlighter(original.as_ref());
-        let modified_highlighter = prepare_highlighter(modified.as_ref());
-        DiffDocument(Arc::new(DocumentInner {
-            original,
-            modified,
-            original_lines,
-            modified_lines,
-            pairs: self.pairs,
-            hunk_boundaries: self.boundaries,
-            metadata: self.metadata,
-            binary: self.binary,
-            additions: self.additions,
-            deletions: self.deletions,
-            original_highlighter,
-            modified_highlighter,
-        }))
+        self.no_newline = true;
+    }
+    fn finish(self, path: Option<String>) -> FileSide {
+        FileSide::new(path.map(SharedString::from), self.source, self.lines)
     }
 }
 
-pub(crate) fn parse(patch: SharedString) -> Result<Vec<DiffDocument>> {
+#[derive(Default)]
+struct File {
+    old_path: Option<String>,
+    new_path: Option<String>,
+    /// Prefixes detected from `diff --git`, stripped from `---` and `+++` paths.
+    git_prefixes: Option<(&'static str, &'static str)>,
+    original: SideBuilder,
+    modified: SideBuilder,
+    pairs: Vec<LinePair>,
+    hunks: Vec<Hunk>,
+    metadata: Vec<SharedString>,
+    binary: bool,
+    headers: bool,
+}
+
+impl File {
+    fn finish(self) -> DiffDocument {
+        DiffDocument::new(
+            self.original.finish(self.old_path),
+            self.modified.finish(self.new_path),
+            self.pairs,
+            self.hunks,
+            self.metadata,
+            self.binary,
+        )
+    }
+
+    fn flush_changes(&mut self, deleted: &mut Vec<usize>, added: &mut Vec<usize>) {
+        for ix in 0..deleted.len().max(added.len()) {
+            self.pairs.push(LinePair::new(
+                deleted.get(ix).copied(),
+                added.get(ix).copied(),
+                true,
+            ));
+        }
+        deleted.clear();
+        added.clear();
+    }
+}
+
+pub(crate) fn parse(patch: &str) -> Result<Vec<DiffDocument>> {
     let raw: Vec<&str> = patch
         .split_inclusive('\n')
         .map(|line| line.strip_suffix('\n').unwrap_or(line))
@@ -150,13 +154,23 @@ pub(crate) fn parse(patch: SharedString) -> Result<Vec<DiffDocument>> {
             if let Some(file) = current.take() {
                 files.push(file.finish());
             }
-            let (old, new) = git_paths(paths)
+            let (old, new, prefixes) = git_paths(paths)
                 .ok_or_else(|| DiffParseError::new(ix + 1, "invalid Git file header"))?;
             current = Some(File {
-                old_name: Some(strip_prefix(old)),
-                new_name: Some(strip_prefix(new)),
+                old_path: Some(old),
+                new_path: Some(new),
+                git_prefixes: Some(prefixes),
                 ..File::default()
             });
+            ix += 1;
+            continue;
+        }
+        // `git format-patch` ends each message with a `-- ` signature line,
+        // followed by the Git version. Mail clients may strip its trailing space.
+        if line == "-- " || line == "--" {
+            if let Some(file) = current.take() {
+                files.push(file.finish());
+            }
             ix += 1;
             continue;
         }
@@ -165,15 +179,24 @@ pub(crate) fn parse(patch: SharedString) -> Result<Vec<DiffDocument>> {
                 files.push(current.take().unwrap().finish());
             }
             let file = current.get_or_insert_with(File::default);
-            file.old_name = header_path(path, ix + 1)?;
+            let old = header_path(path, ix + 1)?;
             ix += 1;
             let Some(path) = lines.get(ix).and_then(|line| line.strip_prefix("+++ ")) else {
                 return Err(DiffParseError::new(ix + 1, "expected modified file header"));
             };
-            file.new_name = header_path(path, ix + 1)?;
-            if file.old_name.is_none() && file.new_name.is_none() {
+            let new = header_path(path, ix + 1)?;
+            if old.is_none() && new.is_none() {
                 return Err(DiffParseError::new(ix + 1, "both file sides are missing"));
             }
+            let (old_prefix, new_prefix) = file.git_prefixes.unwrap_or_else(|| {
+                // Without a Git header, strip `a/` and `b/` only when the
+                // present sides agree on that convention.
+                let conventional = old.as_deref().is_none_or(|path| path.starts_with("a/"))
+                    && new.as_deref().is_none_or(|path| path.starts_with("b/"));
+                if conventional { ("a/", "b/") } else { ("", "") }
+            });
+            file.old_path = old.map(|path| strip_prefix(path, old_prefix));
+            file.new_path = new.map(|path| strip_prefix(path, new_prefix));
             file.headers = true;
             ix += 1;
             continue;
@@ -188,144 +211,7 @@ pub(crate) fn parse(patch: SharedString) -> Result<Vec<DiffDocument>> {
                     "hunk requires original and modified file headers",
                 ));
             }
-            let (old_start, old_count, new_start, new_count) = hunk_header(line, ix + 1)?;
-            if file
-                .old
-                .last()
-                .is_some_and(|(number, _)| *number >= old_start)
-                && old_count > 0
-                || file
-                    .new
-                    .last()
-                    .is_some_and(|(number, _)| *number >= new_start)
-                    && new_count > 0
-            {
-                return Err(DiffParseError::new(
-                    ix + 1,
-                    "overlapping or unordered hunks",
-                ));
-            }
-            if file.old_name.is_none() && old_count != 0
-                || file.new_name.is_none() && new_count != 0
-            {
-                return Err(DiffParseError::new(
-                    ix + 1,
-                    "missing file side has source lines",
-                ));
-            }
-            file.boundaries
-                .push((file.pairs.len(), line.to_owned().into()));
-            ix += 1;
-            let (mut old_used, mut new_used) = (0, 0);
-            let (mut deleted, mut added) = (Vec::new(), Vec::new());
-            let mut last = None;
-            while ix < lines.len() {
-                let content = lines[ix];
-                if content == "\\ No newline at end of file" {
-                    match last {
-                        Some(b'-') => {
-                            remove_newline(&mut file.old);
-                            file.old_no_newline = true;
-                        }
-                        Some(b'+') => {
-                            remove_newline(&mut file.new);
-                            file.new_no_newline = true;
-                        }
-                        Some(b' ') => {
-                            remove_newline(&mut file.old);
-                            file.old_no_newline = true;
-                            remove_newline(&mut file.new);
-                            file.new_no_newline = true;
-                        }
-                        _ => {
-                            return Err(DiffParseError::new(
-                                ix + 1,
-                                "newline marker has no preceding source line",
-                            ));
-                        }
-                    }
-                    last = None;
-                    ix += 1;
-                    continue;
-                }
-                if old_used == old_count && new_used == new_count {
-                    break;
-                }
-                let Some((&tag, _)) = content.as_bytes().split_first() else {
-                    return Err(DiffParseError::new(
-                        ix + 1,
-                        "hunk line requires a context, addition or deletion prefix",
-                    ));
-                };
-                if !matches!(tag, b' ' | b'+' | b'-') {
-                    return Err(DiffParseError::new(
-                        ix + 1,
-                        "hunk ended before its declared line counts",
-                    ));
-                }
-                if tag != b'+' && file.old_no_newline || tag != b'-' && file.new_no_newline {
-                    return Err(DiffParseError::new(
-                        ix + 1,
-                        "source continues after an unterminated final line",
-                    ));
-                }
-                let source = format!("{}\n", &content[1..]);
-                match tag {
-                    b' ' => {
-                        flush_changes(file, &mut deleted, &mut added);
-                        if old_used >= old_count || new_used >= new_count {
-                            return Err(DiffParseError::new(
-                                ix + 1,
-                                "hunk exceeds declared line counts",
-                            ));
-                        }
-                        let old = file.old.len();
-                        let new = file.new.len();
-                        file.old.push((old_start + old_used, source.clone()));
-                        file.new.push((new_start + new_used, source));
-                        file.pairs.push(LinePair {
-                            original: Some(old),
-                            modified: Some(new),
-                            changed: false,
-                        });
-                        old_used += 1;
-                        new_used += 1;
-                    }
-                    b'-' => {
-                        if old_used >= old_count {
-                            return Err(DiffParseError::new(
-                                ix + 1,
-                                "hunk exceeds original line count",
-                            ));
-                        }
-                        deleted.push(file.old.len());
-                        file.old.push((old_start + old_used, source));
-                        old_used += 1;
-                        file.deletions += 1;
-                    }
-                    _ => {
-                        if new_used >= new_count {
-                            return Err(DiffParseError::new(
-                                ix + 1,
-                                "hunk exceeds modified line count",
-                            ));
-                        }
-                        added.push(file.new.len());
-                        file.new.push((new_start + new_used, source));
-                        new_used += 1;
-                        file.additions += 1;
-                    }
-                }
-                last = Some(tag);
-                ix += 1;
-            }
-            if old_used != old_count || new_used != new_count {
-                return Err(DiffParseError::new(
-                    ix + 1,
-                    "hunk ended before its declared line counts",
-                ));
-            }
-            flush_changes(file, &mut deleted, &mut added);
+            ix = parse_hunk(file, &lines, ix)?;
             continue;
         }
         // Binary payload is opaque to the UI. Keep its marker, not thousands
@@ -334,14 +220,13 @@ pub(crate) fn parse(patch: SharedString) -> Result<Vec<DiffDocument>> {
             ix += 1;
             continue;
         }
-        if line.starts_with('+')
+        if (line.starts_with('+')
             || line.starts_with('-')
             || line.starts_with(' ')
-            || line.starts_with("\\ No newline")
+            || line.starts_with("\\ No newline"))
+            && current.as_ref().is_some_and(|file| file.headers)
         {
-            if current.as_ref().is_some_and(|file| file.headers) {
-                return Err(DiffParseError::new(ix + 1, "source line outside a hunk"));
-            }
+            return Err(DiffParseError::new(ix + 1, "source line outside a hunk"));
         }
         if let Some(file) = &mut current {
             if line.starts_with("Binary files ") || line == "GIT binary patch" {
@@ -351,19 +236,19 @@ pub(crate) fn parse(patch: SharedString) -> Result<Vec<DiffDocument>> {
                 .strip_prefix("rename from ")
                 .or_else(|| line.strip_prefix("copy from "))
             {
-                file.old_name = Some(decode_path(path, ix + 1)?);
+                file.old_path = Some(decode_path(path, ix + 1)?);
             }
             if let Some(path) = line
                 .strip_prefix("rename to ")
                 .or_else(|| line.strip_prefix("copy to "))
             {
-                file.new_name = Some(decode_path(path, ix + 1)?);
+                file.new_path = Some(decode_path(path, ix + 1)?);
             }
             if line.starts_with("new file mode ") {
-                file.old_name = None;
+                file.old_path = None;
             }
             if line.starts_with("deleted file mode ") {
-                file.new_name = None;
+                file.new_path = None;
             }
             if !line.is_empty() {
                 file.metadata.push(line.to_owned().into());
@@ -380,22 +265,130 @@ pub(crate) fn parse(patch: SharedString) -> Result<Vec<DiffDocument>> {
     Ok(files)
 }
 
-fn remove_newline(lines: &mut [(usize, String)]) {
-    if let Some((_, text)) = lines.last_mut() {
-        text.pop();
+/// Parses the hunk whose header is `lines[ix]` and returns the next line index.
+fn parse_hunk(file: &mut File, lines: &[&str], mut ix: usize) -> Result<usize> {
+    let header = lines[ix];
+    let (old_start, old_count, new_start, new_count) = hunk_header(header, ix + 1)?;
+    let last_line = |side: &SideBuilder| side.lines.last().map(|(number, _)| *number);
+    if last_line(&file.original).is_some_and(|number| number >= old_start) && old_count > 0
+        || last_line(&file.modified).is_some_and(|number| number >= new_start) && new_count > 0
+    {
+        return Err(DiffParseError::new(
+            ix + 1,
+            "overlapping or unordered hunks",
+        ));
     }
-}
-fn flush_changes(file: &mut File, deleted: &mut Vec<usize>, added: &mut Vec<usize>) {
-    for ix in 0..deleted.len().max(added.len()) {
-        file.pairs.push(LinePair {
-            original: deleted.get(ix).copied(),
-            modified: added.get(ix).copied(),
-            changed: true,
-        });
+    if file.old_path.is_none() && old_count != 0 || file.new_path.is_none() && new_count != 0 {
+        return Err(DiffParseError::new(
+            ix + 1,
+            "missing file side has source lines",
+        ));
     }
-    deleted.clear();
-    added.clear();
+    let pairs_start = file.pairs.len();
+    let original_start = file.original.lines.len();
+    let modified_start = file.modified.lines.len();
+    ix += 1;
+    let (mut old_used, mut new_used) = (0, 0);
+    let (mut deleted, mut added) = (Vec::new(), Vec::new());
+    let mut last = None;
+    while ix < lines.len() {
+        let content = lines[ix];
+        if content == "\\ No newline at end of file" {
+            match last {
+                Some(b'-') => file.original.remove_final_newline(),
+                Some(b'+') => file.modified.remove_final_newline(),
+                Some(b' ') => {
+                    file.original.remove_final_newline();
+                    file.modified.remove_final_newline();
+                }
+                _ => {
+                    return Err(DiffParseError::new(
+                        ix + 1,
+                        "newline marker has no preceding source line",
+                    ));
+                }
+            }
+            last = None;
+            ix += 1;
+            continue;
+        }
+        if old_used == old_count && new_used == new_count {
+            break;
+        }
+        // Editors and mail transports may strip the space from an empty
+        // context line; `git apply` accepts that, so accept it here too.
+        let (tag, text) = match content.as_bytes().first() {
+            None => (b' ', ""),
+            Some(&tag) => (tag, &content[1..]),
+        };
+        if !matches!(tag, b' ' | b'+' | b'-') {
+            return Err(DiffParseError::new(
+                ix + 1,
+                "hunk ended before its declared line counts",
+            ));
+        }
+        if tag != b'+' && file.original.no_newline || tag != b'-' && file.modified.no_newline {
+            return Err(DiffParseError::new(
+                ix + 1,
+                "source continues after an unterminated final line",
+            ));
+        }
+        match tag {
+            b' ' => {
+                file.flush_changes(&mut deleted, &mut added);
+                if old_used >= old_count || new_used >= new_count {
+                    return Err(DiffParseError::new(
+                        ix + 1,
+                        "hunk exceeds declared line counts",
+                    ));
+                }
+                let original = file.original.push(old_start + old_used, text);
+                let modified = file.modified.push(new_start + new_used, text);
+                file.pairs
+                    .push(LinePair::new(Some(original), Some(modified), false));
+                old_used += 1;
+                new_used += 1;
+            }
+            b'-' => {
+                if old_used >= old_count {
+                    return Err(DiffParseError::new(
+                        ix + 1,
+                        "hunk exceeds original line count",
+                    ));
+                }
+                deleted.push(file.original.push(old_start + old_used, text));
+                old_used += 1;
+            }
+            _ => {
+                if new_used >= new_count {
+                    return Err(DiffParseError::new(
+                        ix + 1,
+                        "hunk exceeds modified line count",
+                    ));
+                }
+                added.push(file.modified.push(new_start + new_used, text));
+                new_used += 1;
+            }
+        }
+        last = Some(tag);
+        ix += 1;
+    }
+    if old_used != old_count || new_used != new_count {
+        return Err(DiffParseError::new(
+            ix + 1,
+            "hunk ended before its declared line counts",
+        ));
+    }
+    file.flush_changes(&mut deleted, &mut added);
+    file.hunks.push(Hunk::new(
+        pairs_start..file.pairs.len(),
+        original_start..file.original.lines.len(),
+        modified_start..file.modified.lines.len(),
+        header.to_owned().into(),
+    ));
+    Ok(ix)
 }
+
 fn hunk_header(line: &str, number: usize) -> Result<(usize, usize, usize, usize)> {
     let invalid = || DiffParseError::new(number, "invalid hunk header");
     let body = line.strip_prefix("@@ ").ok_or_else(invalid)?;
@@ -425,34 +418,92 @@ fn hunk_header(line: &str, number: usize) -> Result<(usize, usize, usize, usize)
     let (new_start, new_count) = range(new).ok_or_else(invalid)?;
     Ok((old_start, old_count, new_start, new_count))
 }
-fn strip_prefix(path: String) -> String {
-    path.strip_prefix("a/")
-        .or_else(|| path.strip_prefix("b/"))
-        .unwrap_or(&path)
-        .to_owned()
+
+fn strip_prefix(path: String, prefix: &str) -> String {
+    match path.strip_prefix(prefix) {
+        Some(stripped) if !prefix.is_empty() => stripped.to_owned(),
+        _ => path,
+    }
 }
+
+/// Decodes a `---` or `+++` path, or `None` for `/dev/null`.
 fn header_path(value: &str, number: usize) -> Result<Option<String>> {
     let value = value.split('\t').next().unwrap_or(value);
     if value == "/dev/null" {
         Ok(None)
     } else {
-        Ok(Some(strip_prefix(decode_path(value, number)?)))
+        decode_path(value, number).map(Some)
     }
 }
-fn git_paths(value: &str) -> Option<(String, String)> {
-    if value.starts_with('"') {
-        let end = quoted_end(value)?;
-        let old = decode_path(&value[..end], 1).ok()?;
-        let new = decode_path(value[end..].trim_start(), 1).ok()?;
-        return Some((old, new));
-    }
-    // Git does not quote spaces; its b/ delimiter separates file sides.
-    let boundary = value.rfind(" b/").or_else(|| value.find(" \"b/"))?;
+
+/// Splits the paths of a `diff --git` header and detects their prefixes.
+fn git_paths(value: &str) -> Option<(String, String, (&'static str, &'static str))> {
+    let detect = |old: &str, new: &str| {
+        GIT_PREFIXES
+            .iter()
+            .copied()
+            .find(|(old_prefix, new_prefix)| {
+                old.starts_with(old_prefix) && new.starts_with(new_prefix)
+            })
+            .unwrap_or(("", ""))
+    };
+    let (old, new, prefixes) =
+        if value.starts_with('"') {
+            let end = quoted_end(value)?;
+            let old = decode_path(&value[..end], 1).ok()?;
+            let new = decode_path(value[end..].trim_start(), 1).ok()?;
+            let prefixes = detect(&old, &new);
+            (old, new, prefixes)
+        } else if value.ends_with('"') {
+            let start = value
+                .match_indices(" \"")
+                .map(|(ix, _)| ix + 1)
+                .find(|ix| quoted_end(&value[*ix..]) == Some(value.len() - ix))?;
+            let old = value[..start - 1].to_owned();
+            let new = decode_path(&value[start..], 1).ok()?;
+            let prefixes = detect(&old, &new);
+            (old, new, prefixes)
+        } else {
+            // Git does not quote spaces. Without a rename both sides name the
+            // same path, which identifies the separating space unambiguously.
+            let same =
+                GIT_PREFIXES.iter().find_map(|&(old_prefix, new_prefix)| {
+                    value.match_indices(' ').find_map(|(ix, _)| {
+                        let (old, new) = (&value[..ix], &value[ix + 1..]);
+                        let path = old.strip_prefix(old_prefix)?;
+                        (!path.is_empty() && new.strip_prefix(new_prefix) == Some(path))
+                            .then_some((old, new, (old_prefix, new_prefix)))
+                    })
+                });
+            // Otherwise this is a rename or copy, and `rename from`/`rename to`
+            // records supply the exact paths.
+            let (old, new, prefixes) = same
+                .or_else(|| {
+                    GIT_PREFIXES
+                        .iter()
+                        .filter(|(old_prefix, _)| !old_prefix.is_empty())
+                        .find_map(|&(old_prefix, new_prefix)| {
+                            let ix = value.rfind(&format!(" {new_prefix}"))?;
+                            value.starts_with(old_prefix).then_some((
+                                &value[..ix],
+                                &value[ix + 1..],
+                                (old_prefix, new_prefix),
+                            ))
+                        })
+                })
+                .or_else(|| {
+                    let (old, new) = value.split_once(' ')?;
+                    Some((old, new, ("", "")))
+                })?;
+            (old.to_owned(), new.to_owned(), prefixes)
+        };
     Some((
-        value[..boundary].to_owned(),
-        decode_path(&value[boundary + 1..], 1).ok()?,
+        strip_prefix(old, prefixes.0),
+        strip_prefix(new, prefixes.1),
+        prefixes,
     ))
 }
+
 fn quoted_end(value: &str) -> Option<usize> {
     let mut escaped = false;
     for (ix, character) in value.char_indices().skip(1) {
@@ -468,6 +519,7 @@ fn quoted_end(value: &str) -> Option<usize> {
     }
     None
 }
+
 fn decode_path(value: &str, number: usize) -> Result<String> {
     if !value.starts_with('"') {
         return Ok(value.to_owned());

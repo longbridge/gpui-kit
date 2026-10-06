@@ -24,7 +24,7 @@ enum DiffStoryAction {
 }
 
 const EXAMPLES: [&str; 9] = [
-    "Code review",
+    "Pull request",
     "Added file",
     "Deleted file",
     "Unicode",
@@ -40,7 +40,6 @@ pub struct DiffStory {
     example: usize,
     annotations: Vec<DiffLineAnnotation>,
     comment_resolved: bool,
-    layout_revision: u64,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -61,31 +60,29 @@ impl super::Story for DiffStory {
 impl DiffStory {
     pub fn view(_window: &mut Window, cx: &mut App) -> Entity<Self> {
         cx.new(|cx| {
-            let state = cx.new(|cx| DiffState::new(example_document(0), cx));
+            let state = cx.new(|cx| DiffState::new(example_documents(0), cx));
             let subscription = cx.observe(&state, |_, _, cx| cx.notify());
             Self {
                 state,
                 example: 0,
                 annotations: vec![DiffLineAnnotation::new(
                     "retry-delay-review",
-                    DiffLinePosition::new(DiffSide::Modified, 21),
+                    DiffLinePosition::new(0, DiffSide::Modified, 21),
                 )],
                 comment_resolved: false,
-                layout_revision: 0,
                 _subscriptions: vec![subscription],
             }
         })
     }
 
-    fn on_action(&mut self, action: &DiffStoryAction, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_action(&mut self, action: &DiffStoryAction, _: &mut Window, cx: &mut Context<Self>) {
         match *action {
             DiffStoryAction::Example(example) => {
                 self.example = example;
                 self.comment_resolved = false;
-                self.layout_revision += 1;
-                let document = example_document(example);
+                let documents = example_documents(example);
                 self.state
-                    .update(cx, |state, cx| state.set_document(document, window, cx));
+                    .update(cx, |state, cx| state.set_documents(documents, cx));
             }
             DiffStoryAction::Context(lines) => {
                 self.state
@@ -101,7 +98,12 @@ impl DiffStory {
         let example = self.example;
         let mode = self.state.read(cx).mode();
         let context = self.state.read(cx).context_lines();
-        let has_changes = self.state.read(cx).document().has_changes();
+        let has_changes = self
+            .state
+            .read(cx)
+            .documents()
+            .iter()
+            .any(|document| document.has_changes());
         h_flex()
             .w_full()
             .gap_2()
@@ -134,7 +136,7 @@ impl DiffStory {
                         Button::new("diff-previous")
                             .icon(IconName::ArrowUp)
                             .accessibility_label("Previous change")
-                            .tooltip("Previous change · Shift+F7")
+                            .tooltip("Previous change")
                             .disabled(!has_changes)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.state.update(cx, |state, cx| state.previous_change(cx));
@@ -144,7 +146,7 @@ impl DiffStory {
                         Button::new("diff-next")
                             .icon(IconName::ArrowDown)
                             .accessibility_label("Next change")
-                            .tooltip("Next change · F7")
+                            .tooltip("Next change")
                             .disabled(!has_changes)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.state.update(cx, |state, cx| state.next_change(cx));
@@ -200,14 +202,9 @@ impl Render for DiffStory {
                 .child(div().font_medium().child(EXAMPLES[self.example]))
                 .child(
                 Diff::new(&self.state).w_full().h(rems(32.))
-                .with_layout_revision(self.layout_revision)
                 .when(self.example == 0, |diff| {
-                    diff.with_annotations(self.annotations.clone())
-                        .render_header_metadata(|_, _, cx| {
-                            div().text_xs().text_color(cx.theme().muted_foreground)
-                                .child("main → retry-backoff")
-                        })
-                        .render_annotation(move |annotation, _, cx| {
+                    diff.annotations(self.annotations.clone())
+                        .annotation(move |annotation, _, cx| {
                             let story = story.clone();
                             v_flex().w_full().gap_2()
                                 .child(h_flex().w_full().justify_between().gap_2()
@@ -221,7 +218,6 @@ impl Render for DiffStory {
                                         .on_click(move |_, _, cx| {
                                             let _ = story.update(cx, |this, cx| {
                                                 this.comment_resolved = !this.comment_resolved;
-                                                this.layout_revision += 1;
                                                 cx.notify();
                                             });
                                         })))
@@ -232,7 +228,7 @@ impl Render for DiffStory {
     }
 }
 
-fn example_document(example: usize) -> DiffDocument {
+fn example_documents(example: usize) -> Vec<DiffDocument> {
     let patch = match example {
         1 => ADDED_PATCH.to_owned(),
         2 => DELETED_PATCH.to_owned(),
@@ -266,13 +262,10 @@ fn example_document(example: usize) -> DiffDocument {
         6 => RENAMED_PATCH.to_owned(),
         7 => NO_NEWLINE_PATCH.to_owned(),
         8 => MODE_PATCH.to_owned(),
-        _ => REVIEW_PATCH.to_owned(),
+        // A pull request touches several files; they share one scrolling list.
+        _ => [REVIEW_PATCH, ADDED_PATCH, DELETED_PATCH, MODE_PATCH].concat(),
     };
-    DiffDocument::parse(patch)
-        .expect("Story patch is valid")
-        .into_iter()
-        .next()
-        .expect("Story patch contains a file")
+    DiffDocument::parse(&patch).expect("Story patch is valid")
 }
 
 const ADDED_PATCH: &str = r#"diff --git a/src/retry.rs b/src/retry.rs
