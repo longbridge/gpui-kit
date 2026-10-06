@@ -273,11 +273,11 @@ pub(crate) trait ManagedTooltipExt:
                                 build(window, cx)
                             });
                             let request = match preferred_placement {
-                                Some(placement) => request.placement(placement),
+                                Some(placement) => request.with_placement(placement),
                                 None => request,
                             };
                             let request = match show_delay {
-                                Some(delay) => request.show_delay(delay),
+                                Some(delay) => request.with_show_delay(delay),
                                 None => request,
                             };
                             o.request_show(request, window, cx);

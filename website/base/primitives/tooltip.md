@@ -34,7 +34,7 @@ The authoritative module is [`components/tooltip.rs`](https://github.com/longbri
 
 Hover or focus schedules it and exit or blur dismisses it; content is descriptive.
 
-`TooltipOverlay` waits 500 ms before showing and keeps a closing tooltip for a 300 ms grace period, during which another trigger switches to its tooltip immediately. Install `TooltipDefaults` to change both for the application, and call `TooltipRequest::show_delay` to override the show delay for one request.
+`TooltipOverlay` waits 500 ms before showing and keeps a closing tooltip for a 300 ms grace period, during which another trigger switches to its tooltip immediately. Install `TooltipDefaults` to change both for the application, and call `TooltipRequest::with_show_delay` to override the show delay for one request.
 
 Keep controlled state on the parent render type or in a GPUI entity. Update it in callbacks and call `cx.notify()`; do not recreate persistent entities during every render.
 

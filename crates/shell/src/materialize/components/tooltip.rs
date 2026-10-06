@@ -37,11 +37,12 @@
 //!
 //! # Placement
 //!
-//! `TooltipRequest` offers `placement` and nothing else: `TooltipPositioner`
-//! nails the window margin to 4px and never reaches the shared positioner's
-//! `align` or `offset`. Nothing here invents the two base does not have, and
-//! the first bound form does not expose the one it does — a script that needs
-//! to choose a side is the case for adding it, not a reason to guess now.
+//! For position, `TooltipRequest` offers `with_placement` and nothing else:
+//! `TooltipPositioner` nails the window margin to 4px and never reaches the
+//! shared positioner's `align` or `offset`. Nothing here invents the two base
+//! does not have, and the first bound form does not expose the one it does — a
+//! script that needs to choose a side is the case for adding it, not a reason
+//! to guess now.
 
 use std::{cell::Cell, rc::Rc};
 

@@ -86,10 +86,12 @@ impl TooltipDefaults {
         self
     }
 
+    /// How long the pointer must rest on a trigger before its tooltip shows.
     pub fn show_delay(&self) -> Duration {
         self.show_delay
     }
 
+    /// How long a tooltip stays after the pointer leaves its trigger.
     pub fn grace_period(&self) -> Duration {
         self.grace_period
     }
@@ -133,13 +135,19 @@ impl TooltipRequest {
         }
     }
 
-    pub fn placement(mut self, placement: Placement) -> Self {
+    /// Prefers a side for the tooltip, falling back when it does not fit.
+    pub fn with_placement(mut self, placement: Placement) -> Self {
         self.preferred_placement = Some(placement);
         self
     }
 
+    #[deprecated(note = "use `with_placement`")]
+    pub fn placement(self, placement: Placement) -> Self {
+        self.with_placement(placement)
+    }
+
     /// Overrides [`TooltipDefaults::show_delay`] for this trigger.
-    pub fn show_delay(mut self, delay: Duration) -> Self {
+    pub fn with_show_delay(mut self, delay: Duration) -> Self {
         self.show_delay = Some(delay);
         self
     }
@@ -414,7 +422,7 @@ mod tests {
         cx.update(|_, cx| state.update(cx, |tooltip, cx| tooltip.hide(cx)));
         cx.update(|window, cx| {
             state.update(cx, |tooltip, cx| {
-                tooltip.request_show(request().show_delay(Duration::ZERO), window, cx);
+                tooltip.request_show(request().with_show_delay(Duration::ZERO), window, cx);
                 assert!(tooltip.content.is_some());
                 assert!(tooltip.show_task.is_none());
             });

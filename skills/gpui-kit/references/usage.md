@@ -280,6 +280,11 @@ div()
 
 // Or on a Button directly:
 Button::new("btn").icon(IconName::Trash).tooltip("Delete")
+
+// Component tooltips open after 500 ms; override per trigger,
+// or install `tooltip::TooltipDefaults` to change it app-wide:
+Button::new("help").icon(IconName::Info).tooltip("Help")
+    .tooltip_show_delay(Duration::ZERO)
 ```
 
 ### Form

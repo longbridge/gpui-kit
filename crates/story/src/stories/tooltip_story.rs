@@ -114,7 +114,7 @@ impl Render for TooltipStory {
                     .child(
                         Button::new("delay-default")
                             .label("Default")
-                            .tooltip("Shows after the application default, 500 ms."),
+                            .tooltip("Shows after the application default delay."),
                     )
                     .child(
                         Button::new("delay-slow")
