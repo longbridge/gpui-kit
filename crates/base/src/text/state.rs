@@ -2304,10 +2304,10 @@ mod tests {
         cx.run_until_parked();
 
         state.read_with(cx, |state, _| {
-            let node::BlockNode::Custom(block) = &state.parsed_content.document.blocks[0] else {
+            let node::BlockNode::Custom { node, .. } = &state.parsed_content.document.blocks[0]
+            else {
                 panic!("expected custom markdown node");
             };
-            let node = &block.node;
             assert_eq!(node.name(), "ticker");
             assert_eq!(node.data::<String>().map(String::as_str), Some("TSLA.US"));
         });
