@@ -67,7 +67,7 @@ git -C "$repo_root" worktree add --detach "$work_dir/main" origin/main >/dev/nul
 # the temporary website copies have no workspace manifest next to them.
 gpui_pre_version() {
   git -C "$repo_root" show "$1:Cargo.toml" 2>/dev/null \
-    | sed -nE 's/^gpui[[:space:]]*=.*package[[:space:]]*=[[:space:]]*"gpui-pre".*version[[:space:]]*=[[:space:]]*"=?([^"]+)".*/\1/p' \
+    | sed -nE 's/^[A-Za-z0-9_-]+[[:space:]]*=.*package[[:space:]]*=[[:space:]]*"gpui-pre".*version[[:space:]]*=[[:space:]]*"=?([^"]+)".*/\1/p' \
     | head -n 1
 }
 
