@@ -207,7 +207,7 @@ fetch the component's `.md` doc.
 | Component         | Import                                          | Notes                         |
 | ----------------- | ----------------------------------------------- | ----------------------------- |
 | `DataTable`       | `table::{DataTable, TableState, TableDelegate}` | Stateful. Full-featured table |
-| `Diff`            | `diff::{Diff, DiffState, DiffFile}`           | Retained state, `RenderOnce` element. Readonly unified/Git diff display of one or more files; application supplies the patch |
+| `Diff`            | `diff::{Diff, DiffState, DiffFile}`           | Retained state, `RenderOnce` element. Readonly unified/Git diff display of one or more files, merge conflicts and source files; application supplies the patch |
 | `Table`           | `table::{Table, ...}`                           | Simpler table                 |
 | `VirtualList`     | `{v_virtual_list, h_virtual_list}`              | High-perf large lists         |
 | `List`            | `list::{List, ListState, ListDelegate}`         | Stateful. Searchable list     |

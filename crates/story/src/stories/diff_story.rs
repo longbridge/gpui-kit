@@ -1,12 +1,16 @@
 use gpui_kit::component::{
     ActiveTheme, Disableable, IconName, Selectable, Sizable, StyledExt as _,
     button::{Button, ButtonVariants},
-    diff::{Diff, DiffAnnotation, DiffFile, DiffLinePosition, DiffMode, DiffSide, DiffState},
+    diff::{
+        Diff, DiffAnnotation, DiffChangeIndicator, DiffFile, DiffHoverHighlight, DiffHunkSeparator,
+        DiffInlineUnit, DiffLinePosition, DiffLineRange, DiffMode, DiffSide, DiffState,
+    },
     h_flex, v_flex,
 };
 use gpui_kit::{
-    Action, App, AppContext as _, Context, Entity, InteractiveElement, IntoElement, ParentElement,
-    Render, Styled, Subscription, Window, div, prelude::FluentBuilder as _, rems,
+    Action, App, AppContext as _, Context, ElementId, Entity, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, rems,
 };
 use serde::Deserialize;
 
@@ -19,9 +23,15 @@ enum DiffStoryAction {
     Context(Option<usize>),
     Expand,
     Collapse,
+    Inline(usize),
+    Separator(usize),
+    Indicator(usize),
+    Background,
+    Hover,
+    Wrap,
 }
 
-const EXAMPLES: [&str; 9] = [
+const EXAMPLES: [&str; 11] = [
     "Pull request",
     "Added file",
     "Deleted file",
@@ -31,14 +41,45 @@ const EXAMPLES: [&str; 9] = [
     "Renamed file",
     "Missing final newline",
     "File mode",
+    "Merge conflict",
+    "Source file",
 ];
+
+const INLINE: [(&str, Option<DiffInlineUnit>); 3] = [
+    ("Words", Some(DiffInlineUnit::Word)),
+    ("Characters", Some(DiffInlineUnit::Character)),
+    ("Whole lines", None),
+];
+const SEPARATORS: [(&str, DiffHunkSeparator); 3] = [
+    ("Hunk header", DiffHunkSeparator::Metadata),
+    ("Hidden line count", DiffHunkSeparator::LineInfo),
+    ("Divider", DiffHunkSeparator::Simple),
+];
+const INDICATORS: [(&str, DiffChangeIndicator); 3] = [
+    ("Signs", DiffChangeIndicator::Signs),
+    ("Bars", DiffChangeIndicator::Bars),
+    ("None", DiffChangeIndicator::None),
+];
+
+/// An application-owned review comment anchored to the end of its lines.
+struct Comment {
+    id: ElementId,
+    range: DiffLineRange,
+    body: SharedString,
+    resolved: bool,
+}
 
 pub struct DiffStory {
     state: Entity<DiffState>,
     example: usize,
-    annotations: Vec<DiffAnnotation>,
-    comment_resolved: bool,
-    _subscriptions: Vec<Subscription>,
+    comments: Vec<Comment>,
+    inline: usize,
+    separator: usize,
+    indicator: usize,
+    background: bool,
+    hover: bool,
+    wrap: bool,
+    _subscription: Subscription,
 }
 
 impl super::Story for DiffStory {
@@ -47,7 +88,7 @@ impl super::Story for DiffStory {
     }
 
     fn description() -> &'static str {
-        "Readonly unified and Git patches with split layouts, source line numbers and review comments."
+        "Readonly unified and Git patches, merge conflicts and source files, with review comments."
     }
 
     fn new_view(window: &mut Window, cx: &mut App) -> Entity<impl Render> {
@@ -58,29 +99,47 @@ impl super::Story for DiffStory {
 impl DiffStory {
     pub fn view(_window: &mut Window, cx: &mut App) -> Entity<Self> {
         cx.new(|cx| {
-            let state = cx.new(|cx| DiffState::new(example_documents(0), cx));
-            let subscription = cx.observe(&state, |_, _, cx| cx.notify());
+            let state = cx.new(|cx| DiffState::new(example_files(0), cx));
             Self {
+                _subscription: cx.observe(&state, |_, _, cx| cx.notify()),
                 state,
                 example: 0,
-                annotations: vec![DiffAnnotation::line(
-                    "retry-delay-review",
-                    DiffLinePosition::new("src/retry.rs", DiffSide::Modified, 21),
-                )],
-                comment_resolved: false,
-                _subscriptions: vec![subscription],
+                comments: vec![Comment {
+                    id: ElementId::from("retry-delay-review"),
+                    range: DiffLineRange::new("src/retry.rs", DiffSide::Modified, 21, 21),
+                    body: "Should callers be able to configure the 6.4-second delay cap?".into(),
+                    resolved: false,
+                }],
+                inline: 0,
+                separator: 0,
+                indicator: 0,
+                background: true,
+                hover: false,
+                wrap: false,
             }
         })
+    }
+
+    /// Rebuilds the state when an option prepared with it changes.
+    fn rebuild_state(&mut self, cx: &mut Context<Self>) {
+        let mode = self.state.read(cx).mode();
+        let inline = INLINE[self.inline].1;
+        let files = example_files(self.example);
+        self.state = cx.new(|cx| {
+            DiffState::new(files, cx)
+                .with_mode(mode)
+                .with_inline_unit(inline)
+        });
+        self._subscription = cx.observe(&self.state, |_, _, cx| cx.notify());
     }
 
     fn on_action(&mut self, action: &DiffStoryAction, _: &mut Window, cx: &mut Context<Self>) {
         match *action {
             DiffStoryAction::Example(example) => {
                 self.example = example;
-                self.comment_resolved = false;
-                let documents = example_documents(example);
+                let files = example_files(example);
                 self.state
-                    .update(cx, |state, cx| state.set_files(documents, cx));
+                    .update(cx, |state, cx| state.set_files(files, cx));
             }
             DiffStoryAction::Context(lines) => {
                 self.state
@@ -92,7 +151,38 @@ impl DiffStory {
             DiffStoryAction::Collapse => self
                 .state
                 .update(cx, |state, cx| state.collapse_unchanged(cx)),
+            DiffStoryAction::Inline(inline) => {
+                self.inline = inline;
+                self.rebuild_state(cx);
+            }
+            DiffStoryAction::Separator(separator) => self.separator = separator,
+            DiffStoryAction::Indicator(indicator) => self.indicator = indicator,
+            DiffStoryAction::Background => self.background = !self.background,
+            DiffStoryAction::Hover => self.hover = !self.hover,
+            DiffStoryAction::Wrap => self.wrap = !self.wrap,
         }
+        cx.notify();
+    }
+
+    fn add_comment(&mut self, range: &DiffLineRange, cx: &mut Context<Self>) {
+        let (start, end) = (
+            range.start().min(range.end()),
+            range.start().max(range.end()),
+        );
+        let lines = if start == end {
+            format!("line {end}")
+        } else {
+            format!("lines {start}–{end}")
+        };
+        self.comments.push(Comment {
+            id: ElementId::from(SharedString::from(format!(
+                "comment-{}",
+                self.comments.len()
+            ))),
+            range: range.clone(),
+            body: format!("New comment on {lines}.").into(),
+            resolved: false,
+        });
         cx.notify();
     }
 
@@ -100,12 +190,14 @@ impl DiffStory {
         let example = self.example;
         let mode = self.state.read(cx).mode();
         let context = self.state.read(cx).context_lines();
+        let (inline, separator, indicator) = (self.inline, self.separator, self.indicator);
+        let (background, hover, wrap) = (self.background, self.hover, self.wrap);
         let has_changes = self
             .state
             .read(cx)
             .files()
             .iter()
-            .any(|document| document.has_changes());
+            .any(|file| file.has_changes());
         h_flex()
             .w_full()
             .gap_2()
@@ -186,6 +278,58 @@ impl DiffStory {
                         .menu("Expand all", Box::new(DiffStoryAction::Expand))
                         .menu("Collapse all", Box::new(DiffStoryAction::Collapse))
                     })
+                    .submenu("Inline changes", window, cx, move |menu, _, _| {
+                        INLINE
+                            .into_iter()
+                            .enumerate()
+                            .fold(menu, |menu, (ix, (label, _))| {
+                                menu.menu_with_check(
+                                    label,
+                                    inline == ix,
+                                    Box::new(DiffStoryAction::Inline(ix)),
+                                )
+                            })
+                    })
+                    .submenu("Hunk separator", window, cx, move |menu, _, _| {
+                        SEPARATORS
+                            .into_iter()
+                            .enumerate()
+                            .fold(menu, |menu, (ix, (label, _))| {
+                                menu.menu_with_check(
+                                    label,
+                                    separator == ix,
+                                    Box::new(DiffStoryAction::Separator(ix)),
+                                )
+                            })
+                    })
+                    .submenu("Change indicator", window, cx, move |menu, _, _| {
+                        INDICATORS
+                            .into_iter()
+                            .enumerate()
+                            .fold(menu, |menu, (ix, (label, _))| {
+                                menu.menu_with_check(
+                                    label,
+                                    indicator == ix,
+                                    Box::new(DiffStoryAction::Indicator(ix)),
+                                )
+                            })
+                    })
+                    .separator()
+                    .menu_with_check(
+                        "Tint changed lines",
+                        background,
+                        Box::new(DiffStoryAction::Background),
+                    )
+                    .menu_with_check(
+                        "Highlight hovered line",
+                        hover,
+                        Box::new(DiffStoryAction::Hover),
+                    )
+                    .menu_with_check(
+                        "Wrap long lines",
+                        wrap,
+                        Box::new(DiffStoryAction::Wrap),
+                    )
                 },
             ))
     }
@@ -193,44 +337,141 @@ impl DiffStory {
 
 impl Render for DiffStory {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let annotations = self
+            .comments
+            .iter()
+            .map(|comment| {
+                DiffAnnotation::line(
+                    comment.id.clone(),
+                    DiffLinePosition::new(
+                        comment.range.path().clone(),
+                        comment.range.end_side(),
+                        comment.range.end(),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        // The renderer receives `App`, so it reads a snapshot of the comments.
+        let comments = std::rc::Rc::new(
+            self.comments
+                .iter()
+                .map(|comment| (comment.id.clone(), comment.body.clone(), comment.resolved))
+                .collect::<Vec<_>>(),
+        );
         let story = cx.entity().downgrade();
-        let resolved = self.comment_resolved;
+        let add_story = story.clone();
         v_flex()
             .w_full()
             .gap_3()
             .on_action(cx.listener(Self::on_action))
             .child(self.render_toolbar(cx))
-            .child(v_flex().w_full().gap_2()
-                .child(div().font_medium().child(EXAMPLES[self.example]))
-                .child(
-                Diff::new(&self.state).w_full().h(rems(32.))
-                .when(self.example == 0, |diff| {
-                    diff.annotations(self.annotations.clone())
-                        .annotation_content(move |annotation, _, cx| {
-                            let story = story.clone();
-                            v_flex().w_full().gap_2()
-                                .child(h_flex().w_full().justify_between().gap_2()
-                                    .child(h_flex().gap_2()
-                                        .child(div().text_sm().font_medium().child("Alex"))
-                                        .child(div().text_xs().text_color(cx.theme().muted_foreground)
-                                            .child(if resolved { "Resolved" } else { "Review comment" })))
-                                    .child(Button::new(annotation.id().clone())
-                                        .w_auto().ghost().xsmall()
-                                        .label(if resolved { "Reopen" } else { "Resolve" })
-                                        .on_click(move |_, _, cx| {
-                                            let _ = story.update(cx, |this, cx| {
-                                                this.comment_resolved = !this.comment_resolved;
-                                                cx.notify();
+            .child(
+                v_flex()
+                    .w_full()
+                    .gap_2()
+                    .child(div().font_medium().child(EXAMPLES[self.example]))
+                    .child(
+                        Diff::new(&self.state)
+                            .w_full()
+                            .h(rems(32.))
+                            .hunk_separator(SEPARATORS[self.separator].1)
+                            .change_indicator(INDICATORS[self.indicator].1)
+                            .change_background(self.background)
+                            .hover_highlight(if self.hover {
+                                DiffHoverHighlight::Both
+                            } else {
+                                DiffHoverHighlight::None
+                            })
+                            .soft_wrap(self.wrap)
+                            .when(self.example == 0, |diff| {
+                                diff.annotations(annotations)
+                                    .annotation_content(move |annotation, _, cx| {
+                                        let (id, body, resolved) = comments
+                                            .iter()
+                                            .find(|(id, ..)| id == annotation.id())
+                                            .cloned()
+                                            .unwrap_or_else(|| {
+                                                (
+                                                    annotation.id().clone(),
+                                                    SharedString::default(),
+                                                    false,
+                                                )
                                             });
-                                        })))
-                                .when(!resolved, |this| this.child(div().text_sm()
-                                    .child("Should callers be able to configure the 6.4-second delay cap?")))
-                        })
-                })))
+                                        let story = story.clone();
+                                        v_flex()
+                                            .w_full()
+                                            .gap_2()
+                                            .child(
+                                                h_flex()
+                                                    .w_full()
+                                                    .justify_between()
+                                                    .gap_2()
+                                                    .child(
+                                                        h_flex()
+                                                            .gap_2()
+                                                            .child(
+                                                                div()
+                                                                    .text_sm()
+                                                                    .font_medium()
+                                                                    .child("Alex"),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .text_xs()
+                                                                    .text_color(
+                                                                        cx.theme().muted_foreground,
+                                                                    )
+                                                                    .child(if resolved {
+                                                                        "Resolved"
+                                                                    } else {
+                                                                        "Review comment"
+                                                                    }),
+                                                            ),
+                                                    )
+                                                    .child(
+                                                        Button::new(id.clone())
+                                                            .w_auto()
+                                                            .ghost()
+                                                            .xsmall()
+                                                            .label(if resolved {
+                                                                "Reopen"
+                                                            } else {
+                                                                "Resolve"
+                                                            })
+                                                            .on_click(move |_, _, cx| {
+                                                                let id = id.clone();
+                                                                let _ =
+                                                                    story.update(cx, |this, cx| {
+                                                                        if let Some(comment) = this
+                                                                            .comments
+                                                                            .iter_mut()
+                                                                            .find(|comment| {
+                                                                                comment.id == id
+                                                                            })
+                                                                        {
+                                                                            comment.resolved =
+                                                                                !comment.resolved;
+                                                                        }
+                                                                        cx.notify();
+                                                                    });
+                                                            }),
+                                                    ),
+                                            )
+                                            .when(!resolved, |this| {
+                                                this.child(div().text_sm().child(body))
+                                            })
+                                    })
+                                    .on_add_annotation(move |range, _, cx| {
+                                        let _ = add_story
+                                            .update(cx, |this, cx| this.add_comment(range, cx));
+                                    })
+                            }),
+                    ),
+            )
     }
 }
 
-fn example_documents(example: usize) -> Vec<DiffFile> {
+fn example_files(example: usize) -> Vec<DiffFile> {
     let patch = match example {
         1 => ADDED_PATCH.to_owned(),
         2 => DELETED_PATCH.to_owned(),
@@ -264,12 +505,21 @@ fn example_documents(example: usize) -> Vec<DiffFile> {
         6 => RENAMED_PATCH.to_owned(),
         7 => NO_NEWLINE_PATCH.to_owned(),
         8 => MODE_PATCH.to_owned(),
+        9 => {
+            return vec![
+                DiffFile::parse_conflicts("src/retry.rs", MERGE_CONFLICT)
+                    .expect("Story conflict is valid"),
+            ];
+        }
+        10 => return vec![DiffFile::unchanged("src/retry.rs", SOURCE_FILE)],
         // A pull request touches several files; they share one scrolling list.
         _ => [REVIEW_PATCH, ADDED_PATCH, DELETED_PATCH, MODE_PATCH].concat(),
     };
     DiffFile::parse(&patch).expect("Story patch is valid")
 }
 
+const MERGE_CONFLICT: &str = "impl Default for RetryPolicy {\n    fn default() -> Self {\n        Self {\n<<<<<<< HEAD\n            max_attempts: 5,\n            base_delay: Duration::from_millis(100),\n=======\n            max_attempts: 3,\n            base_delay: Duration::from_millis(250),\n>>>>>>> retry-backoff\n        }\n    }\n}\n";
+const SOURCE_FILE: &str = "use std::time::Duration;\n\n/// How often a failed request is retried.\npub struct RetryPolicy {\n    pub max_attempts: u32,\n    pub base_delay: Duration,\n}\n\nimpl RetryPolicy {\n    /// Returns the delay before the next attempt.\n    pub fn delay(&self, attempt: u32) -> Duration {\n        self.base_delay * 2_u32.pow(attempt.min(6))\n    }\n}\n";
 const ADDED_PATCH: &str = r#"diff --git a/src/retry.rs b/src/retry.rs
 new file mode 100644
 --- /dev/null
