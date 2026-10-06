@@ -52,6 +52,16 @@ export const stories = [
     api: "Dock",
   }),
   pendingStory({
+    id: "diff",
+    title: "Diff",
+    group: "Layout & advanced",
+    rustStory: "DiffStory",
+    description: "Readonly patch viewer.",
+    states: ["unified", "split", "multiple files"],
+    availability: "pending",
+    api: "Diff",
+  }),
+  pendingStory({
     id: "editor",
     title: "Editor",
     group: "Layout & advanced",

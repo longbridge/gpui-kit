@@ -52,6 +52,7 @@ const RUST_STORY_ORDER = [
   "DatePickerStory",
   "DescriptionListStory",
   "DialogStory",
+  "DiffStory",
   "DockStory",
   "DropdownButtonStory",
   "EditorStory",

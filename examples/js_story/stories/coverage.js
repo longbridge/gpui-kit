@@ -24,6 +24,7 @@ export const coveredBy = [
   { route: "date-picker", registrations: ["DatePicker"] },
   { route: "description-list", registrations: ["DescriptionList"] },
   { route: "dialog", registrations: ["Dialog"] },
+  { route: "diff", registrations: ["Diff"] },
   { route: "dock", registrations: [] },
   { route: "dropdown-button", registrations: ["DropdownButton"] },
   { route: "editor", registrations: ["Editor", "Text"] },
