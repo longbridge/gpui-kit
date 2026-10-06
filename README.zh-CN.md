@@ -105,6 +105,21 @@ gpui-kit = "0.7"
 
 `gpui-kit` 始终引入 GPUI 和 `gpui-base`；`gpui-component` 和默认图标集默认开启。只想保留部分层时关闭默认 feature 按需选择即可。`gpui-component` 的 feature（`inspector`、`decimal`、`tree-sitter` 及各 `tree-sitter-<language>`）在 `gpui-kit` 上同名可用。
 
+### GPUI Fast
+
+启用可选的 `gpui-fast` feature，可以为核心、原生平台、WebAssembly 和所有已启用的
+Kit 层统一选择 [GPUI Fast](https://github.com/longbridge/gpui-fast)：
+
+```toml
+[dependencies]
+gpui-kit = { version = "0.7", features = ["gpui-fast"] }
+```
+
+原有导入、初始化流程和测试宏保持不变，应用无需 `[patch]` 或 crate 别名。
+默认后端仍是固定版本的上游 GPUI 快照。Cargo features 是累加的，因此选择 Fast 后，
+上游包仍会参与编译。feature 组合和对比命令见
+[Getting Started](https://gpui-kit.com/zh-CN/docs/getting-started)。
+
 ### 基础示例
 
 ```rs
