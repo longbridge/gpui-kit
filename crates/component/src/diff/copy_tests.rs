@@ -1,8 +1,8 @@
-use super::{DiffDocument, DiffLineRange, DiffSide, document::fixture};
+use super::{DiffFile, DiffLineRange, DiffSide, document::fixture};
 
 /// Copies a normalized range, as gutter and keyboard selection do.
-fn copy(document: &DiffDocument, side: DiffSide, start: usize, end: usize) -> String {
-    let range = DiffLineRange::new(0, side, start, end);
+fn copy(document: &DiffFile, side: DiffSide, start: usize, end: usize) -> String {
+    let range = DiffLineRange::new("", side, start, end);
     document.text_for_lines(side, range.start(), range.end())
 }
 

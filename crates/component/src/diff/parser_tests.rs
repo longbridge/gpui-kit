@@ -1,9 +1,9 @@
-use super::{DiffDocument, DiffSide};
+use super::{DiffFile, DiffSide};
 
 #[test]
 fn sparse_hunks_preserve_source_numbers_and_available_copy() {
     let patch = "--- a/src/a.rs\n+++ b/src/a.rs\n@@ -10,2 +20,2 @@ fn first\n keep\n-old\n+new\n@@ -100 +110 @@\n-last\n+next\n";
-    let files = DiffDocument::parse(patch).unwrap();
+    let files = DiffFile::parse(patch).unwrap();
     let doc = &files[0];
     assert_eq!((doc.additions(), doc.deletions()), (2, 2));
     assert_eq!(doc.lines_count(DiffSide::Original), 3);
@@ -22,7 +22,7 @@ fn sparse_hunks_preserve_source_numbers_and_available_copy() {
 #[test]
 fn multi_file_missing_sides_metadata_and_binary() {
     let patch = "diff --git a/new b/new\nnew file mode 100644\n--- /dev/null\n+++ b/new\n@@ -0,0 +1 @@\n+added\ndiff --git a/old b/old\ndeleted file mode 100644\n--- a/old\n+++ /dev/null\n@@ -1 +0,0 @@\n-deleted\ndiff --git a/from b/to\nsimilarity index 100%\nrename from from\nrename to to\ndiff --git a/pic b/pic\nBinary files a/pic and b/pic differ\n";
-    let files = DiffDocument::parse(patch).unwrap();
+    let files = DiffFile::parse(patch).unwrap();
     assert_eq!(files.len(), 4);
     assert!(files[0].original_path().is_none());
     assert_eq!(files[0].path().as_str(), "new");
@@ -37,19 +37,18 @@ fn multi_file_missing_sides_metadata_and_binary() {
 
 #[test]
 fn newline_markers_and_transport_are_distinct() {
-    let files = DiffDocument::parse("--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n").unwrap();
+    let files = DiffFile::parse("--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n").unwrap();
     assert_eq!(files[0].source(DiffSide::Original), "old");
     assert_eq!(files[0].source(DiffSide::Modified), "new");
-    let files = DiffDocument::parse("--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\r\n+new\r\n").unwrap();
+    let files = DiffFile::parse("--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\r\n+new\r\n").unwrap();
     assert_eq!(files[0].source(DiffSide::Original), "old\r\n");
-    let files =
-        DiffDocument::parse("--- a/a\r\n+++ b/a\r\n@@ -1 +1 @@\r\n-old\r\n+new\r\n").unwrap();
+    let files = DiffFile::parse("--- a/a\r\n+++ b/a\r\n@@ -1 +1 @@\r\n-old\r\n+new\r\n").unwrap();
     assert_eq!(files[0].source(DiffSide::Original), "old\n");
 }
 
 #[test]
 fn quoted_git_paths_and_context_prefixes() {
-    let files = DiffDocument::parse("diff --git \"a/\\344\\270\\255.rs\" \"b/\\344\\270\\255.rs\"\n--- \"a/\\344\\270\\255.rs\"\n+++ \"b/\\344\\270\\255.rs\"\n@@ -1,2 +1,2 @@\n --- source text\n-old\n+new\n").unwrap();
+    let files = DiffFile::parse("diff --git \"a/\\344\\270\\255.rs\" \"b/\\344\\270\\255.rs\"\n--- \"a/\\344\\270\\255.rs\"\n+++ \"b/\\344\\270\\255.rs\"\n@@ -1,2 +1,2 @@\n --- source text\n-old\n+new\n").unwrap();
     assert_eq!(files[0].original_path().unwrap().as_str(), "中.rs");
     assert!(
         files[0]
@@ -61,7 +60,7 @@ fn quoted_git_paths_and_context_prefixes() {
 #[test]
 fn format_patch_signature_ends_the_message() {
     let patch = "From 1a2b Mon Sep 17 00:00:00 2001\nSubject: [PATCH 1/2] Change\n\n---\n a.rs | 2 +-\n 1 file changed\n\ndiff --git a/a.rs b/a.rs\n--- a/a.rs\n+++ b/a.rs\n@@ -1 +1 @@\n-old\n+new\n-- \n2.47.0\n\nFrom 3c4d Mon Sep 17 00:00:00 2001\nSubject: [PATCH 2/2] Again\n\n---\n b.rs | 2 +-\n\ndiff --git a/b.rs b/b.rs\n--- a/b.rs\n+++ b/b.rs\n@@ -1 +1 @@\n-before\n+after\n--\n2.47.0\n";
-    let files = DiffDocument::parse(patch).unwrap();
+    let files = DiffFile::parse(patch).unwrap();
     assert_eq!(files.len(), 2);
     assert_eq!(files[0].path().as_str(), "a.rs");
     assert_eq!(files[1].path().as_str(), "b.rs");
@@ -84,7 +83,7 @@ fn git_prefix_configurations_resolve_paths() {
         let patch = format!(
             "diff --git {header}\nindex 1..2 100644\n--- {old_header}\n+++ {new_header}\n@@ -1 +1 @@\n-old\n+new\n"
         );
-        let files = DiffDocument::parse(&patch).unwrap();
+        let files = DiffFile::parse(&patch).unwrap();
         let expected = if header.contains("space") {
             "dir with space/a.rs"
         } else {
@@ -103,7 +102,7 @@ fn git_prefix_configurations_resolve_paths() {
     }
     // A mode change has no `---`/`+++` records; the Git header names the file.
     let files =
-        DiffDocument::parse("diff --git src/run.sh src/run.sh\nold mode 100644\nnew mode 100755\n")
+        DiffFile::parse("diff --git src/run.sh src/run.sh\nold mode 100644\nnew mode 100755\n")
             .unwrap();
     assert_eq!(files[0].path().as_str(), "src/run.sh");
 }
@@ -111,21 +110,21 @@ fn git_prefix_configurations_resolve_paths() {
 #[test]
 fn plain_unified_paths_keep_directories_named_like_prefixes() {
     let files =
-        DiffDocument::parse("--- a/notes.txt\n+++ a/notes.txt\n@@ -1 +1 @@\n-old\n+new\n").unwrap();
+        DiffFile::parse("--- a/notes.txt\n+++ a/notes.txt\n@@ -1 +1 @@\n-old\n+new\n").unwrap();
     assert_eq!(files[0].path().as_str(), "a/notes.txt");
     let files =
-        DiffDocument::parse("--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-old\n+new\n").unwrap();
+        DiffFile::parse("--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-old\n+new\n").unwrap();
     assert_eq!(files[0].path().as_str(), "notes.txt");
 }
 
 #[test]
 fn whitespace_stripped_context_lines_are_empty_context() {
     let files =
-        DiffDocument::parse("--- a/a\n+++ b/a\n@@ -1,3 +1,3 @@\n first\n\n-old\n+new\n").unwrap();
+        DiffFile::parse("--- a/a\n+++ b/a\n@@ -1,3 +1,3 @@\n first\n\n-old\n+new\n").unwrap();
     assert_eq!(files[0].source(DiffSide::Original), "first\n\nold\n");
     assert_eq!(files[0].source(DiffSide::Modified), "first\n\nnew\n");
     // A blank line after a complete hunk separates files instead.
-    let files = DiffDocument::parse(
+    let files = DiffFile::parse(
         "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n\n--- a/b\n+++ b/b\n@@ -1 +1 @@\n-x\n+y\n",
     )
     .unwrap();
@@ -142,11 +141,11 @@ fn malformed_hunks_fail_without_partial_documents() {
         "diff --cc a.rs\n@@@ -1 -1 +1 @@@\n",
         "--- /dev/null\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n",
     ] {
-        let error = DiffDocument::parse(patch)
+        let error = DiffFile::parse(patch)
             .err()
             .expect("reject malformed patch");
         assert!(error.line() > 0);
         assert!(!error.message().is_empty());
     }
-    assert!(DiffDocument::parse("").unwrap().is_empty());
+    assert!(DiffFile::parse("").unwrap().is_empty());
 }

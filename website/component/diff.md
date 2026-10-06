@@ -10,8 +10,8 @@ surface. Use it for code review and change previews; use [Editor](./editor.md)
 when the user needs to edit source code.
 
 The application obtains the patch from Git, an AI response, or another producer.
-`DiffDocument::parse` prepares one document per changed file without comparing
-old and new files. One `DiffState` shows all of those files in a single
+`DiffFile::parse` prepares one `DiffFile` per changed file without comparing
+old and new versions. One `DiffState` shows all of those files in a single
 virtualized list, each introduced by its own header.
 
 ## Import
@@ -19,7 +19,7 @@ virtualized list, each introduced by its own header.
 ```rust
 use gpui_kit::*;
 use gpui_kit::component::diff::{
-    Diff, DiffDocument, DiffLineAnnotation, DiffLinePosition, DiffLineRange,
+    Diff, DiffFile, DiffLineAnnotation, DiffLinePosition, DiffLineRange,
     DiffMode, DiffSide, DiffState,
 };
 ```
@@ -33,13 +33,13 @@ Parse the patch and create its state once in the owning view:
 
 ```rust
 let patch = "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n fn main() {\n-    run();\n+    run_app();\n }\n";
-let documents = DiffDocument::parse(patch)?;
-let diff = cx.new(|cx| DiffState::new(documents, cx));
+let files = DiffFile::parse(patch)?;
+let diff = cx.new(|cx| DiffState::new(files, cx));
 ```
 
-`parse` returns `Result<Vec<DiffDocument>, DiffParseError>`. Handle errors in the
+`parse` returns `Result<Vec<DiffFile>, DiffParseError>`. Handle errors in the
 application. The state also accepts a subset of files, or a single file as
-`[document]`, when the application presents files separately.
+`[file]`, when the application presents files separately.
 
 Store the state as an `Entity<DiffState>` on the owner. Construct only the
 presentation during rendering, and give it a bounded viewport:
@@ -50,15 +50,15 @@ Diff::new(&self.diff).h(rems(24.)).w_full()
 
 Do not parse the patch or recreate its state on every render. Parsing is fast
 (about 15 ms for a 6.5 MB, 200-file patch in a release build); for very large
-patches, parse on a background executor, then install the documents only if
+patches, parse on a background executor, then install the files only if
 the result still belongs to the current patch revision.
 
 ## Patch input
 
 Accept unified diffs (`---`, `+++`, `@@`) and Git diff text, including
 `git format-patch` output and patches written with `diff.noprefix` or
-`diff.mnemonicPrefix`. Each parsed file produces one document. `path()` is the
-path to show; `original_path()` and `modified_path()` return `None` for the
+`diff.mnemonicPrefix`. Each parsed file produces one `DiffFile`. `path()` is the
+path to show and identifies the file; `original_path()` and `modified_path()` return `None` for the
 missing side of an added or deleted file (`/dev/null`). `additions()` and
 `deletions()` report changed lines represented by the patch.
 
@@ -67,21 +67,22 @@ are source coordinates, not proof that the complete source file is available.
 Diff neither computes differences nor loads repository files, applies changes,
 or resolves merge conflicts. Source outside the patch remains unavailable.
 
-`metadata()` exposes retained Git headers and binary metadata; `is_binary()`
+`extended_headers()` exposes Git's extended header lines, such as modes,
+similarity, renames and the binary marker; `is_binary()`
 identifies binary changes. A file without source rows, such as a binary file, a
 mode change or a pure rename, shows a summary below its header. Malformed hunks
 and unsupported combined diffs return a `DiffParseError`; its `line()` and
 `message()` identify the patch location and reason.
 
-## Layout and context
+## Display mode and context
 
-The default layout is `DiffMode::Unified`, with up to three available unchanged
-lines around each change. Set the initial layout when creating the state, and
-change it later from application commands:
+The default display mode is `DiffMode::Unified`, with up to three available
+unchanged lines around each change. Set the initial mode when creating the state,
+and change it later from application commands:
 
 ```rust
 let diff = cx.new(|cx| {
-    DiffState::new(documents, cx)
+    DiffState::new(files, cx)
         .with_mode(DiffMode::Split)
         .with_context_lines(Some(5))
 });
@@ -110,23 +111,25 @@ self.diff.update(cx, |state, cx| {
 ## Source coordinates and navigation
 
 `DiffSide::Original` and `DiffSide::Modified` identify the file version.
-`DiffLinePosition` and `DiffLineRange` address a file by its index in
-`documents()` and use **one-based source line numbers**, not visible row
-indices. A line range includes both endpoints and stays on one side of one file.
-Layout changes and context folding do not renumber source lines.
+`DiffLinePosition` and `DiffLineRange` identify a file by its `path()`, which
+stays stable when a newer revision of the patch reorders its files, and use
+**one-based source line numbers**, not visible row indices. A line range includes both endpoints and stays on one side of one file.
+Display mode changes and context folding do not renumber source lines.
 
 ```rust
 self.diff.update(cx, |state, cx| {
-    state.scroll_to_line(DiffLinePosition::new(0, DiffSide::Modified, 12), cx);
+    state.scroll_to_line(DiffLinePosition::new("src/main.rs", DiffSide::Modified, 12), cx);
+    state.scroll_to_file("src/main.rs", cx);
     state.next_change(cx);
     state.previous_change(cx);
 });
 ```
 
 `scroll_to_line` reveals supplied context when needed; it cannot reveal lines
-absent from the patch. Change navigation moves between changed groups across
-all files and wraps at the ends. Put layout and navigation commands in the
-application's toolbar or menu.
+absent from the patch. `scroll_to_file` shows a file's header, including a file
+without source rows, for example from a file list. Change navigation moves
+between changed groups across all files and wraps at the ends. Put display mode
+and navigation commands in the application's toolbar or menu.
 
 ## Selection and copying
 
@@ -134,7 +137,7 @@ Select source lines programmatically using a file, a side and an inclusive range
 
 ```rust
 self.diff.update(cx, |state, cx| {
-    state.set_selected_lines(Some(DiffLineRange::new(0, DiffSide::Modified, 3, 8)), cx);
+    state.set_selected_lines(Some(DiffLineRange::new("src/main.rs", DiffSide::Modified, 3, 8)), cx);
 });
 
 let source = self.diff.read(cx).selected_text(cx);
@@ -151,15 +154,15 @@ alignment cells, or annotation content. Copy excludes diff prefixes and
 unavailable gaps; it cannot reconstruct the whole file or infer source line
 endings that the patch does not preserve.
 
-## Replacing the documents
+## Replacing the files
 
 ```rust
 self.diff.update(cx, |state, cx| {
-    state.set_documents(updated_documents, cx);
+    state.set_files(updated_files, cx);
 });
 ```
 
-Replacing the documents resets expansion, selection, and scrolling because
+Replacing the files resets expansion, selection, and scrolling because
 their coordinates belong to the previous patch. State mutations notify
 observers; callers do not need an additional `cx.notify()` for the Diff state.
 
@@ -169,7 +172,7 @@ Line numbers, syntax highlighting, and file headers are enabled by default:
 
 ```rust
 Diff::new(&self.diff)
-    .line_numbers(true)
+    .line_number(true)
     .syntax_highlight(true)
     .header_visible(true)
     .h(rems(24.))
@@ -181,7 +184,7 @@ all built-in grammars. Without a grammar, supplied code still renders with line
 change colors.
 
 The state prepares syntax on a background thread, file by file, after it is
-created or receives new documents; code first appears uncolored and gains color
+created or receives new files; code first appears uncolored and gains color
 as each file is ready. Each hunk is parsed on its own, so a comment or string
 left open at the end of one hunk does not color the next. Injected languages,
 such as code blocks inside Markdown, are not highlighted. Lines longer than
@@ -204,17 +207,17 @@ separator, and `header_visible(false)` to hide headers:
 
 ```rust
 Diff::new(&self.diff)
-    .header(|document, _, _| {
+    .header(|file, _, _| {
         div()
             .flex()
             .gap_2()
-            .child(document.path().clone())
-            .child(format!("+{}", document.additions()))
+            .child(file.path().clone())
+            .child(format!("+{}", file.additions()))
     })
     .h(rems(24.))
 ```
 
-The callback receives `&DiffDocument`, `&mut Window`, and `&mut App`, and
+The callback receives `&DiffFile`, `&mut Window`, and `&mut App`, and
 returns an `IntoElement`. Callbacks implement `Fn` and retain their captures for
 `'static`; they receive an `App`, rather than the owning view's `Context`.
 Construct the content in the callback and update state from its event handlers.
@@ -230,16 +233,16 @@ content beneath the associated source line:
 ```rust
 let annotation = DiffLineAnnotation::new(
     "review-comment-42",
-    DiffLinePosition::new(0, DiffSide::Modified, 3),
+    DiffLinePosition::new("src/main.rs", DiffSide::Modified, 3),
 );
 
 Diff::new(&self.diff)
     .annotations([annotation])
-    .annotation(|_, _, _| div().child("Check the fallback behavior."))
+    .annotation_content(|_, _, _| div().child("Check the fallback behavior."))
     .h(rems(24.))
 ```
 
-Supply both `annotations` and `annotation`. The callback receives
+Supply both `annotations` and `annotation_content`. The callback receives
 `&DiffLineAnnotation`, `&mut Window`, and `&mut App`; use `id()` and
 `position()` to find application content. Annotation IDs must be stable and
 unique within the Diff. An annotation on hidden context appears when that
@@ -250,7 +253,7 @@ though the code is shown once. Annotation callbacks have the same `Fn` and
 
 Annotation content may change height freely. Visible rows are measured on every
 frame, and rows are measured again when annotations are added, moved, removed or
-replaced. In split layout, the paired row stretches to the taller side.
+replaced. In Split mode, the paired row stretches to the taller side.
 Annotation text is excluded from source copying; buttons and other controls in
 annotation content own their actions.
 

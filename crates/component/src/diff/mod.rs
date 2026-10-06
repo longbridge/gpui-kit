@@ -1,5 +1,5 @@
 //! Readonly, virtualized patch display inspired by Diffs from Pierre.
-//! Parse an externally supplied patch into [`DiffDocument`]s, retain one
+//! Parse an externally supplied patch into [`DiffFile`]s, retain one
 //! [`DiffState`] for all of them in the owner, and build [`Diff`] during rendering.
 mod document;
 mod parser;
@@ -8,7 +8,7 @@ mod parser_tests;
 mod selection;
 mod state;
 
-pub use document::{DiffDocument, DiffLinePosition, DiffLineRange, DiffSide};
+pub use document::{DiffFile, DiffLinePosition, DiffLineRange, DiffSide};
 pub use parser::DiffParseError;
 pub use state::{DiffEvent, DiffState};
 
@@ -71,10 +71,13 @@ pub(crate) fn init(cx: &mut App) {
     ]);
 }
 
-/// Presentation of the same immutable file comparison.
+/// How a [`Diff`] presents the two sides of each file.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum DiffMode {
+    /// The original and modified source side by side.
     Split,
+    /// One column, with deleted lines before added lines.
     #[default]
     Unified,
 }
@@ -98,15 +101,15 @@ impl DiffLineAnnotation {
     pub fn id(&self) -> &ElementId {
         &self.id
     }
-    pub fn position(&self) -> DiffLinePosition {
-        self.position
+    pub fn position(&self) -> &DiffLinePosition {
+        &self.position
     }
 }
 
-type HeaderRenderer = Rc<dyn Fn(&DiffDocument, &mut Window, &mut App) -> AnyElement>;
+type HeaderRenderer = Rc<dyn Fn(&DiffFile, &mut Window, &mut App) -> AnyElement>;
 type AnnotationRenderer = Rc<dyn Fn(&DiffLineAnnotation, &mut Window, &mut App) -> AnyElement>;
 
-/// A themed readonly code-review surface with split and unified layouts.
+/// A themed readonly code-review surface in split or unified mode.
 ///
 /// All files of the supplied state share one virtualized list, each introduced
 /// by its header. The component owns both scrolling axes, so give it a bounded
@@ -117,7 +120,7 @@ type AnnotationRenderer = Rc<dyn Fn(&DiffLineAnnotation, &mut Window, &mut App) 
 pub struct Diff {
     state: Entity<DiffState>,
     style: StyleRefinement,
-    line_numbers: bool,
+    line_number: bool,
     syntax_highlight: bool,
     header_visible: bool,
     annotations: Rc<Vec<DiffLineAnnotation>>,
@@ -131,7 +134,7 @@ impl Diff {
         Self {
             state: state.clone(),
             style: StyleRefinement::default(),
-            line_numbers: true,
+            line_number: true,
             syntax_highlight: true,
             header_visible: true,
             annotations: Rc::new(Vec::new()),
@@ -141,8 +144,8 @@ impl Diff {
         }
     }
     /// Shows the original and modified line-number lanes. Default is true.
-    pub fn line_numbers(mut self, value: bool) -> Self {
-        self.line_numbers = value;
+    pub fn line_number(mut self, value: bool) -> Self {
+        self.line_number = value;
         self
     }
     /// Emphasizes syntax once the state has prepared it. Default is true.
@@ -166,7 +169,10 @@ impl Diff {
         let annotations = annotations.into_iter().collect::<Vec<_>>();
         let mut index: HashMap<DiffLinePosition, Vec<usize>> = HashMap::new();
         for (ix, annotation) in annotations.iter().enumerate() {
-            index.entry(annotation.position).or_default().push(ix);
+            index
+                .entry(annotation.position.clone())
+                .or_default()
+                .push(ix);
         }
         self.annotations = Rc::new(annotations);
         self.annotation_index = Rc::new(index);
@@ -175,7 +181,7 @@ impl Diff {
     /// Replaces the content of each file header, keeping its shell and separator.
     pub fn header<F, E>(mut self, render: F) -> Self
     where
-        F: Fn(&DiffDocument, &mut Window, &mut App) -> E + 'static,
+        F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
         E: IntoElement,
     {
         self.header_renderer = Some(Rc::new(move |document, window, cx| {
@@ -184,7 +190,7 @@ impl Diff {
         self
     }
     /// Renders each supplied annotation. Application state and commands stay with the owner.
-    pub fn annotation<F, E>(mut self, render: F) -> Self
+    pub fn annotation_content<F, E>(mut self, render: F) -> Self
     where
         F: Fn(&DiffLineAnnotation, &mut Window, &mut App) -> E + 'static,
         E: IntoElement,
@@ -220,27 +226,21 @@ fn render_diff(
     let font_family = cx.theme().mono_font_family.clone();
     let row_height = font_size * 1.6;
     let digits = state
-        .documents()
+        .files()
         .iter()
         .map(|document| document.line_number_digits())
         .max()
         .unwrap_or(1);
-    let gutter_width = if props.line_numbers {
+    let gutter_width = if props.line_number {
         font_size * 0.7 * digits as f32 + rem
     } else {
         px(0.)
     };
     let mode = state.mode();
-    let layout = LayoutKey::new(
-        rem,
-        font_size,
-        font_family.clone(),
-        mode,
-        props.line_numbers,
-    );
+    let layout = LayoutKey::new(rem, font_size, font_family.clone(), mode, props.line_number);
     if state.update_layout(layout, row_height) {
         let width = measure_code_width(
-            state.documents(),
+            state.files(),
             font_size,
             &font_family,
             gutter_width,
@@ -258,13 +258,13 @@ fn render_diff(
         content_width
     };
     let code = Rc::new(CodePresentation {
-        documents: state.documents().to_vec(),
+        files: state.files().to_vec(),
         mode,
         column_width,
         font_size,
         row_height,
         gutter_width,
-        line_numbers: props.line_numbers,
+        line_number: props.line_number,
         syntax_highlight: props.syntax_highlight,
         header_visible: props.header_visible,
         header_renderer: props.header_renderer.clone(),
@@ -280,9 +280,9 @@ fn render_diff(
     let scrollbar = state.list().clone();
     let horizontal = state.horizontal_scroll().clone();
     let has_rows = !rows.is_empty();
-    let label = match state.documents() {
+    let label = match state.files() {
         [document] => t!("Diff.Viewer", name = document.path().as_str()).to_string(),
-        documents => t!("Diff.ViewerFiles", count = documents.len()).to_string(),
+        files => t!("Diff.ViewerFiles", count = files.len()).to_string(),
     };
     let body = div()
         .id("diff-body")
@@ -457,13 +457,13 @@ fn body_focused(state: &DiffState, window: &Window, cx: &mut Context<DiffState>)
 }
 
 struct CodePresentation {
-    documents: Vec<DiffDocument>,
+    files: Vec<DiffFile>,
     mode: DiffMode,
     column_width: Pixels,
     font_size: Pixels,
     row_height: Pixels,
     gutter_width: Pixels,
-    line_numbers: bool,
+    line_number: bool,
     syntax_highlight: bool,
     header_visible: bool,
     header_renderer: Option<HeaderRenderer>,
@@ -478,7 +478,12 @@ struct CodePresentation {
 
 impl CodePresentation {
     fn position(&self, file: usize, side: DiffSide, ix: usize) -> DiffLinePosition {
-        DiffLinePosition::new(file, side, self.documents[file].line_number(side, ix))
+        let document = &self.files[file];
+        DiffLinePosition::new(
+            document.path().clone(),
+            side,
+            document.line_number(side, ix),
+        )
     }
 }
 
@@ -494,7 +499,7 @@ fn code_width(width: Pixels, gutter_width: Pixels, rem: Pixels, mode: DiffMode) 
 /// Estimates content width from the lines widest in display cells, then
 /// shapes those candidates with the code font for resolved geometry.
 fn measure_code_width(
-    documents: &[DiffDocument],
+    files: &[DiffFile],
     font_size: Pixels,
     family: &SharedString,
     gutter_width: Pixels,
@@ -506,7 +511,7 @@ fn measure_code_width(
     // than trusting the single widest by cell count.
     const CANDIDATES: usize = 8;
     let mut candidates: Vec<(usize, &SharedString)> = Vec::with_capacity(CANDIDATES + 1);
-    for document in documents {
+    for document in files {
         for side in [DiffSide::Original, DiffSide::Modified] {
             for line in document.lines(side) {
                 let cells = unicode_width::UnicodeWidthStr::width(line.display().as_str());
@@ -559,7 +564,7 @@ fn render_row(
 ) -> AnyElement {
     match row {
         DisplayRow::File(file) => render_file_header(*file, &code, window, cx),
-        DisplayRow::Notice(file) => render_notice(&code.documents[*file], cx),
+        DisplayRow::Notice(file) => render_notice(&code.files[*file], cx),
         DisplayRow::Hunk { file, hunk } => h_flex()
             .w_full()
             .h_6()
@@ -567,7 +572,7 @@ fn render_row(
             .bg(cx.theme().muted.opacity(0.35))
             .text_xs()
             .text_color(cx.theme().muted_foreground)
-            .child(code.documents[*file].hunks()[*hunk].label().clone())
+            .child(code.files[*file].hunks()[*hunk].label().clone())
             .into_any_element(),
         DisplayRow::Fold { file, pairs } => {
             let (file, pairs) = (*file, pairs.clone());
@@ -655,7 +660,7 @@ fn render_file_header(
     if !code.header_visible {
         return div().into_any_element();
     }
-    let document = &code.documents[file];
+    let document = &code.files[file];
     let theme = cx.theme();
     let foreground = theme.muted_foreground;
     let border = theme.border;
@@ -714,12 +719,12 @@ fn render_file_header(
 }
 
 /// Summarizes a file without source rows: binary, metadata-only or empty.
-fn render_notice(document: &DiffDocument, cx: &App) -> AnyElement {
+fn render_notice(document: &DiffFile, cx: &App) -> AnyElement {
     let message = if !document.has_changes() {
         t!("Diff.NoChanges")
     } else if document.is_binary() {
         t!("Diff.BinaryChanges")
-    } else if !document.metadata().is_empty() {
+    } else if !document.extended_headers().is_empty() {
         t!("Diff.NoTextChanges")
     } else {
         t!("Diff.EmptyFile")
@@ -733,7 +738,7 @@ fn render_notice(document: &DiffDocument, cx: &App) -> AnyElement {
         .text_color(cx.theme().muted_foreground)
         .children(
             document
-                .metadata()
+                .extended_headers()
                 .iter()
                 .cloned()
                 .map(|line| div().child(line)),
@@ -786,7 +791,7 @@ fn render_gutter(
                     .child(position.line().to_string())
                     .on_click(move |event, window, cx| {
                         state.update(cx, |state, cx| {
-                            state.click_line(position, event.modifiers().shift, window, cx)
+                            state.click_line(position.clone(), event.modifiers().shift, window, cx)
                         })
                     }),
             )
@@ -861,7 +866,7 @@ fn render_unified_cell(
     cx: &mut App,
 ) -> AnyElement {
     let (original, modified) = pair;
-    let counterpart = code.documents[file].lines(side)[ix].counterpart();
+    let counterpart = code.files[file].lines(side)[ix].counterpart();
     let other_ix = if side == DiffSide::Original {
         modified
     } else {
@@ -913,19 +918,19 @@ fn code_line(
     gutters: [Option<(DiffSide, Option<usize>)>; 2],
     cx: &mut App,
 ) -> AnyElement {
-    let document = &code.documents[file];
+    let document = &code.files[file];
     let line = &document.lines(side)[ix];
     let status = if side == DiffSide::Original {
         cx.theme().danger
     } else {
         cx.theme().success
     };
-    let selected = code.selected_lines.is_some_and(|range| {
-        range.contains(code.position(file, side, ix))
+    let selected = code.selected_lines.as_ref().is_some_and(|range| {
+        range.contains(&code.position(file, side, ix))
             || (code.mode == DiffMode::Unified
                 && !changed
                 && gutters.iter().flatten().any(|(side, ix)| {
-                    ix.is_some_and(|ix| range.contains(code.position(file, *side, ix)))
+                    ix.is_some_and(|ix| range.contains(&code.position(file, *side, ix)))
                 }))
     });
     let mut highlights = if code.syntax_highlight {
@@ -989,7 +994,7 @@ fn code_line(
         .whitespace_nowrap()
         .when(changed, |this| this.bg(status.opacity(0.12)))
         .when(selected, |this| this.bg(cx.theme().selection))
-        .when(code.line_numbers, |this| {
+        .when(code.line_number, |this| {
             this.children(
                 gutters
                     .into_iter()
@@ -1056,7 +1061,7 @@ fn line_extras(
     cx: &mut App,
 ) -> Vec<AnyElement> {
     let mut extras = Vec::new();
-    let document = &code.documents[file];
+    let document = &code.files[file];
     let line = &document.lines(side)[ix];
     let ending = &document.source(side)[line.content_end()..line.source().end];
     let ending_only = changed && has_line_ending_change(document, side, ix, other_ix);
@@ -1114,7 +1119,7 @@ fn annotation_extras(
 }
 
 fn has_line_ending_change(
-    document: &DiffDocument,
+    document: &DiffFile,
     side: DiffSide,
     ix: usize,
     counterpart: Option<usize>,

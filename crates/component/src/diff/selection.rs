@@ -19,7 +19,7 @@ use gpui_base::{
 };
 
 use super::{
-    DiffDocument, DiffSide,
+    DiffFile, DiffSide,
     state::{decode_key, encode_key},
 };
 
@@ -30,7 +30,7 @@ pub(crate) struct CodeRun {
     display_range: Range<usize>,
     layout: TextLayout,
     bounds: Bounds<Pixels>,
-    document: DiffDocument,
+    document: DiffFile,
 }
 
 #[derive(Default)]
@@ -206,7 +206,7 @@ pub(crate) fn selected_source_range(
 
 pub(crate) struct CodeText {
     id: ElementId,
-    document: DiffDocument,
+    document: DiffFile,
     file: usize,
     side: DiffSide,
     line_ix: usize,
@@ -221,7 +221,7 @@ impl CodeText {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: ElementId,
-        document: DiffDocument,
+        document: DiffFile,
         file: usize,
         side: DiffSide,
         line_ix: usize,

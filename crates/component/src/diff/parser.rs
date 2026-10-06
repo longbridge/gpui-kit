@@ -2,7 +2,7 @@ use std::{fmt, ops::Range};
 
 use gpui::SharedString;
 
-use super::document::{DiffDocument, FileSide, Hunk, LinePair};
+use super::document::{DiffFile, FileSide, Hunk, LinePair};
 
 /// A malformed or unsupported unified diff, with its one-based patch line.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,19 +85,19 @@ struct File {
     modified: SideBuilder,
     pairs: Vec<LinePair>,
     hunks: Vec<Hunk>,
-    metadata: Vec<SharedString>,
+    extended_headers: Vec<SharedString>,
     binary: bool,
     headers: bool,
 }
 
 impl File {
-    fn finish(self) -> DiffDocument {
-        DiffDocument::new(
+    fn finish(self) -> DiffFile {
+        DiffFile::new(
             self.original.finish(self.old_path),
             self.modified.finish(self.new_path),
             self.pairs,
             self.hunks,
-            self.metadata,
+            self.extended_headers,
             self.binary,
         )
     }
@@ -115,7 +115,7 @@ impl File {
     }
 }
 
-pub(crate) fn parse(patch: &str) -> Result<Vec<DiffDocument>> {
+pub(crate) fn parse(patch: &str) -> Result<Vec<DiffFile>> {
     let raw: Vec<&str> = patch
         .split_inclusive('\n')
         .map(|line| line.strip_suffix('\n').unwrap_or(line))
@@ -251,7 +251,7 @@ pub(crate) fn parse(patch: &str) -> Result<Vec<DiffDocument>> {
                 file.new_path = None;
             }
             if !line.is_empty() {
-                file.metadata.push(line.to_owned().into());
+                file.extended_headers.push(line.to_owned().into());
             }
         }
         ix += 1;

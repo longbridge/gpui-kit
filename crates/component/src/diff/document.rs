@@ -30,26 +30,29 @@ impl DiffSide {
     }
 }
 
-/// A one-based source line of one file in a [`super::DiffState`],
-/// independent of the visual layout.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// A one-based source line, independent of the visual layout.
+///
+/// The file is identified by its [`DiffFile::path`], which stays stable when a
+/// newer revision of the patch reorders its files.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DiffLinePosition {
-    file: usize,
+    path: SharedString,
     side: DiffSide,
     line: usize,
 }
 
 impl DiffLinePosition {
-    /// Creates a position in the file at index `file`, clamping the line to at least one.
-    pub fn new(file: usize, side: DiffSide, line: usize) -> Self {
+    /// Creates a position, clamping the line to at least one.
+    pub fn new(path: impl Into<SharedString>, side: DiffSide, line: usize) -> Self {
         Self {
-            file,
+            path: path.into(),
             side,
             line: line.max(1),
         }
     }
-    pub fn file(&self) -> usize {
-        self.file
+    /// The [`DiffFile::path`] of the file.
+    pub fn path(&self) -> &SharedString {
+        &self.path
     }
     pub fn side(&self) -> DiffSide {
         self.side
@@ -59,10 +62,11 @@ impl DiffLinePosition {
     }
 }
 
-/// An inclusive range of source lines on one side of one file.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// An inclusive range of source lines on one side of one file, identified by
+/// its [`DiffFile::path`].
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DiffLineRange {
-    file: usize,
+    path: SharedString,
     side: DiffSide,
     start: usize,
     end: usize,
@@ -70,16 +74,17 @@ pub struct DiffLineRange {
 
 impl DiffLineRange {
     /// Normalizes the endpoints and clamps them to one-based line numbers.
-    pub fn new(file: usize, side: DiffSide, start: usize, end: usize) -> Self {
+    pub fn new(path: impl Into<SharedString>, side: DiffSide, start: usize, end: usize) -> Self {
         Self {
-            file,
+            path: path.into(),
             side,
             start: start.min(end).max(1),
             end: start.max(end).max(1),
         }
     }
-    pub fn file(&self) -> usize {
-        self.file
+    /// The [`DiffFile::path`] of the file.
+    pub fn path(&self) -> &SharedString {
+        &self.path
     }
     pub fn side(&self) -> DiffSide {
         self.side
@@ -90,14 +95,13 @@ impl DiffLineRange {
     pub fn end(&self) -> usize {
         self.end
     }
-    pub(crate) fn contains(&self, position: DiffLinePosition) -> bool {
-        self.file == position.file
-            && self.side == position.side
+    pub(crate) fn contains(&self, position: &DiffLinePosition) -> bool {
+        self.side == position.side
             && (self.start..=self.end).contains(&position.line)
+            && self.path == position.path
     }
 }
 
-/// One supplied source line and its display form.
 #[derive(Debug)]
 pub(crate) struct SourceLine {
     line_number: usize,
@@ -307,7 +311,7 @@ struct DocumentInner {
     hunks: Vec<Hunk>,
     additions: usize,
     deletions: usize,
-    metadata: Vec<SharedString>,
+    extended_headers: Vec<SharedString>,
     binary: bool,
     /// Width of the widest line number, in digits.
     line_number_digits: usize,
@@ -319,9 +323,9 @@ struct DocumentInner {
 /// Only source fragments present in the patch are retained; unavailable
 /// context is never reconstructed or compared. Cloning is cheap.
 #[derive(Clone)]
-pub struct DiffDocument(Arc<DocumentInner>);
+pub struct DiffFile(Arc<DocumentInner>);
 
-impl DiffDocument {
+impl DiffFile {
     /// Parses every file in a unified or Git diff, in patch order, without
     /// computing differences. Syntax emphasis is prepared later by
     /// [`super::DiffState`] on a background thread.
@@ -336,7 +340,7 @@ impl DiffDocument {
         mut modified: FileSide,
         pairs: Vec<LinePair>,
         hunks: Vec<Hunk>,
-        metadata: Vec<SharedString>,
+        extended_headers: Vec<SharedString>,
         binary: bool,
     ) -> Self {
         let (mut additions, mut deletions) = (0, 0);
@@ -369,7 +373,7 @@ impl DiffDocument {
             hunks,
             additions,
             deletions,
-            metadata,
+            extended_headers,
             binary,
             line_number_digits: widest.max(1).ilog10() as usize + 1,
             syntax: OnceLock::new(),
@@ -389,9 +393,10 @@ impl DiffDocument {
     pub fn modified_path(&self) -> Option<&SharedString> {
         self.0.modified.path.as_ref()
     }
-    /// Git metadata such as file modes, similarity and rename headers.
-    pub fn metadata(&self) -> &[SharedString] {
-        &self.0.metadata
+    /// Git extended header lines, such as file modes, similarity, renames
+    /// and the binary marker, as they appear in the patch.
+    pub fn extended_headers(&self) -> &[SharedString] {
+        &self.0.extended_headers
     }
     /// Whether the patch reports binary contents rather than textual hunks.
     pub fn is_binary(&self) -> bool {
@@ -408,7 +413,7 @@ impl DiffDocument {
     pub fn has_changes(&self) -> bool {
         self.additions() > 0
             || self.deletions() > 0
-            || !self.0.metadata.is_empty()
+            || !self.0.extended_headers.is_empty()
             || self.0.binary
             || self.original_path().is_none()
             || self.modified_path().is_none()
@@ -530,7 +535,7 @@ struct SideSyntax {
 }
 
 impl DocumentSyntax {
-    fn new(document: &DiffDocument, highlighters: &mut SyntaxHighlighters) -> Self {
+    fn new(document: &DiffFile, highlighters: &mut SyntaxHighlighters) -> Self {
         let mut syntax = Self::default();
         let mut name_ixs = HashMap::<SharedString, u16>::new();
         for side in [DiffSide::Original, DiffSide::Modified] {
@@ -745,7 +750,7 @@ pub(crate) fn display_chunks(text: &str) -> SmallVec<[Range<usize>; 1]> {
 pub(crate) mod fixture {
     use similar::{ChangeTag, TextDiff};
 
-    use super::DiffDocument;
+    use super::DiffFile;
 
     fn quoted(name: &str) -> String {
         format!(
@@ -763,7 +768,7 @@ pub(crate) mod fixture {
     pub(crate) fn document(
         original: Option<(&str, &str)>,
         modified: Option<(&str, &str)>,
-    ) -> DiffDocument {
+    ) -> DiffFile {
         let old = original.map_or("", |(_, text)| text);
         let new = modified.map_or("", |(_, text)| text);
         let old_lines: Vec<&str> = old.split_inclusive('\n').collect();
@@ -804,7 +809,7 @@ pub(crate) mod fixture {
                 "diff --git a/fixture b/fixture\ndeleted file mode 100644\n",
             );
         }
-        let mut document = DiffDocument::parse(&patch)
+        let mut document = DiffFile::parse(&patch)
             .unwrap_or_else(|error| panic!("invalid fixture patch: {error}\n{patch}"))
             .remove(0);
         std::sync::Arc::get_mut(&mut document.0)
@@ -814,7 +819,7 @@ pub(crate) mod fixture {
         document
     }
 
-    pub(crate) fn modified(name: &str, original: &str, modified: &str) -> DiffDocument {
+    pub(crate) fn modified(name: &str, original: &str, modified: &str) -> DiffFile {
         document(Some((name, original)), Some((name, modified)))
     }
 }
@@ -826,7 +831,7 @@ mod tests {
     #[test]
     fn comparison_preserves_source_and_alignment() {
         fn assert_send_sync<T: Send + Sync>() {}
-        assert_send_sync::<DiffDocument>();
+        assert_send_sync::<DiffFile>();
         let doc = fixture::modified(
             "a.rs",
             "same\r\n旧值\r\nremoved\r\ntail",
@@ -1074,7 +1079,7 @@ mod tests {
     fn syntax_is_parsed_per_hunk() {
         // Hunks are separated by unavailable source. Parsing their fragments
         // together would join `/* open` and `close */` into one comment.
-        let document = DiffDocument::parse(
+        let document = DiffFile::parse(
             "--- a/a.rs\n+++ b/a.rs\n@@ -1,2 +1,2 @@\n-let a = 1;\n+let a = 2;\n /* open\n@@ -10,2 +10,2 @@\n close */\n-fn old() {}\n+fn new() {}\n",
         )
         .unwrap()

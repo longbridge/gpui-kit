@@ -4,9 +4,7 @@ mod common;
 
 use gpui_kit::component::{
     button::Button,
-    diff::{
-        Diff, DiffDocument, DiffLineAnnotation, DiffLinePosition, DiffMode, DiffSide, DiffState,
-    },
+    diff::{Diff, DiffFile, DiffLineAnnotation, DiffLinePosition, DiffMode, DiffSide, DiffState},
     input::{Input, InputState},
 };
 use gpui_kit::test::{TestSupportExt as _, TestWindowExt as _};
@@ -38,7 +36,7 @@ impl Render for Review {
                     .flex_1()
                     .min_h_0()
                     .annotations(self.annotations.clone())
-                    .annotation(move |_, _, _| {
+                    .annotation_content(move |_, _, _| {
                         div()
                             .id("comment-content")
                             .test_support()
@@ -54,8 +52,8 @@ impl Render for Review {
     }
 }
 
-fn patch_document(hunks: &str) -> DiffDocument {
-    DiffDocument::parse(&format!("--- a/review.txt\n+++ b/review.txt\n{hunks}"))
+fn patch_document(hunks: &str) -> DiffFile {
+    DiffFile::parse(&format!("--- a/review.txt\n+++ b/review.txt\n{hunks}"))
         .expect("Test patch is valid")
         .into_iter()
         .next()
@@ -74,7 +72,7 @@ fn review(
 
 fn review_documents(
     cx: &mut TestAppContext,
-    documents: Vec<DiffDocument>,
+    documents: Vec<DiffFile>,
     context: Option<usize>,
     mode: DiffMode,
     annotations: Vec<DiffLineAnnotation>,
@@ -230,7 +228,7 @@ fn keyboard_expansion_exposes_original_annotation_on_an_unchanged_unified_line(
         DiffMode::Unified,
         vec![DiffLineAnnotation::new(
             "original-comment",
-            DiffLinePosition::new(0, DiffSide::Original, 1),
+            DiffLinePosition::new("review.txt", DiffSide::Original, 1),
         )],
     );
     cx.update_window(handle.into(), |_, window, cx| {
@@ -313,7 +311,7 @@ fn annotation_input_retains_focus_and_handles_its_own_text_commands(cx: &mut Tes
             state: cx.new(|cx| DiffState::new([patch_document("@@ -1 +1 @@\n-old\n+new\n")], cx)),
             annotations: vec![DiffLineAnnotation::new(
                 "editable-comment",
-                DiffLinePosition::new(0, DiffSide::Modified, 1),
+                DiffLinePosition::new("review.txt", DiffSide::Modified, 1),
             )],
             editor: Some(cx.new(|cx| InputState::new(window, cx))),
         })
@@ -379,7 +377,7 @@ fn source_accessibility_labels_preserve_raw_tabs_unicode_and_trailing_spaces(
 
 #[gpui_kit::test]
 fn files_share_one_list_and_select_lines_in_their_own_file(cx: &mut TestAppContext) {
-    let documents = DiffDocument::parse(
+    let documents = DiffFile::parse(
         "diff --git a/first.txt b/first.txt\n--- a/first.txt\n+++ b/first.txt\n@@ -1 +1 @@\n-one\n+uno\ndiff --git a/second.txt b/second.txt\n--- a/second.txt\n+++ b/second.txt\n@@ -1 +1 @@\n-two\n+dos\n",
     )
     .unwrap();
@@ -392,7 +390,8 @@ fn files_share_one_list_and_select_lines_in_their_own_file(cx: &mut TestAppConte
             .within(("new", 0usize))
             .click(("line", 0usize), cx);
         let range = state.read(cx).selected_lines().unwrap();
-        assert_eq!((range.file(), range.side()), (1, DiffSide::Modified));
+        assert_eq!(range.path().as_str(), "second.txt");
+        assert_eq!(range.side(), DiffSide::Modified);
         window.within("review").press("secondary-c", cx);
         assert_clipboard(cx, "dos\n");
     })

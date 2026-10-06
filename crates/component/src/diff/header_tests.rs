@@ -3,8 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use gpui::{AppContext, ParentElement as _, TestAppContext, div};
 
 use super::{
-    Diff, DiffDocument, DiffLineAnnotation, DiffLinePosition, DiffSide, DiffState,
-    document::fixture,
+    Diff, DiffFile, DiffLineAnnotation, DiffLinePosition, DiffSide, DiffState, document::fixture,
 };
 
 #[gpui::test]
@@ -17,24 +16,24 @@ fn test_diff_builder(cx: &mut TestAppContext) {
     let state = cx.new(|cx| DiffState::new([document.clone()], cx));
     let defaults = Diff::new(&state);
     assert_eq!(defaults.state.entity_id(), state.entity_id());
-    assert!(defaults.header_visible && defaults.line_numbers);
+    assert!(defaults.header_visible && defaults.line_number);
     assert!(defaults.syntax_highlight);
     assert!(defaults.annotations.is_empty());
     assert!(defaults.header_renderer.is_none());
     assert!(defaults.annotation_renderer.is_none());
 
     let header_calls = Rc::new(RefCell::new(Vec::new()));
-    let position = DiffLinePosition::new(0, DiffSide::Modified, 1);
-    let annotation = DiffLineAnnotation::new("review-comment", position);
+    let position = DiffLinePosition::new("after.rs", DiffSide::Modified, 1);
+    let annotation = DiffLineAnnotation::new("review-comment", position.clone());
     let annotation_calls = Rc::new(RefCell::new(Vec::new()));
     let diff = Diff::new(&state)
         .header_visible(false)
-        .line_numbers(false)
+        .line_number(false)
         .syntax_highlight(false)
         .annotations([annotation.clone()])
         .header({
             let header_calls = header_calls.clone();
-            move |document: &DiffDocument, _, _| {
+            move |document: &DiffFile, _, _| {
                 header_calls.borrow_mut().push((
                     document.original_path().cloned(),
                     document.modified_path().cloned(),
@@ -42,21 +41,23 @@ fn test_diff_builder(cx: &mut TestAppContext) {
                 div().child("header")
             }
         })
-        .annotation({
+        .annotation_content({
             let annotation_calls = annotation_calls.clone();
             move |annotation, _, _| {
                 assert_eq!(annotation.id(), &"review-comment".into());
-                annotation_calls.borrow_mut().push(annotation.position());
+                annotation_calls
+                    .borrow_mut()
+                    .push(annotation.position().clone());
                 div().child("Review comment")
             }
         });
 
     assert_eq!(diff.state.entity_id(), state.entity_id());
-    assert!(!diff.header_visible && !diff.line_numbers);
+    assert!(!diff.header_visible && !diff.line_number);
     assert!(!diff.syntax_highlight);
     assert_eq!(diff.annotations.len(), 1);
     assert_eq!(diff.annotations[0].id(), annotation.id());
-    assert_eq!(diff.annotations[0].position(), position);
+    assert_eq!(diff.annotations[0].position(), &position);
     assert_eq!(diff.annotation_index[&position], [0]);
 
     let window = cx.add_empty_window();

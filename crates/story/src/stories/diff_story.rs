@@ -1,9 +1,7 @@
 use gpui_kit::component::{
     ActiveTheme, Disableable, IconName, Selectable, Sizable, StyledExt as _,
     button::{Button, ButtonVariants},
-    diff::{
-        Diff, DiffDocument, DiffLineAnnotation, DiffLinePosition, DiffMode, DiffSide, DiffState,
-    },
+    diff::{Diff, DiffFile, DiffLineAnnotation, DiffLinePosition, DiffMode, DiffSide, DiffState},
     h_flex, v_flex,
 };
 use gpui_kit::{
@@ -67,7 +65,7 @@ impl DiffStory {
                 example: 0,
                 annotations: vec![DiffLineAnnotation::new(
                     "retry-delay-review",
-                    DiffLinePosition::new(0, DiffSide::Modified, 21),
+                    DiffLinePosition::new("src/retry.rs", DiffSide::Modified, 21),
                 )],
                 comment_resolved: false,
                 _subscriptions: vec![subscription],
@@ -82,7 +80,7 @@ impl DiffStory {
                 self.comment_resolved = false;
                 let documents = example_documents(example);
                 self.state
-                    .update(cx, |state, cx| state.set_documents(documents, cx));
+                    .update(cx, |state, cx| state.set_files(documents, cx));
             }
             DiffStoryAction::Context(lines) => {
                 self.state
@@ -101,7 +99,7 @@ impl DiffStory {
         let has_changes = self
             .state
             .read(cx)
-            .documents()
+            .files()
             .iter()
             .any(|document| document.has_changes());
         h_flex()
@@ -204,7 +202,7 @@ impl Render for DiffStory {
                 Diff::new(&self.state).w_full().h(rems(32.))
                 .when(self.example == 0, |diff| {
                     diff.annotations(self.annotations.clone())
-                        .annotation(move |annotation, _, cx| {
+                        .annotation_content(move |annotation, _, cx| {
                             let story = story.clone();
                             v_flex().w_full().gap_2()
                                 .child(h_flex().w_full().justify_between().gap_2()
@@ -228,7 +226,7 @@ impl Render for DiffStory {
     }
 }
 
-fn example_documents(example: usize) -> Vec<DiffDocument> {
+fn example_documents(example: usize) -> Vec<DiffFile> {
     let patch = match example {
         1 => ADDED_PATCH.to_owned(),
         2 => DELETED_PATCH.to_owned(),
@@ -265,7 +263,7 @@ fn example_documents(example: usize) -> Vec<DiffDocument> {
         // A pull request touches several files; they share one scrolling list.
         _ => [REVIEW_PATCH, ADDED_PATCH, DELETED_PATCH, MODE_PATCH].concat(),
     };
-    DiffDocument::parse(&patch).expect("Story patch is valid")
+    DiffFile::parse(&patch).expect("Story patch is valid")
 }
 
 const ADDED_PATCH: &str = r#"diff --git a/src/retry.rs b/src/retry.rs

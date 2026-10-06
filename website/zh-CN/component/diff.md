@@ -8,7 +8,7 @@ description: 用于代码审阅与变更预览的只读 unified diff 和 Git dif
 `Diff` 在只读视图中展示应用提供的 unified diff 或 Git diff，适用于代码审阅与变更预览。
 需要编辑源代码时，使用 [Editor](./editor.md)。
 
-应用从 Git、AI 响应或其他来源获取 patch。`DiffDocument::parse` 为每个变更文件生成一个文档，
+应用从 Git、AI 响应或其他来源获取 patch。`DiffFile::parse` 为每个变更文件生成一个 `DiffFile`，
 不比较修改前后的文件。一个 `DiffState` 在同一个虚拟列表中展示这些文件，每个文件以各自的文件头开始。
 
 ## 导入
@@ -16,7 +16,7 @@ description: 用于代码审阅与变更预览的只读 unified diff 和 Git dif
 ```rust
 use gpui_kit::*;
 use gpui_kit::component::diff::{
-    Diff, DiffDocument, DiffLineAnnotation, DiffLinePosition, DiffLineRange,
+    Diff, DiffFile, DiffLineAnnotation, DiffLinePosition, DiffLineRange,
     DiffMode, DiffSide, DiffState,
 };
 ```
@@ -30,12 +30,12 @@ use gpui_kit::component::diff::{
 
 ```rust
 let patch = "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n fn main() {\n-    run();\n+    run_app();\n }\n";
-let documents = DiffDocument::parse(patch)?;
-let diff = cx.new(|cx| DiffState::new(documents, cx));
+let files = DiffFile::parse(patch)?;
+let diff = cx.new(|cx| DiffState::new(files, cx));
 ```
 
-`parse` 返回 `Result<Vec<DiffDocument>, DiffParseError>`，由应用处理解析错误。
-应用需要分开展示文件时，也可以只传入部分文件，或以 `[document]` 传入单个文件。
+`parse` 返回 `Result<Vec<DiffFile>, DiffParseError>`，由应用处理解析错误。
+应用需要分开展示文件时，也可以只传入部分文件，或以 `[file]` 传入单个文件。
 
 将状态作为 `Entity<DiffState>` 保存在视图中。渲染时只构建展示组件，并为它提供明确的视口高度：
 
@@ -59,19 +59,19 @@ patch 通常只包含变更行和附近上下文。行号表示源文件坐标�
 Diff 不计算差异，不加载仓库文件，也不应用修改或解决合并冲突。
 patch 未提供的源文件内容始终不可用。
 
-`metadata()` 提供保留的 Git 头信息和二进制元数据；`is_binary()` 判断二进制变更。
+`extended_headers()` 提供 Git 的扩展头行，例如权限、相似度、重命名和二进制标记；`is_binary()` 判断二进制变更。
 二进制文件、仅修改权限或纯重命名等没有源文本行的文件，在文件头下方显示摘要。
 格式错误的 hunk 和不支持的 combined diff 返回 `DiffParseError`，通过 `line()` 和
 `message()` 获取 patch 位置与原因。
 
-## 布局与上下文
+## 显示模式与上下文
 
-默认采用 `DiffMode::Unified` 布局，每处变更前后最多保留三行 patch 已提供的未修改上下文。
-在创建状态时设置初始布局，之后由应用命令切换：
+默认采用 `DiffMode::Unified` 显示模式，每处变更前后最多保留三行 patch 已提供的未修改上下文。
+在创建状态时设置初始模式，之后由应用命令切换：
 
 ```rust
 let diff = cx.new(|cx| {
-    DiffState::new(documents, cx)
+    DiffState::new(files, cx)
         .with_mode(DiffMode::Split)
         .with_context_lines(Some(5))
 });
@@ -97,21 +97,23 @@ self.diff.update(cx, |state, cx| {
 ## 源文件坐标与导航
 
 `DiffSide::Original` 和 `DiffSide::Modified` 分别表示原始文件和修改后文件。
-`DiffLinePosition` 与 `DiffLineRange` 以文件在 `documents()` 中的下标定位文件，
-并使用**从 1 开始的源文件行号**，不是当前显示行的下标。行范围包含两端，
-且只属于一个文件的一侧。切换布局或折叠上下文不会改变源文件行号。
+`DiffLinePosition` 与 `DiffLineRange` 以文件的 `path()` 定位文件；patch 的新版本调整文件顺序时，
+路径保持不变。它们使用**从 1 开始的源文件行号**，不是当前显示行的下标。行范围包含两端，
+且只属于一个文件的一侧。切换显示模式或折叠上下文不会改变源文件行号。
 
 ```rust
 self.diff.update(cx, |state, cx| {
-    state.scroll_to_line(DiffLinePosition::new(0, DiffSide::Modified, 12), cx);
+    state.scroll_to_line(DiffLinePosition::new("src/main.rs", DiffSide::Modified, 12), cx);
+    state.scroll_to_file("src/main.rs", cx);
     state.next_change(cx);
     state.previous_change(cx);
 });
 ```
 
 `scroll_to_line` 会按需展开 patch 已提供的隐藏上下文，不能显示 patch 中不存在的行。
+`scroll_to_file` 滚动到文件头，没有源文本行的文件也可以定位，适合配合文件列表使用。
 变更导航跨所有文件在各个变更组之间移动，到达两端后循环。
-布局切换与导航命令由应用放置在工具栏或菜单中。
+显示模式切换与导航命令由应用放置在工具栏或菜单中。
 
 ## 选择与复制
 
@@ -119,7 +121,7 @@ self.diff.update(cx, |state, cx| {
 
 ```rust
 self.diff.update(cx, |state, cx| {
-    state.set_selected_lines(Some(DiffLineRange::new(0, DiffSide::Modified, 3, 8)), cx);
+    state.set_selected_lines(Some(DiffLineRange::new("src/main.rs", DiffSide::Modified, 3, 8)), cx);
 });
 
 let source = self.diff.read(cx).selected_text(cx);
@@ -138,7 +140,7 @@ self.diff.update(cx, |state, cx| {
 
 ```rust
 self.diff.update(cx, |state, cx| {
-    state.set_documents(updated_documents, cx);
+    state.set_files(updated_files, cx);
 });
 ```
 
@@ -151,7 +153,7 @@ self.diff.update(cx, |state, cx| {
 
 ```rust
 Diff::new(&self.diff)
-    .line_numbers(true)
+    .line_number(true)
     .syntax_highlight(true)
     .header_visible(true)
     .h(rems(24.))
@@ -179,17 +181,17 @@ Diff::new(&self.diff)
 
 ```rust
 Diff::new(&self.diff)
-    .header(|document, _, _| {
+    .header(|file, _, _| {
         div()
             .flex()
             .gap_2()
-            .child(document.path().clone())
-            .child(format!("+{}", document.additions()))
+            .child(file.path().clone())
+            .child(format!("+{}", file.additions()))
     })
     .h(rems(24.))
 ```
 
-回调接收 `&DiffDocument`、`&mut Window` 和 `&mut App`，返回 `IntoElement`。
+回调接收 `&DiffFile`、`&mut Window` 和 `&mut App`，返回 `IntoElement`。
 回调实现 `Fn`，捕获的值必须满足 `'static`；接收的是 `App`，不是所属视图的 `Context`。
 在回调中构建内容，在内容的事件处理函数中修改状态。不要在渲染回调内同步读取或更新
 同一个 `DiffState` 实体。
@@ -202,16 +204,16 @@ Diff::new(&self.diff)
 ```rust
 let annotation = DiffLineAnnotation::new(
     "review-comment-42",
-    DiffLinePosition::new(0, DiffSide::Modified, 3),
+    DiffLinePosition::new("src/main.rs", DiffSide::Modified, 3),
 );
 
 Diff::new(&self.diff)
     .annotations([annotation])
-    .annotation(|_, _, _| div().child("Check the fallback behavior."))
+    .annotation_content(|_, _, _| div().child("Check the fallback behavior."))
     .h(rems(24.))
 ```
 
-同时提供 `annotations` 和 `annotation`。回调接收
+同时提供 `annotations` 和 `annotation_content`。回调接收
 `&DiffLineAnnotation`、`&mut Window` 和 `&mut App`，可通过 `id()` 与 `position()`
 查找应用内容。批注 ID 在同一个 Diff 中必须稳定且唯一。批注位于隐藏上下文时，
 对应源文件行展开后才会显示。无效行位置或不存在的一侧不会渲染批注。
@@ -219,7 +221,7 @@ Unified 中未修改的行只显示一次，但可以显示原始侧和修改后
 批注回调与文件头回调具有相同的 `Fn` 和 `'static` 要求。
 
 批注内容的高度可以随意变化。可见行每一帧都会重新测量；添加、移动、删除或替换批注时，
-相关行也会重新测量。Split 布局中的配对行随较高的一侧伸展。
+相关行也会重新测量。Split 模式中的配对行随较高的一侧伸展。
 复制源文本时不包含批注内容；批注中的按钮和其他控件管理各自的操作。
 
 ## 鼠标与键盘交互

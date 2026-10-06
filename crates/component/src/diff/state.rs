@@ -1,4 +1,9 @@
-use std::{cell::RefCell, collections::HashSet, ops::Range, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    ops::Range,
+    rc::Rc,
+};
 
 use gpui::{
     App, AppContext as _, Context, ElementId, EventEmitter, FocusHandle, Focusable, ListAlignment,
@@ -8,7 +13,7 @@ use gpui::{
 use gpui_base::{TextSelection, TextSelectionContentKey, TextSelectionEvent, TextSelectionHandle};
 
 use super::{
-    DiffDocument, DiffLineAnnotation, DiffLinePosition, DiffLineRange, DiffMode, DiffSide,
+    DiffFile, DiffLineAnnotation, DiffLinePosition, DiffLineRange, DiffMode, DiffSide,
     document::SyntaxHighlighters, selection::SelectionGeometry,
 };
 
@@ -46,6 +51,7 @@ impl DisplayRow {
 
 /// Notifications from the readonly comparison surface.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum DiffEvent {
     /// A gutter or keyboard operation changed the selected source lines.
     SelectionChanged(Option<DiffLineRange>),
@@ -58,7 +64,7 @@ pub(crate) struct LayoutKey {
     font_size: Pixels,
     font_family: SharedString,
     mode: DiffMode,
-    line_numbers: bool,
+    line_number: bool,
 }
 
 impl LayoutKey {
@@ -67,14 +73,14 @@ impl LayoutKey {
         font_size: Pixels,
         font_family: SharedString,
         mode: DiffMode,
-        line_numbers: bool,
+        line_number: bool,
     ) -> Self {
         Self {
             rem,
             font_size,
             font_family,
             mode,
-            line_numbers,
+            line_number,
         }
     }
 }
@@ -90,14 +96,17 @@ struct FileRows {
 /// [`super::Diff`] showing one or more files of a patch.
 ///
 /// Create once in the owning view. Mutations notify observers; the application
-/// owns the patch and chooses when to install new documents. Syntax emphasis is
+/// owns the patch and chooses when to install new files. Syntax emphasis is
 /// prepared on a background thread and appears once ready.
 pub struct DiffState {
-    documents: Vec<DiffDocument>,
+    files: Vec<DiffFile>,
+    /// Each path's index in `files`; the first file wins a duplicated path.
+    file_ixs: HashMap<SharedString, usize>,
     mode: DiffMode,
     context_lines: Option<usize>,
     expanded: Vec<Vec<Range<usize>>>,
     file_rows: Vec<FileRows>,
+    header_rows: Vec<usize>,
     rows: Rc<Vec<DisplayRow>>,
     change_rows: Vec<usize>,
     list: ListState,
@@ -127,7 +136,7 @@ impl Focusable for DiffState {
 
 impl DiffState {
     /// Creates a unified viewer with three unchanged lines around each change.
-    pub fn new(documents: impl IntoIterator<Item = DiffDocument>, cx: &mut Context<Self>) -> Self {
+    pub fn new(files: impl IntoIterator<Item = DiffFile>, cx: &mut Context<Self>) -> Self {
         let focus = cx.focus_handle().tab_stop(true);
         let selection = TextSelectionHandle::new("", cx);
         let geometry = Rc::new(RefCell::new(SelectionGeometry::default()));
@@ -202,13 +211,15 @@ impl DiffState {
             },
             cx,
         );
-        let documents = documents.into_iter().collect::<Vec<_>>();
+        let files = files.into_iter().collect::<Vec<_>>();
         let mut state = Self {
-            expanded: vec![Vec::new(); documents.len()],
-            documents,
+            expanded: vec![Vec::new(); files.len()],
+            file_ixs: file_ixs(&files),
+            files,
             mode: DiffMode::Unified,
             context_lines: Some(3),
             file_rows: Vec::new(),
+            header_rows: Vec::new(),
             rows: Rc::default(),
             change_rows: Vec::new(),
             list: ListState::new(0, ListAlignment::Top, px(0.)),
@@ -233,7 +244,7 @@ impl DiffState {
         state
     }
 
-    /// Sets the initial layout. Default is [`DiffMode::Unified`].
+    /// Sets the initial display mode. Default is [`DiffMode::Unified`].
     pub fn with_mode(mut self, mode: DiffMode) -> Self {
         self.mode = mode;
         self.rebuild(true);
@@ -248,10 +259,9 @@ impl DiffState {
         self
     }
 
-    /// The files in patch order. Positions and ranges address a file by its
-    /// index in this slice.
-    pub fn documents(&self) -> &[DiffDocument] {
-        &self.documents
+    /// The files in patch order.
+    pub fn files(&self) -> &[DiffFile] {
+        &self.files
     }
     pub fn mode(&self) -> DiffMode {
         self.mode
@@ -260,7 +270,7 @@ impl DiffState {
         self.context_lines
     }
     pub fn selected_lines(&self) -> Option<DiffLineRange> {
-        self.selected_lines
+        self.selected_lines.clone()
     }
 
     pub(crate) fn rows(&self) -> &Rc<Vec<DisplayRow>> {
@@ -302,18 +312,15 @@ impl DiffState {
     }
 
     /// Replaces the files and resets expansion, selection and viewport.
-    pub fn set_documents(
-        &mut self,
-        documents: impl IntoIterator<Item = DiffDocument>,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn set_files(&mut self, files: impl IntoIterator<Item = DiffFile>, cx: &mut Context<Self>) {
         if let Some(window) = self.window
             && self.selection_is_local(cx)
         {
             TextSelection::clear_for_window(window, cx);
         }
-        self.documents = documents.into_iter().collect();
-        self.expanded = vec![Vec::new(); self.documents.len()];
+        self.files = files.into_iter().collect();
+        self.file_ixs = file_ixs(&self.files);
+        self.expanded = vec![Vec::new(); self.files.len()];
         self.layout = None;
         self.annotations.clear();
         self.selection.set_local_selection(false, cx);
@@ -328,7 +335,7 @@ impl DiffState {
         cx.notify();
     }
 
-    /// Changes layout while preserving source-line selection and a nearby source row.
+    /// Changes the display mode while preserving source-line selection and a nearby source row.
     pub fn set_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
         if self.mode == mode {
             return;
@@ -352,7 +359,7 @@ impl DiffState {
 
     /// Reveals all unchanged source while preserving the configured context count.
     pub fn expand_all(&mut self, cx: &mut Context<Self>) {
-        for (expanded, document) in self.expanded.iter_mut().zip(&self.documents) {
+        for (expanded, document) in self.expanded.iter_mut().zip(&self.files) {
             *expanded = vec![0..document.pairs().len()];
         }
         self.rebuild_at_anchor();
@@ -370,12 +377,12 @@ impl DiffState {
     /// Clips to supplied patch lines; a range containing none clears selection.
     pub fn set_selected_lines(&mut self, range: Option<DiffLineRange>, cx: &mut Context<Self>) {
         let range = range.and_then(|range| {
-            let lines = self.documents.get(range.file())?.lines(range.side());
+            let lines = self.files[self.file_ix(range.path())?].lines(range.side());
             let start = lines.partition_point(|line| line.line_number() < range.start());
             let end = lines.partition_point(|line| line.line_number() <= range.end());
             (start < end).then(|| {
                 DiffLineRange::new(
-                    range.file(),
+                    range.path().clone(),
                     range.side(),
                     lines[start].line_number(),
                     lines[end - 1].line_number(),
@@ -385,33 +392,33 @@ impl DiffState {
         if self.selected_lines == range {
             return;
         }
-        self.selected_lines = range;
-        self.selection_anchor =
-            range.map(|range| DiffLinePosition::new(range.file(), range.side(), range.start()));
-        self.selection_cursor =
-            range.map(|range| DiffLinePosition::new(range.file(), range.side(), range.end()));
+        self.selection_anchor = range
+            .as_ref()
+            .map(|range| DiffLinePosition::new(range.path().clone(), range.side(), range.start()));
+        self.selection_cursor = range
+            .as_ref()
+            .map(|range| DiffLinePosition::new(range.path().clone(), range.side(), range.end()));
         self.selection.set_local_selection(range.is_some(), cx);
+        self.selected_lines = range;
         cx.notify();
     }
 
     /// Returns selected source without gutters, diff markers or annotation content.
     pub fn selected_text(&self, cx: &App) -> String {
         if self.selection.has_local_selection(cx)
-            && let Some(range) = self.selected_lines
+            && let Some(range) = &self.selected_lines
         {
-            return self
-                .documents
-                .get(range.file())
-                .map_or_else(String::new, |document| {
-                    document.text_for_lines(range.side(), range.start(), range.end())
-                });
+            return self.file_ix(range.path()).map_or_else(String::new, |file| {
+                let document = &self.files[file];
+                document.text_for_lines(range.side(), range.start(), range.end())
+            });
         }
         let Some((file, side, range)) =
             super::selection::selected_source_range(&self.selection, cx)
         else {
             return String::new();
         };
-        self.documents
+        self.files
             .get(file)
             .and_then(|document| document.source(side).get(range))
             .unwrap_or("")
@@ -420,13 +427,28 @@ impl DiffState {
 
     /// Reveals and scrolls to a source line, expanding its hidden context if needed.
     pub fn scroll_to_line(&mut self, position: DiffLinePosition, cx: &mut Context<Self>) {
-        if self.line_index(position).is_none() {
+        if self.line_index(&position).is_none() {
             return;
         }
-        if self.expand_line(position).is_some() {
-            self.reveal_line(position);
+        if self.expand_line(&position).is_some() {
+            self.reveal_line(&position);
             cx.notify();
         }
+    }
+
+    /// Scrolls to the header of the file at `path`, a [`DiffFile::path`].
+    pub fn scroll_to_file(&mut self, path: &str, cx: &mut Context<Self>) {
+        let Some(item_ix) = self
+            .file_ix(path)
+            .and_then(|file| self.header_rows.get(file).copied())
+        else {
+            return;
+        };
+        self.list.scroll_to(ListOffset {
+            item_ix,
+            offset_in_item: px(0.),
+        });
+        cx.notify();
     }
 
     /// Moves to the next changed group after the current viewport, across files.
@@ -453,13 +475,14 @@ impl DiffState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.line_index(position).is_none() {
+        if self.line_index(&position).is_none() {
             return;
         }
         let anchor = self
             .selection_anchor
-            .filter(|a| extend && a.file() == position.file() && a.side() == position.side())
-            .unwrap_or(position);
+            .clone()
+            .filter(|a| extend && a.path() == position.path() && a.side() == position.side())
+            .unwrap_or_else(|| position.clone());
         TextSelection::clear(window, cx);
         self.select_user_range(anchor, position, window, cx);
     }
@@ -474,17 +497,20 @@ impl DiffState {
         let Some((file, side)) = self.active_side(cx) else {
             return;
         };
-        let document = &self.documents[file];
+        let document = &self.files[file];
         let count = document.lines_count(side);
         let ix = self
             .selection_cursor
-            .filter(|position| position.file() == file && position.side() == side)
+            .as_ref()
+            .filter(|position| {
+                position.side() == side && self.file_ix(position.path()) == Some(file)
+            })
             .and_then(|position| self.line_index(position))
             .map(|ix| ix.saturating_add_signed(direction).min(count - 1))
             .unwrap_or(0);
         let position = self.position(file, side, ix);
-        self.click_line(position, extend, window, cx);
-        if let Some(row) = self.expand_line(position) {
+        self.click_line(position.clone(), extend, window, cx);
+        if let Some(row) = self.expand_line(&position) {
             self.list.scroll_to_reveal_item(row);
         }
     }
@@ -493,7 +519,7 @@ impl DiffState {
         let Some((file, side)) = self.active_side(cx) else {
             return;
         };
-        let count = self.documents[file].lines_count(side);
+        let count = self.files[file].lines_count(side);
         TextSelection::clear(window, cx);
         self.select_user_range(
             self.position(file, side, 0),
@@ -529,14 +555,14 @@ impl DiffState {
     pub(crate) fn sync_annotations(&mut self, annotations: &[DiffLineAnnotation]) {
         let current = annotations
             .iter()
-            .map(|annotation| (annotation.position(), annotation.id().clone()))
+            .map(|annotation| (annotation.position().clone(), annotation.id().clone()))
             .collect::<HashSet<_>>();
         if current == self.annotations {
             return;
         }
         let rows = current
             .symmetric_difference(&self.annotations)
-            .filter_map(|(position, _)| self.source_row(*position))
+            .filter_map(|(position, _)| self.source_row(position))
             .collect::<Vec<_>>();
         for row in rows {
             self.list.remeasure_items(row..row + 1);
@@ -545,13 +571,20 @@ impl DiffState {
     }
 
     pub(crate) fn position(&self, file: usize, side: DiffSide, ix: usize) -> DiffLinePosition {
-        DiffLinePosition::new(file, side, self.documents[file].line_number(side, ix))
+        let document = &self.files[file];
+        DiffLinePosition::new(
+            document.path().clone(),
+            side,
+            document.line_number(side, ix),
+        )
     }
 
-    fn line_index(&self, position: DiffLinePosition) -> Option<usize> {
-        self.documents
-            .get(position.file())?
-            .line_index(position.side(), position.line())
+    fn file_ix(&self, path: &str) -> Option<usize> {
+        self.file_ixs.get(path).copied()
+    }
+
+    fn line_index(&self, position: &DiffLinePosition) -> Option<usize> {
+        self.files[self.file_ix(position.path())?].line_index(position.side(), position.line())
     }
 
     fn selection_is_local(&self, cx: &App) -> bool {
@@ -565,7 +598,8 @@ impl DiffState {
     fn active_side(&self, cx: &App) -> Option<(usize, DiffSide)> {
         let (file, side) = self
             .selected_lines
-            .map(|range| (range.file(), Some(range.side())))
+            .as_ref()
+            .and_then(|range| Some((self.file_ix(range.path())?, Some(range.side()))))
             .or_else(|| {
                 super::selection::selected_source_range(&self.selection, cx)
                     .map(|(file, side, _)| (file, Some(side)))
@@ -574,7 +608,7 @@ impl DiffState {
                 let top = self.list.logical_scroll_top().item_ix;
                 self.rows.get(top).map(|row| (row.file(), None))
             })?;
-        let document = self.documents.get(file)?;
+        let document = self.files.get(file)?;
         let side = side.unwrap_or(if document.lines_count(DiffSide::Modified) > 0 {
             DiffSide::Modified
         } else {
@@ -583,7 +617,7 @@ impl DiffState {
         (document.lines_count(side) > 0).then_some((file, side))
     }
 
-    fn expand_line(&mut self, position: DiffLinePosition) -> Option<usize> {
+    fn expand_line(&mut self, position: &DiffLinePosition) -> Option<usize> {
         let row = self.source_row(position)?;
         if let Some(DisplayRow::Fold { file, pairs }) = self.rows.get(row) {
             let (file, pairs) = (*file, pairs.clone());
@@ -601,13 +635,13 @@ impl DiffState {
         cx: &mut Context<Self>,
     ) {
         let range = Some(DiffLineRange::new(
-            cursor.file(),
+            cursor.path().clone(),
             cursor.side(),
             anchor.line(),
             cursor.line(),
         ));
         let changed = self.selected_lines != range;
-        self.selected_lines = range;
+        self.selected_lines = range.clone();
         self.selection_anchor = Some(anchor);
         self.selection_cursor = Some(cursor);
         self.selection.set_local_selection(true, cx);
@@ -656,7 +690,7 @@ impl DiffState {
             DisplayRow::Code {
                 original, modified, ..
             } => pair_position(*original, *modified),
-            DisplayRow::Fold { pairs, .. } => self.documents[file]
+            DisplayRow::Fold { pairs, .. } => self.files[file]
                 .pairs()
                 .get(pairs.start)
                 .and_then(|pair| pair_position(pair.original(), pair.modified())),
@@ -668,8 +702,8 @@ impl DiffState {
         }
     }
 
-    pub(crate) fn source_row(&self, position: DiffLinePosition) -> Option<usize> {
-        let rows = self.file_rows.get(position.file())?;
+    pub(crate) fn source_row(&self, position: &DiffLinePosition) -> Option<usize> {
+        let rows = self.file_rows.get(self.file_ix(position.path())?)?;
         let rows = match position.side() {
             DiffSide::Original => &rows.original,
             DiffSide::Modified => &rows.modified,
@@ -677,7 +711,7 @@ impl DiffState {
         rows.get(self.line_index(position)?).copied()
     }
 
-    fn reveal_line(&self, position: DiffLinePosition) {
+    fn reveal_line(&self, position: &DiffLinePosition) {
         if let Some(item_ix) = self.source_row(position) {
             self.list.scroll_to(ListOffset {
                 item_ix,
@@ -691,21 +725,21 @@ impl DiffState {
         let anchor = self.row_position(self.list.logical_scroll_top().item_ix);
         self.rebuild(false);
         if let Some(anchor) = anchor {
-            self.reveal_line(anchor);
+            self.reveal_line(&anchor);
         }
     }
 
     /// Projects rows. Without `reset`, only the changed middle is spliced so
     /// measured heights of unchanged rows survive disclosure changes.
     fn rebuild(&mut self, reset: bool) {
-        let rows = project_rows(
-            &self.documents,
-            self.mode,
-            self.context_lines,
-            &self.expanded,
-        );
-        self.file_rows = source_rows(&self.documents, &rows);
+        let rows = project_rows(&self.files, self.mode, self.context_lines, &self.expanded);
+        self.file_rows = source_rows(&self.files, &rows);
         self.change_rows = changed_groups(&rows);
+        self.header_rows = rows
+            .iter()
+            .enumerate()
+            .filter_map(|(ix, row)| matches!(row, DisplayRow::File(_)).then_some(ix))
+            .collect();
         if reset {
             self.list.reset(rows.len());
         } else {
@@ -735,7 +769,7 @@ impl DiffState {
 
     fn prepare_syntax(&mut self, cx: &mut Context<Self>) {
         let pending = self
-            .documents
+            .files
             .iter()
             .filter(|document| document.syntax().is_none())
             .cloned()
@@ -762,10 +796,18 @@ impl DiffState {
     }
 }
 
+fn file_ixs(files: &[DiffFile]) -> HashMap<SharedString, usize> {
+    let mut ixs = HashMap::with_capacity(files.len());
+    for (ix, file) in files.iter().enumerate() {
+        ixs.entry(file.path().clone()).or_insert(ix);
+    }
+    ixs
+}
+
 /// Every source line maps to its code row or the disclosure hiding it.
 /// Disjoint folds visit each pair once, so building the maps is linear.
-fn source_rows(documents: &[DiffDocument], rows: &[DisplayRow]) -> Vec<FileRows> {
-    let mut file_rows = documents
+fn source_rows(files: &[DiffFile], rows: &[DisplayRow]) -> Vec<FileRows> {
+    let mut file_rows = files
         .iter()
         .map(|document| FileRows {
             original: vec![0; document.lines_count(DiffSide::Original)],
@@ -789,7 +831,7 @@ fn source_rows(documents: &[DiffDocument], rows: &[DisplayRow]) -> Vec<FileRows>
                 ..
             } => map(*file, *original, *modified),
             DisplayRow::Fold { file, pairs } => {
-                for pair in &documents[*file].pairs()[pairs.clone()] {
+                for pair in &files[*file].pairs()[pairs.clone()] {
                     map(*file, pair.original(), pair.modified());
                 }
             }
@@ -837,13 +879,13 @@ pub(crate) fn decode_key(key: u64) -> (usize, DiffSide, usize) {
 }
 
 fn project_rows(
-    documents: &[DiffDocument],
+    files: &[DiffFile],
     mode: DiffMode,
     context: Option<usize>,
     expanded: &[Vec<Range<usize>>],
 ) -> Vec<DisplayRow> {
     let mut rows = Vec::new();
-    for (file, document) in documents.iter().enumerate() {
+    for (file, document) in files.iter().enumerate() {
         rows.push(DisplayRow::File(file));
         if document.pairs().is_empty() {
             rows.push(DisplayRow::Notice(file));
@@ -857,7 +899,7 @@ fn project_rows(
 fn project_file(
     rows: &mut Vec<DisplayRow>,
     file: usize,
-    document: &DiffDocument,
+    document: &DiffFile,
     mode: DiffMode,
     context: Option<usize>,
     expanded: &[Range<usize>],
