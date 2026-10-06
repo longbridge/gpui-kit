@@ -120,7 +120,7 @@ fn context_disclosures_reveal_source_ranges_without_retargeting_selection(cx: &m
             item_ix: 3,
             offset_in_item: px(0.),
         });
-        state.expand(0, folds[0].clone(), cx);
+        state.expand_fold(0, folds[0].clone(), super::state::FoldExpansion::All, cx);
         assert_eq!(state.list().logical_scroll_top().item_ix, 15);
         assert!(matches!(
             state.rows().get(1),
@@ -152,13 +152,13 @@ fn context_disclosures_reveal_source_ranges_without_retargeting_selection(cx: &m
                 .iter()
                 .any(|row| matches!(row, DisplayRow::Fold { .. }))
         );
-        state.collapse_all(cx);
+        state.collapse_unchanged(cx);
         assert_eq!(state.context_lines(), Some(1));
         assert_eq!(
             state.selected_lines(),
             Some(DiffLineRange::new("review.txt", DiffSide::Modified, 14, 16))
         );
-        state.expand_all(cx);
+        state.expand_unchanged(cx);
         assert_eq!(state.rows().len(), 31);
         assert!(
             !state
@@ -325,8 +325,9 @@ fn controlled_selection_stays_silent_and_coherent_changes_notify(cx: &mut TestAp
     let _events = cx.update(|cx| {
         let events = events.clone();
         cx.subscribe(&state, move |_, event: &DiffEvent, _| {
-            let DiffEvent::SelectionChanged(range) = event;
-            events.borrow_mut().push(range.clone());
+            if let DiffEvent::SelectionChanged(range) = event {
+                events.borrow_mut().push(range.clone());
+            }
         })
     });
     let _notifications = cx.update(|cx| {
@@ -371,8 +372,9 @@ fn user_line_selection_extends_on_one_side_and_replacement_resets_silently(
     let _subscription = cx.update(|cx| {
         let events = events.clone();
         cx.subscribe(&state, move |_, event: &DiffEvent, _| {
-            let DiffEvent::SelectionChanged(range) = event;
-            events.borrow_mut().push(range.clone());
+            if let DiffEvent::SelectionChanged(range) = event {
+                events.borrow_mut().push(range.clone());
+            }
         })
     });
     cx.update_window(window.into(), |_, window, cx| {
@@ -399,6 +401,32 @@ fn user_line_selection_extends_on_one_side_and_replacement_resets_silently(
             assert_eq!(
                 state.selected_lines(),
                 Some(DiffLineRange::new("review.txt", DiffSide::Original, 2, 2))
+            );
+            // Unified rows follow patch order, so Shift-click crosses sides.
+            state.click_line(
+                DiffLinePosition::new("review.txt", DiffSide::Modified, 3),
+                true,
+                window,
+                cx,
+            );
+            assert_eq!(
+                state.selected_lines(),
+                Some(
+                    DiffLineRange::new("review.txt", DiffSide::Original, 2, 3)
+                        .with_end_side(DiffSide::Modified)
+                )
+            );
+            assert_eq!(
+                state.selected_text(cx),
+                "old two\r\nold three\nnew one\r\nnew two\r\nnew three"
+            );
+            // Split columns are separate; changing side starts a new selection.
+            state.set_mode(DiffMode::Split, cx);
+            state.click_line(
+                DiffLinePosition::new("review.txt", DiffSide::Original, 1),
+                false,
+                window,
+                cx,
             );
             state.click_line(
                 DiffLinePosition::new("review.txt", DiffSide::Modified, 3),
@@ -433,6 +461,11 @@ fn user_line_selection_extends_on_one_side_and_replacement_resets_silently(
             Some(DiffLineRange::new("review.txt", DiffSide::Original, 2, 2)),
             Some(DiffLineRange::new("review.txt", DiffSide::Original, 2, 3)),
             Some(DiffLineRange::new("review.txt", DiffSide::Original, 2, 2)),
+            Some(
+                DiffLineRange::new("review.txt", DiffSide::Original, 2, 3)
+                    .with_end_side(DiffSide::Modified)
+            ),
+            Some(DiffLineRange::new("review.txt", DiffSide::Original, 1, 1)),
             Some(DiffLineRange::new("review.txt", DiffSide::Modified, 3, 3)),
             Some(DiffLineRange::new("review.txt", DiffSide::Modified, 1, 3)),
         ]
@@ -452,7 +485,7 @@ fn user_line_selection_extends_on_one_side_and_replacement_resets_silently(
         });
     })
     .unwrap();
-    assert_eq!(events.borrow().len(), 6);
+    assert_eq!(events.borrow().len(), 8);
 }
 
 #[gpui::test]

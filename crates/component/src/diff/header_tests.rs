@@ -3,7 +3,7 @@ use std::{cell::RefCell, rc::Rc};
 use gpui::{AppContext, ParentElement as _, TestAppContext, div};
 
 use super::{
-    Diff, DiffFile, DiffLineAnnotation, DiffLinePosition, DiffSide, DiffState, document::fixture,
+    Diff, DiffAnnotation, DiffFile, DiffLinePosition, DiffSide, DiffState, document::fixture,
 };
 
 #[gpui::test]
@@ -18,13 +18,13 @@ fn test_diff_builder(cx: &mut TestAppContext) {
     assert_eq!(defaults.state.entity_id(), state.entity_id());
     assert!(defaults.header_visible && defaults.line_number);
     assert!(defaults.syntax_highlight);
-    assert!(defaults.annotations.is_empty());
-    assert!(defaults.header_renderer.is_none());
-    assert!(defaults.annotation_renderer.is_none());
+    assert!(defaults.annotations.items.is_empty());
+    assert!(defaults.header.content.is_none());
+    assert!(defaults.annotation_content.is_none());
 
     let header_calls = Rc::new(RefCell::new(Vec::new()));
     let position = DiffLinePosition::new("after.rs", DiffSide::Modified, 1);
-    let annotation = DiffLineAnnotation::new("review-comment", position.clone());
+    let annotation = DiffAnnotation::line("review-comment", position.clone());
     let annotation_calls = Rc::new(RefCell::new(Vec::new()));
     let diff = Diff::new(&state)
         .header_visible(false)
@@ -47,7 +47,7 @@ fn test_diff_builder(cx: &mut TestAppContext) {
                 assert_eq!(annotation.id(), &"review-comment".into());
                 annotation_calls
                     .borrow_mut()
-                    .push(annotation.position().clone());
+                    .push(annotation.position().cloned().unwrap());
                 div().child("Review comment")
             }
         });
@@ -55,17 +55,17 @@ fn test_diff_builder(cx: &mut TestAppContext) {
     assert_eq!(diff.state.entity_id(), state.entity_id());
     assert!(!diff.header_visible && !diff.line_number);
     assert!(!diff.syntax_highlight);
-    assert_eq!(diff.annotations.len(), 1);
-    assert_eq!(diff.annotations[0].id(), annotation.id());
-    assert_eq!(diff.annotations[0].position(), &position);
-    assert_eq!(diff.annotation_index[&position], [0]);
+    assert_eq!(diff.annotations.items.len(), 1);
+    assert_eq!(diff.annotations.items[0].id(), annotation.id());
+    assert_eq!(diff.annotations.items[0].position(), Some(&position));
+    assert_eq!(diff.annotations.lines[&position], [0]);
 
     let window = cx.add_empty_window();
     window.update(|window, cx| {
-        let render = diff.header_renderer.as_ref().unwrap();
+        let render = diff.header.content.as_ref().unwrap();
         let _ = render(&document, window, cx);
-        let render = diff.annotation_renderer.as_ref().unwrap();
-        let _ = render(&diff.annotations[0], window, cx);
+        let render = diff.annotation_content.as_ref().unwrap();
+        let _ = render(&diff.annotations.items[0], window, cx);
     });
     assert_eq!(
         header_calls.borrow().as_slice(),

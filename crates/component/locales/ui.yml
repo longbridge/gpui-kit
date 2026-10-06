@@ -473,6 +473,38 @@ Diff:
     en: Deleted file
     zh-CN: 已删除文件
     zh-HK: 已刪除檔案
+  RenamedFile:
+    en: Renamed
+    zh-CN: 已重命名
+    zh-HK: 已重新命名
+  CopiedFile:
+    en: Copied
+    zh-CN: 已复制
+    zh-HK: 已複製
+  HiddenLines:
+    en: "%{count} lines not in patch"
+    zh-CN: "patch 中未包含 %{count} 行"
+    zh-HK: "patch 中未包含 %{count} 行"
+  ExpandAbove:
+    en: Show %{count} lines above
+    zh-CN: 显示上方 %{count} 行
+    zh-HK: 顯示上方 %{count} 行
+  ExpandBelow:
+    en: Show %{count} lines below
+    zh-CN: 显示下方 %{count} 行
+    zh-HK: 顯示下方 %{count} 行
+  CollapseFile:
+    en: Collapse %{name}
+    zh-CN: 收起 %{name}
+    zh-HK: 收起 %{name}
+  ExpandFile:
+    en: Expand %{name}
+    zh-CN: 展开 %{name}
+    zh-HK: 展開 %{name}
+  AddAnnotation:
+    en: Add annotation to line %{line}
+    zh-CN: 为第 %{line} 行添加批注
+    zh-HK: 為第 %{line} 行新增批註
   Original:
     en: Original
     zh-CN: 原版

@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     ops::Range,
     rc::Rc,
+    sync::Arc,
 };
 
 use gpui::{
@@ -13,14 +14,15 @@ use gpui::{
 use gpui_base::{TextSelection, TextSelectionContentKey, TextSelectionEvent, TextSelectionHandle};
 
 use super::{
-    DiffFile, DiffLineAnnotation, DiffLinePosition, DiffLineRange, DiffMode, DiffSide,
-    document::SyntaxHighlighters, selection::SelectionGeometry,
+    DiffAnnotation, DiffFile, DiffInlineUnit, DiffLinePosition, DiffLineRange, DiffMode, DiffSide,
+    presentation::{FilePresentation, PresentationOptions, SyntaxHighlighters},
+    selection::SelectionGeometry,
 };
 
 /// One virtualized row. Every row belongs to exactly one file.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum DisplayRow {
-    /// The file header.
+    /// The file header, with any file-level annotations.
     File(usize),
     /// Binary, metadata-only or empty file summary, for a file without source rows.
     Notice(usize),
@@ -49,12 +51,30 @@ impl DisplayRow {
     }
 }
 
+/// Which part of a collapsed unchanged range a disclosure reveals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FoldExpansion {
+    /// The lines just above the following source.
+    Up,
+    /// The lines just below the preceding source.
+    Down,
+    All,
+}
+
 /// Notifications from the readonly comparison surface.
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum DiffEvent {
-    /// A gutter or keyboard operation changed the selected source lines.
+    /// A pointer gesture began selecting source lines from a line number.
+    SelectionStarted(DiffLineRange),
+    /// A pointer, gutter or keyboard operation changed the selected source lines.
     SelectionChanged(Option<DiffLineRange>),
+    /// A selection gesture finished; the range is ready to act on.
+    SelectionEnded(DiffLineRange),
+    /// The user expanded a collapsed file from its header.
+    FileExpanded(SharedString),
+    /// The user collapsed a file from its header.
+    FileCollapsed(SharedString),
 }
 
 /// Inputs that determine row heights and content width.
@@ -88,23 +108,90 @@ impl LayoutKey {
 /// The row showing each source line, or the disclosure hiding it.
 #[derive(Default)]
 struct FileRows {
-    original: Vec<usize>,
-    modified: Vec<usize>,
+    original: Vec<Option<usize>>,
+    modified: Vec<Option<usize>>,
+}
+
+/// The selected source lines of one file, resolved for membership tests.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum SelectedLines {
+    /// Lines numbered `lines` on one side.
+    Side {
+        file: usize,
+        side: DiffSide,
+        lines: Range<usize>,
+    },
+    /// Patch lines in `patch` order, across both sides.
+    Patch { file: usize, patch: Range<usize> },
+}
+
+impl SelectedLines {
+    pub(crate) fn contains(
+        &self,
+        files: &[DiffFile],
+        file: usize,
+        side: DiffSide,
+        ix: usize,
+    ) -> bool {
+        match self {
+            Self::Side {
+                file: selected,
+                side: selected_side,
+                lines,
+            } => {
+                *selected == file
+                    && *selected_side == side
+                    && lines.contains(&files[file].line_number(side, ix))
+            }
+            Self::Patch {
+                file: selected,
+                patch,
+            } => *selected == file && patch.contains(&files[file].patch_ix(side, ix)),
+        }
+    }
+
+    /// The last selected line, where a selection's add-annotation button sits.
+    pub(crate) fn is_last(
+        &self,
+        files: &[DiffFile],
+        file: usize,
+        side: DiffSide,
+        ix: usize,
+    ) -> bool {
+        match self {
+            Self::Side {
+                file: selected,
+                side: selected_side,
+                lines,
+            } => {
+                *selected == file
+                    && *selected_side == side
+                    && files[file].line_number(side, ix) + 1 == lines.end
+            }
+            Self::Patch {
+                file: selected,
+                patch,
+            } => *selected == file && files[file].patch_ix(side, ix) + 1 == patch.end,
+        }
+    }
 }
 
 /// Retained focus, viewport, context expansion and selection for a
 /// [`super::Diff`] showing one or more files of a patch.
 ///
 /// Create once in the owning view. Mutations notify observers; the application
-/// owns the patch and chooses when to install new files. Syntax emphasis is
-/// prepared on a background thread and appears once ready.
+/// owns the patch and chooses when to install new files. Syntax and inline
+/// emphasis are prepared on a background thread and appear once ready.
 pub struct DiffState {
     files: Vec<DiffFile>,
     /// Each path's index in `files`; the first file wins a duplicated path.
     file_ixs: HashMap<SharedString, usize>,
     mode: DiffMode,
     context_lines: Option<usize>,
+    expansion_lines: usize,
+    min_collapsed_lines: usize,
     expanded: Vec<Vec<Range<usize>>>,
+    collapsed: HashSet<SharedString>,
     file_rows: Vec<FileRows>,
     header_rows: Vec<usize>,
     rows: Rc<Vec<DisplayRow>>,
@@ -117,13 +204,16 @@ pub struct DiffState {
     selected_lines: Option<DiffLineRange>,
     selection_anchor: Option<DiffLinePosition>,
     selection_cursor: Option<DiffLinePosition>,
+    selecting: bool,
+    presentation_options: PresentationOptions,
+    presentations: Vec<Option<Arc<FilePresentation>>>,
     viewport: Size<Pixels>,
     layout: Option<LayoutKey>,
     content_width: Pixels,
     row_height: Option<Pixels>,
-    annotations: HashSet<(DiffLinePosition, ElementId)>,
+    annotations: HashSet<(Option<DiffLinePosition>, SharedString, ElementId)>,
     window: Option<WindowId>,
-    _syntax: Task<()>,
+    _presentation: Task<()>,
     _selection_subscription: Subscription,
 }
 
@@ -214,10 +304,14 @@ impl DiffState {
         let files = files.into_iter().collect::<Vec<_>>();
         let mut state = Self {
             expanded: vec![Vec::new(); files.len()],
+            presentations: vec![None; files.len()],
             file_ixs: file_ixs(&files),
             files,
             mode: DiffMode::Unified,
             context_lines: Some(3),
+            expansion_lines: 20,
+            min_collapsed_lines: 2,
+            collapsed: HashSet::new(),
             file_rows: Vec::new(),
             header_rows: Vec::new(),
             rows: Rc::default(),
@@ -230,17 +324,23 @@ impl DiffState {
             selected_lines: None,
             selection_anchor: None,
             selection_cursor: None,
+            selecting: false,
+            presentation_options: PresentationOptions {
+                inline_unit: Some(DiffInlineUnit::Word),
+                inline_max_line_length: 1000,
+                syntax_max_line_length: 1000,
+            },
             viewport: Size::default(),
             layout: None,
             content_width: px(0.),
             row_height: None,
             annotations: HashSet::new(),
             window: None,
-            _syntax: Task::ready(()),
+            _presentation: Task::ready(()),
             _selection_subscription,
         };
         state.rebuild(true);
-        state.prepare_syntax(cx);
+        state.prepare_presentation(cx);
         state
     }
 
@@ -259,6 +359,42 @@ impl DiffState {
         self
     }
 
+    /// Sets how many lines an up or down disclosure reveals. Default is 20.
+    pub fn with_expansion_lines(mut self, lines: usize) -> Self {
+        self.expansion_lines = lines.max(1);
+        self
+    }
+
+    /// Sets the shortest unchanged range that collapses; shorter ranges stay
+    /// visible. Default is 2.
+    pub fn with_min_collapsed_lines(mut self, lines: usize) -> Self {
+        self.min_collapsed_lines = lines.max(1);
+        self.rebuild(true);
+        self
+    }
+
+    /// Sets the unit inline changes between paired lines are emphasized in,
+    /// or `None` to emphasize whole lines only. Default is [`DiffInlineUnit::Word`].
+    pub fn with_inline_unit(mut self, unit: Option<DiffInlineUnit>) -> Self {
+        self.presentation_options.inline_unit = unit;
+        self.presentations.iter_mut().for_each(|item| *item = None);
+        self
+    }
+
+    /// Sets the longest line, in bytes, compared for inline changes. Default is 1,000.
+    pub fn with_inline_max_line_length(mut self, length: usize) -> Self {
+        self.presentation_options.inline_max_line_length = length;
+        self.presentations.iter_mut().for_each(|item| *item = None);
+        self
+    }
+
+    /// Sets the longest line, in bytes, given syntax emphasis. Default is 1,000.
+    pub fn with_syntax_max_line_length(mut self, length: usize) -> Self {
+        self.presentation_options.syntax_max_line_length = length;
+        self.presentations.iter_mut().for_each(|item| *item = None);
+        self
+    }
+
     /// The files in patch order.
     pub fn files(&self) -> &[DiffFile] {
         &self.files
@@ -269,8 +405,27 @@ impl DiffState {
     pub fn context_lines(&self) -> Option<usize> {
         self.context_lines
     }
+    pub fn expansion_lines(&self) -> usize {
+        self.expansion_lines
+    }
+    pub fn min_collapsed_lines(&self) -> usize {
+        self.min_collapsed_lines
+    }
+    pub fn inline_unit(&self) -> Option<DiffInlineUnit> {
+        self.presentation_options.inline_unit
+    }
+    pub fn inline_max_line_length(&self) -> usize {
+        self.presentation_options.inline_max_line_length
+    }
+    pub fn syntax_max_line_length(&self) -> usize {
+        self.presentation_options.syntax_max_line_length
+    }
     pub fn selected_lines(&self) -> Option<DiffLineRange> {
         self.selected_lines.clone()
+    }
+    /// Whether the file at `path` shows only its header.
+    pub fn is_file_collapsed(&self, path: &str) -> bool {
+        self.collapsed.contains(path)
     }
 
     pub(crate) fn rows(&self) -> &Rc<Vec<DisplayRow>> {
@@ -287,6 +442,9 @@ impl DiffState {
     }
     pub(crate) fn geometry(&self) -> &Rc<RefCell<SelectionGeometry>> {
         &self.geometry
+    }
+    pub(crate) fn presentations(&self) -> &[Option<Arc<FilePresentation>>] {
+        &self.presentations
     }
     /// The body's size as of the last paint.
     pub(crate) fn viewport(&self) -> Size<Pixels> {
@@ -312,6 +470,7 @@ impl DiffState {
     }
 
     /// Replaces the files and resets expansion, selection and viewport.
+    /// Collapsed files stay collapsed when their path is still present.
     pub fn set_files(&mut self, files: impl IntoIterator<Item = DiffFile>, cx: &mut Context<Self>) {
         if let Some(window) = self.window
             && self.selection_is_local(cx)
@@ -320,7 +479,10 @@ impl DiffState {
         }
         self.files = files.into_iter().collect();
         self.file_ixs = file_ixs(&self.files);
+        self.collapsed
+            .retain(|path| self.file_ixs.contains_key(path));
         self.expanded = vec![Vec::new(); self.files.len()];
+        self.presentations = vec![None; self.files.len()];
         self.layout = None;
         self.annotations.clear();
         self.selection.set_local_selection(false, cx);
@@ -328,14 +490,16 @@ impl DiffState {
         self.selected_lines = None;
         self.selection_anchor = None;
         self.selection_cursor = None;
+        self.selecting = false;
         self.geometry.borrow_mut().clear();
         self.rebuild(true);
         self.horizontal_scroll.set_offset(point(px(0.), px(0.)));
-        self.prepare_syntax(cx);
+        self.prepare_presentation(cx);
         cx.notify();
     }
 
-    /// Changes the display mode while preserving source-line selection and a nearby source row.
+    /// Changes the display mode while preserving source-line selection and a
+    /// nearby source row.
     pub fn set_mode(&mut self, mode: DiffMode, cx: &mut Context<Self>) {
         if self.mode == mode {
             return;
@@ -358,46 +522,48 @@ impl DiffState {
     }
 
     /// Reveals all unchanged source while preserving the configured context count.
-    pub fn expand_all(&mut self, cx: &mut Context<Self>) {
-        for (expanded, document) in self.expanded.iter_mut().zip(&self.files) {
-            *expanded = vec![0..document.pairs().len()];
+    pub fn expand_unchanged(&mut self, cx: &mut Context<Self>) {
+        for (expanded, file) in self.expanded.iter_mut().zip(&self.files) {
+            *expanded = vec![0..file.pairs().len()];
         }
         self.rebuild_at_anchor();
         cx.notify();
     }
 
     /// Restores the configured context disclosures.
-    pub fn collapse_all(&mut self, cx: &mut Context<Self>) {
+    pub fn collapse_unchanged(&mut self, cx: &mut Context<Self>) {
         self.expanded.iter_mut().for_each(Vec::clear);
         self.rebuild_at_anchor();
         cx.notify();
     }
 
+    /// Collapses the file at `path` to its header, or expands it, without
+    /// emitting a user event.
+    pub fn set_file_collapsed(&mut self, path: &str, collapsed: bool, cx: &mut Context<Self>) {
+        let Some(file) = self.file_ix(path) else {
+            return;
+        };
+        let path = self.files[file].path().clone();
+        let changed = if collapsed {
+            self.collapsed.insert(path)
+        } else {
+            self.collapsed.remove(&path)
+        };
+        if changed {
+            self.rebuild_at_anchor();
+            cx.notify();
+        }
+    }
+
     /// Synchronizes source-line selection without emitting a user event.
     /// Clips to supplied patch lines; a range containing none clears selection.
     pub fn set_selected_lines(&mut self, range: Option<DiffLineRange>, cx: &mut Context<Self>) {
-        let range = range.and_then(|range| {
-            let lines = self.files[self.file_ix(range.path())?].lines(range.side());
-            let start = lines.partition_point(|line| line.line_number() < range.start());
-            let end = lines.partition_point(|line| line.line_number() <= range.end());
-            (start < end).then(|| {
-                DiffLineRange::new(
-                    range.path().clone(),
-                    range.side(),
-                    lines[start].line_number(),
-                    lines[end - 1].line_number(),
-                )
-            })
-        });
+        let range = range.and_then(|range| self.clip_range(&range));
         if self.selected_lines == range {
             return;
         }
-        self.selection_anchor = range
-            .as_ref()
-            .map(|range| DiffLinePosition::new(range.path().clone(), range.side(), range.start()));
-        self.selection_cursor = range
-            .as_ref()
-            .map(|range| DiffLinePosition::new(range.path().clone(), range.side(), range.end()));
+        self.selection_anchor = range.as_ref().map(DiffLineRange::start_position);
+        self.selection_cursor = range.as_ref().map(DiffLineRange::end_position);
         self.selection.set_local_selection(range.is_some(), cx);
         self.selected_lines = range;
         cx.notify();
@@ -406,12 +572,34 @@ impl DiffState {
     /// Returns selected source without gutters, diff markers or annotation content.
     pub fn selected_text(&self, cx: &App) -> String {
         if self.selection.has_local_selection(cx)
-            && let Some(range) = &self.selected_lines
+            && let Some(selected) = self.selected_span()
         {
-            return self.file_ix(range.path()).map_or_else(String::new, |file| {
-                let document = &self.files[file];
-                document.text_for_lines(range.side(), range.start(), range.end())
-            });
+            return match selected {
+                SelectedLines::Side { file, side, lines } => {
+                    self.files[file].text_for_lines(side, lines.start, lines.end - 1)
+                }
+                SelectedLines::Patch { file, patch } => {
+                    let file = &self.files[file];
+                    let mut text = String::new();
+                    for line in &file.patch_lines()[patch] {
+                        // An unchanged line reads the same on both sides.
+                        let (side, ix) = match line.line(DiffSide::Modified) {
+                            Some(ix) => (DiffSide::Modified, ix),
+                            None => (
+                                DiffSide::Original,
+                                line.line(DiffSide::Original).unwrap_or(0),
+                            ),
+                        };
+                        // A side's unterminated final line can precede the
+                        // other side's lines in patch order.
+                        if !text.is_empty() && !text.ends_with('\n') {
+                            text.push('\n');
+                        }
+                        text.push_str(&file.source(side)[file.lines(side)[ix].source()]);
+                    }
+                    text
+                }
+            };
         }
         let Some((file, side, range)) =
             super::selection::selected_source_range(&self.selection, cx)
@@ -420,15 +608,19 @@ impl DiffState {
         };
         self.files
             .get(file)
-            .and_then(|document| document.source(side).get(range))
+            .and_then(|file| file.source(side).get(range))
             .unwrap_or("")
             .to_owned()
     }
 
-    /// Reveals and scrolls to a source line, expanding its hidden context if needed.
+    /// Reveals and scrolls to a source line, expanding its file and hidden
+    /// context if needed.
     pub fn scroll_to_line(&mut self, position: DiffLinePosition, cx: &mut Context<Self>) {
         if self.line_index(&position).is_none() {
             return;
+        }
+        if self.collapsed.remove(position.path().as_str()) {
+            self.rebuild_at_anchor();
         }
         if self.expand_line(&position).is_some() {
             self.reveal_line(&position);
@@ -460,15 +652,42 @@ impl DiffState {
         self.move_change(false, cx);
     }
 
-    pub(crate) fn expand(&mut self, file: usize, pairs: Range<usize>, cx: &mut Context<Self>) {
+    /// Reveals part or all of a collapsed unchanged range.
+    pub(crate) fn expand_fold(
+        &mut self,
+        file: usize,
+        pairs: Range<usize>,
+        expansion: FoldExpansion,
+        cx: &mut Context<Self>,
+    ) {
+        let lines = self.expansion_lines;
+        let revealed = match expansion {
+            FoldExpansion::All => pairs,
+            FoldExpansion::Up => pairs.end.saturating_sub(lines).max(pairs.start)..pairs.end,
+            FoldExpansion::Down => pairs.start..(pairs.start + lines).min(pairs.end),
+        };
         if let Some(expanded) = self.expanded.get_mut(file) {
-            expanded.push(pairs);
+            expanded.push(revealed);
             self.rebuild_at_anchor();
             cx.notify();
         }
     }
 
-    pub(crate) fn click_line(
+    /// Toggles a file from its header and reports the user's change.
+    pub(crate) fn toggle_file_collapsed(&mut self, file: usize, cx: &mut Context<Self>) {
+        let path = self.files[file].path().clone();
+        let collapsed = !self.collapsed.contains(&path);
+        self.set_file_collapsed(&path, collapsed, cx);
+        cx.emit(if collapsed {
+            DiffEvent::FileCollapsed(path)
+        } else {
+            DiffEvent::FileExpanded(path)
+        });
+    }
+
+    /// Starts a line-number selection gesture, extending the current anchor in
+    /// the same file when `extend` is set.
+    pub(crate) fn begin_line_selection(
         &mut self,
         position: DiffLinePosition,
         extend: bool,
@@ -481,10 +700,65 @@ impl DiffState {
         let anchor = self
             .selection_anchor
             .clone()
-            .filter(|a| extend && a.path() == position.path() && a.side() == position.side())
+            .filter(|anchor| extend && self.can_extend(anchor, &position))
             .unwrap_or_else(|| position.clone());
         TextSelection::clear(window, cx);
-        self.select_user_range(anchor, position, window, cx);
+        window.focus(&self.focus, cx);
+        self.selecting = true;
+        cx.emit(DiffEvent::SelectionStarted(range_between(
+            &anchor, &position,
+        )));
+        self.select_user_range(anchor, position, cx);
+    }
+
+    /// Extends an active line-number gesture to `position` in the same file.
+    pub(crate) fn drag_line_selection(
+        &mut self,
+        position: DiffLinePosition,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(anchor) = self.selection_anchor.clone() else {
+            return;
+        };
+        if !self.selecting
+            || !self.can_extend(&anchor, &position)
+            || self.selection_cursor.as_ref() == Some(&position)
+            || self.line_index(&position).is_none()
+        {
+            return;
+        }
+        self.select_user_range(anchor, position, cx);
+    }
+
+    /// Whether a selection anchored at `anchor` may extend to `position`:
+    /// within one file, and across sides only in Unified mode, whose rows
+    /// follow patch order.
+    fn can_extend(&self, anchor: &DiffLinePosition, position: &DiffLinePosition) -> bool {
+        anchor.path() == position.path()
+            && (anchor.side() == position.side() || self.mode == DiffMode::Unified)
+    }
+
+    /// Finishes an active line-number gesture.
+    pub(crate) fn end_line_selection(&mut self, cx: &mut Context<Self>) {
+        if !std::mem::take(&mut self.selecting) {
+            return;
+        }
+        if let Some(range) = self.selected_lines.clone() {
+            cx.emit(DiffEvent::SelectionEnded(range));
+        }
+    }
+
+    /// Selects one line, or extends to it, as a complete gesture.
+    #[cfg(test)]
+    pub(crate) fn click_line(
+        &mut self,
+        position: DiffLinePosition,
+        extend: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.begin_line_selection(position, extend, window, cx);
+        self.end_line_selection(cx);
     }
 
     pub(crate) fn keyboard_select(
@@ -497,8 +771,7 @@ impl DiffState {
         let Some((file, side)) = self.active_side(cx) else {
             return;
         };
-        let document = &self.files[file];
-        let count = document.lines_count(side);
+        let count = self.files[file].lines_count(side);
         let ix = self
             .selection_cursor
             .as_ref()
@@ -509,7 +782,15 @@ impl DiffState {
             .map(|ix| ix.saturating_add_signed(direction).min(count - 1))
             .unwrap_or(0);
         let position = self.position(file, side, ix);
-        self.click_line(position.clone(), extend, window, cx);
+        let anchor = self
+            .selection_anchor
+            .clone()
+            .filter(|anchor| extend && anchor.path() == position.path())
+            .unwrap_or_else(|| position.clone());
+        TextSelection::clear(window, cx);
+        window.focus(&self.focus, cx);
+        let range = self.select_user_range(anchor, position.clone(), cx);
+        cx.emit(DiffEvent::SelectionEnded(range));
         if let Some(row) = self.expand_line(&position) {
             self.list.scroll_to_reveal_item(row);
         }
@@ -521,12 +802,43 @@ impl DiffState {
         };
         let count = self.files[file].lines_count(side);
         TextSelection::clear(window, cx);
-        self.select_user_range(
+        window.focus(&self.focus, cx);
+        let range = self.select_user_range(
             self.position(file, side, 0),
             self.position(file, side, count - 1),
-            window,
             cx,
         );
+        cx.emit(DiffEvent::SelectionEnded(range));
+    }
+
+    /// The selected lines, resolved for membership tests.
+    pub(crate) fn selected_span(&self) -> Option<SelectedLines> {
+        let range = self.selected_lines.as_ref()?;
+        let file = self.file_ix(range.path())?;
+        if range.is_single_side() {
+            let (start, end) = (
+                range.start().min(range.end()),
+                range.start().max(range.end()),
+            );
+            return Some(SelectedLines::Side {
+                file,
+                side: range.side(),
+                lines: start..end + 1,
+            });
+        }
+        let document = &self.files[file];
+        let start = document.patch_ix(
+            range.side(),
+            document.line_index(range.side(), range.start())?,
+        );
+        let end = document.patch_ix(
+            range.end_side(),
+            document.line_index(range.end_side(), range.end())?,
+        );
+        Some(SelectedLines::Patch {
+            file,
+            patch: start.min(end)..start.max(end) + 1,
+        })
     }
 
     /// Records the window that renders this state, for clearing its text selection.
@@ -552,17 +864,28 @@ impl DiffState {
     /// Re-measures rows whose annotations were added, removed or replaced.
     /// Visible rows are re-measured every frame, so content changes inside an
     /// annotation need no notification.
-    pub(crate) fn sync_annotations(&mut self, annotations: &[DiffLineAnnotation]) {
+    pub(crate) fn sync_annotations(&mut self, annotations: &[DiffAnnotation]) {
         let current = annotations
             .iter()
-            .map(|annotation| (annotation.position().clone(), annotation.id().clone()))
+            .map(|annotation| {
+                (
+                    annotation.position().cloned(),
+                    annotation.path().clone(),
+                    annotation.id().clone(),
+                )
+            })
             .collect::<HashSet<_>>();
         if current == self.annotations {
             return;
         }
         let rows = current
             .symmetric_difference(&self.annotations)
-            .filter_map(|(position, _)| self.source_row(position))
+            .filter_map(|(position, path, _)| match position {
+                Some(position) => self.source_row(position),
+                None => self
+                    .file_ix(path)
+                    .and_then(|file| self.header_rows.get(file).copied()),
+            })
             .collect::<Vec<_>>();
         for row in rows {
             self.list.remeasure_items(row..row + 1);
@@ -587,6 +910,42 @@ impl DiffState {
         self.files[self.file_ix(position.path())?].line_index(position.side(), position.line())
     }
 
+    /// Clips a range to supplied lines, normalizing a single-side range.
+    fn clip_range(&self, range: &DiffLineRange) -> Option<DiffLineRange> {
+        let file = &self.files[self.file_ix(range.path())?];
+        let first_at_or_after = |side: DiffSide, line: usize| {
+            let lines = file.lines(side);
+            lines
+                .get(lines.partition_point(|source| source.line_number() < line))
+                .map(|source| source.line_number())
+        };
+        let last_at_or_before = |side: DiffSide, line: usize| {
+            let lines = file.lines(side);
+            lines
+                .partition_point(|source| source.line_number() <= line)
+                .checked_sub(1)
+                .map(|ix| lines[ix].line_number())
+        };
+        if range.is_single_side() {
+            let (start, end) = (
+                range.start().min(range.end()),
+                range.start().max(range.end()),
+            );
+            let start = first_at_or_after(range.side(), start)?;
+            let end = last_at_or_before(range.side(), end)?;
+            return (start <= end)
+                .then(|| DiffLineRange::new(range.path().clone(), range.side(), start, end));
+        }
+        let start = first_at_or_after(range.side(), range.start())
+            .or_else(|| last_at_or_before(range.side(), range.start()))?;
+        let end = last_at_or_before(range.end_side(), range.end())
+            .or_else(|| first_at_or_after(range.end_side(), range.end()))?;
+        Some(
+            DiffLineRange::new(range.path().clone(), range.side(), start, end)
+                .with_end_side(range.end_side()),
+        )
+    }
+
     fn selection_is_local(&self, cx: &App) -> bool {
         let entity = Some(self.selection.entity_id());
         self.selection
@@ -597,9 +956,10 @@ impl DiffState {
     /// The file and side that keyboard selection and Select All act on.
     fn active_side(&self, cx: &App) -> Option<(usize, DiffSide)> {
         let (file, side) = self
-            .selected_lines
+            .selection_cursor
             .as_ref()
-            .and_then(|range| Some((self.file_ix(range.path())?, Some(range.side()))))
+            .and_then(|cursor| Some((self.file_ix(cursor.path())?, Some(cursor.side()))))
+            .filter(|_| self.selected_lines.is_some())
             .or_else(|| {
                 super::selection::selected_source_range(&self.selection, cx)
                     .map(|(file, side, _)| (file, Some(side)))
@@ -627,29 +987,24 @@ impl DiffState {
         self.source_row(position)
     }
 
+    /// Selects from `anchor` to `cursor` in one file and reports a change.
     fn select_user_range(
         &mut self,
         anchor: DiffLinePosition,
         cursor: DiffLinePosition,
-        window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        let range = Some(DiffLineRange::new(
-            cursor.path().clone(),
-            cursor.side(),
-            anchor.line(),
-            cursor.line(),
-        ));
-        let changed = self.selected_lines != range;
-        self.selected_lines = range.clone();
+    ) -> DiffLineRange {
+        let range = range_between(&anchor, &cursor);
+        let changed = self.selected_lines.as_ref() != Some(&range);
+        self.selected_lines = Some(range.clone());
         self.selection_anchor = Some(anchor);
         self.selection_cursor = Some(cursor);
         self.selection.set_local_selection(true, cx);
-        window.focus(&self.focus, cx);
         if changed {
-            cx.emit(DiffEvent::SelectionChanged(range));
+            cx.emit(DiffEvent::SelectionChanged(Some(range.clone())));
         }
         cx.notify();
+        range
     }
 
     fn move_change(&mut self, forward: bool, cx: &mut Context<Self>) {
@@ -708,7 +1063,7 @@ impl DiffState {
             DiffSide::Original => &rows.original,
             DiffSide::Modified => &rows.modified,
         };
-        rows.get(self.line_index(position)?).copied()
+        rows.get(self.line_index(position)?).copied().flatten()
     }
 
     fn reveal_line(&self, position: &DiffLinePosition) {
@@ -732,7 +1087,7 @@ impl DiffState {
     /// Projects rows. Without `reset`, only the changed middle is spliced so
     /// measured heights of unchanged rows survive disclosure changes.
     fn rebuild(&mut self, reset: bool) {
-        let rows = project_rows(&self.files, self.mode, self.context_lines, &self.expanded);
+        let rows = self.project_rows();
         self.file_rows = source_rows(&self.files, &rows);
         self.change_rows = changed_groups(&rows);
         self.header_rows = rows
@@ -759,6 +1114,30 @@ impl DiffState {
         self.apply_row_height_hint();
     }
 
+    fn project_rows(&self) -> Vec<DisplayRow> {
+        let mut rows = Vec::new();
+        for (ix, file) in self.files.iter().enumerate() {
+            rows.push(DisplayRow::File(ix));
+            if self.collapsed.contains(file.path()) {
+                continue;
+            }
+            if file.pairs().is_empty() {
+                rows.push(DisplayRow::Notice(ix));
+            } else {
+                project_file(
+                    &mut rows,
+                    ix,
+                    file,
+                    self.mode,
+                    self.context_lines,
+                    self.min_collapsed_lines,
+                    &self.expanded[ix],
+                );
+            }
+        }
+        rows
+    }
+
     /// Gives unmeasured rows a code-row height so the scrollbar is sized for
     /// the whole patch before every row has been rendered.
     fn apply_row_height_hint(&self) {
@@ -767,32 +1146,67 @@ impl DiffState {
         }
     }
 
-    fn prepare_syntax(&mut self, cx: &mut Context<Self>) {
+    /// Prepares syntax and inline emphasis for files that lack it, one file
+    /// at a time on the background executor, reusing highlighters per language.
+    fn prepare_presentation(&mut self, cx: &mut Context<Self>) {
         let pending = self
-            .files
+            .presentations
             .iter()
-            .filter(|document| document.syntax().is_none())
-            .cloned()
+            .enumerate()
+            .filter(|(_, presentation)| presentation.is_none())
+            .map(|(ix, _)| (ix, self.files[ix].clone()))
             .collect::<Vec<_>>();
-        self._syntax = if pending.is_empty() {
+        let options = self.presentation_options;
+        self._presentation = if pending.is_empty() {
             Task::ready(())
         } else {
             cx.spawn(async move |this, cx| {
                 let mut highlighters = Some(SyntaxHighlighters::default());
-                for document in pending {
+                for (ix, file) in pending {
                     let mut moved = highlighters.take();
-                    highlighters = cx
+                    let (presentation, returned) = cx
                         .background_spawn(async move {
-                            document.prepare_syntax(moved.get_or_insert_default());
-                            moved
+                            let presentation = FilePresentation::prepare(
+                                &file,
+                                options,
+                                moved.get_or_insert_default(),
+                            );
+                            (presentation, moved)
                         })
                         .await;
-                    if this.update(cx, |_, cx| cx.notify()).is_err() {
+                    highlighters = returned;
+                    let installed = this.update(cx, |state, cx| {
+                        if let Some(slot) = state.presentations.get_mut(ix) {
+                            *slot = Some(Arc::new(presentation));
+                        }
+                        cx.notify();
+                    });
+                    if installed.is_err() {
                         return;
                     }
                 }
             })
         };
+    }
+}
+
+/// The range from `anchor` to `cursor`, normalized when both are on one side.
+fn range_between(anchor: &DiffLinePosition, cursor: &DiffLinePosition) -> DiffLineRange {
+    if anchor.side() == cursor.side() {
+        DiffLineRange::new(
+            cursor.path().clone(),
+            cursor.side(),
+            anchor.line().min(cursor.line()),
+            anchor.line().max(cursor.line()),
+        )
+    } else {
+        DiffLineRange::new(
+            cursor.path().clone(),
+            anchor.side(),
+            anchor.line(),
+            cursor.line(),
+        )
+        .with_end_side(cursor.side())
     }
 }
 
@@ -804,23 +1218,24 @@ fn file_ixs(files: &[DiffFile]) -> HashMap<SharedString, usize> {
     ixs
 }
 
-/// Every source line maps to its code row or the disclosure hiding it.
-/// Disjoint folds visit each pair once, so building the maps is linear.
+/// Every source line maps to its code row or the disclosure hiding it; lines
+/// of a collapsed file have no row. Disjoint folds visit each pair once, so
+/// building the maps is linear.
 fn source_rows(files: &[DiffFile], rows: &[DisplayRow]) -> Vec<FileRows> {
     let mut file_rows = files
         .iter()
-        .map(|document| FileRows {
-            original: vec![0; document.lines_count(DiffSide::Original)],
-            modified: vec![0; document.lines_count(DiffSide::Modified)],
+        .map(|file| FileRows {
+            original: vec![None; file.lines_count(DiffSide::Original)],
+            modified: vec![None; file.lines_count(DiffSide::Modified)],
         })
         .collect::<Vec<_>>();
     for (row_ix, row) in rows.iter().enumerate() {
         let mut map = |file: usize, original: Option<usize>, modified: Option<usize>| {
             if let Some(line) = original {
-                file_rows[file].original[line] = row_ix;
+                file_rows[file].original[line] = Some(row_ix);
             }
             if let Some(line) = modified {
-                file_rows[file].modified[line] = row_ix;
+                file_rows[file].modified[line] = Some(row_ix);
             }
         };
         match row {
@@ -878,30 +1293,13 @@ pub(crate) fn decode_key(key: u64) -> (usize, DiffSide, usize) {
     )
 }
 
-fn project_rows(
-    files: &[DiffFile],
-    mode: DiffMode,
-    context: Option<usize>,
-    expanded: &[Vec<Range<usize>>],
-) -> Vec<DisplayRow> {
-    let mut rows = Vec::new();
-    for (file, document) in files.iter().enumerate() {
-        rows.push(DisplayRow::File(file));
-        if document.pairs().is_empty() {
-            rows.push(DisplayRow::Notice(file));
-        } else {
-            project_file(&mut rows, file, document, mode, context, &expanded[file]);
-        }
-    }
-    rows
-}
-
 fn project_file(
     rows: &mut Vec<DisplayRow>,
     file: usize,
     document: &DiffFile,
     mode: DiffMode,
     context: Option<usize>,
+    min_collapsed_lines: usize,
     expanded: &[Range<usize>],
 ) {
     let pairs = document.pairs();
@@ -942,13 +1340,28 @@ fn project_file(
         }
     }
     let mut active = 0;
-    let visible = boundaries[..pairs.len()]
+    let mut visible = boundaries[..pairs.len()]
         .iter()
         .map(|boundary| {
             active += boundary;
             active > 0
         })
         .collect::<Vec<_>>();
+    // A disclosure shorter than the threshold would hide almost nothing.
+    let mut ix = 0;
+    while ix < pairs.len() {
+        if visible[ix] {
+            ix += 1;
+            continue;
+        }
+        let start = ix;
+        while ix < pairs.len() && ix < hunk_end[start] && !visible[ix] {
+            ix += 1;
+        }
+        if ix - start < min_collapsed_lines {
+            visible[start..ix].fill(true);
+        }
+    }
     let mut hunk_ix = 0;
     let mut ix = 0;
     while ix < pairs.len() {

@@ -5,26 +5,29 @@ mod document;
 mod parser;
 #[cfg(test)]
 mod parser_tests;
+mod presentation;
 mod selection;
 mod state;
 
-pub use document::{DiffFile, DiffLinePosition, DiffLineRange, DiffSide};
+pub use document::{DiffFile, DiffFileStatus, DiffLinePosition, DiffLineRange, DiffSide};
 pub use parser::DiffParseError;
+pub use presentation::DiffInlineUnit;
 pub use state::{DiffEvent, DiffState};
 
-use std::{collections::HashMap, rc::Rc};
+use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, ElementId, Entity, Focusable as _, HighlightStyle,
-    InteractiveElement as _, IntoElement, KeyBinding, ListOffset, ParentElement as _, Pixels,
-    RenderOnce, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, TextRun,
-    Window, div, list, point, prelude::FluentBuilder as _, px,
+    AnyElement, App, ClickEvent, ClipboardItem, Context, ElementId, Entity, Focusable as _,
+    HighlightStyle, Hsla, InteractiveElement as _, IntoElement, KeyBinding, ListOffset,
+    MouseButton, ParentElement as _, Pixels, RenderOnce, SharedString,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, TextRun, Window, div, list, point,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_base::TestSupportExt as _;
 use rust_i18n::t;
 
 use crate::{
-    ActiveTheme as _, Sizable as _, StyledExt as _,
+    ActiveTheme as _, Icon, IconName, Sizable as _, StyledExt as _,
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Copy, SelectAll},
@@ -32,8 +35,9 @@ use crate::{
     v_flex,
 };
 use actions::*;
+use presentation::FilePresentation;
 use selection::{CodeText, SelectionLayer};
-use state::{DisplayRow, LayoutKey};
+use state::{DisplayRow, FoldExpansion, LayoutKey, SelectedLines};
 
 // Private: bindings serve the focused code body only.
 mod actions {
@@ -82,32 +86,108 @@ pub enum DiffMode {
     Unified,
 }
 
-/// Application-owned content attached beneath a source line.
-///
-/// The stable ID belongs to the annotation itself, while the position uses
-/// the file, side and original one-based source line, independent of folding.
-#[derive(Clone)]
-pub struct DiffLineAnnotation {
-    id: ElementId,
-    position: DiffLinePosition,
+/// Which part of a row is emphasized while the pointer is over it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DiffHoverHighlight {
+    #[default]
+    None,
+    /// The whole line.
+    Line,
+    /// The line-number gutter.
+    LineNumber,
+    /// The line and its line number.
+    Both,
 }
-impl DiffLineAnnotation {
-    pub fn new(id: impl Into<ElementId>, position: DiffLinePosition) -> Self {
+
+/// How the start of each hunk is marked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DiffHunkSeparator {
+    /// The `@@` header, including the enclosing scope Git reports.
+    #[default]
+    Metadata,
+    /// The count of lines the patch does not supply before the hunk.
+    LineInfo,
+    /// A thin divider.
+    Simple,
+}
+
+/// How changed lines are marked beside the code.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum DiffChangeIndicator {
+    /// `+` and `−` signs.
+    #[default]
+    Signs,
+    /// A colored bar.
+    Bars,
+    /// No marker.
+    None,
+}
+
+/// Application-owned content attached to a source line or to a whole file.
+///
+/// The stable ID belongs to the annotation itself, while the target uses the
+/// file path and, for a line, its side and one-based source line, independent
+/// of folding.
+#[derive(Clone)]
+pub struct DiffAnnotation {
+    id: ElementId,
+    path: SharedString,
+    position: Option<DiffLinePosition>,
+}
+
+impl DiffAnnotation {
+    /// Attaches content beneath a source line.
+    pub fn line(id: impl Into<ElementId>, position: DiffLinePosition) -> Self {
         Self {
             id: id.into(),
-            position,
+            path: position.path().clone(),
+            position: Some(position),
+        }
+    }
+    /// Attaches content beneath the header of the file at `path`.
+    pub fn file(id: impl Into<ElementId>, path: impl Into<SharedString>) -> Self {
+        Self {
+            id: id.into(),
+            path: path.into(),
+            position: None,
         }
     }
     pub fn id(&self) -> &ElementId {
         &self.id
     }
-    pub fn position(&self) -> &DiffLinePosition {
-        &self.position
+    /// The [`DiffFile::path`] of the annotated file.
+    pub fn path(&self) -> &SharedString {
+        &self.path
+    }
+    /// The annotated line, or `None` for a file annotation.
+    pub fn position(&self) -> Option<&DiffLinePosition> {
+        self.position.as_ref()
     }
 }
 
-type HeaderRenderer = Rc<dyn Fn(&DiffFile, &mut Window, &mut App) -> AnyElement>;
-type AnnotationRenderer = Rc<dyn Fn(&DiffLineAnnotation, &mut Window, &mut App) -> AnyElement>;
+type FileRenderer = Rc<dyn Fn(&DiffFile, &mut Window, &mut App) -> AnyElement>;
+type AnnotationRenderer = Rc<dyn Fn(&DiffAnnotation, &mut Window, &mut App) -> AnyElement>;
+type RangeHandler = Rc<dyn Fn(&DiffLineRange, &mut Window, &mut App)>;
+type ClickHandler = Rc<dyn Fn(&DiffLinePosition, &ClickEvent, &mut Window, &mut App)>;
+type HoverHandler = Rc<dyn Fn(Option<&DiffLinePosition>, &mut Window, &mut App)>;
+
+#[derive(Default)]
+struct HeaderSlots {
+    content: Option<FileRenderer>,
+    prefix: Option<FileRenderer>,
+    title_suffix: Option<FileRenderer>,
+    suffix: Option<FileRenderer>,
+}
+
+#[derive(Default)]
+struct Annotations {
+    items: Vec<DiffAnnotation>,
+    lines: HashMap<DiffLinePosition, Vec<usize>>,
+    files: HashMap<SharedString, Vec<usize>>,
+}
 
 /// A themed readonly code-review surface in split or unified mode.
 ///
@@ -123,10 +203,24 @@ pub struct Diff {
     line_number: bool,
     syntax_highlight: bool,
     header_visible: bool,
-    annotations: Rc<Vec<DiffLineAnnotation>>,
-    annotation_index: Rc<HashMap<DiffLinePosition, Vec<usize>>>,
-    header_renderer: Option<HeaderRenderer>,
-    annotation_renderer: Option<AnnotationRenderer>,
+    hover_highlight: DiffHoverHighlight,
+    hunk_separator: DiffHunkSeparator,
+    change_indicator: DiffChangeIndicator,
+    change_background: bool,
+    header: HeaderSlots,
+    annotations: Rc<Annotations>,
+    annotation_content: Option<AnnotationRenderer>,
+    on_add_annotation: Option<RangeHandler>,
+    on_line_click: Option<ClickHandler>,
+    on_line_hover: Option<HoverHandler>,
+}
+
+fn file_renderer<F, E>(render: F) -> FileRenderer
+where
+    F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
+    E: IntoElement,
+{
+    Rc::new(move |file, window, cx| render(file, window, cx).into_any_element())
 }
 
 impl Diff {
@@ -137,10 +231,16 @@ impl Diff {
             line_number: true,
             syntax_highlight: true,
             header_visible: true,
-            annotations: Rc::new(Vec::new()),
-            annotation_index: Rc::new(HashMap::new()),
-            header_renderer: None,
-            annotation_renderer: None,
+            hover_highlight: DiffHoverHighlight::default(),
+            hunk_separator: DiffHunkSeparator::default(),
+            change_indicator: DiffChangeIndicator::default(),
+            change_background: true,
+            header: HeaderSlots::default(),
+            annotations: Rc::default(),
+            annotation_content: None,
+            on_add_annotation: None,
+            on_line_click: None,
+            on_line_hover: None,
         }
     }
     /// Shows the original and modified line-number lanes. Default is true.
@@ -158,46 +258,120 @@ impl Diff {
         self.header_visible = visible;
         self
     }
-    /// Supplies annotations with stable identities and source positions.
+    /// Emphasizes the line, its number, or both under the pointer. Default is none.
+    pub fn hover_highlight(mut self, highlight: DiffHoverHighlight) -> Self {
+        self.hover_highlight = highlight;
+        self
+    }
+    /// Marks the start of each hunk. Default is [`DiffHunkSeparator::Metadata`].
+    pub fn hunk_separator(mut self, separator: DiffHunkSeparator) -> Self {
+        self.hunk_separator = separator;
+        self
+    }
+    /// Marks changed lines beside the code. Default is [`DiffChangeIndicator::Signs`].
+    pub fn change_indicator(mut self, indicator: DiffChangeIndicator) -> Self {
+        self.change_indicator = indicator;
+        self
+    }
+    /// Tints changed lines. Default is true. Inline changes stay emphasized.
+    pub fn change_background(mut self, value: bool) -> Self {
+        self.change_background = value;
+        self
+    }
+    /// Supplies annotations with stable identities and targets.
     ///
     /// Rows re-measure when annotations are added, removed or replaced, and
     /// whenever they are visible, so annotation content may change height freely.
-    pub fn annotations(
-        mut self,
-        annotations: impl IntoIterator<Item = DiffLineAnnotation>,
-    ) -> Self {
-        let annotations = annotations.into_iter().collect::<Vec<_>>();
-        let mut index: HashMap<DiffLinePosition, Vec<usize>> = HashMap::new();
-        for (ix, annotation) in annotations.iter().enumerate() {
-            index
-                .entry(annotation.position.clone())
-                .or_default()
-                .push(ix);
+    pub fn annotations(mut self, annotations: impl IntoIterator<Item = DiffAnnotation>) -> Self {
+        let mut index = Annotations {
+            items: annotations.into_iter().collect(),
+            ..Annotations::default()
+        };
+        for (ix, annotation) in index.items.iter().enumerate() {
+            match &annotation.position {
+                Some(position) => index.lines.entry(position.clone()).or_default().push(ix),
+                None => index
+                    .files
+                    .entry(annotation.path.clone())
+                    .or_default()
+                    .push(ix),
+            }
         }
-        self.annotations = Rc::new(annotations);
-        self.annotation_index = Rc::new(index);
-        self
-    }
-    /// Replaces the content of each file header, keeping its shell and separator.
-    pub fn header<F, E>(mut self, render: F) -> Self
-    where
-        F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
-        E: IntoElement,
-    {
-        self.header_renderer = Some(Rc::new(move |document, window, cx| {
-            render(document, window, cx).into_any_element()
-        }));
+        self.annotations = Rc::new(index);
         self
     }
     /// Renders each supplied annotation. Application state and commands stay with the owner.
     pub fn annotation_content<F, E>(mut self, render: F) -> Self
     where
-        F: Fn(&DiffLineAnnotation, &mut Window, &mut App) -> E + 'static,
+        F: Fn(&DiffAnnotation, &mut Window, &mut App) -> E + 'static,
         E: IntoElement,
     {
-        self.annotation_renderer = Some(Rc::new(move |annotation, window, cx| {
+        self.annotation_content = Some(Rc::new(move |annotation, window, cx| {
             render(annotation, window, cx).into_any_element()
         }));
+        self
+    }
+    /// Replaces the content of each file header, keeping its shell, separator
+    /// and collapse control.
+    pub fn header<F, E>(mut self, render: F) -> Self
+    where
+        F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
+        E: IntoElement,
+    {
+        self.header.content = Some(file_renderer(render));
+        self
+    }
+    /// Inserts content before the path in the default header.
+    pub fn header_prefix<F, E>(mut self, render: F) -> Self
+    where
+        F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
+        E: IntoElement,
+    {
+        self.header.prefix = Some(file_renderer(render));
+        self
+    }
+    /// Inserts compact content immediately after the path in the default header.
+    pub fn header_title_suffix<F, E>(mut self, render: F) -> Self
+    where
+        F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
+        E: IntoElement,
+    {
+        self.header.title_suffix = Some(file_renderer(render));
+        self
+    }
+    /// Inserts trailing content after the change statistics in the default header.
+    pub fn header_suffix<F, E>(mut self, render: F) -> Self
+    where
+        F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
+        E: IntoElement,
+    {
+        self.header.suffix = Some(file_renderer(render));
+        self
+    }
+    /// Shows an add button beside the hovered line and at the end of the
+    /// selected lines. The handler receives the selected range when the line
+    /// is part of it, or that line alone.
+    pub fn on_add_annotation<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&DiffLineRange, &mut Window, &mut App) + 'static,
+    {
+        self.on_add_annotation = Some(Rc::new(handler));
+        self
+    }
+    /// Handles a click on a line's code, outside a text-selection drag.
+    pub fn on_line_click<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(&DiffLinePosition, &ClickEvent, &mut Window, &mut App) + 'static,
+    {
+        self.on_line_click = Some(Rc::new(handler));
+        self
+    }
+    /// Reports the line under the pointer, or `None` when the pointer leaves it.
+    pub fn on_line_hover<F>(mut self, handler: F) -> Self
+    where
+        F: Fn(Option<&DiffLinePosition>, &mut Window, &mut App) + 'static,
+    {
+        self.on_line_hover = Some(Rc::new(handler));
         self
     }
 }
@@ -228,7 +402,7 @@ fn render_diff(
     let digits = state
         .files()
         .iter()
-        .map(|document| document.line_number_digits())
+        .map(|file| file.line_number_digits())
         .max()
         .unwrap_or(1);
     let gutter_width = if props.line_number {
@@ -250,7 +424,7 @@ fn render_diff(
         );
         state.set_content_width(width);
     }
-    state.sync_annotations(&props.annotations);
+    state.sync_annotations(&props.annotations.items);
     let content_width = state.content_width().max(state.viewport().width);
     let column_width = if mode == DiffMode::Split {
         content_width / 2.
@@ -259,20 +433,29 @@ fn render_diff(
     };
     let code = Rc::new(CodePresentation {
         files: state.files().to_vec(),
+        presentations: state.presentations().to_vec(),
         mode,
         column_width,
         font_size,
         row_height,
         gutter_width,
+        expansion_lines: state.expansion_lines(),
         line_number: props.line_number,
         syntax_highlight: props.syntax_highlight,
         header_visible: props.header_visible,
-        header_renderer: props.header_renderer.clone(),
+        hover_highlight: props.hover_highlight,
+        hunk_separator: props.hunk_separator,
+        change_indicator: props.change_indicator,
+        change_background: props.change_background,
+        header: props.header,
         annotations: props.annotations.clone(),
-        annotation_index: props.annotation_index.clone(),
-        annotation_renderer: props.annotation_renderer.clone(),
+        annotation_content: props.annotation_content,
+        on_add_annotation: props.on_add_annotation,
+        on_line_click: props.on_line_click,
+        on_line_hover: props.on_line_hover,
         selection: state.selection().clone(),
         selected_lines: state.selected_lines(),
+        selected: state.selected_span(),
         geometry: state.geometry().clone(),
         state: cx.entity(),
     });
@@ -281,7 +464,7 @@ fn render_diff(
     let horizontal = state.horizontal_scroll().clone();
     let has_rows = !rows.is_empty();
     let label = match state.files() {
-        [document] => t!("Diff.Viewer", name = document.path().as_str()).to_string(),
+        [file] => t!("Diff.Viewer", name = file.path().as_str()).to_string(),
         files => t!("Diff.ViewerFiles", count = files.len()).to_string(),
     };
     let body = div()
@@ -318,6 +501,15 @@ fn render_diff(
             this.child(Scrollbar::vertical(&scrollbar))
                 .child(Scrollbar::horizontal(&horizontal))
         })
+        // A line-number drag may finish anywhere, including outside the body.
+        .on_mouse_up(
+            MouseButton::Left,
+            cx.listener(|this, _, _, cx| this.end_line_selection(cx)),
+        )
+        .on_mouse_up_out(
+            MouseButton::Left,
+            cx.listener(|this, _, _, cx| this.end_line_selection(cx)),
+        )
         .on_action(cx.listener(|this, _: &ScrollUp, window, cx| {
             if !body_focused(this, window, cx) {
                 return;
@@ -458,20 +650,29 @@ fn body_focused(state: &DiffState, window: &Window, cx: &mut Context<DiffState>)
 
 struct CodePresentation {
     files: Vec<DiffFile>,
+    presentations: Vec<Option<Arc<FilePresentation>>>,
     mode: DiffMode,
     column_width: Pixels,
     font_size: Pixels,
     row_height: Pixels,
     gutter_width: Pixels,
+    expansion_lines: usize,
     line_number: bool,
     syntax_highlight: bool,
     header_visible: bool,
-    header_renderer: Option<HeaderRenderer>,
-    annotations: Rc<Vec<DiffLineAnnotation>>,
-    annotation_index: Rc<HashMap<DiffLinePosition, Vec<usize>>>,
-    annotation_renderer: Option<AnnotationRenderer>,
+    hover_highlight: DiffHoverHighlight,
+    hunk_separator: DiffHunkSeparator,
+    change_indicator: DiffChangeIndicator,
+    change_background: bool,
+    header: HeaderSlots,
+    annotations: Rc<Annotations>,
+    annotation_content: Option<AnnotationRenderer>,
+    on_add_annotation: Option<RangeHandler>,
+    on_line_click: Option<ClickHandler>,
+    on_line_hover: Option<HoverHandler>,
     selection: gpui_base::TextSelectionHandle,
     selected_lines: Option<DiffLineRange>,
+    selected: Option<SelectedLines>,
     geometry: Rc<std::cell::RefCell<selection::SelectionGeometry>>,
     state: Entity<DiffState>,
 }
@@ -485,9 +686,15 @@ impl CodePresentation {
             document.line_number(side, ix),
         )
     }
+
+    fn is_selected(&self, file: usize, side: DiffSide, ix: usize) -> bool {
+        self.selected
+            .as_ref()
+            .is_some_and(|selected| selected.contains(&self.files, file, side, ix))
+    }
 }
 
-/// Total row width for code of `width` in the current layout.
+/// Total row width for code of `width` in the current mode.
 fn code_width(width: Pixels, gutter_width: Pixels, rem: Pixels, mode: DiffMode) -> Pixels {
     if mode == DiffMode::Split {
         (width + gutter_width + rem * 2.) * 2.
@@ -511,9 +718,9 @@ fn measure_code_width(
     // than trusting the single widest by cell count.
     const CANDIDATES: usize = 8;
     let mut candidates: Vec<(usize, &SharedString)> = Vec::with_capacity(CANDIDATES + 1);
-    for document in files {
+    for file in files {
         for side in [DiffSide::Original, DiffSide::Modified] {
-            for line in document.lines(side) {
+            for line in file.lines(side) {
                 let cells = unicode_width::UnicodeWidthStr::width(line.display().as_str());
                 if candidates.len() == CANDIDATES
                     && candidates
@@ -565,40 +772,8 @@ fn render_row(
     match row {
         DisplayRow::File(file) => render_file_header(*file, &code, window, cx),
         DisplayRow::Notice(file) => render_notice(&code.files[*file], cx),
-        DisplayRow::Hunk { file, hunk } => h_flex()
-            .w_full()
-            .h_6()
-            .px_3()
-            .bg(cx.theme().muted.opacity(0.35))
-            .text_xs()
-            .text_color(cx.theme().muted_foreground)
-            .child(code.files[*file].hunks()[*hunk].label().clone())
-            .into_any_element(),
-        DisplayRow::Fold { file, pairs } => {
-            let (file, pairs) = (*file, pairs.clone());
-            let state = code.state.clone();
-            h_flex()
-                .w_full()
-                .h_6()
-                .px_2()
-                .bg(cx.theme().muted.opacity(0.35))
-                .child(
-                    Button::new(("expand", pairs.start))
-                        .ghost()
-                        .xsmall()
-                        .w_auto()
-                        .icon(crate::IconName::ChevronDown)
-                        .text_color(cx.theme().muted_foreground)
-                        .label(t!("Diff.UnchangedLines", count = pairs.len()).to_string())
-                        .accessibility_label(
-                            t!("Diff.ExpandLines", count = pairs.len()).to_string(),
-                        )
-                        .on_click(move |_, _, cx| {
-                            state.update(cx, |state, cx| state.expand(file, pairs.clone(), cx))
-                        }),
-                )
-                .into_any_element()
-        }
+        DisplayRow::Hunk { file, hunk } => render_hunk_separator(*file, *hunk, &code, cx),
+        DisplayRow::Fold { file, pairs } => render_fold(*file, pairs.clone(), &code, cx),
         DisplayRow::Code {
             file,
             original,
@@ -651,6 +826,100 @@ fn render_row(
     }
 }
 
+fn render_hunk_separator(
+    file: usize,
+    hunk: usize,
+    code: &CodePresentation,
+    cx: &App,
+) -> AnyElement {
+    let hunks = code.files[file].hunks();
+    let row = h_flex()
+        .w_full()
+        .px_3()
+        .bg(cx.theme().muted.opacity(0.35))
+        .text_xs()
+        .text_color(cx.theme().muted_foreground);
+    match code.hunk_separator {
+        DiffHunkSeparator::Metadata => row
+            .h_6()
+            .child(hunks[hunk].label().clone())
+            .into_any_element(),
+        DiffHunkSeparator::LineInfo => {
+            let hidden = hunks[hunk].hidden_lines_before(hunk.checked_sub(1).map(|ix| &hunks[ix]));
+            if hidden == 0 {
+                return div().into_any_element();
+            }
+            row.h_6()
+                .child(t!("Diff.HiddenLines", count = hidden).to_string())
+                .into_any_element()
+        }
+        DiffHunkSeparator::Simple => row.h_1().into_any_element(),
+    }
+}
+
+fn render_fold(
+    file: usize,
+    pairs: std::ops::Range<usize>,
+    code: &CodePresentation,
+    cx: &App,
+) -> AnyElement {
+    let document = &code.files[file];
+    // A fold bordering the hunk start has no source above it, and one
+    // bordering the hunk end has none below; offer only the meaningful sides.
+    let hunk = document
+        .hunks()
+        .iter()
+        .find(|hunk| hunk.pairs().contains(&pairs.start))
+        .map_or(0..document.pairs().len(), |hunk| hunk.pairs());
+    let lines = code.expansion_lines;
+    let partial = pairs.len() > lines;
+    let expand = |id: (&'static str, usize), expansion: FoldExpansion| {
+        let state = code.state.clone();
+        let pairs = pairs.clone();
+        Button::new(id)
+            .ghost()
+            .xsmall()
+            .w_auto()
+            .text_color(cx.theme().muted_foreground)
+            .on_click(move |_, _, cx| {
+                state.update(cx, |state, cx| {
+                    state.expand_fold(file, pairs.clone(), expansion, cx)
+                })
+            })
+    };
+    h_flex()
+        .w_full()
+        .h_6()
+        .px_2()
+        .gap_1()
+        .bg(cx.theme().muted.opacity(0.35))
+        .when(partial && pairs.start > hunk.start, |this| {
+            this.child(
+                expand(("expand-down", pairs.start), FoldExpansion::Down)
+                    .icon(IconName::ArrowDown)
+                    .accessibility_label(t!("Diff.ExpandBelow", count = lines).to_string()),
+            )
+        })
+        .when(partial && pairs.end < hunk.end, |this| {
+            this.child(
+                expand(("expand-up", pairs.start), FoldExpansion::Up)
+                    .icon(IconName::ArrowUp)
+                    .accessibility_label(t!("Diff.ExpandAbove", count = lines).to_string()),
+            )
+        })
+        .child(
+            expand(("expand", pairs.start), FoldExpansion::All)
+                .icon(if partial {
+                    IconName::ChevronsUpDown
+                } else {
+                    IconName::ChevronDown
+                })
+                .label(t!("Diff.UnchangedLines", count = pairs.len()).to_string())
+                .accessibility_label(t!("Diff.ExpandLines", count = pairs.len()).to_string()),
+        )
+        .into_any_element()
+}
+
 fn render_file_header(
     file: usize,
     code: &CodePresentation,
@@ -658,73 +927,131 @@ fn render_file_header(
     cx: &mut App,
 ) -> AnyElement {
     if !code.header_visible {
-        return div().into_any_element();
+        return div()
+            .children(file_annotations(file, code, window, cx))
+            .into_any_element();
     }
     let document = &code.files[file];
-    let theme = cx.theme();
-    let foreground = theme.muted_foreground;
-    let border = theme.border;
-    let content = if let Some(render) = &code.header_renderer {
+    let foreground = cx.theme().muted_foreground;
+    let border = cx.theme().border;
+    let collapsed = code.state.read(cx).is_file_collapsed(document.path());
+    let content = if let Some(render) = &code.header.content {
         render(document, window, cx)
     } else {
         let name: SharedString = match (document.original_path(), document.modified_path()) {
             (Some(old), Some(new)) if old != new => format!("{old} → {new}").into(),
             _ => document.path().clone(),
         };
+        let slot = |render: &Option<FileRenderer>, window: &mut Window, cx: &mut App| {
+            render.as_ref().map(|render| render(document, window, cx))
+        };
+        let prefix = slot(&code.header.prefix, window, cx);
+        let title_suffix = slot(&code.header.title_suffix, window, cx);
+        let suffix = slot(&code.header.suffix, window, cx);
+        let status = match document.status() {
+            DiffFileStatus::Added => Some(t!("Diff.AddedFile")),
+            DiffFileStatus::Deleted => Some(t!("Diff.DeletedFile")),
+            DiffFileStatus::Renamed => Some(t!("Diff.RenamedFile")),
+            DiffFileStatus::Copied => Some(t!("Diff.CopiedFile")),
+            _ => None,
+        };
         h_flex()
             .w_full()
             .min_w_0()
             .gap_2()
+            .children(prefix)
             .child(
-                div()
+                h_flex()
                     .min_w_0()
                     .flex_1()
-                    .truncate()
-                    .font_medium()
-                    .child(name),
+                    .gap_2()
+                    .child(div().min_w_0().truncate().font_medium().child(name))
+                    .when_some(title_suffix, |this, suffix| {
+                        this.child(div().flex_shrink_0().child(suffix))
+                    }),
             )
             .child(div().text_xs().text_color(foreground).child(format!(
                 "+{} −{}",
                 document.additions(),
                 document.deletions()
             )))
-            .when(document.original_path().is_none(), |this| {
+            .when_some(status, |this, status| {
                 this.child(
                     div()
                         .text_xs()
                         .text_color(foreground)
-                        .child(t!("Diff.AddedFile").to_string()),
+                        .child(status.to_string()),
                 )
             })
-            .when(document.modified_path().is_none(), |this| {
-                this.child(
-                    div()
-                        .text_xs()
-                        .text_color(foreground)
-                        .child(t!("Diff.DeletedFile").to_string()),
-                )
-            })
+            .children(suffix)
             .into_any_element()
     };
-    div()
+    let state = code.state.clone();
+    let name = document.path().clone();
+    v_flex()
         .id("file-header")
         .w_full()
-        .px_3()
-        .py_2()
         .when(file > 0, |this| this.border_t_1())
         .border_b_1()
         .border_color(border)
-        .child(content)
+        .child(
+            h_flex()
+                .w_full()
+                .min_w_0()
+                .pl_1()
+                .pr_3()
+                .py_1()
+                .gap_1()
+                .child(
+                    Button::new("collapse-file")
+                        .ghost()
+                        .xsmall()
+                        .icon(if collapsed {
+                            IconName::ChevronRight
+                        } else {
+                            IconName::ChevronDown
+                        })
+                        .accessibility_label(
+                            if collapsed {
+                                t!("Diff.ExpandFile", name = name.as_str())
+                            } else {
+                                t!("Diff.CollapseFile", name = name.as_str())
+                            }
+                            .to_string(),
+                        )
+                        .on_click(move |_, _, cx| {
+                            state.update(cx, |state, cx| state.toggle_file_collapsed(file, cx))
+                        }),
+                )
+                .child(div().flex_1().min_w_0().child(content)),
+        )
+        .children(file_annotations(file, code, window, cx))
         .into_any_element()
 }
 
+fn file_annotations(
+    file: usize,
+    code: &CodePresentation,
+    window: &mut Window,
+    cx: &mut App,
+) -> Vec<AnyElement> {
+    let path = code.files[file].path();
+    let ixs = code
+        .annotations
+        .files
+        .get(path)
+        .cloned()
+        .unwrap_or_default();
+    annotation_elements(&ixs, code, window, cx)
+}
+
 /// Summarizes a file without source rows: binary, metadata-only or empty.
-fn render_notice(document: &DiffFile, cx: &App) -> AnyElement {
-    let message = if !document.has_changes() {
+fn render_notice(file: &DiffFile, cx: &App) -> AnyElement {
+    let message = if !file.has_changes() {
         t!("Diff.NoChanges")
-    } else if document.is_binary() {
+    } else if file.is_binary() {
         t!("Diff.BinaryChanges")
-    } else if !document.extended_headers().is_empty() {
+    } else if !file.extended_headers().is_empty() {
         t!("Diff.NoTextChanges")
     } else {
         t!("Diff.EmptyFile")
@@ -737,8 +1064,7 @@ fn render_notice(document: &DiffFile, cx: &App) -> AnyElement {
         .text_xs()
         .text_color(cx.theme().muted_foreground)
         .children(
-            document
-                .extended_headers()
+            file.extended_headers()
                 .iter()
                 .cloned()
                 .map(|line| div().child(line)),
@@ -754,6 +1080,10 @@ fn render_gutter(
     code: &CodePresentation,
     cx: &App,
 ) -> AnyElement {
+    let hover = matches!(
+        code.hover_highlight,
+        DiffHoverHighlight::LineNumber | DiffHoverHighlight::Both
+    );
     div()
         .id(if side == DiffSide::Original {
             "old-gutter"
@@ -763,9 +1093,14 @@ fn render_gutter(
         .flex_shrink_0()
         .w(code.gutter_width)
         .pr_1()
+        .when(hover, |this| {
+            this.hover(|this| this.bg(cx.theme().list_hover))
+        })
         .when_some(ix, |this, ix| {
             let position = code.position(file, side, ix);
-            let state = code.state.clone();
+            let down = code.state.clone();
+            let moved = code.state.clone();
+            let dragged = position.clone();
             // A plain hit target: line numbers need no button chrome or state.
             this.child(
                 div()
@@ -789,10 +1124,22 @@ fn render_gutter(
                         .to_string(),
                     )
                     .child(position.line().to_string())
-                    .on_click(move |event, window, cx| {
-                        state.update(cx, |state, cx| {
-                            state.click_line(position.clone(), event.modifiers().shift, window, cx)
+                    .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                        down.update(cx, |state, cx| {
+                            state.begin_line_selection(
+                                position.clone(),
+                                event.modifiers.shift,
+                                window,
+                                cx,
+                            )
                         })
+                    })
+                    .on_mouse_move(move |event, _, cx| {
+                        if event.pressed_button == Some(MouseButton::Left) {
+                            moved.update(cx, |state, cx| {
+                                state.drag_line_selection(dragged.clone(), cx)
+                            })
+                        }
                     }),
             )
         })
@@ -874,7 +1221,7 @@ fn render_unified_cell(
     };
     let mut extras = line_extras(file, side, ix, counterpart, changed, &code, window, cx);
     if !changed && let Some(other_ix) = other_ix {
-        extras.extend(annotation_extras(
+        extras.extend(line_annotations(
             file,
             side.other(),
             other_ix,
@@ -909,6 +1256,103 @@ fn render_unified_cell(
         .into_any_element()
 }
 
+/// Syntax colors with inline-change and selection emphasis layered over them.
+#[allow(clippy::too_many_arguments)]
+fn line_highlights(
+    file: usize,
+    side: DiffSide,
+    ix: usize,
+    changed: bool,
+    selected: bool,
+    status: Hsla,
+    code: &CodePresentation,
+    cx: &App,
+) -> Vec<(std::ops::Range<usize>, HighlightStyle)> {
+    let line = &code.files[file].lines(side)[ix];
+    let presentation = code.presentations.get(file).and_then(Option::as_ref);
+    let mut highlights = match presentation {
+        Some(presentation) if code.syntax_highlight => {
+            presentation.syntax_highlights(line, side, ix, cx.theme().highlight_theme.as_ref())
+        }
+        _ => Vec::new(),
+    };
+    if changed && let Some(presentation) = presentation {
+        highlights.extend(presentation.inline_changes(line, side, ix).map(|range| {
+            (
+                range,
+                HighlightStyle {
+                    background_color: Some(status.opacity(0.3)),
+                    ..Default::default()
+                },
+            )
+        }));
+    }
+    if selected {
+        highlights.push((
+            0..line.display().len(),
+            HighlightStyle {
+                background_color: Some(cx.theme().selection),
+                ..Default::default()
+            },
+        ));
+    }
+    highlights
+}
+
+/// The add-annotation button, shown on hover and at the end of the selection.
+fn add_annotation_button(
+    file: usize,
+    side: DiffSide,
+    ix: usize,
+    left: Pixels,
+    code: &CodePresentation,
+    cx: &App,
+) -> Option<AnyElement> {
+    let handler = code.on_add_annotation.clone()?;
+    let position = code.position(file, side, ix);
+    let range = code
+        .selected_lines
+        .clone()
+        .filter(|_| code.is_selected(file, side, ix))
+        .unwrap_or_else(|| {
+            DiffLineRange::new(
+                position.path().clone(),
+                side,
+                position.line(),
+                position.line(),
+            )
+        });
+    let at_selection_end = code
+        .selected
+        .as_ref()
+        .is_some_and(|selected| selected.is_last(&code.files, file, side, ix));
+    Some(
+        div()
+            .id(("add-annotation", ix))
+            .test_support()
+            .absolute()
+            .top_0()
+            .left(left)
+            .size(code.row_height)
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(cx.theme().radius)
+            .bg(cx.theme().primary)
+            .text_color(cx.theme().primary_foreground)
+            .when(!at_selection_end, |this| {
+                this.opacity(0.)
+                    .group_hover("diff-line", |this| this.opacity(1.))
+            })
+            .role(gpui::accesskit::Role::Button)
+            .aria_label(t!("Diff.AddAnnotation", line = position.line()).to_string())
+            .child(Icon::new(IconName::Plus).xsmall())
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, window, cx| handler(&range, window, cx))
+            .into_any_element(),
+    )
+}
+
 fn code_line(
     file: usize,
     side: DiffSide,
@@ -925,28 +1369,14 @@ fn code_line(
     } else {
         cx.theme().success
     };
-    let selected = code.selected_lines.as_ref().is_some_and(|range| {
-        range.contains(&code.position(file, side, ix))
-            || (code.mode == DiffMode::Unified
-                && !changed
-                && gutters.iter().flatten().any(|(side, ix)| {
-                    ix.is_some_and(|ix| range.contains(&code.position(file, *side, ix)))
-                }))
-    });
-    let mut highlights = if code.syntax_highlight {
-        document.line_highlights(side, ix, cx.theme().highlight_theme.as_ref())
-    } else {
-        Vec::new()
-    };
-    if selected {
-        highlights.push((
-            0..line.display().len(),
-            HighlightStyle {
-                background_color: Some(cx.theme().selection),
-                ..Default::default()
-            },
-        ));
-    }
+    let selected = code.is_selected(file, side, ix)
+        || (code.mode == DiffMode::Unified
+            && !changed
+            && gutters
+                .iter()
+                .flatten()
+                .any(|(side, ix)| ix.is_some_and(|ix| code.is_selected(file, *side, ix))));
+    let highlights = line_highlights(file, side, ix, changed, selected, status, &code, cx);
     // An unchanged Unified row shows one source line for both sides; follow
     // the side a text selection started on so its offsets stay consistent.
     let (text_side, text_ix) = if code.mode == DiffMode::Unified
@@ -985,15 +1415,58 @@ fn code_line(
                         )
                     }),
             );
+    let gutters_width = if code.line_number {
+        code.gutter_width * gutters.iter().flatten().count() as f32
+    } else {
+        px(0.)
+    };
+    let indicator = match code.change_indicator {
+        DiffChangeIndicator::Signs => div()
+            .w_4()
+            .flex_shrink_0()
+            .text_color(if changed {
+                status
+            } else {
+                cx.theme().muted_foreground
+            })
+            .child(match (changed, side) {
+                (false, _) => " ",
+                (true, DiffSide::Original) => "−",
+                (true, DiffSide::Modified) => "+",
+            }),
+        DiffChangeIndicator::Bars => div().w_4().h_full().flex_shrink_0().when(changed, |this| {
+            this.child(div().w(px(3.)).h_full().bg(status))
+        }),
+        DiffChangeIndicator::None => div().w_2().flex_shrink_0(),
+    };
+    let hover_line = matches!(
+        code.hover_highlight,
+        DiffHoverHighlight::Line | DiffHoverHighlight::Both
+    );
+    let add_button = add_annotation_button(file, side, ix, gutters_width, &code, cx);
     h_flex()
+        .id("line-row")
+        .group("diff-line")
+        .relative()
         .w_full()
         .h(code.row_height)
         .font_family(cx.theme().mono_font_family.clone())
         .text_size(code.font_size)
         .line_height(code.row_height)
         .whitespace_nowrap()
-        .when(changed, |this| this.bg(status.opacity(0.12)))
+        .when(changed && code.change_background, |this| {
+            this.bg(status.opacity(0.12))
+        })
         .when(selected, |this| this.bg(cx.theme().selection))
+        .when(hover_line && !selected, |this| {
+            this.hover(|this| this.bg(cx.theme().list_hover))
+        })
+        .when_some(code.on_line_hover.clone(), |this, handler| {
+            let position = position.clone();
+            this.on_hover(move |hovered, window, cx| {
+                handler(hovered.then_some(&position), window, cx)
+            })
+        })
         .when(code.line_number, |this| {
             this.children(
                 gutters
@@ -1002,25 +1475,7 @@ fn code_line(
                     .map(|(side, ix)| render_gutter(file, side, ix, &code, cx)),
             )
         })
-        .child(
-            div()
-                .w_4()
-                .flex_shrink_0()
-                .text_color(if changed {
-                    status
-                } else {
-                    cx.theme().muted_foreground
-                })
-                .child(if changed {
-                    if side == DiffSide::Original {
-                        "−"
-                    } else {
-                        "+"
-                    }
-                } else {
-                    " "
-                }),
-        )
+        .child(indicator)
         .child(
             div()
                 .id("source")
@@ -1044,8 +1499,22 @@ fn code_line(
                     )
                     .to_string(),
                 )
+                .when_some(code.on_line_click.clone(), |this, handler| {
+                    let position = position.clone();
+                    this.on_click(move |event, window, cx| {
+                        // A drag selects text; only a stationary press is a click.
+                        if let ClickEvent::Mouse(mouse) = event {
+                            let moved = mouse.up.position - mouse.down.position;
+                            if moved.x.abs() > px(3.) || moved.y.abs() > px(3.) {
+                                return;
+                            }
+                        }
+                        handler(&position, event, window, cx)
+                    })
+                })
                 .child(text),
         )
+        .children(add_button)
         .into_any_element()
 }
 
@@ -1081,11 +1550,11 @@ fn line_extras(
                 .into_any_element(),
         );
     }
-    extras.extend(annotation_extras(file, side, ix, code, window, cx));
+    extras.extend(line_annotations(file, side, ix, code, window, cx));
     extras
 }
 
-fn annotation_extras(
+fn line_annotations(
     file: usize,
     side: DiffSide,
     ix: usize,
@@ -1093,16 +1562,28 @@ fn annotation_extras(
     window: &mut Window,
     cx: &mut App,
 ) -> Vec<AnyElement> {
-    let Some(render) = &code.annotation_renderer else {
+    let position = code.position(file, side, ix);
+    let ixs = code
+        .annotations
+        .lines
+        .get(&position)
+        .cloned()
+        .unwrap_or_default();
+    annotation_elements(&ixs, code, window, cx)
+}
+
+fn annotation_elements(
+    ixs: &[usize],
+    code: &CodePresentation,
+    window: &mut Window,
+    cx: &mut App,
+) -> Vec<AnyElement> {
+    let Some(render) = &code.annotation_content else {
         return Vec::new();
     };
-    let position = code.position(file, side, ix);
-    code.annotation_index
-        .get(&position)
-        .into_iter()
-        .flatten()
+    ixs.iter()
         .map(|ix| {
-            let annotation = &code.annotations[*ix];
+            let annotation = &code.annotations.items[*ix];
             div()
                 .id(annotation.id.clone())
                 .w_full()
@@ -1119,18 +1600,18 @@ fn annotation_extras(
 }
 
 fn has_line_ending_change(
-    document: &DiffFile,
+    file: &DiffFile,
     side: DiffSide,
     ix: usize,
     counterpart: Option<usize>,
 ) -> bool {
     counterpart.is_some_and(|counterpart| {
         let other_side = side.other();
-        let line = &document.lines(side)[ix];
-        let other = &document.lines(other_side)[counterpart];
+        let line = &file.lines(side)[ix];
+        let other = &file.lines(other_side)[counterpart];
         line.text() == other.text()
-            && document.source(side)[line.content_end()..line.source().end]
-                != document.source(other_side)[other.content_end()..other.source().end]
+            && file.source(side)[line.content_end()..line.source().end]
+                != file.source(other_side)[other.content_end()..other.source().end]
     })
 }
 
@@ -1140,6 +1621,8 @@ mod copy_tests;
 mod header_tests;
 #[cfg(test)]
 mod newline_tests;
+#[cfg(test)]
+mod review_tests;
 #[cfg(test)]
 mod selection_tests;
 #[cfg(test)]

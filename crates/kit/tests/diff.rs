@@ -4,7 +4,10 @@ mod common;
 
 use gpui_kit::component::{
     button::Button,
-    diff::{Diff, DiffFile, DiffLineAnnotation, DiffLinePosition, DiffMode, DiffSide, DiffState},
+    diff::{
+        Diff, DiffAnnotation, DiffFile, DiffLinePosition, DiffLineRange, DiffMode, DiffSide,
+        DiffState,
+    },
     input::{Input, InputState},
 };
 use gpui_kit::test::{TestSupportExt as _, TestWindowExt as _};
@@ -16,7 +19,7 @@ use gpui_kit::{
 
 struct Review {
     state: Entity<DiffState>,
-    annotations: Vec<DiffLineAnnotation>,
+    annotations: Vec<DiffAnnotation>,
     editor: Option<Entity<InputState>>,
 }
 
@@ -65,7 +68,7 @@ fn review(
     patch: &str,
     context: Option<usize>,
     mode: DiffMode,
-    annotations: Vec<DiffLineAnnotation>,
+    annotations: Vec<DiffAnnotation>,
 ) -> (WindowHandle<gpui_kit::base::Root>, Entity<DiffState>) {
     review_documents(cx, vec![patch_document(patch)], context, mode, annotations)
 }
@@ -75,7 +78,7 @@ fn review_documents(
     documents: Vec<DiffFile>,
     context: Option<usize>,
     mode: DiffMode,
-    annotations: Vec<DiffLineAnnotation>,
+    annotations: Vec<DiffAnnotation>,
 ) -> (WindowHandle<gpui_kit::base::Root>, Entity<DiffState>) {
     cx.update(gpui_kit::init);
     let (handle, view) = common::open_window(cx, Some(size(px(800.), px(480.))), |_, cx| {
@@ -226,7 +229,7 @@ fn keyboard_expansion_exposes_original_annotation_on_an_unchanged_unified_line(
         "@@ -1,5 +1,5 @@\n first\n second\n-old\n+new\n fourth\n fifth\n",
         Some(0),
         DiffMode::Unified,
-        vec![DiffLineAnnotation::new(
+        vec![DiffAnnotation::line(
             "original-comment",
             DiffLinePosition::new("review.txt", DiffSide::Original, 1),
         )],
@@ -309,7 +312,7 @@ fn annotation_input_retains_focus_and_handles_its_own_text_commands(cx: &mut Tes
     let (handle, view) = common::open_window(cx, Some(size(px(800.), px(480.))), |window, cx| {
         cx.new(|cx| Review {
             state: cx.new(|cx| DiffState::new([patch_document("@@ -1 +1 @@\n-old\n+new\n")], cx)),
-            annotations: vec![DiffLineAnnotation::new(
+            annotations: vec![DiffAnnotation::line(
                 "editable-comment",
                 DiffLinePosition::new("review.txt", DiffSide::Modified, 1),
             )],
@@ -394,6 +397,144 @@ fn files_share_one_list_and_select_lines_in_their_own_file(cx: &mut TestAppConte
         assert_eq!(range.side(), DiffSide::Modified);
         window.within("review").press("secondary-c", cx);
         assert_clipboard(cx, "dos\n");
+    })
+    .unwrap();
+}
+
+struct Interactions {
+    state: Entity<DiffState>,
+    added: std::rc::Rc<std::cell::RefCell<Vec<DiffLineRange>>>,
+    clicked: std::rc::Rc<std::cell::RefCell<Vec<DiffLinePosition>>>,
+}
+
+impl Render for Interactions {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let added = self.added.clone();
+        let clicked = self.clicked.clone();
+        div().id("review").test_support().size_full().child(
+            Diff::new(&self.state)
+                .size_full()
+                .annotations([DiffAnnotation::file("file-note", "review.txt")])
+                .annotation_content(|annotation, _, _| {
+                    div()
+                        .id("note-content")
+                        .test_support()
+                        .child(annotation.id().to_string())
+                })
+                .on_add_annotation(move |range, _, _| added.borrow_mut().push(range.clone()))
+                .on_line_click(move |position, _, _, _| {
+                    clicked.borrow_mut().push(position.clone())
+                }),
+        )
+    }
+}
+
+fn interactions(
+    cx: &mut TestAppContext,
+    patch: &str,
+) -> (WindowHandle<gpui_kit::base::Root>, Entity<Interactions>) {
+    cx.update(gpui_kit::init);
+    let file = patch_document(patch);
+    common::open_window(cx, Some(size(px(800.), px(480.))), |_, cx| {
+        cx.new(|cx| Interactions {
+            state: cx.new(|cx| DiffState::new([file], cx).with_context_lines(None)),
+            added: Default::default(),
+            clicked: Default::default(),
+        })
+    })
+}
+
+#[gpui_kit::test]
+fn add_annotation_offers_the_line_or_the_selection_containing_it(cx: &mut TestAppContext) {
+    let (handle, view) = interactions(cx, "@@ -1,3 +1,3 @@\n one\n two\n three\n");
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        // The button appears while its row is hovered.
+        window.within(("new", 1usize)).hover("source", cx);
+        window
+            .within(("new", 1usize))
+            .click(("add-annotation", 1usize), cx);
+        // Selecting lines 1–3, then adding from inside the selection, offers it.
+        window
+            .within(("new", 0usize))
+            .within("new-gutter")
+            .click(("line", 0usize), cx);
+        let last = window
+            .within(("new", 2usize))
+            .within("new-gutter")
+            .find(("line", 2usize))
+            .bounds()
+            .center();
+        shift_click(window, last, cx);
+        window.within(("new", 1usize)).hover("source", cx);
+        window
+            .within(("new", 1usize))
+            .click(("add-annotation", 1usize), cx);
+        let added = view.read(cx).added.borrow().clone();
+        assert_eq!(
+            added,
+            [
+                DiffLineRange::new("review.txt", DiffSide::Modified, 2, 2),
+                DiffLineRange::new("review.txt", DiffSide::Modified, 1, 3),
+            ]
+        );
+        // The button does not start a line selection of its own.
+        assert_eq!(
+            view.read(cx).state.read(cx).selected_lines(),
+            Some(DiffLineRange::new("review.txt", DiffSide::Modified, 1, 3))
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn line_number_drag_selects_and_code_click_reports_the_line(cx: &mut TestAppContext) {
+    let (handle, view) = interactions(cx, "@@ -1,3 +1,3 @@\n one\n two\n three\n");
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let from = window
+            .within(("new", 0usize))
+            .within("new-gutter")
+            .find(("line", 0usize))
+            .bounds()
+            .center();
+        let to = window
+            .within(("new", 2usize))
+            .within("new-gutter")
+            .find(("line", 2usize))
+            .bounds()
+            .center();
+        window.drag(from, to, cx);
+        assert_eq!(
+            view.read(cx).state.read(cx).selected_lines(),
+            Some(DiffLineRange::new("review.txt", DiffSide::Modified, 1, 3))
+        );
+        window.within(("new", 1usize)).click("source", cx);
+        assert_eq!(
+            view.read(cx).clicked.borrow().as_slice(),
+            &[DiffLinePosition::new("review.txt", DiffSide::Modified, 2)]
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn header_collapses_its_file_and_shows_file_annotations(cx: &mut TestAppContext) {
+    let (handle, view) = interactions(cx, "@@ -1,2 +1,2 @@\n one\n-two\n+TWO\n");
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.find("note-content").visible());
+        assert!(window.within(("new", 0usize)).try_find("source").is_some());
+        window
+            .within(("diff-file", 0usize))
+            .click("collapse-file", cx);
+        assert!(view.read(cx).state.read(cx).is_file_collapsed("review.txt"));
+        assert!(window.try_find("source").is_none());
+        assert!(window.find("note-content").visible());
+        window
+            .within(("diff-file", 0usize))
+            .click("collapse-file", cx);
+        assert!(window.within(("new", 0usize)).try_find("source").is_some());
     })
     .unwrap();
 }

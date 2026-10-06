@@ -2,7 +2,7 @@ use std::{fmt, ops::Range};
 
 use gpui::SharedString;
 
-use super::document::{DiffFile, FileSide, Hunk, LinePair};
+use super::document::{DiffFile, DiffFileStatus, FileSide, Hunk, LinePair};
 
 /// A malformed or unsupported unified diff, with its one-based patch line.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,11 +88,25 @@ struct File {
     extended_headers: Vec<SharedString>,
     binary: bool,
     headers: bool,
+    renamed: bool,
+    copied: bool,
 }
 
 impl File {
     fn finish(self) -> DiffFile {
+        let status = if self.old_path.is_none() {
+            DiffFileStatus::Added
+        } else if self.new_path.is_none() {
+            DiffFileStatus::Deleted
+        } else if self.copied {
+            DiffFileStatus::Copied
+        } else if self.renamed {
+            DiffFileStatus::Renamed
+        } else {
+            DiffFileStatus::Modified
+        };
         DiffFile::new(
+            status,
             self.original.finish(self.old_path),
             self.modified.finish(self.new_path),
             self.pairs,
@@ -232,11 +246,13 @@ pub(crate) fn parse(patch: &str) -> Result<Vec<DiffFile>> {
             if line.starts_with("Binary files ") || line == "GIT binary patch" {
                 file.binary = true;
             }
-            if let Some(path) = line
-                .strip_prefix("rename from ")
-                .or_else(|| line.strip_prefix("copy from "))
-            {
+            if let Some(path) = line.strip_prefix("rename from ") {
                 file.old_path = Some(decode_path(path, ix + 1)?);
+                file.renamed = true;
+            }
+            if let Some(path) = line.strip_prefix("copy from ") {
+                file.old_path = Some(decode_path(path, ix + 1)?);
+                file.copied = true;
             }
             if let Some(path) = line
                 .strip_prefix("rename to ")
@@ -380,11 +396,14 @@ fn parse_hunk(file: &mut File, lines: &[&str], mut ix: usize) -> Result<usize> {
         ));
     }
     file.flush_changes(&mut deleted, &mut added);
+    // A zero-count side names the line before its insertion point.
+    let first_original = old_start + usize::from(old_count == 0);
     file.hunks.push(Hunk::new(
         pairs_start..file.pairs.len(),
         original_start..file.original.lines.len(),
         modified_start..file.modified.lines.len(),
         header.to_owned().into(),
+        first_original..first_original + old_count,
     ));
     Ok(ix)
 }

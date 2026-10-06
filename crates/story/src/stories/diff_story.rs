@@ -1,7 +1,7 @@
 use gpui_kit::component::{
     ActiveTheme, Disableable, IconName, Selectable, Sizable, StyledExt as _,
     button::{Button, ButtonVariants},
-    diff::{Diff, DiffFile, DiffLineAnnotation, DiffLinePosition, DiffMode, DiffSide, DiffState},
+    diff::{Diff, DiffAnnotation, DiffFile, DiffLinePosition, DiffMode, DiffSide, DiffState},
     h_flex, v_flex,
 };
 use gpui_kit::{
@@ -36,7 +36,7 @@ const EXAMPLES: [&str; 9] = [
 pub struct DiffStory {
     state: Entity<DiffState>,
     example: usize,
-    annotations: Vec<DiffLineAnnotation>,
+    annotations: Vec<DiffAnnotation>,
     comment_resolved: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -63,7 +63,7 @@ impl DiffStory {
             Self {
                 state,
                 example: 0,
-                annotations: vec![DiffLineAnnotation::new(
+                annotations: vec![DiffAnnotation::line(
                     "retry-delay-review",
                     DiffLinePosition::new("src/retry.rs", DiffSide::Modified, 21),
                 )],
@@ -86,8 +86,12 @@ impl DiffStory {
                 self.state
                     .update(cx, |state, cx| state.set_context_lines(lines, cx));
             }
-            DiffStoryAction::Expand => self.state.update(cx, |state, cx| state.expand_all(cx)),
-            DiffStoryAction::Collapse => self.state.update(cx, |state, cx| state.collapse_all(cx)),
+            DiffStoryAction::Expand => self
+                .state
+                .update(cx, |state, cx| state.expand_unchanged(cx)),
+            DiffStoryAction::Collapse => self
+                .state
+                .update(cx, |state, cx| state.collapse_unchanged(cx)),
         }
         cx.notify();
     }
