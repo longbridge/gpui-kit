@@ -232,6 +232,10 @@ pub struct DiffState {
     row_height: Option<Pixels>,
     annotations: HashSet<(Option<DiffLinePosition>, SharedString, ElementId)>,
     window: Option<WindowId>,
+    /// Bumped when files or presentation options change, so a preparation
+    /// started for earlier ones never installs its results.
+    presentation_generation: usize,
+    preparing: Option<usize>,
     _presentation: Task<()>,
     _selection_subscription: Subscription,
 }
@@ -356,11 +360,12 @@ impl DiffState {
             row_height: None,
             annotations: HashSet::new(),
             window: None,
+            presentation_generation: 0,
+            preparing: None,
             _presentation: Task::ready(()),
             _selection_subscription,
         };
         state.rebuild(true);
-        state.prepare_presentation(cx);
         state
     }
 
@@ -397,21 +402,21 @@ impl DiffState {
     /// or `None` to emphasize whole lines only. Default is [`DiffInlineUnit::Word`].
     pub fn with_inline_unit(mut self, unit: Option<DiffInlineUnit>) -> Self {
         self.presentation_options.inline_unit = unit;
-        self.presentations.iter_mut().for_each(|item| *item = None);
+        self.reset_presentation();
         self
     }
 
     /// Sets the longest line, in bytes, compared for inline changes. Default is 1,000.
     pub fn with_inline_max_line_length(mut self, length: usize) -> Self {
         self.presentation_options.inline_max_line_length = length;
-        self.presentations.iter_mut().for_each(|item| *item = None);
+        self.reset_presentation();
         self
     }
 
     /// Sets the longest line, in bytes, given syntax emphasis. Default is 1,000.
     pub fn with_syntax_max_line_length(mut self, length: usize) -> Self {
         self.presentation_options.syntax_max_line_length = length;
-        self.presentations.iter_mut().for_each(|item| *item = None);
+        self.reset_presentation();
         self
     }
 
@@ -503,7 +508,7 @@ impl DiffState {
             .retain(|path| self.file_ixs.contains_key(path));
         self.resolutions.clear();
         self.expanded = vec![Vec::new(); self.files.len()];
-        self.presentations = vec![None; self.files.len()];
+        self.reset_presentation();
         self.layout = None;
         self.annotations.clear();
         self.selection.set_local_selection(false, cx);
@@ -515,7 +520,7 @@ impl DiffState {
         self.geometry.borrow_mut().clear();
         self.rebuild(true);
         self.horizontal_scroll.set_offset(point(px(0.), px(0.)));
-        self.prepare_presentation(cx);
+        self.ensure_presentation(cx);
         cx.notify();
     }
 
@@ -1266,9 +1271,22 @@ impl DiffState {
         }
     }
 
-    /// Prepares syntax and inline emphasis for files that lack it, one file
-    /// at a time on the background executor, reusing highlighters per language.
-    fn prepare_presentation(&mut self, cx: &mut Context<Self>) {
+    /// Discards prepared emphasis after files or options change.
+    fn reset_presentation(&mut self) {
+        self.presentations = vec![None; self.files.len()];
+        self.presentation_generation += 1;
+        self.preparing = None;
+        self._presentation = Task::ready(());
+    }
+
+    /// Prepares syntax and inline emphasis for files that lack it, one file at
+    /// a time on the background executor, reusing highlighters per language.
+    /// Starts on first render, so builders applied after `new` take effect.
+    pub(crate) fn ensure_presentation(&mut self, cx: &mut Context<Self>) {
+        let generation = self.presentation_generation;
+        if self.preparing == Some(generation) {
+            return;
+        }
         let pending = self
             .presentations
             .iter()
@@ -1276,37 +1294,41 @@ impl DiffState {
             .filter(|(_, presentation)| presentation.is_none())
             .map(|(ix, _)| (ix, self.files[ix].clone()))
             .collect::<Vec<_>>();
+        if pending.is_empty() {
+            return;
+        }
         let options = self.presentation_options;
-        self._presentation = if pending.is_empty() {
-            Task::ready(())
-        } else {
-            cx.spawn(async move |this, cx| {
-                let mut highlighters = Some(SyntaxHighlighters::default());
-                for (ix, file) in pending {
-                    let mut moved = highlighters.take();
-                    let (presentation, returned) = cx
-                        .background_spawn(async move {
-                            let presentation = FilePresentation::prepare(
-                                &file,
-                                options,
-                                moved.get_or_insert_default(),
-                            );
-                            (presentation, moved)
-                        })
-                        .await;
-                    highlighters = returned;
-                    let installed = this.update(cx, |state, cx| {
-                        if let Some(slot) = state.presentations.get_mut(ix) {
-                            *slot = Some(Arc::new(presentation));
-                        }
-                        cx.notify();
-                    });
-                    if installed.is_err() {
-                        return;
+        self.preparing = Some(generation);
+        self._presentation = cx.spawn(async move |this, cx| {
+            let mut highlighters = Some(SyntaxHighlighters::default());
+            for (ix, file) in pending {
+                let mut moved = highlighters.take();
+                let (presentation, returned) = cx
+                    .background_spawn(async move {
+                        let presentation = FilePresentation::prepare(
+                            &file,
+                            options,
+                            moved.get_or_insert_default(),
+                        );
+                        (presentation, moved)
+                    })
+                    .await;
+                highlighters = returned;
+                let current = this.update(cx, |state, cx| {
+                    if state.presentation_generation != generation {
+                        return false;
                     }
+                    if let Some(slot) = state.presentations.get_mut(ix) {
+                        *slot = Some(Arc::new(presentation));
+                    }
+                    cx.notify();
+                    true
+                });
+                if !matches!(current, Ok(true)) {
+                    return;
                 }
-            })
-        };
+            }
+        });
     }
 }
 

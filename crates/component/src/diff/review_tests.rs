@@ -305,3 +305,26 @@ fn unchanged_files_show_every_line_without_folding(cx: &mut TestAppContext) {
         assert_eq!(state.selected_text(cx), "line 2\nline 3\n");
     });
 }
+
+#[gpui::test]
+fn builders_after_new_shape_the_prepared_emphasis(cx: &mut TestAppContext) {
+    let patch = "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-let total = price;\n+let total = cost;\n";
+    let inline_count = |state: &gpui::Entity<DiffState>, cx: &mut TestAppContext| {
+        state.update(cx, |state, cx| state.ensure_presentation(cx));
+        cx.run_until_parked();
+        state.read_with(cx, |state, _| {
+            let file = &state.files()[0];
+            let line = &file.lines(DiffSide::Modified)[0];
+            state.presentations()[0]
+                .as_ref()
+                .expect("prepared in the background")
+                .inline_changes(line, DiffSide::Modified, 0)
+                .count()
+        })
+    };
+    let words = cx.new(|cx| DiffState::new(DiffFile::parse(patch).unwrap(), cx));
+    assert_eq!(inline_count(&words, cx), 1);
+    let whole_lines =
+        cx.new(|cx| DiffState::new(DiffFile::parse(patch).unwrap(), cx).with_inline_unit(None));
+    assert_eq!(inline_count(&whole_lines, cx), 0);
+}
