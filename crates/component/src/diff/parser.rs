@@ -18,7 +18,7 @@ impl DiffParseError {
     pub fn message(&self) -> &SharedString {
         &self.message
     }
-    fn new(line: usize, message: &'static str) -> Self {
+    pub(crate) fn new(line: usize, message: &'static str) -> Self {
         Self {
             line,
             message: SharedString::new_static(message),

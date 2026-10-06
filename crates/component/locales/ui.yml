@@ -505,6 +505,50 @@ Diff:
     en: Add annotation to line %{line}
     zh-CN: 为第 %{line} 行添加批注
     zh-HK: 為第 %{line} 行新增批註
+  ConflictedFile:
+    en: Conflicts
+    zh-CN: 有冲突
+    zh-HK: 有衝突
+  CurrentChange:
+    en: Current change
+    zh-CN: 当前更改
+    zh-HK: 目前變更
+  IncomingChange:
+    en: Incoming change
+    zh-CN: 传入的更改
+    zh-HK: 傳入的變更
+  BaseChange:
+    en: Common ancestor
+    zh-CN: 共同祖先
+    zh-HK: 共同祖先
+  AcceptCurrent:
+    en: Accept Current
+    zh-CN: 采用当前更改
+    zh-HK: 採用目前變更
+  AcceptIncoming:
+    en: Accept Incoming
+    zh-CN: 采用传入的更改
+    zh-HK: 採用傳入的變更
+  AcceptBoth:
+    en: Accept Both
+    zh-CN: 保留双方更改
+    zh-HK: 保留雙方變更
+  AcceptedCurrent:
+    en: Accepted current change
+    zh-CN: 已采用当前更改
+    zh-HK: 已採用目前變更
+  AcceptedIncoming:
+    en: Accepted incoming change
+    zh-CN: 已采用传入的更改
+    zh-HK: 已採用傳入的變更
+  AcceptedBoth:
+    en: Accepted both changes
+    zh-CN: 已保留双方更改
+    zh-HK: 已保留雙方變更
+  UndoResolution:
+    en: Undo
+    zh-CN: 撤销
+    zh-HK: 復原
   Original:
     en: Original
     zh-CN: 原版

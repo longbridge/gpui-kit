@@ -14,7 +14,9 @@ use gpui::{
 use gpui_base::{TextSelection, TextSelectionContentKey, TextSelectionEvent, TextSelectionHandle};
 
 use super::{
-    DiffAnnotation, DiffFile, DiffInlineUnit, DiffLinePosition, DiffLineRange, DiffMode, DiffSide,
+    DiffAnnotation, DiffConflictResolution, DiffFile, DiffFileStatus, DiffInlineUnit,
+    DiffLinePosition, DiffLineRange, DiffMode, DiffSide,
+    conflict::ConflictPart,
     presentation::{FilePresentation, PresentationOptions, SyntaxHighlighters},
     selection::SelectionGeometry,
 };
@@ -34,6 +36,13 @@ pub(crate) enum DisplayRow {
         file: usize,
         pairs: Range<usize>,
     },
+    /// The heading of one part of a merge conflict; for a resolved conflict,
+    /// the [`ConflictPart::Current`] heading stands for the whole conflict.
+    Conflict {
+        file: usize,
+        conflict: usize,
+        part: ConflictPart,
+    },
     Code {
         file: usize,
         original: Option<usize>,
@@ -46,7 +55,10 @@ impl DisplayRow {
     pub(crate) fn file(&self) -> usize {
         match self {
             Self::File(file) | Self::Notice(file) => *file,
-            Self::Hunk { file, .. } | Self::Fold { file, .. } | Self::Code { file, .. } => *file,
+            Self::Hunk { file, .. }
+            | Self::Fold { file, .. }
+            | Self::Conflict { file, .. }
+            | Self::Code { file, .. } => *file,
         }
     }
 }
@@ -75,6 +87,9 @@ pub enum DiffEvent {
     FileExpanded(SharedString),
     /// The user collapsed a file from its header.
     FileCollapsed(SharedString),
+    /// The user resolved a merge conflict, or undid its resolution; read it
+    /// with [`DiffState::conflict_resolution`].
+    ConflictResolved(SharedString, usize),
 }
 
 /// Inputs that determine row heights and content width.
@@ -85,6 +100,7 @@ pub(crate) struct LayoutKey {
     font_family: SharedString,
     mode: DiffMode,
     line_number: bool,
+    soft_wrap: bool,
 }
 
 impl LayoutKey {
@@ -94,6 +110,7 @@ impl LayoutKey {
         font_family: SharedString,
         mode: DiffMode,
         line_number: bool,
+        soft_wrap: bool,
     ) -> Self {
         Self {
             rem,
@@ -101,6 +118,7 @@ impl LayoutKey {
             font_family,
             mode,
             line_number,
+            soft_wrap,
         }
     }
 }
@@ -192,6 +210,7 @@ pub struct DiffState {
     min_collapsed_lines: usize,
     expanded: Vec<Vec<Range<usize>>>,
     collapsed: HashSet<SharedString>,
+    resolutions: HashMap<(SharedString, usize), DiffConflictResolution>,
     file_rows: Vec<FileRows>,
     header_rows: Vec<usize>,
     rows: Rc<Vec<DisplayRow>>,
@@ -312,6 +331,7 @@ impl DiffState {
             expansion_lines: 20,
             min_collapsed_lines: 2,
             collapsed: HashSet::new(),
+            resolutions: HashMap::new(),
             file_rows: Vec::new(),
             header_rows: Vec::new(),
             rows: Rc::default(),
@@ -481,6 +501,7 @@ impl DiffState {
         self.file_ixs = file_ixs(&self.files);
         self.collapsed
             .retain(|path| self.file_ixs.contains_key(path));
+        self.resolutions.clear();
         self.expanded = vec![Vec::new(); self.files.len()];
         self.presentations = vec![None; self.files.len()];
         self.layout = None;
@@ -553,6 +574,67 @@ impl DiffState {
             self.rebuild_at_anchor();
             cx.notify();
         }
+    }
+
+    /// The resolution of conflict `ix` in the file at `path`, if any.
+    pub fn conflict_resolution(&self, path: &str, ix: usize) -> Option<DiffConflictResolution> {
+        let file = &self.files[self.file_ix(path)?];
+        self.resolutions.get(&(file.path().clone(), ix)).copied()
+    }
+
+    /// Resolves conflict `ix` in the file at `path`, or clears its resolution
+    /// with `None`, without emitting a user event.
+    pub fn resolve_conflict(
+        &mut self,
+        path: &str,
+        ix: usize,
+        resolution: Option<DiffConflictResolution>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(file) = self.file_ix(path) else {
+            return;
+        };
+        if ix >= self.files[file].conflicts().len() {
+            return;
+        }
+        let key = (self.files[file].path().clone(), ix);
+        let previous = match resolution {
+            Some(resolution) => self.resolutions.insert(key, resolution),
+            None => self.resolutions.remove(&key),
+        };
+        if previous != resolution {
+            self.rebuild_at_anchor();
+            cx.notify();
+        }
+    }
+
+    /// The working file with every conflict replaced by its resolution, or
+    /// `None` while a conflict is unresolved or `path` names no conflicted file.
+    pub fn resolved_text(&self, path: &str) -> Option<String> {
+        let file = &self.files[self.file_ix(path)?];
+        if file.status() != DiffFileStatus::Conflicted {
+            return None;
+        }
+        let lines = file.lines(DiffSide::Modified);
+        let source = file.source(DiffSide::Modified);
+        let mut text = String::with_capacity(source.len());
+        let mut ix = 0;
+        for (conflict_ix, conflict) in file.conflicts().iter().enumerate() {
+            let resolution = *self.resolutions.get(&(file.path().clone(), conflict_ix))?;
+            for line in &lines[ix..conflict.lines().start] {
+                text.push_str(&source[line.source()]);
+            }
+            for range in conflict.kept(resolution) {
+                for line in &lines[range] {
+                    text.push_str(&source[line.source()]);
+                }
+            }
+            ix = conflict.lines().end;
+        }
+        for line in &lines[ix..] {
+            text.push_str(&source[line.source()]);
+        }
+        Some(text)
     }
 
     /// Synchronizes source-line selection without emitting a user event.
@@ -671,6 +753,19 @@ impl DiffState {
             self.rebuild_at_anchor();
             cx.notify();
         }
+    }
+
+    /// Resolves a conflict from its heading and reports the user's change.
+    pub(crate) fn choose_conflict(
+        &mut self,
+        file: usize,
+        ix: usize,
+        resolution: Option<DiffConflictResolution>,
+        cx: &mut Context<Self>,
+    ) {
+        let path = self.files[file].path().clone();
+        self.resolve_conflict(&path, ix, resolution, cx);
+        cx.emit(DiffEvent::ConflictResolved(path, ix));
     }
 
     /// Toggles a file from its header and reports the user's change.
@@ -1049,7 +1144,10 @@ impl DiffState {
                 .pairs()
                 .get(pairs.start)
                 .and_then(|pair| pair_position(pair.original(), pair.modified())),
-            DisplayRow::File(_) | DisplayRow::Notice(_) | DisplayRow::Hunk { .. } => self
+            DisplayRow::File(_)
+            | DisplayRow::Notice(_)
+            | DisplayRow::Hunk { .. }
+            | DisplayRow::Conflict { .. } => self
                 .rows
                 .get(ix + 1)
                 .filter(|next| next.file() == file)
@@ -1123,6 +1221,28 @@ impl DiffState {
             }
             if file.pairs().is_empty() {
                 rows.push(DisplayRow::Notice(ix));
+            } else if file.status() == DiffFileStatus::Unchanged {
+                rows.extend((0..file.pairs().len()).map(|line| DisplayRow::Code {
+                    file: ix,
+                    original: None,
+                    modified: Some(line),
+                    changed: false,
+                }));
+            } else if file.status() == DiffFileStatus::Conflicted {
+                let resolutions = (0..file.conflicts().len())
+                    .map(|conflict| {
+                        self.resolutions
+                            .get(&(file.path().clone(), conflict))
+                            .copied()
+                    })
+                    .collect::<Vec<_>>();
+                let visible = visible_pairs(
+                    file,
+                    self.context_lines,
+                    self.min_collapsed_lines,
+                    &self.expanded[ix],
+                );
+                project_conflicts(&mut rows, ix, file, &visible, &resolutions);
             } else {
                 project_file(
                     &mut rows,
@@ -1250,7 +1370,10 @@ fn source_rows(files: &[DiffFile], rows: &[DisplayRow]) -> Vec<FileRows> {
                     map(*file, pair.original(), pair.modified());
                 }
             }
-            DisplayRow::File(_) | DisplayRow::Notice(_) | DisplayRow::Hunk { .. } => {}
+            DisplayRow::File(_)
+            | DisplayRow::Notice(_)
+            | DisplayRow::Hunk { .. }
+            | DisplayRow::Conflict { .. } => {}
         }
     }
     file_rows
@@ -1293,15 +1416,24 @@ pub(crate) fn decode_key(key: u64) -> (usize, DiffSide, usize) {
     )
 }
 
-fn project_file(
-    rows: &mut Vec<DisplayRow>,
-    file: usize,
+/// The end of the hunk containing each pair; a fixture without hunks is one.
+fn hunk_ends(document: &DiffFile) -> Vec<usize> {
+    let pairs = document.pairs();
+    let mut hunk_end = vec![pairs.len(); pairs.len()];
+    for hunk in document.hunks() {
+        hunk_end[hunk.pairs()].fill(hunk.pairs().end);
+    }
+    hunk_end
+}
+
+/// Which pairs show as code: changes with their context, expanded ranges,
+/// and collapsed ranges shorter than `min_collapsed_lines`.
+fn visible_pairs(
     document: &DiffFile,
-    mode: DiffMode,
     context: Option<usize>,
     min_collapsed_lines: usize,
     expanded: &[Range<usize>],
-) {
+) -> Vec<bool> {
     let pairs = document.pairs();
     let hunks = document.hunks();
     let mut hunk_end = vec![pairs.len(); pairs.len()];
@@ -1362,6 +1494,22 @@ fn project_file(
             visible[start..ix].fill(true);
         }
     }
+    visible
+}
+
+fn project_file(
+    rows: &mut Vec<DisplayRow>,
+    file: usize,
+    document: &DiffFile,
+    mode: DiffMode,
+    context: Option<usize>,
+    min_collapsed_lines: usize,
+    expanded: &[Range<usize>],
+) {
+    let pairs = document.pairs();
+    let hunks = document.hunks();
+    let hunk_end = hunk_ends(document);
+    let visible = visible_pairs(document, context, min_collapsed_lines, expanded);
     let mut hunk_ix = 0;
     let mut ix = 0;
     while ix < pairs.len() {
@@ -1419,5 +1567,76 @@ fn project_file(
             });
             ix += 1;
         }
+    }
+}
+
+/// Projects a conflicted working file: shared lines fold like context, and
+/// each conflict shows its parts, or only the kept lines once resolved.
+fn project_conflicts(
+    rows: &mut Vec<DisplayRow>,
+    file: usize,
+    document: &DiffFile,
+    visible: &[bool],
+    resolutions: &[Option<DiffConflictResolution>],
+) {
+    // Each line of a conflicted file is its own pair.
+    let code = |line: usize, changed: bool| DisplayRow::Code {
+        file,
+        original: None,
+        modified: Some(line),
+        changed,
+    };
+    let conflicts = document.conflicts();
+    let mut next = 0;
+    let mut ix = 0;
+    while ix < visible.len() {
+        if let Some(conflict) = conflicts.get(next)
+            && conflict.lines().start == ix
+        {
+            match resolutions[next] {
+                None => {
+                    for part in [
+                        ConflictPart::Current,
+                        ConflictPart::Base,
+                        ConflictPart::Incoming,
+                    ] {
+                        if let Some(lines) = conflict.part(part) {
+                            rows.push(DisplayRow::Conflict {
+                                file,
+                                conflict: next,
+                                part,
+                            });
+                            rows.extend(lines.map(|line| code(line, true)));
+                        }
+                    }
+                }
+                Some(resolution) => {
+                    rows.push(DisplayRow::Conflict {
+                        file,
+                        conflict: next,
+                        part: ConflictPart::Current,
+                    });
+                    for lines in conflict.kept(resolution) {
+                        rows.extend(lines.map(|line| code(line, false)));
+                    }
+                }
+            }
+            ix = conflict.lines().end;
+            next += 1;
+            continue;
+        }
+        if visible[ix] {
+            rows.push(code(ix, false));
+            ix += 1;
+            continue;
+        }
+        let start = ix;
+        while ix < visible.len() && !visible[ix] {
+            ix += 1;
+        }
+        rows.push(DisplayRow::Fold {
+            file,
+            pairs: start..ix,
+        });
     }
 }

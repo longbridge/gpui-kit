@@ -222,3 +222,86 @@ fn files_report_git_status_and_hidden_lines() {
     assert_eq!(added[0].hidden_lines_before(None), 0);
     let _ = DiffMode::Unified;
 }
+
+const MERGE: &str = "start\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> feature\nmiddle\n<<<<<<< HEAD\na\n||||||| base\nb\n=======\nc\n>>>>>>> other\nend\n";
+
+#[gpui::test]
+fn conflicts_project_their_parts_and_resolve_to_working_text(cx: &mut TestAppContext) {
+    let file = DiffFile::parse_conflicts("merge.txt", MERGE).unwrap();
+    let state = cx.new(|cx| {
+        DiffState::new([file], cx)
+            .with_mode(DiffMode::Split)
+            .with_context_lines(None)
+    });
+    let (events, _subscription) = record_events(cx, &state);
+    let conflict_rows = |state: &DiffState| {
+        state
+            .rows()
+            .iter()
+            .filter(|row| matches!(row, DisplayRow::Conflict { .. }))
+            .count()
+    };
+    state.update(cx, |state, cx| {
+        // Two parts for the first conflict, three with its base for the second.
+        assert_eq!(conflict_rows(state), 5);
+        assert_eq!(code_rows(state, 0), 8);
+        assert_eq!(state.resolved_text("merge.txt"), None);
+        state.resolve_conflict(
+            "merge.txt",
+            0,
+            Some(super::DiffConflictResolution::Incoming),
+            cx,
+        );
+        assert_eq!(conflict_rows(state), 4);
+        assert_eq!(state.resolved_text("merge.txt"), None);
+        state.choose_conflict(0, 1, Some(super::DiffConflictResolution::Both), cx);
+        assert_eq!(
+            state.resolved_text("merge.txt").as_deref(),
+            Some("start\ntheirs\nmiddle\na\nc\nend\n")
+        );
+        assert_eq!(
+            state.conflict_resolution("merge.txt", 1),
+            Some(super::DiffConflictResolution::Both)
+        );
+        state.choose_conflict(0, 1, None, cx);
+        assert_eq!(state.conflict_resolution("merge.txt", 1), None);
+        // Out-of-range conflicts and other files are ignored.
+        state.resolve_conflict(
+            "merge.txt",
+            9,
+            Some(super::DiffConflictResolution::Current),
+            cx,
+        );
+        assert_eq!(state.resolved_text("other.txt"), None);
+    });
+    let events = events.borrow();
+    assert_eq!(events.len(), 2);
+    assert!(events.iter().all(|event| matches!(
+        event,
+        DiffEvent::ConflictResolved(path, 1) if path.as_str() == "merge.txt"
+    )));
+}
+
+#[gpui::test]
+fn unchanged_files_show_every_line_without_folding(cx: &mut TestAppContext) {
+    let text = (1..=40)
+        .map(|line| format!("line {line}\n"))
+        .collect::<String>();
+    let state = cx.new(|cx| {
+        DiffState::new([DiffFile::unchanged("notes.txt", &text)], cx).with_mode(DiffMode::Split)
+    });
+    state.update(cx, |state, cx| {
+        assert_eq!(code_rows(state, 0), 40);
+        assert!(
+            !state
+                .rows()
+                .iter()
+                .any(|row| matches!(row, DisplayRow::Fold { .. }))
+        );
+        state.set_selected_lines(
+            Some(DiffLineRange::new("notes.txt", DiffSide::Modified, 2, 3)),
+            cx,
+        );
+        assert_eq!(state.selected_text(cx), "line 2\nline 3\n");
+    });
+}

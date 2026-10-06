@@ -1,6 +1,7 @@
 //! Readonly, virtualized patch display inspired by Diffs from Pierre.
 //! Parse an externally supplied patch into [`DiffFile`]s, retain one
 //! [`DiffState`] for all of them in the owner, and build [`Diff`] during rendering.
+mod conflict;
 mod document;
 mod parser;
 #[cfg(test)]
@@ -9,6 +10,7 @@ mod presentation;
 mod selection;
 mod state;
 
+pub use conflict::DiffConflictResolution;
 pub use document::{DiffFile, DiffFileStatus, DiffLinePosition, DiffLineRange, DiffSide};
 pub use parser::DiffParseError;
 pub use presentation::DiffInlineUnit;
@@ -35,6 +37,7 @@ use crate::{
     v_flex,
 };
 use actions::*;
+use conflict::ConflictPart;
 use presentation::FilePresentation;
 use selection::{CodeText, SelectionLayer};
 use state::{DisplayRow, FoldExpansion, LayoutKey, SelectedLines};
@@ -192,10 +195,10 @@ struct Annotations {
 /// A themed readonly code-review surface in split or unified mode.
 ///
 /// All files of the supplied state share one virtualized list, each introduced
-/// by its header. The component owns both scrolling axes, so give it a bounded
-/// height. Long lines scroll rather than wrap; file headers and review
-/// annotations are explicit slots, and application commands remain owned by
-/// the application.
+/// by its header. The component owns its scrolling, so give it a bounded
+/// height. Long lines scroll horizontally unless [`Diff::soft_wrap`] is set;
+/// file headers and review annotations are explicit slots, and application
+/// commands remain owned by the application.
 #[derive(IntoElement)]
 pub struct Diff {
     state: Entity<DiffState>,
@@ -207,6 +210,7 @@ pub struct Diff {
     hunk_separator: DiffHunkSeparator,
     change_indicator: DiffChangeIndicator,
     change_background: bool,
+    soft_wrap: bool,
     header: HeaderSlots,
     annotations: Rc<Annotations>,
     annotation_content: Option<AnnotationRenderer>,
@@ -235,6 +239,7 @@ impl Diff {
             hunk_separator: DiffHunkSeparator::default(),
             change_indicator: DiffChangeIndicator::default(),
             change_background: true,
+            soft_wrap: false,
             header: HeaderSlots::default(),
             annotations: Rc::default(),
             annotation_content: None,
@@ -276,6 +281,12 @@ impl Diff {
     /// Tints changed lines. Default is true. Inline changes stay emphasized.
     pub fn change_background(mut self, value: bool) -> Self {
         self.change_background = value;
+        self
+    }
+    /// Wraps long lines at the column width instead of scrolling horizontally.
+    /// Default is false.
+    pub fn soft_wrap(mut self, value: bool) -> Self {
+        self.soft_wrap = value;
         self
     }
     /// Supplies annotations with stable identities and targets.
@@ -411,17 +422,30 @@ fn render_diff(
         px(0.)
     };
     let mode = state.mode();
-    let layout = LayoutKey::new(rem, font_size, font_family.clone(), mode, props.line_number);
+    let soft_wrap = props.soft_wrap;
+    let layout = LayoutKey::new(
+        rem,
+        font_size,
+        font_family.clone(),
+        mode,
+        props.line_number,
+        soft_wrap,
+    );
     if state.update_layout(layout, row_height) {
-        let width = measure_code_width(
-            state.files(),
-            font_size,
-            &font_family,
-            gutter_width,
-            mode,
-            window,
-            cx,
-        );
+        // Wrapped rows take the viewport width instead of their longest line.
+        let width = if soft_wrap {
+            px(0.)
+        } else {
+            measure_code_width(
+                state.files(),
+                font_size,
+                &font_family,
+                gutter_width,
+                mode,
+                window,
+                cx,
+            )
+        };
         state.set_content_width(width);
     }
     state.sync_annotations(&props.annotations.items);
@@ -435,6 +459,7 @@ fn render_diff(
         files: state.files().to_vec(),
         presentations: state.presentations().to_vec(),
         mode,
+        content_width,
         column_width,
         font_size,
         row_height,
@@ -447,6 +472,7 @@ fn render_diff(
         hunk_separator: props.hunk_separator,
         change_indicator: props.change_indicator,
         change_background: props.change_background,
+        soft_wrap,
         header: props.header,
         annotations: props.annotations.clone(),
         annotation_content: props.annotation_content,
@@ -477,7 +503,7 @@ fn render_diff(
             div()
                 .id("diff-horizontal")
                 .size_full()
-                .overflow_x_scroll()
+                .when(!soft_wrap, |this| this.overflow_x_scroll())
                 .track_scroll(&horizontal)
                 .child(
                     list(scrollbar.clone(), move |ix, window, cx| {
@@ -499,7 +525,9 @@ fn render_diff(
         ))
         .when(has_rows, |this| {
             this.child(Scrollbar::vertical(&scrollbar))
-                .child(Scrollbar::horizontal(&horizontal))
+                .when(!soft_wrap, |this| {
+                    this.child(Scrollbar::horizontal(&horizontal))
+                })
         })
         // A line-number drag may finish anywhere, including outside the body.
         .on_mouse_up(
@@ -606,8 +634,12 @@ fn render_diff(
                         state.update(cx, |state, cx| {
                             // The estimate shapes the widest candidates only;
                             // grow to fit any wider line once it is painted.
-                            let painted = state.geometry().borrow().painted_width();
-                            let painted = code_width(painted, gutter_width, rem, mode);
+                            let painted = if soft_wrap {
+                                px(0.)
+                            } else {
+                                let painted = state.geometry().borrow().painted_width();
+                                code_width(painted, gutter_width, rem, mode)
+                            };
                             if state.record_paint(bounds.size, painted) {
                                 cx.notify();
                             }
@@ -652,6 +684,7 @@ struct CodePresentation {
     files: Vec<DiffFile>,
     presentations: Vec<Option<Arc<FilePresentation>>>,
     mode: DiffMode,
+    content_width: Pixels,
     column_width: Pixels,
     font_size: Pixels,
     row_height: Pixels,
@@ -664,6 +697,7 @@ struct CodePresentation {
     hunk_separator: DiffHunkSeparator,
     change_indicator: DiffChangeIndicator,
     change_background: bool,
+    soft_wrap: bool,
     header: HeaderSlots,
     annotations: Rc<Annotations>,
     annotation_content: Option<AnnotationRenderer>,
@@ -774,13 +808,18 @@ fn render_row(
         DisplayRow::Notice(file) => render_notice(&code.files[*file], cx),
         DisplayRow::Hunk { file, hunk } => render_hunk_separator(*file, *hunk, &code, cx),
         DisplayRow::Fold { file, pairs } => render_fold(*file, pairs.clone(), &code, cx),
+        DisplayRow::Conflict {
+            file,
+            conflict,
+            part,
+        } => render_conflict(*file, *conflict, *part, &code, cx),
         DisplayRow::Code {
             file,
             original,
             modified,
             changed,
         } => {
-            if code.mode == DiffMode::Split {
+            if code.mode == DiffMode::Split && !code.files[*file].is_single_column() {
                 h_flex()
                     .items_stretch()
                     .w_full()
@@ -920,6 +959,93 @@ fn render_fold(
         .into_any_element()
 }
 
+/// The heading of one part of a conflict, with the resolution commands on
+/// the current part; a resolved conflict shows its choice and Undo instead.
+fn render_conflict(
+    file: usize,
+    ix: usize,
+    part: ConflictPart,
+    code: &CodePresentation,
+    cx: &App,
+) -> AnyElement {
+    let document = &code.files[file];
+    let conflict = &document.conflicts()[ix];
+    let resolution = code.state.read(cx).conflict_resolution(document.path(), ix);
+    let choose = |id: &'static str, label: String, resolution: Option<DiffConflictResolution>| {
+        let state = code.state.clone();
+        Button::new((id, ix))
+            .ghost()
+            .xsmall()
+            .w_auto()
+            .label(label)
+            .on_click(move |_, _, cx| {
+                state.update(cx, |state, cx| {
+                    state.choose_conflict(file, ix, resolution, cx)
+                })
+            })
+    };
+    let row = h_flex()
+        .w_full()
+        .h_6()
+        .px_3()
+        .gap_2()
+        .text_xs()
+        .text_color(cx.theme().muted_foreground)
+        .bg(conflict_tint(Some(part), cx).opacity(0.25));
+    if let Some(resolution) = resolution {
+        let label = match resolution {
+            DiffConflictResolution::Current => t!("Diff.AcceptedCurrent"),
+            DiffConflictResolution::Incoming => t!("Diff.AcceptedIncoming"),
+            _ => t!("Diff.AcceptedBoth"),
+        };
+        return row
+            .bg(cx.theme().muted.opacity(0.35))
+            .child(label.to_string())
+            .child(choose(
+                "undo-resolution",
+                t!("Diff.UndoResolution").to_string(),
+                None,
+            ))
+            .into_any_element();
+    }
+    let title = match part {
+        ConflictPart::Current => t!("Diff.CurrentChange"),
+        ConflictPart::Base => t!("Diff.BaseChange"),
+        ConflictPart::Incoming => t!("Diff.IncomingChange"),
+    };
+    let label = conflict.label(part).clone();
+    row.child(div().font_medium().child(title.to_string()))
+        .when(!label.is_empty(), |this| this.child(label))
+        .when(part == ConflictPart::Current, |this| {
+            this.child(div().flex_1())
+                .child(choose(
+                    "accept-current",
+                    t!("Diff.AcceptCurrent").to_string(),
+                    Some(DiffConflictResolution::Current),
+                ))
+                .child(choose(
+                    "accept-incoming",
+                    t!("Diff.AcceptIncoming").to_string(),
+                    Some(DiffConflictResolution::Incoming),
+                ))
+                .child(choose(
+                    "accept-both",
+                    t!("Diff.AcceptBoth").to_string(),
+                    Some(DiffConflictResolution::Both),
+                ))
+        })
+        .into_any_element()
+}
+
+/// The color that marks lines of a conflict part.
+fn conflict_tint(part: Option<ConflictPart>, cx: &App) -> Hsla {
+    match part {
+        Some(ConflictPart::Current) => cx.theme().success,
+        Some(ConflictPart::Incoming) => cx.theme().info,
+        _ => cx.theme().muted_foreground,
+    }
+}
+
 fn render_file_header(
     file: usize,
     code: &CodePresentation,
@@ -953,8 +1079,10 @@ fn render_file_header(
             DiffFileStatus::Deleted => Some(t!("Diff.DeletedFile")),
             DiffFileStatus::Renamed => Some(t!("Diff.RenamedFile")),
             DiffFileStatus::Copied => Some(t!("Diff.CopiedFile")),
+            DiffFileStatus::Conflicted => Some(t!("Diff.ConflictedFile")),
             _ => None,
         };
+        let statistics = !document.is_single_column();
         h_flex()
             .w_full()
             .min_w_0()
@@ -970,11 +1098,13 @@ fn render_file_header(
                         this.child(div().flex_shrink_0().child(suffix))
                     }),
             )
-            .child(div().text_xs().text_color(foreground).child(format!(
-                "+{} −{}",
-                document.additions(),
-                document.deletions()
-            )))
+            .when(statistics, |this| {
+                this.child(div().text_xs().text_color(foreground).child(format!(
+                    "+{} −{}",
+                    document.additions(),
+                    document.deletions()
+                )))
+            })
             .when_some(status, |this, status| {
                 this.child(
                     div()
@@ -1106,7 +1236,8 @@ fn render_gutter(
                 div()
                     .id(("line", ix))
                     .test_support()
-                    .size_full()
+                    .w_full()
+                    .h(code.row_height)
                     .px_1()
                     .flex()
                     .items_center()
@@ -1213,6 +1344,7 @@ fn render_unified_cell(
     cx: &mut App,
 ) -> AnyElement {
     let (original, modified) = pair;
+    let single_column = code.files[file].is_single_column();
     let counterpart = code.files[file].lines(side)[ix].counterpart();
     let other_ix = if side == DiffSide::Original {
         modified
@@ -1230,8 +1362,20 @@ fn render_unified_cell(
             cx,
         ));
     }
+    let gutters = if single_column {
+        [Some((DiffSide::Modified, modified)), None]
+    } else {
+        [
+            Some((DiffSide::Original, original)),
+            Some((DiffSide::Modified, modified)),
+        ]
+    };
     v_flex()
-        .w(code.column_width)
+        .w(if single_column {
+            code.content_width
+        } else {
+            code.column_width
+        })
         .id((
             if side == DiffSide::Original {
                 "old"
@@ -1246,10 +1390,7 @@ fn render_unified_cell(
             ix,
             changed,
             code.clone(),
-            [
-                Some((DiffSide::Original, original)),
-                Some((DiffSide::Modified, modified)),
-            ],
+            gutters,
             cx,
         ))
         .children(extras)
@@ -1364,7 +1505,18 @@ fn code_line(
 ) -> AnyElement {
     let document = &code.files[file];
     let line = &document.lines(side)[ix];
-    let status = if side == DiffSide::Original {
+    let conflict_part = (document.status() == DiffFileStatus::Conflicted && changed)
+        .then(|| {
+            document
+                .conflicts()
+                .iter()
+                .find(|conflict| conflict.lines().contains(&ix))
+                .and_then(|conflict| conflict.part_of(ix))
+        })
+        .flatten();
+    let status = if conflict_part.is_some() {
+        conflict_tint(conflict_part, cx)
+    } else if side == DiffSide::Original {
         cx.theme().danger
     } else {
         cx.theme().success
@@ -1393,28 +1545,35 @@ fn code_line(
     };
     let position = code.position(file, text_side, text_ix);
     let source_line = &document.lines(text_side)[text_ix];
-    let text =
-        h_flex()
-            .gap_0()
-            .flex_shrink_0()
-            .children(
-                source_line
-                    .chunk_ranges()
-                    .enumerate()
-                    .map(|(chunk_ix, range)| {
-                        CodeText::new(
-                            ("code", chunk_ix).into(),
-                            document.clone(),
-                            file,
-                            text_side,
-                            text_ix,
-                            range,
-                            highlights.clone(),
-                            code.selection.clone(),
-                            code.geometry.clone(),
-                        )
-                    }),
-            );
+    // Wrapped text must be one run to break across the column; unwrapped
+    // long lines stay chunked to bound shaping and selection projection.
+    let ranges: Vec<_> = if code.soft_wrap {
+        vec![0..source_line.display().len()]
+    } else {
+        source_line.chunk_ranges().collect()
+    };
+    // A block container gives wrapped text a definite width to break at.
+    let text = div()
+        .map(|this| {
+            if code.soft_wrap {
+                this.w_full()
+            } else {
+                this.flex().flex_row().flex_shrink_0()
+            }
+        })
+        .children(ranges.into_iter().enumerate().map(|(chunk_ix, range)| {
+            CodeText::new(
+                ("code", chunk_ix).into(),
+                document.clone(),
+                file,
+                text_side,
+                text_ix,
+                range,
+                highlights.clone(),
+                code.selection.clone(),
+                code.geometry.clone(),
+            )
+        }));
     let gutters_width = if code.line_number {
         code.gutter_width * gutters.iter().flatten().count() as f32
     } else {
@@ -1429,7 +1588,7 @@ fn code_line(
             } else {
                 cx.theme().muted_foreground
             })
-            .child(match (changed, side) {
+            .child(match (changed && conflict_part.is_none(), side) {
                 (false, _) => " ",
                 (true, DiffSide::Original) => "−",
                 (true, DiffSide::Modified) => "+",
@@ -1449,11 +1608,18 @@ fn code_line(
         .group("diff-line")
         .relative()
         .w_full()
-        .h(code.row_height)
+        .map(|this| {
+            if code.soft_wrap {
+                this.min_h(code.row_height)
+                    .items_start()
+                    .whitespace_normal()
+            } else {
+                this.h(code.row_height).whitespace_nowrap()
+            }
+        })
         .font_family(cx.theme().mono_font_family.clone())
         .text_size(code.font_size)
         .line_height(code.row_height)
-        .whitespace_nowrap()
         .when(changed && code.change_background, |this| {
             this.bg(status.opacity(0.12))
         })
@@ -1480,7 +1646,13 @@ fn code_line(
             div()
                 .id("source")
                 .test_support()
-                .flex_shrink_0()
+                .map(|this| {
+                    if code.soft_wrap {
+                        this.flex_1().min_w_0()
+                    } else {
+                        this.flex_shrink_0()
+                    }
+                })
                 .role(gpui::accesskit::Role::Label)
                 .aria_label(source_line.text().clone())
                 .aria_description(

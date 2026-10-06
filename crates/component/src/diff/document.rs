@@ -1,6 +1,8 @@
 use std::{ops::Range, sync::Arc};
 
 use gpui::SharedString;
+
+use super::conflict::Conflict;
 use smallvec::{SmallVec, smallvec};
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -336,6 +338,10 @@ pub enum DiffFileStatus {
     Modified,
     Renamed,
     Copied,
+    /// A whole file shown for reference, from [`DiffFile::unchanged`].
+    Unchanged,
+    /// A working file with conflict markers, from [`DiffFile::parse_conflicts`].
+    Conflicted,
 }
 
 /// One line of the patch body in patch order: an unchanged line on both
@@ -371,6 +377,7 @@ struct DocumentInner {
     /// The patch body in order; each side's lines map back into it.
     patch_lines: Vec<PatchLine>,
     patch_ixs: [Vec<usize>; 2],
+    conflicts: Vec<Conflict>,
 }
 
 /// One changed file parsed from a unified or Git diff.
@@ -404,7 +411,8 @@ impl DiffFile {
     ) -> Self {
         let (mut additions, mut deletions) = (0, 0);
         for pair in &pairs {
-            if pair.changed {
+            // Conflict lines are unresolved alternatives, not additions.
+            if pair.changed && status != DiffFileStatus::Conflicted {
                 additions += usize::from(pair.modified.is_some());
                 deletions += usize::from(pair.original.is_some());
             }
@@ -440,6 +448,7 @@ impl DiffFile {
                 line_number_digits: widest.max(1).ilog10() as usize + 1,
                 patch_lines,
                 patch_ixs,
+                conflicts: Vec::new(),
             }),
             language: None,
         }
@@ -502,6 +511,24 @@ impl DiffFile {
             || self.inner.binary
             || self.original_path().is_none()
             || self.modified_path().is_none()
+            || self.status() == DiffFileStatus::Conflicted
+    }
+
+    /// Whether the file has one column in every display mode.
+    pub(crate) fn is_single_column(&self) -> bool {
+        matches!(
+            self.status(),
+            DiffFileStatus::Unchanged | DiffFileStatus::Conflicted
+        )
+    }
+    pub(crate) fn conflicts(&self) -> &[Conflict] {
+        &self.inner.conflicts
+    }
+    pub(crate) fn with_conflicts(mut self, conflicts: Vec<Conflict>) -> Self {
+        Arc::get_mut(&mut self.inner)
+            .expect("a newly built file is not shared")
+            .conflicts = conflicts;
+        self
     }
 
     pub(crate) fn lines_count(&self, side: DiffSide) -> usize {

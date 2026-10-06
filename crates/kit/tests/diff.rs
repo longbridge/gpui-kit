@@ -538,3 +538,80 @@ fn header_collapses_its_file_and_shows_file_annotations(cx: &mut TestAppContext)
     })
     .unwrap();
 }
+
+struct Viewer {
+    state: Entity<DiffState>,
+    soft_wrap: bool,
+}
+
+impl Render for Viewer {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .id("review")
+            .test_support()
+            .size_full()
+            .child(Diff::new(&self.state).soft_wrap(self.soft_wrap).size_full())
+    }
+}
+
+fn viewer(
+    cx: &mut TestAppContext,
+    file: DiffFile,
+    mode: DiffMode,
+    soft_wrap: bool,
+) -> (WindowHandle<gpui_kit::base::Root>, Entity<DiffState>) {
+    cx.update(gpui_kit::init);
+    let (handle, view) = common::open_window(cx, Some(size(px(480.), px(480.))), |_, cx| {
+        cx.new(|cx| Viewer {
+            state: cx.new(|cx| DiffState::new([file], cx).with_mode(mode)),
+            soft_wrap,
+        })
+    });
+    let state = cx.update(|cx| view.read(cx).state.clone());
+    (handle, state)
+}
+
+#[gpui_kit::test]
+fn conflict_headings_resolve_from_their_buttons(cx: &mut TestAppContext) {
+    let file = DiffFile::parse_conflicts(
+        "merge.txt",
+        "before\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> feature\nafter\n",
+    )
+    .unwrap();
+    let (handle, state) = viewer(cx, file, DiffMode::Split, false);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        // Conflicted files keep one column, with only the working-file gutter.
+        assert!(window.try_find(("old", 0usize)).is_none());
+        window.click(("accept-incoming", 0usize), cx);
+        assert_eq!(
+            state.read(cx).resolved_text("merge.txt").as_deref(),
+            Some("before\ntheirs\nafter\n")
+        );
+        window.click(("undo-resolution", 0usize), cx);
+        assert_eq!(state.read(cx).resolved_text("merge.txt"), None);
+        assert!(window.try_find(("accept-both", 0usize)).is_some());
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn soft_wrap_grows_rows_instead_of_scrolling(cx: &mut TestAppContext) {
+    let long = "word ".repeat(60);
+    let text = format!("short\n{long}\n");
+    let (handle, _) = viewer(
+        cx,
+        DiffFile::unchanged("notes.txt", &text),
+        DiffMode::Unified,
+        true,
+    );
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+        let short = window.within(("new", 0usize)).find("source").bounds();
+        let wrapped = window.within(("new", 1usize)).find("source").bounds();
+        assert!(wrapped.size.height > short.size.height * 2.);
+        assert!(wrapped.right() <= window.find("review").bounds().right());
+    })
+    .unwrap();
+}
