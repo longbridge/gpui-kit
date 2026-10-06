@@ -12,3 +12,6 @@ rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 
 [lints]
 workspace = true
+
+[features]
+gpui-fast = ["gpui-kit/gpui-fast"]

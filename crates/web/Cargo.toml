@@ -1,0 +1,21 @@
+[package]
+name = "gpui-kit-web"
+version = "0.7.1"
+edition.workspace = true
+license = "Apache-2.0"
+publish = true
+repository = "https://github.com/longbridge/gpui-kit"
+description = "Shared gpui_web backend selection for GPUI Kit."
+
+[lints]
+workspace = true
+
+[features]
+default = ["multithreaded"]
+gpui-fast = ["dep:fast", "gpui/gpui-fast"]
+multithreaded = ["gpui_web_upstream/multithreaded", "fast?/multithreaded"]
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+gpui_web_upstream.workspace = true
+fast = { package = "gpui-fast-web", version = "0.1.0", default-features = false, optional = true }
+gpui.workspace = true

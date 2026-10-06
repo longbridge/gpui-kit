@@ -24,6 +24,33 @@ gpui-kit = "{{gpui_kit_version}}"
 
 This single dependency includes GPUI, GPUI Base, the styled GPUI Component library and its default icon assets. Application code accesses GPUI through `use gpui_kit::*;` and components through `gpui_kit::component`. You can change the feature selection later; see [Icons & Assets](./assets.md).
 
+### Use GPUI Fast
+
+GPUI Kit uses the pinned upstream GPUI snapshot by default. To select GPUI Fast's
+retained rendering and layout engine, enable `gpui-fast`:
+
+```toml
+[dependencies]
+gpui-kit = { version = "{{gpui_kit_version}}", features = ["gpui-fast"] }
+```
+
+The feature switches GPUI, native platforms, the WebAssembly backend, and every
+enabled Kit layer together. Keep using `gpui_kit::*`, `gpui_kit::component`, and
+`#[gpui_kit::test]`; no `[patch]`, extra engine dependency, or crate alias is needed.
+It also works with `default-features = false` and with `assets`, `test-support`,
+`inspector`, or `profiler`. GPUI Fast dependencies use `0.1.0` requirements, so
+`cargo update` can select compatible `0.1.x` releases.
+
+Cargo features are additive: enabling Fast selects its public types for the whole
+dependency graph, while upstream packages remain build dependencies. Avoid mixing
+Kit's Fast types with a direct dependency on upstream GPUI. For standalone Base,
+Component, assets, FPS, WebView, or Shell consumers, enable their `gpui-fast`
+feature too when selecting a backend explicitly.
+
+From this checkout, compare the gallery with `cargo run` and
+`cargo run --features gpui-fast`. WebAssembly builds use the nightly toolchain
+described in [WebAssembly](./webassembly.md).
+
 ### macOS text rendering: `font-kit`
 
 **macOS needs the `font-kit` feature on `gpui-pre-platform` to render text.**

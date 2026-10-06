@@ -12,3 +12,6 @@ gpui-kit = { workspace = true, features = ["speech"] }
 
 [lints]
 workspace = true
+
+[features]
+gpui-fast = ["gpui-kit/gpui-fast"]

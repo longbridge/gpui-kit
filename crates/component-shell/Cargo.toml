@@ -21,3 +21,6 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+gpui-fast = ["gpui-shell/gpui-fast", "gpui-component/gpui-fast", "gpui/gpui-fast", "gpui-base/gpui-fast"]

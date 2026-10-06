@@ -60,3 +60,6 @@ gpui = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true
+
+[features]
+gpui-fast = ["gpui/gpui-fast"]

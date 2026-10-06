@@ -7,6 +7,18 @@ One dependency for building desktop applications with GPUI:
 gpui-kit = "0.7"
 ```
 
+Enable the optional GPUI Fast backend without changing application imports:
+
+```toml
+[dependencies]
+gpui-kit = { version = "0.7", features = ["gpui-fast"] }
+```
+
+This selects GPUI Fast 0.1.x for the core, platforms, and every enabled Kit layer.
+`gpui_kit::*`, selective macro imports, and `#[gpui_kit::test]` keep working;
+no `[patch]` or `extern crate` alias is needed. Cargo features are additive, so
+upstream packages remain build dependencies while Kit exposes only Fast types.
+
 `gpui-kit` depends on the matching set of GPUI crates, so an application
 never lists GPUI itself. `use gpui_kit::*;` is GPUI, and each layer is
 reachable by name:

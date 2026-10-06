@@ -18,6 +18,7 @@ name = "gpui-shell"
 path = "src/bin/gpui-shell.rs"
 
 [features]
+gpui-fast = ["gpui/gpui-fast", "gpui_platform/gpui-fast", "gpui-base/gpui-fast", "gpui-fps/gpui-fast"]
 default = ["quickjs"]
 # The scripting engine. See `src/engine/mod.rs` for the surface an engine has
 # to provide; QuickJS is the only implementation today, and the feature exists

@@ -17,6 +17,15 @@ workspace = true
 
 [features]
 default = ["component", "assets"]
+# Select GPUI Fast across the core, platforms, and already-enabled layers.
+gpui-fast = [
+    "gpui/gpui-fast",
+    "gpui_platform/gpui-fast",
+    "gpui_web/gpui-fast",
+    "gpui-base/gpui-fast",
+    "gpui-component?/gpui-fast",
+    "gpui-kit-assets?/gpui-fast",
+]
 # The styled component library, `gpui_kit::component`. Initializes `gpui-base` too.
 component = ["dep:gpui-component"]
 # The default icon set for `gpui-component`, `gpui_kit::assets`.

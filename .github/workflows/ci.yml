@@ -143,6 +143,45 @@ jobs:
           --features gpui-component-story/test-support --locked
           $TEST_EXCLUDES --test rendering
 
+  gpui-fast:
+    name: GPUI Fast (${{ matrix.run_on }})
+    strategy:
+      fail-fast: false
+      matrix:
+        run_on: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.run_on }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-shared-key: gpui-fast
+      - uses: rui314/setup-mold@v1
+      - name: Install system dependencies
+        if: ${{ matrix.run_on != 'windows-latest' }}
+        run: script/bootstrap
+      - name: Test GPUI Fast facade and UI integration
+        run: cargo test -p gpui-kit --features gpui-fast,test-support --locked
+
+  gpui-fast-web:
+    name: GPUI Fast (WebAssembly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly
+          target: wasm32-unknown-unknown
+          cache-save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-shared-key: gpui-fast-web
+      - name: Install system dependencies
+        run: script/bootstrap
+      - name: Check GPUI Fast WebAssembly
+        run: cargo check -p gpui-kit --features gpui-fast --target wasm32-unknown-unknown --locked
+
   gpui-shell-core:
     name: GPUI Shell Core
     runs-on: ubuntu-latest

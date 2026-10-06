@@ -29,3 +29,6 @@ rust-embed = { version = "8.7.2", features = ["interpolate-folder-path", "includ
 reqwest = { workspace = true }
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
+
+[features]
+gpui-fast = ["gpui/gpui-fast", "gpui_platform/gpui-fast"]

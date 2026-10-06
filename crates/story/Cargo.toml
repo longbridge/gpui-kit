@@ -5,6 +5,7 @@ publish = false
 edition.workspace = true
 
 [features]
+gpui-fast = ["gpui-kit/gpui-fast", "gpui-fps/gpui-fast", "gpui-shell/gpui-fast"]
 inspector = ["gpui-kit/inspector"]
 tree-sitter = ["gpui-kit/tree-sitter-languages"]
 test-support = ["gpui-kit/test-support"]

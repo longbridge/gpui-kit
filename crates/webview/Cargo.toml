@@ -12,6 +12,7 @@ publish = true
 version = "0.7.1"
 
 [features]
+gpui-fast = ["gpui/gpui-fast"]
 inspector = ["wry/devtools"]
 
 [lib]

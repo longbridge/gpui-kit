@@ -29,3 +29,6 @@ workspace = true
 # follow when detecting its `chrono`, `gpui_base` and `syntect` imports.
 [package.metadata.cargo-machete]
 ignored = ["chrono", "gpui-base", "reqwest_client", "syntect"]
+
+[features]
+gpui-fast = ["gpui/gpui-fast", "gpui_platform/gpui-fast"]

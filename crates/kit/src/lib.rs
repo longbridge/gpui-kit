@@ -39,6 +39,9 @@
 //! }
 //! ```
 //!
+//! Enable `gpui-fast` to select GPUI Fast for the core, platform, and enabled
+//! layers without changing imports. Upstream remains the default backend.
+//!
 //! See [`component`] for the same program with the styled component library.
 
 /// Defines unit actions without requiring consumers to depend on GPUI under the

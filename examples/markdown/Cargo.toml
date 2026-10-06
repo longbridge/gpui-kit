@@ -12,3 +12,6 @@ regex = "1"
 
 [lints]
 workspace = true
+
+[features]
+gpui-fast = ["gpui-kit/gpui-fast"]

@@ -10,3 +10,6 @@ gpui-component-story = { path = "../../crates/story" }
 
 [lints]
 workspace = true
+
+[features]
+gpui-fast = ["gpui-kit/gpui-fast"]

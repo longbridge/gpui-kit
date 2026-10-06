@@ -1,0 +1,28 @@
+[package]
+name = "gpui-kit-platform"
+version = "0.7.1"
+edition.workspace = true
+license = "Apache-2.0"
+publish = true
+repository = "https://github.com/longbridge/gpui-kit"
+description = "Shared gpui_platform backend selection for GPUI Kit."
+
+[lints]
+workspace = true
+
+[features]
+default = []
+gpui-fast = ["dep:fast", "gpui/gpui-fast"]
+bench-support = ["gpui_platform_upstream/bench-support", "fast?/bench-support"]
+font-kit = ["gpui_platform_upstream/font-kit", "fast?/font-kit"]
+inspector = ["gpui_platform_upstream/inspector", "fast?/inspector"]
+runtime_shaders = ["gpui_platform_upstream/runtime_shaders", "fast?/runtime_shaders"]
+screen-capture = ["gpui_platform_upstream/screen-capture", "fast?/screen-capture"]
+test-support = ["gpui_platform_upstream/test-support", "fast?/test-support"]
+wayland = ["gpui_platform_upstream/wayland", "fast?/wayland"]
+x11 = ["gpui_platform_upstream/x11", "fast?/x11"]
+
+[dependencies]
+gpui_platform_upstream.workspace = true
+fast = { package = "gpui-fast-platform", version = "0.1.0", default-features = false, optional = true }
+gpui.workspace = true

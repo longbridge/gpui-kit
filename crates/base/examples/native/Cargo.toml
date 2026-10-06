@@ -23,3 +23,6 @@ workspace = true
 # follow when detecting its `chrono`, `gpui`, `gpui_base`, and `syntect` imports.
 [package.metadata.cargo-machete]
 ignored = ["chrono", "gpui", "gpui-base", "syntect"]
+
+[features]
+gpui-fast = ["gpui/gpui-fast", "gpui_platform/gpui-fast"]
