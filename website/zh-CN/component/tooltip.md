@@ -92,6 +92,34 @@ div()
     })
 ```
 
+## 显示时机
+
+组件自带的 Tooltip（例如通过 `Button::tooltip` 设置的）在指针停留于触发元素 500 ms 后出现。指针离开后，Tooltip 会再保留 300 ms 宽限期；在宽限期内移入另一个触发元素，会立即切换到它的 Tooltip，不再重新等待。
+
+如需在整个应用中调整这两个时长，安装一次 `TooltipDefaults` 即可。已打开的窗口会在下一次悬停时使用新值。
+
+```rust
+use std::time::Duration;
+use gpui_kit::component::tooltip::TooltipDefaults;
+
+gpui_kit::init(cx);
+TooltipDefaults::new()
+    .with_show_delay(Duration::from_millis(300))
+    .with_grace_period(Duration::from_millis(200))
+    .install(cx);
+```
+
+单个触发元素可以用 `tooltip_show_delay` 覆盖显示延迟。延迟为零时，指针一移入就显示：
+
+```rust
+Button::new("help")
+    .icon(IconName::Info)
+    .tooltip("帮助")
+    .tooltip_show_delay(Duration::ZERO)
+```
+
+宽限期由窗口内所有触发元素共享，不能按单个元素覆盖。直接调用 GPUI `.tooltip()` 的元素不受这些设置影响，请改用 GPUI 的 `.tooltip_show_delay()`。
+
 ## API 参考
 
 ### Tooltip
@@ -112,6 +140,7 @@ div()
 | --- | --- |
 | `tooltip(text)` | 添加简单文本提示 |
 | `tooltip_with_action(text, action, context)` | 添加带快捷键的提示 |
+| `tooltip_show_delay(duration)` | 覆盖该触发元素的显示延迟，见[显示时机](#显示时机) |
 | `tooltip(closure)` | 使用构建器生成自定义提示 |
 
 ## 样式

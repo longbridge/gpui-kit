@@ -97,7 +97,7 @@ div()
 
 ### Components with Built-in Tooltip Support
 
-Many components have built-in tooltip methods:
+Many components have built-in tooltip methods. Button, Toggle, Switch, Checkbox, Radio, Clipboard and InputGroupButton also accept `tooltip_show_delay`; see [Timing](#timing):
 
 ```rust
 // Button
@@ -174,6 +174,34 @@ v_flex()
     )
 ```
 
+## Timing
+
+Component tooltips, such as those set with `Button::tooltip`, open after the pointer rests on the trigger for 500 ms. After the pointer leaves, the tooltip stays for a 300 ms grace period; entering another trigger within that period switches to its tooltip immediately, without waiting again.
+
+Install `TooltipDefaults` once to change these values for the whole application. Windows that are already open pick up the new values on the next hover.
+
+```rust
+use std::time::Duration;
+use gpui_kit::component::tooltip::TooltipDefaults;
+
+gpui_kit::init(cx);
+TooltipDefaults::new()
+    .with_show_delay(Duration::from_millis(300))
+    .with_grace_period(Duration::from_millis(200))
+    .install(cx);
+```
+
+Override the show delay for one trigger with `tooltip_show_delay`. A zero delay opens the tooltip as soon as the pointer enters:
+
+```rust
+Button::new("help")
+    .icon(IconName::Info)
+    .tooltip("Help")
+    .tooltip_show_delay(Duration::ZERO)
+```
+
+The grace period is shared by all triggers in a window and has no per-trigger override. Direct GPUI `.tooltip()` calls bypass these settings; use GPUI's `.tooltip_show_delay()` on those elements instead.
+
 ## API Reference
 
 ### Tooltip
@@ -194,6 +222,7 @@ Components with tooltip support typically provide these methods:
 | -------------------------------------------- | --------------------------------------- |
 | `tooltip(text)`                              | Add simple text tooltip                 |
 | `tooltip_with_action(text, action, context)` | Add tooltip with action keybinding      |
+| `tooltip_show_delay(duration)`               | Override the show delay for the trigger |
 | `tooltip(closure)`                           | Add custom tooltip with builder closure |
 
 ### Tooltip Styling

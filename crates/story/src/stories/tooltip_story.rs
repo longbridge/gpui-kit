@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
@@ -98,6 +100,27 @@ impl Render for TooltipStory {
                             .label("Hover me")
                             .tooltip("This tooltip prefers the right side.")
                             .tooltip_placement(Placement::Right),
+                    ),
+            )
+            .child(
+                section("Show delay")
+                    .description("Override the delay per trigger. Moving between triggers switches without waiting again.")
+                    .child(
+                        Button::new("delay-immediate")
+                            .label("Immediate")
+                            .tooltip("Shows as soon as the pointer enters.")
+                            .tooltip_show_delay(Duration::ZERO),
+                    )
+                    .child(
+                        Button::new("delay-default")
+                            .label("Default")
+                            .tooltip("Shows after the application default, 500 ms."),
+                    )
+                    .child(
+                        Button::new("delay-slow")
+                            .label("Slow")
+                            .tooltip("Shows after 1 second.")
+                            .tooltip_show_delay(Duration::from_secs(1)),
                     ),
             )
             .child(

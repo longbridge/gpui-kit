@@ -8,7 +8,7 @@ use gpui::{
     px,
 };
 use gpui_base::{Switch as BaseSwitch, SwitchThumb, SwitchTrack, spring};
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
 /// A Switch element that can be toggled on or off.
 #[derive(IntoElement)]
@@ -107,6 +107,14 @@ impl Switch {
     /// Set tooltip text for the switch.
     pub fn tooltip(mut self, tooltip: impl Into<SharedString>) -> Self {
         self.tooltip.text = Some((tooltip.into(), None));
+        self
+    }
+
+    /// Overrides how long the pointer must rest before the tooltip shows.
+    ///
+    /// Defaults to [`gpui_base::TooltipDefaults::show_delay`].
+    pub fn tooltip_show_delay(mut self, delay: Duration) -> Self {
+        self.tooltip.show_delay = Some(delay);
         self
     }
 

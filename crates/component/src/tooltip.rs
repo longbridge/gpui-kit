@@ -6,6 +6,7 @@ use gpui::{
     MouseButton, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement,
     StyleRefinement, Styled, Window, div, prelude::FluentBuilder, px,
 };
+pub use gpui_base::TooltipDefaults;
 use gpui_base::{
     Tooltip as BaseTooltip, TooltipOverlay as BaseTooltipOverlay,
     TooltipRequest as BaseTooltipRequest, TooltipTransition as BaseTooltipTransition,
@@ -200,15 +201,17 @@ pub(crate) struct ComponentTooltip {
         Option<(Rc<Box<dyn Action>>, Option<SharedString>)>,
     )>,
     pub builder: Option<Rc<dyn Fn(&mut Window, &mut App) -> AnyView>>,
+    pub show_delay: Option<Duration>,
 }
 
 impl ComponentTooltip {
     /// Apply this tooltip to a `Stateful<Div>` (or any `ManagedTooltipExt` element).
     pub fn apply<E: ManagedTooltipExt>(self, el: E) -> E {
+        let show_delay = self.show_delay;
         if let Some(builder) = self.builder {
-            el.managed_tooltip(move |window, cx| builder(window, cx))
+            el.managed_tooltip_with(None, show_delay, move |window, cx| builder(window, cx))
         } else if let Some((text, action)) = self.text {
-            el.managed_tooltip(move |window, cx| {
+            el.managed_tooltip_with(None, show_delay, move |window, cx| {
                 Tooltip::new(text.clone())
                     .when_some(action.clone(), |this, (action, context)| {
                         this.action(
@@ -233,7 +236,7 @@ pub(crate) trait ManagedTooltipExt:
         self,
         build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
     ) -> Self {
-        self.managed_tooltip_with_placement(None, build_tooltip)
+        self.managed_tooltip_with(None, None, build_tooltip)
     }
 
     fn managed_tooltip_at(
@@ -241,12 +244,13 @@ pub(crate) trait ManagedTooltipExt:
         placement: Placement,
         build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
     ) -> Self {
-        self.managed_tooltip_with_placement(Some(placement), build_tooltip)
+        self.managed_tooltip_with(Some(placement), None, build_tooltip)
     }
 
-    fn managed_tooltip_with_placement(
+    fn managed_tooltip_with(
         self,
         preferred_placement: Option<Placement>,
+        show_delay: Option<Duration>,
         build_tooltip: impl Fn(&mut Window, &mut App) -> AnyView + 'static,
     ) -> Self {
         let build_tooltip = Rc::new(build_tooltip);
@@ -270,6 +274,10 @@ pub(crate) trait ManagedTooltipExt:
                             });
                             let request = match preferred_placement {
                                 Some(placement) => request.placement(placement),
+                                None => request,
+                            };
+                            let request = match show_delay {
+                                Some(delay) => request.show_delay(delay),
                                 None => request,
                             };
                             o.request_show(request, window, cx);

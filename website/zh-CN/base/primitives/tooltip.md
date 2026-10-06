@@ -32,6 +32,8 @@ use gpui_kit::base::{Tooltip};
 
 指针悬停或键盘聚焦后延迟显示，离开或失焦后关闭。
 
+`TooltipOverlay` 默认等待 500 ms 后显示；关闭时保留 300 ms 宽限期，期间移入另一个触发元素会立即切换。安装 `TooltipDefaults` 可在应用范围内调整这两个时长，`TooltipRequest::show_delay` 可覆盖单次请求的显示延迟。
+
 受控状态应保存在父渲染类型或 GPUI entity 中；在回调中更新并调用 `cx.notify()`，不要在每次渲染时重建持久 entity。
 
 ## 完整 Rust 示例

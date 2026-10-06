@@ -19,6 +19,7 @@ pub struct Clipboard {
     value_fn: Option<Rc<dyn Fn(&mut Window, &mut App) -> SharedString>>,
     on_copied: Option<Rc<dyn Fn(SharedString, &mut Window, &mut App)>>,
     tooltip_text: Option<SharedString>,
+    tooltip_show_delay: Option<Duration>,
     accessibility_label: Option<SharedString>,
     size: Size,
 }
@@ -39,6 +40,7 @@ impl Clipboard {
             value_fn: None,
             on_copied: None,
             tooltip_text: None,
+            tooltip_show_delay: None,
             accessibility_label: None,
             size: Size::XSmall,
         }
@@ -47,6 +49,14 @@ impl Clipboard {
     /// Set tooltip text for the clipboard button.
     pub fn tooltip(mut self, tooltip: impl Into<SharedString>) -> Self {
         self.tooltip_text = Some(tooltip.into());
+        self
+    }
+
+    /// Overrides how long the pointer must rest before the tooltip shows.
+    ///
+    /// Defaults to [`gpui_base::TooltipDefaults::show_delay`].
+    pub fn tooltip_show_delay(mut self, delay: Duration) -> Self {
+        self.tooltip_show_delay = Some(delay);
         self
     }
 
@@ -104,6 +114,9 @@ impl RenderOnce for Clipboard {
             .ghost()
             .with_size(self.size)
             .when_some(self.tooltip_text, |this, text| this.tooltip(text))
+            .when_some(self.tooltip_show_delay, |this, delay| {
+                this.tooltip_show_delay(delay)
+            })
             .accessibility_label(
                 self.accessibility_label
                     .unwrap_or_else(|| t!("Copy").into()),

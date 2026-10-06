@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
 use crate::{
     ActiveTheme, Colorize as _, Disableable, Icon, Placement, RoleOverride, Selectable, Sizable,
@@ -220,6 +220,7 @@ pub struct Button {
         Option<(Rc<Box<dyn gpui::Action>>, Option<SharedString>)>,
     )>,
     tooltip_placement: Option<Placement>,
+    tooltip_show_delay: Option<Duration>,
     tooltip_builder: Option<Rc<dyn Fn(&mut Window, &mut App) -> gpui::AnyView>>,
     on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App)>>,
     on_hover: Option<Rc<dyn Fn(&bool, &mut Window, &mut App)>>,
@@ -267,6 +268,7 @@ impl Button {
             icon_size: None,
             tooltip: None,
             tooltip_placement: None,
+            tooltip_show_delay: None,
             tooltip_builder: None,
             on_click: None,
             focus_ring_enabled: true,
@@ -411,6 +413,14 @@ impl Button {
     /// Omitting placement keeps automatic positioning.
     pub fn tooltip_placement(mut self, placement: Placement) -> Self {
         self.tooltip_placement = Some(placement);
+        self
+    }
+
+    /// Overrides how long the pointer must rest before the tooltip shows.
+    ///
+    /// Defaults to [`gpui_base::TooltipDefaults::show_delay`].
+    pub fn tooltip_show_delay(mut self, delay: Duration) -> Self {
+        self.tooltip_show_delay = Some(delay);
         self
     }
 
@@ -604,6 +614,7 @@ impl RenderOnce for Button {
         let selected = self.shows_selected_style();
         let loading = self.loading;
         let tooltip_placement = self.tooltip_placement;
+        let tooltip_show_delay = self.tooltip_show_delay;
         let hover_group = self.hover_group;
         let hover_group_held = self.hover_group_held;
         let mut base = self.base;
@@ -857,20 +868,26 @@ impl RenderOnce for Button {
         })
         .map(|this| {
             if let Some(builder) = self.tooltip_builder {
-                this.managed_tooltip_with_placement(tooltip_placement, move |window, cx| {
-                    builder(window, cx)
-                })
+                this.managed_tooltip_with(
+                    tooltip_placement,
+                    tooltip_show_delay,
+                    move |window, cx| builder(window, cx),
+                )
             } else if let Some((tooltip, action)) = self.tooltip {
-                this.managed_tooltip_with_placement(tooltip_placement, move |window, cx| {
-                    Tooltip::new(tooltip.clone())
-                        .when_some(action.clone(), |this, (action, context)| {
-                            this.action(
-                                action.boxed_clone().as_ref(),
-                                context.as_ref().map(|c| c.as_ref()),
-                            )
-                        })
-                        .build(window, cx)
-                })
+                this.managed_tooltip_with(
+                    tooltip_placement,
+                    tooltip_show_delay,
+                    move |window, cx| {
+                        Tooltip::new(tooltip.clone())
+                            .when_some(action.clone(), |this, (action, context)| {
+                                this.action(
+                                    action.boxed_clone().as_ref(),
+                                    context.as_ref().map(|c| c.as_ref()),
+                                )
+                            })
+                            .build(window, cx)
+                    },
+                )
             } else {
                 this
             }
@@ -1633,6 +1650,7 @@ mod tests {
             .outline()
             .large()
             .tooltip("Click to save")
+            .tooltip_show_delay(Duration::from_millis(100))
             .compact()
             .loading(false)
             .disabled(false)
@@ -1648,6 +1666,7 @@ mod tests {
         assert!(button.outline);
         assert_eq!(button.size, Size::Large);
         assert!(button.tooltip.is_some());
+        assert_eq!(button.tooltip_show_delay, Some(Duration::from_millis(100)));
         assert!(button.compact);
         assert!(!button.loading);
         assert!(!button.disabled);
