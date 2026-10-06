@@ -5,8 +5,7 @@ mod common;
 use gpui_kit::component::{
     button::Button,
     diff::{
-        Diff, DiffDocument, DiffFile, DiffLineAnnotation, DiffLinePosition, DiffMode, DiffSide,
-        DiffState,
+        Diff, DiffDocument, DiffLineAnnotation, DiffLinePosition, DiffMode, DiffSide, DiffState,
     },
     input::{Input, InputState},
 };
@@ -55,19 +54,23 @@ impl Render for Review {
     }
 }
 
+fn patch_document(hunks: &str) -> DiffDocument {
+    DiffDocument::parse(format!("--- a/review.txt\n+++ b/review.txt\n{hunks}"))
+        .expect("Test patch is valid")
+        .into_iter()
+        .next()
+        .expect("Test patch contains a file")
+}
+
 fn review(
     cx: &mut TestAppContext,
-    original: &str,
-    modified: &str,
+    patch: &str,
     context: Option<usize>,
     mode: DiffMode,
     annotations: Vec<DiffLineAnnotation>,
 ) -> (WindowHandle<gpui_kit::base::Root>, Entity<DiffState>) {
     cx.update(gpui_kit::init);
-    let document = DiffDocument::new(
-        DiffFile::new("review.txt", original.to_owned()),
-        DiffFile::new("review.txt", modified.to_owned()),
-    );
+    let document = patch_document(patch);
     let (handle, view) = common::open_window(cx, Some(size(px(800.), px(480.))), |_, cx| {
         cx.new(|cx| Review {
             state: cx.new(|cx| {
@@ -137,8 +140,7 @@ fn assert_clipboard(cx: &mut App, expected: &str) {
 fn gutter_keyboard_selection_copies_exact_source_and_survives_mode_change(cx: &mut TestAppContext) {
     let (handle, state) = review(
         cx,
-        "before\r\nold\r\n\tlast 🦀\r\n",
-        "before\r\nnew\r\n\tlast 🦀\r\n",
+        "@@ -1,3 +1,3 @@\n before\r\n-old\r\n+new\r\n \tlast 🦀\r\n",
         None,
         DiffMode::Split,
         vec![],
@@ -167,8 +169,7 @@ fn gutter_keyboard_selection_copies_exact_source_and_survives_mode_change(cx: &m
 fn double_click_on_a_later_source_line_copies_that_word(cx: &mut TestAppContext) {
     let (handle, state) = review(
         cx,
-        "first\nprevious\nlast\n",
-        "first\ncurrent\nlast\n",
+        "@@ -1,3 +1,3 @@\n first\n-previous\n+current\n last\n",
         None,
         DiffMode::Split,
         vec![],
@@ -189,8 +190,7 @@ fn split_text_drag_keeps_the_original_side_when_pointer_crosses_the_divider(
 ) {
     let (handle, state) = review(
         cx,
-        "old-one\r\nold-two\r\n",
-        "new-one\r\nnew-two\r\n",
+        "@@ -1,2 +1,2 @@\n-old-one\r\n-old-two\r\n+new-one\r\n+new-two\r\n",
         None,
         DiffMode::Split,
         vec![],
@@ -217,8 +217,7 @@ fn keyboard_expansion_exposes_original_annotation_on_an_unchanged_unified_line(
 ) {
     let (handle, _) = review(
         cx,
-        "first\nsecond\nold\nfourth\nfifth\n",
-        "first\nsecond\nnew\nfourth\nfifth\n",
+        "@@ -1,5 +1,5 @@\n first\n second\n-old\n+new\n fourth\n fifth\n",
         Some(0),
         DiffMode::Unified,
         vec![DiffLineAnnotation::new(
@@ -254,8 +253,7 @@ fn keyboard_expansion_exposes_original_annotation_on_an_unchanged_unified_line(
 fn shift_gutter_click_extends_from_anchor_and_resets_when_side_changes(cx: &mut TestAppContext) {
     let (handle, state) = review(
         cx,
-        "one\r\nold\r\nthree\r\n",
-        "one\r\nnew\r\nthree\r\n",
+        "@@ -1,3 +1,3 @@\n one\r\n-old\r\n+new\r\n three\r\n",
         None,
         DiffMode::Split,
         vec![],
@@ -300,12 +298,7 @@ fn annotation_input_retains_focus_and_handles_its_own_text_commands(cx: &mut Tes
     cx.update(gpui_kit::init);
     let (handle, view) = common::open_window(cx, Some(size(px(800.), px(480.))), |window, cx| {
         cx.new(|cx| Review {
-            state: cx.new(|cx| {
-                DiffState::new(
-                    DiffDocument::new(DiffFile::new("a", "old\n"), DiffFile::new("a", "new\n")),
-                    cx,
-                )
-            }),
+            state: cx.new(|cx| DiffState::new(patch_document("@@ -1 +1 @@\n-old\n+new\n"), cx)),
             annotations: vec![DiffLineAnnotation::new(
                 "editable-comment",
                 DiffLinePosition::new(DiffSide::Modified, 1),
@@ -352,8 +345,7 @@ fn source_accessibility_labels_preserve_raw_tabs_unicode_and_trailing_spaces(
 ) {
     let (handle, _) = review(
         cx,
-        "\t旧 🦀  \r\nunchanged\r\n",
-        "\t新 🦀  \r\nunchanged\r\n",
+        "@@ -1,2 +1,2 @@\n-\t旧 🦀  \r\n+\t新 🦀  \r\n unchanged\r\n",
         None,
         DiffMode::Unified,
         vec![],

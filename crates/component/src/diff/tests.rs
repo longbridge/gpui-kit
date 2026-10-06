@@ -223,11 +223,8 @@ fn source_selection_clamps_ranges_and_preserves_original_bytes(cx: &mut TestAppC
         );
         assert_eq!(state.selected_text(cx), "\r\nlast");
         state.set_selected_lines(Some(DiffLineRange::new(DiffSide::Original, 20, 30)), cx);
-        assert_eq!(
-            state.selected_lines(),
-            Some(DiffLineRange::new(DiffSide::Original, 3, 3))
-        );
-        assert_eq!(state.selected_text(cx), "last");
+        assert_eq!(state.selected_lines(), None);
+        assert_eq!(state.selected_text(cx), "");
         state.set_selected_lines(None, cx);
         assert_eq!(state.selected_text(cx), "");
     });
@@ -422,4 +419,55 @@ fn user_line_selection_extends_on_one_side_and_replacement_resets_silently(
     })
     .unwrap();
     assert_eq!(events.borrow().len(), 6);
+}
+
+#[gpui::test]
+fn patch_navigation_and_selection_use_supplied_source_coordinates(cx: &mut TestAppContext) {
+    let document = DiffDocument::parse(
+        "--- a/review.txt\n+++ b/review.txt\n@@ -100,2 +100,2 @@ first\n context 100\n-old 101\n+new 101\n@@ -200,2 +200,2 @@ second\n context 200\n-old 201\n+new 201\n",
+    )
+    .unwrap()
+    .remove(0);
+    let state = cx.new(|cx| DiffState::new(document, cx));
+    let window = cx.open_window(size(px(640.), px(480.)), |_, _| Empty);
+    cx.update_window(window.into(), |_, window, cx| {
+        state.update(cx, |state, cx| {
+            assert_eq!(
+                state
+                    .rows
+                    .iter()
+                    .filter(|row| matches!(row, DisplayRow::Hunk(_)))
+                    .count(),
+                2
+            );
+            assert!(
+                !state
+                    .rows
+                    .iter()
+                    .any(|row| matches!(row, DisplayRow::Fold(_)))
+            );
+            state.keyboard_select(1, false, window, cx);
+            assert_eq!(state.selected_lines().unwrap().start(), 100);
+            state.keyboard_select(1, true, window, cx);
+            state.keyboard_select(1, true, window, cx);
+            assert_eq!(
+                state.selected_lines(),
+                Some(DiffLineRange::new(DiffSide::Modified, 100, 200))
+            );
+            assert_eq!(
+                state.selected_text(cx),
+                "context 100\nnew 101\ncontext 200\n"
+            );
+            state.set_selected_lines(Some(DiffLineRange::new(DiffSide::Modified, 105, 150)), cx);
+            assert_eq!(state.selected_lines(), None);
+            let top = state.list.logical_scroll_top();
+            state.scroll_to_line(DiffLinePosition::new(DiffSide::Modified, 150), cx);
+            assert_eq!(state.list.logical_scroll_top().item_ix, top.item_ix);
+            assert_eq!(
+                state.list.logical_scroll_top().offset_in_item,
+                top.offset_in_item
+            );
+        });
+    })
+    .unwrap();
 }

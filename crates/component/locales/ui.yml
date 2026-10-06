@@ -449,6 +449,14 @@ Speech:
     zh-HK: 語音輸入不可用
     zh-TW: 語音輸入不可用
 Diff:
+  BinaryChanges:
+    en: Binary file changed
+    zh-CN: 二进制文件已变更
+    zh-HK: 二進位檔案已變更
+  NoTextChanges:
+    en: No text changes in this patch
+    zh-CN: 此 patch 没有文本变更
+    zh-HK: 此 patch 沒有文字變更
   NoChanges:
     en: No changes
     zh-CN: 没有变更

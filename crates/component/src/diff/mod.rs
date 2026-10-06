@@ -1,11 +1,15 @@
-//! Readonly, virtualized file comparisons inspired by Diffs from Pierre.
-//! Prepare a [`DiffDocument`] when source versions change, retain [`DiffState`]
+//! Readonly, virtualized patch display inspired by Diffs from Pierre.
+//! Parse an externally supplied patch into [`DiffDocument`], retain [`DiffState`]
 //! in the owner, and build [`Diff`] during rendering.
 mod document;
+mod parser;
+#[cfg(test)]
+mod parser_tests;
 mod selection;
 mod state;
 
 pub use document::{DiffDocument, DiffFile, DiffLinePosition, DiffLineRange, DiffSide};
+pub use parser::DiffParseError;
 pub use state::{DiffEvent, DiffState};
 
 use std::{collections::HashMap, rc::Rc};
@@ -114,7 +118,6 @@ pub struct Diff {
     state: Entity<DiffState>,
     style: StyleRefinement,
     line_numbers: bool,
-    inline_highlight: bool,
     syntax_highlight: bool,
     header: bool,
     annotations: Rc<Vec<DiffLineAnnotation>>,
@@ -133,7 +136,6 @@ impl Diff {
             state: state.clone(),
             style: StyleRefinement::default(),
             line_numbers: true,
-            inline_highlight: true,
             syntax_highlight: true,
             header: true,
             annotations: Rc::new(Vec::new()),
@@ -149,11 +151,6 @@ impl Diff {
     /// Shows the original and modified line-number lanes. Default is true.
     pub fn line_numbers(mut self, value: bool) -> Self {
         self.line_numbers = value;
-        self
-    }
-    /// Highlights changed words within paired replacement lines. Default is true.
-    pub fn inline_highlight(mut self, value: bool) -> Self {
-        self.inline_highlight = value;
         self
     }
     /// Uses the document's prepared syntax grammar and current theme. Default is true.
@@ -389,7 +386,6 @@ fn render_diff(
         column_width,
         font_size,
         line_numbers: props.line_numbers,
-        inline_highlight: props.inline_highlight,
         syntax_highlight: props.syntax_highlight,
         annotations: props.annotations.clone(),
         annotation_index: props.annotation_index.clone(),
@@ -409,8 +405,16 @@ fn render_diff(
     let has_rows = !state.rows.is_empty();
     let digits = state
         .document
-        .line_count(DiffSide::Original)
-        .max(state.document.line_count(DiffSide::Modified))
+        .lines(DiffSide::Original)
+        .last()
+        .map_or(1, |line| line.line_number)
+        .max(
+            state
+                .document
+                .lines(DiffSide::Modified)
+                .last()
+                .map_or(1, |line| line.line_number),
+        )
         .max(1)
         .to_string()
         .len();
@@ -609,12 +613,15 @@ fn render_diff(
             .to_string(),
         )
         .when(!has_rows, |this| {
-            this.child(
-                div()
-                    .p_4()
-                    .text_color(cx.theme().muted_foreground)
-                    .child(t!("Diff.EmptyFile").to_string()),
-            )
+            this.child(div().p_4().text_color(cx.theme().muted_foreground).child(
+                if state.document.is_binary() {
+                    t!("Diff.BinaryChanges").to_string()
+                } else if !state.document.metadata().is_empty() {
+                    t!("Diff.NoTextChanges").to_string()
+                } else {
+                    t!("Diff.EmptyFile").to_string()
+                },
+            ))
         });
     v_flex()
         .id(("diff", cx.entity_id()))
@@ -627,6 +634,25 @@ fn render_diff(
         .border_1()
         .border_color(cx.theme().border)
         .when_some(header, |this, header| this.child(header))
+        .when(!has_rows && !state.document.metadata().is_empty(), |this| {
+            this.child(
+                v_flex()
+                    .px_3()
+                    .py_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .children(
+                        state
+                            .document
+                            .metadata()
+                            .iter()
+                            .cloned()
+                            .map(|line| div().child(line)),
+                    ),
+            )
+        })
         .when(is_identical, |this| {
             this.child(
                 div()
@@ -656,7 +682,6 @@ struct CodePresentation {
     column_width: Pixels,
     font_size: Pixels,
     line_numbers: bool,
-    inline_highlight: bool,
     syntax_highlight: bool,
     annotations: Rc<Vec<DiffLineAnnotation>>,
     annotation_index: Rc<HashMap<DiffLinePosition, Vec<usize>>>,
@@ -709,8 +734,15 @@ fn measure_code_width(
         widths.push(width);
     }
     let digits = document
-        .line_count(DiffSide::Original)
-        .max(document.line_count(DiffSide::Modified))
+        .lines(DiffSide::Original)
+        .last()
+        .map_or(1, |line| line.line_number)
+        .max(
+            document
+                .lines(DiffSide::Modified)
+                .last()
+                .map_or(1, |line| line.line_number),
+        )
         .max(1)
         .to_string()
         .len();
@@ -734,6 +766,15 @@ fn render_row(
     cx: &mut App,
 ) -> AnyElement {
     match row {
+        DisplayRow::Hunk(label) => h_flex()
+            .w_full()
+            .h_6()
+            .px_3()
+            .bg(cx.theme().muted.opacity(0.35))
+            .text_xs()
+            .text_color(cx.theme().muted_foreground)
+            .child(label.clone())
+            .into_any_element(),
         DisplayRow::Fold(range) => {
             let range = range.clone();
             let state = code.state.clone();
@@ -820,8 +861,15 @@ fn render_gutter(
 ) -> AnyElement {
     let digits = code
         .document
-        .line_count(DiffSide::Original)
-        .max(code.document.line_count(DiffSide::Modified))
+        .lines(DiffSide::Original)
+        .last()
+        .map_or(1, |line| line.line_number)
+        .max(
+            code.document
+                .lines(DiffSide::Modified)
+                .last()
+                .map_or(1, |line| line.line_number),
+        )
         .max(1)
         .to_string()
         .len();
@@ -838,7 +886,7 @@ fn render_gutter(
         .pr_1()
         .text_color(cx.theme().muted_foreground)
         .when_some(ix, |this, ix| {
-            let position = DiffLinePosition::new(side, ix + 1);
+            let position = code.document.position(side, ix);
             let state = code.state.clone();
             this.child(
                 Button::new(("line", ix))
@@ -855,7 +903,7 @@ fn render_gutter(
                     )
                     .text_color(cx.theme().muted_foreground)
                     .font_family(cx.theme().mono_font_family.clone())
-                    .label((ix + 1).to_string())
+                    .label(position.line().to_string())
                     .accessibility_label(
                         t!(
                             "Diff.SelectLine",
@@ -864,7 +912,7 @@ fn render_gutter(
                             } else {
                                 t!("Diff.Modified")
                             },
-                            line = ix + 1
+                            line = position.line()
                         )
                         .to_string(),
                     )
@@ -988,11 +1036,11 @@ fn code_line(
         cx.theme().success
     };
     let selected = code.selected_lines.is_some_and(|range| {
-        range.contains(DiffLinePosition::new(side, ix + 1))
+        range.contains(code.document.position(side, ix))
             || (code.mode == DiffMode::Unified
                 && !changed
                 && gutters.iter().flatten().any(|(side, ix)| {
-                    ix.is_some_and(|ix| range.contains(DiffLinePosition::new(*side, ix + 1)))
+                    ix.is_some_and(|ix| range.contains(code.document.position(*side, ix)))
                 }))
     });
     let mut highlights = if code.syntax_highlight && line.text.len() <= 1000 {
@@ -1018,17 +1066,6 @@ fn code_line(
     } else {
         Vec::new()
     };
-    if code.inline_highlight && changed {
-        highlights.extend(line.highlights.iter().map(|range| {
-            (
-                line.display_range(range.clone()),
-                HighlightStyle {
-                    background_color: Some(status.opacity(0.28)),
-                    ..Default::default()
-                },
-            )
-        }));
-    }
     if selected {
         highlights.push((
             0..line.display.len(),
@@ -1048,7 +1085,7 @@ fn code_line(
     } else {
         (side, ix)
     };
-    let position = DiffLinePosition::new(text_side, text_ix + 1);
+    let position = code.document.position(text_side, text_ix);
     let source_line = &code.document.lines(text_side)[text_ix];
     let text =
         h_flex()
@@ -1134,7 +1171,7 @@ fn code_line(
                         } else {
                             t!("Diff.Modified")
                         },
-                        line = text_ix + 1
+                        line = position.line()
                     )
                     .to_string(),
                 )
@@ -1186,7 +1223,7 @@ fn annotation_extras(
 ) -> Vec<AnyElement> {
     let mut extras = Vec::new();
     if let Some(render) = &code.annotation_renderer {
-        let position = DiffLinePosition::new(side, ix + 1);
+        let position = code.document.position(side, ix);
         for ix in code.annotation_index.get(&position).into_iter().flatten() {
             let annotation = &code.annotations[*ix];
             extras.push(

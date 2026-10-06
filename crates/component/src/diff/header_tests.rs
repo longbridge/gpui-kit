@@ -17,7 +17,7 @@ fn test_diff_builder(cx: &mut TestAppContext) {
     let defaults = Diff::new(&state);
     assert_eq!(defaults.state.entity_id(), state.entity_id());
     assert!(defaults.header && defaults.line_numbers);
-    assert!(defaults.inline_highlight && defaults.syntax_highlight);
+    assert!(defaults.syntax_highlight);
     assert!(defaults.annotations.is_empty());
     assert_eq!(defaults.layout_revision, 0);
     assert!(defaults.header_renderer.is_none());
@@ -50,7 +50,6 @@ fn test_diff_builder(cx: &mut TestAppContext) {
     let mut diff = Diff::new(&state)
         .header(false)
         .line_numbers(false)
-        .inline_highlight(false)
         .syntax_highlight(false)
         .with_annotations([annotation.clone()])
         .with_layout_revision(7)
@@ -69,7 +68,7 @@ fn test_diff_builder(cx: &mut TestAppContext) {
 
     assert_eq!(diff.state.entity_id(), state.entity_id());
     assert!(!diff.header && !diff.line_numbers);
-    assert!(!diff.inline_highlight && !diff.syntax_highlight);
+    assert!(!diff.syntax_highlight);
     assert_eq!(diff.layout_revision, 7);
     assert_eq!(diff.annotations.len(), 1);
     assert_eq!(diff.annotations[0].id(), annotation.id());

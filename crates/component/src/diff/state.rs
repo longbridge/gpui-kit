@@ -18,6 +18,7 @@ pub(crate) enum DisplayRow {
         changed: bool,
     },
     Fold(Range<usize>),
+    Hunk(gpui::SharedString),
 }
 
 /// Notifications from the readonly comparison surface.
@@ -219,7 +220,7 @@ impl DiffState {
         cx.notify();
     }
 
-    /// Sets surrounding context. `None` shows every source line.
+    /// Sets surrounding context. `None` shows every supplied patch line.
     pub fn set_context_lines(&mut self, lines: Option<usize>, cx: &mut Context<Self>) {
         if self.context_lines == lines {
             return;
@@ -257,15 +258,17 @@ impl DiffState {
     }
 
     /// Synchronizes source-line selection without emitting a user event.
-    /// Invalid lines are clamped; a missing or empty side clears selection.
+    /// Clips to supplied patch lines; a range containing none clears selection.
     pub fn set_selected_lines(&mut self, range: Option<DiffLineRange>, cx: &mut Context<Self>) {
         let range = range.and_then(|range| {
-            let count = self.document.line_count(range.side());
-            (count > 0).then(|| {
+            let lines = self.document.lines(range.side());
+            let start = lines.partition_point(|line| line.line_number < range.start());
+            let end = lines.partition_point(|line| line.line_number <= range.end());
+            (start < end).then(|| {
                 DiffLineRange::new(
                     range.side(),
-                    range.start().min(count),
-                    range.end().min(count),
+                    lines[start].line_number,
+                    lines[end - 1].line_number,
                 )
             })
         });
@@ -315,7 +318,7 @@ impl DiffState {
 
     /// Reveals and scrolls to a source line, expanding its hidden context if needed.
     pub fn scroll_to_line(&mut self, position: DiffLinePosition, cx: &mut Context<Self>) {
-        if position.line() > self.document.line_count(position.side()) {
+        if self.document.line_index(position).is_none() {
             return;
         }
         if self.expand_line(position, cx).is_some() {
@@ -359,11 +362,9 @@ impl DiffState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let count = self.document.line_count(position.side());
-        if count == 0 {
+        if self.document.line_index(position).is_none() {
             return;
         }
-        let position = DiffLinePosition::new(position.side(), position.line().min(count));
         let anchor = self
             .selection_anchor
             .filter(|a| extend && a.side() == position.side())
@@ -393,19 +394,13 @@ impl DiffState {
         if count == 0 {
             return;
         }
-        let position = self
+        let ix = self
             .selection_cursor
             .filter(|position| position.side() == side)
-            .map(|position| {
-                DiffLinePosition::new(
-                    side,
-                    position
-                        .line()
-                        .saturating_add_signed(direction)
-                        .clamp(1, count),
-                )
-            })
-            .unwrap_or_else(|| DiffLinePosition::new(side, 1));
+            .and_then(|position| self.document.line_index(position))
+            .map(|ix| ix.saturating_add_signed(direction).min(count - 1))
+            .unwrap_or(0);
+        let position = self.document.position(side, ix);
         self.click_line(position, extend, window, cx);
         if let Some(row) = self.expand_line(position, cx) {
             self.list.scroll_to_reveal_item(row);
@@ -441,8 +436,8 @@ impl DiffState {
         }
         TextSelection::clear(window, cx);
         self.select_user_range(
-            DiffLinePosition::new(side, 1),
-            DiffLinePosition::new(side, count),
+            self.document.position(side, 0),
+            self.document.position(side, count - 1),
             window,
             cx,
         );
@@ -502,14 +497,15 @@ impl DiffState {
             DisplayRow::Code {
                 original, modified, ..
             } => modified
-                .map(|ix| DiffLinePosition::new(DiffSide::Modified, ix + 1))
-                .or_else(|| original.map(|ix| DiffLinePosition::new(DiffSide::Original, ix + 1))),
+                .map(|ix| self.document.position(DiffSide::Modified, ix))
+                .or_else(|| original.map(|ix| self.document.position(DiffSide::Original, ix))),
+            DisplayRow::Hunk(_) => self.row_position(ix + 1),
             DisplayRow::Fold(range) => self.document.0.pairs.get(range.start).and_then(|pair| {
                 pair.modified
-                    .map(|ix| DiffLinePosition::new(DiffSide::Modified, ix + 1))
+                    .map(|ix| self.document.position(DiffSide::Modified, ix))
                     .or_else(|| {
                         pair.original
-                            .map(|ix| DiffLinePosition::new(DiffSide::Original, ix + 1))
+                            .map(|ix| self.document.position(DiffSide::Original, ix))
                     })
             }),
         }
@@ -519,7 +515,7 @@ impl DiffState {
             DiffSide::Original => &self.original_rows,
             DiffSide::Modified => &self.modified_rows,
         };
-        rows.get(position.line() - 1).copied()
+        rows.get(self.document.line_index(position)?).copied()
     }
 
     fn reveal_line(&self, position: DiffLinePosition) {
@@ -561,6 +557,7 @@ fn source_rows(document: &DiffDocument, rows: &[DisplayRow]) -> (Vec<usize>, Vec
                     modified_rows[*line] = row_ix;
                 }
             }
+            DisplayRow::Hunk(_) => {}
             DisplayRow::Fold(range) => {
                 for pair in &document.0.pairs[range.clone()] {
                     if let Some(line) = pair.original {
@@ -613,6 +610,16 @@ fn project_rows(
     expanded: &[Range<usize>],
 ) -> Vec<DisplayRow> {
     let pairs = &document.0.pairs;
+    let hunk_boundaries = &document.0.hunk_boundaries;
+    let mut hunk_end = vec![pairs.len(); pairs.len()];
+    let mut hunk_start = vec![0; pairs.len()];
+    for (ix, (start, _)) in hunk_boundaries.iter().enumerate() {
+        let end = hunk_boundaries
+            .get(ix + 1)
+            .map_or(pairs.len(), |(start, _)| *start);
+        hunk_start[*start..end].fill(*start);
+        hunk_end[*start..end].fill(end);
+    }
     // Interval boundaries avoid repeatedly filling overlapping context windows.
     // Projection remains linear in source lines plus the number of disclosures.
     let mut boundaries = vec![0isize; pairs.len() + 1];
@@ -624,11 +631,11 @@ fn project_rows(
                 continue;
             }
             let start = ix;
-            while ix < pairs.len() && pairs[ix].changed {
+            while ix < pairs.len() && ix < hunk_end[start] && pairs[ix].changed {
                 ix += 1;
             }
-            boundaries[start.saturating_sub(context)] += 1;
-            boundaries[ix.saturating_add(context).min(pairs.len())] -= 1;
+            boundaries[start.saturating_sub(context).max(hunk_start[start])] += 1;
+            boundaries[ix.saturating_add(context).min(hunk_end[start])] -= 1;
         }
     } else {
         boundaries[0] += 1;
@@ -651,17 +658,25 @@ fn project_rows(
         })
         .collect::<Vec<_>>();
     let mut rows = Vec::new();
+    let mut hunk_ix = 0;
     let mut ix = 0;
     while ix < pairs.len() {
+        while let Some((start, label)) = hunk_boundaries.get(hunk_ix) {
+            if *start != ix {
+                break;
+            }
+            rows.push(DisplayRow::Hunk(label.clone()));
+            hunk_ix += 1;
+        }
         if !visible[ix] {
             let start = ix;
-            while ix < pairs.len() && !visible[ix] {
+            while ix < pairs.len() && ix < hunk_end[start] && !visible[ix] {
                 ix += 1;
             }
             rows.push(DisplayRow::Fold(start..ix));
         } else if mode == DiffMode::Unified && pairs[ix].changed {
             let start = ix;
-            while ix < pairs.len() && pairs[ix].changed {
+            while ix < pairs.len() && ix < hunk_end[start] && pairs[ix].changed {
                 ix += 1;
             }
             for pair in &pairs[start..ix] {

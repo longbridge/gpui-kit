@@ -203,11 +203,14 @@ impl CodeText {
         selection: TextSelectionHandle,
         geometry: Rc<RefCell<SelectionGeometry>>,
     ) -> Self {
+        let line_ix = document
+            .line_index(position)
+            .expect("rendered patch line exists");
         Self {
             id,
             document,
             side: position.side(),
-            line_ix: position.line() - 1,
+            line_ix,
             range,
             highlights,
             selection,

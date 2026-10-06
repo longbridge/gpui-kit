@@ -1,23 +1,24 @@
 ---
 title: Diff
-description: Readonly file comparison for code review and change previews, with split and unified layouts.
+description: Readonly unified and Git diff display for code review and change previews.
 ---
 
 # Diff
 
-`Diff` compares complete original and modified file versions in a readonly
+`Diff` displays an application-supplied unified or Git diff in a readonly
 surface. Use it for code review and change previews; use [Editor](./editor.md)
 when the user needs to edit source code.
 
-The application owns the file versions and retains an `Entity<DiffState>`.
-`DiffDocument` prepares the comparison; `Diff` renders the retained state.
+The application obtains the patch from Git, an AI response, or another producer.
+`DiffDocument::parse` prepares display data without comparing old and new files.
+The owner retains an `Entity<DiffState>` for each file it chooses to display.
 
 ## Import
 
 ```rust
 use gpui_kit::*;
 use gpui_kit::component::diff::{
-    Diff, DiffDocument, DiffFile, DiffLineAnnotation, DiffLinePosition, DiffLineRange,
+    Diff, DiffDocument, DiffLineAnnotation, DiffLinePosition, DiffLineRange,
     DiffMode, DiffSide, DiffState,
 };
 ```
@@ -27,49 +28,53 @@ Initialize components with `gpui_kit::init(cx)` before opening the window throug
 
 ## Basic usage
 
-Prepare the document and create its state once in the owning view:
+Parse the patch and create its state once in the owning view. A patch can
+contain multiple files; the application chooses how to present them:
 
 ```rust
-let original = DiffFile::new("src/main.rs", "fn main() {\n    run();\n}\n")
-    .with_language("rust");
-let modified = DiffFile::new("src/main.rs", "fn main() {\n    run_app();\n}\n")
-    .with_language("rust");
-let document = DiffDocument::new(original, modified);
-let diff = cx.new(|cx| DiffState::new(document, cx));
+let patch = "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,3 +1,3 @@\n fn main() {\n-    run();\n+    run_app();\n }\n";
+let documents = DiffDocument::parse(patch)?;
+let diff = documents.into_iter().next().map(|document| {
+    cx.new(|cx| DiffState::new(document, cx))
+});
 ```
 
-Store `diff` as an `Entity<DiffState>` on the owner. Construct only the
+`parse` returns `Result<Vec<DiffDocument>, DiffParseError>`. Handle errors in the
+application and show an appropriate empty state when the patch contains no files.
+The remaining examples assume the owner stores one selected file's state.
+
+Store the selected state as an `Entity<DiffState>` on the owner. Construct only the
 presentation during rendering, and give it a bounded viewport:
 
 ```rust
 Diff::new(&self.diff).h(rems(24.)).w_full()
 ```
 
-Do not recompute a comparison or recreate its state on every render. For large
-source files, prepare `DiffDocument` on a background executor, then install it
-only if the result still belongs to the current file revision.
+Do not parse the patch or recreate its state on every render. For large patches,
+prepare documents on a background executor, then install them only if the result
+still belongs to the current patch revision.
 
-## File versions
+## Patch input
 
-`DiffFile::new(name, text)` represents an existing file, including an empty
-file. Use the dedicated constructors for a missing original or modified side:
+Accept unified diffs (`---`, `+++`, `@@`) and Git diff text. Each parsed file
+produces one document. `original()` and `modified()` expose readonly `DiffFile`
+metadata for the available sides; `/dev/null` represents a missing side.
+`additions()` and `deletions()` report changed lines represented by the patch.
 
-```rust
-let added = DiffDocument::added(DiffFile::new("README.md", "# Project\n"));
-let deleted = DiffDocument::deleted(DiffFile::new("legacy.rs", "fn legacy() {}\n"));
-```
+A patch normally contains only changed lines and nearby context. Its line numbers
+are source coordinates, not proof that the complete source file is available.
+Diff neither computes differences nor loads repository files, applies changes,
+or resolves merge conflicts. Source outside the patch remains unavailable.
 
-`original()` and `modified()` return `Option<&DiffFile>`. `additions()` and
-`deletions()` report changed line counts, and `has_changes()` identifies a
-comparison with changes. `line_count(side)` returns the source line count for
-that side.
-
-The input contract is complete text versions. Diff does not parse Git patch
-text, load repository files, apply changes, or resolve merge conflicts.
+`line_count(side)` counts supplied lines, not the complete file length.
+`metadata()` exposes retained Git headers and binary metadata; `is_binary()`
+identifies binary changes. Metadata-only changes can have no source rows.
+Malformed hunks and unsupported combined diffs return a `DiffParseError`; its
+`line()` and `message()` identify the patch location and reason.
 
 ## Layout and context
 
-The default layout is `DiffMode::Unified`, with three unchanged lines around
+The default layout is `DiffMode::Unified`, with up to three available unchanged lines around
 each change. Choose the layout explicitly for the available space:
 
 ```rust
@@ -84,10 +89,10 @@ where a line has no counterpart. Unified shows deleted lines before added
 lines while retaining original source line numbers.
 
 Hidden unchanged context is represented by a compact disclosure showing the
-unchanged-line count. Activating it expands that entire hidden range. To expose all source
-without changing the configured context count, call `expand_all`; call
+unchanged-line count. Activating it expands that entire hidden range. To expose all context supplied
+by the patch without changing the configured context count, call `expand_all`; call
 `collapse_all` to restore that count. Setting the context count to `None`
-disables context folding:
+disables folding of available context:
 
 ```rust
 self.diff.update(cx, |state, cx| {
@@ -112,7 +117,8 @@ self.diff.update(cx, |state, cx| {
 });
 ```
 
-`scroll_to_line` reveals hidden context when needed. Change navigation moves
+`scroll_to_line` reveals supplied context when needed; it cannot reveal lines
+absent from the patch. Change navigation moves
 between changed groups and wraps at the ends. Put layout and navigation
 commands in the application's toolbar or menu.
 
@@ -132,11 +138,13 @@ self.diff.update(cx, |state, cx| {
 });
 ```
 
-`selected_lines()` reports the current line range. Invalid line numbers are
-clamped to available source; selecting a missing side clears the selection.
+`selected_lines()` reports the current line range. Line selection is limited to
+supplied source lines; selecting a missing side clears the selection.
 `selected_text(cx)` returns source text without line numbers, change markers,
 alignment cells, or annotation content. `DiffDocument::text_for_range(range)`
-extracts an inclusive source range without changing the viewer selection.
+extracts supplied lines in an inclusive source range without changing the viewer
+selection. Copy excludes diff prefixes and unavailable gaps; it cannot reconstruct
+the whole file or infer source line endings that the patch does not preserve.
 
 ## Replacing the document
 
@@ -147,41 +155,33 @@ self.diff.update(cx, |state, cx| {
 ```
 
 Replacing the document resets expansion, selection, and scrolling because
-their coordinates belong to the previous source versions. State mutations
+their coordinates belong to the previous patch. State mutations
 notify observers; callers do not need an additional `cx.notify()` for the
 Diff state.
 
 ## Appearance and scrolling
 
-Line numbers, inline change highlighting, syntax highlighting, and the file
-header are enabled by default:
+Line numbers, syntax highlighting, and the file header are enabled by default:
 
 ```rust
 Diff::new(&self.diff)
     .line_numbers(true)
-    .inline_highlight(true)
     .syntax_highlight(true)
     .header(true)
     .h(rems(24.))
 ```
 
-Syntax language is detected from the filename; `DiffFile::with_language`
-overrides detection. Enable the matching Cargo grammar feature, such as
-`tree-sitter-rust`, or use `tree-sitter-languages` for all built-in grammars.
-Without a grammar, the source still renders with change highlighting. Syntax
-highlighting is skipped for lines longer than 1,000 bytes. Inline comparison
-also has size and time limits, so costly replacements can retain their line
-highlight without word-level emphasis.
+Syntax language is detected from the filename. Enable the matching Cargo grammar
+feature, such as `tree-sitter-rust`, or use `tree-sitter-languages` for all built-in
+grammars. Without a grammar, supplied code still renders with line change colors.
+Syntax highlighting is skipped for lines longer than 1,000 bytes. Patch fragments
+may have incomplete syntax context; colors do not establish parse completeness.
+Syntax preparation budgets host-language parsing; syntax queries and injected
+language parsing can take additional time. There is no source comparison or
+word-level diff computation in this component.
 
-Line comparison has a computation time limit. Reaching it can produce larger
-change groups without omitting changed source text.
-Syntax preparation also budgets host-language parsing; syntax queries and
-injected-language parsing can take additional time. These budgets do not impose
-a hard deadline on the complete `DiffDocument` construction operation.
-
-The code uses the theme's monospace font and syntax theme. Source whitespace
-and line endings are retained for copying; missing final newlines are shown
-explicitly. Rows are virtualized, including annotation height. Diff owns both
+The code uses the theme's monospace font and syntax theme. Supplied source whitespace is retained for copying; a patch
+`\ No newline at end of file` marker is shown explicitly. Rows are virtualized, including annotation height. Diff owns both
 scrolling axes; avoid nesting it in another scrolling region. Long lines
 scroll horizontally. Soft wrapping is not supported.
 
@@ -253,8 +253,8 @@ copying; buttons and other controls in annotation content own their actions.
 
 ## Pointer and keyboard interaction
 
-Drag over code to select source text on one file side, including across
-virtualized or folded ranges. Click a line number to select that source line;
+Drag over code to select supplied text on one file side, including across
+virtualized or folded available ranges. Unavailable gaps are not selectable. Click a line number to select that source line;
 Shift-click another number on the same side extends the inclusive range.
 Text selection and source-line selection are separate modes. The viewer is
 focusable through Tab. Focusing the viewer retains its ordinary border.
@@ -269,11 +269,11 @@ These defaults apply while the code body is focused:
 | Next / previous changed group | F7 / Shift+F7 |
 | Extend source-line selection | Shift+Up / Shift+Down |
 | Copy source selection | Cmd+C on macOS; Ctrl+C on Windows/Linux |
-| Select all source on the active side | Cmd+A on macOS; Ctrl+A on Windows/Linux |
+| Select all supplied source on the active side | Cmd+A on macOS; Ctrl+A on Windows/Linux |
 
 Select all uses the selected file side; without a selection it chooses the
 modified side when it contains source, otherwise the original side. Shift+Up
-and Shift+Down start at line 1 when no source-line selection exists. Context
+and Shift+Down start at the first supplied source line when no source-line selection exists. Context
 disclosures are ordinary buttons and can be reached with Tab.
 When a control inside a header or annotation has focus, its own keyboard
 commands take priority; Diff's source-copy and scrolling bindings apply only

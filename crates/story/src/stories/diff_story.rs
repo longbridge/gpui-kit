@@ -2,8 +2,7 @@ use gpui_kit::component::{
     ActiveTheme, Disableable, IconName, Selectable, Sizable, StyledExt as _,
     button::{Button, ButtonVariants},
     diff::{
-        Diff, DiffDocument, DiffFile, DiffLineAnnotation, DiffLinePosition, DiffMode, DiffSide,
-        DiffState,
+        Diff, DiffDocument, DiffLineAnnotation, DiffLinePosition, DiffMode, DiffSide, DiffState,
     },
     h_flex, v_flex,
 };
@@ -31,9 +30,9 @@ const EXAMPLES: [&str; 9] = [
     "Unicode",
     "Long lines",
     "Large file",
-    "Identical files",
-    "Line endings",
-    "Empty files",
+    "Renamed file",
+    "Missing final newline",
+    "File mode",
 ];
 
 pub struct DiffStory {
@@ -51,7 +50,7 @@ impl super::Story for DiffStory {
     }
 
     fn description() -> &'static str {
-        "Readonly code review with split and unified layouts, inline changes and expandable context."
+        "Readonly unified and Git patches with split layouts, source line numbers and review comments."
     }
 
     fn new_view(window: &mut Window, cx: &mut App) -> Entity<impl Render> {
@@ -170,12 +169,12 @@ impl DiffStory {
                     })
                     .submenu("Context", window, cx, move |menu, _, _| {
                         menu.menu_with_check(
-                            "Three lines",
+                            "Three context lines",
                             context == Some(3),
                             Box::new(DiffStoryAction::Context(Some(3))),
                         )
                         .menu_with_check(
-                            "All lines",
+                            "All supplied context",
                             context.is_none(),
                             Box::new(DiffStoryAction::Context(None)),
                         )
@@ -234,118 +233,82 @@ impl Render for DiffStory {
 }
 
 fn example_document(example: usize) -> DiffDocument {
-    match example {
-        1 => DiffDocument::added(DiffFile::new("src/retry.rs", ADDED).with_language("rust")),
-        2 => DiffDocument::deleted(
-            DiffFile::new("src/legacy_retry.rs", DELETED).with_language("rust"),
-        ),
-        3 => compare(
-            "src/greeting.rs",
-            "// Greeting for every visitor\nfn greeting(name: &str) -> String {\n\tformat!(\"Hello, {name} 👋\")\n}\n\n// café: e\u{301}, 中文，مرحبا\n",
-            "// 为每位访客生成问候\nfn greeting(name: &str) -> String {\n\tformat!(\"你好，{name} 🌏\")\n}\n\n// café: é, 中文，مرحبا\n",
-        ),
+    let patch = match example {
+        1 => ADDED_PATCH.to_owned(),
+        2 => DELETED_PATCH.to_owned(),
+        3 => UNICODE_PATCH.to_owned(),
         4 => {
             let prefix = "const ENDPOINT: &str = \"https://api.example.com/v1/changes?";
-            compare(
-                "src/endpoint.rs",
-                &format!("{prefix}{}&limit=20\";\n", "scope=repository&".repeat(24)),
-                &format!("{prefix}{}&limit=100\";\n", "scope=repository&".repeat(24)),
+            format!(
+                "--- a/src/endpoint.rs\n+++ b/src/endpoint.rs\n@@ -1 +1 @@\n-{prefix}{}&limit=20\";\n+{prefix}{}&limit=100\";\n",
+                "scope=repository&".repeat(24),
+                "scope=repository&".repeat(24),
             )
         }
         5 => {
-            let original = (1..=5000)
-                .map(|line| format!("entry_{line:04} = enabled\n"))
-                .collect::<String>();
-            let modified = original
-                .replace("entry_0040 = enabled", "entry_0040 = disabled")
-                .replace("entry_2500 = enabled", "entry_2500 = pending")
-                .replace("entry_4960 = enabled", "entry_4960 = disabled");
-            compare("config/features.conf", &original, &modified)
+            // The fixture is a supplied patch: no source comparison is performed.
+            let mut patch = String::from(
+                "--- a/config/features.conf\n+++ b/config/features.conf\n@@ -1,5000 +1,5000 @@\n",
+            );
+            for line in 1..=5000 {
+                match line {
+                    40 | 4960 => patch.push_str(&format!(
+                        "-entry_{line:04} = enabled\n+entry_{line:04} = disabled\n"
+                    )),
+                    2500 => patch.push_str(&format!(
+                        "-entry_{line:04} = enabled\n+entry_{line:04} = pending\n"
+                    )),
+                    _ => patch.push_str(&format!(" entry_{line:04} = enabled\n")),
+                }
+            }
+            patch
         }
-        6 => compare("src/retry.rs", ADDED, ADDED),
-        7 => compare(
-            "config/review.conf",
-            "enabled=true\r\nlimit=20\r\n",
-            "enabled=true\nlimit=20",
-        ),
-        8 => compare("empty.txt", "", ""),
-        _ => compare("src/retry.rs", REVIEW_ORIGINAL, REVIEW_MODIFIED),
-    }
+        6 => RENAMED_PATCH.to_owned(),
+        7 => NO_NEWLINE_PATCH.to_owned(),
+        8 => MODE_PATCH.to_owned(),
+        _ => REVIEW_PATCH.to_owned(),
+    };
+    DiffDocument::parse(patch)
+        .expect("Story patch is valid")
+        .into_iter()
+        .next()
+        .expect("Story patch contains a file")
 }
 
-fn compare(name: &'static str, original: &str, modified: &str) -> DiffDocument {
-    DiffDocument::new(
-        DiffFile::new(name, original.to_owned()),
-        DiffFile::new(name, modified.to_owned()),
-    )
-}
-
-const ADDED: &str =
-    "pub fn retry_delay(attempt: u32) -> u64 {\n    100 * 2_u64.pow(attempt.min(6))\n}\n";
-const DELETED: &str = "pub fn retry_delay(_: u32) -> u64 {\n    1000\n}\n";
-const REVIEW_ORIGINAL: &str = r#"use std::time::Duration;
-
-/// Retry policy for network requests.
-pub struct RetryPolicy {
-    pub max_attempts: u32,
-    pub base_delay: Duration,
-}
-
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self {
-            max_attempts: 3,
-            base_delay: Duration::from_millis(100),
-        }
-    }
-}
-
-impl RetryPolicy {
-    /// Returns the delay before the next attempt.
-    pub fn delay(&self, attempt: u32) -> Duration {
-        self.base_delay * attempt
-    }
-
-    /// Whether another request may be attempted.
-    pub fn should_retry(&self, attempt: u32) -> bool {
-        attempt < self.max_attempts
-    }
-}
-
-pub fn describe(policy: &RetryPolicy) -> String {
-    format!("{} attempts", policy.max_attempts)
-}
+const ADDED_PATCH: &str = r#"diff --git a/src/retry.rs b/src/retry.rs
+new file mode 100644
+--- /dev/null
++++ b/src/retry.rs
+@@ -0,0 +1,3 @@
++pub fn retry_delay(attempt: u32) -> u64 {
++    100 * 2_u64.pow(attempt.min(6))
++}
 "#;
-const REVIEW_MODIFIED: &str = r#"use std::time::Duration;
-
-/// Retry policy for network requests.
-pub struct RetryPolicy {
-    pub max_attempts: u32,
-    pub base_delay: Duration,
-}
-
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self {
-            max_attempts: 5,
-            base_delay: Duration::from_millis(100),
-        }
-    }
-}
-
-impl RetryPolicy {
-    /// Returns the delay before the next attempt.
-    pub fn delay(&self, attempt: u32) -> Duration {
-        self.base_delay * 2_u32.pow(attempt.min(6))
-    }
-
-    /// Whether another request may be attempted.
-    pub fn should_retry(&self, attempt: u32) -> bool {
-        attempt < self.max_attempts
-    }
-}
-
-pub fn describe(policy: &RetryPolicy) -> String {
-    format!("Up to {} attempts", policy.max_attempts)
-}
+const DELETED_PATCH: &str = r#"diff --git a/src/legacy_retry.rs b/src/legacy_retry.rs
+deleted file mode 100644
+--- a/src/legacy_retry.rs
++++ /dev/null
+@@ -1,3 +0,0 @@
+-pub fn retry_delay(_: u32) -> u64 {
+-    1000
+-}
 "#;
+const UNICODE_PATCH: &str = "--- a/src/greeting.rs\n+++ b/src/greeting.rs\n@@ -1,6 +1,6 @@\n-// Greeting for every visitor\n+// 为每位访客生成问候\n fn greeting(name: &str) -> String {\n-\tformat!(\"Hello, {name} 👋\")\n+\tformat!(\"你好，{name} 🌏\")\n }\n \n-// café: e\u{301}, 中文，مرحبا\n+// café: é, 中文，مرحبا\n";
+const RENAMED_PATCH: &str = r#"diff --git a/src/retry.rs b/src/retry_policy.rs
+similarity index 100%
+rename from src/retry.rs
+rename to src/retry_policy.rs
+"#;
+const NO_NEWLINE_PATCH: &str = r#"--- a/config/review.conf
++++ b/config/review.conf
+@@ -1,2 +1,2 @@
+ enabled=true
+-limit=20
++limit=100
+\ No newline at end of file
+"#;
+const MODE_PATCH: &str = r#"diff --git a/scripts/review.sh b/scripts/review.sh
+old mode 100644
+new mode 100755
+"#;
+const REVIEW_PATCH: &str = "diff --git a/src/retry.rs b/src/retry.rs\nindex 30a471b..604db2a 100644\n--- a/src/retry.rs\n+++ b/src/retry.rs\n@@ -9,7 +9,7 @@ impl Default for RetryPolicy {\n impl Default for RetryPolicy {\n     fn default() -> Self {\n         Self {\n-            max_attempts: 3,\n+            max_attempts: 5,\n             base_delay: Duration::from_millis(100),\n         }\n     }\n@@ -18,7 +18,7 @@ impl RetryPolicy {\n impl RetryPolicy {\n     /// Returns the delay before the next attempt.\n     pub fn delay(&self, attempt: u32) -> Duration {\n-        self.base_delay * attempt\n+        self.base_delay * 2_u32.pow(attempt.min(6))\n     }\n \n     /// Whether another request may be attempted.\n@@ -29,4 +29,4 @@ impl RetryPolicy {\n \n pub fn describe(policy: &RetryPolicy) -> String {\n-    format!(\"{} attempts\", policy.max_attempts)\n+    format!(\"Up to {} attempts\", policy.max_attempts)\n }\n";

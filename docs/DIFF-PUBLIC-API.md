@@ -9,45 +9,43 @@ The declaration excerpts omit private fields and method bodies.
 ## Reference API mapping
 
 [Pierre Diffs](https://diffs.com/docs) is the reference for the division between
-file data, retained comparison state and presentation. The following mappings
+patch data, retained display state and presentation. The following mappings
 describe corresponding responsibilities; they do not promise source compatibility
 or feature parity.
 
 | Pierre Diffs concept | GPUI Kit API | Responsibility |
 | --- | --- | --- |
-| Complete file versions / `FileContents` | `DiffFile` | Retain a file name, exact source and optional syntax language. |
-| `parseDiffFromFile` / comparison metadata | `DiffDocument` | Compute and retain one immutable comparison for reuse. |
+| `PatchDiff` / patch parsing | `DiffDocument::parse` | Parse external unified/Git diff into one document per file. |
+| Parsed file-side metadata | `DiffFile` | Expose the parsed name and available source fragments. |
 | Split/unified `diffStyle` | `DiffMode`, `DiffState::set_mode` | Choose presentation without changing source coordinates. |
-| Context visibility and expansion | `DiffState::set_context_lines`, `expand_all`, `collapse_all` | Retain disclosures independently of the immutable comparison. |
+| Context visibility and expansion | `DiffState::set_context_lines`, `expand_all`, `collapse_all` | Retain disclosures independently of the immutable document. |
 | Selected source lines | `DiffSide`, `DiffLinePosition`, `DiffLineRange`, `DiffEvent` | Locate selection by source side and one-based source lines. |
 | Imperative source-line navigation | `DiffState::scroll_to_line`, `next_change`, `previous_change` | Reveal context and navigate within the retained viewport. |
 | `FileDiff` presentation | `Diff`, `Entity<DiffState>` | Build a themed component while retaining interaction state in the owner. |
 | File-header render slots | `Diff::render_header`, `render_header_prefix`, `render_header_filename_suffix`, `render_header_metadata` | Compose application content in the header. |
 | Source-line annotations | `DiffLineAnnotation`, `Diff::with_annotations`, `render_annotation` | Attach application-owned content to a source position with a stable ID. |
 
-Complete file versions are the supported input. A missing side is represented by
-`DiffDocument::added` or `deleted`; an existing empty `DiffFile` remains an
-existing side. Patch parsing is not part of this API.
+The application supplies unified/Git diff text. Missing sides use `/dev/null`;
+context not present in the patch remains unavailable. There is no full-file or
+word-level comparison entry point.
 
 ## Source data
 
 The public structs below expose private fields through constructors and readers.
 Documents are immutable and cheaply cloned; prepare a new document when the
-application's source revision changes, then install it with `set_document`.
+application's patch revision changes, then install it with `set_document`.
 
 ```rust
 pub struct DiffFile;
 impl DiffFile {
-    pub fn new(name: impl Into<SharedString>, text: impl Into<SharedString>) -> Self;
-    pub fn with_language(self, language: impl Into<SharedString>) -> Self;
     pub fn name(&self) -> &SharedString;
     pub fn text(&self) -> &SharedString;
-    pub fn language(&self) -> Option<&SharedString>;
 }
 ```
 
-`DiffFile` retains exact source, including whitespace and line endings.
-`with_language` overrides language detection from the file name.
+`DiffFile` is readonly parsed-side metadata. `name` identifies the path, `text`
+returns concatenated source fragments provided by the patch. Syntax language is
+detected from the filename. It is not a complete-source input type.
 
 ```rust
 pub enum DiffSide { Original, Modified }
@@ -75,9 +73,9 @@ rows, so changing layout does not change their meaning.
 ```rust
 pub struct DiffDocument;
 impl DiffDocument {
-    pub fn new(original: DiffFile, modified: DiffFile) -> Self;
-    pub fn added(modified: DiffFile) -> Self;
-    pub fn deleted(original: DiffFile) -> Self;
+    pub fn parse(patch: impl Into<SharedString>) -> Result<Vec<Self>, DiffParseError>;
+    pub fn metadata(&self) -> &[SharedString];
+    pub fn is_binary(&self) -> bool;
     pub fn original(&self) -> Option<&DiffFile>;
     pub fn modified(&self) -> Option<&DiffFile>;
     pub fn additions(&self) -> usize;
@@ -88,12 +86,34 @@ impl DiffDocument {
 }
 ```
 
-The constructors compare complete source versions synchronously. Applications
-should compute large comparisons on a background executor and check that the
-source revision is still current before installing the result.
-`text_for_range` copies exact source lines, clips to available lines and returns
-an empty string for a range after the file. The addition/deletion counts describe
-changed source lines; an added or deleted empty file still has changes.
+`parse` validates unified/Git diff structure without computing differences and
+returns one immutable document per file. Empty input returns an empty vector;
+malformed hunks and unsupported combined diffs return a `DiffParseError`.
+Applications may parse large patches on a background executor and check the
+patch revision before installing the result.
+
+`metadata` exposes Git headers such as modes, rename/copy and index information,
+and binary markers; encoded Git binary payload is skipped. `is_binary` identifies
+a binary change.
+`original` and `modified` inspect available file sides. `additions` and
+`deletions` count supplied changed lines; `has_changes` also recognizes
+metadata-only changes. `line_count` counts retained lines on the requested side,
+not the total lines in the unavailable complete source file. `text_for_range`
+extracts supplied lines within inclusive source coordinates; unavailable gaps
+contribute no text. Neither reader reconstructs a full file.
+
+```rust
+pub struct DiffParseError;
+impl DiffParseError {
+    pub fn line(&self) -> usize;
+    pub fn message(&self) -> &SharedString;
+}
+impl std::fmt::Display for DiffParseError {}
+impl std::error::Error for DiffParseError {}
+```
+
+`line` reports the one-based patch location and `message` describes why parsing
+failed, allowing the application to present a source-specific error.
 
 ## Retained state and events
 
@@ -126,18 +146,19 @@ impl DiffState {
 ```
 
 Create one `Entity<DiffState>` in the owning view and reuse it across renders.
-The default is unified mode with three unchanged lines around changes.
-`set_context_lines(None)` shows all source; expanding all temporarily reveals
+The default is unified mode with up to three supplied unchanged lines around changes.
+`set_context_lines(None)` shows all supplied source; expanding all temporarily reveals
 context without changing that configured count. Collapsing restores the count.
 
 Changing mode retains line-range selection and a nearby source row. Replacing
 the document resets selection, context expansion and viewport. Programmatic
-line selection clamps to existing source lines; selecting a missing or empty
+line selection is limited to supplied source lines; selecting a missing or empty
 side clears it. `selected_text` omits gutters, diff signs, alignment blanks and
-annotation content, and preserves source whitespace and line endings.
+annotation content, and preserves the supplied source representation. Missing patch gaps cannot be
+copied and complete-file newline encoding cannot be inferred.
 
-`scroll_to_line` expands hidden context when necessary and ignores positions
-past the end of the requested side. Change navigation moves between changed
+`scroll_to_line` expands hidden context when necessary and ignores unavailable
+positions. No action reveals source absent from the patch. Change navigation moves between changed
 groups and wraps at the first/last group. `DiffEvent::SelectionChanged` reports
 source-line selection changes; arbitrary text selection does not become a
 source-line range.
@@ -158,7 +179,6 @@ pub struct Diff;
 impl Diff {
     pub fn new(state: &Entity<DiffState>) -> Self;
     pub fn line_numbers(self, value: bool) -> Self;
-    pub fn inline_highlight(self, value: bool) -> Self;
     pub fn syntax_highlight(self, value: bool) -> Self;
     pub fn header(self, value: bool) -> Self;
     pub fn with_annotations(self, annotations: impl IntoIterator<Item = DiffLineAnnotation>) -> Self;
@@ -179,7 +199,7 @@ impl RenderOnce for Diff {}
 impl IntoElement for Diff {}
 ```
 
-`DiffMode` defaults to `Unified`. The component's four boolean presentation
+`DiffMode` defaults to `Unified`. The component's three boolean presentation
 options default to `true`. `Diff` owns vertical and horizontal scrolling and
 needs bounded height. Long lines scroll horizontally; wrapping is not exposed.
 
@@ -226,5 +246,5 @@ impl Story for DiffStory {}
 impl Render for DiffStory {}
 ```
 
-`stories::DiffStory` provides the registered, restorable comparison showcase.
+`stories::DiffStory` provides the registered, restorable patch showcase.
 `view` constructs its retained state and application-owned review annotation.
