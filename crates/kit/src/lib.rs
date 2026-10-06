@@ -125,18 +125,18 @@ pub mod test;
 pub use ::gpui_base as base;
 #[cfg(all(
     not(any(target_os = "ios", target_os = "android")),
+    feature = "gpui-fast"
+))]
+pub use ::gpui_fast_platform as platform;
+#[cfg(all(target_family = "wasm", feature = "gpui-fast"))]
+pub use ::gpui_fast_web as web;
+#[cfg(all(
+    not(any(target_os = "ios", target_os = "android")),
     not(feature = "gpui-fast")
 ))]
 pub use ::gpui_platform as platform;
-#[cfg(all(
-    not(any(target_os = "ios", target_os = "android")),
-    feature = "gpui-fast"
-))]
-pub use ::gpui_platform_fast as platform;
 #[cfg(all(target_family = "wasm", not(feature = "gpui-fast")))]
 pub use ::gpui_web as web;
-#[cfg(all(target_family = "wasm", feature = "gpui-fast"))]
-pub use ::gpui_web_fast as web;
 pub use gpui_base::is_mobile;
 
 /// The styled component library.

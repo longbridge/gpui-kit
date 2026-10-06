@@ -18,7 +18,7 @@ name = "gpui-shell"
 path = "src/bin/gpui-shell.rs"
 
 [features]
-gpui-fast = ["dep:gpui_fast", "dep:gpui_platform_fast", "gpui-base/gpui-fast", "gpui-fps/gpui-fast"]
+gpui-fast = ["dep:gpui-fast", "dep:gpui-fast-platform", "gpui-base/gpui-fast", "gpui-fps/gpui-fast"]
 default = ["quickjs"]
 # The scripting engine. See `src/engine/mod.rs` for the surface an engine has
 # to provide; QuickJS is the only implementation today, and the feature exists
@@ -33,9 +33,9 @@ quickjs = [
 
 [dependencies]
 gpui.workspace = true
-gpui_fast = { workspace = true, optional = true }
+gpui-fast = { workspace = true, optional = true }
 gpui_platform.workspace = true
-gpui_platform_fast = { workspace = true, optional = true }
+gpui-fast-platform = { workspace = true, optional = true }
 gpui-base = { workspace = true, features = ["inspector"] }
 gpui-fps.workspace = true
 
@@ -76,7 +76,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
-gpui_fast = { workspace = true, features = ["test-support"] }
+gpui-fast = { workspace = true, features = ["test-support"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

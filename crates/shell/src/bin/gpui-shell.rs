@@ -8,7 +8,7 @@
 #[cfg(feature = "gpui-fast")]
 extern crate gpui_fast as gpui;
 #[cfg(feature = "gpui-fast")]
-extern crate gpui_platform_fast as gpui_platform;
+extern crate gpui_fast_platform as gpui_platform;
 
 fn main() {
     gpui_shell::host::main_with_components(gpui_shell::FrozenComponentRegistry::default());

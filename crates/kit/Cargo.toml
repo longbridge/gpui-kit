@@ -18,16 +18,16 @@ workspace = true
 [features]
 default = ["component", "assets"]
 # Select GPUI Fast across the core, platforms, and already-enabled layers.
-gpui-fast = ["dep:gpui_fast", "dep:gpui_platform_fast", "dep:gpui_web_fast", "gpui-base/gpui-fast", "gpui-component?/gpui-fast", "gpui-kit-assets?/gpui-fast"]
+gpui-fast = ["dep:gpui-fast", "dep:gpui-fast-platform", "dep:gpui-fast-web", "gpui-base/gpui-fast", "gpui-component?/gpui-fast", "gpui-kit-assets?/gpui-fast"]
 # The styled component library, `gpui_kit::component`. Initializes `gpui-base` too.
 component = ["dep:gpui-component"]
 # The default icon set for `gpui-component`, `gpui_kit::assets`.
 assets = ["dep:gpui-kit-assets"]
 # GPUI's test harness, native-platform rendering, and Kit UI test helpers.
-test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui-base/test-support", "gpui-component?/test-support", "gpui_fast?/test-support", "gpui_platform_fast?/test-support"]
+test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui-base/test-support", "gpui-component?/test-support", "gpui-fast?/test-support", "gpui-fast-platform?/test-support"]
 # Frame-event instrumentation remains opt-in for performance builds.
-profiler = ["gpui/profiler", "gpui_fast?/profiler"]
-inspector = ["gpui/inspector", "gpui-base/inspector", "gpui-component?/inspector", "gpui_fast?/inspector"]
+profiler = ["gpui/profiler", "gpui-fast?/profiler"]
+inspector = ["gpui/inspector", "gpui-base/inspector", "gpui-component?/inspector", "gpui-fast?/inspector"]
 decimal = ["component", "gpui-component/decimal"]
 # Speech input: microphone capture and the system speech recognizer.
 speech = ["component", "gpui-component/speech"]
@@ -73,23 +73,23 @@ tree-sitter-zig = ["component", "gpui-component/tree-sitter-zig"]
 [dependencies]
 gpui_macros.workspace = true
 gpui.workspace = true
-gpui_fast = { workspace = true, optional = true }
+gpui-fast = { workspace = true, optional = true }
 gpui-base.workspace = true
 gpui-component = { workspace = true, optional = true }
 gpui-kit-assets = { workspace = true, optional = true }
 
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 gpui_platform.workspace = true
-gpui_platform_fast = { workspace = true, optional = true }
+gpui-fast-platform = { workspace = true, optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 gpui_web.workspace = true
-gpui_web_fast = { workspace = true, optional = true }
+gpui-fast-web = { workspace = true, optional = true }
 
 [dev-dependencies]
 chrono = "0.4.38"
 gpui = { workspace = true, features = ["test-support"] }
-gpui_fast = { workspace = true, features = ["test-support"] }
+gpui-fast = { workspace = true, features = ["test-support"] }
 lsp-types.workspace = true
 
 [[test]]

@@ -10,10 +10,10 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 chrono = "0.4.38"
 gpui.workspace = true
-gpui_fast = { workspace = true, optional = true }
+gpui-fast = { workspace = true, optional = true }
 gpui-base = { path = "../.." }
 gpui_platform.workspace = true
-gpui_platform_fast = { workspace = true, optional = true }
+gpui-fast-platform = { workspace = true, optional = true }
 console_error_panic_hook = "0.1"
 console_log = "1.0"
 log.workspace = true
@@ -33,4 +33,4 @@ workspace = true
 ignored = ["chrono", "gpui-base", "reqwest_client", "syntect"]
 
 [features]
-gpui-fast = ["dep:gpui_fast", "dep:gpui_platform_fast"]
+gpui-fast = ["dep:gpui-fast", "dep:gpui-fast-platform"]

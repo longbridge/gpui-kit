@@ -7,7 +7,7 @@
 #[cfg(feature = "gpui-fast")]
 extern crate gpui_fast as gpui;
 #[cfg(all(feature = "gpui-fast", test))]
-extern crate gpui_platform_fast as gpui_platform;
+extern crate gpui_fast_platform as gpui_platform;
 
 mod accordion;
 pub mod actions;

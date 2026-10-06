@@ -8,16 +8,16 @@ edition.workspace = true
 [dependencies]
 chrono = "0.4.38"
 gpui.workspace = true
-gpui_fast = { workspace = true, optional = true }
+gpui-fast = { workspace = true, optional = true }
 gpui-base = { path = "../.." }
 gpui_platform.workspace = true
-gpui_platform_fast = { workspace = true, optional = true }
+gpui-fast-platform = { workspace = true, optional = true }
 reqwest_client.workspace = true
 syntect.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
-gpui_fast = { workspace = true, features = ["test-support"] }
+gpui-fast = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true
@@ -28,4 +28,4 @@ workspace = true
 ignored = ["chrono", "gpui", "gpui-base", "syntect"]
 
 [features]
-gpui-fast = ["dep:gpui_fast", "dep:gpui_platform_fast"]
+gpui-fast = ["dep:gpui-fast", "dep:gpui-fast-platform"]
