@@ -11,7 +11,7 @@ use gpui::{
     px,
 };
 
-use crate::menu::PopupMenu;
+use crate::{input::AnyInputState, menu::PopupMenu, root::WindowState};
 
 /// A extension trait for adding a context menu to an element.
 pub trait ContextMenuExt: InteractiveElement + ParentElement + Styled {
@@ -120,6 +120,9 @@ impl<E: ParentElement + Styled + IntoElement + 'static> IntoElement for ContextM
 
 struct ContextMenuSharedState {
     menu_view: Option<Entity<PopupMenu>>,
+    /// Kept while open so replacing the menu preserves its input's selection
+    /// after the input has left the focused-input registry.
+    selection_input: Option<AnyInputState>,
     open: bool,
     position: Point<Pixels>,
     /// Registered on this element's dispatch node every frame and never
@@ -150,6 +153,7 @@ impl Default for ContextMenuState {
             draws_menu: Rc::default(),
             shared_state: Rc::new(RefCell::new(ContextMenuSharedState {
                 menu_view: None,
+                selection_input: None,
                 open: false,
                 position: Default::default(),
                 trigger_focus_handle: None,
@@ -407,11 +411,33 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                             }
                         });
 
+                        let selection_input = WindowState::try_update(window, cx, |state, _, _| {
+                            state.focused_input.clone()
+                        })
+                        .flatten()
+                        .filter(|input| input.focus_handle(cx).is_focused(window))
+                        .or_else(|| {
+                            let state = shared_state.borrow();
+                            let menu_focused = state.menu_view.as_ref().is_some_and(|menu| {
+                                let focus = menu.focus_handle(cx);
+                                focus.is_focused(window) || focus.contains_focused(window, cx)
+                            });
+                            state
+                                .selection_input
+                                .as_ref()
+                                .filter(|input| {
+                                    menu_focused || input.focus_handle(cx).is_focused(window)
+                                })
+                                .cloned()
+                        });
+                        let position = event.position;
+
                         {
                             let mut shared_state = shared_state.borrow_mut();
                             // Clear any existing menu view to allow immediate replacement
                             // Set the new position and open the menu
                             shared_state.menu_view = None;
+                            shared_state.selection_input = None;
                             shared_state._subscription = None;
                             shared_state.position = event.position;
                             shared_state.open = true;
@@ -435,6 +461,22 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                                     menu.set_previous_focus(previous_focus_handle, cx);
                                 });
 
+                                // A menu on another element must not keep the last
+                                // focused input highlighted. An explicit action target
+                                // takes precedence over where the press landed.
+                                let selection_input = selection_input.filter(|input| {
+                                    let Some(bounds) = input.input_bounds(cx) else {
+                                        return false;
+                                    };
+                                    match menu.read(cx).action_context.as_ref() {
+                                        Some(target) => target == &input.focus_handle(cx),
+                                        None => bounds.contains(&position),
+                                    }
+                                });
+                                if let Some(input) = selection_input.as_ref() {
+                                    input.set_selection_focus(Some(menu.focus_handle(cx)), cx);
+                                }
+
                                 // Set up the subscription for dismiss handling.
                                 // Hold a Weak here, not a strong clone: the closure
                                 // would otherwise close the cycle
@@ -445,7 +487,9 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                                     let shared_state = Rc::downgrade(&shared_state);
                                     move |_, _: &DismissEvent, window, _cx| {
                                         if let Some(shared_state) = shared_state.upgrade() {
-                                            shared_state.borrow_mut().open = false;
+                                            let mut state = shared_state.borrow_mut();
+                                            state.open = false;
+                                            state.selection_input = None;
                                             window.refresh();
                                         }
                                     }
@@ -455,6 +499,7 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                                 {
                                     let mut state = shared_state.borrow_mut();
                                     state.menu_view = Some(menu.clone());
+                                    state.selection_input = selection_input;
                                     state._subscription = Some(_subscription);
                                     window.refresh();
                                 }

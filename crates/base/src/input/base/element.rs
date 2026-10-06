@@ -939,7 +939,7 @@ impl<M: InputModeKind> TextElement<M> {
         cx: &mut App,
     ) -> Vec<Path<Pixels>> {
         let state = self.state.read(cx);
-        if !state.focus_handle.is_focused(window) {
+        if !state.has_selection_focus(window, cx) {
             return vec![];
         }
 
@@ -3615,6 +3615,60 @@ mod tests {
             DecorationHarness(state)
         });
         (editor.unwrap(), window)
+    }
+
+    #[gpui::test]
+    fn selection_paths_follow_the_input_and_its_menu_focus(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "alpha beta", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let menu_focus = cx.focus_handle();
+            let other_focus = cx.focus_handle();
+            editor.update(cx, |state, cx| {
+                state.set_selected_range(0..5, cx);
+                state.focus(window, cx);
+            });
+
+            let selection_paths = |window: &mut Window, cx: &mut App| {
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let layout = state.last_layout.clone().unwrap();
+                let mut bounds = state.input_bounds;
+                TextElement::new(editor.clone()).layout_selections(&layout, &mut bounds, window, cx)
+            };
+            let focused_paths = selection_paths(window, cx).len();
+            assert!(focused_paths > 0);
+
+            editor.update(cx, |state, cx| {
+                state.set_selection_focus(Some(menu_focus.clone()), cx);
+            });
+            menu_focus.focus(window, cx);
+            assert!(!editor.read(cx).focus_handle.is_focused(window));
+            assert_eq!(selection_paths(window, cx).len(), focused_paths);
+            // The opening frame can still use the input's old focus. Check
+            // another frame with the menu already focused as well.
+            assert_eq!(selection_paths(window, cx).len(), focused_paths);
+
+            other_focus.focus(window, cx);
+            assert!(selection_paths(window, cx).is_empty());
+            assert_eq!(editor.read(cx).selected_range(), 0..5);
+
+            menu_focus.focus(window, cx);
+            editor.update(cx, |state, cx| state.set_selection_focus(None, cx));
+            assert!(selection_paths(window, cx).is_empty());
+            editor.update(cx, |state, cx| state.focus(window, cx));
+            assert_eq!(selection_paths(window, cx).len(), focused_paths);
+
+            // Retaining the input must not keep a removed menu alive.
+            let weak_menu = menu_focus.downgrade();
+            editor.update(cx, |state, cx| {
+                state.set_selection_focus(Some(menu_focus.clone()), cx);
+            });
+            menu_focus.focus(window, cx);
+            drop(menu_focus);
+            assert!(weak_menu.upgrade().is_none());
+            assert!(selection_paths(window, cx).is_empty());
+        });
     }
 
     #[gpui::test]
