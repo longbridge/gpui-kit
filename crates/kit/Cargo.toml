@@ -166,3 +166,7 @@ required-features = ["assets", "test-support", "component"]
 [[test]]
 name = "touch_selection"
 required-features = ["test-support", "component"]
+
+[[test]]
+name = "diff"
+required-features = ["test-support", "component"]

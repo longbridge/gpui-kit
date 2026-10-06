@@ -74,6 +74,7 @@ collapsed: false
 
 ### Advanced Components
 
+- [Diff](./diff.md) - Readonly file comparison for code review and change previews
 - [Calendar](calendar) - Calendar display and navigation
 - [Carousel](carousel) - Browse through a set of related items
 - [Command](command) - Command palette for search and quick actions

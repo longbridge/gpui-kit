@@ -448,3 +448,60 @@ Speech:
     zh-CN: 语音输入不可用
     zh-HK: 語音輸入不可用
     zh-TW: 語音輸入不可用
+Diff:
+  NoChanges:
+    en: No changes
+    zh-CN: 没有变更
+    zh-HK: 沒有變更
+  EmptyFile:
+    en: Empty file
+    zh-CN: 空文件
+    zh-HK: 空檔案
+  AddedFile:
+    en: Added file
+    zh-CN: 新增文件
+    zh-HK: 新增檔案
+  DeletedFile:
+    en: Deleted file
+    zh-CN: 已删除文件
+    zh-HK: 已刪除檔案
+  Original:
+    en: Original
+    zh-CN: 原版
+    zh-HK: 原版
+  Modified:
+    en: Modified
+    zh-CN: 新版
+    zh-HK: 新版
+  ExpandLines:
+    en: Expand %{count} unchanged lines
+    zh-CN: 展开 %{count} 行未变更内容
+    zh-HK: 展開 %{count} 行未變更內容
+  SourceLine:
+    en: "%{side} line %{line}"
+    zh-CN: "%{side}第 %{line} 行"
+    zh-HK: "%{side}第 %{line} 行"
+  AddedLine:
+    en: "%{side} line %{line}, added"
+    zh-CN: "%{side}第 %{line} 行，新增"
+    zh-HK: "%{side}第 %{line} 行，新增"
+  RemovedLine:
+    en: "%{side} line %{line}, removed"
+    zh-CN: "%{side}第 %{line} 行，删除"
+    zh-HK: "%{side}第 %{line} 行，刪除"
+  UnchangedLines:
+    en: "%{count} unchanged lines"
+    zh-CN: "%{count} 行未变更内容"
+    zh-HK: "%{count} 行未變更內容"
+  SelectLine:
+    en: Select %{side} line %{line}
+    zh-CN: 选择%{side}第 %{line} 行
+    zh-HK: 選擇%{side}第 %{line} 行
+  NoNewline:
+    en: No newline at end of file
+    zh-CN: 文件末尾没有换行
+    zh-HK: 檔案末尾沒有換行
+  Viewer:
+    en: Diff for %{name}
+    zh-CN: "%{name} 的差异"
+    zh-HK: "%{name} 的差異"
