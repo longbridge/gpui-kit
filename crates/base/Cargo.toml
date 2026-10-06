@@ -25,10 +25,10 @@ name = "text_view_scroll"
 harness = false
 
 [features]
-gpui-fast = ["gpui/gpui-fast", "gpui_platform/gpui-fast"]
+gpui-fast = ["dep:gpui_fast"]
 decimal = ["dep:rust_decimal"]
-test-support = ["gpui/test-support"]
-inspector = ["gpui_macros/inspector", "gpui/inspector"]
+test-support = ["gpui/test-support", "gpui_fast?/test-support"]
+inspector = ["gpui_macros/inspector", "gpui/inspector", "gpui_fast?/inspector"]
 
 [dependencies]
 anyhow.workspace = true
@@ -37,6 +37,7 @@ chrono = "0.4.38"
 data-url = "0.3"
 futures = "0.3"
 gpui.workspace = true
+gpui_fast = { workspace = true, optional = true }
 gpui_macros.workspace = true
 instant.workspace = true
 itertools = "0.13.0"
@@ -80,9 +81,11 @@ windows = { workspace = true, features = ["Win32_Foundation", "Win32_UI_WindowsA
 ashpd = { version = "0.13", default-features = false, features = ["async-io", "settings"] }
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.8"
 gpui = { workspace = true, features = ["test-support", "bench-support"] }
+gpui_fast = { workspace = true, features = ["test-support", "bench-support"] }
 gpui_platform = { workspace = true, features = ["bench-support"] }
+gpui_platform_fast = { workspace = true, features = ["bench-support"] }
 indoc = "2"
 reqwest_client.workspace = true
 

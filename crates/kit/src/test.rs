@@ -10,7 +10,7 @@
 //!
 //! [`ElementSnapshot`] is immutable. Call [`TestWindowExt::render_frame`] after
 //! external changes, or use [`TestAppContextExt::wait_for`] for asynchronous UI.
-use gpui::{
+use crate::{
     AnyWindowHandle, App, AppContext, ElementId, InputEvent, KeyDownEvent, KeyUpEvent, Keystroke,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, ScrollDelta,
     ScrollWheelEvent, TestAppContext, Window, point, px,

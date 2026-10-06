@@ -1,3 +1,6 @@
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     hint::black_box,

@@ -2,9 +2,6 @@
 default-members = ["crates/story"]
 members = [
     "crates/kit",
-    "crates/core",
-    "crates/platform",
-    "crates/web",
     "crates/base",
     "crates/base/examples/wasm",
     "crates/base/examples/native",
@@ -69,14 +66,13 @@ story = { path = "crates/story" }
 # onto a newer snapshot that gpui-component did not compile with (#3156). Bump
 # every snapshot crate together with its Cargo.lock entry; `script/check-gpui-pin.ts`
 # fails CI when a pin is not exact.
-gpui = { package = "gpui-kit-core", path = "crates/core", version = "0.7.1" }
-gpui_platform = { package = "gpui-kit-platform", path = "crates/platform", version = "0.7.1", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { package = "gpui-kit-web", path = "crates/web", version = "0.7.1" }
-# The facades keep engine selection shared across all Kit layers. The upstream
-# snapshot remains pinned; GPUI Fast uses compatible 0.1.x releases.
-gpui_upstream = { package = "gpui-pre", version = "=0.3.8", default-features = false }
-gpui_platform_upstream = { package = "gpui-pre-platform", version = "=0.3.8", default-features = false }
-gpui_web_upstream = { package = "gpui-pre-web", version = "=0.3.8", default-features = false }
+gpui = { package = "gpui-pre", version = "=0.3.8" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.8", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { package = "gpui-pre-web", version = "=0.3.8" }
+# Fast is optional; existing crates select it through their gpui-fast feature.
+gpui_fast = { package = "gpui-fast", version = "0.1.0" }
+gpui_platform_fast = { package = "gpui-fast-platform", version = "0.1.0", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web_fast = { package = "gpui-fast-web", version = "0.1.0" }
 gpui_macros = { package = "gpui-pre-macros", version = "=0.3.8" }
 reqwest_client = { package = "gpui-pre-reqwest-client", version = "=0.3.8" }
 sum-tree = { package = "gpui-pre-sum-tree", version = "=0.3.8" }

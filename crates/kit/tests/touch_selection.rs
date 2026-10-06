@@ -2,12 +2,6 @@
 //! `Input` and in a `TextView`.
 
 mod common;
-use gpui::{
-    AppContext, Context, DispatchPhase, Entity, InputEvent as _, LongPressEvent, Modifiers,
-    MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent,
-    StyleRefinement, TestAppContext, TouchDragEvent, TouchPhase, Window, WindowHandle, canvas, div,
-    prelude::*, px,
-};
 use gpui_base::TextSelection;
 use gpui_component::{
     Root, WindowExt as _,
@@ -15,6 +9,12 @@ use gpui_component::{
     text::{TextView, TextViewState},
 };
 use gpui_kit::test::{TestSupportExt as _, TestWindowExt};
+use gpui_kit::{
+    AppContext, Context, DispatchPhase, Entity, InputEvent as _, LongPressEvent, Modifiers,
+    MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Point, ScrollDelta, ScrollWheelEvent,
+    StyleRefinement, TestAppContext, TouchDragEvent, TouchPhase, Window, WindowHandle, canvas, div,
+    prelude::*, px,
+};
 
 struct Screen {
     input: Entity<InputState>,
@@ -77,7 +77,7 @@ struct CachedScreen {
 impl Render for CachedScreen {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div().size_full().p_4().child(
-            gpui::AnyView::from(self.text.clone())
+            gpui_kit::AnyView::from(self.text.clone())
                 .cached(StyleRefinement::default().w(px(320.)).h(px(120.))),
         )
     }
@@ -121,7 +121,7 @@ fn tall_screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
 
 /// A finger's double tap: the touch is offered as a drag first, as GPUI
 /// does, then arrives as a two-click press.
-fn double_tap(window: &mut Window, cx: &mut gpui::App, position: Point<Pixels>) {
+fn double_tap(window: &mut Window, cx: &mut gpui_kit::App, position: Point<Pixels>) {
     window.dispatch_event(
         TouchDragEvent {
             phase: TouchPhase::Started,
@@ -217,11 +217,11 @@ fn cached_screen(cx: &mut TestAppContext) -> WindowHandle<Root> {
 /// A frame as the app draws one: what is not dirty is replayed from the
 /// cache. `render_frame` refreshes the window first, which paints everything
 /// afresh and would hide what a cached view does.
-fn frame(window: &mut Window, cx: &mut gpui::App) {
+fn frame(window: &mut Window, cx: &mut gpui_kit::App) {
     window.draw(cx).clear(cx);
 }
 
-fn long_press(window: &mut Window, cx: &mut gpui::App, position: Point<Pixels>) {
+fn long_press(window: &mut Window, cx: &mut gpui_kit::App, position: Point<Pixels>) {
     for phase in [TouchPhase::Started, TouchPhase::Ended] {
         window.dispatch_event(
             LongPressEvent {
@@ -236,7 +236,7 @@ fn long_press(window: &mut Window, cx: &mut gpui::App, position: Point<Pixels>) 
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn long_press_in_input_offers_copy_which_closes_the_menu(cx: &mut TestAppContext) {
     let handle = screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -268,7 +268,7 @@ fn long_press_in_input_offers_copy_which_closes_the_menu(cx: &mut TestAppContext
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn long_press_in_input_select_all_keeps_the_menu(cx: &mut TestAppContext) {
     let handle = screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -286,7 +286,7 @@ fn long_press_in_input_select_all_keeps_the_menu(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn long_press_in_text_view_offers_copy_and_select_all(cx: &mut TestAppContext) {
     let handle = screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -330,7 +330,7 @@ fn end_knob(snapshot: &gpui_base::TouchSelectionSnapshot) -> Point<Pixels> {
     point(end.left(), end.bottom() + px(6.))
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn end_handle_drags_the_input_selection_with_a_finger(cx: &mut TestAppContext) {
     let handle = screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -395,7 +395,7 @@ fn end_handle_drags_the_input_selection_with_a_finger(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn end_handle_drags_the_text_view_selection_with_a_mouse(cx: &mut TestAppContext) {
     let handle = screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -423,7 +423,7 @@ fn end_handle_drags_the_text_view_selection_with_a_mouse(cx: &mut TestAppContext
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn a_handle_stops_at_the_other_end_instead_of_collapsing_the_selection(cx: &mut TestAppContext) {
     let handle = screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -475,7 +475,7 @@ fn a_handle_stops_at_the_other_end_instead_of_collapsing_the_selection(cx: &mut 
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn copy_after_select_all_keeps_the_whole_selection(cx: &mut TestAppContext) {
     let handle = screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -509,7 +509,7 @@ fn copy_after_select_all_keeps_the_whole_selection(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn the_first_move_after_taking_a_handle_is_not_lost(cx: &mut TestAppContext) {
     let handle = screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -556,7 +556,7 @@ fn the_first_move_after_taking_a_handle_is_not_lost(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn select_all_after_a_drag_stays_put_frame_after_frame(cx: &mut TestAppContext) {
     let handle = screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -594,7 +594,7 @@ fn select_all_after_a_drag_stays_put_frame_after_frame(cx: &mut TestAppContext) 
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn a_selection_under_a_cached_view_holds_still_and_keeps_its_handles(cx: &mut TestAppContext) {
     let handle = cached_screen(cx);
     // One update per step: what a frame defers — the sweep of participants
@@ -681,7 +681,7 @@ fn a_selection_under_a_cached_view_holds_still_and_keeps_its_handles(cx: &mut Te
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn a_double_tap_in_text_view_selects_nothing(cx: &mut TestAppContext) {
     let handle = screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -703,7 +703,7 @@ fn a_double_tap_in_text_view_selects_nothing(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn select_all_takes_the_text_beyond_the_viewport(cx: &mut TestAppContext) {
     let handle = tall_screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -726,7 +726,7 @@ fn select_all_takes_the_text_beyond_the_viewport(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn the_menu_comes_back_after_a_scroll_the_container_swallowed(cx: &mut TestAppContext) {
     let handle = swallowing_screen(cx);
     cx.update_window(handle.into(), |_, window, cx| {

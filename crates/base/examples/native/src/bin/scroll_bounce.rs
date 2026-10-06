@@ -1,6 +1,11 @@
 //! Run with `cargo run -p gpui-base-examples --bin scroll_bounce --release`.
 //! Trackpad gestures exercise the same viewport wrapper as the iOS host.
 
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_platform_fast as gpui_platform;
+
 #[allow(dead_code)]
 #[path = "../../../shared/palette.rs"]
 mod palette;

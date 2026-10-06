@@ -15,10 +15,10 @@ edition.workspace = true
 doctest = false
 
 [features]
-gpui-fast = ["gpui/gpui-fast", "gpui-base/gpui-fast", "gpui-kit-assets/gpui-fast"]
-test-support = ["gpui/test-support", "gpui-base/test-support"]
+gpui-fast = ["dep:gpui_fast", "gpui-base/gpui-fast", "gpui-kit-assets/gpui-fast"]
+test-support = ["gpui/test-support", "gpui-base/test-support", "gpui_fast?/test-support"]
 decimal = ["gpui-base/decimal"]
-inspector = ["gpui_macros/inspector", "gpui/inspector", "gpui-base/inspector"]
+inspector = ["gpui_macros/inspector", "gpui/inspector", "gpui-base/inspector", "gpui_fast?/inspector"]
 tree-sitter = ["dep:tree-sitter", "dep:tree-sitter-json"]
 # Speech input: microphone capture and the system speech recognizer.
 speech = [
@@ -115,6 +115,7 @@ tree-sitter-zig = ["tree-sitter", "dep:tree-sitter-zig"]
 regex = "1"
 anyhow.workspace = true
 gpui = { workspace = true }
+gpui_fast = { workspace = true, optional = true }
 gpui_macros.workspace = true
 gpui-base.workspace = true
 gpui-component-macros = { workspace = true }
@@ -248,6 +249,7 @@ windows = { workspace = true, features = [
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+gpui_fast = { workspace = true, features = ["test-support"] }
 indoc = "2"
 
 [lints]

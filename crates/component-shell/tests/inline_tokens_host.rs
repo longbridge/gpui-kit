@@ -1,3 +1,6 @@
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+
 use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px};
 use std::{
     fs,

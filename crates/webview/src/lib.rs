@@ -1,3 +1,6 @@
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+
 use std::{ops::Deref, rc::Rc};
 
 use wry::{

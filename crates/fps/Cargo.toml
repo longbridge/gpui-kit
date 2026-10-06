@@ -18,6 +18,7 @@ doctest = false
 # `gpui/profiler` belongs here, not on the workspace dependency: this is the
 # only crate that uses it, and cargo unifies features across the graph.
 gpui = { workspace = true, features = ["profiler"] }
+gpui_fast = { workspace = true, features = ["profiler"] , optional = true }
 web-time = "1"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
@@ -57,9 +58,10 @@ windows = { workspace = true, features = [
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+gpui_fast = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true
 
 [features]
-gpui-fast = ["gpui/gpui-fast"]
+gpui-fast = ["dep:gpui_fast"]

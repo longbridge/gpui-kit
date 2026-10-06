@@ -1,8 +1,8 @@
 mod common;
-use gpui::{
+use gpui_kit::test::{TestSupportExt, TestWindowExt};
+use gpui_kit::{
     AppContext, Context, Entity, SharedString, TestAppContext, Window, div, prelude::*, px,
 };
-use gpui_kit::test::{TestSupportExt, TestWindowExt};
 
 struct Child {
     label: SharedString,
@@ -33,7 +33,7 @@ impl Render for Host {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn cached_child_hides_and_reappears_after_refresh(cx: &mut TestAppContext) {
     let (handle, handle_content) = common::open_window(cx, None, |_, cx| {
         cx.new(|cx| Host {
@@ -59,7 +59,7 @@ fn cached_child_hides_and_reappears_after_refresh(cx: &mut TestAppContext) {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn unmount_and_remount_do_not_retain_old_metadata(cx: &mut TestAppContext) {
     let (handle, handle_content) = common::open_window(cx, None, |_, cx| {
         cx.new(|cx| Host {
@@ -129,7 +129,7 @@ impl Render for Rows {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn composite_ids_follow_reordered_rows(cx: &mut TestAppContext) {
     let (handle, handle_content) =
         common::open_window(cx, None, |_, cx| cx.new(|_| Rows { reversed: false }));
@@ -152,7 +152,7 @@ fn composite_ids_follow_reordered_rows(cx: &mut TestAppContext) {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn closing_one_window_preserves_other_window_and_owned_snapshot(cx: &mut TestAppContext) {
     let (first, _) = common::open_window(cx, None, |_, cx| {
         cx.new(|_| Child {
@@ -184,7 +184,7 @@ fn closing_one_window_preserves_other_window_and_owned_snapshot(cx: &mut TestApp
 
 #[test]
 fn observation_preserves_accessibility_role_and_properties() {
-    use gpui::{Element, Role};
+    use gpui_kit::{Element, Role};
     let native = div()
         .id("control")
         .role(Role::Button)
@@ -198,8 +198,8 @@ fn observation_preserves_accessibility_role_and_properties() {
         .test_support();
     assert_eq!(Element::id(&native), Element::id(&observed));
     assert_eq!(native.a11y_role(), observed.a11y_role());
-    let mut expected = gpui::accesskit::Node::new(Role::Button);
-    let mut actual = gpui::accesskit::Node::new(Role::Button);
+    let mut expected = gpui_kit::accesskit::Node::new(Role::Button);
+    let mut actual = gpui_kit::accesskit::Node::new(Role::Button);
     native.write_a11y_info(&mut expected);
     observed.write_a11y_info(&mut actual);
     assert_eq!(actual.label(), expected.label());
@@ -230,7 +230,7 @@ impl Render for Clipped {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn clipped_center_does_not_bypass_native_hit_testing(cx: &mut TestAppContext) {
     let clicks = std::rc::Rc::new(std::cell::Cell::new(0));
     let (handle, _) = common::open_window(cx, None, |_, cx| {
@@ -246,7 +246,7 @@ fn clipped_center_does_not_bypass_native_hit_testing(cx: &mut TestAppContext) {
         assert_eq!(target.bounds().size.width, px(100.));
         window.click("partly-visible", cx);
         assert_eq!(clicks.get(), 0);
-        window.click_at("partly-visible", gpui::point(px(10.), px(20.)), cx);
+        window.click_at("partly-visible", gpui_kit::point(px(10.), px(20.)), cx);
     })
     .unwrap();
     assert_eq!(clicks.get(), 1);
@@ -271,7 +271,7 @@ impl Render for ManyRows {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn large_frame_removes_stale_records_when_list_shrinks(cx: &mut TestAppContext) {
     let (handle, handle_content) =
         common::open_window(cx, None, |_, cx| cx.new(|_| ManyRows { count: 1000 }));

@@ -4,6 +4,11 @@
 //! colors, sizing, and motion belong to applications or the
 //! `gpui-component` façade.
 
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+#[cfg(all(feature = "gpui-fast", test))]
+extern crate gpui_platform_fast as gpui_platform;
+
 mod accordion;
 pub mod actions;
 mod alert_dialog;

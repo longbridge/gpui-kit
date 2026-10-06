@@ -28,7 +28,7 @@ function readGpuiPreVersion() {
   if (process.env.GPUI_PRE_VERSION) return process.env.GPUI_PRE_VERSION;
   const manifest = resolve(process.cwd(), '..', 'Cargo.toml');
   if (!existsSync(manifest)) return undefined;
-  // Match the package, since its workspace alias can be gpui or gpui_upstream.
+  // Match the package rather than relying on its workspace alias.
   const pin = readFileSync(manifest, 'utf8')
     .match(/^[A-Za-z0-9_-]+\s*=\s*\{[^}\n]*package\s*=\s*"gpui-pre"[^}\n]*version\s*=\s*"=?([^"]+)"/m);
   return pin?.[1];

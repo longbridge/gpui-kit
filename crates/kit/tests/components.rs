@@ -1,5 +1,4 @@
 mod common;
-use gpui::{AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size};
 use gpui_component::{
     Disableable,
     button::Button,
@@ -8,6 +7,7 @@ use gpui_component::{
     popover::Popover,
 };
 use gpui_kit::test::{TestSupportExt, TestWindowExt};
+use gpui_kit::{AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size};
 
 struct Controls {
     input: Entity<InputState>,
@@ -45,7 +45,7 @@ impl Render for Controls {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn kit_controls_use_native_events_and_report_state(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);
     let (handle, handle_content) =
@@ -85,7 +85,7 @@ impl Render for NamedButton {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn button_reports_accessibility_name_without_claiming_visible_text(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);
     let (handle, _) = common::open_window(cx, None, |_, cx| cx.new(|_| NamedButton));
@@ -114,7 +114,7 @@ impl Render for NamedClipboard {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn clipboard_reports_default_and_explicit_accessibility_names(cx: &mut TestAppContext) {
     cx.update(gpui_component::init);
     let (handle, _) = common::open_window(cx, None, |_, cx| cx.new(|_| NamedClipboard));
@@ -131,7 +131,7 @@ fn clipboard_reports_default_and_explicit_accessibility_names(cx: &mut TestAppCo
 }
 
 struct ScrollFocus {
-    focus: gpui::FocusHandle,
+    focus: gpui_kit::FocusHandle,
 }
 impl Render for ScrollFocus {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -157,7 +157,7 @@ fn scrollable_elements_forward_observed_focus_binding(cx: &mut TestAppContext) {
         common::update_content(handle, &handle_content, cx, |view, _, _| view.focus.clone())
             .unwrap();
     cx.update_window(handle.into(), |_, window, cx| {
-        let content = (gpui::ElementId::from("scroll"), "content");
+        let content = (gpui_kit::ElementId::from("scroll"), "content");
         window.render_frame(cx);
         assert_eq!(
             window.within("scroll").find(content.clone()).focused(),

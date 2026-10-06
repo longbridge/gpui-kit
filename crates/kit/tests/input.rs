@@ -15,11 +15,11 @@ mod history;
 mod lifecycle;
 #[path = "input/textarea.rs"]
 mod textarea;
-use gpui::{
-    AppContext, Context, Entity, TestAppContext, Window, WindowHandle, div, prelude::*, px,
-};
 use gpui_component::input::{Input, InputState};
 use gpui_kit::test::TestWindowExt;
+use gpui_kit::{
+    AppContext, Context, Entity, TestAppContext, Window, WindowHandle, div, prelude::*, px,
+};
 
 struct Inputs {
     first: Entity<InputState>,
@@ -62,7 +62,7 @@ fn inputs(cx: &mut TestAppContext) -> (WindowHandle<gpui_kit::base::Root>, Entit
     })
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn text_goes_only_to_the_focused_input(cx: &mut TestAppContext) {
     let (handle, handle_content) = inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -85,7 +85,7 @@ fn text_goes_only_to_the_focused_input(cx: &mut TestAppContext) {
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn readonly_and_disabled_inputs_reject_native_typing(cx: &mut TestAppContext) {
     let (handle, handle_content) = inputs(cx);
     for disabled in [false, true] {
@@ -110,7 +110,7 @@ fn readonly_and_disabled_inputs_reject_native_typing(cx: &mut TestAppContext) {
     }
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn masked_input_handles_typing_without_reporting_secret_value(cx: &mut TestAppContext) {
     let (handle, handle_content) = inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -127,7 +127,7 @@ fn masked_input_handles_typing_without_reporting_secret_value(cx: &mut TestAppCo
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn existing_gpui_keyboard_editing_updates_observed_value(cx: &mut TestAppContext) {
     let (handle, handle_content) = inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -183,7 +183,7 @@ fn scoped_inputs(
     })
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn scoped_keyboard_uses_the_focused_input_in_the_selected_scope(cx: &mut TestAppContext) {
     let (handle, _) = scoped_inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {
@@ -204,7 +204,7 @@ fn scoped_keyboard_uses_the_focused_input_in_the_selected_scope(cx: &mut TestApp
     .unwrap();
 }
 
-#[gpui::test]
+#[gpui_kit::test]
 fn scoped_keyboard_rejects_focus_outside_the_selected_scope(cx: &mut TestAppContext) {
     let (handle, _) = scoped_inputs(cx);
     cx.update_window(handle.into(), |_, window, cx| {

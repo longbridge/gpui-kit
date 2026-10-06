@@ -1,3 +1,6 @@
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+
 #[path = "../src/shell/delegate_select/mod.rs"]
 mod delegate_select;
 

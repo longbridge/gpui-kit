@@ -1,3 +1,6 @@
+#[cfg(all(feature = "gpui-fast", test))]
+extern crate gpui_fast as gpui;
+
 fn main() {
     let components = match gpui_component_shell::components() {
         Ok(components) => components,

@@ -1,3 +1,6 @@
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{Context, IntoElement, Render, Styled as _, TestAppContext, Window, div, px};

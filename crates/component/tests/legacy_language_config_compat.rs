@@ -1,4 +1,5 @@
 // These imports and grammar struct literals were valid in 0.6.0.
+
 use gpui_component::{highlighter::*, input::*};
 
 #[test]

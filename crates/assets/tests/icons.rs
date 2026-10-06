@@ -1,5 +1,8 @@
 #![cfg(not(target_family = "wasm"))]
 
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+
 use gpui::{AssetSource, IntoElement};
 use gpui_kit_assets::{AllAssets, Assets, IconName};
 use std::collections::BTreeSet;

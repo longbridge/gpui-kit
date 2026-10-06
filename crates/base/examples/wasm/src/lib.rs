@@ -1,3 +1,8 @@
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_platform_fast as gpui_platform;
+
 #[cfg(target_family = "wasm")]
 use gpui::{Application, ApplicationHandle};
 #[cfg(target_family = "wasm")]

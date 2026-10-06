@@ -97,7 +97,21 @@ macro_rules! actions {
 //
 // With test-support, the glob below includes GPUI's test macro. Test modules
 // should import their Kit types explicitly to avoid shadowing Rust's #[test].
+#[cfg(not(feature = "gpui-fast"))]
 pub use ::gpui::*;
+#[cfg(feature = "gpui-fast")]
+pub use ::gpui_fast::*;
+
+// Preserve Kit-aware macro paths when the engine is Fast.
+#[cfg(all(feature = "gpui-fast", any(feature = "inspector", debug_assertions)))]
+pub use gpui_macros::derive_inspector_reflection;
+#[cfg(feature = "gpui-fast")]
+pub use gpui_macros::{
+    Action, AppContext, IntoElement, Render, VisualContext, bench, border_style_methods,
+    box_shadow_style_methods, cursor_style_methods, margin_style_methods, overflow_style_methods,
+    padding_style_methods, position_style_methods, property_test, register_action, style_helpers,
+    test, visibility_style_methods,
+};
 
 #[doc(hidden)]
 pub use crate as gpui;
@@ -109,10 +123,20 @@ pub use crate as gpui;
 pub mod test;
 
 pub use ::gpui_base as base;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(all(
+    not(any(target_os = "ios", target_os = "android")),
+    not(feature = "gpui-fast")
+))]
 pub use ::gpui_platform as platform;
-#[cfg(target_family = "wasm")]
+#[cfg(all(
+    not(any(target_os = "ios", target_os = "android")),
+    feature = "gpui-fast"
+))]
+pub use ::gpui_platform_fast as platform;
+#[cfg(all(target_family = "wasm", not(feature = "gpui-fast")))]
 pub use ::gpui_web as web;
+#[cfg(all(target_family = "wasm", feature = "gpui-fast"))]
+pub use ::gpui_web_fast as web;
 pub use gpui_base::is_mobile;
 
 /// The styled component library.
@@ -168,7 +192,7 @@ pub fn open_window<V: Render>(
 
 // Mobile applications provide their platform with `Application::with_platform`.
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub use ::gpui_platform::application;
+pub use platform::application;
 
 /// Initializes every enabled layer. Call it once, before using anything else.
 ///

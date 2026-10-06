@@ -5,6 +5,11 @@
 //!
 //! Run with `cargo bench -p gpui-base --bench text_view_scroll`.
 
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_platform_fast as gpui_platform;
+
 use std::fmt::Write as _;
 
 use gpui::{

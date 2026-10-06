@@ -1,3 +1,6 @@
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
+
 use gpui::App;
 use std::ops::Deref;
 use std::sync::LazyLock;

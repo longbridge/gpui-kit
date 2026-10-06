@@ -5,6 +5,9 @@
 //! `gpui-component`, and the runtime depends on neither this crate nor the
 //! component library, so it stays usable without a component catalog.
 
+#[cfg(all(feature = "gpui-fast", test))]
+extern crate gpui_fast as gpui;
+
 mod shell;
 
 /// Initializes the component catalog and the shell runtime it registers into.
