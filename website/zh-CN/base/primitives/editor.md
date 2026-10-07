@@ -74,6 +74,24 @@ gutter 设置或字体后需重新渲染；不要为尚未布局的编辑器代�
 Monaco 将这条轨道称为概览标尺。这两个集合会保留表示行边界的空范围。
 参见[行号槽与概览标尺装饰](../../component/editor.md#行号槽与概览标尺装饰)。
 
+`create_line_decorations_collection` 挂载一个 `LineDecorationProvider`，编辑器每一帧都会向它
+询问整行背景和行号槽标记。背景由 Base 直接绘制；标记只通过 `InputEditorStyle::gutter_marker_renderer()`
+绘制，样式化编辑器会提供该渲染器。参见[行装饰](../../component/editor.md#行装饰)。
+
+直接使用 Base 时，应用通过 builder 同时提供渲染器和布局尺寸：
+
+```rust
+let style = InputEditorStyle::default()
+    .with_gutter_marker_renderer(Some(renderer))
+    .with_gutter_marker_size(gpui_kit::rems(0.75))
+    .with_gutter_marker_gap(gpui_kit::rems(0.25));
+```
+
+标记尺寸和间距默认为零。渲染器应遵守配置的正方形尺寸；Base 使用同一尺寸计算槽宽和垂直居中。
+使用 rem 值时，每次布局都会按窗口当前的 rem 大小换算。
+通过 `gutter_marker_renderer()`、`gutter_marker_size()` 和 `gutter_marker_gap()` 读取配置，
+向 `with_gutter_marker_renderer` 传入 `None` 可停用标记。既有样式字段仍可直接读写。
+
 ## 高亮与语言功能
 
 `InputHighlighterFactory`、`InputHighlighter`、诊断类型和 LSP provider trait 是提供给设计系统作者的底层扩展点，作用于共享的 `InputBaseState`。样式组件的应用通常应通过编辑器集成配置它们，而不是普通文本框。

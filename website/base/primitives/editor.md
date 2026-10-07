@@ -107,6 +107,29 @@ on the vertical scrollbar track. Monaco calls this track the overview ruler. The
 collections keep empty ranges, which mark line boundaries. See
 [Gutter and overview ruler decorations](../../component/editor.md#gutter-and-overview-ruler-decorations).
 
+`create_line_decorations_collection` attaches a `LineDecorationProvider`, which is
+asked for whole-row backgrounds and gutter markers on every frame. Base paints the
+backgrounds itself; markers are painted only through
+`InputEditorStyle::gutter_marker_renderer()`, which the styled editor projects. See
+[Line decorations](../../component/editor.md#line-decorations).
+
+When using Base directly, the application supplies both the renderer and its
+geometry through builders:
+
+```rust
+let style = InputEditorStyle::default()
+    .with_gutter_marker_renderer(Some(renderer))
+    .with_gutter_marker_size(gpui_kit::rems(0.75))
+    .with_gutter_marker_gap(gpui_kit::rems(0.25));
+```
+
+Marker size and gap default to zero. The renderer must respect the configured
+square size; Base uses that same size for the gutter slot and vertical centering.
+Rem-based values resolve against the window's current rem size on each layout.
+Read the configuration with `gutter_marker_renderer()`, `gutter_marker_size()`
+and `gutter_marker_gap()`. Pass `None` to `with_gutter_marker_renderer` to disable
+markers. Existing style fields keep their direct-access API.
+
 ## Highlighting and language features
 
 `InputHighlighterFactory`, `InputHighlighter`, diagnostic types, and the LSP

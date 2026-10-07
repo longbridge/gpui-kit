@@ -1,8 +1,8 @@
-use std::{cell::Cell, rc::Rc};
+use std::{cell::Cell, ops::Range, rc::Rc};
 
 use gpui_kit::{
     App, AppContext as _, Context, Entity, HighlightStyle, IntoElement, ParentElement, Pixels,
-    Render, SharedString, Styled, Task, Window, div, prelude::FluentBuilder as _, px,
+    Render, SharedString, Styled, Task, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use gpui_kit::component::{
@@ -105,6 +105,7 @@ pub struct EditorStory {
     _range_decorations: RangeDecorationCollection,
     _gutter_decorations: GutterDecorationCollection,
     _overview_ruler_decorations: OverviewRulerDecorationCollection,
+    _line_decorations: LineDecorationCollection,
     active_tab: usize,
     readonly: bool,
     font_family: Option<SharedString>,
@@ -162,7 +163,7 @@ impl EditorStory {
             });
         }
 
-        let decoration_text = "Decoration styles\nColor highlights important text.\nItalic adds emphasis.\nUnderline marks review text.\n\nFill: marks a tracked range.\n\nFrame: outlines a tracked range.";
+        let decoration_text = "Decoration styles\nColor highlights important text.\nItalic adds emphasis.\nUnderline marks review text.\n\nFill: marks a tracked range.\n\nFrame: outlines a tracked range.\n\nAdded: a line background and a gutter marker.\nRemoved: asked again on every frame.\nBookmark: a gutter marker alone.";
         let decorations_state = cx.new(|cx| {
             EditorState::new(window, cx)
                 .language("text")
@@ -277,6 +278,14 @@ impl EditorStory {
                 cx,
             )
         });
+        // Whole-line decorations come from a provider asked about the visible
+        // rows on every frame, so these follow edits and theme changes.
+        let line_decorations = decorations_state.update(cx, |state, cx| {
+            state.create_line_decorations_collection(
+                Rc::new(LineMarkers(cx.entity().downgrade())),
+                cx,
+            )
+        });
 
         let completion_highlight = Rc::new(Cell::new(StoryCompletionHighlight::Prefix));
         let provider_highlight = completion_highlight.clone();
@@ -296,12 +305,49 @@ impl EditorStory {
             _range_decorations: range_decorations,
             _gutter_decorations: gutter_decorations,
             _overview_ruler_decorations: overview_ruler_decorations,
+            _line_decorations: line_decorations,
             active_tab: 0,
             readonly: false,
             font_family: None,
             font_size: cx.theme().mono_font_size,
             completion_highlight,
         }
+    }
+}
+
+/// Marks the rows of the Decorations tab that start with `Added:`, `Removed:`
+/// or `Bookmark:`, reading the text as it is when the editor asks.
+struct LineMarkers(WeakEntity<EditorState>);
+
+impl LineDecorationProvider for LineMarkers {
+    fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
+        let Some(editor) = self.0.upgrade() else {
+            return Vec::new();
+        };
+        let text = editor.read(cx).text();
+        let theme = cx.theme();
+        rows.filter_map(|row| {
+            let line = text.slice_line(row).to_string();
+            let decoration = LineDecoration::new(row);
+            if line.starts_with("Added:") {
+                Some(
+                    decoration
+                        .with_background(theme.success.opacity(0.12))
+                        .with_marker(GutterMarker::DiffAdded),
+                )
+            } else if line.starts_with("Removed:") {
+                Some(
+                    decoration
+                        .with_background(theme.danger.opacity(0.12))
+                        .with_marker(GutterMarker::DiffRemoved),
+                )
+            } else if line.starts_with("Bookmark:") {
+                Some(decoration.with_marker(GutterMarker::Bookmark))
+            } else {
+                None
+            }
+        })
+        .collect()
     }
 }
 

@@ -426,6 +426,73 @@ let ruler = editor.update(cx, |state, cx| {
   `status.deleted(cx)`. If a key is missing, these methods use `success`,
   `warning`, and `error`.
 
+### Line decorations
+
+A `LineDecorationCollection` paints whole rows: a background band across a row, a
+marker in its gutter, or both. Its entries come from a `LineDecorationProvider`, which
+the editor asks about the visible buffer rows on every frame it paints.
+
+```rust
+use std::{ops::Range, rc::Rc};
+
+use gpui_kit::App;
+use gpui_kit::component::{
+    ActiveTheme as _,
+    input::{GutterMarker, LineDecoration, LineDecorationProvider},
+};
+
+/// Zero-based buffer rows, sorted.
+struct AddedRows(Vec<usize>);
+
+impl LineDecorationProvider for AddedRows {
+    fn line_decorations(&self, rows: Range<usize>, cx: &App) -> Vec<LineDecoration> {
+        let start = self.0.partition_point(|&row| row < rows.start);
+        let end = self.0.partition_point(|&row| row < rows.end);
+        self.0[start..end]
+            .iter()
+            .map(|&row| {
+                LineDecoration::new(row)
+                    .with_background(cx.theme().success.opacity(0.16))
+                    .with_marker(GutterMarker::DiffAdded)
+            })
+            .collect()
+    }
+}
+
+let added = editor.update(cx, |state, cx| {
+    state.create_line_decorations_collection(Rc::new(AddedRows(vec![2, 3, 7])), cx)
+});
+
+added.set_provider(Rc::new(AddedRows(vec![4])), cx); // The next frame asks this one.
+added.clear(cx);   // Stop painting, keep the collection available for reuse.
+added.dispose(cx); // Invalidate this handle and all its clones.
+```
+
+Because the provider is asked again on every frame, it owns its rows: the editor does
+not move them across edits or clear them when the text is replaced, and it ignores
+decorations outside the rows it asked about. Keep the answer cheap by indexing your
+data by row, and read colors from `cx` when asked so they follow theme changes.
+Collections are independent, like the other decoration collections; later ones paint
+over earlier ones.
+
+A background spans the row from the gutter to the right edge, across all of its
+soft-wrapped lines, under the active line, indent guides, selection and text. A marker
+is painted in a slot of its own at the left of the line numbers, so it is shown only
+while line numbers are. The gutter reserves the slot while any collection has a
+provider, and keeps it as marked rows scroll in and out of view. The styled editor
+sizes the marker at 90% of its effective font size and the gap at 30%. The icon,
+reserved slot and vertical centering share the same size, so markers follow both
+interface zoom and an editor-specific `.text_size(...)` change. `DiffAdded`,
+`DiffRemoved`, `DiffChanged`, `Conflict`, `Bookmark` and `Breakpoint` take the
+theme's success, danger, warning and info colors; `GutterMarker::Custom { icon, color }`
+paints an icon asset path as given. Neither affects hit testing or focus, and neither
+has a pointer or keyboard action.
+
+`EditorState::row_bounds(row)` returns the band a row occupies in window coordinates,
+where it is painted: below a multi-line inline completion, rows move down with the
+text. It returns `None` while the row is not laid out. The **Decorations** tab of the Editor showcase
+marks its last three rows with a provider.
+
 ## Value and events
 
 ```rust

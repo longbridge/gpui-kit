@@ -271,6 +271,18 @@ impl crate::input::InputExtras for super::EditorExtras {
         self.overview_ruler_decorations.revision()
     }
 
+    fn line_decorations(
+        &self,
+        rows: std::ops::Range<usize>,
+        cx: &App,
+    ) -> Vec<super::LineDecoration> {
+        self.line_decorations.query(rows, cx)
+    }
+
+    fn has_line_decorations(&self) -> bool {
+        self.line_decorations.has_any_provider()
+    }
+
     fn semantic_token_styles(
         &self,
         text: &ropey::Rope,
