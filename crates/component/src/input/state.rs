@@ -52,6 +52,10 @@ macro_rules! dispatch {
 }
 
 impl TextInputState {
+    pub(crate) fn has_selection_focus(&self, window: &Window, cx: &App) -> bool {
+        dispatch!(self, |state| state.read(cx).has_selection_focus(window, cx))
+    }
+
     pub(crate) fn install_token_presentation(
         &self,
         renderer: Option<gpui_base::input::InlineTokenRenderer>,

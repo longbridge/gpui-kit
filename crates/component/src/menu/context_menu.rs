@@ -411,12 +411,8 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                             }
                         });
 
-                        let selection_input = WindowState::try_update(window, cx, |state, _, _| {
-                            state.focused_input.clone()
-                        })
-                        .flatten()
-                        .filter(|input| input.focus_handle(cx).is_focused(window))
-                        .or_else(|| {
+                        // Retain the old menu's owner before clearing replacement state.
+                        let previous_selection_input = {
                             let state = shared_state.borrow();
                             let menu_focused = state.menu_view.as_ref().is_some_and(|menu| {
                                 let focus = menu.focus_handle(cx);
@@ -429,7 +425,7 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                                     menu_focused || input.focus_handle(cx).is_focused(window)
                                 })
                                 .cloned()
-                        });
+                        };
                         let position = event.position;
 
                         {
@@ -448,6 +444,16 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
                             let shared_state = shared_state.clone();
                             let builder = builder.clone();
                             move |window, cx| {
+                                // Resolve after pointer dispatch: the inner input has
+                                // now taken focus and published its state, even if it
+                                // was unfocused in the last rendered frame.
+                                let selection_input =
+                                    WindowState::try_update(window, cx, |state, _, _| {
+                                        state.focused_input.clone()
+                                    })
+                                    .flatten()
+                                    .filter(|input| input.focus_handle(cx).is_focused(window))
+                                    .or(previous_selection_input);
                                 let menu = PopupMenu::build(window, cx, move |menu, window, cx| {
                                     let Some(build) = &builder else {
                                         return menu;

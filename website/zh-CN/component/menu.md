@@ -290,6 +290,12 @@ menu.action_context(focus_handle)
     .menu("Paste", Box::new(Paste))
 ```
 
+子菜单未设置自己的 `action_context` 时，会把 action 派发到最近父菜单显式指定的目标，
+快捷键提示也按这个目标解析。子菜单可以设置自己的 `action_context`，覆盖该分支的父菜单目标。
+
+Input、Textarea 或 Editor 打开框架绘制的右键菜单后，关联菜单或子菜单获得焦点时，
+输入框会继续显示选区高亮和焦点外框。包裹输入框的 InputGroup 也会保留焦点外框。
+
 ## API 参考
 
 - [PopupMenu]

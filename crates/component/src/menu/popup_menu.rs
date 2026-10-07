@@ -368,6 +368,8 @@ impl PopupMenu {
     /// When the menu is dismissed or before an action is triggered, the focus will be returned to this handle.
     ///
     /// Then the action will be dispatched to this handle.
+    /// Submenus without their own action context use the nearest parent's
+    /// explicit context for actions and shortcut hints.
     pub fn action_context(mut self, handle: FocusHandle) -> Self {
         self.action_context = Some(handle);
         self
@@ -895,11 +897,18 @@ impl PopupMenu {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(context) = self.action_context.as_ref() {
+        if let Some(context) = self.resolved_action_context(cx) {
             context.focus(window, cx);
         }
 
         window.dispatch_action(action.boxed_clone(), cx);
+    }
+
+    fn resolved_action_context(&self, cx: &App) -> Option<FocusHandle> {
+        self.action_context.clone().or_else(|| {
+            let parent = self.parent_menu.as_ref()?.upgrade()?;
+            parent.read(cx).resolved_action_context(cx)
+        })
     }
 
     fn set_selected_index(&mut self, ix: usize, cx: &mut Context<Self>) {
@@ -1120,7 +1129,7 @@ impl PopupMenu {
         &self,
         action: Option<Box<dyn Action>>,
         window: &mut Window,
-        _: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Option<Kbd> {
         let action = action?;
 
@@ -1132,8 +1141,9 @@ impl PopupMenu {
         // every path, so it is the last resort rather than the window's
         // leftover context stack, which only holds the path of whatever
         // element happened to paint last.
+        let action_context = self.resolved_action_context(cx);
         [
-            self.action_context.as_ref(),
+            action_context.as_ref(),
             self.trigger_focus_handle.as_ref(),
             self.previous_focus_handle.as_ref(),
             Some(&self.focus_handle),

@@ -1,7 +1,7 @@
 mod common;
 use gpui_kit::component::{
     button::Button,
-    input::{Copy, Input, InputState, Textarea, TextareaState},
+    input::{Copy, Input, InputState, SelectAll, Textarea, TextareaState},
     menu::{ContextMenuExt, DropdownMenu, PopupMenuItem},
 };
 use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
@@ -238,6 +238,7 @@ impl Render for ContextMenuInputs {
                         .menu("Copy", Box::new(Copy))
                         .submenu("More", window, cx, |menu, _, _| {
                             menu.menu("Copy", Box::new(Copy))
+                                .menu("Select all", Box::new(SelectAll))
                         })
                     }),
             )
@@ -469,6 +470,137 @@ fn context_menu_preserves_only_its_inputs_selection_and_keyboard_actions(cx: &mu
         assert_eq!(other.read(cx).value().as_ref(), "destination");
         assert_eq!(source.read(cx).value().as_ref(), "alpha\ncopy");
         assert!(!source.read(cx).has_selection_focus(window, cx));
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn right_click_on_unfocused_input_keeps_selection(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, inputs) = common::open_window(cx, Some(size(px(640.), px(480.))), |window, cx| {
+        cx.new(|cx| ContextMenuInputs {
+            source: cx.new(|cx| TextareaState::new(window, cx).context_menu(false)),
+            other: cx.new(|cx| InputState::new(window, cx)),
+            action_target: None,
+        })
+    });
+    let source = inputs.read_with(cx, |inputs, _| inputs.source.clone());
+    let source_id = ("input", source.entity_id());
+    cx.update_window(handle.into(), |_, window, cx| {
+        source.update(cx, |state, cx| {
+            state.set_value("alpha\ncopy", window, cx);
+            state.set_selected_range(6..10, cx);
+        });
+        window.click("other-input", cx);
+        window.render_frame(cx);
+        assert!(!source.focus_handle(cx).is_focused(window));
+        window.right_click(source_id, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(window.find("popup-menu").focused(), Some(true));
+        assert_eq!(source.read(cx).selected_range(), 6..10);
+        assert!(
+            source.read(cx).has_selection_focus(window, cx),
+            "the newly focused input was missed by ContextMenu ownership lookup"
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn submenu_select_all_uses_the_parent_input_action_target(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, inputs) = common::open_window(cx, Some(size(px(640.), px(480.))), |window, cx| {
+        cx.new(|cx| ContextMenuInputs {
+            source: cx.new(|cx| TextareaState::new(window, cx).context_menu(false)),
+            other: cx.new(|cx| InputState::new(window, cx)),
+            action_target: None,
+        })
+    });
+    let (source, other) = inputs.read_with(cx, |inputs, _| {
+        (inputs.source.clone(), inputs.other.clone())
+    });
+    let source_id = ("input", source.entity_id());
+    inputs.update(cx, |inputs, cx| {
+        inputs.action_target = Some(source.focus_handle(cx));
+        cx.notify();
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        source.update(cx, |state, cx| {
+            state.set_value("alpha\ncopy", window, cx);
+            state.set_selected_range(6..10, cx);
+        });
+        window.click("other-input", cx);
+        window.input("other", cx);
+        window.right_click(source_id, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.press("down", cx);
+        window.press("down", cx);
+        window.press("right", cx);
+        window
+            .within("submenu")
+            .within("popup-menu")
+            .hover(1usize, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    // Native pointer events run in separate app updates. Let dismissal
+    // subscriptions run before another frame can refocus the open menu.
+    cx.update_window(handle.into(), |_, window, cx| {
+        let position = window
+            .within("submenu")
+            .within("popup-menu")
+            .find(1usize)
+            .bounds()
+            .center();
+        window.dispatch_event(
+            MouseDownEvent {
+                button: MouseButton::Left,
+                position,
+                click_count: 1,
+                first_mouse: false,
+                modifiers: Default::default(),
+            }
+            .to_platform_input(),
+            cx,
+        );
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        let position = window
+            .within("submenu")
+            .within("popup-menu")
+            .find(1usize)
+            .bounds()
+            .center();
+        window.dispatch_event(
+            MouseUpEvent {
+                button: MouseButton::Left,
+                position,
+                click_count: 1,
+                modifiers: Default::default(),
+            }
+            .to_platform_input(),
+            cx,
+        );
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("popup-menu").is_none());
+        assert_eq!(source.read(cx).selected_range(), 0..10);
+        assert_eq!(source.read(cx).value().as_ref(), "alpha\ncopy");
+        assert_eq!(other.read(cx).value().as_ref(), "other");
+        assert!(source.focus_handle(cx).is_focused(window));
     })
     .unwrap();
 }

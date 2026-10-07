@@ -3,9 +3,9 @@ use std::rc::Rc;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AccessibleAction, AnyElement, App, DefiniteLength, Edges, ElementId, Entity, Hsla,
-    InteractiveElement as _, IntoElement, ParentElement as _, Rems, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement as _, StyleRefinement, Styled, TextAlign, TouchPhase, Window, div,
-    px, relative,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Rems, RenderOnce, Role,
+    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, TextAlign, TouchPhase,
+    Window, div, px, relative,
 };
 
 use crate::button::{Button, ButtonRounded, ButtonVariants as _};
@@ -694,8 +694,9 @@ impl RenderOnce for Input {
             })
             .read(cx)
             .clone();
-        let focused = input_focused
-            || (frame_focus_handle.contains_focused(window, cx) && !presentation.is_disabled());
+        let focused = !presentation.is_disabled()
+            && (state.has_selection_focus(window, cx)
+                || frame_focus_handle.contains_focused(window, cx));
 
         let gap_x = match self.size {
             Size::Small => px(4.),
@@ -741,6 +742,15 @@ impl RenderOnce for Input {
             .focused(focused)
             .disabled(disabled)
             .track_focus(&frame_focus_handle)
+            .on_mouse_down(MouseButton::Right, {
+                let state = state.clone();
+                move |_, window, cx| {
+                    // The text element has already taken focus. Publish its state
+                    // before an outer ContextMenu resolves the selection owner;
+                    // render-time registration still names the previous input.
+                    sync_focused_input_registry(&state, window, cx);
+                }
+            })
             .when(disabled, |this| {
                 this.capture_any_mouse_down(|_, _, cx| cx.stop_propagation())
             })

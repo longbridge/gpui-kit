@@ -322,6 +322,14 @@ menu.action_context(focus_handle)
     .menu("Paste", Box::new(Paste))
 ```
 
+Submenus without their own `action_context` dispatch actions to the nearest
+parent menu's explicit target. Shortcut hints use the same target. A submenu
+can set its own `action_context` to override the parent for that branch.
+
+When an Input, Textarea or Editor opens a framework-rendered context menu, its
+selection highlight and focus ring remain visible while the associated menu or
+submenu has focus. A containing InputGroup keeps its focus ring as well.
+
 ## API Reference
 
 - [PopupMenu]

@@ -146,7 +146,7 @@ impl RenderOnce for InputGroup {
         let focused = !disabled
             && state
                 .as_ref()
-                .is_some_and(|state| state.presentation(cx).focus_handle().is_focused(window));
+                .is_some_and(|state| state.has_selection_focus(window, cx));
         let multiline = state
             .as_ref()
             .is_some_and(|state| state.presentation(cx).is_multi_line());
