@@ -44,6 +44,7 @@ pub mod combobox;
 pub mod command;
 pub mod description_list;
 pub mod dialog;
+pub mod diff;
 pub mod dock;
 pub mod empty;
 pub mod form;
@@ -136,6 +137,7 @@ pub fn init(cx: &mut App) {
     root::init(cx);
     gpui_base::init(cx);
     input::init(cx);
+    diff::init(cx);
     date_picker::init(cx);
     dock::init(cx);
     sheet::init(cx);

@@ -274,13 +274,13 @@ fn catalog_exposes_only_renderable_media_surfaces() {
             .descriptors()
             .map(|descriptor| descriptor.name())
             .collect::<Vec<_>>(),
-        ["Image", "Editor"]
+        ["Image", "Editor", "Diff"]
     );
     assert_eq!(
         frozen
             .states()
             .map(|state| state.export())
             .collect::<Vec<_>>(),
-        ["EditorState"]
+        ["EditorState", "DiffState"]
     );
 }

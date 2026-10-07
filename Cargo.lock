@@ -1056,6 +1056,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bb31b46c14244e20ee9984b11bf5c992b91fb6939fea616e3512c8baecdbe5f"
 dependencies = [
  "memchr",
+ "regex-automata",
  "serde_core",
 ]
 
@@ -3979,6 +3980,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_repr",
+ "similar",
  "smallvec",
  "smol",
  "tracing",
@@ -4017,6 +4019,8 @@ dependencies = [
  "tree-sitter-typescript",
  "tree-sitter-yaml",
  "tree-sitter-zig",
+ "unicode-segmentation",
+ "unicode-width",
  "uuid",
  "windows 0.58.0",
 ]
@@ -4089,9 +4093,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "063c617c09f2799eeef3fbe8c4e28b45accc30dfab1faa8bcd96786d2b11241d"
+checksum = "6e8d1f233419524754a7616432238279b7e5a4fe9e25570858efc9288929c365"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -4160,9 +4164,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-apple"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb9dabf74c5d53ec08800ba8c1db99b2dd0c217a6dcd1ab68d43155c6fc05f5b"
+checksum = "c28e4022471841debdfea9e25925199cf1a6f90a177cc0b2816847ab4ba79ec7"
 dependencies = [
  "anyhow",
  "async-task",
@@ -4191,9 +4195,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-linux"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "305917c8a77f06ab0470fb1ca1ac4f79d775392d02677f7b15102bbb9c7cd06e"
+checksum = "30eb9bf1bb0b5df26478d08fefd52680ad18bec8e805c15a410c4d5aec7b9512"
 dependencies = [
  "accesskit",
  "accesskit_unix",
@@ -4236,9 +4240,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-macos"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef3dacfb363254bd26d882a89f047661961478b0a1887b3e56e5072c189b841f"
+checksum = "055d11d70a38b41cff0fa983c8cc07da5af1607cb224a32fb021b36ea28af4dd"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -4279,9 +4283,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-macros"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9051723a3598773b1f5cb8ac7c33a9a227699b31904dd63de5d57c01684caa4"
+checksum = "b0efd1db82b3af54b84a6768f8abe52c1faaaa7b86f0420abdee98326683a426"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -4291,9 +4295,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-platform"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18305747bc566ec0bb1f8348e479699519647540f1702386600e39a7604cb4fb"
+checksum = "c17400b5d87ec4a031e84cede2a7fc66f1857a7643c320be9e3bb933ce2e4bfe"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -4307,9 +4311,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-web"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "529498fa42c422c99597d978ceb1d695aab95cf29bbaef38bb713adc4cb3ec9c"
+checksum = "ab666e20ba36307b3990d9cf047e02d849afa4d8b37d5da4c74d934025913f90"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -4336,9 +4340,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-wgpu"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ee1db0fc36312f20a5b8f162da84064ae2f6a83e1fe03654a3506317f3d1760"
+checksum = "ef5c102e947fc1c28e81db6b9228f9a095fea2ccf1cd40aa5de9f8f4a7445e21"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -4364,9 +4368,9 @@ dependencies = [
 
 [[package]]
 name = "gpui-fast-windows"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c63ee81356fc36dac8b9ce7b7e576d0046d99b6615f73914c4ee1c086836fa0d"
+checksum = "36bfbacdc3be9040c90f58602c5f22a682cf06c44c65a20f6eb18fd87ea78c90"
 dependencies = [
  "accesskit",
  "accesskit_windows",
@@ -10179,6 +10183,16 @@ name = "simdutf8"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3a9fe34e3e7a50316060351f37187a3f546bce95496156754b601a5fa71b76e"
+
+[[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
+dependencies = [
+ "bstr",
+ "unicode-segmentation",
+]
 
 [[package]]
 name = "simplecss"

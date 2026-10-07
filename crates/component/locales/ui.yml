@@ -448,3 +448,148 @@ Speech:
     zh-CN: 语音输入不可用
     zh-HK: 語音輸入不可用
     zh-TW: 語音輸入不可用
+Diff:
+  BinaryChanges:
+    en: Binary file changed
+    zh-CN: 二进制文件已变更
+    zh-HK: 二進位檔案已變更
+  NoTextChanges:
+    en: No text changes in this patch
+    zh-CN: 此 patch 没有文本变更
+    zh-HK: 此 patch 沒有文字變更
+  NoChanges:
+    en: No changes
+    zh-CN: 没有变更
+    zh-HK: 沒有變更
+  EmptyFile:
+    en: Empty file
+    zh-CN: 空文件
+    zh-HK: 空檔案
+  AddedFile:
+    en: Added file
+    zh-CN: 新增文件
+    zh-HK: 新增檔案
+  DeletedFile:
+    en: Deleted file
+    zh-CN: 已删除文件
+    zh-HK: 已刪除檔案
+  RenamedFile:
+    en: Renamed
+    zh-CN: 已重命名
+    zh-HK: 已重新命名
+  CopiedFile:
+    en: Copied
+    zh-CN: 已复制
+    zh-HK: 已複製
+  HiddenLines:
+    en: "%{count} lines not in patch"
+    zh-CN: "patch 中未包含 %{count} 行"
+    zh-HK: "patch 中未包含 %{count} 行"
+  ExpandAbove:
+    en: Show %{count} lines above
+    zh-CN: 显示上方 %{count} 行
+    zh-HK: 顯示上方 %{count} 行
+  ExpandBelow:
+    en: Show %{count} lines below
+    zh-CN: 显示下方 %{count} 行
+    zh-HK: 顯示下方 %{count} 行
+  CollapseFile:
+    en: Collapse %{name}
+    zh-CN: 收起 %{name}
+    zh-HK: 收起 %{name}
+  ExpandFile:
+    en: Expand %{name}
+    zh-CN: 展开 %{name}
+    zh-HK: 展開 %{name}
+  AddAnnotation:
+    en: Add annotation to line %{line}
+    zh-CN: 为第 %{line} 行添加批注
+    zh-HK: 為第 %{line} 行新增批註
+  ConflictedFile:
+    en: Conflicts
+    zh-CN: 有冲突
+    zh-HK: 有衝突
+  CurrentChange:
+    en: Current change
+    zh-CN: 当前更改
+    zh-HK: 目前變更
+  IncomingChange:
+    en: Incoming change
+    zh-CN: 传入的更改
+    zh-HK: 傳入的變更
+  BaseChange:
+    en: Common ancestor
+    zh-CN: 共同祖先
+    zh-HK: 共同祖先
+  AcceptCurrent:
+    en: Accept Current
+    zh-CN: 采用当前更改
+    zh-HK: 採用目前變更
+  AcceptIncoming:
+    en: Accept Incoming
+    zh-CN: 采用传入的更改
+    zh-HK: 採用傳入的變更
+  AcceptBoth:
+    en: Accept Both
+    zh-CN: 保留双方更改
+    zh-HK: 保留雙方變更
+  AcceptedCurrent:
+    en: Accepted current change
+    zh-CN: 已采用当前更改
+    zh-HK: 已採用目前變更
+  AcceptedIncoming:
+    en: Accepted incoming change
+    zh-CN: 已采用传入的更改
+    zh-HK: 已採用傳入的變更
+  AcceptedBoth:
+    en: Accepted both changes
+    zh-CN: 已保留双方更改
+    zh-HK: 已保留雙方變更
+  UndoResolution:
+    en: Undo
+    zh-CN: 撤销
+    zh-HK: 復原
+  Original:
+    en: Original
+    zh-CN: 原版
+    zh-HK: 原版
+  Modified:
+    en: Modified
+    zh-CN: 新版
+    zh-HK: 新版
+  ExpandLines:
+    en: Expand %{count} unchanged lines
+    zh-CN: 展开 %{count} 行未变更内容
+    zh-HK: 展開 %{count} 行未變更內容
+  SourceLine:
+    en: "%{side} line %{line}"
+    zh-CN: "%{side}第 %{line} 行"
+    zh-HK: "%{side}第 %{line} 行"
+  AddedLine:
+    en: "%{side} line %{line}, added"
+    zh-CN: "%{side}第 %{line} 行，新增"
+    zh-HK: "%{side}第 %{line} 行，新增"
+  RemovedLine:
+    en: "%{side} line %{line}, removed"
+    zh-CN: "%{side}第 %{line} 行，删除"
+    zh-HK: "%{side}第 %{line} 行，刪除"
+  UnchangedLines:
+    en: "%{count} unchanged lines"
+    zh-CN: "%{count} 行未变更内容"
+    zh-HK: "%{count} 行未變更內容"
+  SelectLine:
+    en: Select %{side} line %{line}
+    zh-CN: 选择%{side}第 %{line} 行
+    zh-HK: 選擇%{side}第 %{line} 行
+  NoNewline:
+    en: No newline at end of file
+    zh-CN: 文件末尾没有换行
+    zh-HK: 檔案末尾沒有換行
+  Viewer:
+    en: Diff for %{name}
+    zh-CN: "%{name} 的差异"
+    zh-HK: "%{name} 的差異"
+  ViewerFiles:
+    en: Diff for %{count} files
+    zh-CN: "%{count} 个文件的差异"
+    zh-HK: "%{count} 個檔案的差異"

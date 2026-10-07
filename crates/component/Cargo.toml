@@ -112,6 +112,9 @@ tree-sitter-yaml = ["tree-sitter", "dep:tree-sitter-yaml"]
 tree-sitter-zig = ["tree-sitter", "dep:tree-sitter-zig"]
 
 [dependencies]
+unicode-width = "0.2"
+unicode-segmentation = "1"
+similar = { version = "2.7", features = ["unicode"] }
 regex = "1"
 anyhow.workspace = true
 gpui = { workspace = true }
