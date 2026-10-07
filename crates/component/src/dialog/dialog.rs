@@ -16,6 +16,7 @@ use crate::{
     animation::cubic_bezier,
     button::{Button, ButtonVariant, ButtonVariants as _},
     dialog::{DialogContent, DialogDispatchAnchor, DialogTitle},
+    popover::DROPDOWN_ENTER_OFFSET,
     scroll::ScrollableElement as _,
     v_flex,
 };
@@ -210,6 +211,7 @@ pub(crate) struct DialogProps {
     overlay_closable: bool,
     pub(crate) overlay_visible: bool,
     keyboard: bool,
+    pop_in: bool,
 }
 
 impl Default for DialogProps {
@@ -223,7 +225,22 @@ impl Default for DialogProps {
             overlay_visible: false,
             close_button: true,
             overlay_closable: true,
+            pop_in: false,
         }
+    }
+}
+
+/// The y position of a dialog surface at entrance progress `delta`.
+///
+/// `delta` runs from 0 at the start of the entrance to 1 at rest. The default
+/// entrance slides the top edge in from the window top (`y * delta`); `pop_in`
+/// settles from [`DROPDOWN_ENTER_OFFSET`] above the resting spot instead, the
+/// same trajectory dropdowns and popovers enter on.
+fn entrance_y(y: Pixels, delta: f32, pop_in: bool) -> Pixels {
+    if pop_in {
+        y + DROPDOWN_ENTER_OFFSET * (1. - delta)
+    } else {
+        y * delta
     }
 }
 
@@ -488,6 +505,18 @@ impl Dialog {
         self
     }
 
+    /// Set the dialog to pop in at its resting spot, defaults to `false`.
+    ///
+    /// The default entrance slides the card down from the window top to its
+    /// resting offset. With `pop_in` the card settles over the fade from
+    /// 8px above the resting spot — the same motion dropdowns and popovers
+    /// enter on — so a centered dialog appears in place instead of flying
+    /// half the height of the window.
+    pub fn pop_in(mut self, pop_in: bool) -> Self {
+        self.props.pop_in = pop_in;
+        self
+    }
+
     pub(crate) fn has_overlay(&self) -> bool {
         self.props.overlay
     }
@@ -576,6 +605,7 @@ impl RenderOnce for Dialog {
         let margin = cx.theme().spacing_tokens().lg;
         let layer_offset = px(layer_ix as f32 * 16.);
         let y = self.props.margin_top.unwrap_or(view_size.height / 10.) + layer_offset;
+        let pop_in = self.props.pop_in;
         let width = self
             .props
             .width
@@ -781,7 +811,7 @@ impl RenderOnce for Dialog {
                                     move |this, delta| {
                                         this.position(point(
                                             window_paddings.left + x,
-                                            window_paddings.top + y * delta,
+                                            window_paddings.top + entrance_y(y, delta, pop_in),
                                         ))
                                     },
                                 ),
@@ -924,5 +954,40 @@ pub(crate) mod tests {
         assert!(first.bottom() <= viewport.height - px(16.), "{first:?}");
         assert!(second.bottom() <= viewport.height - px(16.), "{second:?}");
         assert!(second.size.height < first.size.height);
+    }
+
+    /// The default entrance slides in from the window top: it starts at the
+    /// top edge and covers the whole distance to the resting offset.
+    #[test]
+    fn the_default_entrance_slides_from_the_window_top() {
+        assert_eq!(entrance_y(px(100.), 0., false), px(0.));
+        assert_eq!(entrance_y(px(100.), 0.5, false), px(50.));
+        assert_eq!(entrance_y(px(100.), 1., false), px(100.));
+    }
+
+    /// The pop-in entrance settles from just above the resting spot, the same
+    /// 8px dropdowns travel, instead of crossing the window.
+    #[test]
+    fn the_pop_in_entrance_settles_from_just_above_the_resting_spot() {
+        assert_eq!(entrance_y(px(100.), 0., true), px(92.));
+        assert_eq!(entrance_y(px(100.), 0.5, true), px(96.));
+        assert_eq!(entrance_y(px(100.), 1., true), px(100.));
+    }
+
+    /// Only the trajectory changes: a pop-in dialog rests exactly where the
+    /// default entrance would have landed it.
+    #[gpui::test]
+    fn a_pop_in_dialog_rests_where_the_default_entrance_lands(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(1000.), px(800.)));
+        open(cx, |dialog, _, _| {
+            dialog
+                .title("Pop in")
+                .child("body")
+                .pop_in(true)
+                .margin_top(px(300.))
+        });
+
+        let bounds = surface(cx, 0);
+        assert_eq!(bounds.origin.y, px(300.));
     }
 }

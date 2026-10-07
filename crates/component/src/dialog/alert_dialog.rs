@@ -259,6 +259,15 @@ impl AlertDialog {
         self
     }
 
+    /// Set the alert dialog to pop in at its resting spot, defaults to `false`.
+    ///
+    /// See [`Dialog::pop_in`]: the card settles over the fade from 8px above
+    /// its resting spot instead of sliding down from the window top.
+    pub fn pop_in(mut self, pop_in: bool) -> Self {
+        self.base = self.base.pop_in(pop_in);
+        self
+    }
+
     /// Sets the callback for when the alert dialog is closed.
     ///
     /// Called after [`Self::on_action`] or [`Self::on_cancel`] callback.

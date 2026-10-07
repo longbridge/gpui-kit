@@ -27,6 +27,7 @@ enum ToggleDialogOption {
     OverlayClosable,
     CloseButton,
     Keyboard,
+    PopIn,
 }
 
 pub struct DialogStory {
@@ -41,6 +42,7 @@ pub struct DialogStory {
     close_button: bool,
     keyboard: bool,
     overlay_closable: bool,
+    pop_in: bool,
 }
 
 struct MyTable {
@@ -140,6 +142,7 @@ impl DialogStory {
             close_button: true,
             keyboard: true,
             overlay_closable: true,
+            pop_in: false,
             table,
         }
     }
@@ -170,6 +173,7 @@ impl DialogStory {
                     .keyboard(self.keyboard)
                     .close_button(self.close_button)
                     .overlay_closable(overlay_closable)
+                    .pop_in(self.pop_in)
                     .on_ok({
                         let view = view.clone();
                         let input1 = input1.clone();
@@ -623,6 +627,7 @@ impl Render for DialogStory {
                     }
                     ToggleDialogOption::CloseButton => this.close_button = !this.close_button,
                     ToggleDialogOption::Keyboard => this.keyboard = !this.keyboard,
+                    ToggleDialogOption::PopIn => this.pop_in = !this.pop_in,
                 }
                 cx.notify();
             }))
@@ -637,6 +642,7 @@ impl Render for DialogStory {
                             let overlay_closable = self.overlay_closable;
                             let close_button = self.close_button;
                             let keyboard = self.keyboard;
+                            let pop_in = self.pop_in;
                             move |menu, _, _| {
                                 menu.menu_with_check(
                                     "Overlay",
@@ -657,6 +663,11 @@ impl Render for DialogStory {
                                     "Keyboard",
                                     keyboard,
                                     Box::new(ToggleDialogOption::Keyboard),
+                                )
+                                .menu_with_check(
+                                    "Pop in",
+                                    pop_in,
+                                    Box::new(ToggleDialogOption::PopIn),
                                 )
                             }
                         },

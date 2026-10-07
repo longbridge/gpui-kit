@@ -30,7 +30,7 @@ const DROPDOWN_ENTER_DURATION: Duration = Duration::from_millis(150);
 /// Negative is above, so the surface slides *down* out of the trigger's edge —
 /// what shadcn/ui expresses as `data-[side=bottom]:slide-in-from-top-2`. Its
 /// `2` is `0.5rem`, which is 8px at the default root size.
-const DROPDOWN_ENTER_OFFSET: Pixels = px(-8.);
+pub(crate) const DROPDOWN_ENTER_OFFSET: Pixels = px(-8.);
 
 fn dropdown_positioner(bounds: Bounds<Pixels>) -> gpui_base::Positioner {
     gpui_base::Positioner::side(bounds)
