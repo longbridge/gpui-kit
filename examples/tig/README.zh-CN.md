@@ -2,7 +2,7 @@
 
 一个受 tig 启发的桌面 Git 浏览器。浏览 HEAD 可达的最近 200 条提交，在 `Diff` 中查看
 每个文件的变更，并在当前提交修改的文件之间跳转。提交和文件导航共用可调整宽度的侧栏，
-Diff 占据主要工作区。提交正文默认收起，可通过 **Show message** 展开。
+Diff 占据主要工作区。提交正文默认收起，可通过 **Commit message** 展开。
 
 ```sh
 cargo run -p example-tig -- .
@@ -17,28 +17,33 @@ Git 必须在 PATH 中。路径参数默认为当前目录，也可以指向工�
 
 先在 **Commits** 中选择提交，再在 **Changed files** 中选择文件。视口只显示选中的文件，
 确保文件头与源文本始终属于同一个对象。再次选择当前文件会滚动到文件头，若文件已收起则先展开。Diff 上方显示当前提交的标题、作者、日期和短哈希。
-**Copy commit hash** 复制完整的对象 ID；**Show message** 显示提交正文，避免长正文默认挤占代码空间。
+哈希旁的复制按钮复制完整的对象 ID；**Commit message** 显示提交正文，避免长正文默认挤占代码空间。
 
-**Unified** 和 **Split** 切换布局并保留源文本选区。使用箭头按钮或 F7 在当前文件的变更组之间跳转。
+在 **Display → Unified / Split** 中切换布局并保留源文本选区。使用箭头按钮或 n / Shift+N 在当前文件的变更组之间跳转。
 **Display** 集中提供换行、行号、单词或字素强调，以及上下文展开选项。
-这些选项更新已有状态，不重新创建状态实体。长行默认换行；源文本区域保持中性背景，
-通过 gutter 中的符号和行内强调区分变更。
+这些选项更新已有状态，不重新创建状态实体。长行默认换行；保留 Diff 的主题化增删行背景，
+配合 gutter 中的符号和行内强调区分变更。
 
 | 范围 | 按键 | 结果 |
 | --- | --- | --- |
 | Commits | ↑ / ↓ 或 k / j | 选择更新／更早的提交 |
 | Commits | Enter | 聚焦 Diff |
-| Changed files | ↑ / ↓ | 显示上一个／下一个文件 |
-| 任意区域 | Alt+↑ / Alt+↓ | 显示上一个／下一个文件 |
-| 任意区域 | Escape | 返回提交历史 |
-| 任意区域 | F7 / Shift+F7 | 显示下一处／上一处变更 |
+| Changed files | ↑ / ↓ 或 k / j | 显示上一个／下一个文件 |
+| Changed files | Enter | 聚焦 Diff |
+| 任意区域 | [ / ] | 显示上一个／下一个文件 |
+| 任意区域 | Escape | 展开侧栏并返回提交历史 |
+| 任意区域 | Cmd+B / Ctrl+B | 显示／隐藏侧栏 |
+| 任意区域 | n / Shift+N | 显示下一处／上一处变更 |
 | 任意区域 | Cmd+R / Ctrl+R | 刷新历史，当前提交仍可用时保留选择 |
 | 任意区域 | Cmd+Shift+C / Ctrl+Shift+C | 复制提交的完整哈希 |
 | Diff | Cmd+C / Ctrl+C | 复制选中的源文本 |
 | 任意区域 | Cmd+Q / Ctrl+Q | 退出 |
 
 通过 Tab 在按钮、历史、文件和 Diff 之间移动。垂直滚轮滚动源文本行，水平手势滚动长行。
-侧栏的两个分区和整个侧栏的宽度都可以独立调整。
+侧栏的两个分区和整个侧栏的宽度都可以独立调整，状态栏左侧提供侧栏折叠按钮。
+点击文件后焦点保留在文件列表，Enter 才进入源文本。键盘焦点显示在当前行，
+不再框住整个导航面板。快捷键 tooltip 和状态提示通过 `Kbd` 从实际 Action 绑定中读取。
+状态栏显示当前提交、文件的位置及源文本选区。
 
 ## 输入与状态
 
@@ -64,6 +69,8 @@ cargo run -p example-tig -- --check /path/to/repository
 示例包含 parser 回归测试，以及使用实际视图的 UI integration test，覆盖提交导航、
 文件导航、过期结果拒绝和焦点切换。
 
-![Git history 中选中的 Rust 文件](screenshots/unified.png)
+下图早于最后一轮操作入口调整：侧栏折叠已移到状态栏左侧，Unified/Split 已收进 Display。
+
+![Git history 的文件列表预览](screenshots/unified.png)
 
 [English](README.md)

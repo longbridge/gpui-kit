@@ -542,15 +542,17 @@ fn header_collapses_its_file_and_shows_file_annotations(cx: &mut TestAppContext)
 struct Viewer {
     state: Entity<DiffState>,
     soft_wrap: bool,
+    line_number: bool,
 }
 
 impl Render for Viewer {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
-            .id("review")
-            .test_support()
-            .size_full()
-            .child(Diff::new(&self.state).soft_wrap(self.soft_wrap).size_full())
+        div().id("review").test_support().size_full().child(
+            Diff::new(&self.state)
+                .soft_wrap(self.soft_wrap)
+                .line_number(self.line_number)
+                .size_full(),
+        )
     }
 }
 
@@ -565,6 +567,7 @@ fn viewer(
         cx.new(|cx| Viewer {
             state: cx.new(|cx| DiffState::new([file], cx).with_mode(mode)),
             soft_wrap,
+            line_number: true,
         })
     });
     let state = cx.update(|cx| view.read(cx).state.clone());
@@ -700,4 +703,60 @@ fn wheel_axes_stay_independent_when_code_overflows_in_both_directions(cx: &mut T
         })
         .unwrap();
     }
+}
+
+#[gpui_kit::test]
+fn hidden_line_numbers_keep_wrapped_source_aligned_and_selectable(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let long = "changed word ".repeat(24);
+    let patch = format!("@@ -1,3 +1,4 @@\n keep\n-old\n+{long}\n+extra\n tail\n");
+    let file = patch_document(&patch);
+    let (handle, view) = common::open_window(cx, Some(size(px(480.), px(480.))), |_, cx| {
+        cx.new(|cx| Viewer {
+            state: cx.new(|cx| DiffState::new([file], cx).with_mode(DiffMode::Split)),
+            soft_wrap: true,
+            line_number: false,
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.render_frame(cx);
+        let keep = window.within(("new", 0usize)).find("source").bounds();
+        let changed = window.within(("new", 1usize)).find("source").bounds();
+        let extra = window.within(("new", 2usize)).find("source").bounds();
+        let viewport = window.find("review").bounds();
+        assert!(keep.left() > viewport.left() + viewport.size.width / 2. + window.rem_size());
+        assert!(keep.right() < viewport.right());
+        assert_eq!(keep.left(), changed.left());
+        assert_eq!(changed.left(), extra.left());
+        assert!(changed.size.height > keep.size.height * 2.);
+        assert!(extra.top() >= changed.bottom());
+        window.within(("new", 2usize)).click("source", cx);
+        window.press(
+            if cfg!(target_os = "macos") {
+                "cmd-a"
+            } else {
+                "ctrl-a"
+            },
+            cx,
+        );
+        let state = view.read(cx).state.clone();
+        let expected = format!("keep\n{long}\nextra\ntail\n");
+        assert_eq!(state.read(cx).selected_text(cx), expected);
+        view.update(cx, |view, cx| {
+            view.line_number = true;
+            cx.notify();
+        });
+        window.render_frame(cx);
+        assert!(
+            window
+                .within(("new", 0usize))
+                .find("source")
+                .bounds()
+                .left()
+                > keep.left()
+        );
+        assert_eq!(state.read(cx).selected_text(cx), expected);
+    })
+    .unwrap();
 }

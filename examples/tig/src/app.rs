@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use gpui_kit::component::{
     ActiveTheme as _, Disableable as _, IconName, Selectable as _, Sizable as _, StyledExt as _,
-    TitleBar,
-    button::{Button, ButtonGroup, ButtonVariants as _},
+    TitleBar, WindowExt as _,
+    button::{Button, ButtonVariants as _},
     diff::{Diff, DiffEvent, DiffFile, DiffFileStatus, DiffInlineUnit, DiffMode, DiffState},
     h_flex,
+    kbd::Kbd,
     list::ListItem,
     menu::DropdownMenu as _,
     resizable::{h_resizable, resizable_panel, v_resizable},
@@ -41,6 +42,9 @@ mod commands {
             ToggleWrap,
             ToggleNumbers,
             ToggleMessage,
+            ToggleSidebar,
+            UnifiedMode,
+            SplitMode,
             Words,
             Characters,
             WholeLines,
@@ -63,11 +67,15 @@ pub(super) fn init(cx: &mut App) {
         KeyBinding::new("enter", FocusDiff, Some("TigHistory")),
         KeyBinding::new("down", NextFile, Some("TigFiles")),
         KeyBinding::new("up", PreviousFile, Some("TigFiles")),
-        KeyBinding::new("alt-down", NextFile, Some("Tig")),
-        KeyBinding::new("alt-up", PreviousFile, Some("Tig")),
+        KeyBinding::new("j", NextFile, Some("TigFiles")),
+        KeyBinding::new("k", PreviousFile, Some("TigFiles")),
+        KeyBinding::new("enter", FocusDiff, Some("TigFiles")),
+        KeyBinding::new("]", NextFile, Some("Tig")),
+        KeyBinding::new("[", PreviousFile, Some("Tig")),
         KeyBinding::new("escape", FocusHistory, Some("Tig")),
-        KeyBinding::new("f7", NextChange, Some("Tig")),
-        KeyBinding::new("shift-f7", PreviousChange, Some("Tig")),
+        KeyBinding::new("n", NextChange, Some("Tig")),
+        KeyBinding::new("shift-n", PreviousChange, Some("Tig")),
+        KeyBinding::new("secondary-b", ToggleSidebar, Some("Tig")),
         KeyBinding::new("secondary-r", Refresh, Some("Tig")),
         KeyBinding::new("secondary-shift-c", CopyHash, Some("Tig")),
         KeyBinding::new("secondary-q", Quit, Some("Tig")),
@@ -89,6 +97,7 @@ pub(super) struct Tig {
     wrap: bool,
     line_numbers: bool,
     message_visible: bool,
+    sidebar_visible: bool,
     loading_history: bool,
     loading_commit: bool,
     error: Option<String>,
@@ -104,7 +113,12 @@ impl Tig {
         let diff = cx.new(|cx| DiffState::new([], cx));
         let history_focus = cx.focus_handle().tab_stop(true);
         history_focus.focus(window, cx);
+        let files_focus = cx.focus_handle().tab_stop(true);
         let subscriptions = vec![
+            cx.on_focus(&history_focus, window, |_, _, cx| cx.notify()),
+            cx.on_blur(&history_focus, window, |_, _, cx| cx.notify()),
+            cx.on_focus(&files_focus, window, |_, _, cx| cx.notify()),
+            cx.on_blur(&files_focus, window, |_, _, cx| cx.notify()),
             cx.observe(&diff, |_, _, cx| cx.notify()),
             cx.subscribe(&diff, |this, _, event: &DiffEvent, cx| {
                 if let DiffEvent::SelectionChanged(Some(range)) = event {
@@ -123,11 +137,12 @@ impl Tig {
             message: SharedString::default(),
             history_focus,
             history_scroll: UniformListScrollHandle::new(),
-            files_focus: cx.focus_handle().tab_stop(true),
+            files_focus,
             files_scroll: UniformListScrollHandle::new(),
             wrap: true,
             line_numbers: true,
             message_visible: false,
+            sidebar_visible: true,
             loading_history: false,
             loading_commit: false,
             error: None,
@@ -278,7 +293,7 @@ impl Tig {
     fn select_file(&mut self, path: SharedString, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(ix) = self.files.iter().position(|file| file.path() == &path) {
             self.load_file(ix, cx);
-            self.focus_diff(window, cx);
+            self.files_focus.focus(window, cx);
         }
     }
 
@@ -296,9 +311,33 @@ impl Tig {
         self.load_file(ix, cx);
     }
 
-    fn copy_hash(&self, cx: &mut Context<Self>) {
+    fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sidebar_visible = !self.sidebar_visible;
+        if !self.sidebar_visible
+            && (self.history_focus.is_focused(window) || self.files_focus.is_focused(window))
+        {
+            self.diff.read(cx).focus_handle(cx).focus(window, cx);
+        }
+        cx.notify();
+    }
+
+    fn focus_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.sidebar_visible = true;
+        self.history_focus.focus(window, cx);
+        cx.notify();
+    }
+
+    fn toggle_message(&mut self, cx: &mut Context<Self>) {
+        if !self.message.is_empty() {
+            self.message_visible = !self.message_visible;
+            cx.notify();
+        }
+    }
+
+    fn copy_hash(&self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(commit) = self.selected_commit() {
             cx.write_to_clipboard(ClipboardItem::new_string(commit.hash.to_string()));
+            window.push_notification("Commit hash copied", cx);
         }
     }
 
@@ -307,7 +346,12 @@ impl Tig {
         let context = self.diff.read(cx).context_lines();
         let inline = self.diff.read(cx).inline_unit();
         let (wrap, numbers) = (self.wrap, self.line_numbers);
-        let available = !self.diff.read(cx).files().is_empty();
+        let available = self
+            .diff
+            .read(cx)
+            .files()
+            .iter()
+            .any(|file| !file.is_binary() && (file.additions() > 0 || file.deletions() > 0));
         h_flex()
             .h_10()
             .flex_none()
@@ -316,75 +360,73 @@ impl Tig {
             .border_b_1()
             .border_color(cx.theme().border)
             .child(
-                ButtonGroup::new("mode").small().outline().children([
-                    Button::new("unified")
-                        .label("Unified")
-                        .selected(mode == DiffMode::Unified)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.diff
-                                .update(cx, |state, cx| state.set_mode(DiffMode::Unified, cx));
-                        })),
-                    Button::new("split")
-                        .label("Split")
-                        .selected(mode == DiffMode::Split)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.diff
-                                .update(cx, |state, cx| state.set_mode(DiffMode::Split, cx));
-                        })),
-                ]),
-            )
-            .child(
-                Button::new("previous-change")
-                    .ghost()
-                    .small()
-                    .icon(IconName::ArrowUp)
-                    .accessibility_label("Previous change")
-                    .tooltip("Previous change (Shift+F7)")
-                    .disabled(!available)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.diff.update(cx, |state, cx| state.previous_change(cx));
-                    })),
-            )
-            .child(
-                Button::new("next-change")
-                    .ghost()
-                    .small()
-                    .icon(IconName::ArrowDown)
-                    .accessibility_label("Next change")
-                    .tooltip("Next change (F7)")
-                    .disabled(!available)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.diff.update(cx, |state, cx| state.next_change(cx));
-                    })),
+                h_flex()
+                    .gap_1()
+                    .child(
+                        Button::new("previous-change")
+                            .ghost()
+                            .small()
+                            .icon(IconName::ArrowUp)
+                            .accessibility_label("Previous change")
+                            .tooltip_with_action("Previous change", &PreviousChange, Some("Tig"))
+                            .disabled(!available)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.diff.update(cx, |state, cx| state.previous_change(cx));
+                            })),
+                    )
+                    .child(
+                        Button::new("next-change")
+                            .ghost()
+                            .small()
+                            .icon(IconName::ArrowDown)
+                            .accessibility_label("Next change")
+                            .tooltip_with_action("Next change", &NextChange, Some("Tig"))
+                            .disabled(!available)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.diff.update(cx, |state, cx| state.next_change(cx));
+                            })),
+                    ),
             )
             .child(div().flex_1())
             .child(
                 Button::new("display-options")
-                    .ghost()
+                    .outline()
                     .small()
                     .label("Display")
+                    .dropdown_caret(true)
                     .dropdown_menu(move |menu, window, cx| {
-                        menu.menu_with_check("Wrap long lines", wrap, Box::new(ToggleWrap))
-                            .menu_with_check("Line numbers", numbers, Box::new(ToggleNumbers))
-                            .separator()
-                            .submenu("Inline changes", window, cx, move |menu, _, _| {
-                                menu.menu_with_check(
-                                    "Words",
-                                    inline == Some(DiffInlineUnit::Word),
-                                    Box::new(Words),
-                                )
-                                .menu_with_check(
-                                    "Characters",
-                                    inline == Some(DiffInlineUnit::Character),
-                                    Box::new(Characters),
-                                )
-                                .menu_with_check(
-                                    "Whole lines",
-                                    inline.is_none(),
-                                    Box::new(WholeLines),
-                                )
-                            })
-                            .submenu("Context", window, cx, move |menu, _, _| {
+                        menu.menu_with_check(
+                            "Unified",
+                            mode == DiffMode::Unified,
+                            Box::new(UnifiedMode),
+                        )
+                        .menu_with_check("Split", mode == DiffMode::Split, Box::new(SplitMode))
+                        .separator()
+                        .menu_with_check("Wrap long lines", wrap, Box::new(ToggleWrap))
+                        .menu_with_check("Line numbers", numbers, Box::new(ToggleNumbers))
+                        .separator()
+                        .submenu("Inline changes", window, cx, move |menu, _, _| {
+                            menu.menu_with_check(
+                                "Words",
+                                inline == Some(DiffInlineUnit::Word),
+                                Box::new(Words),
+                            )
+                            .menu_with_check(
+                                "Characters",
+                                inline == Some(DiffInlineUnit::Character),
+                                Box::new(Characters),
+                            )
+                            .menu_with_check(
+                                "Whole lines",
+                                inline.is_none(),
+                                Box::new(WholeLines),
+                            )
+                        })
+                        .submenu(
+                            "Context",
+                            window,
+                            cx,
+                            move |menu, _, _| {
                                 menu.menu_with_check(
                                     "Three lines",
                                     context == Some(3),
@@ -398,17 +440,18 @@ impl Tig {
                                 .separator()
                                 .menu("Expand unchanged lines", Box::new(ExpandContext))
                                 .menu("Collapse unchanged lines", Box::new(CollapseContext))
-                            })
+                            },
+                        )
                     }),
             )
             .into_any_element()
     }
 
-    fn render_history(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_history(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let selected = self.selected;
         let commits = self.commits.clone();
         let owner = cx.entity().downgrade();
-        let ring = cx.theme().ring;
+        let focused = self.history_focus.is_focused(window) && window.last_input_was_keyboard();
         v_flex()
             .size_full()
             .min_h_0()
@@ -424,6 +467,16 @@ impl Tig {
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(format!("{}", commits.len())),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        Button::new("refresh")
+                            .ghost()
+                            .small()
+                            .label("Refresh")
+                            .tooltip_with_action("Refresh history", &Refresh, Some("Tig"))
+                            .disabled(self.loading_history)
+                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
                     ),
             )
             .child(
@@ -432,9 +485,6 @@ impl Tig {
                     .relative()
                     .flex_1()
                     .min_h_0()
-                    .border_1()
-                    .border_color(cx.theme().transparent)
-                    .focus(move |style| style.border_color(ring))
                     .track_focus(&self.history_focus)
                     .key_context("TigHistory")
                     .role(gpui_kit::Role::List)
@@ -462,6 +512,7 @@ impl Tig {
                                             Tooltip::new(tooltip.clone()).build(window, cx)
                                         })
                                         .selected(selected == Some(ix))
+                                        .secondary_selected(focused && selected == Some(ix))
                                         .h_12()
                                         .px_4()
                                         .w_full()
@@ -574,7 +625,6 @@ impl Tig {
             Diff::new(&self.diff)
                 .line_number(self.line_numbers)
                 .soft_wrap(self.wrap)
-                .change_background(false)
                 .border_0()
                 .into_any_element()
         };
@@ -591,51 +641,60 @@ impl Tig {
                         .flex_none()
                         .child(
                             div()
-                                .text_sm()
+                                .text_base()
                                 .font_medium()
-                                .truncate()
                                 .child(commit.subject.clone()),
                         )
                         .child(
                             h_flex()
+                                .min_w_0()
                                 .gap_2()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
                                 .child(
                                     div()
+                                        .flex_none()
                                         .font_family(cx.theme().mono_font_family.clone())
                                         .child(commit.short_hash.clone()),
                                 )
-                                .child(commit.author.clone())
-                                .child("·")
-                                .child(commit.date.clone())
-                                .child(div().flex_1())
-                                .when(!self.message.is_empty(), |this| {
-                                    this.child(
-                                        Button::new("commit-message-toggle")
-                                            .ghost()
-                                            .xsmall()
-                                            .label(if self.message_visible {
-                                                "Hide message"
-                                            } else {
-                                                "Show message"
-                                            })
-                                            .on_click(cx.listener(|this, _, _, cx| {
-                                                this.message_visible = !this.message_visible;
-                                                cx.notify();
-                                            })),
-                                    )
-                                })
                                 .child(
                                     Button::new("copy-hash")
                                         .ghost()
-                                        .xsmall()
+                                        .small()
                                         .icon(IconName::Copy)
                                         .accessibility_label("Copy commit hash")
-                                        .tooltip("Copy commit hash")
-                                        .on_click(cx.listener(|this, _, _, cx| this.copy_hash(cx))),
-                                ),
-                        ),
+                                        .tooltip_with_action(
+                                            "Copy commit hash",
+                                            &CopyHash,
+                                            Some("Tig"),
+                                        )
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.copy_hash(window, cx)
+                                        })),
+                                )
+                                .child(div().min_w_0().truncate().child(commit.author.clone()))
+                                .child(div().flex_none().child("·"))
+                                .child(div().flex_none().child(commit.date.clone())),
+                        )
+                        .when(!self.message.is_empty(), |this| {
+                            this.child(
+                                Button::new("commit-message-toggle")
+                                    .ghost()
+                                    .small()
+                                    .w_auto()
+                                    .label("Commit message")
+                                    .icon(if self.message_visible {
+                                        IconName::ChevronUp
+                                    } else {
+                                        IconName::ChevronDown
+                                    })
+                                    .selected(self.message_visible)
+                                    .toggled(self.message_visible)
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.toggle_message(cx);
+                                    })),
+                            )
+                        }),
                 )
             })
             .when(
@@ -655,11 +714,15 @@ impl Tig {
             .into_any_element()
     }
 
-    fn render_files(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_files(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let files = self.files.clone();
         let selected_file = self.selected_file.clone();
         let owner = cx.entity().downgrade();
-        let ring = cx.theme().ring;
+        let focused = self.files_focus.is_focused(window) && window.last_input_was_keyboard();
+        let selected_ix = self
+            .selected_file
+            .as_ref()
+            .and_then(|path| files.iter().position(|file| file.path() == path));
         v_flex()
             .size_full()
             .min_h_0()
@@ -675,6 +738,35 @@ impl Tig {
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
                             .child(format!("{}", files.len())),
+                    )
+                    .child(div().flex_1())
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                Button::new("previous-file")
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::ChevronLeft)
+                                    .accessibility_label("Previous file")
+                                    .tooltip_with_action(
+                                        "Previous file",
+                                        &PreviousFile,
+                                        Some("Tig"),
+                                    )
+                                    .disabled(selected_ix.is_none_or(|ix| ix == 0))
+                                    .on_click(cx.listener(|this, _, _, cx| this.move_file(-1, cx))),
+                            )
+                            .child(
+                                Button::new("next-file")
+                                    .ghost()
+                                    .small()
+                                    .icon(IconName::ChevronRight)
+                                    .accessibility_label("Next file")
+                                    .tooltip_with_action("Next file", &NextFile, Some("Tig"))
+                                    .disabled(selected_ix.is_none_or(|ix| ix + 1 >= files.len()))
+                                    .on_click(cx.listener(|this, _, _, cx| this.move_file(1, cx))),
+                            ),
                     ),
             )
             .child(
@@ -683,9 +775,6 @@ impl Tig {
                     .relative()
                     .flex_1()
                     .min_h_0()
-                    .border_1()
-                    .border_color(cx.theme().transparent)
-                    .focus(move |style| style.border_color(ring))
                     .track_focus(&self.files_focus)
                     .key_context("TigFiles")
                     .role(gpui_kit::Role::List)
@@ -710,24 +799,31 @@ impl Tig {
                                         DiffFileStatus::Deleted => "D",
                                         DiffFileStatus::Renamed => "R",
                                         DiffFileStatus::Copied => "C",
-                                        _ => {
-                                            if file.is_binary() {
-                                                "B"
-                                            } else {
-                                                "M"
-                                            }
-                                        }
+                                        DiffFileStatus::Conflicted => "U",
+                                        DiffFileStatus::Unchanged => "—",
+                                        DiffFileStatus::Modified => "M",
+                                        _ => "?",
                                     };
-                                    let tooltip = path.clone();
+                                    let tooltip = format!(
+                                        "{} · {:?}{}",
+                                        path,
+                                        file.status(),
+                                        if file.is_binary() { " · Binary" } else { "" }
+                                    );
+                                    let has_counts = !file.is_binary()
+                                        && (file.additions() > 0 || file.deletions() > 0);
                                     ListItem::new(path.clone())
                                         .tooltip(move |window, cx| {
                                             Tooltip::new(tooltip.clone()).build(window, cx)
                                         })
-                                        .h_12()
+                                        .h_10()
                                         .px_4()
                                         .w_full()
                                         .min_w_0()
                                         .selected(selected_file.as_ref() == Some(&path))
+                                        .secondary_selected(
+                                            focused && selected_file.as_ref() == Some(&path),
+                                        )
                                         .accessibility_label(format!(
                                             "{} · {:?} · +{} −{}",
                                             path,
@@ -739,21 +835,24 @@ impl Tig {
                                             h_flex()
                                                 .w_full()
                                                 .min_w_0()
-                                                .gap_3()
+                                                .gap_2()
                                                 .child(
                                                     v_flex()
                                                         .min_w_0()
                                                         .flex_1()
-                                                        .gap_1()
+                                                        .gap_0()
                                                         .child(
                                                             div()
                                                                 .text_sm()
+                                                                .line_height(rems(1.25))
                                                                 .truncate()
                                                                 .child(filename.to_owned()),
                                                         )
                                                         .child(
                                                             div()
+                                                                .h_4()
                                                                 .text_xs()
+                                                                .line_height(rems(1.))
                                                                 .truncate()
                                                                 .text_color(
                                                                     cx.theme().muted_foreground,
@@ -762,18 +861,52 @@ impl Tig {
                                                         ),
                                                 )
                                                 .child(
-                                                    v_flex()
+                                                    div()
+                                                        .w_4()
                                                         .flex_none()
-                                                        .items_end()
-                                                        .gap_1()
                                                         .text_xs()
                                                         .text_color(cx.theme().muted_foreground)
-                                                        .child(status)
-                                                        .child(format!(
-                                                            "+{} −{}",
-                                                            file.additions(),
-                                                            file.deletions()
-                                                        )),
+                                                        .child(status),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .w_12()
+                                                        .flex_none()
+                                                        .text_right()
+                                                        .text_xs()
+                                                        .font_family(
+                                                            cx.theme().mono_font_family.clone(),
+                                                        )
+                                                        .text_color(if file.additions() > 0 {
+                                                            cx.theme().foreground
+                                                        } else {
+                                                            cx.theme().muted_foreground
+                                                        })
+                                                        .child(if has_counts {
+                                                            format!("+{}", file.additions())
+                                                        } else {
+                                                            "—".into()
+                                                        }),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .w_12()
+                                                        .flex_none()
+                                                        .text_right()
+                                                        .text_xs()
+                                                        .font_family(
+                                                            cx.theme().mono_font_family.clone(),
+                                                        )
+                                                        .text_color(if file.deletions() > 0 {
+                                                            cx.theme().foreground
+                                                        } else {
+                                                            cx.theme().muted_foreground
+                                                        })
+                                                        .child(if has_counts {
+                                                            format!("−{}", file.deletions())
+                                                        } else {
+                                                            "—".into()
+                                                        }),
                                                 ),
                                         )
                                         .on_click(move |_, window, cx| {
@@ -797,20 +930,51 @@ impl Tig {
 impl Render for Tig {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rem = window.rem_size();
-        let selection = self
-            .diff
-            .read(cx)
-            .selected_lines()
-            .map(|range| {
-                format!(
-                    "{} · {:?} {}–{}",
-                    range.path(),
-                    range.side(),
-                    range.start(),
-                    range.end()
-                )
-            })
-            .unwrap_or_else(|| "Readonly · patch context only".into());
+        let commit_status = if self.loading_history {
+            "Reading history".into()
+        } else if self.commits.is_empty() {
+            "No commits".into()
+        } else {
+            format!(
+                "Commit {} of {}",
+                self.selected.map_or(0, |ix| ix + 1),
+                self.commits.len()
+            )
+        };
+        let file_status = if self.loading_commit {
+            "Reading files".into()
+        } else if let Some(path) = &self.selected_file {
+            let ix = self
+                .files
+                .iter()
+                .position(|file| file.path() == path)
+                .unwrap_or(0);
+            format!("File {} of {}", ix + 1, self.files.len())
+        } else {
+            "No file selected".into()
+        };
+        let selection = self.diff.read(cx).selected_lines().map(|range| {
+            if range.side() == range.end_side() {
+                format!("{} lines selected", range.start().abs_diff(range.end()) + 1)
+            } else {
+                "Source selected".into()
+            }
+        });
+        let navigation_focused =
+            self.history_focus.is_focused(window) || self.files_focus.is_focused(window);
+        let hint = if navigation_focused {
+            Kbd::binding_for_action(
+                &FocusDiff,
+                Some(if self.history_focus.is_focused(window) {
+                    "TigHistory"
+                } else {
+                    "TigFiles"
+                }),
+                window,
+            )
+        } else {
+            None
+        };
         v_flex()
             .id("tig")
             .key_context("Tig")
@@ -824,16 +988,27 @@ impl Render for Tig {
             .on_action(cx.listener(|this, _: &NextFile, _, cx| this.move_file(1, cx)))
             .on_action(cx.listener(|this, _: &PreviousFile, _, cx| this.move_file(-1, cx)))
             .on_action(cx.listener(|this, _: &FocusDiff, window, cx| this.focus_diff(window, cx)))
-            .on_action(cx.listener(|this, _: &FocusHistory, window, cx| {
-                this.history_focus.focus(window, cx)
-            }))
+            .on_action(
+                cx.listener(|this, _: &FocusHistory, window, cx| this.focus_history(window, cx)),
+            )
             .on_action(cx.listener(|this, _: &Refresh, _, cx| this.refresh(cx)))
-            .on_action(cx.listener(|this, _: &CopyHash, _, cx| this.copy_hash(cx)))
+            .on_action(cx.listener(|this, _: &CopyHash, window, cx| this.copy_hash(window, cx)))
+            .on_action(
+                cx.listener(|this, _: &ToggleSidebar, window, cx| this.toggle_sidebar(window, cx)),
+            )
             .on_action(cx.listener(|this, _: &NextChange, _, cx| {
                 this.diff.update(cx, |state, cx| state.next_change(cx))
             }))
             .on_action(cx.listener(|this, _: &PreviousChange, _, cx| {
                 this.diff.update(cx, |state, cx| state.previous_change(cx))
+            }))
+            .on_action(cx.listener(|this, _: &UnifiedMode, _, cx| {
+                this.diff
+                    .update(cx, |state, cx| state.set_mode(DiffMode::Unified, cx));
+            }))
+            .on_action(cx.listener(|this, _: &SplitMode, _, cx| {
+                this.diff
+                    .update(cx, |state, cx| state.set_mode(DiffMode::Split, cx));
             }))
             .on_action(cx.listener(|this, _: &ToggleWrap, _, cx| {
                 this.wrap = !this.wrap;
@@ -873,8 +1048,7 @@ impl Render for Tig {
                     .update(cx, |state, cx| state.collapse_unchanged(cx))
             }))
             .on_action(cx.listener(|this, _: &ToggleMessage, _, cx| {
-                this.message_visible = !this.message_visible;
-                cx.notify();
+                this.toggle_message(cx);
             }))
             .on_action(|_: &Quit, _, cx| cx.quit())
             .child(
@@ -891,41 +1065,39 @@ impl Render for Tig {
                                 .text_color(cx.theme().muted_foreground)
                                 .child("HEAD history"),
                         )
-                        .child(div().flex_1())
-                        .child(
-                            Button::new("refresh")
-                                .ghost()
-                                .small()
-                                .label("Refresh")
-                                .disabled(self.loading_history)
-                                .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-                        ),
+                        .child(div().flex_1()),
                 ),
             )
             .child(
                 div().flex_1().min_h_0().child(
                     h_resizable("tig-panes")
-                        .child(
-                            resizable_panel()
-                                .size(rem * 22.)
-                                .size_range(rem * 18. ..rem * 30.)
-                                .child(
-                                    v_flex().size_full().min_h_0().bg(cx.theme().sidebar).child(
-                                        v_resizable("tig-navigation")
+                        .when(self.sidebar_visible, |this| {
+                            this.child(
+                                resizable_panel()
+                                    .size(rem * 22.)
+                                    .size_range(rem * 18. ..rem * 30.)
+                                    .child(
+                                        v_flex()
+                                            .size_full()
+                                            .min_h_0()
+                                            .bg(cx.theme().sidebar)
                                             .child(
-                                                resizable_panel()
-                                                    .size(rem * 25.)
-                                                    .size_range(rem * 12. ..rem * 100.)
-                                                    .child(self.render_history(cx)),
-                                            )
-                                            .child(
-                                                resizable_panel()
-                                                    .size_range(rem * 10. ..rem * 100.)
-                                                    .child(self.render_files(cx)),
+                                                v_resizable("tig-navigation")
+                                                    .child(
+                                                        resizable_panel()
+                                                            .size(rem * 25.)
+                                                            .size_range(rem * 12. ..rem * 100.)
+                                                            .child(self.render_history(window, cx)),
+                                                    )
+                                                    .child(
+                                                        resizable_panel()
+                                                            .size_range(rem * 10. ..rem * 100.)
+                                                            .child(self.render_files(window, cx)),
+                                                    ),
                                             ),
                                     ),
-                                ),
-                        )
+                            )
+                        })
                         .child(
                             resizable_panel()
                                 .size_range(rem * 38. ..rem * 200.)
@@ -936,19 +1108,51 @@ impl Render for Tig {
             .child(
                 StatusBar::new()
                     .left(
+                        h_flex().child(
+                            Button::new("toggle-sidebar")
+                                .toggled(self.sidebar_visible)
+                                .ghost()
+                                .small()
+                                .icon(if self.sidebar_visible {
+                                    IconName::PanelLeftClose
+                                } else {
+                                    IconName::PanelLeftOpen
+                                })
+                                .accessibility_label(if self.sidebar_visible {
+                                    "Hide sidebar"
+                                } else {
+                                    "Show sidebar"
+                                })
+                                .tooltip_with_action(
+                                    if self.sidebar_visible {
+                                        "Hide sidebar"
+                                    } else {
+                                        "Show sidebar"
+                                    },
+                                    &ToggleSidebar,
+                                    Some("Tig"),
+                                )
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.toggle_sidebar(window, cx)
+                                })),
+                        ),
+                    )
+                    .left(
                         div()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .min_w_0()
-                            .truncate()
-                            .child(selection),
+                            .child(commit_status),
                     )
                     .right(
-                        div()
+                        h_flex()
+                            .gap_3()
                             .text_xs()
                             .text_color(cx.theme().muted_foreground)
-                            .flex_none()
-                            .child("Alt+↑/↓ Files · F7 Changes"),
+                            .child(file_status)
+                            .when_some(selection, |this, text| this.child(text))
+                            .when_some(hint, |this, key| {
+                                this.child(h_flex().gap_1().child(key).child("Read diff"))
+                            }),
                     ),
             )
     }

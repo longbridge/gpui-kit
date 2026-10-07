@@ -38,7 +38,7 @@ fn commit_navigation_discards_old_results_and_preserves_keyboard_focus(cx: &mut 
             view.verify_loading_and_install(cx);
         });
         window.render_frame(cx);
-        window.press("alt-down", cx);
+        window.press("]", cx);
         assert_eq!(view.read(cx).selected_file.as_deref(), Some("other.txt"));
         assert_eq!(view.read(cx).diff.read(cx).files().len(), 1);
         assert_eq!(
@@ -54,6 +54,33 @@ fn commit_navigation_discards_old_results_and_preserves_keyboard_focus(cx: &mut 
                 .is_focused(window)
         );
         window.press("escape", cx);
+        assert!(view.read(cx).history_focus.is_focused(window));
+        window.render_frame(cx);
+        window.click(gpui_kit::SharedString::new("new.txt"), cx);
+        assert!(view.read(cx).files_focus.is_focused(window));
+        window.press("down", cx);
+        assert_eq!(view.read(cx).selected_file.as_deref(), Some("other.txt"));
+        window.press("enter", cx);
+        assert!(
+            view.read(cx)
+                .diff
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        );
+        window.press(
+            if cfg!(target_os = "macos") {
+                "cmd-b"
+            } else {
+                "ctrl-b"
+            },
+            cx,
+        );
+        assert!(!view.read(cx).sidebar_visible);
+        window.render_frame(cx);
+        window.press("escape", cx);
+        window.render_frame(cx);
+        assert!(view.read(cx).sidebar_visible);
         assert!(view.read(cx).history_focus.is_focused(window));
     })
     .unwrap();

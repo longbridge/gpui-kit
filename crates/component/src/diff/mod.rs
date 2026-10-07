@@ -510,6 +510,7 @@ fn render_diff(
         font_size,
         row_height,
         gutter_width,
+        rem,
         expansion_lines: state.expansion_lines(),
         line_number: props.line_number,
         syntax_highlight: props.syntax_highlight,
@@ -742,6 +743,7 @@ struct CodePresentation {
     font_size: Pixels,
     row_height: Pixels,
     gutter_width: Pixels,
+    rem: Pixels,
     expansion_lines: usize,
     line_number: bool,
     syntax_highlight: bool,
@@ -1357,7 +1359,8 @@ fn render_cell(
             this.border_r_1().border_color(cx.theme().border)
         })
         .when(ix.is_none(), |this| {
-            this.bg(cx.theme().muted.opacity(0.3)).child(div().h_6())
+            this.bg(cx.theme().muted.opacity(0.3))
+                .child(div().h(code.row_height))
         });
     let Some(ix) = ix else {
         return cell.into_any_element();
@@ -1655,12 +1658,14 @@ fn code_line(
         code.hover_highlight,
         DiffHoverHighlight::Line | DiffHoverHighlight::Both
     );
-    let add_button = add_annotation_button(file, side, ix, gutters_width, &code, cx);
+    let add_button =
+        add_annotation_button(file, side, ix, gutters_width + code.rem / 2., &code, cx);
     h_flex()
         .id("line-row")
         .group("diff-line")
         .relative()
         .w_full()
+        .px_2()
         .map(|this| {
             if code.soft_wrap {
                 this.min_h(code.row_height)
