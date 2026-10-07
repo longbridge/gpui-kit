@@ -1771,26 +1771,45 @@ struct TableColumnWidths {
 }
 
 /// The text styles table rows render with: the window's, refined by
-/// `style.table_head` on the header row and by `style.table_cell` on every
-/// cell, in the order the row and cell elements apply them.
+/// `style.table` on the frame, `style.table_head` on the header row and
+/// `style.table_cell` on every cell, in the order the elements apply them.
 #[derive(Clone, PartialEq)]
 struct TableTextStyles {
     head: gpui::TextStyle,
     body: gpui::TextStyle,
+    head_refinement: TextStyleRefinement,
+    body_refinement: TextStyleRefinement,
 }
 
 impl TableTextStyles {
     fn new(style: &TextViewStyle, window: &Window) -> Self {
+        let mut body_refinement = style.table().text.clone();
+        let mut head_refinement = body_refinement.clone();
+        head_refinement.refine(&style.table_head().text);
+        head_refinement.refine(&style.table_cell().text);
+        body_refinement.refine(&style.table_cell().text);
         let mut head = window.text_style();
         let mut body = head.clone();
-        head.refine(&style.table_head().text);
-        head.refine(&style.table_cell().text);
-        body.refine(&style.table_cell().text);
-        Self { head, body }
+        head.refine(&head_refinement);
+        body.refine(&body_refinement);
+        Self {
+            head,
+            body,
+            head_refinement,
+            body_refinement,
+        }
     }
 
     fn row(&self, row_ix: usize) -> &gpui::TextStyle {
         if row_ix == 0 { &self.head } else { &self.body }
+    }
+
+    fn row_refinement(&self, row_ix: usize) -> &TextStyleRefinement {
+        if row_ix == 0 {
+            &self.head_refinement
+        } else {
+            &self.body_refinement
+        }
     }
 }
 
@@ -2911,6 +2930,26 @@ fn slice_backgrounds(
     slice_ranges(backgrounds, start, end, |range, color| (range, *color))
 }
 
+/// A table column's cell widths for layout, excluding the divider after it.
+struct TableColumn {
+    /// The width that fits the content on its widest line.
+    max: f32,
+    /// The width below which the column stops shrinking.
+    min: f32,
+    divider: f32,
+}
+
+/// Horizontal padding of a table cell: `px_3` unless `style.table_cell`
+/// sets it.
+fn table_cell_padding_x(style: &TextViewStyle, rem_size: Pixels) -> f32 {
+    let padding = &style.table_cell().padding;
+    let side = |length: Option<DefiniteLength>| match length {
+        Some(DefiniteLength::Absolute(length)) => f32::from(length.to_pixels(rem_size)),
+        _ => CELL_PAD_PX / 2.,
+    };
+    side(padding.left) + side(padding.right)
+}
+
 const CELL_PAD_PX: f32 = 24.0; // px_3 horizontal padding
 const CELL_MIN_PX: f32 = 48.0;
 const CELL_BORDER_PX: f32 = 1.0; // border_r_1 drawn by every column but the last
@@ -2971,7 +3010,7 @@ fn measure_table_columns(
     for &(row_ix, ix) in &measured.custom_cells {
         let cell = &table.children[row_ix].children[ix];
         let items = cell.children.inline_flow_items(None, &[], &[], node_cx, cx);
-        let style = text_styles.row(row_ix).subtract(&Default::default());
+        let style = text_styles.row_refinement(row_ix).clone();
         let width = window.with_text_style(Some(style), |window| {
             super::inline_flow::intrinsic_width(&items, window, cx)
         });
@@ -3488,8 +3527,9 @@ impl BlockNode {
     ///   horizontally, so no content ever becomes unreachable.
     ///
     /// `white_space: nowrap` on `style.table_cell` composes like in CSS: the
-    /// refinement keeps cell text on a single line, and the floors are raised
-    /// to the full content widths so the single-line columns never shrink.
+    /// refinement keeps cell text on a single line, and the scroll layout
+    /// raises the floors to the full content widths so the single-line
+    /// columns never shrink.
     fn render_table(
         item: &BlockNode,
         options: &NodeRenderOptions,
@@ -3523,11 +3563,21 @@ impl BlockNode {
         let col_w = measure_table_columns(table, col_count, node_cx, window, cx);
         let scroll = matches!(style.table().overflow.x, Some(Overflow::Scroll));
         let nowrap = style.table_cell().text.white_space == Some(WhiteSpace::Nowrap);
-        let wrap_min_px = f32::from(rems(4.).to_pixels(window.rem_size()));
-        let col_min_w: Vec<f32> = col_w
+        let rem_size = window.rem_size();
+        let wrap_min_px = f32::from(rems(4.).to_pixels(rem_size));
+        // Widths were measured with the default cell padding.
+        let padding_delta = table_cell_padding_x(style, rem_size) - CELL_PAD_PX;
+        // Lengths are rounded to device pixels for layout. Round the content
+        // widths up, or a column can lose the fraction of a pixel that keeps
+        // its text on one line.
+        let scale_factor = window.scale_factor();
+        let device_ceil = |width: f32| (width * scale_factor).ceil() / scale_factor;
+        let columns: Vec<TableColumn> = col_w
             .iter()
-            .map(|&w| {
-                if nowrap {
+            .enumerate()
+            .map(|(ix, &w)| {
+                let w = w + padding_delta;
+                let floor = if scroll && nowrap {
                     w
                 } else if scroll {
                     (w / CELL_WRAP_MAX_LINES)
@@ -3535,11 +3585,22 @@ impl BlockNode {
                         .min(w)
                 } else {
                     w.min(wrap_min_px)
+                };
+                let divider = if ix + 1 < col_count {
+                    CELL_BORDER_PX
+                } else {
+                    0.
+                };
+                let max = device_ceil(w - divider);
+                TableColumn {
+                    min: device_ceil(floor - divider).min(max),
+                    max,
+                    divider,
                 }
             })
             .collect();
 
-        let rows = Self::render_table_rows(table, &col_w, &col_min_w, node_cx, window, cx);
+        let rows = Self::render_table_rows(table, &columns, node_cx, window, cx);
         let frame = StyleRefinement::default()
             .text_size(text_size)
             .bg(style
@@ -3557,7 +3618,11 @@ impl BlockNode {
                 )
                 .read(cx)
                 .clone();
-            let min_total_w = col_min_w.iter().sum::<f32>() + TABLE_BORDER_PX;
+            let min_total_w = columns
+                .iter()
+                .map(|column| column.min + column.divider)
+                .sum::<f32>()
+                + TABLE_BORDER_PX;
             // Scroll viewport owns the visible frame, including any
             // caller-provided radius. Keeping the border here makes the
             // rounded frame stable while the wider row track moves below it.
@@ -3635,7 +3700,7 @@ impl BlockNode {
     /// The table rows, each a flex row laid out on the same column grid.
     ///
     /// Every column is a cell plus slack beside it. A cell grows from zero up
-    /// to its content width `col_w` and never below its floor `col_min_w`:
+    /// to its content width `max` and never below its floor `min`:
     /// flex layout grows all cells equally and freezes each one that reaches
     /// its content width, so the narrow columns fit their content and the
     /// widest ones share what is left. The slack grows only after every cell
@@ -3647,8 +3712,7 @@ impl BlockNode {
     /// place, so its columns line up with the other rows.
     fn render_table_rows(
         table: &Table,
-        col_w: &[f32],
-        col_min_w: &[f32],
+        columns: &[TableColumn],
         node_cx: &NodeContext,
         window: &mut Window,
         cx: &mut App,
@@ -3662,14 +3726,21 @@ impl BlockNode {
         const SLACK_GROW: f32 = 1.0;
 
         let style = &node_cx.style;
-        let col_count = col_w.len();
-        let total_w = col_w.iter().sum::<f32>().max(1.);
-        // Lengths are rounded to device pixels for layout. Round the content
-        // widths up, or a column can lose the fraction of a pixel that keeps
-        // its text on one line.
-        let scale_factor = window.scale_factor();
-        let device_ceil = |width: f32| (width * scale_factor).ceil() / scale_factor;
-        let slack = |grow: f32| div().flex_basis(px(0.)).flex_grow(grow).flex_shrink(0.);
+        let col_count = columns.len();
+        let total_w = columns.iter().map(|column| column.max).sum::<f32>().max(1.);
+        // The slack is part of the column, so it carries the cell's fill and
+        // the column divider in the cell's border color.
+        let mut slack_style = StyleRefinement::default();
+        slack_style.background = style.table_cell().background.clone();
+        slack_style.border_color = style.table_cell().border_color;
+        let slack = |grow: f32| {
+            div()
+                .flex_basis(px(0.))
+                .flex_grow(grow)
+                .flex_shrink(0.)
+                .border_color(style.border())
+                .refine_style(&slack_style)
+        };
 
         let row_count = table.children.len();
         let [top_left, top_right, bottom_left, bottom_right] =
@@ -3677,12 +3748,9 @@ impl BlockNode {
         let mut rows = Vec::with_capacity(row_count);
         let mut cell_ordinal = 0;
         for (row_ix, row) in table.children.iter().enumerate() {
-            let mut columns = Vec::with_capacity(col_count * 2);
-            for ix in 0..col_count {
+            let mut cells = Vec::with_capacity(col_count * 2);
+            for (ix, column) in columns.iter().enumerate() {
                 let is_last_col = ix + 1 == col_count;
-                let border = if is_last_col { 0. } else { CELL_BORDER_PX };
-                let max_w = device_ceil(col_w[ix] - border);
-                let min_w = device_ceil(col_min_w[ix] - border).min(max_w);
                 let align = table.column_align(ix);
                 let content = row.children.get(ix).map(|cell| {
                     let fade_key = table
@@ -3692,21 +3760,21 @@ impl BlockNode {
                     cell.children.render(fade_key, node_cx, window, cx)
                 });
 
-                let grow = SLACK_GROW * col_w[ix] / total_w;
+                let grow = SLACK_GROW * column.max / total_w;
                 let (lead, trail) = match align {
                     ColumnumnAlign::Left => (0., grow),
                     ColumnumnAlign::Center => (grow / 2., grow / 2.),
                     ColumnumnAlign::Right => (grow, 0.),
                 };
                 if lead > 0. {
-                    columns.push(slack(lead).into_any_element());
+                    cells.push(slack(lead).into_any_element());
                 }
-                columns.push(
+                cells.push(
                     div()
                         .flex_basis(px(0.))
                         .flex_grow(CELL_GROW)
-                        .min_w(px(min_w))
-                        .max_w(px(max_w))
+                        .min_w(px(column.min))
+                        .max_w(px(column.max))
                         .overflow_hidden()
                         .when(align == ColumnumnAlign::Center, |this| this.text_center())
                         .when(align == ColumnumnAlign::Right, |this| this.text_right())
@@ -3717,11 +3785,9 @@ impl BlockNode {
                         .into_any_element(),
                 );
                 if trail > 0. || !is_last_col {
-                    columns.push(
+                    cells.push(
                         slack(trail)
-                            .when(!is_last_col, |this| {
-                                this.border_r_1().border_color(style.border())
-                            })
+                            .when(!is_last_col, |this| this.border_r_1())
                             .into_any_element(),
                     );
                 }
@@ -3747,7 +3813,7 @@ impl BlockNode {
                         this.when_some(bottom_left, |this, radius| this.rounded_bl(radius))
                             .when_some(bottom_right, |this, radius| this.rounded_br(radius))
                     })
-                    .children(columns)
+                    .children(cells)
                     .into_any_element(),
             );
         }

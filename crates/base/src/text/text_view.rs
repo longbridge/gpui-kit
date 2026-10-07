@@ -2742,71 +2742,98 @@ mod tests {
 
     /// A table wider than its frame shrinks its widest column. A narrower
     /// column keeps its content width rather than shrinking by the same
-    /// ratio and wrapping the end of its text onto a line of its own.
+    /// ratio and wrapping the end of its text onto a line of its own, in the
+    /// header and the body alike, and with the cell and frame refinements
+    /// the text renders with.
     #[test]
     fn table_keeps_narrow_columns_on_one_line_while_wide_ones_wrap() {
         use crate::text::inline::test_fonts::WideMonoTextSystem;
         use gpui::TestApp;
         use std::sync::Arc;
 
-        const HEAD_BACKGROUND: u32 = 0x11aa77;
+        const CELL_BACKGROUND: u32 = 0x11aa77;
 
         struct TableRoot {
             text_view: Entity<TextViewState>,
             width: Pixels,
-            scroll: bool,
+            style: TextViewStyle,
         }
 
         impl Render for TableRoot {
             fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-                let mut table = StyleRefinement::default();
-                if self.scroll {
-                    table.overflow.x = Some(gpui::Overflow::Scroll);
-                }
-                let style = TextViewStyle::default()
-                    .with_code_background(gpui::rgb(HEAD_BACKGROUND).into())
-                    .with_table(table);
                 div()
                     .w(self.width)
-                    .child(TextView::new(&self.text_view).style(style))
+                    .child(TextView::new(&self.text_view).style(self.style.clone()))
             }
         }
 
+        let short = "Operating revenue (USD)";
         let source = format!(
-            "| Operating revenue (USD) | Note |\n| --- | --- |\n| 1 | {} |",
+            "| {short} | Note |\n| --- | --- |\n| {short} | x |\n| 1 | {} |",
             "word ".repeat(30)
         );
-        let header_height = |width: f32, scroll: bool| {
+        // Heights of the first column's cells, top to bottom.
+        let first_column = |width: f32, style: TextViewStyle| {
             let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
             app.update(crate::init);
+            let cell = style.table_cell().clone().bg(gpui::rgb(CELL_BACKGROUND));
+            let style = style.with_table_cell(cell);
             let mut window = app.open_window(|_, cx| TableRoot {
                 text_view: cx.new(|cx| TextViewState::markdown(&source, cx)),
                 width: px(width),
-                scroll,
+                style,
             });
             window.draw();
             app.run_until_parked();
             window.draw();
             window.update(|_, window, _| {
-                let head: gpui::Background = gpui::rgb(HEAD_BACKGROUND).into();
-                window
+                let background: gpui::Background = gpui::rgb(CELL_BACKGROUND).into();
+                let cells: Vec<_> = window
                     .painted_quads()
                     .into_iter()
-                    .find(|quad| quad.background == head)
-                    .expect("the header background quad is painted")
-                    .bounds
-                    .size
-                    .height
+                    .filter(|quad| quad.background == background)
+                    .map(|quad| quad.bounds)
+                    .collect();
+                let left = cells.iter().map(|bounds| bounds.origin.x).min().unwrap();
+                let mut column: Vec<_> = cells
+                    .into_iter()
+                    .filter(|bounds| bounds.origin.x == left)
+                    .collect();
+                column.sort_by_key(|bounds| bounds.origin.y);
+                column
+                    .iter()
+                    .map(|bounds| bounds.size.height)
+                    .collect::<Vec<_>>()
             })
         };
+        let scroll = || {
+            let mut table = StyleRefinement::default();
+            table.overflow.x = Some(gpui::Overflow::Scroll);
+            TextViewStyle::default().with_table(table)
+        };
 
-        for scroll in [false, true] {
-            assert_eq!(
-                header_height(700., scroll),
-                header_height(4000., scroll),
-                "scroll: {scroll}: the header wraps although its column fits"
-            );
+        for (layout, style) in [("wrap", TextViewStyle::default()), ("scroll", scroll())] {
+            let fits = first_column(4000., style.clone());
+            let narrow = first_column(700., style);
+            assert_eq!(fits.len(), 3, "{layout}: three rows");
+            assert_eq!(fits[0], fits[2], "{layout}: the header fits on one line");
+            assert_eq!(narrow[..2], fits[..2], "{layout}: the short column wraps");
         }
+
+        let single_line = first_column(4000., TextViewStyle::default())[0];
+        let padded = TextViewStyle::default().with_table_cell(StyleRefinement::default().px_4());
+        assert_eq!(
+            first_column(4000., padded)[0],
+            single_line,
+            "the cell padding refinement leaves the text its measured width"
+        );
+        let bold = TextViewStyle::default()
+            .with_table(StyleRefinement::default().font_weight(gpui::FontWeight::BOLD));
+        assert_eq!(
+            first_column(4000., bold)[0],
+            single_line,
+            "the table text refinement is measured"
+        );
     }
 
     #[gpui::test]
