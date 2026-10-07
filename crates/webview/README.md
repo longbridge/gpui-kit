@@ -8,11 +8,12 @@ This still a experimental with limited features, please file issues for any bugs
 
 - With the default backend, native WebViews render above GPUI content.
 - On macOS, enabling `gpui-fast` makes `WebView::new()` register the native view with window composition so GPUI overlays can render above it. Composition failures are logged and fall back to the default native attachment.
+- On Linux, enabling `gpui-fast` makes `WebView::build()` build the native view in a window composition surface, with the same fallback.
 - Use `WebView::set_bounds()` and `WebView::set_visible()` to keep the managed container and Wry child synchronized. Raw Wry handles bypass this coordination.
 - Use `WebView::build()` to attach a webview to a GPUI window with the platform setup Wry needs.
 - On Linux, the webview uses WebKitGTK and requires the application to run on X11 (or XWayland in a Wayland session). Start it with `gpui_kit::platform::linux(WindowingModes::X11)`; `WebView::build()` returns an error on a Wayland window. Wayland is not supported.
 
-With the default backend, on Windows, or on Linux, use the webview in a separate window or a Popup layer when overlapping GPUI content is required.
+With the default backend or on Windows, use the webview in a separate window or a Popup layer when overlapping GPUI content is required.
 
 ## Run Example
 

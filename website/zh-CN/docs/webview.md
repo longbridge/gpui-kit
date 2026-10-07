@@ -46,7 +46,9 @@ div().flex_1().child(webview.clone())
 
 ## GPUI Fast 原生合成
 
-在 `gpui-kit` 和 `gpui-webview` 上同时启用 `gpui-fast`，让两者使用同一个后端。macOS 上，现有 `WebView::new()` 会自动把 WKWebView 注册到窗口合成树，延后绘制的 GPUI 浮层可以显示在网页上方。无需新增合成 feature 或更换构造方法。默认后端和 Windows 保留原生子视图的行为。
+在 `gpui-kit` 和 `gpui-webview` 上同时启用 `gpui-fast`，让两者使用同一个后端。macOS 上，现有 `WebView::new()` 会自动把 WKWebView 注册到窗口合成树。Linux 上，`WebView::build()` 会把视图建在合成 surface 中，即一个 X11 子窗口，GPUI 会把位于其上方的浮层区域从中挖空。这样延后绘制的 GPUI 浮层就能显示在网页上方，无需新增合成 feature。默认后端和 Windows 保留原生子视图的行为。
+
+挖空只能替换网页像素，因此在 Linux 上，阴影和半透明内容（例如 dialog 的遮罩）需要窗口合成器才能叠加到网页上；带 X11 浮层窗口的 GPUI Fast 版本会把这些内容画进网页上方的透明窗口。没有合成器时，网页上方的阴影不会绘制，dialog 的遮罩会遮住网页。
 
 窗口坐标下的尺寸和位置使用 `WebView::set_bounds(Rect) -> wry::Result<()>`；显隐使用 `WebView::set_visible(bool) -> wry::Result<()>`。这两个方法会同步合成容器和 Wry 子视图，直接调用原始 Wry 对象会绕过同步。`show()`、`hide()` 仍是忽略错误的便捷方法。合成注册失败时，构造方法记录错误并保留原来的挂载方式。浮层点击和反复调整尺寸必须在真实窗口中验证。
 
@@ -123,7 +125,7 @@ let builder = wry::WebViewBuilder::new()
 
 ## Focus 与生命周期
 
-WebView 是**原生子视图**，不是 GPUI 绘制的 Element。它占据 GPUI layout 节点的 bounds，并接收浏览器原生输入。`WebView` 实现了 `Focusable`，包装层跟踪一个 `FocusHandle`。调用 `hide()` 时会先把 Focus 交回父视图；点击其 bounds 之外也会请求父视图取得 Focus。界面同时使用 GPUI input 和浏览器 input 时，应验证实际键盘与 Focus 行为。
+WebView 是**原生子视图**，不是 GPUI 绘制的 Element。它占据 GPUI layout 节点的 bounds，并接收浏览器原生输入。`WebView` 实现了 `Focusable`，包装层跟踪一个 `FocusHandle`。调用 `hide()` 时会先把 Focus 交回父视图；点击其 bounds 之外也会请求父视图取得 Focus。在 Linux 上，点击网页也会传给 GPUI，因此点击外部即关闭的 popover 和 menu 在点击网页时会关闭。界面同时使用 GPUI input 和浏览器 input 时，应验证实际键盘与 Focus 行为。
 
 WebView 及其 handle 应在父窗口销毁前结束生命周期。销毁所属 Entity 会隐藏子视图，但克隆的 `WebViewHandle` 或帧内持有的克隆可能推迟原生视图销毁。销毁父窗口前应释放这些 handle。状态归属参见 [Entity](./entity)，窗口 handle 参见 [Window](./window)。
 
@@ -138,10 +140,10 @@ WebView 及其 handle 应在父窗口销毁前结束生命周期。销毁所属 
 | 范围 | 当前行为 |
 | --- | --- |
 | 平台 | macOS、Windows 和 X11 上的 Linux 为实验性支持。不支持 Wayland；Linux 应用必须以 X11 或 XWayland 启动。 |
-| Overlay 层级 | 原生 WebView 位于 GPUI surface 上方，会遮住同一矩形范围内的 GPUI 内容，包括 popover、dialog、menu 和 tooltip。默认后端、Windows 和 Linux 上，GPUI overlay 无法可靠地显示在它上方。macOS 启用 `gpui-fast` 后，延后绘制的浮层通过原生合成显示在网页上方。 |
+| Overlay 层级 | 原生 WebView 位于 GPUI surface 上方，会遮住同一矩形范围内的 GPUI 内容，包括 popover、dialog、menu 和 tooltip。默认后端和 Windows 上，GPUI overlay 无法可靠地显示在它上方。macOS 和 Linux 启用 `gpui-fast` 后，延后绘制的浮层通过原生合成显示在网页上方。 |
 | Windows renderer | 仓库示例在启动 GPUI 前设置 `GPUI_DISABLE_DIRECT_COMPOSITION=true`，以便当前子视图方案正常渲染。这是此示例的要求，不是 GPUI 的通用设置建议。 |
 
-需要显示 overlay 时，可以将 WebView 放在单独窗口，或安排布局使 overlay 不跨过 WebView 的 bounds。这一限制适用于默认后端、Windows 和 Linux；macOS 启用 `gpui-fast` 后，可通过原生合成支持延后绘制的 GPUI 浮层。
+需要显示 overlay 时，可以将 WebView 放在单独窗口，或安排布局使 overlay 不跨过 WebView 的 bounds。这一限制适用于默认后端和 Windows；macOS 和 Linux 启用 `gpui-fast` 后，可通过原生合成支持延后绘制的 GPUI 浮层。
 
 ## 尚未合并的 Composition 尝试
 

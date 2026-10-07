@@ -6,7 +6,7 @@ publish = false
 edition.workspace = true
 
 [features]
-gpui-fast = ["gpui-kit/gpui-fast"]
+gpui-fast = ["gpui-kit/gpui-fast", "gpui-webview/gpui-fast"]
 inspector = []
 
 [dependencies]

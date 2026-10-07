@@ -22,13 +22,13 @@ doctest = false
 anyhow.workspace = true
 gpui.workspace = true
 gpui-fast = { workspace = true, optional = true }
+log = { version = "0.4", optional = true }
 wry = { version = "0.53.3", package = "lb-wry" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", optional = true }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView"], optional = true }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"], optional = true }
-log = { version = "0.4", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"

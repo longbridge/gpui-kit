@@ -46,7 +46,9 @@ div().flex_1().child(webview.clone())
 
 ## GPUI Fast native composition
 
-Enable `gpui-fast` on both `gpui-kit` and `gpui-webview` to select one backend. On macOS, the existing `WebView::new()` automatically registers the WKWebView in the window composition tree. Deferred GPUI overlays can then render above it. No separate composition feature or constructor is needed. The default backend and Windows retain the existing native child-view behavior.
+Enable `gpui-fast` on both `gpui-kit` and `gpui-webview` to select one backend. On macOS, the existing `WebView::new()` automatically registers the WKWebView in the window composition tree. On Linux, `WebView::build()` builds the view in a composition surface, an X11 child window that GPUI cuts the overlays above it out of. Deferred GPUI overlays can then render above the page. No separate composition feature is needed. The default backend and Windows retain the existing native child-view behavior.
+
+A cutout can only replace page pixels, so on Linux shadows and translucent content, such as a dialog's backdrop, need a compositing manager to blend them over the page; GPUI Fast versions with X11 overlay windows draw that content into a transparent window above the page. Without one, shadows over the page are not drawn and a dialog's backdrop hides the page.
 
 Use `WebView::set_bounds(Rect) -> wry::Result<()>` for window-relative bounds and `WebView::set_visible(bool) -> wry::Result<()>` for visibility. They coordinate the managed container and its Wry child; raw Wry calls bypass that coordination. `show()` and `hide()` remain convenience methods that discard errors. If composition registration fails, construction logs the error and keeps the original attachment. Verify native overlay input and repeated resizing in a real window.
 
@@ -123,7 +125,7 @@ Decide how downloads, external links, and `window.open` requests are handled bef
 
 ## Focus and lifetime
 
-The WebView is a **native child view**, not a GPUI-painted Element. It occupies the bounds of its GPUI layout node and receives native browser input. `WebView` implements `Focusable`; its wrapper tracks a `FocusHandle`. Calling `hide()` returns focus to the parent before hiding the native view. Clicking outside the view's bounds also requests focus on the parent. Test keyboard and focus behavior for your own screen, especially when it combines GPUI inputs with browser inputs.
+The WebView is a **native child view**, not a GPUI-painted Element. It occupies the bounds of its GPUI layout node and receives native browser input. `WebView` implements `Focusable`; its wrapper tracks a `FocusHandle`. Calling `hide()` returns focus to the parent before hiding the native view. Clicking outside the view's bounds also requests focus on the parent. On Linux, a click on the page is also delivered to GPUI, so popovers and menus that close on an outside click close when the page is clicked. Test keyboard and focus behavior for your own screen, especially when it combines GPUI inputs with browser inputs.
 
 Keep the WebView and its handles within the parent window's lifetime. Dropping the owning Entity hides the child view, but cloned `WebViewHandle`s or frame-held clones can delay native destruction. Drop those handles before destroying the parent window. See [Entity](./entity) for state ownership and [Window](./window) for window-local handles.
 
@@ -138,10 +140,10 @@ For an application smoke test on each supported OS, exercise initial load, links
 | Area | Current behavior |
 | --- | --- |
 | Platforms | Experimental on macOS, Windows, and Linux on X11. Wayland is not supported; Linux applications must start on X11 or XWayland. |
-| Overlay order | The native WebView sits above the GPUI surface and covers GPUI content in the same rectangle, including popovers, dialogs, menus, and tooltips. With the default backend, on Windows, or on Linux, a GPUI overlay cannot reliably appear on top of it. macOS with `gpui-fast` uses native composition for deferred overlays. |
+| Overlay order | The native WebView sits above the GPUI surface and covers GPUI content in the same rectangle, including popovers, dialogs, menus, and tooltips. With the default backend or on Windows, a GPUI overlay cannot reliably appear on top of it. macOS and Linux with `gpui-fast` use native composition for deferred overlays. |
 | Windows renderer | The repository example sets `GPUI_DISABLE_DIRECT_COMPOSITION=true` before starting GPUI so this child-view approach renders. This is an example-specific requirement, not a general GPUI setting recommendation. |
 
-When an overlay must be visible, place the WebView in a separate window or arrange the screen so the overlay does not cross its bounds. This restriction applies to the default backend, Windows, and Linux; macOS with `gpui-fast` supports deferred GPUI overlays through native composition.
+When an overlay must be visible, place the WebView in a separate window or arrange the screen so the overlay does not cross its bounds. This restriction applies to the default backend and Windows; macOS and Linux with `gpui-fast` support deferred GPUI overlays through native composition.
 
 ## Unmerged composition experiments
 

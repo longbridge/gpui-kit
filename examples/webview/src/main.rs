@@ -1,6 +1,10 @@
 use gpui_kit::component::{
-    ActiveTheme as _, h_flex,
+    ActiveTheme as _, IconName, WindowExt as _,
+    button::{Button, ButtonVariants as _},
+    h_flex,
     input::{Input, InputEvent, InputState},
+    menu::{DropdownMenu as _, PopupMenuItem},
+    popover::Popover,
     v_flex,
 };
 use gpui_kit::*;
@@ -59,10 +63,15 @@ impl Example {
         self.webview.update(cx, |webview, _| webview.hide())
     }
 
-    #[allow(unused)]
-    fn go_back(&mut self, _: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn go_back(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.webview.update(cx, |webview, _| {
             webview.back().unwrap();
+        });
+    }
+
+    fn go_forward(&mut self, _: &ClickEvent, _: &mut Window, cx: &mut Context<Self>) {
+        self.webview.update(cx, |webview, _| {
+            webview.forward().unwrap();
         });
     }
 }
@@ -85,7 +94,65 @@ impl Render for Example {
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .child(Input::new(&self.address_input)),
+                    .child(
+                        Button::new("back")
+                            .ghost()
+                            .icon(IconName::ChevronLeft)
+                            .on_click(cx.listener(Self::go_back)),
+                    )
+                    .child(
+                        Button::new("forward")
+                            .ghost()
+                            .icon(IconName::ChevronRight)
+                            .on_click(cx.listener(Self::go_forward)),
+                    )
+                    .child(Input::new(&self.address_input))
+                    // Overlays that open above the WebView, to verify they are not covered.
+                    .child(
+                        Popover::new("popover")
+                            .trigger(Button::new("popover-trigger").outline().label("Popover"))
+                            .w(px(320.))
+                            .h(px(240.))
+                            .child("This popover should render above the WebView."),
+                    )
+                    .child(
+                        Button::new("menu-trigger")
+                            .outline()
+                            .label("Menu")
+                            .dropdown_menu({
+                                let webview = self.webview.clone();
+                                move |menu, _, _| {
+                                    let reload = webview.clone();
+                                    menu.item(PopupMenuItem::new("Reload").on_click(
+                                        move |_, _, cx| {
+                                            let _ = reload.read(cx).raw().reload();
+                                        },
+                                    ))
+                                    .separator()
+                                    .item(
+                                        PopupMenuItem::new("About").on_click(|_, window, cx| {
+                                            window.open_dialog(cx, |dialog, _, _| {
+                                                dialog.title("About").child(
+                                                    "A WebView embedded in a GPUI Kit window.",
+                                                )
+                                            });
+                                        }),
+                                    )
+                                }
+                            }),
+                    )
+                    .child(
+                        Button::new("dialog-trigger")
+                            .outline()
+                            .label("Dialog")
+                            .on_click(|_, window, cx| {
+                                window.open_dialog(cx, |dialog, _, _| {
+                                    dialog
+                                        .title("Dialog")
+                                        .child("This dialog should render above the WebView.")
+                                });
+                            }),
+                    ),
             )
             .child(
                 div()
