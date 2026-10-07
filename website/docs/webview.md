@@ -48,7 +48,7 @@ div().flex_1().child(webview.clone())
 
 Enable `gpui-fast` on both `gpui-kit` and `gpui-webview` to select one backend. On macOS, the existing `WebView::new()` automatically registers the WKWebView in the window composition tree. On Linux, `WebView::build()` builds the view in a composition surface, an X11 child window that GPUI cuts the overlays above it out of. Deferred GPUI overlays can then render above the page. No separate composition feature is needed. The default backend and Windows retain the existing native child-view behavior.
 
-A cutout can only replace page pixels, so on Linux shadows and translucent content, such as a dialog's backdrop, need a compositing manager to blend them over the page; GPUI Fast versions with X11 overlay windows draw that content into a transparent window above the page. Without one, shadows over the page are not drawn and a dialog's backdrop hides the page.
+On Linux, GPUI Fast draws shadows and translucent content, such as a dialog's backdrop, into a transparent window above the page, which the compositing manager blends over it; XWayland always has one. On an X11 desktop without a compositing manager, overlays are cut out of the page instead: shadows over the page are not drawn and a dialog's backdrop hides the page.
 
 Use `WebView::set_bounds(Rect) -> wry::Result<()>` for window-relative bounds and `WebView::set_visible(bool) -> wry::Result<()>` for visibility. They coordinate the managed container and its Wry child; raw Wry calls bypass that coordination. `show()` and `hide()` remain convenience methods that discard errors. If composition registration fails, construction logs the error and keeps the original attachment. Verify native overlay input and repeated resizing in a real window.
 

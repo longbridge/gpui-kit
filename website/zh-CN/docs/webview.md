@@ -48,7 +48,7 @@ div().flex_1().child(webview.clone())
 
 在 `gpui-kit` 和 `gpui-webview` 上同时启用 `gpui-fast`，让两者使用同一个后端。macOS 上，现有 `WebView::new()` 会自动把 WKWebView 注册到窗口合成树。Linux 上，`WebView::build()` 会把视图建在合成 surface 中，即一个 X11 子窗口，GPUI 会把位于其上方的浮层区域从中挖空。这样延后绘制的 GPUI 浮层就能显示在网页上方，无需新增合成 feature。默认后端和 Windows 保留原生子视图的行为。
 
-挖空只能替换网页像素，因此在 Linux 上，阴影和半透明内容（例如 dialog 的遮罩）需要窗口合成器才能叠加到网页上；带 X11 浮层窗口的 GPUI Fast 版本会把这些内容画进网页上方的透明窗口。没有合成器时，网页上方的阴影不会绘制，dialog 的遮罩会遮住网页。
+在 Linux 上，GPUI Fast 会把阴影和半透明内容（例如 dialog 的遮罩）画进网页上方的透明窗口，由窗口合成器叠加到网页上；XWayland 下始终有合成器。在没有窗口合成器的 X11 桌面上，浮层改为从网页中挖空：网页上方的阴影不会绘制，dialog 的遮罩会遮住网页。
 
 窗口坐标下的尺寸和位置使用 `WebView::set_bounds(Rect) -> wry::Result<()>`；显隐使用 `WebView::set_visible(bool) -> wry::Result<()>`。这两个方法会同步合成容器和 Wry 子视图，直接调用原始 Wry 对象会绕过同步。`show()`、`hide()` 仍是忽略错误的便捷方法。合成注册失败时，构造方法记录错误并保留原来的挂载方式。浮层点击和反复调整尺寸必须在真实窗口中验证。
 
