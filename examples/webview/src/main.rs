@@ -4,7 +4,7 @@ use gpui_kit::component::{
     v_flex,
 };
 use gpui_kit::*;
-use gpui_wry::WebView;
+use gpui_webview::WebView;
 
 pub struct Example {
     focus_handle: FocusHandle,
@@ -19,36 +19,7 @@ impl Example {
             #[cfg(any(debug_assertions, feature = "inspector"))]
             let builder = builder.with_devtools(true);
 
-            #[cfg(not(any(
-                target_os = "windows",
-                target_os = "macos",
-                target_os = "ios",
-                target_os = "android"
-            )))]
-            let webview = {
-                use gtk::prelude::*;
-                use wry::WebViewBuilderExtUnix;
-                // borrowed from https://github.com/tauri-apps/wry/blob/dev/examples/gtk_multiwebview.rs
-                // doesn't work yet
-                // TODO: How to initialize this fixed?
-                let fixed = gtk::Fixed::builder().build();
-                fixed.show_all();
-                builder.build_gtk(&fixed).unwrap()
-            };
-            #[cfg(any(
-                target_os = "windows",
-                target_os = "macos",
-                target_os = "ios",
-                target_os = "android"
-            ))]
-            let webview = {
-                use raw_window_handle::HasWindowHandle;
-
-                let window_handle = window.window_handle().expect("No window handle");
-                builder.build_as_child(&window_handle).unwrap()
-            };
-
-            WebView::new(webview, window, cx)
+            WebView::build(builder, window, cx).expect("Failed to create WebView")
         });
 
         let address_input =
@@ -134,7 +105,13 @@ fn main() {
         std::env::set_var("GPUI_DISABLE_DIRECT_COMPOSITION", "true");
     }
 
-    gpui_kit::application().run(move |cx| {
+    // WebKitGTK embeds only into X11 windows, so use XWayland in a Wayland session.
+    #[cfg(target_os = "linux")]
+    let app = gpui_kit::platform::linux(WindowingModes::X11);
+    #[cfg(not(target_os = "linux"))]
+    let app = gpui_kit::application();
+
+    app.run(move |cx| {
         // This must be called before using any GPUI Component features.
         gpui_kit::init(cx);
 

@@ -5060,12 +5060,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "gpui-wry"
+name = "gpui-webview"
 version = "0.7.1"
 dependencies = [
  "anyhow",
  "gpui-fast",
  "gpui-pre",
+ "gtk",
  "lb-wry",
  "log",
  "objc2 0.6.4",
@@ -12460,10 +12461,8 @@ version = "0.7.1"
 dependencies = [
  "anyhow",
  "gpui-kit",
- "gpui-wry",
- "gtk",
+ "gpui-webview",
  "lb-wry",
- "raw-window-handle",
 ]
 
 [[package]]

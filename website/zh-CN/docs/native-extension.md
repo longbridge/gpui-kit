@@ -7,9 +7,9 @@ maturity: [platform-dependent]
 
 # Native Extensions
 
-Native extension 是把操作系统控件或视图接入 GPUI window。本仓库有两条具体路径：[NativeMenu](https://github.com/longbridge/gpui-kit/tree/main/crates/component/src/native_menu) 使用系统菜单 API，[gpui-wry](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) 嵌入原生 WebView。两者都跨越 GPUI 与系统的边界；启动另一个应用不属于这里讨论的原生控件接入。
+Native extension 是把操作系统控件或视图接入 GPUI window。本仓库有两条具体路径：[NativeMenu](https://github.com/longbridge/gpui-kit/tree/main/crates/component/src/native_menu) 使用系统菜单 API，[gpui-webview](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) 嵌入原生 WebView。两者都跨越 GPUI 与系统的边界；启动另一个应用不属于这里讨论的原生控件接入。
 
-当弹出菜单需要超出小窗口边界，或应遵循系统菜单外观时，使用 `NativeMenu`；若菜单应参与 GPUI 自身的 overlay 合成，使用 GPUI `PopupMenu`。只有屏幕确实需要浏览器引擎，并能为原生子视图留出一块矩形区域时，才使用 `gpui-wry`。[TextView HTML](../component/text-view.md#html) 用于显示文档内容，[`cx.open_url`](./context#在默认浏览器中打开-url) 会打开用户的默认浏览器。`gpui-wry` 仍属实验性功能。
+当弹出菜单需要超出小窗口边界，或应遵循系统菜单外观时，使用 `NativeMenu`；若菜单应参与 GPUI 自身的 overlay 合成，使用 GPUI `PopupMenu`。只有屏幕确实需要浏览器引擎，并能为原生子视图留出一块矩形区域时，才使用 `gpui-webview`。[TextView HTML](../component/text-view.md#html) 用于显示文档内容，[`cx.open_url`](./context#在默认浏览器中打开-url) 会打开用户的默认浏览器。`gpui-webview` 仍属实验性功能。
 
 | 平台 | NativeMenu | 本仓库的嵌入式 WebView |
 | --- | --- | --- |
@@ -27,7 +27,7 @@ Linux 的菜单回退实现保持 `NativeMenu` API，但内容由 GPUI 绘制，
 | --- | --- | --- |
 | 菜单公共 API 与平台选择 | `gpui-component` crate 中的 `crates/component/src/native_menu/mod.rs` | `cargo check -p gpui-component`；`cargo test -p gpui-component native_menu` 检查 builder 和图标测试 |
 | AppKit、Win32 菜单 adapter 与 GPUI 回退实现 | `crates/component/src/native_menu/{macos,windows,fallback}.rs`；回退 overlay 由 `crates/component/src/root.rs` 持有 | `cargo run -p gpui-component-story`，然后在目标系统中打开 **NativeMenu** story |
-| Wry wrapper 与自定义 element | `gpui-wry` crate 中的 `crates/webview/src/lib.rs` | `cargo check -p gpui-wry` 检查当前目标平台的 wrapper |
+| Wry wrapper 与自定义 element | `gpui-webview` crate 中的 `crates/webview/src/lib.rs` | `cargo check -p gpui-webview` 检查当前目标平台的 wrapper |
 | 子视图创建与 renderer 设置 | `examples/webview/src/main.rs`，依赖定义在 `examples/webview/Cargo.toml` | 在 macOS 或 Windows 上运行 `cargo run -p webview` |
 
 Cargo 只检查当前目标平台的 `#[cfg]` 分支；在 Linux 上构建不会验证 AppKit 或 Win32 adapter。story 和 WebView 例子需要图形桌面环境及平台原生库。Linux WebView 分支即使编译成功，也不是可用的 GPUI 宿主实现。
@@ -36,7 +36,7 @@ Cargo 只检查当前目标平台的 `#[cfg]` 分支；在 Linux 上构建不会
 
 对于**平台菜单集成**，应将共享的 GPUI API 与平台 adapter 分开。`NativeMenu::show(position, window, cx)` 在[共享 module](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/native_menu/mod.rs)中选择 macOS、Windows 或 Linux 回退实现。原生 adapter 创建和操作系统菜单，再通过 GPUI 返回所选 Action。
 
-对于**嵌入式子视图**，原生内容会持续占据 GPUI layout 区域。像 [`gpui-wry::WebView`](https://github.com/longbridge/gpui-kit/blob/main/crates/webview/src/lib.rs) 一样，把它交给 `Entity` 持有。owner 负责 show/hide、Focus、bounds，并确保父窗口关闭前完成销毁。
+对于**嵌入式子视图**，原生内容会持续占据 GPUI layout 区域。像 [`gpui-webview::WebView`](https://github.com/longbridge/gpui-kit/blob/main/crates/webview/src/lib.rs) 一样，把它交给 `Entity` 持有。owner 负责 show/hide、Focus、bounds，并确保父窗口关闭前完成销毁。
 
 ## 2. 取得正确的 window handle
 
@@ -103,21 +103,16 @@ NativeMenu::new()
 
 ```rust
 let webview = cx.new(|cx| {
-    use raw_window_handle::HasWindowHandle;
-
-    let handle = window.window_handle().expect("No window handle");
-    let native = wry::WebViewBuilder::new()
-        .build_as_child(&handle)
-        .expect("Failed to create WebView");
-    gpui_wry::WebView::new(native, window, cx)
+    gpui_webview::WebView::build(wry::WebViewBuilder::new(), window, cx)
+        .expect("Failed to create WebView")
 });
 ```
 
-wrapper 在普通 GPUI element tree 中渲染一个自定义 `Element`。`request_layout` 占据 layout 区域；`prepaint` 得到计算好的 `Bounds<Pixels>`，以逻辑坐标调用 Wry 的 `set_bounds`，并插入 GPUI hitbox。`paint` 注册点击外部时的 Focus 行为。**WebView 像素由系统子视图绘制，不由 GPUI 绘制。** GPUI 的 `ContentMask` 或 hitbox 不会改变它在系统 compositor 中的层级。owner drop 时隐藏原生视图；克隆的 `WebViewHandle` 应在父窗口销毁前释放。
+wrapper 在普通 GPUI element tree 中渲染一个自定义 `Element`。`request_layout` 占据 layout 区域；`prepaint` 得到计算好的 `Bounds<Pixels>`，调用 Wry 的 `set_bounds`（macOS 和 Windows 使用逻辑坐标，Linux 使用设备像素），并插入 GPUI hitbox。`paint` 注册点击外部时的 Focus 行为。**WebView 像素由系统子视图绘制，不由 GPUI 绘制。** GPUI 的 `ContentMask` 或 hitbox 不会改变它在系统 compositor 中的层级。owner drop 时隐藏原生视图；克隆的 `WebViewHandle` 应在父窗口销毁前释放。
 
-当前 WebView 位于同区域 GPUI 内容之上，因此 GPUI popover、dialog、tooltip 无法可靠覆盖它。Windows 例子在 `gpui_kit::application()` 之前设置 `GPUI_DISABLE_DIRECT_COMPOSITION=true`，以支持这条子视图路径。Linux 例子中的 GTK 路径标记为未完成。用法与限制详见 [WebView](./webview)。
+当前 WebView 位于同区域 GPUI 内容之上，因此 GPUI popover、dialog、tooltip 无法可靠覆盖它。Windows 例子在 `gpui_kit::application()` 之前设置 `GPUI_DISABLE_DIRECT_COMPOSITION=true`，以支持这条子视图路径。Linux 例子用 `gpui_kit::platform::linux(WindowingModes::X11)` 启动，让窗口运行在 X11 或 XWayland 上。用法与限制详见 [WebView](./webview)。
 
-在 Linux 上，例子引入 `gtk` 和 Wry 的 `WebViewBuilderExtUnix`，创建 `gtk::Fixed`，再调用 `build_gtk(&fixed)`。源码本身标记宿主初始化未完成：创建 GTK widget **不会**自动将它附着到 GPUI 的 XCB 或 Wayland window。当前固定版本的 GPUI Linux backend 在 X11 使用 `x11rb` 的 `configure_window` 等调用，在 Wayland 使用 `wayland-client` 的 `WlSurface::commit`。Linux adapter 需要接入对应 backend 的 connection 与 event loop，管理 surface 生命周期，并安排输入和 compositor 顺序；只有 raw `XcbWindowHandle` 或 `WaylandWindowHandle` 无法完成这些工作。当前 `gpui-wry` 例子无法作为最后这一步的可运行模板。
+在 Linux 上，Wry 的 WebKitGTK 视图是一个 GTK widget，因此 `WebView::build` 会以 X11 后端初始化 GTK，并由一个 GPUI task 分发待处理的 GTK 事件。GPUI 的 X11 backend 提供的是 `XcbWindowHandle`，而 Wry 只接受 Xlib 父窗口；两者指向同一个 X11 window，所以 adapter 把 window ID 转成 `XlibWindowHandle` 传入。Wry 随后在 GPUI 窗口下创建一个 X11 子窗口，把 GTK 视图放入其中。Wry 按 GDK 的缩放倍率换算 bounds，与 GPUI 的倍率无关，因此 Linux 上 wrapper 传入设备像素。Wayland 没有对应机制：GTK 无法嵌入其他工具包持有的 `wl_surface`，所以 Wayland 窗口会返回错误。
 
 ## 5. 实现其他原生控件
 
@@ -128,7 +123,7 @@ wrapper 在普通 GPUI element tree 中渲染一个自定义 `Element`。`reques
 
 ## 调试与验证原生边界
 
-先在目标机器运行 `cargo check -p gpui-component` 或 `cargo check -p gpui-wry`。再运行上面的 NativeMenu story 或 WebView 例子，分别检查普通与高缩放倍率下的行为。Cargo 检查成功仅说明当前目标平台通过类型检查；它不会链接或运行应用，也不能证明原生输入和层级正确。
+先在目标机器运行 `cargo check -p gpui-component` 或 `cargo check -p gpui-webview`。再运行上面的 NativeMenu story 或 WebView 例子，分别检查普通与高缩放倍率下的行为。Cargo 检查成功仅说明当前目标平台通过类型检查；它不会链接或运行应用，也不能证明原生输入和层级正确。
 
 | 现象 | 在本仓库中检查 |
 | --- | --- |
@@ -142,4 +137,4 @@ wrapper 在普通 GPUI element tree 中渲染一个自定义 `Element`。`reques
 
 ### 合成边界
 
-当前 checkout 的 `gpui-wry` wrapper 没有提供让 GPUI overlay 覆盖其原生子视图的 API。应把 overlay 交互放在 WebView bounds 之外，或使用单独的窗口。当前行为见 [WebView](./webview)；若要依赖实验性 GPUI 合成分支，须另行验证。
+当前 checkout 的 `gpui-webview` wrapper 没有提供让 GPUI overlay 覆盖其原生子视图的 API。应把 overlay 交互放在 WebView bounds 之外，或使用单独的窗口。当前行为见 [WebView](./webview)；若要依赖实验性 GPUI 合成分支，须另行验证。

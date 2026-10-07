@@ -7,9 +7,9 @@ maturity: [platform-dependent]
 
 # Native Extensions
 
-A native extension attaches an OS control or view to a GPUI window. The two concrete integrations in this repository show different paths: [NativeMenu](https://github.com/longbridge/gpui-kit/tree/main/crates/component/src/native_menu) uses the operating system's menu API, while [gpui-wry](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) embeds a native WebView. Both cross the GPUI/OS boundary; neither is implemented by launching another application.
+A native extension attaches an OS control or view to a GPUI window. The two concrete integrations in this repository show different paths: [NativeMenu](https://github.com/longbridge/gpui-kit/tree/main/crates/component/src/native_menu) uses the operating system's menu API, while [gpui-webview](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) embeds a native WebView. Both cross the GPUI/OS boundary; neither is implemented by launching another application.
 
-Use `NativeMenu` when a popup must escape a small window's bounds or follow the system menu appearance. Use the GPUI `PopupMenu` when the menu needs to participate in GPUI's own overlay composition. Use `gpui-wry` only when the screen needs an actual browser engine and can reserve a rectangle for a native child view; [TextView HTML](../component/text-view.md#html) handles document display, and [`cx.open_url`](./context#open-a-url-in-the-default-browser) opens the user's browser. `gpui-wry` is experimental.
+Use `NativeMenu` when a popup must escape a small window's bounds or follow the system menu appearance. Use the GPUI `PopupMenu` when the menu needs to participate in GPUI's own overlay composition. Use `gpui-webview` only when the screen needs an actual browser engine and can reserve a rectangle for a native child view; [TextView HTML](../component/text-view.md#html) handles document display, and [`cx.open_url`](./context#open-a-url-in-the-default-browser) opens the user's browser. `gpui-webview` is experimental.
 
 | Platform | NativeMenu | Embedded WebView in this repository |
 | --- | --- | --- |
@@ -27,7 +27,7 @@ The workspace pins `gpui-pre` to `={{gpui_pre_version}}` in the root `Cargo.toml
 | --- | --- | --- |
 | Shared menu API and platform selection | `crates/component/src/native_menu/mod.rs` in the `gpui-component` crate | `cargo check -p gpui-component`; `cargo test -p gpui-component native_menu` checks its builder and icon tests |
 | AppKit and Win32 menu adapters; GPUI fallback | `crates/component/src/native_menu/{macos,windows,fallback}.rs`; fallback overlay ownership is in `crates/component/src/root.rs` | `cargo run -p gpui-component-story`, then open the **NativeMenu** story on the target OS |
-| Wry wrapper and custom element | `crates/webview/src/lib.rs` in the `gpui-wry` crate | `cargo check -p gpui-wry` checks the wrapper for the current target |
+| Wry wrapper and custom element | `crates/webview/src/lib.rs` in the `gpui-webview` crate | `cargo check -p gpui-webview` checks the wrapper for the current target |
 | Child-view creation and renderer setup | `examples/webview/src/main.rs` with dependencies in `examples/webview/Cargo.toml` | `cargo run -p webview` on macOS or Windows |
 
 Cargo checks only the current target's `#[cfg]` branch; a Linux build does not validate the AppKit or Win32 adapter. The story and WebView example require a graphical desktop and native platform libraries. The Linux WebView branch may compile but is not a working GPUI host.
@@ -36,7 +36,7 @@ Cargo checks only the current target's `#[cfg]` branch; a Linux build does not v
 
 For **platform menu integration**, keep the shared GPUI-facing API separate from platform adapters. `NativeMenu::show(position, window, cx)` chooses its macOS, Windows, or Linux fallback implementation in [the shared module](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/native_menu/mod.rs). Its native adapters create and operate the system menu, then send the selected action back through GPUI.
 
-For an **embedded child view**, native content occupies a GPUI layout slot across frames. Own it in an `Entity`, as [`gpui-wry::WebView`](https://github.com/longbridge/gpui-kit/blob/main/crates/webview/src/lib.rs) does. The owner must control show/hide, focus, bounds, and destruction before the parent window closes.
+For an **embedded child view**, native content occupies a GPUI layout slot across frames. Own it in an `Entity`, as [`gpui-webview::WebView`](https://github.com/longbridge/gpui-kit/blob/main/crates/webview/src/lib.rs) does. The owner must control show/hide, focus, bounds, and destruction before the parent window closes.
 
 ## 2. Obtain the right window handle
 
@@ -103,21 +103,16 @@ The [WebView example](https://github.com/longbridge/gpui-kit/blob/main/examples/
 
 ```rust
 let webview = cx.new(|cx| {
-    use raw_window_handle::HasWindowHandle;
-
-    let handle = window.window_handle().expect("No window handle");
-    let native = wry::WebViewBuilder::new()
-        .build_as_child(&handle)
-        .expect("Failed to create WebView");
-    gpui_wry::WebView::new(native, window, cx)
+    gpui_webview::WebView::build(wry::WebViewBuilder::new(), window, cx)
+        .expect("Failed to create WebView")
 });
 ```
 
-The wrapper renders a custom `Element` in the normal GPUI tree. `request_layout` reserves the slot; `prepaint` receives its resolved `Bounds<Pixels>` and calls Wry's `set_bounds` with logical coordinates. It also inserts a GPUI hitbox. `paint` registers outside-click focus behavior. **GPUI does not paint the WebView pixels**: the OS owns that child view. A GPUI `ContentMask` or hitbox does not change its compositor order. The owner hides the native view on drop; cloned `WebViewHandle`s must be released before the parent window is destroyed.
+The wrapper renders a custom `Element` in the normal GPUI tree. `request_layout` reserves the slot; `prepaint` receives its resolved `Bounds<Pixels>` and calls Wry's `set_bounds` (logical coordinates on macOS and Windows, device pixels on Linux). It also inserts a GPUI hitbox. `paint` registers outside-click focus behavior. **GPUI does not paint the WebView pixels**: the OS owns that child view. A GPUI `ContentMask` or hitbox does not change its compositor order. The owner hides the native view on drop; cloned `WebViewHandle`s must be released before the parent window is destroyed.
 
-The current WebView sits above GPUI content in the same rectangle, so GPUI popovers, dialogs, and tooltips cannot reliably cover it. On Windows, the repository example sets `GPUI_DISABLE_DIRECT_COMPOSITION=true` before `gpui_kit::application()` for this child-view route. The Linux GTK path in the example is marked unfinished. Details and usage are in [WebView](./webview).
+The current WebView sits above GPUI content in the same rectangle, so GPUI popovers, dialogs, and tooltips cannot reliably cover it. On Windows, the repository example sets `GPUI_DISABLE_DIRECT_COMPOSITION=true` before `gpui_kit::application()` for this child-view route. On Linux, the example starts with `gpui_kit::platform::linux(WindowingModes::X11)` so the window runs on X11 or XWayland. Details and usage are in [WebView](./webview).
 
-On Linux, the example imports `gtk` and Wry's `WebViewBuilderExtUnix`, creates a `gtk::Fixed`, and calls `build_gtk(&fixed)`. The code itself says the host initialization is unfinished: creating a GTK widget does **not** attach it to GPUI's XCB or Wayland window. GPUI's pinned Linux backend uses `x11rb` calls such as `configure_window` on X11 and `wayland-client`'s `WlSurface::commit` on Wayland. A Linux adapter must use the matching backend's connection and event loop, own its surface, and arrange input and compositor order; the raw `XcbWindowHandle` or `WaylandWindowHandle` alone cannot supply that integration. The current `gpui-wry` example is not a working template for this final step.
+On Linux, Wry's WebKitGTK view is a GTK widget, so `WebView::build` initializes GTK on its X11 backend and dispatches pending GTK events from a GPUI task. GPUI's X11 backend reports an `XcbWindowHandle`, while Wry accepts only an Xlib parent; both name the same X11 window, so the adapter passes the window ID as an `XlibWindowHandle`. Wry then creates a child X11 window under the GPUI window and places the GTK view in it. Wry scales bounds by GDK's factor, which does not follow GPUI's, so the wrapper sends device pixels on Linux. Wayland has no equivalent: GTK cannot embed into a `wl_surface` owned by another toolkit, so a Wayland window returns an error.
 
 ## 5. Build another native control
 
@@ -128,7 +123,7 @@ On Linux, the example imports `gtk` and Wry's `WebViewBuilderExtUnix`, creates a
 
 ## Debug and verify the native boundary
 
-Start with `cargo check -p gpui-component` or `cargo check -p gpui-wry` on the target machine. Run the NativeMenu story or WebView example above, then inspect the behavior at normal and high display scale. A successful Cargo check establishes type checking for that target; it does not link or run the application and cannot establish correct native input or stacking.
+Start with `cargo check -p gpui-component` or `cargo check -p gpui-webview` on the target machine. Run the NativeMenu story or WebView example above, then inspect the behavior at normal and high display scale. A successful Cargo check establishes type checking for that target; it does not link or run the application and cannot establish correct native input or stacking.
 
 | Symptom | Check in this repository |
 | --- | --- |
@@ -142,4 +137,4 @@ When adding an adapter, test opening, cancelling, selecting, resizing, scaling, 
 
 ### Composition boundary
 
-The `gpui-wry` wrapper in this checkout does not provide an API for putting GPUI overlays above its native child view. Keep overlay interactions outside the WebView bounds or use a separate window. See [WebView](./webview) for the current behavior; verify any experimental GPUI composition branch separately before relying on it.
+The `gpui-webview` wrapper in this checkout does not provide an API for putting GPUI overlays above its native child view. Keep overlay interactions outside the WebView bounds or use a separate window. See [WebView](./webview) for the current behavior; verify any experimental GPUI composition branch separately before relying on it.

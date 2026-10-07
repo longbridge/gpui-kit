@@ -1,9 +1,9 @@
 [package]
-name = "gpui-wry"
+name = "gpui-webview"
 description = "WebView support for GPUI, based on Wry."
-keywords = ["webview", "gpui","wry"]
+keywords = ["webview", "gpui", "wry"]
 license = "Apache-2.0"
-documentation = "https://docs.rs/gpui-wry"
+documentation = "https://docs.rs/gpui-webview"
 homepage = "https://gpui-kit.com"
 repository = "https://github.com/longbridge/gpui-kit/tree/main/crates/webview"
 readme = "README.md"
@@ -29,3 +29,6 @@ objc2 = { version = "0.6", optional = true }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView"], optional = true }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"], optional = true }
 log = { version = "0.4", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = "0.18"

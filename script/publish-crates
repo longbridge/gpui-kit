@@ -11,7 +11,7 @@ for package in \
   gpui-base \
   gpui-fps \
   gpui-component \
-  gpui-wry \
+  gpui-webview \
   gpui-kit
 do
   # CI forces colored Cargo output; keep diagnostics plain for matching below.

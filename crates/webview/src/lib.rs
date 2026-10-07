@@ -3,13 +3,12 @@ extern crate gpui_fast as gpui;
 
 #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
 mod composition;
+#[cfg(target_os = "linux")]
+mod linux;
 
 use std::{cell::Cell, ops::Deref, rc::Rc};
 
-use wry::{
-    Rect,
-    dpi::{self, LogicalSize},
-};
+use wry::Rect;
 
 use gpui::{
     App, Bounds, ContentMask, DismissEvent, Element, ElementId, Entity, EventEmitter, FocusHandle,
@@ -78,6 +77,28 @@ impl WebView {
             #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
             composition,
         }
+    }
+
+    /// Build a webview as a child of `window`, performing the platform setup Wry requires.
+    ///
+    /// On Linux the window must run on X11 or XWayland: start the application with
+    /// `gpui_kit::platform::linux(WindowingModes::X11)`. A Wayland window returns an error.
+    /// This also initializes GTK and drives its main loop from GPUI.
+    pub fn build(
+        builder: wry::WebViewBuilder,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> wry::Result<Self> {
+        #[cfg(target_os = "linux")]
+        let webview = {
+            let parent = linux::X11Parent::new(window)?;
+            linux::ensure_gtk(cx)?;
+            builder.build_as_child(&parent)?
+        };
+        #[cfg(not(target_os = "linux"))]
+        let webview = builder.build_as_child(&*window)?;
+
+        Ok(Self::new(webview, window, cx))
     }
 
     /// Set window-relative bounds, including offscreen loading bounds.
@@ -266,16 +287,22 @@ impl Element for WebViewElement {
         if let Some(surface) = &parent.composition {
             surface.set_scale_factor(window.scale_factor());
         }
-        let _ = parent.set_bounds(Rect {
-            size: dpi::Size::Logical(LogicalSize {
-                width: bounds.size.width.into(),
-                height: bounds.size.height.into(),
-            }),
-            position: dpi::Position::Logical(dpi::LogicalPosition::new(
-                bounds.origin.x.into(),
-                bounds.origin.y.into(),
-            )),
-        });
+        #[cfg(target_os = "linux")]
+        let rect = linux::device_bounds(bounds, window.scale_factor());
+        #[cfg(not(target_os = "linux"))]
+        let rect = Rect {
+            size: wry::dpi::LogicalSize::new(
+                f64::from(bounds.size.width),
+                f64::from(bounds.size.height),
+            )
+            .into(),
+            position: wry::dpi::LogicalPosition::new(
+                f64::from(bounds.origin.x),
+                f64::from(bounds.origin.y),
+            )
+            .into(),
+        };
+        let _ = parent.set_bounds(rect);
 
         // Create a hitbox to handle mouse event
         Some(window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal))

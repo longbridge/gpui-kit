@@ -7,7 +7,16 @@ maturity: [experimental, platform-dependent]
 
 # WebView
 
-[`gpui-wry`](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) 是 GPUI Kit 基于 [Wry](https://github.com/tauri-apps/wry) 的**实验性**集成。需要浏览器行为时可以使用它；[TextView HTML](../component/text-view.md#html) 用于渲染文档内容，并不是浏览器。要在默认外部浏览器中打开 URL，使用 [`cx.open_url`](./context)。当前集成支持 macOS 和 Windows。仓库示例中的 Linux 路径尚未完成。
+[`gpui-webview`](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) 是 GPUI Kit 基于 [Wry](https://github.com/tauri-apps/wry) 的**实验性**集成。需要浏览器行为时可以使用它；[TextView HTML](../component/text-view.md#html) 用于渲染文档内容，并不是浏览器。要在默认外部浏览器中打开 URL，使用 [`cx.open_url`](./context)。0.7.1 及更早版本以 `gpui-wry` 发布；升级时把依赖换成 `gpui-webview`，并把 `gpui_wry::` 路径改为 `gpui_webview::`。支持的操作系统和显示服务见[平台支持](#平台支持)。
+
+## 平台支持
+
+| 平台 | 引擎 | 状态 |
+| --- | --- | --- |
+| macOS | WKWebView | 实验性。启用 `gpui-fast` 后，延后绘制的 GPUI 浮层可以显示在网页上方。 |
+| Windows | WebView2 | 实验性。示例关闭了 GPUI 的 DirectComposition，子视图才能正常渲染。 |
+| Linux（X11） | WebKitGTK | 实验性。应用必须以 X11 启动，见 [Linux](#linux)。 |
+| Linux（Wayland） | — | 不支持。请让应用通过 XWayland 以 X11 运行。 |
 
 ## 运行示例
 
@@ -17,20 +26,14 @@ maturity: [experimental, platform-dependent]
 cargo run -p webview
 ```
 
-[完整示例](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs)是可运行的起点：它在 `open_window` 回调中创建原生子视图，把它包装为 `Entity<WebView>`，再放在地址输入框下方渲染。在输入框按 Enter 会调用 `load_url`；示例还包含返回上一页的处理函数。从仓库根目录运行上面的命令。其他应用请参照[示例的依赖配置](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml)：这条集成路径直接依赖 `gpui-kit`、`gpui-wry`、`wry`（package 名为 `lb-wry`）和 `raw-window-handle`。
+[完整示例](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs)是可运行的起点：它在 `open_window` 回调中创建原生子视图，把它包装为 `Entity<WebView>`，再放在地址输入框下方渲染。在输入框按 Enter 会调用 `load_url`；示例还包含返回上一页的处理函数。从仓库根目录运行上面的命令。其他应用请参照[示例的依赖配置](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml)：这条集成路径直接依赖 `gpui-kit`、`gpui-webview` 和 `wry`（package 名为 `lb-wry`）。
 
 ```rust
 use gpui_kit::*;
-use gpui_wry::WebView;
+use gpui_webview::WebView;
 
 let webview = cx.new(|cx| {
-    use raw_window_handle::HasWindowHandle;
-
-    let handle = window.window_handle().expect("No window handle");
-    let native = wry::WebViewBuilder::new()
-        .build_as_child(&handle)
-        .expect("Failed to create WebView");
-    WebView::new(native, window, cx)
+    WebView::build(wry::WebViewBuilder::new(), window, cx).expect("Failed to create WebView")
 });
 
 webview.update(cx, |view, _| view.load_url("https://gpui-kit.com"));
@@ -39,17 +42,43 @@ webview.update(cx, |view, _| view.load_url("https://gpui-kit.com"));
 div().flex_1().child(webview.clone())
 ```
 
-这段代码展示 macOS 和 Windows 的子视图路径。要等 GPUI 提供有效的 `Window` 后才创建原生视图；所属 View 保存 `Entity<WebView>`，让它在多次 render 之间持续存在。完整示例先调用 `gpui_kit::init(cx)` 初始化组件，再通过 `gpui_kit::open_window(...)` 创建窗口。完整的应用启动代码请以链接的源码为准；此片段不是独立的 `main` 函数。
+`WebView::build` 把 Wry 视图挂为 GPUI 窗口的子视图，并完成 Wry 所需的平台初始化；`WebView::new` 仍可包装应用自行创建的 `wry::WebView`。要等 GPUI 提供有效的 `Window` 后才创建原生视图；所属 View 保存 `Entity<WebView>`，让它在多次 render 之间持续存在。完整示例先调用 `gpui_kit::init(cx)` 初始化组件，再通过 `gpui_kit::open_window(...)` 创建窗口。完整的应用启动代码请以链接的源码为准；此片段不是独立的 `main` 函数。
 
 ## GPUI Fast 原生合成
 
-在 `gpui-kit` 和 `gpui-wry` 上同时启用 `gpui-fast`，让两者使用同一个后端。macOS 上，现有 `WebView::new()` 会自动把 WKWebView 注册到窗口合成树，延后绘制的 GPUI 浮层可以显示在网页上方。无需新增合成 feature 或更换构造方法。默认后端和 Windows 保留原生子视图的行为。
+在 `gpui-kit` 和 `gpui-webview` 上同时启用 `gpui-fast`，让两者使用同一个后端。macOS 上，现有 `WebView::new()` 会自动把 WKWebView 注册到窗口合成树，延后绘制的 GPUI 浮层可以显示在网页上方。无需新增合成 feature 或更换构造方法。默认后端和 Windows 保留原生子视图的行为。
 
 窗口坐标下的尺寸和位置使用 `WebView::set_bounds(Rect) -> wry::Result<()>`；显隐使用 `WebView::set_visible(bool) -> wry::Result<()>`。这两个方法会同步合成容器和 Wry 子视图，直接调用原始 Wry 对象会绕过同步。`show()`、`hide()` 仍是忽略错误的便捷方法。合成注册失败时，构造方法记录错误并保留原来的挂载方式。浮层点击和反复调整尺寸必须在真实窗口中验证。
 
+## Linux
+
+Wry 使用 WebKitGTK 渲染，而 GTK 只能嵌入 X11 窗口；Wayland 不允许把一个客户端的 surface 放进另一个客户端的 surface。因此在 Linux 上，使用 `gpui-webview` 的应用必须运行在 X11 上，在 Wayland 会话中即通过 XWayland 运行。GPUI 整个应用只连接一个显示服务，所以这个选择对所有窗口生效，而不只是承载 WebView 的窗口。
+
+用 `gpui_kit::platform::linux(WindowingModes::X11)` 代替 `gpui_kit::application()` 启动应用，示例也是这样做的：
+
+```rust
+use gpui_kit::*;
+
+fn main() {
+    #[cfg(target_os = "linux")]
+    let app = gpui_kit::platform::linux(WindowingModes::X11);
+    #[cfg(not(target_os = "linux"))]
+    let app = gpui_kit::application();
+
+    app.run(|cx| {
+        gpui_kit::init(cx);
+        // 在这里打开窗口并创建 WebView。
+    });
+}
+```
+
+`WebView::build` 在做任何初始化之前，会先检查窗口是否为 X11 窗口。窗口运行在 Wayland 时，它返回说明这一要求的错误，配置不对的应用会在创建时就失败，而不是显示一块空白。窗口是 X11 时，它以 X11 后端初始化 GTK，由一个 GPUI task 分发 GTK 事件，再把视图挂到窗口上。桌面环境需要提供 XWayland，GNOME、KDE Plasma 和 Hyprland 默认都已启用。在分数缩放下，XWayland 窗口可能比原生 Wayland 窗口略模糊，具体取决于 compositor。
+
+构建前需安装 WebKitGTK 4.1 和 GTK 3 的开发包，例如 Debian 和 Ubuntu 的 `libwebkit2gtk-4.1-dev`、Arch Linux 的 `webkit2gtk-4.1`。
+
 ## 视图归属与布局
 
-`WebView::new` 起初把原生 bounds 设为空矩形。渲染 Entity 会安装 GPUI layout element；在 `prepaint` 阶段，该 element 把算出的 bounds 以**逻辑坐标**传给 Wry，并插入 GPUI hitbox。容器必须有实际尺寸。示例使用 `div().flex_1().h(px(400.)).child(self.webview.clone())`。浏览器像素由操作系统绘制，仅靠 GPUI clipping、hitbox 和 content mask 不能让 GPUI 内容盖过子视图；macOS 的 GPUI Fast 后端通过合成树安排浮层顺序。
+`WebView::new` 起初把原生 bounds 设为空矩形。渲染 Entity 会安装 GPUI layout element；在 `prepaint` 阶段，该 element 把算出的 bounds 传给 Wry（macOS 和 Windows 使用逻辑坐标，Linux 使用设备像素），并插入 GPUI hitbox。容器必须有实际尺寸。示例使用 `div().flex_1().h(px(400.)).child(self.webview.clone())`。浏览器像素由操作系统绘制，仅靠 GPUI clipping、hitbox 和 content mask 不能让 GPUI 内容盖过子视图；macOS 的 GPUI Fast 后端通过合成树安排浮层顺序。
 
 每个原生视图保存一个 `Entity<WebView>`，不要在每次 `render` 时重新构建 Wry 视图。包装层的 `visible()` 和 `bounds()` 分别返回保存的可见状态及上次 layout 的 bounds；`show()` 和 `hide()` 改变原生可见性。如果页面或标签不再渲染该 Entity，应在需要消失时明确调用 `hide()`，恢复时调用 `show()`。隐藏期间 `prepaint` 不更新 bounds。
 
@@ -57,7 +86,7 @@ div().flex_1().child(webview.clone())
 
 ## 加载、导航与页面消息
 
-页面策略与回调应在 `build_as_child` **之前**配置到 `wry::WebViewBuilder` 上。它们属于 Wry，不是 `gpui-wry` 事件。仓库固定的 `lb-wry` 版本提供：
+页面策略与回调应在 `build_as_child` **之前**配置到 `wry::WebViewBuilder` 上。它们属于 Wry，不是 `gpui-webview` 事件。仓库固定的 `lb-wry` 版本提供：
 
 | 需求 | Wry API | 含义 |
 | --- | --- | --- |
@@ -90,7 +119,7 @@ let builder = wry::WebViewBuilder::new()
 
 把页面内容视为不可信输入，包括来自自己控制的 URL 的内容。IPC 是应用能力入口：仅接受预期的消息类型与长度；平台提供发送方 origin 时应检查；执行文件、网络或账户操作前还要检查应用层授权。Wry 在 Linux/Android 上对 iframe 的 IPC request URL 使用主 frame URL，因此不能仅凭它确认 iframe 身份。初始化脚本会在新页面执行；固定版本的 Wry 文档指出，即使请求只注入主 frame，Windows 仍会注入子 frame。不要把秘密放进脚本或页面全局变量。
 
-展示远程内容前，应决定下载、外部链接和 `window.open` 的处理策略。Wry 默认的下载开始回调允许下载；如果这不符合应用要求，应配置下载策略。在所属 GPUI View 中维护用户可见的加载和错误状态：`gpui-wry::WebView::load_url` 忽略即时错误，而成功提交请求也可能最终加载失败。分别使用原始 Wry 返回值与页面加载回调作为信号；单靠 `PageLoadEvent::Finished` 或 `load_url` 都不能证明内容成功加载。应为应用能够检测到的失败提供重试入口。
+展示远程内容前，应决定下载、外部链接和 `window.open` 的处理策略。Wry 默认的下载开始回调允许下载；如果这不符合应用要求，应配置下载策略。在所属 GPUI View 中维护用户可见的加载和错误状态：`gpui-webview::WebView::load_url` 忽略即时错误，而成功提交请求也可能最终加载失败。分别使用原始 Wry 返回值与页面加载回调作为信号；单靠 `PageLoadEvent::Finished` 或 `load_url` 都不能证明内容成功加载。应为应用能够检测到的失败提供重试入口。
 
 ## Focus 与生命周期
 
@@ -108,15 +137,15 @@ WebView 及其 handle 应在父窗口销毁前结束生命周期。销毁所属 
 
 | 范围 | 当前行为 |
 | --- | --- |
-| 平台 | macOS 和 Windows 实验性支持。Linux 示例的 GTK hosting 路径尚未完成，不能视为已支持。 |
-| Overlay 层级 | 原生 WebView 位于 GPUI surface 上方，会遮住同一矩形范围内的 GPUI 内容，包括 popover、dialog、menu 和 tooltip。默认后端和 Windows 上，GPUI overlay 无法可靠地显示在它上方。macOS 启用 `gpui-fast` 后，延后绘制的浮层通过原生合成显示在网页上方。 |
+| 平台 | macOS、Windows 和 X11 上的 Linux 为实验性支持。不支持 Wayland；Linux 应用必须以 X11 或 XWayland 启动。 |
+| Overlay 层级 | 原生 WebView 位于 GPUI surface 上方，会遮住同一矩形范围内的 GPUI 内容，包括 popover、dialog、menu 和 tooltip。默认后端、Windows 和 Linux 上，GPUI overlay 无法可靠地显示在它上方。macOS 启用 `gpui-fast` 后，延后绘制的浮层通过原生合成显示在网页上方。 |
 | Windows renderer | 仓库示例在启动 GPUI 前设置 `GPUI_DISABLE_DIRECT_COMPOSITION=true`，以便当前子视图方案正常渲染。这是此示例的要求，不是 GPUI 的通用设置建议。 |
 
-需要显示 overlay 时，可以将 WebView 放在单独窗口，或安排布局使 overlay 不跨过 WebView 的 bounds。这一限制适用于默认后端和 Windows；macOS 启用 `gpui-fast` 后，可通过原生合成支持延后绘制的 GPUI 浮层。
+需要显示 overlay 时，可以将 WebView 放在单独窗口，或安排布局使 overlay 不跨过 WebView 的 bounds。这一限制适用于默认后端、Windows 和 Linux；macOS 启用 `gpui-fast` 后，可通过原生合成支持延后绘制的 GPUI 浮层。
 
 ## 尚未合并的 Composition 尝试
 
-以下 PR 探索 overlay composition。**它们都不属于上文所述的当前 `gpui-wry` 行为。**应用采用实验分支前，应重新核对 PR 状态和实现：
+以下 PR 探索 overlay composition。**它们都不属于上文所述的当前 `gpui-webview` 行为。**应用采用实验分支前，应重新核对 PR 状态和实现：
 
 - [GPUI Kit #2626](https://github.com/longbridge/gpui-kit/pull/2626) 尝试将 GPUI overlay 绘制在原生 WebView 上方。当前分支依赖 [Zed/GPUI #61945](https://github.com/zed-industries/zed/pull/61945)，后者为 deferred GPUI overlay 提供可选的分层 scene。GPUI Kit 这项 PR 验证了 macOS 路径；Windows composition 和 Linux hosting 在该 PR 中仍属于后续工作。
 - [Zed/GPUI #62379](https://github.com/zed-industries/zed/pull/62379) 提出另一套范围更广、可选启用的 `CompositionTree`，用于编排 GPUI 与原生 surface，并带有 macOS 和 Windows 示例。它是 #61945 的替代方案，**不是** GPUI Kit #2626 的依赖。Linux composition 不在这项 PR 的范围内。

@@ -7,7 +7,16 @@ maturity: [experimental, platform-dependent]
 
 # WebView
 
-[`gpui-wry`](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) is GPUI Kit's **experimental** integration with [Wry](https://github.com/tauri-apps/wry). Use it when a screen needs browser behavior; [TextView HTML](../component/text-view.md#html) renders document content but is not a browser. To open a URL in the user's default external browser, use [`cx.open_url`](./context#open-a-url-in-the-default-browser). The integration currently supports macOS and Windows. The Linux path in the repository's example is unfinished.
+[`gpui-webview`](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) is GPUI Kit's **experimental** integration with [Wry](https://github.com/tauri-apps/wry). Use it when a screen needs browser behavior; [TextView HTML](../component/text-view.md#html) renders document content but is not a browser. To open a URL in the user's default external browser, use [`cx.open_url`](./context#open-a-url-in-the-default-browser). Versions up to 0.7.1 were published as `gpui-wry`; replace that dependency with `gpui-webview` and `gpui_wry::` paths with `gpui_webview::`. See [Platform support](#platform-support) for the operating systems and display servers it runs on.
+
+## Platform support
+
+| Platform | Engine | Status |
+| --- | --- | --- |
+| macOS | WKWebView | Experimental. With `gpui-fast`, deferred GPUI overlays can render above the page. |
+| Windows | WebView2 | Experimental. The example disables GPUI's DirectComposition so the child view renders. |
+| Linux (X11) | WebKitGTK | Experimental. The application must start on X11; see [Linux](#linux). |
+| Linux (Wayland) | — | Not supported. Run the application on X11 through XWayland instead. |
 
 ## Run the example
 
@@ -17,20 +26,14 @@ From the repository root:
 cargo run -p webview
 ```
 
-The [complete example](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs) is the runnable starting point. It creates the child view inside the `open_window` callback, wraps it in an `Entity<WebView>`, and renders that Entity below an address input. Enter in the input calls `load_url`; the example also contains a back handler. Run it from the repository root with the command above. For another application, match the dependency versions in [the example manifest](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml): `gpui-kit`, `gpui-wry`, `wry` (package `lb-wry`), and `raw-window-handle` are direct dependencies of this integration.
+The [complete example](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs) is the runnable starting point. It creates the child view inside the `open_window` callback, wraps it in an `Entity<WebView>`, and renders that Entity below an address input. Enter in the input calls `load_url`; the example also contains a back handler. Run it from the repository root with the command above. For another application, match the dependency versions in [the example manifest](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml): `gpui-kit`, `gpui-webview`, and `wry` (package `lb-wry`) are direct dependencies of this integration.
 
 ```rust
 use gpui_kit::*;
-use gpui_wry::WebView;
+use gpui_webview::WebView;
 
 let webview = cx.new(|cx| {
-    use raw_window_handle::HasWindowHandle;
-
-    let handle = window.window_handle().expect("No window handle");
-    let native = wry::WebViewBuilder::new()
-        .build_as_child(&handle)
-        .expect("Failed to create WebView");
-    WebView::new(native, window, cx)
+    WebView::build(wry::WebViewBuilder::new(), window, cx).expect("Failed to create WebView")
 });
 
 webview.update(cx, |view, _| view.load_url("https://gpui-kit.com"));
@@ -39,17 +42,43 @@ webview.update(cx, |view, _| view.load_url("https://gpui-kit.com"));
 div().flex_1().child(webview.clone())
 ```
 
-This excerpt shows the macOS and Windows child-view path. Create the native view only after GPUI supplies a live `Window`, and keep the `Entity<WebView>` in its owning view so it survives renders. The example calls `gpui_kit::init(cx)` before creating component state and uses `gpui_kit::open_window(...)` to create the window. For the complete application setup, use the linked source rather than treating this excerpt as a standalone `main` function.
+`WebView::build` attaches the Wry view as a child of the GPUI window and performs the platform setup Wry needs. `WebView::new` still wraps a `wry::WebView` the application built itself. Create the native view only after GPUI supplies a live `Window`, and keep the `Entity<WebView>` in its owning view so it survives renders. The example calls `gpui_kit::init(cx)` before creating component state and uses `gpui_kit::open_window(...)` to create the window. For the complete application setup, use the linked source rather than treating this excerpt as a standalone `main` function.
 
 ## GPUI Fast native composition
 
-Enable `gpui-fast` on both `gpui-kit` and `gpui-wry` to select one backend. On macOS, the existing `WebView::new()` automatically registers the WKWebView in the window composition tree. Deferred GPUI overlays can then render above it. No separate composition feature or constructor is needed. The default backend and Windows retain the existing native child-view behavior.
+Enable `gpui-fast` on both `gpui-kit` and `gpui-webview` to select one backend. On macOS, the existing `WebView::new()` automatically registers the WKWebView in the window composition tree. Deferred GPUI overlays can then render above it. No separate composition feature or constructor is needed. The default backend and Windows retain the existing native child-view behavior.
 
 Use `WebView::set_bounds(Rect) -> wry::Result<()>` for window-relative bounds and `WebView::set_visible(bool) -> wry::Result<()>` for visibility. They coordinate the managed container and its Wry child; raw Wry calls bypass that coordination. `show()` and `hide()` remain convenience methods that discard errors. If composition registration fails, construction logs the error and keeps the original attachment. Verify native overlay input and repeated resizing in a real window.
 
+## Linux
+
+Wry renders with WebKitGTK, and GTK can only embed into an X11 window; Wayland has no way to place one client's surface inside another's. An application that uses `gpui-webview` must therefore run on X11 on Linux, which means XWayland in a Wayland session. GPUI connects to one display server for the whole application, so this choice covers every window, not only the one hosting the WebView.
+
+Start the application with `gpui_kit::platform::linux(WindowingModes::X11)` instead of `gpui_kit::application()`, as the example does:
+
+```rust
+use gpui_kit::*;
+
+fn main() {
+    #[cfg(target_os = "linux")]
+    let app = gpui_kit::platform::linux(WindowingModes::X11);
+    #[cfg(not(target_os = "linux"))]
+    let app = gpui_kit::application();
+
+    app.run(|cx| {
+        gpui_kit::init(cx);
+        // Open windows and create WebViews here.
+    });
+}
+```
+
+`WebView::build` checks that the window is an X11 window before doing any setup. On a Wayland window it returns an error naming this requirement, so a misconfigured application fails at construction rather than showing a blank area. On X11 it initializes GTK on its X11 backend, dispatches GTK events from a GPUI task, and attaches the view to the window. The desktop must provide XWayland, which GNOME, KDE Plasma, and Hyprland enable by default. Under fractional scaling, an XWayland window may look softer than a native Wayland window, depending on the compositor.
+
+Install the WebKitGTK 4.1 and GTK 3 development packages (for example `libwebkit2gtk-4.1-dev` on Debian and Ubuntu, `webkit2gtk-4.1` on Arch Linux) before building.
+
 ## Own the view and its layout
 
-`WebView::new` initially sets the native bounds to an empty rectangle. Rendering the entity installs a GPUI layout element; during `prepaint`, that element sends its resolved bounds to Wry in **logical coordinates** and inserts a GPUI hitbox. Give the containing region a real size. The example uses `div().flex_1().h(px(400.)).child(self.webview.clone())`. The browser pixels themselves are painted by the operating system, so clipping, hitboxes, and content masks alone do not put GPUI UI above the child view; macOS with GPUI Fast uses the composition tree for overlay order.
+`WebView::new` initially sets the native bounds to an empty rectangle. Rendering the entity installs a GPUI layout element; during `prepaint`, that element sends its resolved bounds to Wry (logical coordinates on macOS and Windows, device pixels on Linux) and inserts a GPUI hitbox. Give the containing region a real size. The example uses `div().flex_1().h(px(400.)).child(self.webview.clone())`. The browser pixels themselves are painted by the operating system, so clipping, hitboxes, and content masks alone do not put GPUI UI above the child view; macOS with GPUI Fast uses the composition tree for overlay order.
 
 Keep one `Entity<WebView>` for each native view. Do not build a new Wry view on each `render`. The wrapper's `visible()` and `bounds()` report its stored visibility and last layout bounds; `show()` and `hide()` change native visibility. If a page or tab no longer renders the entity, explicitly call `hide()` when it should disappear, and `show()` when it returns. `prepaint` skips bounds updates while hidden.
 
@@ -57,7 +86,7 @@ Call wrapper methods through `webview.update(cx, |view, _| ...)` on the GPUI UI 
 
 ## Loading, navigation, and page messages
 
-Configure page policy and callbacks on `wry::WebViewBuilder` **before** `build_as_child`; these are Wry facilities, not `gpui-wry` events. The pinned `lb-wry` version provides:
+Configure page policy and callbacks on `wry::WebViewBuilder` **before** `build_as_child`; these are Wry facilities, not `gpui-webview` events. The pinned `lb-wry` version provides:
 
 | Need | Wry API | Meaning |
 | --- | --- | --- |
@@ -90,7 +119,7 @@ This exact-match check is only an illustration of the callback shape; use parsed
 
 Treat page content as untrusted, including content served from a URL you control. IPC is an application capability: allow only expected message types and payload sizes, check the sender origin where the platform supplies it, and require application authorization before file, network, or account actions. Wry's IPC request URL is the main-frame URL for iframes on Linux/Android, so do not use it alone as iframe identity. Initialization scripts can run on each new page; the pinned Wry documentation says Windows also injects them into subframes, even when main-frame-only is requested. Avoid placing secrets in scripts or page globals.
 
-Decide how downloads, external links, and `window.open` requests are handled before displaying remote content. Wry's default download-start handler allows downloads, so add a download policy if that is inappropriate for the application. Keep user-visible loading and error state in the owning GPUI view: `gpui-wry::WebView::load_url` ignores immediate errors, and a successful request can still lead to a failed page load. Use raw Wry results and page-load callbacks as separate signals; neither `PageLoadEvent::Finished` nor `load_url` alone proves successful content loading. Show a retry path for failures your application detects.
+Decide how downloads, external links, and `window.open` requests are handled before displaying remote content. Wry's default download-start handler allows downloads, so add a download policy if that is inappropriate for the application. Keep user-visible loading and error state in the owning GPUI view: `gpui-webview::WebView::load_url` ignores immediate errors, and a successful request can still lead to a failed page load. Use raw Wry results and page-load callbacks as separate signals; neither `PageLoadEvent::Finished` nor `load_url` alone proves successful content loading. Show a retry path for failures your application detects.
 
 ## Focus and lifetime
 
@@ -108,15 +137,15 @@ For an application smoke test on each supported OS, exercise initial load, links
 
 | Area | Current behavior |
 | --- | --- |
-| Platforms | Experimental macOS and Windows support. The Linux example contains an unfinished GTK hosting path; do not treat it as supported. |
-| Overlay order | The native WebView sits above the GPUI surface and covers GPUI content in the same rectangle, including popovers, dialogs, menus, and tooltips. With the default backend or on Windows, a GPUI overlay cannot reliably appear on top of it. macOS with `gpui-fast` uses native composition for deferred overlays. |
+| Platforms | Experimental on macOS, Windows, and Linux on X11. Wayland is not supported; Linux applications must start on X11 or XWayland. |
+| Overlay order | The native WebView sits above the GPUI surface and covers GPUI content in the same rectangle, including popovers, dialogs, menus, and tooltips. With the default backend, on Windows, or on Linux, a GPUI overlay cannot reliably appear on top of it. macOS with `gpui-fast` uses native composition for deferred overlays. |
 | Windows renderer | The repository example sets `GPUI_DISABLE_DIRECT_COMPOSITION=true` before starting GPUI so this child-view approach renders. This is an example-specific requirement, not a general GPUI setting recommendation. |
 
-When an overlay must be visible, place the WebView in a separate window or arrange the screen so the overlay does not cross its bounds. This restriction applies to the default backend and Windows; macOS with `gpui-fast` supports deferred GPUI overlays through native composition.
+When an overlay must be visible, place the WebView in a separate window or arrange the screen so the overlay does not cross its bounds. This restriction applies to the default backend, Windows, and Linux; macOS with `gpui-fast` supports deferred GPUI overlays through native composition.
 
 ## Unmerged composition experiments
 
-The following PRs explore overlay composition. **None is part of the current `gpui-wry` behavior described above.** Check their status and implementation before using a branch in an application:
+The following PRs explore overlay composition. **None is part of the current `gpui-webview` behavior described above.** Check their status and implementation before using a branch in an application:
 
 - [GPUI Kit #2626](https://github.com/longbridge/gpui-kit/pull/2626) explores drawing GPUI overlays above the native WebView. Its current branch depends on [Zed/GPUI #61945](https://github.com/zed-industries/zed/pull/61945), an opt-in layered scene for deferred GPUI overlays. The GPUI Kit PR validates the macOS path; Windows composition and Linux hosting remain follow-up work in that PR.
 - [Zed/GPUI #62379](https://github.com/zed-industries/zed/pull/62379) proposes a separate, broader opt-in `CompositionTree` for ordering GPUI and native surfaces, with macOS and Windows examples. It is an alternative to #61945, **not** the dependency of GPUI Kit #2626. Its Linux composition path is outside that PR's scope.
