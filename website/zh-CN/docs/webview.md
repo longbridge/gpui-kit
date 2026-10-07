@@ -41,9 +41,15 @@ div().flex_1().child(webview.clone())
 
 这段代码展示 macOS 和 Windows 的子视图路径。要等 GPUI 提供有效的 `Window` 后才创建原生视图；所属 View 保存 `Entity<WebView>`，让它在多次 render 之间持续存在。完整示例先调用 `gpui_kit::init(cx)` 初始化组件，再通过 `gpui_kit::open_window(...)` 创建窗口。完整的应用启动代码请以链接的源码为准；此片段不是独立的 `main` 函数。
 
+## GPUI Fast 原生合成
+
+在 `gpui-kit` 和 `gpui-wry` 上同时启用 `gpui-fast`，让两者使用同一个后端。macOS 上，现有 `WebView::new()` 会自动把 WKWebView 注册到窗口合成树，延后绘制的 GPUI 浮层可以显示在网页上方。无需新增合成 feature 或更换构造方法。默认后端和 Windows 保留原生子视图的行为。
+
+窗口坐标下的尺寸和位置使用 `WebView::set_bounds(Rect) -> wry::Result<()>`；显隐使用 `WebView::set_visible(bool) -> wry::Result<()>`。这两个方法会同步合成容器和 Wry 子视图，直接调用原始 Wry 对象会绕过同步。`show()`、`hide()` 仍是忽略错误的便捷方法。合成注册失败时，构造方法记录错误并保留原来的挂载方式。浮层点击和反复调整尺寸必须在真实窗口中验证。
+
 ## 视图归属与布局
 
-`WebView::new` 起初把原生 bounds 设为空矩形。渲染 Entity 会安装 GPUI layout element；在 `prepaint` 阶段，该 element 把算出的 bounds 以**逻辑坐标**传给 Wry，并插入 GPUI hitbox。容器必须有实际尺寸。示例使用 `div().flex_1().h(px(400.)).child(self.webview.clone())`。浏览器像素由操作系统绘制，所以 GPUI clipping、hitbox 和 content mask 都不能让 GPUI 内容盖过这个子视图。
+`WebView::new` 起初把原生 bounds 设为空矩形。渲染 Entity 会安装 GPUI layout element；在 `prepaint` 阶段，该 element 把算出的 bounds 以**逻辑坐标**传给 Wry，并插入 GPUI hitbox。容器必须有实际尺寸。示例使用 `div().flex_1().h(px(400.)).child(self.webview.clone())`。浏览器像素由操作系统绘制，仅靠 GPUI clipping、hitbox 和 content mask 不能让 GPUI 内容盖过子视图；macOS 的 GPUI Fast 后端通过合成树安排浮层顺序。
 
 每个原生视图保存一个 `Entity<WebView>`，不要在每次 `render` 时重新构建 Wry 视图。包装层的 `visible()` 和 `bounds()` 分别返回保存的可见状态及上次 layout 的 bounds；`show()` 和 `hide()` 改变原生可见性。如果页面或标签不再渲染该 Entity，应在需要消失时明确调用 `hide()`，恢复时调用 `show()`。隐藏期间 `prepaint` 不更新 bounds。
 
@@ -103,10 +109,10 @@ WebView 及其 handle 应在父窗口销毁前结束生命周期。销毁所属 
 | 范围 | 当前行为 |
 | --- | --- |
 | 平台 | macOS 和 Windows 实验性支持。Linux 示例的 GTK hosting 路径尚未完成，不能视为已支持。 |
-| Overlay 层级 | 原生 WebView 位于 GPUI surface 上方，会遮住同一矩形范围内的 GPUI 内容，包括 popover、dialog、menu 和 tooltip。GPUI overlay 无法可靠地显示在它上方。 |
+| Overlay 层级 | 原生 WebView 位于 GPUI surface 上方，会遮住同一矩形范围内的 GPUI 内容，包括 popover、dialog、menu 和 tooltip。默认后端和 Windows 上，GPUI overlay 无法可靠地显示在它上方。macOS 启用 `gpui-fast` 后，延后绘制的浮层通过原生合成显示在网页上方。 |
 | Windows renderer | 仓库示例在启动 GPUI 前设置 `GPUI_DISABLE_DIRECT_COMPOSITION=true`，以便当前子视图方案正常渲染。这是此示例的要求，不是 GPUI 的通用设置建议。 |
 
-需要显示 overlay 时，可以将 WebView 放在单独窗口，或安排布局使 overlay 不跨过 WebView 的 bounds。当前实现不支持把普通 GPUI overlay 作为可依赖的交互显示在 WebView 上方。
+需要显示 overlay 时，可以将 WebView 放在单独窗口，或安排布局使 overlay 不跨过 WebView 的 bounds。这一限制适用于默认后端和 Windows；macOS 启用 `gpui-fast` 后，可通过原生合成支持延后绘制的 GPUI 浮层。
 
 ## 尚未合并的 Composition 尝试
 

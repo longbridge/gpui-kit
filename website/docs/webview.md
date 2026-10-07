@@ -41,9 +41,15 @@ div().flex_1().child(webview.clone())
 
 This excerpt shows the macOS and Windows child-view path. Create the native view only after GPUI supplies a live `Window`, and keep the `Entity<WebView>` in its owning view so it survives renders. The example calls `gpui_kit::init(cx)` before creating component state and uses `gpui_kit::open_window(...)` to create the window. For the complete application setup, use the linked source rather than treating this excerpt as a standalone `main` function.
 
+## GPUI Fast native composition
+
+Enable `gpui-fast` on both `gpui-kit` and `gpui-wry` to select one backend. On macOS, the existing `WebView::new()` automatically registers the WKWebView in the window composition tree. Deferred GPUI overlays can then render above it. No separate composition feature or constructor is needed. The default backend and Windows retain the existing native child-view behavior.
+
+Use `WebView::set_bounds(Rect) -> wry::Result<()>` for window-relative bounds and `WebView::set_visible(bool) -> wry::Result<()>` for visibility. They coordinate the managed container and its Wry child; raw Wry calls bypass that coordination. `show()` and `hide()` remain convenience methods that discard errors. If composition registration fails, construction logs the error and keeps the original attachment. Verify native overlay input and repeated resizing in a real window.
+
 ## Own the view and its layout
 
-`WebView::new` initially sets the native bounds to an empty rectangle. Rendering the entity installs a GPUI layout element; during `prepaint`, that element sends its resolved bounds to Wry in **logical coordinates** and inserts a GPUI hitbox. Give the containing region a real size. The example uses `div().flex_1().h(px(400.)).child(self.webview.clone())`. The browser pixels themselves are painted by the operating system, so GPUI clipping, hitboxes, and content masks do not put GPUI UI above the child view.
+`WebView::new` initially sets the native bounds to an empty rectangle. Rendering the entity installs a GPUI layout element; during `prepaint`, that element sends its resolved bounds to Wry in **logical coordinates** and inserts a GPUI hitbox. Give the containing region a real size. The example uses `div().flex_1().h(px(400.)).child(self.webview.clone())`. The browser pixels themselves are painted by the operating system, so clipping, hitboxes, and content masks alone do not put GPUI UI above the child view; macOS with GPUI Fast uses the composition tree for overlay order.
 
 Keep one `Entity<WebView>` for each native view. Do not build a new Wry view on each `render`. The wrapper's `visible()` and `bounds()` report its stored visibility and last layout bounds; `show()` and `hide()` change native visibility. If a page or tab no longer renders the entity, explicitly call `hide()` when it should disappear, and `show()` when it returns. `prepaint` skips bounds updates while hidden.
 
@@ -103,10 +109,10 @@ For an application smoke test on each supported OS, exercise initial load, links
 | Area | Current behavior |
 | --- | --- |
 | Platforms | Experimental macOS and Windows support. The Linux example contains an unfinished GTK hosting path; do not treat it as supported. |
-| Overlay order | The native WebView sits above the GPUI surface and covers GPUI content in the same rectangle, including popovers, dialogs, menus, and tooltips. A GPUI overlay cannot reliably appear on top of it. |
+| Overlay order | The native WebView sits above the GPUI surface and covers GPUI content in the same rectangle, including popovers, dialogs, menus, and tooltips. With the default backend or on Windows, a GPUI overlay cannot reliably appear on top of it. macOS with `gpui-fast` uses native composition for deferred overlays. |
 | Windows renderer | The repository example sets `GPUI_DISABLE_DIRECT_COMPOSITION=true` before starting GPUI so this child-view approach renders. This is an example-specific requirement, not a general GPUI setting recommendation. |
 
-When an overlay must be visible, place the WebView in a separate window or arrange the screen so the overlay does not cross its bounds. Do not present a normal GPUI overlay over the WebView as a supported interaction in the current implementation.
+When an overlay must be visible, place the WebView in a separate window or arrange the screen so the overlay does not cross its bounds. This restriction applies to the default backend and Windows; macOS with `gpui-fast` supports deferred GPUI overlays through native composition.
 
 ## Unmerged composition experiments
 

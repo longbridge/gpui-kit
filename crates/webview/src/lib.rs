@@ -1,7 +1,10 @@
 #[cfg(feature = "gpui-fast")]
 extern crate gpui_fast as gpui;
 
-use std::{ops::Deref, rc::Rc};
+#[cfg(all(feature = "gpui-fast", target_os = "macos"))]
+mod composition;
+
+use std::{cell::Cell, ops::Deref, rc::Rc};
 
 use wry::{
     Rect,
@@ -35,45 +38,89 @@ impl WebViewHandle {
 pub struct WebView {
     focus_handle: FocusHandle,
     webview: Rc<wry::WebView>,
-    visible: bool,
+    visible: Cell<bool>,
     bounds: Bounds<Pixels>,
+    #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
+    composition: Option<composition::NativeWebViewSurface>,
 }
 
 impl Drop for WebView {
     fn drop(&mut self) {
         self.hide();
+        #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
+        if let Some(surface) = self.composition.take() {
+            surface.release(self.webview.clone());
+        }
     }
 }
 
 impl WebView {
     /// Create a new WebView from a wry WebView.
-    pub fn new(webview: wry::WebView, _: &mut Window, cx: &mut App) -> Self {
+    pub fn new(webview: wry::WebView, window: &mut Window, cx: &mut App) -> Self {
         let _ = webview.set_bounds(Rect::default());
+
+        #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
+        let composition = match composition::NativeWebViewSurface::new(&webview, window, cx) {
+            Ok(surface) => Some(surface),
+            Err(error) => {
+                log::warn!("WebView composition unavailable: {error:#}");
+                None
+            }
+        };
+        #[cfg(not(all(feature = "gpui-fast", target_os = "macos")))]
+        let _ = window;
 
         Self {
             focus_handle: cx.focus_handle(),
-            visible: true,
+            visible: Cell::new(true),
             bounds: Bounds::default(),
             webview: Rc::new(webview),
+            #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
+            composition,
         }
+    }
+
+    /// Set window-relative bounds, including offscreen loading bounds.
+    /// On macOS with GPUI Fast, position the managed container and its child together.
+    pub fn set_bounds(&self, bounds: Rect) -> wry::Result<()> {
+        #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
+        if let Some(surface) = &self.composition {
+            return surface
+                .set_bounds(&self.webview, bounds)
+                .map_err(|error| wry::Error::Io(std::io::Error::other(error)));
+        }
+        self.webview.set_bounds(bounds)
+    }
+
+    /// Set visibility and report native errors without discarding the loaded page.
+    pub fn set_visible(&self, visible: bool) -> wry::Result<()> {
+        if !visible && self.visible.get() {
+            self.webview.focus_parent()?;
+        }
+        self.webview.set_visible(visible)?;
+        #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
+        if let Some(surface) = &self.composition {
+            surface
+                .set_visible(visible)
+                .map_err(|error| wry::Error::Io(std::io::Error::other(error)))?;
+        }
+        self.visible.set(visible);
+        Ok(())
     }
 
     /// Show the webview.
     pub fn show(&mut self) {
-        let _ = self.webview.set_visible(true);
-        self.visible = true;
+        let _ = self.set_visible(true);
     }
 
     /// Hide the webview.
     pub fn hide(&mut self) {
-        _ = self.webview.focus_parent();
-        _ = self.webview.set_visible(false);
-        self.visible = false;
+        let _ = self.set_visible(false);
     }
 
     /// Get whether the webview is visible.
     pub fn visible(&self) -> bool {
-        self.visible
+        self.visible.get()
     }
 
     /// Get the current bounds of the webview.
@@ -211,7 +258,12 @@ impl Element for WebViewElement {
             return None;
         }
 
-        let _ = self.view.set_bounds(Rect {
+        let parent = self.parent.read(cx);
+        #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
+        if let Some(surface) = &parent.composition {
+            surface.set_scale_factor(window.scale_factor());
+        }
+        let _ = parent.set_bounds(Rect {
             size: dpi::Size::Logical(LogicalSize {
                 width: bounds.size.width.into(),
                 height: bounds.size.height.into(),

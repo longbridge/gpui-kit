@@ -12,7 +12,7 @@ publish = true
 version = "0.7.1"
 
 [features]
-gpui-fast = ["dep:gpui-fast"]
+gpui-fast = ["dep:gpui-fast", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:log"]
 inspector = ["wry/devtools"]
 
 [lib]
@@ -23,3 +23,9 @@ anyhow.workspace = true
 gpui.workspace = true
 gpui-fast = { workspace = true, optional = true }
 wry = { version = "0.53.3", package = "lb-wry" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = { version = "0.6", optional = true }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView"], optional = true }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"], optional = true }
+log = { version = "0.4", optional = true }

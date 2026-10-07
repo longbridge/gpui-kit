@@ -4,10 +4,12 @@ A webview supports for GPUI, based on [Wry](https://github.com/tauri-apps/wry).
 
 This still a experimental with limited features, please file issues for any bugs or missing features.
 
-- The WebView will render on top of the GPUI window, any GPUI elements behind the WebView bounds will be covered.
+- With the default backend, native WebViews render above GPUI content.
+- On macOS, enabling `gpui-fast` makes `WebView::new()` register the native view with window composition so GPUI overlays can render above it. Composition failures are logged and fall back to the default native attachment.
+- Use `WebView::set_bounds()` and `WebView::set_visible()` to keep the managed container and Wry child synchronized. Raw Wry handles bypass this coordination.
 - Only supports macOS and Windows currently.
 
-So, we recommend using the webview in a separate window or in a Popup layer.
+With the default backend or on Windows, use the webview in a separate window or a Popup layer when overlapping GPUI content is required.
 
 ## Run Example
 
