@@ -94,9 +94,12 @@ impl WebView {
 
     /// Set visibility and report native errors without discarding the loaded page.
     pub fn set_visible(&self, visible: bool) -> wry::Result<()> {
-        if !visible && self.visible.get() {
-            self.webview.focus_parent()?;
-        }
+        // A focus error must not leave a closing native view covering the window.
+        let focus_result = if !visible && self.visible.get() {
+            self.webview.focus_parent()
+        } else {
+            Ok(())
+        };
         self.webview.set_visible(visible)?;
         #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
         if let Some(surface) = &self.composition {
@@ -105,7 +108,7 @@ impl WebView {
                 .map_err(|error| wry::Error::Io(std::io::Error::other(error)))?;
         }
         self.visible.set(visible);
-        Ok(())
+        focus_result
     }
 
     /// Show the webview.
