@@ -2991,6 +2991,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-tig"
+version = "0.7.1"
+dependencies = [
+ "gpui-kit",
+]
+
+[[package]]
 name = "exr"
 version = "1.74.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

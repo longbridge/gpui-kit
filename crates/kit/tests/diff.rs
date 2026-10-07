@@ -5,16 +5,16 @@ mod common;
 use gpui_kit::component::{
     button::Button,
     diff::{
-        Diff, DiffAnnotation, DiffFile, DiffLinePosition, DiffLineRange, DiffMode, DiffSide,
-        DiffState,
+        Diff, DiffAnnotation, DiffEvent, DiffFile, DiffLinePosition, DiffLineRange, DiffMode,
+        DiffSide, DiffState,
     },
     input::{Input, InputState},
 };
 use gpui_kit::test::{TestSupportExt as _, TestWindowExt as _};
 use gpui_kit::{
     App, AppContext, Context, Entity, Focusable as _, InputEvent as _, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Role, TestAppContext, Window,
-    WindowHandle, div, point, prelude::*, px, size,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Role, ScrollDelta, TestAppContext,
+    Window, WindowHandle, div, point, prelude::*, px, size,
 };
 
 struct Review {
@@ -39,7 +39,7 @@ impl Render for Review {
                     .flex_1()
                     .min_h_0()
                     .annotations(self.annotations.clone())
-                    .annotation_content(move |_, _, _| {
+                    .render_annotation(move |_, _, _| {
                         div()
                             .id("comment-content")
                             .test_support()
@@ -415,7 +415,7 @@ impl Render for Interactions {
             Diff::new(&self.state)
                 .size_full()
                 .annotations([DiffAnnotation::file("file-note", "review.txt")])
-                .annotation_content(|annotation, _, _| {
+                .render_annotation(|annotation, _, _| {
                     div()
                         .id("note-content")
                         .test_support()
@@ -614,4 +614,90 @@ fn soft_wrap_grows_rows_instead_of_scrolling(cx: &mut TestAppContext) {
         assert!(wrapped.right() <= window.find("review").bounds().right());
     })
     .unwrap();
+}
+
+#[gpui_kit::test]
+fn clearing_gutter_selection_notifies_without_interrupting_shift_extension(
+    cx: &mut TestAppContext,
+) {
+    let (handle, state) = review(
+        cx,
+        "@@ -1,3 +1,3 @@\n one\n-old\n+new\n three\n",
+        None,
+        DiffMode::Split,
+        vec![],
+    );
+    let changes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let _subscription = cx.update(|cx| {
+        let changes = changes.clone();
+        cx.subscribe(&state, move |_, event: &DiffEvent, _| {
+            if let DiffEvent::SelectionChanged(range) = event {
+                changes.borrow_mut().push(range.clone());
+            }
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.within(("old", 0usize)).click(("line", 0usize), cx);
+    })
+    .unwrap();
+    assert_eq!(changes.borrow().len(), 1);
+    cx.update_window(handle.into(), |_, window, cx| {
+        let target = window
+            .within(("old", 2usize))
+            .find(("line", 2usize))
+            .bounds()
+            .center();
+        shift_click(window, target, cx);
+    })
+    .unwrap();
+    assert_eq!(changes.borrow().len(), 2);
+    assert!(changes.borrow().iter().all(Option::is_some));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click("before-diff", cx);
+    })
+    .unwrap();
+    cx.update(|cx| assert!(state.read(cx).selected_lines().is_none()));
+    assert_eq!(changes.borrow().len(), 3);
+    assert!(changes.borrow().last().unwrap().is_none());
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.click("before-diff", cx);
+    })
+    .unwrap();
+    assert_eq!(changes.borrow().len(), 3);
+}
+
+#[gpui_kit::test]
+fn wheel_axes_stay_independent_when_code_overflows_in_both_directions(cx: &mut TestAppContext) {
+    let line = "let long_line = ".repeat(40);
+    let mut patch = String::from("@@ -1,60 +1,60 @@\n");
+    for tag in ['-', '+'] {
+        for ix in 0..60 {
+            patch.push_str(&format!("{tag}{line}{ix}\n"));
+        }
+    }
+    for mode in [DiffMode::Unified, DiffMode::Split] {
+        let (handle, _) = review(cx, &patch, None, mode, vec![]);
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let before = window.within(("old", 10usize)).find("source").bounds();
+            window.scroll(
+                "diff-body",
+                ScrollDelta::Pixels(point(px(0.), px(-100.))),
+                cx,
+            );
+            let vertical = window.within(("old", 10usize)).find("source").bounds();
+            assert!(vertical.top() < before.top());
+            assert_eq!(vertical.left(), before.left());
+            window.scroll(
+                "diff-body",
+                ScrollDelta::Pixels(point(px(-100.), px(0.))),
+                cx,
+            );
+            let horizontal = window.within(("old", 10usize)).find("source").bounds();
+            assert!(horizontal.left() < vertical.left());
+            assert_eq!(horizontal.top(), vertical.top());
+        })
+        .unwrap();
+    }
 }

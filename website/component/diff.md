@@ -20,7 +20,7 @@ whole source file for reference, or a working file with merge conflicts.
 ```rust
 use gpui_kit::*;
 use gpui_kit::component::diff::{
-    Diff, DiffAnnotation, DiffChangeIndicator, DiffFile, DiffHoverHighlight,
+    Diff, DiffAnnotation, DiffChangeIndicator, DiffConflictResolution, DiffFile, DiffHoverHighlight,
     DiffHunkSeparator, DiffInlineUnit, DiffLinePosition, DiffLineRange, DiffMode,
     DiffSide, DiffState,
 };
@@ -54,6 +54,19 @@ Do not parse the patch or recreate its state on every render. Parsing is fast
 (about 15 ms for a 6.5 MB, 200-file patch in a release build); for very large
 patches, parse on a background executor, then install the files only if the
 result still belongs to the current patch revision.
+
+## Git history example
+
+For a complete application, see the [tig example](https://github.com/longbridge/gpui-kit/tree/main/examples/tig).
+It reads local Git history and patches on a background executor, uses virtualized
+commit/file navigation in a resizable sidebar, and displays the selected file
+with one retained `DiffState`. Stale requests cannot overwrite a newer commit.
+The example includes keyboard navigation, source copying, runtime display
+options, loading/error/empty states and a collapsible commit message.
+
+```sh
+cargo run -p example-tig -- /path/to/repository
+```
 
 ## Files
 
@@ -106,6 +119,32 @@ if let Some(text) = state.resolved_text("src/retry.rs") {
 `conflict_resolution(path, ix)` reads one conflict's resolution, and
 `resolve_conflict(path, ix, resolution, cx)` sets or clears it without emitting
 an event. A user's choice emits `DiffEvent::ConflictResolved(path, ix)`.
+
+`DiffFile::conflicts()` returns readonly `DiffConflict` descriptors in working-file
+order. Their slice indices are the `ix` used by resolution methods and events;
+`conflicts().len()` gives the count. `lines()` includes the marker lines;
+`current_lines()`, `base_lines()` and `incoming_lines()` locate each source part.
+These ranges use one-based working-file coordinates with an **exclusive end**,
+so an empty part is represented by `start == end`. `base_lines()` and
+`base_label()` return `None` for a two-way conflict. The labels are available
+through `current_label()`, `base_label()` and `incoming_label()`.
+
+For example, an application command can accept every incoming change without
+parsing the working file again:
+
+```rust
+self.diff.update(cx, |state, cx| {
+    let path = "src/retry.rs";
+    let count = state.files().iter().find(|file| file.path().as_str() == path)
+        .map_or(0, |file| file.conflicts().len());
+    for ix in 0..count {
+        state.resolve_conflict(path, ix, Some(DiffConflictResolution::Incoming), cx);
+    }
+});
+```
+
+`conflict_resolution` returns `None` for an unresolved conflict or an unknown
+file/index; enumerate `conflicts()` to distinguish valid unresolved conflicts.
 
 ## Display mode and context
 
@@ -266,23 +305,35 @@ whitespace is retained for copying; a patch `\ No newline at end of file` marker
 is shown explicitly. Rows are virtualized across all files, including annotation
 height. Diff owns its scrolling; avoid nesting it in another scrolling region.
 
+The `with_*` state builders configure initial values. To change them on the
+retained entity, use `set_expansion_lines`, `set_min_collapsed_lines`,
+`set_inline_unit`, `set_inline_max_line_length` and `set_syntax_max_line_length`.
+These methods notify observers and preserve selection and the nearby source
+position; emphasis changes discard stale preparation and prepare it again.
+
+```rust
+self.diff.update(cx, |state, cx| {
+    state.set_inline_unit(Some(DiffInlineUnit::Character), cx);
+});
+```
+
 ## File headers
 
 The default header shows the collapse control, the path, a rename as
 `old → new`, the addition and deletion counts, and the file status. Three slots
-add application content to it, and `header` replaces its content while keeping
+add application content to it, and `render_header` replaces its content while keeping
 the shell, separator and collapse control:
 
 | Builder | Placement |
 | --- | --- |
-| `header_prefix` | Before the path |
-| `header_title_suffix` | Immediately after the path |
-| `header_suffix` | After the counts and status |
-| `header` | Replaces the content |
+| `render_header_prefix` | Before the path |
+| `render_header_title_suffix` | Immediately after the path |
+| `render_header_suffix` | After the counts and status |
+| `render_header` | Replaces the content |
 
 ```rust
 Diff::new(&self.diff)
-    .header_suffix(|file, _, _| div().child(format!("{} lines", file.additions())))
+    .render_header_suffix(|file, _, _| div().child(format!("{} lines", file.additions())))
     .h(rems(24.))
 ```
 
@@ -292,6 +343,10 @@ and retain their captures for `'static`; they receive an `App`, rather than the
 owning view's `Context`. Construct the content in the callback and update state
 from its event handlers. Do not synchronously read or update the same
 `DiffState` entity inside a render callback.
+
+The earlier names `header`, `header_prefix`, `header_title_suffix`,
+`header_suffix` and `annotation_content` remain available as compatibility
+aliases for the corresponding `render_*` builders.
 
 ## Annotations
 
@@ -310,11 +365,11 @@ let annotations = [
 
 Diff::new(&self.diff)
     .annotations(annotations)
-    .annotation_content(|annotation, _, _| div().child(annotation.id().to_string()))
+    .render_annotation(|annotation, _, _| div().child(annotation.id().to_string()))
     .h(rems(24.))
 ```
 
-Supply both `annotations` and `annotation_content`. The callback receives
+Supply both `annotations` and `render_annotation`. The callback receives
 `&DiffAnnotation`; use `id()`, `path()` and `position()`, which is `None` for a
 file annotation, to find application content. Annotation IDs must be stable and
 unique within the Diff. An annotation on hidden context appears when that source
@@ -339,6 +394,11 @@ Diff::new(&self.diff).on_add_annotation(cx.listener(|this, range: &DiffLineRange
 ```
 
 ## Pointer and keyboard interaction
+
+Wheel axes remain independent: vertical input scrolls the source rows;
+horizontal input (including a platform's Shift+wheel gesture) scrolls long
+lines without moving the vertical position. Soft wrapping removes horizontal
+overflow.
 
 Drag over code to select supplied text on one side of one file, including across
 virtualized or folded available ranges. Unavailable gaps are not selectable.

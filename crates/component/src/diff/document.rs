@@ -2,7 +2,7 @@ use std::{ops::Range, sync::Arc};
 
 use gpui::SharedString;
 
-use super::conflict::Conflict;
+use super::conflict::DiffConflict;
 use smallvec::{SmallVec, smallvec};
 use unicode_segmentation::UnicodeSegmentation as _;
 
@@ -377,7 +377,7 @@ struct DocumentInner {
     /// The patch body in order; each side's lines map back into it.
     patch_lines: Vec<PatchLine>,
     patch_ixs: [Vec<usize>; 2],
-    conflicts: Vec<Conflict>,
+    conflicts: Vec<DiffConflict>,
 }
 
 /// One changed file parsed from a unified or Git diff.
@@ -521,10 +521,11 @@ impl DiffFile {
             DiffFileStatus::Unchanged | DiffFileStatus::Conflicted
         )
     }
-    pub(crate) fn conflicts(&self) -> &[Conflict] {
+    /// Merge conflicts in working-file order; slice indices identify resolutions.
+    pub fn conflicts(&self) -> &[DiffConflict] {
         &self.inner.conflicts
     }
-    pub(crate) fn with_conflicts(mut self, conflicts: Vec<Conflict>) -> Self {
+    pub(crate) fn with_conflicts(mut self, conflicts: Vec<DiffConflict>) -> Self {
         Arc::get_mut(&mut self.inner)
             .expect("a newly built file is not shared")
             .conflicts = conflicts;

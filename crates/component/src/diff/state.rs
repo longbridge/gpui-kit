@@ -312,9 +312,12 @@ impl DiffState {
                                 }
                             }
                             TextSelectionEvent::Cleared => {
-                                // Mouse-down cleanup precedes gutter activation. Retain
-                                // its anchor for Shift-click, without an intermediate event.
-                                state.selected_lines = None;
+                                // A replacement gutter gesture has local selection and
+                                // skips this branch. Keep its anchor for Shift-click,
+                                // but report a clear that leaves no replacement range.
+                                if state.selected_lines.take().is_some() {
+                                    cx.emit(DiffEvent::SelectionChanged(None));
+                                }
                             }
                             _ => {}
                         }
@@ -418,6 +421,60 @@ impl DiffState {
         self.presentation_options.syntax_max_line_length = length;
         self.reset_presentation();
         self
+    }
+
+    /// Changes the number of lines each disclosure reveals, preserving selection and scrolling.
+    pub fn set_expansion_lines(&mut self, lines: usize, cx: &mut Context<Self>) {
+        let lines = lines.max(1);
+        if self.expansion_lines == lines {
+            return;
+        }
+        self.expansion_lines = lines;
+        cx.notify();
+    }
+
+    /// Changes the shortest unchanged range that collapses, preserving selection and scrolling.
+    pub fn set_min_collapsed_lines(&mut self, lines: usize, cx: &mut Context<Self>) {
+        let lines = lines.max(1);
+        if self.min_collapsed_lines == lines {
+            return;
+        }
+        self.min_collapsed_lines = lines;
+        self.rebuild_at_anchor();
+        cx.notify();
+    }
+
+    /// Changes the inline comparison unit without resetting selection or scrolling.
+    pub fn set_inline_unit(&mut self, unit: Option<DiffInlineUnit>, cx: &mut Context<Self>) {
+        if self.presentation_options.inline_unit == unit {
+            return;
+        }
+        self.presentation_options.inline_unit = unit;
+        self.reset_presentation();
+        self.ensure_presentation(cx);
+        cx.notify();
+    }
+
+    /// Changes the inline comparison line limit in bytes without resetting selection or scrolling.
+    pub fn set_inline_max_line_length(&mut self, length: usize, cx: &mut Context<Self>) {
+        if self.presentation_options.inline_max_line_length == length {
+            return;
+        }
+        self.presentation_options.inline_max_line_length = length;
+        self.reset_presentation();
+        self.ensure_presentation(cx);
+        cx.notify();
+    }
+
+    /// Changes the syntax emphasis line limit in bytes without resetting selection or scrolling.
+    pub fn set_syntax_max_line_length(&mut self, length: usize, cx: &mut Context<Self>) {
+        if self.presentation_options.syntax_max_line_length == length {
+            return;
+        }
+        self.presentation_options.syntax_max_line_length = length;
+        self.reset_presentation();
+        self.ensure_presentation(cx);
+        cx.notify();
     }
 
     /// The files in patch order.
@@ -582,12 +639,15 @@ impl DiffState {
     }
 
     /// The resolution of conflict `ix` in the file at `path`, if any.
+    /// Use [`DiffFile::conflicts`] to enumerate valid indices; `None` means
+    /// unresolved, or that the file or index does not exist.
     pub fn conflict_resolution(&self, path: &str, ix: usize) -> Option<DiffConflictResolution> {
         let file = &self.files[self.file_ix(path)?];
         self.resolutions.get(&(file.path().clone(), ix)).copied()
     }
 
-    /// Resolves conflict `ix` in the file at `path`, or clears its resolution
+    /// Resolves conflict `ix` (an index in [`DiffFile::conflicts`]) in the file
+    /// at `path`, or clears its resolution
     /// with `None`, without emitting a user event.
     pub fn resolve_conflict(
         &mut self,
@@ -626,7 +686,7 @@ impl DiffState {
         let mut ix = 0;
         for (conflict_ix, conflict) in file.conflicts().iter().enumerate() {
             let resolution = *self.resolutions.get(&(file.path().clone(), conflict_ix))?;
-            for line in &lines[ix..conflict.lines().start] {
+            for line in &lines[ix..conflict.source_lines().start] {
                 text.push_str(&source[line.source()]);
             }
             for range in conflict.kept(resolution) {
@@ -634,7 +694,7 @@ impl DiffState {
                     text.push_str(&source[line.source()]);
                 }
             }
-            ix = conflict.lines().end;
+            ix = conflict.source_lines().end;
         }
         for line in &lines[ix..] {
             text.push_str(&source[line.source()]);
@@ -1613,7 +1673,7 @@ fn project_conflicts(
     let mut ix = 0;
     while ix < visible.len() {
         if let Some(conflict) = conflicts.get(next)
-            && conflict.lines().start == ix
+            && conflict.source_lines().start == ix
         {
             match resolutions[next] {
                 None => {
@@ -1643,7 +1703,7 @@ fn project_conflicts(
                     }
                 }
             }
-            ix = conflict.lines().end;
+            ix = conflict.source_lines().end;
             next += 1;
             continue;
         }

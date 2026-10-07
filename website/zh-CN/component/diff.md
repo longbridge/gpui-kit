@@ -17,7 +17,7 @@ description: 用于代码审阅、合并冲突和源文件预览的只读 unifie
 ```rust
 use gpui_kit::*;
 use gpui_kit::component::diff::{
-    Diff, DiffAnnotation, DiffChangeIndicator, DiffFile, DiffHoverHighlight,
+    Diff, DiffAnnotation, DiffChangeIndicator, DiffConflictResolution, DiffFile, DiffHoverHighlight,
     DiffHunkSeparator, DiffInlineUnit, DiffLinePosition, DiffLineRange, DiffMode,
     DiffSide, DiffState,
 };
@@ -48,6 +48,17 @@ Diff::new(&self.diff).h(rems(24.)).w_full()
 不要在每次 render 中重新解析 patch 或创建状态。解析很快（release 构建下，6.5 MB、
 200 个文件的 patch 约需 15 ms）；patch 特别大时，在后台 executor 中解析，
 并在确认结果仍对应当前 patch 版本后再安装文件。
+
+## Git history 示例
+
+完整应用见 [tig example](https://github.com/longbridge/gpui-kit/tree/main/examples/tig)。
+它在后台执行器中读取本地 Git 历史和 patch，在可调整大小的侧栏中提供虚拟化的提交、文件导航，
+并用一个保留的 `DiffState` 显示当前文件。过期请求不会覆盖新选择的提交。
+示例还包含键盘导航、源文本复制、运行时显示选项、加载／错误／空状态，以及可折叠的提交正文。
+
+```sh
+cargo run -p example-tig -- /path/to/repository
+```
 
 ## 文件
 
@@ -91,6 +102,29 @@ if let Some(text) = state.resolved_text("src/retry.rs") {
 只要还有未解决的冲突，`resolved_text` 就返回 `None`。`conflict_resolution(path, ix)`
 读取单个冲突的解决结果，`resolve_conflict(path, ix, resolution, cx)` 设置或清除结果且不发出事件。
 用户的选择会发出 `DiffEvent::ConflictResolved(path, ix)`。
+
+`DiffFile::conflicts()` 按工作文件中的顺序返回只读的 `DiffConflict` 描述。
+切片索引就是解决方法和事件中的 `ix`；`conflicts().len()` 返回冲突数量。
+`lines()` 包含标记行，`current_lines()`、`base_lines()` 和 `incoming_lines()`
+给出各部分源文本的位置。范围使用从 1 开始的工作文件行号，**结束行不包含在范围内**，
+因此空部分用 `start == end` 表示。双向冲突的 `base_lines()` 和 `base_label()`
+返回 `None`。通过 `current_label()`、`base_label()` 和 `incoming_label()` 读取标签。
+
+例如，应用命令可以采用所有传入的更改，无需再次解析工作文件：
+
+```rust
+self.diff.update(cx, |state, cx| {
+    let path = "src/retry.rs";
+    let count = state.files().iter().find(|file| file.path().as_str() == path)
+        .map_or(0, |file| file.conflicts().len());
+    for ix in 0..count {
+        state.resolve_conflict(path, ix, Some(DiffConflictResolution::Incoming), cx);
+    }
+});
+```
+
+未解决的冲突和不存在的文件或索引都会让 `conflict_resolution` 返回 `None`；
+通过 `conflicts()` 枚举有效的冲突，可以区分这两种情况。
 
 ## 显示模式与上下文
 
@@ -225,21 +259,32 @@ Diff::new(&self.diff)
 `\ No newline at end of file` 标记会明确显示。所有文件的行共同参与虚拟化，
 批注高度也参与测量。Diff 管理自身的滚动，应避免再将它嵌入另一个滚动区域。
 
+状态的 `with_*` builder 设置初始值。若要更新已有 entity，使用
+`set_expansion_lines`、`set_min_collapsed_lines`、`set_inline_unit`、
+`set_inline_max_line_length` 和 `set_syntax_max_line_length`。
+这些方法会通知观察者，并保留选区与附近的源文本位置；强调方式改变时会丢弃旧的准备结果并重新准备。
+
+```rust
+self.diff.update(cx, |state, cx| {
+    state.set_inline_unit(Some(DiffInlineUnit::Character), cx);
+});
+```
+
 ## 文件头
 
 默认文件头显示收起控件、路径、以 `old → new` 表示的重命名、新增与删除行数以及文件状态。
-三个插槽可向其中添加应用内容；`header` 替换文件头内容，保留外层布局、分隔线和收起控件：
+三个插槽可向其中添加应用内容；`render_header` 替换文件头内容，保留外层布局、分隔线和收起控件：
 
 | Builder | 位置 |
 | --- | --- |
-| `header_prefix` | 路径前方 |
-| `header_title_suffix` | 紧接路径之后 |
-| `header_suffix` | 行数统计和状态之后 |
-| `header` | 替换文件头内容 |
+| `render_header_prefix` | 路径前方 |
+| `render_header_title_suffix` | 紧接路径之后 |
+| `render_header_suffix` | 行数统计和状态之后 |
+| `render_header` | 替换文件头内容 |
 
 ```rust
 Diff::new(&self.diff)
-    .header_suffix(|file, _, _| div().child(format!("{} lines", file.additions())))
+    .render_header_suffix(|file, _, _| div().child(format!("{} lines", file.additions())))
     .h(rems(24.))
 ```
 
@@ -247,6 +292,9 @@ Diff::new(&self.diff)
 `header_visible(false)` 隐藏文件头。回调实现 `Fn`，捕获的值必须满足 `'static`；
 接收的是 `App`，不是所属视图的 `Context`。在回调中构建内容，在内容的事件处理函数中修改状态。
 不要在渲染回调内同步读取或更新同一个 `DiffState` 实体。
+
+原有的 `header`、`header_prefix`、`header_title_suffix`、`header_suffix` 和
+`annotation_content` 仍然可用，作为对应 `render_*` builder 的兼容别名。
 
 ## 批注
 
@@ -264,11 +312,11 @@ let annotations = [
 
 Diff::new(&self.diff)
     .annotations(annotations)
-    .annotation_content(|annotation, _, _| div().child(annotation.id().to_string()))
+    .render_annotation(|annotation, _, _| div().child(annotation.id().to_string()))
     .h(rems(24.))
 ```
 
-同时提供 `annotations` 和 `annotation_content`。回调接收 `&DiffAnnotation`，可通过 `id()`、
+同时提供 `annotations` 和 `render_annotation`。回调接收 `&DiffAnnotation`，可通过 `id()`、
 `path()` 和 `position()` 查找应用内容；文件级批注的 `position()` 为 `None`。批注 ID
 在同一个 Diff 中必须稳定且唯一。批注位于隐藏上下文时，对应源文件行展开后才会显示。
 无效行位置或不存在的一侧不会渲染批注。Unified 中未修改的行只显示一次，但可以显示两侧的批注。
@@ -287,6 +335,9 @@ Diff::new(&self.diff).on_add_annotation(cx.listener(|this, range: &DiffLineRange
 ```
 
 ## 鼠标与键盘交互
+
+滚轮的两个方向独立处理：垂直输入滚动源文本行；水平输入（包括平台转换后的
+Shift+滚轮手势）滚动长行，不改变垂直位置。启用软换行后不再产生水平溢出。
 
 在代码上拖动可选择同一文件同一侧的源文本，选区可以跨越虚拟列表范围和已有上下文的折叠范围，
 不能选择未提供的源文本。点击行号选择该行，在行号上拖动选择一个范围，按住 Shift 点击另一个行号

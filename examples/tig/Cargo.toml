@@ -1,0 +1,18 @@
+[package]
+name = "example-tig"
+description = "A small desktop Git history browser built with GPUI Kit's Diff."
+version = "0.7.1"
+publish = false
+edition.workspace = true
+
+[dependencies]
+gpui-kit = { workspace = true, features = ["tree-sitter-rust", "tree-sitter-toml", "tree-sitter-markdown", "tree-sitter-javascript", "tree-sitter-typescript"] }
+
+[dev-dependencies]
+gpui-kit = { workspace = true, features = ["test-support"] }
+
+[features]
+gpui-fast = ["gpui-kit/gpui-fast"]
+
+[lints]
+workspace = true

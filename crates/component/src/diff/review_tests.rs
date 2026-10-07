@@ -327,4 +327,46 @@ fn builders_after_new_shape_the_prepared_emphasis(cx: &mut TestAppContext) {
     let whole_lines =
         cx.new(|cx| DiffState::new(DiffFile::parse(patch).unwrap(), cx).with_inline_unit(None));
     assert_eq!(inline_count(&whole_lines, cx), 0);
+    // Runtime changes invalidate earlier work, including an in-flight preparation.
+    words.update(cx, |state, cx| {
+        state.set_inline_unit(None, cx);
+        state.set_inline_unit(Some(super::DiffInlineUnit::Character), cx);
+    });
+    assert!(inline_count(&words, cx) > 0);
+    words.update(cx, |state, cx| state.set_inline_max_line_length(5, cx));
+    assert_eq!(inline_count(&words, cx), 0);
+    words.update(cx, |state, cx| {
+        state.set_inline_max_line_length(2048, cx);
+        state.set_inline_unit(Some(super::DiffInlineUnit::Word), cx);
+    });
+    assert_eq!(inline_count(&words, cx), 1);
+}
+
+#[gpui::test]
+fn changing_presentation_options_keeps_selection_and_scroll(cx: &mut TestAppContext) {
+    let state = cx.new(|cx| DiffState::new(DiffFile::parse(PATCH).unwrap(), cx));
+    let (events, _subscription) = record_events(cx, &state);
+    state.update(cx, |state, cx| {
+        let range = DiffLineRange::new("second.txt", DiffSide::Modified, 10, 10);
+        state.set_selected_lines(Some(range.clone()), cx);
+        state.scroll_to_line(range.start_position(), cx);
+        let top = state.list().logical_scroll_top();
+        state.set_inline_unit(Some(super::DiffInlineUnit::Character), cx);
+        state.set_inline_max_line_length(2048, cx);
+        state.set_syntax_max_line_length(4096, cx);
+        state.set_expansion_lines(5, cx);
+        state.set_min_collapsed_lines(4, cx);
+        assert_eq!(state.selected_lines(), Some(range));
+        assert_eq!(state.list().logical_scroll_top().item_ix, top.item_ix);
+        assert_eq!(state.inline_unit(), Some(super::DiffInlineUnit::Character));
+        assert_eq!(state.inline_max_line_length(), 2048);
+        assert_eq!(state.syntax_max_line_length(), 4096);
+        assert_eq!(state.expansion_lines(), 5);
+        assert_eq!(state.min_collapsed_lines(), 4);
+        // None disables emphasis, without replacing the entity or patch.
+        state.set_inline_unit(None, cx);
+        assert!(state.inline_unit().is_none());
+        assert_eq!(state.files().len(), 2);
+    });
+    assert!(events.borrow().is_empty());
 }

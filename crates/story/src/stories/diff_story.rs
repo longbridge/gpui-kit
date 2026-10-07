@@ -385,7 +385,7 @@ impl Render for DiffStory {
                             .soft_wrap(self.wrap)
                             .when(self.example == 0, |diff| {
                                 diff.annotations(annotations)
-                                    .annotation_content(move |annotation, _, cx| {
+                                    .render_annotation(move |annotation, _, cx| {
                                         let (id, body, resolved) = comments
                                             .iter()
                                             .find(|(id, ..)| id == annotation.id())

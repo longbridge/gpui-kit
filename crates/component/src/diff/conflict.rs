@@ -29,10 +29,18 @@ pub(crate) enum ConflictPart {
     Incoming,
 }
 
-/// One conflict region. Ranges index the file's modified-side lines, which
-/// exclude the marker lines.
+/// A parsed merge conflict in a working file.
+///
+/// Source coordinates are one-based, half-open ranges, allowing empty parts.
+/// Returned by [`DiffFile::conflicts`] in source order; its slice index is the
+/// index accepted by [`super::DiffState::resolve_conflict`]. Fields are private
+/// and only the parser constructs these snapshots.
 #[derive(Clone, Debug)]
-pub(crate) struct Conflict {
+pub struct DiffConflict {
+    lines: Range<usize>,
+    current_lines: Range<usize>,
+    base_lines: Option<Range<usize>>,
+    incoming_lines: Range<usize>,
     current: Range<usize>,
     base: Option<Range<usize>>,
     incoming: Range<usize>,
@@ -41,9 +49,37 @@ pub(crate) struct Conflict {
     incoming_label: SharedString,
 }
 
-impl Conflict {
+impl DiffConflict {
+    /// One-based working-file lines, including markers, with an exclusive end.
+    pub fn lines(&self) -> Range<usize> {
+        self.lines.clone()
+    }
+    /// Current-side source lines, with an exclusive end; may be empty.
+    pub fn current_lines(&self) -> Range<usize> {
+        self.current_lines.clone()
+    }
+    /// Base source lines for diff3, with an exclusive end; may be empty.
+    pub fn base_lines(&self) -> Option<Range<usize>> {
+        self.base_lines.clone()
+    }
+    /// Incoming-side source lines, with an exclusive end; may be empty.
+    pub fn incoming_lines(&self) -> Range<usize> {
+        self.incoming_lines.clone()
+    }
+    /// The label from the opening marker.
+    pub fn current_label(&self) -> &SharedString {
+        &self.current_label
+    }
+    /// The base marker label, or None for a two-way conflict.
+    pub fn base_label(&self) -> Option<&SharedString> {
+        self.base.as_ref().map(|_| &self.base_label)
+    }
+    /// The label from the closing marker.
+    pub fn incoming_label(&self) -> &SharedString {
+        &self.incoming_label
+    }
     /// Every line of the region, in file order.
-    pub(crate) fn lines(&self) -> Range<usize> {
+    pub(crate) fn source_lines(&self) -> Range<usize> {
         self.current.start..self.incoming.end
     }
     pub(crate) fn part(&self, part: ConflictPart) -> Option<Range<usize>> {
@@ -129,7 +165,7 @@ impl DiffFile {
         let mut pairs = Vec::new();
         let mut conflicts = Vec::new();
         // The marker-delimited part being read, with the open region's ranges.
-        let mut open: Option<(ConflictPart, Conflict)> = None;
+        let mut open: Option<(ConflictPart, DiffConflict)> = None;
         for (ix, range) in line_ranges(text).into_iter().enumerate() {
             let line = &text[range.clone()];
             let content = line.trim_end_matches(['\n', '\r']);
@@ -151,7 +187,11 @@ impl DiffFile {
                     if let Some(label) = opening {
                         open = Some((
                             ConflictPart::Current,
-                            Conflict {
+                            DiffConflict {
+                                lines: ix + 1..ix + 1,
+                                current_lines: ix + 2..ix + 2,
+                                base_lines: None,
+                                incoming_lines: ix + 2..ix + 2,
                                 current: next..next,
                                 base: None,
                                 incoming: next..next,
@@ -176,6 +216,8 @@ impl DiffFile {
                     match (*part, base, separator, closing) {
                         (ConflictPart::Current, Some(label), _, _) => {
                             conflict.current.end = next;
+                            conflict.current_lines.end = ix + 1;
+                            conflict.base_lines = Some(ix + 2..ix + 2);
                             conflict.base = Some(next..next);
                             conflict.base_label = label;
                             *part = ConflictPart::Base;
@@ -184,15 +226,20 @@ impl DiffFile {
                         (ConflictPart::Current | ConflictPart::Base, _, Some(_), _) => {
                             if *part == ConflictPart::Current {
                                 conflict.current.end = next;
+                                conflict.current_lines.end = ix + 1;
                             } else if let Some(base) = &mut conflict.base {
                                 base.end = next;
+                                conflict.base_lines.as_mut().unwrap().end = ix + 1;
                             }
                             conflict.incoming = next..next;
+                            conflict.incoming_lines = ix + 2..ix + 2;
                             *part = ConflictPart::Incoming;
                             continue;
                         }
                         (ConflictPart::Incoming, _, _, Some(label)) => {
                             conflict.incoming.end = next;
+                            conflict.incoming_lines.end = ix + 1;
+                            conflict.lines.end = ix + 2;
                             conflict.incoming_label = label;
                             if let Some((_, conflict)) = open.take() {
                                 conflicts.push(conflict);
@@ -259,6 +306,13 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(numbers, [1, 3, 5, 7]);
         let conflict = &file.conflicts()[0];
+        assert_eq!(conflict.lines(), 2..7);
+        assert_eq!(conflict.current_lines(), 3..4);
+        assert_eq!(conflict.incoming_lines(), 5..6);
+        assert_eq!(conflict.base_lines(), None);
+        assert_eq!(conflict.base_label(), None);
+        assert_eq!(conflict.current_label().as_str(), "HEAD");
+        assert_eq!(conflict.incoming_label().as_str(), "feature");
         assert_eq!(conflict.part(ConflictPart::Current), Some(1..2));
         assert_eq!(conflict.part(ConflictPart::Incoming), Some(2..3));
         assert_eq!(conflict.label(ConflictPart::Current).as_str(), "HEAD");
@@ -275,6 +329,11 @@ mod tests {
         )
         .unwrap();
         let conflict = &file.conflicts()[0];
+        assert_eq!(conflict.lines(), 1..8);
+        assert_eq!(conflict.current_lines(), 2..3);
+        assert_eq!(conflict.base_lines(), Some(4..5));
+        assert_eq!(conflict.incoming_lines(), 6..7);
+        assert_eq!(conflict.base_label().unwrap().as_str(), "base");
         assert_eq!(conflict.part(ConflictPart::Base), Some(1..2));
         assert_eq!(conflict.label(ConflictPart::Base).as_str(), "base");
         assert_eq!(conflict.kept(DiffConflictResolution::Both), [0..1, 2..3]);
@@ -286,6 +345,16 @@ mod tests {
             let error = DiffFile::parse_conflicts("a.txt", text).err().unwrap();
             assert!(error.line() > 0);
         }
+        let empty = DiffFile::parse_conflicts(
+            "empty.txt",
+            "<<<<<<< ours\n||||||| base\n=======\n>>>>>>> theirs\n",
+        )
+        .unwrap();
+        let conflict = &empty.conflicts()[0];
+        assert_eq!(conflict.lines(), 1..5);
+        assert_eq!(conflict.current_lines(), 2..2);
+        assert_eq!(conflict.base_lines(), Some(3..3));
+        assert_eq!(conflict.incoming_lines(), 4..4);
         // A separator outside a conflict is ordinary text.
         assert!(DiffFile::parse_conflicts("a.md", "title\n=======\n").is_ok());
     }

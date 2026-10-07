@@ -10,7 +10,7 @@ mod presentation;
 mod selection;
 mod state;
 
-pub use conflict::DiffConflictResolution;
+pub use conflict::{DiffConflict, DiffConflictResolution};
 pub use document::{DiffFile, DiffFileStatus, DiffLinePosition, DiffLineRange, DiffSide};
 pub use parser::DiffParseError;
 pub use presentation::DiffInlineUnit;
@@ -19,7 +19,7 @@ pub use state::{DiffEvent, DiffState};
 use std::{collections::HashMap, rc::Rc, sync::Arc};
 
 use gpui::{
-    AnyElement, App, ClickEvent, ClipboardItem, Context, ElementId, Entity, Focusable as _,
+    AnyElement, App, Axis, ClickEvent, ClipboardItem, Context, ElementId, Entity, Focusable as _,
     HighlightStyle, Hsla, InteractiveElement as _, IntoElement, KeyBinding, ListOffset,
     MouseButton, ParentElement as _, Pixels, RenderOnce, SharedString,
     StatefulInteractiveElement as _, StyleRefinement, Styled, TextRun, Window, div, list, point,
@@ -33,7 +33,7 @@ use crate::{
     button::{Button, ButtonVariants as _},
     h_flex,
     input::{Copy, SelectAll},
-    scroll::Scrollbar,
+    scroll::{ScrollableMask, Scrollbar},
     v_flex,
 };
 use actions::*;
@@ -312,7 +312,7 @@ impl Diff {
         self
     }
     /// Renders each supplied annotation. Application state and commands stay with the owner.
-    pub fn annotation_content<F, E>(mut self, render: F) -> Self
+    pub fn render_annotation<F, E>(mut self, render: F) -> Self
     where
         F: Fn(&DiffAnnotation, &mut Window, &mut App) -> E + 'static,
         E: IntoElement,
@@ -324,7 +324,7 @@ impl Diff {
     }
     /// Replaces the content of each file header, keeping its shell, separator
     /// and collapse control.
-    pub fn header<F, E>(mut self, render: F) -> Self
+    pub fn render_header<F, E>(mut self, render: F) -> Self
     where
         F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
         E: IntoElement,
@@ -333,7 +333,7 @@ impl Diff {
         self
     }
     /// Inserts content before the path in the default header.
-    pub fn header_prefix<F, E>(mut self, render: F) -> Self
+    pub fn render_header_prefix<F, E>(mut self, render: F) -> Self
     where
         F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
         E: IntoElement,
@@ -342,7 +342,7 @@ impl Diff {
         self
     }
     /// Inserts compact content immediately after the path in the default header.
-    pub fn header_title_suffix<F, E>(mut self, render: F) -> Self
+    pub fn render_header_title_suffix<F, E>(mut self, render: F) -> Self
     where
         F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
         E: IntoElement,
@@ -351,7 +351,7 @@ impl Diff {
         self
     }
     /// Inserts trailing content after the change statistics in the default header.
-    pub fn header_suffix<F, E>(mut self, render: F) -> Self
+    pub fn render_header_suffix<F, E>(mut self, render: F) -> Self
     where
         F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
         E: IntoElement,
@@ -359,6 +359,51 @@ impl Diff {
         self.header.suffix = Some(file_renderer(render));
         self
     }
+    /// Compatibility alias for [`Self::render_annotation`].
+    pub fn annotation_content<F, E>(self, render: F) -> Self
+    where
+        F: Fn(&DiffAnnotation, &mut Window, &mut App) -> E + 'static,
+        E: IntoElement,
+    {
+        self.render_annotation(render)
+    }
+
+    /// Compatibility alias for [`Self::render_header`].
+    pub fn header<F, E>(self, render: F) -> Self
+    where
+        F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
+        E: IntoElement,
+    {
+        self.render_header(render)
+    }
+
+    /// Compatibility alias for [`Self::render_header_prefix`].
+    pub fn header_prefix<F, E>(self, render: F) -> Self
+    where
+        F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
+        E: IntoElement,
+    {
+        self.render_header_prefix(render)
+    }
+
+    /// Compatibility alias for [`Self::render_header_title_suffix`].
+    pub fn header_title_suffix<F, E>(self, render: F) -> Self
+    where
+        F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
+        E: IntoElement,
+    {
+        self.render_header_title_suffix(render)
+    }
+
+    /// Compatibility alias for [`Self::render_header_suffix`].
+    pub fn header_suffix<F, E>(self, render: F) -> Self
+    where
+        F: Fn(&DiffFile, &mut Window, &mut App) -> E + 'static,
+        E: IntoElement,
+    {
+        self.render_header_suffix(render)
+    }
+
     /// Shows an add button beside the hovered line and at the end of the
     /// selected lines. The handler receives the selected range when the line
     /// is part of it, or that line alone.
@@ -504,7 +549,9 @@ fn render_diff(
             div()
                 .id("diff-horizontal")
                 .size_full()
-                .when(!soft_wrap, |this| this.overflow_x_scroll())
+                // Preserve offset tracking and clipping without GPUI's
+                // single-axis wheel remapping. The sibling mask owns X input.
+                .when(!soft_wrap, |this| this.overflow_x_hidden())
                 .track_scroll(&horizontal)
                 .child(
                     list(scrollbar.clone(), move |ix, window, cx| {
@@ -524,6 +571,11 @@ fn render_diff(
             state.selection().clone(),
             state.geometry().clone(),
         ))
+        .when(has_rows && !soft_wrap, |this| {
+            this.child(
+                ScrollableMask::new(Axis::Horizontal, &horizontal).id("diff-horizontal-wheel"),
+            )
+        })
         .when(has_rows, |this| {
             this.child(Scrollbar::vertical(&scrollbar))
                 .when(!soft_wrap, |this| {
@@ -1511,7 +1563,7 @@ fn code_line(
             document
                 .conflicts()
                 .iter()
-                .find(|conflict| conflict.lines().contains(&ix))
+                .find(|conflict| conflict.source_lines().contains(&ix))
                 .and_then(|conflict| conflict.part_of(ix))
         })
         .flatten();
