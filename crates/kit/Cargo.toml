@@ -146,7 +146,7 @@ required-features = ["test-support", "component"]
 
 [[test]]
 name = "rendering"
-# Requires a real Metal device; select explicitly with --test rendering.
+# Requires Metal (macOS) or WGPU (Linux); select explicitly with --test rendering.
 test = false
 harness = false
 required-features = ["test-support", "component", "assets"]

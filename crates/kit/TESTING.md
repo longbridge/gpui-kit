@@ -76,6 +76,9 @@ panic on ambiguity. Scoped queries include strict descendants, excluding the
 scope node itself. These queries also work inside `within` and do not discover
 unobserved text or offscreen virtual rows. A label is an accessibility name,
 not rendered text; use stable IDs when localization changes the name.
+The pinned GPUI version does not expose an enumeration of anonymous rendered
+text. Kit therefore has no general rendered-text `HasText` assertion; exact
+accessible-label queries cannot establish that text was actually drawn.
 
 For gestures whose intermediate state matters, dispatch each step explicitly:
 
@@ -185,10 +188,18 @@ and stale registration cleanup when a 1,000-element list shrinks to 10 elements.
 
 The full command runs in the existing CI platform matrix. Large-list cases check
 correctness, not rendering performance. The `rendering` target additionally checks
-real Metal images on macOS, using a main-thread harness. It is opt-in (`test = false`):
-run `cargo test -p gpui-kit --features test-support --test rendering --locked` on a
-Metal-capable runner. The macOS CI job runs this command as a required step;
-Linux and Windows run the portable interaction/layout suite. It detects missing checkbox
-marks and invisible input text even when native state stays correct. Other platforms
-explicitly skip this target until GPUI supplies a headless renderer; this is not a
-complete golden-image suite.
+real offscreen images on macOS (Metal) and Linux (WGPU), using a main-thread
+harness. It is opt-in (`test = false`): run
+`cargo test -p gpui-kit --features test-support --test rendering --locked` with a
+working renderer. Linux can use a software Vulkan adapter such as Mesa lavapipe.
+The macOS and Linux CI jobs run this command as a required step. Windows runs the
+portable interaction/layout suite and explicitly skips this target because the
+pinned GPUI 0.3.8 platform crate has no Windows headless renderer. Missing renderer
+support on macOS or Linux fails instead of producing fake images.
+
+The rendering suite detects missing checkbox marks and invisible input text even
+when native state stays correct. It also checks wrapped CJK text with inline code,
+button focus-line placement and contrast in both themes, pointer activation without
+a button focus line, menu pointer/key highlight transitions, list keyboard
+selection and table keyboard-only focus with the focus ring enabled and disabled.
+These checks are not a complete golden-image suite.

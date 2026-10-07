@@ -337,6 +337,8 @@ Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用�
 遇到歧义也会 panic。作用域查询只包含后代，不包含作用域节点自身。这些方法也支持 `within`
 作用域，不会发现未观测的文字或尚未绘制的虚拟行。标签是无障碍名称，不是屏幕文字；
 名称会随本地化变化时，优先使用稳定 ID。
+锁定版本的 GPUI 不提供匿名绘制文本的枚举。因此 Kit 没有通用的绘制文本
+`HasText` 断言；精确匹配无障碍标签不能证明文字已经实际绘制。
 
 需要检查手势中间状态时，可分别发送事件：
 
@@ -379,7 +381,7 @@ window.pointer_up(start + point(px(24.), px(0.)), MouseButton::Left, cx);
 | `environment.rs` | 窗口尺寸和显示缩放、跨窗口剪贴板、Link URL 请求与应用回调 |
 | `date_picker.rs` | 打开、精确预设日期与日历日期选择、月份切换、清除、Escape 与禁用行为 |
 | `overlays.rs` | Dialog 校验 → 作用域 Input → 保存 → Notification；悬停显示关闭按钮；自动关闭计时；Dialog/Sheet Escape 与焦点恢复；表面边界 |
-| `menu.rs` | 禁用菜单项、键盘确认、Escape、焦点恢复、子菜单悬停及嵌套菜单项激活 |
+| `menu.rs` | 禁用菜单项、键盘确认、Escape、焦点恢复、子菜单悬停、嵌套菜单项激活及最内层右键菜单的事件归属 |
 | `dock.rs` | Tab 选择与重排、跨分组拖放、放大和恢复分割布局 |
 
 已有表单、Select、HoverCard、虚拟列表、指针、生命周期和隔离测试继续保留。
@@ -442,24 +444,30 @@ GPUI 没有公开未观察祖先的继承绘制透明度，因此无法推断该
 
 值或勾选标志正确，不代表控件正确绘制。GPUI 提供
 `HeadlessAppContext::with_platform`、`Window::render_to_image` 和
-`HeadlessAppContext::capture_screenshot`，可以生成真实离屏图片。当前锁定版本的
-平台 crate 仅在 macOS 提供 Metal 离屏渲染器。在支持 Metal 的 Mac 上执行：
+`HeadlessAppContext::capture_screenshot`，可以生成真实离屏图片。当前锁定的
+GPUI {{gpui_pre_version}} 平台 crate 在 macOS 提供 Metal 离屏渲染器，在 Linux 提供 WGPU
+离屏渲染器。使用可用的 Metal 或 WGPU 适配器 执行以下命令；Linux 可以使用
+Mesa lavapipe 等软件 Vulkan 适配器：
 
 ```sh
 cargo test -p gpui-kit --features test-support --test rendering --locked
 ```
 
-该目标设置了 `test = false`，默认 Cargo 命令不会选择它。macOS CI job 已增加必须
-通过的独立步骤，显式执行 `--test rendering`；Linux 和 Windows 只运行交互与布局
-测试。这使用 Cargo 的
+该目标设置了 `test = false`，默认 Cargo 命令不会选择它。macOS 和 Linux CI job
+都通过必需的独立步骤显式执行 `--test rendering`，同时运行交互与布局测试；
+Windows 运行交互与布局测试。这使用 Cargo 的
 [显式目标选择](https://doc.rust-lang.org/cargo/commands/cargo-test.html#target-selection)。
 目标还使用 `harness = false`，因为 AppKit 必须在主线程初始化；普通 Rust
-测试即使指定 `--test-threads=1` 仍运行在工作线程。其他平台明确报告跳过像素验证；
-macOS 缺少渲染能力时测试失败，不用假图片替代。
+测试即使指定 `--test-threads=1` 仍运行在工作线程。锁定版本的平台 crate 没有
+Windows 离屏渲染器，因此 Windows 明确报告跳过像素验证；macOS 或 Linux 缺少
+渲染能力时测试失败，不用假图片替代。
 
 测试向真实 Kit 控件注入两种故障：`checked()` 仍为 true，但勾号资源丢失；
 `value()` 仍正确，但输入文字变透明。故障图片必须与正常控件不同，重复绘制正常
-Checkbox 的图片必须一致。另一个原生事件测试断开 Checkbox 的状态更新处理器，
+Checkbox 的图片必须一致。完整测试套件还检查含行内代码的 CJK 文本换行、明暗
+主题下焦点线的位置与对比度、指针激活 Button 时没有焦点线、指针与键盘切换时
+Menu 只有一个高亮项、List 的键盘选中状态，以及开启或关闭焦点环时 Table 只在
+键盘聚焦后显示焦点样式。另一个原生事件测试断开 Checkbox 的状态更新处理器，
 验证点击不会凭空产生已勾选结果。
 
 这些测试验证能否发现特定错误，不是完整的基准图片回归测试。应用的视觉回归应在
@@ -470,8 +478,8 @@ Checkbox 的图片必须一致。另一个原生事件测试断开 Checkbox 的�
 
 ## 接入 CI
 
-Kit 仓库在 macOS、Linux 和 Windows 矩阵中运行交互与布局测试。macOS job 还运行两个
-Metal 像素测试，失败会使 job 失败。以下是用于 Kit 检出目录的最小 macOS workflow：
+Kit 仓库在 macOS、Linux 和 Windows 矩阵中运行交互与布局测试。macOS 和 Linux
+job 还分别通过 Metal 和 WGPU 运行完整绘制测试套件，失败会使 job 失败。以下是用于 Kit 检出目录的最小 macOS workflow：
 
 ```yaml
 name: UI tests

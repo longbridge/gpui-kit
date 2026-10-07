@@ -226,6 +226,9 @@ panic on ambiguity. Scoped queries include strict descendants, excluding the
 scope node itself. These queries also work inside `within` and do not discover
 unobserved text or offscreen virtual rows. A label is an accessibility name,
 not rendered text; use stable IDs when localization changes the name.
+The pinned GPUI version does not expose an enumeration of anonymous rendered
+text. Kit therefore has no general rendered-text `HasText` assertion; exact
+accessible-label queries cannot establish that text was actually drawn.
 
 For gestures whose intermediate state matters, dispatch each step explicitly:
 
@@ -341,8 +344,11 @@ appropriate to that production animation before asserting final geometry.
   correct accessibility value does not establish correct pixels.
 - These tests run in-process. Pixel comparisons need GPUI's separate renderer;
   packaged-app behavior and full OS IME composition need other coverage. Kit's
-  explicit macOS rendering target is
+  explicit macOS (Metal) and Linux (WGPU) rendering target is
   `cargo test -p gpui-kit --features test-support --test rendering --locked`.
+  Linux requires a working WGPU adapter and can use Mesa lavapipe. Windows
+  explicitly skips this target because GPUI 0.3.8 has no Windows headless renderer.
+  Missing renderer support on macOS or Linux fails instead of producing fake images.
 
 ## Additional resources
 

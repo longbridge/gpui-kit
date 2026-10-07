@@ -139,11 +139,14 @@ jobs:
           cargo test --workspace --exclude gpui-shell
           --features gpui-component-story/test-support --locked
           $TEST_EXCLUDES --doc
-      # `crates/kit/tests/rendering.rs` needs a real Metal device and is opted
+      # `crates/kit/tests/rendering.rs` needs a real renderer and is opted
       # out of the default test set; select it with the same feature set so it
       # reuses the build above.
-      - name: Metal UI rendering tests
-        if: ${{ matrix.run_on == 'macos-latest' }}
+      - name: Install Linux offscreen renderer
+        if: ${{ matrix.run_on == 'ubuntu-latest' }}
+        run: sudo apt-get install -y mesa-vulkan-drivers
+      - name: UI rendering tests
+        if: ${{ matrix.run_on != 'windows-latest' }}
         run: >-
           cargo test --workspace --exclude gpui-shell
           --features gpui-component-story/test-support --locked

@@ -1,14 +1,14 @@
-//! These tests need GPUI's Metal renderer. Other platforms still run the native
-//! event/state suite; no fake renderer is substituted for missing GPU support.
+//! These tests need GPUI's real offscreen renderer: Metal on macOS or WGPU on
+//! Linux. No fake renderer is substituted for missing GPU support.
 fn main() {
-    #[cfg(target_os = "macos")]
-    macos::run();
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    rendering::run();
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     println!("rendering: skipped; GPUI does not supply a headless renderer on this platform");
 }
 
-#[cfg(target_os = "macos")]
-mod macos {
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod rendering {
     use gpui_kit::{
         App, AppContext, AssetSource, Bounds, Context, Entity, Focusable as _, HeadlessAppContext,
         Pixels, Render, Result, Rgba, SharedString, Window,
@@ -95,7 +95,7 @@ mod macos {
         })
         .unwrap();
         cx.capture_screenshot(handle)
-            .expect("Metal rendering must be available")
+            .expect("offscreen rendering must be available")
             .into_raw()
     }
 
@@ -866,6 +866,6 @@ mod macos {
             table_shows_keyboard_focus_only(focus_ring);
             println!("passed table_shows_keyboard_focus_only (focus_ring = {focus_ring})");
         }
-        println!("rendering: 10 passed (Metal)");
+        println!("rendering: 10 passed (real offscreen renderer)");
     }
 }

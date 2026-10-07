@@ -309,6 +309,9 @@ panic on ambiguity. Scoped queries include strict descendants, excluding the
 scope node itself. These queries also work inside `within` and do not discover
 unobserved text or offscreen virtual rows. A label is an accessibility name,
 not rendered text; use stable IDs when localization changes the name.
+The pinned GPUI version does not expose an enumeration of anonymous rendered
+text. Kit therefore has no general rendered-text `HasText` assertion; exact
+accessible-label queries cannot establish that text was actually drawn.
 
 For gestures whose intermediate state matters, dispatch each step explicitly:
 
@@ -447,7 +450,7 @@ that every option or combination of every component has been exhaustively tested
 | `environment.rs` | Resize and display scale, cross-window clipboard, Link URL requests and owner callbacks |
 | `date_picker.rs` | Opening, exact preset/day selection, month navigation, clearing, Escape and disabled behavior |
 | `overlays.rs` | Dialog validation → scoped Input → save → Notification; hover-revealed close; auto-dismiss timer; Dialog/Sheet Escape and focus restoration; surface bounds |
-| `menu.rs` | Disabled items, keyboard confirmation, Escape, focus restoration, submenu hover and nested item activation |
+| `menu.rs` | Disabled items, keyboard confirmation, Escape, focus restoration, submenu hover, nested item activation and innermost context-menu ownership |
 | `dock.rs` | Tab selection/reordering, cross-group drag/drop, zoom and restored split geometry |
 
 The existing form, Select, HoverCard, virtual-list, pointer, lifecycle and isolation
@@ -521,26 +524,32 @@ focus, clipping/overlays and asynchronous completion, in that order as relevant.
 A correct value or checked flag does not prove the control was drawn correctly.
 GPUI exposes `HeadlessAppContext::with_platform`, `Window::render_to_image` and
 `HeadlessAppContext::capture_screenshot` for real offscreen images. The currently
-pinned platform crate supplies its headless renderer on macOS (Metal) only. Run
-this target on a Mac with Metal available:
+pinned GPUI {{gpui_pre_version}} platform crate supplies headless renderers on macOS (Metal)
+and Linux (WGPU). Run this target with a working Metal or WGPU adapter; Linux
+can use a software Vulkan adapter such as Mesa lavapipe:
 
 ```sh
 cargo test -p gpui-kit --features test-support --test rendering --locked
 ```
 
 The target uses `test = false`, so the default Cargo command does not select it.
-The macOS CI job explicitly runs `--test rendering` as a required step, alongside
-the portable interaction suite. Linux and Windows run only the portable suite. Cargo supports this
+The macOS and Linux CI jobs explicitly run `--test rendering` as a required
+step, alongside the portable interaction suite. Windows runs the portable suite. Cargo supports this
 [explicit target selection](https://doc.rust-lang.org/cargo/commands/cargo-test.html#target-selection).
 It also uses `harness = false` because AppKit initialization requires the main
 thread; `--test-threads=1` would still run an ordinary Rust test on a worker thread.
-On other platforms it explicitly reports that pixel verification is skipped.
-Missing renderer support on macOS fails rather than substituting a fake image.
+Windows explicitly reports that pixel verification is skipped because the pinned
+platform crate has no Windows headless renderer. Missing renderer support on
+macOS or Linux fails rather than substituting a fake image.
 
 The tests inject two defects into real Kit controls: a missing check-mark asset
 while `checked()` remains true, and transparent input text while `value()` remains
 correct. Images must differ from the working control, and repeated working checkbox
-renders must match. A separate native-event test disconnects a checkbox's change
+renders must match. The suite also checks wrapped CJK text with inline code,
+focus-line placement and contrast in light and dark themes, pointer activation
+without a button focus line, a single menu highlight across pointer/key transitions,
+list keyboard selection, and table keyboard-only focus with the focus ring enabled
+and disabled. A separate native-event test disconnects a checkbox's change
 handler and checks that clicking cannot fabricate a checked result.
 
 These are sensitivity checks, not a complete golden-image suite. For application
@@ -553,7 +562,8 @@ correctness. The executable rendering examples are in
 ## Run in CI
 
 The Kit repository runs the interaction/layout suite on macOS, Linux and Windows.
-The macOS job additionally runs the two Metal pixel checks; a failure fails the job.
+The macOS and Linux jobs additionally run the full rendering suite using Metal
+and WGPU respectively; a failure fails the job.
 A minimal macOS workflow for a Kit checkout is:
 
 ```yaml
