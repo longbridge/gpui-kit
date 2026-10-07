@@ -85,14 +85,14 @@ div()
     .w(self.sidebar_width)
     .h_full()
     .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizeSidebar>, _, cx| {
-        this.sidebar_width = e.event.position.x;
+        this.sidebar_width = e.event.position.x - e.bounds.left();
         cx.notify();
     }))
     .child(sidebar_content)
     .child(
         resize_handle("sidebar-edge", Axis::Horizontal)
             .inside(HandleEdge::Trailing)
-            .on_drag(ResizeSidebar, |drag, _, _, cx| cx.new(|_| (*drag).clone()))
+            .on_drag(ResizeSidebar, |drag, _, _, cx| cx.new(|_| drag.clone()))
             .on_double_click(cx.listener(|this, _, _, cx| {
                 this.sidebar_width = DEFAULT_SIDEBAR_WIDTH;
                 cx.notify();

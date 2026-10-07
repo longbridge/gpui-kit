@@ -1,7 +1,4 @@
-use std::{
-    ops::{Deref, Range},
-    rc::Rc,
-};
+use std::{ops::Range, rc::Rc};
 
 use gpui::{
     Along, AnyElement, App, AppContext, Axis, Bounds, Context, Element, ElementId, Empty, Entity,
@@ -373,7 +370,7 @@ impl RenderOnce for ResizablePanel {
                             state.update(cx, |state, _| {
                                 state.resizing_panel_ix = Some(ix);
                             });
-                            cx.new(|_| drag_panel.deref().clone())
+                            cx.new(|_| drag_panel.clone())
                         }),
                 )
             })

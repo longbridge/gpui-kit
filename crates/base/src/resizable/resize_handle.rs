@@ -12,6 +12,8 @@ use crate::{AxisExt as _, InteractiveElementExt, TestSupportExt as _, theme::Act
 pub(crate) const HANDLE_PADDING: Pixels = px(4.);
 pub(crate) const HANDLE_SIZE: Pixels = px(1.);
 
+type DragConstructor<T, E> = Box<dyn Fn(&T, &Point<Pixels>, &mut Window, &mut App) -> Entity<E>>;
+
 /// Create a resize handle: a band that resizes whatever it edges when it is
 /// dragged.
 ///
@@ -28,10 +30,14 @@ pub(crate) const HANDLE_SIZE: Pixels = px(1.);
 /// hovered, its own container included, so a container that has to know the
 /// pointer is still over it listens on the handle as well.
 ///
+/// The band's element id, its `"handle"` group, its occlusion and its drag
+/// are base's: an `id`, `group`, hitbox behavior or `on_drag` set through the
+/// interactive element traits is replaced when the band is laid out.
+///
 /// ```ignore
 /// resize_handle("sidebar-edge", Axis::Horizontal)
 ///     .inside(HandleEdge::Trailing)
-///     .on_drag(ResizeSidebar, |drag, _, _, cx| cx.new(|_| (*drag).clone()))
+///     .on_drag(ResizeSidebar, |drag, _, _, cx| cx.new(|_| drag.clone()))
 ///     .on_double_click(|_, _, cx| restore_default_width(cx))
 /// ```
 pub fn resize_handle<T: 'static, E: 'static + Render>(
@@ -149,9 +155,8 @@ pub enum HandleEdge {
 pub struct ResizeHandle<T: 'static, E: 'static + Render> {
     id: ElementId,
     axis: Axis,
-    drag_value: Option<T>,
     edge: Option<HandleEdge>,
-    on_drag: Option<Rc<dyn Fn(&Point<Pixels>, &mut Window, &mut App) -> Entity<E>>>,
+    drag: Option<(T, DragConstructor<T, E>)>,
     appearance: Option<ResizeHandleRenderer>,
     /// The band itself. Listeners a caller attaches through the interactive
     /// element traits land here, on the element the pointer actually hits;
@@ -164,9 +169,8 @@ impl<T: 'static, E: 'static + Render> ResizeHandle<T, E> {
         let id = id.into();
         Self {
             id: id.clone(),
-            on_drag: None,
-            drag_value: None,
             edge: None,
+            drag: None,
             appearance: None,
             axis,
             base: div(),
@@ -190,16 +194,9 @@ impl<T: 'static, E: 'static + Render> ResizeHandle<T, E> {
     pub fn on_drag(
         mut self,
         value: T,
-        f: impl Fn(Rc<T>, &Point<Pixels>, &mut Window, &mut App) -> Entity<E> + 'static,
-    ) -> Self
-    where
-        T: Clone,
-    {
-        let shared = Rc::new(value.clone());
-        self.drag_value = Some(value);
-        self.on_drag = Some(Rc::new(move |p, window, cx| {
-            f(shared.clone(), p, window, cx)
-        }));
+        f: impl Fn(&T, &Point<Pixels>, &mut Window, &mut App) -> Entity<E> + 'static,
+    ) -> Self {
+        self.drag = Some((value, Box::new(f)));
         self
     }
 
@@ -287,7 +284,7 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
         // The caller's listeners are already on it; what base adds is where the
         // band goes and what it holds.
         let base = std::mem::replace(&mut self.base, div());
-        let drag = self.drag_value.take().zip(self.on_drag.clone());
+        let drag = self.drag.take();
 
         window.with_element_state(id.unwrap(), |state, window| {
             let state: SharedHandleState = state.unwrap_or_default();
@@ -302,8 +299,8 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
                 .flex_shrink_0()
                 .group("handle")
                 .when_some(drag, |this, (value, on_drag)| {
-                    this.on_drag(value, move |_, position, window, cx| {
-                        on_drag(&position, window, cx)
+                    this.on_drag(value, move |value, position, window, cx| {
+                        on_drag(value, &position, window, cx)
                     })
                 })
                 .map(|this| match (edge, axis) {
@@ -897,7 +894,7 @@ mod tests {
                                     heard.double_clicks.set(heard.double_clicks.get() + 1)
                                 }
                             })
-                            .on_drag(Resize, |drag, _, _, cx| cx.new(|_| (*drag).clone())),
+                            .on_drag(Resize, |drag, _, _, cx| cx.new(|_| drag.clone())),
                     ),
             )
         }

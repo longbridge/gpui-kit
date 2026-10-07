@@ -58,9 +58,9 @@ anything else, such as an application's own sidebar. It keeps the band, the
 cursor and the hovered / pressed / dragging indicator; what a drag resizes is
 the caller's, through the handle's own `on_drag` and `on_drag_move`, and any
 other listener — `on_hover`, `on_double_click` — goes on the handle the usual
-way. The builder was hidden before and keeps its signature, so existing calls
-are unchanged; its `on_drag` now asks for `T: Clone` and the drag carries the
-`T` itself rather than an `Rc<T>`, so `on_drag_move::<T>` follows it.
+way. The drag carries the `T` itself rather than an `Rc<T>`, so
+`on_drag_move::<T>` follows it, and the `on_drag` constructor is handed a `&T`
+the way GPUI's own `on_drag` is.
 
 #### Plot moves to `gpui-base`
 

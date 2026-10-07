@@ -1,7 +1,7 @@
 //! The gpui-component appearance for the dock area: the outer frame, the
 //! split frames, and one dock's chrome.
 
-use std::{ops::Deref as _, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 
 use gpui::{
     AnyElement, App, AppContext as _, Axis, Context, Div, Element, Empty, InteractiveElement as _,
@@ -21,7 +21,7 @@ use crate::{
     dock::{
         DockSkin, SkinShared, invalid_panel::InvalidPanel, panel_handle, tab_panel::TabGroupSkin,
     },
-    resizable::{render_resize_handle, resize_handle_appearance},
+    resizable::render_resize_handle,
     resize_handle,
 };
 
@@ -139,14 +139,14 @@ impl DockSkin {
             _ => HandleEdge::Leading,
         };
 
-        resize_handle(id, placement.axis())
-            .with_appearance(resize_handle_appearance())
-            .inside(edge)
-            .on_drag(ResizePanel, move |info, _, _, cx| {
+        resize_handle(id, placement.axis()).inside(edge).on_drag(
+            ResizePanel,
+            move |info, _, _, cx| {
                 cx.stop_propagation();
                 shared.resizing_dock().set(Some(placement));
-                cx.new(|_| info.deref().clone())
-            })
+                cx.new(|_| info.clone())
+            },
+        )
     }
 }
 
