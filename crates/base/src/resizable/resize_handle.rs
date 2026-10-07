@@ -1,19 +1,39 @@
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    AnyElement, App, Axis, Element, ElementId, Entity, GlobalElementId, Hitbox, HitboxBehavior,
-    InteractiveElement, IntoElement, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ParentElement as _, Pixels, Point, Render, StatefulInteractiveElement, Styled as _, Window,
-    div, prelude::FluentBuilder as _, px,
+    AnyElement, App, Axis, Div, Element, ElementId, Entity, GlobalElementId, Hitbox,
+    HitboxBehavior, InteractiveElement, Interactivity, IntoElement, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ParentElement as _, Pixels, Point, Render, StatefulInteractiveElement,
+    Styled as _, Window, div, prelude::FluentBuilder as _, px,
 };
 
-use crate::{AxisExt as _, theme::ActiveTheme as _};
+use crate::{AxisExt as _, InteractiveElementExt, TestSupportExt as _, theme::ActiveTheme as _};
 
 pub(crate) const HANDLE_PADDING: Pixels = px(4.);
 pub(crate) const HANDLE_SIZE: Pixels = px(1.);
 
-/// Create a resize handle for a resizable panel.
-#[doc(hidden)]
+/// Create a resize handle: a band that resizes whatever it edges when it is
+/// dragged.
+///
+/// Base owns the band -- where it sits, how wide it is, its cursor, and the
+/// Idle → Hovered → Pressed → Dragging progression its appearance is told
+/// about. What a drag resizes is the caller's. Give the handle a payload with
+/// [`ResizeHandle::on_drag`] and follow that payload with
+/// [`on_drag_move`](InteractiveElement::on_drag_move), the way a slider thumb
+/// does; any other listener -- a double click that restores a default size, a
+/// hover that a surrounding drawer has to count as its own -- goes on the
+/// handle through the interactive element traits.
+///
+/// The band occludes. While the pointer is on it nothing behind it reads as
+/// hovered, its own container included, so a container that has to know the
+/// pointer is still over it listens on the handle as well.
+///
+/// ```ignore
+/// resize_handle("sidebar-edge", Axis::Horizontal)
+///     .inside(HandleEdge::Trailing)
+///     .on_drag(ResizeSidebar, |drag, _, _, cx| cx.new(|_| (*drag).clone()))
+///     .on_double_click(|_, _, cx| restore_default_width(cx))
+/// ```
 pub fn resize_handle<T: 'static, E: 'static + Render>(
     id: impl Into<ElementId>,
     axis: Axis,
@@ -124,14 +144,19 @@ pub enum HandleEdge {
     Trailing,
 }
 
-#[doc(hidden)]
+/// A band that resizes along one axis when it is dragged, carrying a `T` that
+/// the drag renders as an `E`. See [`resize_handle`].
 pub struct ResizeHandle<T: 'static, E: 'static + Render> {
     id: ElementId,
     axis: Axis,
-    drag_value: Option<Rc<T>>,
+    drag_value: Option<T>,
     edge: Option<HandleEdge>,
     on_drag: Option<Rc<dyn Fn(&Point<Pixels>, &mut Window, &mut App) -> Entity<E>>>,
     appearance: Option<ResizeHandleRenderer>,
+    /// The band itself. Listeners a caller attaches through the interactive
+    /// element traits land here, on the element the pointer actually hits;
+    /// base places and sizes it when it is laid out.
+    base: Div,
 }
 
 impl<T: 'static, E: 'static + Render> ResizeHandle<T, E> {
@@ -144,6 +169,7 @@ impl<T: 'static, E: 'static + Render> ResizeHandle<T, E> {
             edge: None,
             appearance: None,
             axis,
+            base: div(),
         }
     }
 
@@ -153,15 +179,26 @@ impl<T: 'static, E: 'static + Render> ResizeHandle<T, E> {
         self
     }
 
+    /// Start a drag carrying `value` when the band is pressed and moved.
+    ///
+    /// A band takes one drag, and this is it: use this rather than
+    /// [`StatefulInteractiveElement::on_drag`], which it shadows.
+    ///
+    /// GPUI tells drags apart by the type of their payload, so the drag
+    /// carries `value` itself, and a caller following it with
+    /// [`on_drag_move`](InteractiveElement::on_drag_move) listens for a `T`.
     pub fn on_drag(
         mut self,
         value: T,
         f: impl Fn(Rc<T>, &Point<Pixels>, &mut Window, &mut App) -> Entity<E> + 'static,
-    ) -> Self {
-        let value = Rc::new(value);
-        self.drag_value = Some(value.clone());
+    ) -> Self
+    where
+        T: Clone,
+    {
+        let shared = Rc::new(value.clone());
+        self.drag_value = Some(value);
         self.on_drag = Some(Rc::new(move |p, window, cx| {
-            f(value.clone(), p, window, cx)
+            f(shared.clone(), p, window, cx)
         }));
         self
     }
@@ -173,6 +210,16 @@ impl<T: 'static, E: 'static + Render> ResizeHandle<T, E> {
         self
     }
 }
+
+impl<T: 'static, E: 'static + Render> InteractiveElement for ResizeHandle<T, E> {
+    fn interactivity(&mut self) -> &mut Interactivity {
+        self.base.interactivity()
+    }
+}
+
+impl<T: 'static, E: 'static + Render> StatefulInteractiveElement for ResizeHandle<T, E> {}
+
+impl<T: 'static, E: 'static + Render> InteractiveElementExt for ResizeHandle<T, E> {}
 
 /// One handle's [`ResizeHandleState`], shared between the element and the
 /// mouse listeners it registers.
@@ -237,23 +284,27 @@ impl<T: 'static, E: 'static + Render> Element for ResizeHandle<T, E> {
         // push it.
         let hug_extent = HANDLE_SIZE + HANDLE_PADDING;
         let straddle_extent = HANDLE_SIZE + HANDLE_PADDING * 2.;
+        // The caller's listeners are already on it; what base adds is where the
+        // band goes and what it holds.
+        let base = std::mem::replace(&mut self.base, div());
+        let drag = self.drag_value.take().zip(self.on_drag.clone());
 
         window.with_element_state(id.unwrap(), |state, window| {
             let state: SharedHandleState = state.unwrap_or_default();
 
             let bg_color = handle_color(&cx.theme(), state.get().is_active());
 
-            let mut el = div()
+            let mut el = base
                 .id(self.id.clone())
+                .test_support()
                 .occlude()
                 .absolute()
                 .flex_shrink_0()
                 .group("handle")
-                .when_some(self.on_drag.clone(), |this, on_drag| {
-                    this.on_drag(
-                        self.drag_value.clone().unwrap(),
-                        move |_, position, window, cx| on_drag(&position, window, cx),
-                    )
+                .when_some(drag, |this, (value, on_drag)| {
+                    this.on_drag(value, move |_, position, window, cx| {
+                        on_drag(&position, window, cx)
+                    })
                 })
                 .map(|this| match (edge, axis) {
                     // Hugging an edge: the whole band is inside the container,
@@ -470,11 +521,16 @@ pub(crate) fn handle_color(theme: &crate::Theme, active: bool) -> gpui::Hsla {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::Cell, rc::Rc};
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
 
     use gpui::{
-        AnyElement, App, Axis, Bounds, Context, Empty, IntoElement, ParentElement as _, Pixels,
-        Render, Styled as _, TestAppContext, Window, deferred, div, hsla,
+        AnyElement, App, AppContext as _, Axis, Bounds, Context, DragMoveEvent, Empty,
+        InteractiveElement as _, IntoElement, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent,
+        ParentElement as _, Pixels, Render, StatefulInteractiveElement as _, Styled as _,
+        TestAppContext, VisualTestContext, Window, deferred, div, hsla, point,
         prelude::FluentBuilder as _, px,
     };
 
@@ -482,7 +538,7 @@ mod tests {
         HandleEdge, ResizeHandleContext, ResizeHandleState, SharedHandleState, handle_color,
         resize_handle,
     };
-    use crate::{ElementExt as _, ResizableTheme, Theme};
+    use crate::{ElementExt as _, InteractiveElementExt as _, ResizableTheme, Theme};
 
     /// What a hugging handle's renderer was told and drew, and where the
     /// drawing landed in the frame: under which mask, and before or after a
@@ -770,5 +826,162 @@ mod tests {
             assert_eq!(handle_color(&theme, false), projected);
             assert_eq!(handle_color(&theme, true), active);
         });
+    }
+
+    /// The payload a caller drags a handle with.
+    #[derive(Clone)]
+    struct Resize;
+
+    impl Render for Resize {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            Empty
+        }
+    }
+
+    /// What the listeners a caller put on a handle, and on its container, heard.
+    #[derive(Default)]
+    struct Heard {
+        container_hovered: Cell<Option<bool>>,
+        handle_hovered: Cell<Option<bool>>,
+        double_clicks: Cell<usize>,
+        drag_moves: RefCell<Vec<Pixels>>,
+        /// Every state the appearance was drawn in, repeats collapsed.
+        states: RefCell<Vec<ResizeHandleState>>,
+    }
+
+    /// A 200px container whose trailing edge a handle hugs, listened to the way
+    /// an application's own sidebar would be.
+    struct CallerHarness {
+        heard: Rc<Heard>,
+    }
+
+    impl Render for CallerHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let heard = self.heard.clone();
+            div().w(px(400.)).h(px(100.)).child(
+                div()
+                    .id("container")
+                    .relative()
+                    .w(px(200.))
+                    .h_full()
+                    .on_hover({
+                        let heard = heard.clone();
+                        move |hovered: &bool, _, _| heard.container_hovered.set(Some(*hovered))
+                    })
+                    .on_drag_move({
+                        let heard = heard.clone();
+                        move |event: &DragMoveEvent<Resize>, _, _| {
+                            heard.drag_moves.borrow_mut().push(event.event.position.x)
+                        }
+                    })
+                    .child(
+                        resize_handle("edge", Axis::Horizontal)
+                            .inside(HandleEdge::Trailing)
+                            .with_appearance(Rc::new({
+                                let heard = heard.clone();
+                                move |handle: &ResizeHandleContext, _: &mut Window, _: &mut App| {
+                                    let mut states = heard.states.borrow_mut();
+                                    if states.last() != Some(&handle.state()) {
+                                        states.push(handle.state());
+                                    }
+                                    None
+                                }
+                            }))
+                            .on_hover({
+                                let heard = heard.clone();
+                                move |hovered: &bool, _, _| heard.handle_hovered.set(Some(*hovered))
+                            })
+                            .on_double_click({
+                                let heard = heard.clone();
+                                move |_, _, _| {
+                                    heard.double_clicks.set(heard.double_clicks.get() + 1)
+                                }
+                            })
+                            .on_drag(Resize, |drag, _, _, cx| cx.new(|_| (*drag).clone())),
+                    ),
+            )
+        }
+    }
+
+    /// Listeners a caller attaches to a handle reach the band, and leave the
+    /// progression base reports to the appearance as it was.
+    #[gpui::test]
+    fn a_callers_listeners_reach_the_band(cx: &mut TestAppContext) {
+        let heard = Rc::new(Heard::default());
+        let (_, cx) = cx.add_window_view({
+            let heard = heard.clone();
+            move |_, _| CallerHarness { heard }
+        });
+        let draw = |cx: &mut VisualTestContext| cx.update(|window, cx| window.draw(cx).clear(cx));
+        let press = |cx: &mut VisualTestContext, click_count| {
+            cx.simulate_event(MouseDownEvent {
+                position: point(px(198.), px(50.)),
+                modifiers: Modifiers::default(),
+                button: MouseButton::Left,
+                click_count,
+                first_mouse: false,
+            });
+        };
+        let release = |cx: &mut VisualTestContext, x, click_count| {
+            cx.simulate_event(MouseUpEvent {
+                position: point(x, px(50.)),
+                modifiers: Modifiers::default(),
+                button: MouseButton::Left,
+                click_count,
+            });
+        };
+        draw(cx);
+
+        // The container spans 0..200, and the band hugs its last five pixels.
+        cx.simulate_mouse_move(point(px(100.), px(50.)), None, Modifiers::default());
+        draw(cx);
+        assert_eq!(heard.container_hovered.get(), Some(true));
+
+        cx.simulate_mouse_move(point(px(198.), px(50.)), None, Modifiers::default());
+        draw(cx);
+        assert_eq!(heard.handle_hovered.get(), Some(true));
+        // The band occludes, so its own container stops reading as hovered.
+        assert_eq!(heard.container_hovered.get(), Some(false));
+
+        for click_count in [1, 2] {
+            press(cx, click_count);
+            draw(cx);
+            release(cx, px(198.), click_count);
+            draw(cx);
+        }
+        assert_eq!(heard.double_clicks.get(), 1);
+
+        press(cx, 1);
+        draw(cx);
+        for x in [px(190.), px(120.)] {
+            cx.simulate_mouse_move(
+                point(x, px(50.)),
+                Some(MouseButton::Left),
+                Modifiers::default(),
+            );
+            draw(cx);
+        }
+        release(cx, px(120.), 1);
+        draw(cx);
+
+        // The drag carries `Resize` itself. When it carried an `Rc<Resize>`,
+        // the container's `on_drag_move::<Resize>` never heard a thing.
+        assert_eq!(heard.drag_moves.borrow().last(), Some(&px(120.)));
+        // A drag is no click, let alone a double one.
+        assert_eq!(heard.double_clicks.get(), 1);
+        assert_eq!(
+            *heard.states.borrow(),
+            vec![
+                ResizeHandleState::Idle,
+                ResizeHandleState::Hovered,
+                ResizeHandleState::Pressed,
+                ResizeHandleState::Hovered,
+                ResizeHandleState::Pressed,
+                ResizeHandleState::Hovered,
+                ResizeHandleState::Pressed,
+                ResizeHandleState::Dragging,
+                ResizeHandleState::Idle,
+            ]
+        );
     }
 }

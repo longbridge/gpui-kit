@@ -40,6 +40,10 @@ ResizableState 持久保存面板尺寸；拖动手柄时更新约束内的比�
 
 renderer 返回 `None` 时保留 Base 自带的 1px 细线，因此只想改其中几个手柄时，不必把其余的一并重画。
 
+## 独立手柄
+
+`resize_handle(id, axis)` 为不属于任何面板组的边缘创建同一种手柄。拖拽通过手柄自带的 `on_drag` 设置，拖拽改变什么由调用方决定。手柄还实现了 `InteractiveElement` 和 `StatefulInteractiveElement`，`on_drag_move`、`on_hover`、`on_double_click` 等监听都按常规方式挂上去。`inside(HandleEdge)` 让命中带留在容器内；不调用时，命中带骑在边界上。
+
 ## 完整 Rust 示例
 
 <<< ../../../../crates/base/examples/showcase/components/resizable.rs{rust}

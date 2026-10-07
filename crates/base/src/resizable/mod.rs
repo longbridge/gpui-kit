@@ -7,8 +7,10 @@ use gpui::{
 mod panel;
 mod resize_handle;
 pub use panel::*;
-#[doc(hidden)]
-pub use resize_handle::*;
+pub use resize_handle::{
+    HandleEdge, ResizeHandle, ResizeHandleContext, ResizeHandleRenderer, ResizeHandleState,
+    resize_handle,
+};
 
 #[doc(hidden)]
 pub const PANEL_MIN_SIZE: Pixels = px(100.);
