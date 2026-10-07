@@ -251,6 +251,39 @@ assert_eq!(window.find("agree").checked(), Some(true)); // New frame.
 文本输入不模拟完整的系统 IME 组合输入；
 密码输入框不报告值，需要时通过应用状态验证结果。
 
+## 通过输入处理器验证文字组合
+
+`gpui_kit::test::TestInput` 将显式传入的 GPUI `InputHandler` 与窗口连接起来。
+如果 entity 实现了 `EntityInputHandler`，先用
+`gpui_kit::ElementInputHandler::new(bounds, entity.clone())` 创建适配器，再传给
+`TestInput::new(handler, window)`。entity 应由生产视图持有，bounds 使用
+真实输入区域。这个桥接器直接调用指定处理器，不会选择当前焦点控件，也不运行系统 IME。
+
+`commit_text(text, cx)` 通过 `replace_text_in_range` 提交文字；
+`compose_text(replacement, text, selection, cx)` 通过
+`replace_and_mark_text_in_range` 更新组合文字。替换范围和选区使用 UTF-16 code unit，
+不是 UTF-8 字节偏移；选区相对于组合文字。替换范围为 `None` 时，处理器替换现有的
+标记范围或选区。空的组合文字按处理器协议取消预编辑。
+`marked_text_range(cx)` 返回文档中的标记范围；`selected_text_range(cx)` 返回
+`Option<UTF16Selection>`，包含选区方向。`unmark_text(cx)` 结束标记并保留文字。修改方法调用处理器后完成一帧，可验证组合状态变化与提交行为。系统候选窗口、
+焦点路由和系统 IME 集成仍需原生测试。向当前焦点输入普通文字时使用 `window.input`。
+
+## 窗口尺寸、显示缩放与剪贴板
+
+在窗口 update 外调用 GPUI 已有的
+`TestAppContext::simulate_window_resize(handle, size)` 和
+`simulate_window_scale_factor_change(handle, scale)`，再用 `render_frame`
+刷新布局。不同显示缩放下，鼠标坐标仍使用窗口内的逻辑像素。应同时检查编辑状态是否
+保留、布局是否调整，并在新位置激活控件。
+
+用生产快捷键（`secondary-c`、`secondary-x`、`secondary-v`）验证剪贴板操作，
+需要时通过 `cx.read_from_clipboard()` 检查内容。测试平台在窗口之间共享剪贴板，
+编辑器状态则应互相独立。这些测试验证测试平台适配器与应用快捷键，不验证系统剪贴板服务。
+
+激活外部 Link 后，可以用 `cx.opened_url()` 检查测试平台收到的 URL，
+同时验证应用的点击回调。它不代表浏览器已打开目标页面。测试平台未公开鼠标指针
+样式的读取 API；不能根据 URL 或回调断言指针样式。
+
 ## 查询前完成一帧
 
 第一次查询、外部直接修改状态或焦点、调整尺寸后，调用 `window.render_frame(cx)`。
@@ -294,6 +327,39 @@ GPUI `dispatch_action` 会排队执行。继续修改 action 将读取的值之�
 Sheet/Notification 几何测试会等待真实入场时长，再断言最终边界。
 Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用于测试展开后的最终几何。
 
+## 按无障碍属性查询与分步事件
+
+导入 `gpui_kit::test::{TestQueryExt, TestEventExt}`，可使用更多查询与事件操作。
+`elements()` 返回当前帧中已观测的元素；`find_by_label(label)`、
+`try_find_by_label(label)` 和 `find_all_by_label(label)` 精确匹配原生无障碍标签，区分大小写；
+`find_all_by_role(role)` 按 AccessKit `Role` 查询。结果包括不可见的注册元素，
+先按 y、再按 x 排序，同位置按路径区分。必需查询缺少目标时 panic；唯一目标查询
+遇到歧义也会 panic。作用域查询只包含后代，不包含作用域节点自身。这些方法也支持 `within`
+作用域，不会发现未观测的文字或尚未绘制的虚拟行。标签是无障碍名称，不是屏幕文字；
+名称会随本地化变化时，优先使用稳定 ID。
+
+需要检查手势中间状态时，可分别发送事件：
+
+```rust
+use gpui_kit::test::TestEventExt;
+
+let start = window.find("handle").bounds().center();
+window.pointer_down(start, MouseButton::Left, cx);
+window.pointer_move(start + point(px(24.), px(0.)), Some(MouseButton::Left), cx);
+// 在鼠标按住期间检查状态。
+window.pointer_up(start + point(px(24.), px(0.)), MouseButton::Left, cx);
+```
+
+坐标使用窗口内的像素位置。`pointer_move(position, pressed_button, cx)`
+需要显式指定按住的按钮；这些方法不保存按钮状态。`pointer_down` 与 `pointer_up`
+各发送一次点击事件。普通点击、悬停、滚动、拖动和分步鼠标事件使用窗口当前的修饰键；
+配置式点击临时使用指定修饰键，结束后恢复之前的状态。`change_modifiers(modifiers, cx)`
+修改修饰键并保留 caps lock，手势结束后应恢复之前的修饰键。
+`key_down(key, is_held, cx)` 与 `key_up(key, cx)` 支持分别发送按下、松开和自动重复
+事件（`is_held = true`）。键盘事件合并按键字符串中的修饰键与窗口已按住的修饰键，
+不修改窗口保存的修饰键状态。每一步先刷新，再发送事件并完成一帧。这些键盘事件不插入
+文字；输入文字使用 `input`。延迟结果仍需离开窗口 update 后等待。
+
 ## 覆盖范围与失败排查
 
 仓库通过真实输入、原生属性和布局边界验证以下组件流程。这些是具体的回归契约，
@@ -307,6 +373,10 @@ Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用�
 | `search.rs` | Command 禁用项跳过、循环导航、中文关键词、空结果、Action 与原始索引回调、两阶段 Escape；Combobox 搜索、单选/多选、清除、空结果恢复、禁用行为及关闭时仅一次 Confirm |
 | `disclosure.rs` | Accordion 互斥展开、折叠与实际面板几何；Stepper 内容导航；禁用展开与步骤操作；Slider 轨道点击、滑块拖动与禁用行为 |
 | `collections.rs` | Tree 点击展开、键盘展开/折叠与选择；DataTable 行选择、键盘虚拟滚动与滚轮滚动 |
+| `query_helpers.rs` | 精确无障碍标签和角色、作用域歧义、不可见注册元素与不可变快照 |
+| `event_helpers.rs` | 分步鼠标和按键事件、自动重复与保持修饰键 |
+| `composition_helpers.rs` | 显式输入处理器桥接、UTF-16 预编辑、整段提交与取消 |
+| `environment.rs` | 窗口尺寸和显示缩放、跨窗口剪贴板、Link URL 请求与应用回调 |
 | `date_picker.rs` | 打开、精确预设日期与日历日期选择、月份切换、清除、Escape 与禁用行为 |
 | `overlays.rs` | Dialog 校验 → 作用域 Input → 保存 → Notification；悬停显示关闭按钮；自动关闭计时；Dialog/Sheet Escape 与焦点恢复；表面边界 |
 | `menu.rs` | 禁用菜单项、键盘确认、Escape、焦点恢复、子菜单悬停及嵌套菜单项激活 |
@@ -396,7 +466,7 @@ Checkbox 的图片必须一致。另一个原生事件测试断开 Checkbox 的�
 固定字体、尺寸、主题、焦点和动画状态下，将图片与已审查的预期结果比较。状态与
 图片断言能发现不同的故障；两者都不能证明打包应用或完整 IME 行为正确。
 可执行示例见
-[`crates/kit/tests/rendering.rs`](https://github.com/longbridge/gpui-kit/blob/testing/crates/kit/tests/rendering.rs)。
+[`crates/kit/tests/rendering.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/kit/tests/rendering.rs)。
 
 ## 接入 CI
 

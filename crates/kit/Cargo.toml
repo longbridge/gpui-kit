@@ -129,6 +129,22 @@ name = "interactions"
 required-features = ["test-support"]
 
 [[test]]
+name = "event_helpers"
+required-features = ["test-support"]
+
+[[test]]
+name = "query_helpers"
+required-features = ["test-support"]
+
+[[test]]
+name = "composition_helpers"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "environment"
+required-features = ["test-support", "component"]
+
+[[test]]
 name = "rendering"
 # Requires a real Metal device; select explicitly with --test rendering.
 test = false
