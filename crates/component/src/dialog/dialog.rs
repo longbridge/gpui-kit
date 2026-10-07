@@ -367,9 +367,7 @@ impl Dialog {
         self
     }
 
-    /// Sets the footer of the dialog, the footer will render at the bottom of the dialog, usually for action buttons.
-    ///
-    /// When you set the footer, the `button_props` will be ignored, you need to render the action buttons by yourself.
+    /// Sets the header of the dialog, rendered above the title and content.
     pub(crate) fn header(mut self, header: impl IntoElement) -> Self {
         self.header = Some(header.into_any_element());
         self
@@ -377,7 +375,12 @@ impl Dialog {
 
     /// Sets the footer of the dialog, the footer will render at the bottom of the dialog, usually for action buttons.
     ///
-    /// When you set the footer, the `button_props` will be ignored, you need to render the action buttons by yourself.
+    /// A plain `Dialog` never renders buttons from `button_props`: the props
+    /// only install the callbacks behind the `Confirm` and `Cancel` actions.
+    /// Compose the action buttons yourself — typically with a
+    /// [`DialogFooter`](crate::dialog::DialogFooter) — or use an
+    /// [`AlertDialog`](crate::dialog::AlertDialog), which builds a default
+    /// footer from `button_props` when no footer is set.
     pub fn footer(mut self, footer: impl IntoElement) -> Self {
         self.footer = Some(footer.into_any_element());
         self
@@ -388,6 +391,12 @@ impl Dialog {
     /// This overrides only the fields `button_props` sets; the rest of the
     /// dialog's button configuration is kept, so the call order does not
     /// matter.
+    ///
+    /// On a plain `Dialog` these props install the callbacks behind the
+    /// `Confirm` and `Cancel` actions and the labels an
+    /// [`AlertDialog`](crate::dialog::AlertDialog) default footer would use;
+    /// the dialog surface itself renders no buttons from them, see
+    /// [`Self::footer`].
     pub fn button_props(mut self, button_props: DialogButtonProps) -> Self {
         self.button_props.merge(button_props);
         self

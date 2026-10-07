@@ -12,11 +12,21 @@ use std::rc::Rc;
 /// Extension trait for [`Window`] to add dialog, sheet .. functionality.
 pub trait WindowExt: Sized {
     /// Opens a Sheet at right placement.
+    ///
+    /// The builder follows the same per-frame contract as
+    /// [`WindowExt::open_dialog`]: it re-runs on every frame the sheet stays
+    /// open, so keep it cheap and create entities before opening, not inside
+    /// the builder.
     fn open_sheet<F>(&mut self, cx: &mut App, build: F)
     where
         F: Fn(Sheet, &mut Window, &mut App) -> Sheet + 'static;
 
     /// Opens a Sheet at the given placement.
+    ///
+    /// The builder follows the same per-frame contract as
+    /// [`WindowExt::open_dialog`]: it re-runs on every frame the sheet stays
+    /// open, so keep it cheap and create entities before opening, not inside
+    /// the builder.
     fn open_sheet_at<F>(&mut self, placement: Placement, cx: &mut App, build: F)
     where
         F: Fn(Sheet, &mut Window, &mut App) -> Sheet + 'static;
@@ -28,6 +38,39 @@ pub trait WindowExt: Sized {
     fn close_sheet(&mut self, cx: &mut App);
 
     /// Opens a Dialog.
+    ///
+    /// The builder is a render closure, not a one-shot constructor: the dialog
+    /// layer re-runs it on every frame the dialog stays open, which is what
+    /// lets an open dialog reflect fresh state. That contract comes with two
+    /// rules:
+    ///
+    /// - Keep the builder cheap and idempotent, it runs on every frame.
+    /// - Do not create entities inside it. Anything from `cx.new(...)` — an
+    ///   [`InputState`](crate::input::InputState), a child view —
+    ///   is dropped and rebuilt every frame, which resets input while the
+    ///   user types. Create entities before opening the dialog and clone them
+    ///   into the builder.
+    ///
+    /// To move focus into the dialog's content, focus from inside the builder:
+    /// `open_dialog` focuses the dialog shell when it is called, and the
+    /// builder runs after that, on the dialog's first render, so a handle
+    /// focused earlier — for example in the constructor of an entity created
+    /// before the call — is overwritten by the shell.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// use gpui_kit::component::input::{Input, InputState};
+    ///
+    /// // Created before opening, cloned into the builder: the input keeps
+    /// // its value across the builder's per-frame re-runs.
+    /// let input = cx.new(|cx| InputState::new(window, cx).placeholder("URL"));
+    /// window.open_dialog(cx, move |dialog, _, _| {
+    ///     dialog
+    ///         .title("Import")
+    ///         .child(Input::new(&input))
+    /// });
+    /// ```
     fn open_dialog<F>(&mut self, cx: &mut App, build: F)
     where
         F: Fn(Dialog, &mut Window, &mut App) -> Dialog + 'static;
@@ -36,6 +79,11 @@ pub trait WindowExt: Sized {
     ///
     /// This is a convenience method for opening an alert dialog with opinionated defaults.
     /// The footer buttons are center-aligned and include an icon based on the variant.
+    ///
+    /// The builder follows the same per-frame contract as
+    /// [`WindowExt::open_dialog`]: it re-runs on every frame the dialog stays
+    /// open, so keep it cheap and create entities before opening, not inside
+    /// the builder.
     ///
     /// # Examples
     ///
