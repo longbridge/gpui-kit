@@ -145,6 +145,22 @@ name = "environment"
 required-features = ["test-support", "component"]
 
 [[test]]
+name = "control_steps"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "slider_steps"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "semantic_controls"
+required-features = ["test-support", "component"]
+
+[[test]]
+name = "collection_steps"
+required-features = ["test-support", "component"]
+
+[[test]]
 name = "rendering"
 # Requires Metal (macOS) or WGPU (Linux); select explicitly with --test rendering.
 test = false

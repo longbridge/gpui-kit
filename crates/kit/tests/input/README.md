@@ -13,7 +13,7 @@ script/test-input
 ```
 
 This runs Base editing/IME/token tests, Component InputGroup/overlay tests,
-and Kit input, focus, touch-selection and keyboard-helper workflows. These
+and Kit input, focus, touch-selection, keyboard-helper and composition-bridge workflows. These
 targets also run in the existing Linux, macOS and Windows CI matrix.
 
 For a quicker editing/focus iteration:

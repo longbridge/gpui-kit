@@ -446,7 +446,11 @@ that every option or combination of every component has been exhaustively tested
 | `collections.rs` | Tree pointer expansion, keyboard collapse/expansion and selection; DataTable row selection, keyboard virtualization and wheel scrolling |
 | `query_helpers.rs` | Exact accessible labels and roles, scoped ambiguity, invisible registrations and immutable snapshots |
 | `event_helpers.rs` | Separate pointer/key transitions, auto-repeat and retained modifiers |
-| `composition_helpers.rs` | Explicit input-handler bridge, UTF-16 preedit, whole-text commit and cancellation |
+| `control_steps.rs` | Button drag-out cancellation, Checkbox key repeat and Switch disabled before key release |
+| `slider_steps.rs` | Live track/drag changes, release ordering and disabled gestures |
+| `semantic_controls.rs` | Scoped RadioGroup accessible names, controlled state and item/group disabled behavior |
+| `collection_steps.rs` | List release modifiers, drag-out cancellation, repeated navigation and confirmation |
+| `composition_helpers.rs` | Explicit input-handler bridge, UTF-16 preedit, whole-text commit, cancellation and multiline Textarea/Editor undo/readonly transitions |
 | `environment.rs` | Resize and display scale, cross-window clipboard, Link URL requests and owner callbacks |
 | `date_picker.rs` | Opening, exact preset/day selection, month navigation, clearing, Escape and disabled behavior |
 | `overlays.rs` | Dialog validation → scoped Input → save → Notification; hover-revealed close; auto-dismiss timer; Dialog/Sheet Escape and focus restoration; surface bounds |
@@ -545,7 +549,9 @@ macOS or Linux fails rather than substituting a fake image.
 The tests inject two defects into real Kit controls: a missing check-mark asset
 while `checked()` remains true, and transparent input text while `value()` remains
 correct. Images must differ from the working control, and repeated working checkbox
-renders must match. The suite also checks wrapped CJK text with inline code,
+renders must match. Controlled Checkbox cases also check that pointer-down leaves
+the owner value and pixels unchanged, while pointer-up updates both exactly once
+in light and dark themes. The suite also checks wrapped CJK text with inline code,
 focus-line placement and contrast in light and dark themes, pointer activation
 without a button focus line, a single menu highlight across pointer/key transitions,
 list keyboard selection, and table keyboard-only focus with the focus ring enabled

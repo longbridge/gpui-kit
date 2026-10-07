@@ -9,4 +9,5 @@ cargo test -p gpui-base -p gpui-component \
 
 # Real component workflows, focus routing, touch selection and key-event helpers.
 cargo test -p gpui-kit --features test-support,assets --locked \
-  --test input --test input_focus --test touch_selection --test interactions
+  --test input --test input_focus --test touch_selection --test interactions \
+  --test composition_helpers

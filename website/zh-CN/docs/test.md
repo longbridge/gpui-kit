@@ -377,7 +377,11 @@ window.pointer_up(start + point(px(24.), px(0.)), MouseButton::Left, cx);
 | `collections.rs` | Tree 点击展开、键盘展开/折叠与选择；DataTable 行选择、键盘虚拟滚动与滚轮滚动 |
 | `query_helpers.rs` | 精确无障碍标签和角色、作用域歧义、不可见注册元素与不可变快照 |
 | `event_helpers.rs` | 分步鼠标和按键事件、自动重复与保持修饰键 |
-| `composition_helpers.rs` | 显式输入处理器桥接、UTF-16 预编辑、整段提交与取消 |
+| `control_steps.rs` | Button 移出释放取消、Checkbox 按键重复及 Switch 在按键释放前禁用 |
+| `slider_steps.rs` | 滑轨与拖动中的实时值变化、释放事件顺序及禁用时的手势 |
+| `semantic_controls.rs` | RadioGroup 作用域内的无障碍名称、受控状态及单项和整组禁用 |
+| `collection_steps.rs` | List 释放时的修饰键、移出取消、重复导航与确认 |
+| `composition_helpers.rs` | 显式输入处理器桥接、UTF-16 预编辑、整段提交、取消及多行 Textarea/Editor 的撤销和 readonly 切换 |
 | `environment.rs` | 窗口尺寸和显示缩放、跨窗口剪贴板、Link URL 请求与应用回调 |
 | `date_picker.rs` | 打开、精确预设日期与日历日期选择、月份切换、清除、Escape 与禁用行为 |
 | `overlays.rs` | Dialog 校验 → 作用域 Input → 保存 → Notification；悬停显示关闭按钮；自动关闭计时；Dialog/Sheet Escape 与焦点恢复；表面边界 |
@@ -464,7 +468,9 @@ Windows 离屏渲染器，因此 Windows 明确报告跳过像素验证；macOS 
 
 测试向真实 Kit 控件注入两种故障：`checked()` 仍为 true，但勾号资源丢失；
 `value()` 仍正确，但输入文字变透明。故障图片必须与正常控件不同，重复绘制正常
-Checkbox 的图片必须一致。完整测试套件还检查含行内代码的 CJK 文本换行、明暗
+Checkbox 的图片必须一致。受控 Checkbox 用例还在明暗主题下验证：鼠标按下时
+应用值和画面保持不变，释放时值只更新一次，画面同步更新。
+完整测试套件还检查含行内代码的 CJK 文本换行、明暗
 主题下焦点线的位置与对比度、指针激活 Button 时没有焦点线、指针与键盘切换时
 Menu 只有一个高亮项、List 的键盘选中状态，以及开启或关闭焦点环时 Table 只在
 键盘聚焦后显示焦点样式。另一个原生事件测试断开 Checkbox 的状态更新处理器，
