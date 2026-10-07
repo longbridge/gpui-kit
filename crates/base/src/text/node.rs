@@ -249,14 +249,21 @@ impl Element for CustomBlockElement {
     }
 }
 
+/// A block is atomic: the selection takes it whole once it crosses the block's
+/// edge, and never from a gesture that stays inside it. A press and release
+/// within one block is a click on its content — often an interactive card —
+/// and the pointer commonly travels a few pixels during a quick click, so
+/// counting that travel as a drag would paint the whole block as selected.
 fn custom_block_is_selected(
     bounds: Bounds<Pixels>,
     start: Point<Pixels>,
     end: Point<Pixels>,
 ) -> bool {
+    let (start_inside, end_inside) = (bounds.contains(&start), bounds.contains(&end));
     start != end
-        && (bounds.contains(&start)
-            || bounds.contains(&end)
+        && !(start_inside && end_inside)
+        && (start_inside
+            || end_inside
             || point_in_text_selection(
                 bounds.origin,
                 bounds.size.width,
@@ -4060,16 +4067,23 @@ mod tests {
         let inside = bounds.center();
         let above = gpui::point(px(0.), px(0.));
         let below = gpui::point(px(0.), px(80.));
-        for (start, end) in [
-            (above, inside),
-            (inside, below),
-            (above, below),
-            (inside, inside + gpui::point(px(1.), px(0.))),
-        ] {
+        for (start, end) in [(above, inside), (inside, below), (above, below)] {
             assert!(custom_block_is_selected(bounds, start, end));
             assert!(custom_block_is_selected(bounds, end, start));
         }
         assert!(!custom_block_is_selected(bounds, inside, inside));
+        // Pointer travel during a click, and any drag that never leaves the
+        // block, select nothing.
+        for (start, end) in [
+            (inside, inside + gpui::point(px(1.), px(0.))),
+            (
+                bounds.origin,
+                bounds.bottom_right() - gpui::point(px(1.), px(1.)),
+            ),
+        ] {
+            assert!(!custom_block_is_selected(bounds, start, end));
+            assert!(!custom_block_is_selected(bounds, end, start));
+        }
         assert!(!custom_block_is_selected(
             bounds,
             gpui::point(px(150.), px(30.)),
