@@ -3085,6 +3085,46 @@ impl<M: InputModeKind> InputBaseState<M> {
         self.select_to(end, cx);
     }
 
+    /// Add `range` as an additional selection, keeping the existing ones —
+    /// the programmatic equivalent of Alt-clicking another cursor into the
+    /// text.
+    ///
+    /// The range is clipped to the text and expanded to character
+    /// boundaries, like [`Self::set_selected_range`]. A range already
+    /// covered by a selection adds nothing. On a single-line input there is
+    /// no second cursor to add, so the call replaces the selection instead.
+    /// The view scrolls to the new selection.
+    pub fn add_selection(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
+        if !self.is_multi_line() {
+            self.set_selected_range(range, cx);
+            return;
+        }
+
+        let range = self.normalize_token_range(range);
+        let end_bias = if range.start == range.end {
+            Bias::Left
+        } else {
+            Bias::Right
+        };
+        let start = self.text.clip_offset(range.start, Bias::Left);
+        let end = self.text.clip_offset(range.end, end_bias);
+
+        for sel in self.selections.iter() {
+            if sel.start <= start && end <= sel.end {
+                return;
+            }
+        }
+
+        self.undo_manager.break_transaction_coalescing();
+        self.selected_word_range = None;
+        let id = self.selections.generate_id();
+        let mut selection = CursorSelection::new(id, start, end);
+        selection.column_anchor = self.preferred_column_for(end);
+        self.selections.add(selection);
+        self.scroll_to(end, None, cx);
+        cx.notify();
+    }
+
     /// Resolve a mouse position to a byte offset in the text.
     ///
     /// Also reports the caret's line-end affinity for that offset: `true` when the position
@@ -8674,6 +8714,34 @@ mod tests {
         );
         view.input
             .read_with(&cx, |state, _| assert_eq!(state.selections.len(), 2));
+    }
+
+    #[gpui::test]
+    fn test_add_selection(cx: &mut TestAppContext) {
+        let view = InputView::<EditorMode>::new(cx);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.focus(window, cx);
+                state.set_value("foo bar foo", window, cx);
+                state.set_selected_range(0..3, cx);
+                // The programmatic second cursor: the next occurrence.
+                state.add_selection(8..11, cx);
+                // Adding a range that is already selected changes nothing.
+                state.add_selection(0..3, cx);
+            });
+        });
+        view.input.read_with(&cx, |state, _| {
+            let mut ranges: Vec<Range<usize>> =
+                state.selections.iter().map(|s| s.start..s.end).collect();
+            ranges.sort_by_key(|r| r.start);
+            assert_eq!(ranges, vec![0..3, 8..11]);
+        });
+        // Typing replaces every selection at once.
+        cx.simulate_keystrokes("x");
+        view.input.read_with(&cx, |state, _| {
+            assert_eq!(state.text.to_string(), "x bar x")
+        });
     }
 
     #[gpui::test]
