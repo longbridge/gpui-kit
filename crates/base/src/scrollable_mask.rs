@@ -38,6 +38,20 @@ pub(crate) fn horizontal_scroll_area(
     // a child of it: children are prepainted with the scroll offset applied,
     // which would slide the mask away from the viewport as the content
     // scrolls, leaving the uncovered part to the parent scroller.
+    //
+    // The frame cover is a sibling for the same reason: it keeps the rounded
+    // corners clean at every scroll offset (see [`RoundedFrameCover`]).
+    let frame = RoundedFrameCover {
+        corner_radii: Corners {
+            top_left: style.corner_radii.top_left,
+            top_right: style.corner_radii.top_right,
+            bottom_left: style.corner_radii.bottom_left,
+            bottom_right: style.corner_radii.bottom_right,
+        },
+        backdrop: None,
+        frame_border: px(0.),
+    };
+
     div()
         .w_full()
         .relative()
@@ -51,6 +65,216 @@ pub(crate) fn horizontal_scroll_area(
                 .child(child),
         )
         .child(ScrollableMask::new(Axis::Horizontal, scroll_handle).id(id))
+        .child(frame)
+}
+
+/// Keeps a rounded scroll viewport's corners clean at every scroll offset.
+///
+/// GPUI clips children with a rectangular content mask, so content scrolled
+/// under a rounded frame paints square into the corner notches — the regions
+/// inside the frame's rect corners but outside its border arcs. Rounding the
+/// content itself (e.g. a table's first row) only helps while its own corners
+/// sit at the viewport corners; once the content scrolls, the clipped edge
+/// meets the notch square again. The cover fills each notch with the backdrop
+/// color, which reads as a rounded clip. The frame's own border needs no help:
+/// gpui paints an element's border after its children, so it already draws
+/// over both the scrolled content and these covers.
+///
+/// Like [`ScrollableMask`], it must be a sibling of the scrolled element so it
+/// does not move with the scroll offset.
+pub struct RoundedFrameCover {
+    corner_radii: Corners<Option<gpui::AbsoluteLength>>,
+    backdrop: Option<Hsla>,
+    frame_border: Pixels,
+}
+
+impl RoundedFrameCover {
+    /// A frame with the same radius on all four corners.
+    pub fn uniform(radius: Pixels) -> Self {
+        let radius = Some(radius.into());
+        Self {
+            corner_radii: Corners {
+                top_left: radius,
+                top_right: radius,
+                bottom_left: radius,
+                bottom_right: radius,
+            },
+            backdrop: None,
+            frame_border: px(0.),
+        }
+    }
+
+    /// The frame's border width, when the cover is a child of the bordered
+    /// element itself: the cover's bounds are then the content box, so the
+    /// painted notches are grown outward by this width to reach the border
+    /// box. The border itself needs no repaint — gpui paints an element's
+    /// border after its children, so the frame's own border already draws
+    /// over the covers.
+    pub fn frame_border(mut self, width: Pixels) -> Self {
+        self.frame_border = width;
+        self
+    }
+
+    /// The color behind the frame, used to fill the corner notches.
+    /// Defaults to the theme background.
+    pub fn backdrop(mut self, color: Hsla) -> Self {
+        self.backdrop = Some(color);
+        self
+    }
+}
+
+impl IntoElement for RoundedFrameCover {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for RoundedFrameCover {
+    type RequestLayoutState = ();
+    type PrepaintState = Bounds<Pixels>;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        // Same layout trick as `ScrollableMask`: absolute and parent-sized.
+        let mut style = Style::default();
+        style.position = Position::Absolute;
+        style.flex_grow = 1.0;
+        style.flex_shrink = 1.0;
+        style.size.width = relative(1.).into();
+        style.size.height = relative(1.).into();
+
+        (window.request_layout(style, None, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Self::PrepaintState {
+        // Shift up by one height to cover the viewport, like `ScrollableMask`.
+        Bounds {
+            origin: Point {
+                x: bounds.origin.x,
+                y: bounds.origin.y - bounds.size.height,
+            },
+            size: bounds.size,
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut Self::RequestLayoutState,
+        cover_bounds: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        use crate::theme::ActiveTheme as _;
+
+        let mut bounds = *cover_bounds;
+        if !self.frame_border.is_zero() {
+            bounds.origin.x -= self.frame_border;
+            bounds.origin.y -= self.frame_border;
+            bounds.size.width += self.frame_border * 2.;
+            bounds.size.height += self.frame_border * 2.;
+        }
+        let rem_size = window.rem_size();
+        let resolve = |corner: Option<gpui::AbsoluteLength>| {
+            corner
+                .map(|radius| radius.to_pixels(rem_size))
+                .filter(|radius| !radius.is_zero())
+        };
+        let radii = Corners {
+            top_left: resolve(self.corner_radii.top_left),
+            top_right: resolve(self.corner_radii.top_right),
+            bottom_left: resolve(self.corner_radii.bottom_left),
+            bottom_right: resolve(self.corner_radii.bottom_right),
+        };
+        if radii.top_left.is_none()
+            && radii.top_right.is_none()
+            && radii.bottom_left.is_none()
+            && radii.bottom_right.is_none()
+        {
+            return;
+        }
+
+        let backdrop = self.backdrop.unwrap_or(cx.theme().tokens.colors.background);
+        let corners = [
+            (bounds.origin, 1., 1., radii.top_left),
+            (bounds.top_right(), -1., 1., radii.top_right),
+            (bounds.bottom_right(), -1., -1., radii.bottom_right),
+            (
+                Point {
+                    x: bounds.origin.x,
+                    y: bounds.bottom_right().y,
+                },
+                1.,
+                -1.,
+                radii.bottom_left,
+            ),
+        ];
+        for (corner, x_dir, y_dir, radius) in corners {
+            let Some(radius) = radius else { continue };
+            if let Some(path) = corner_notch_path(corner, x_dir, y_dir, radius) {
+                window.paint_path(path, backdrop);
+            }
+        }
+    }
+}
+
+/// The notch at one frame corner: the square of side `radius` anchored at
+/// `corner`, minus the quarter disc of the border arc. `x_dir`/`y_dir` point
+/// from the corner toward the frame's inside (`±1`).
+fn corner_notch_path(
+    corner: Point<Pixels>,
+    x_dir: f32,
+    y_dir: f32,
+    radius: Pixels,
+) -> Option<gpui::Path<Pixels>> {
+    let mut builder = gpui::PathBuilder::fill();
+    builder.move_to(corner);
+    builder.line_to(Point {
+        x: corner.x + radius * x_dir,
+        y: corner.y,
+    });
+    builder.arc_to(
+        Point {
+            x: radius,
+            y: radius,
+        },
+        px(0.),
+        false,
+        // The quarter arc nearest the corner: counterclockwise when the two
+        // inward directions agree in sign, clockwise otherwise.
+        x_dir * y_dir < 0.,
+        Point {
+            x: corner.x,
+            y: corner.y + radius * y_dir,
+        },
+    );
+    builder.close();
+    builder.build().ok()
 }
 
 /// Make a scrollable mask element to cover the parent view with the mouse wheel event listening.
@@ -303,6 +527,50 @@ mod tests {
         Context, IntoElement, ListAlignment, ListState, Render, ScrollDelta, ScrollWheelEvent,
         TestAppContext, VisualTestContext, Window, div, list, point, px,
     };
+
+    #[test]
+    fn corner_notch_paths_stay_inside_their_corner_squares() {
+        let width = px(200.);
+        let height = px(100.);
+        let radius = px(8.);
+        let cases = [
+            ("top left", point(px(0.), px(0.)), 1., 1.),
+            ("top right", point(width, px(0.)), -1., 1.),
+            ("bottom right", point(width, height), -1., -1.),
+            ("bottom left", point(px(0.), height), 1., -1.),
+        ];
+        for (name, corner, x_dir, y_dir) in cases {
+            let path =
+                corner_notch_path(corner, x_dir, y_dir, radius).expect("the notch tessellates");
+            let bounds = path.bounds;
+            // Curve tessellation may inset fractionally; one pixel of slack.
+            let tolerance = 1.0;
+            assert!(
+                (f32::from(bounds.size.width) - f32::from(radius)).abs() <= tolerance
+                    && (f32::from(bounds.size.height) - f32::from(radius)).abs() <= tolerance,
+                "{name}: notch size {:?} must stay a {radius:?} square",
+                bounds.size,
+            );
+            let expected_origin = point(
+                if x_dir > 0. {
+                    corner.x
+                } else {
+                    corner.x - radius
+                },
+                if y_dir > 0. {
+                    corner.y
+                } else {
+                    corner.y - radius
+                },
+            );
+            assert!(
+                (f32::from(bounds.origin.x) - f32::from(expected_origin.x)).abs() <= tolerance
+                    && (f32::from(bounds.origin.y) - f32::from(expected_origin.y)).abs()
+                        <= tolerance,
+                "{name}: notch bounds {bounds:?} must anchor at the frame corner",
+            );
+        }
+    }
 
     struct HorizontalScrollAreaTest {
         scroll_handle: ScrollHandle,
