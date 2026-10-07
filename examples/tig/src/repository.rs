@@ -21,13 +21,29 @@ pub(super) struct CommitDetails {
 #[derive(Clone)]
 pub(super) struct Repository {
     path: PathBuf,
+    revision: SharedString,
 }
 
 impl Repository {
     pub(super) fn new(path: PathBuf) -> Self {
         Self {
             path: std::fs::canonicalize(&path).unwrap_or(path),
+            revision: "HEAD".into(),
         }
+    }
+
+    pub(super) fn with_revision(mut self, revision: SharedString) -> Result<Self, String> {
+        if !(7..=64).contains(&revision.len())
+            || !revision.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
+            return Err("Commit must be a hexadecimal object ID of 7–64 characters.".into());
+        }
+        self.revision = revision;
+        Ok(self)
+    }
+
+    pub(super) fn revision(&self) -> &SharedString {
+        &self.revision
     }
 
     pub(super) fn label(&self) -> String {
@@ -67,11 +83,15 @@ impl Repository {
         self.read(&["rev-parse", "--git-dir"])?;
         let head = self
             .command()
-            .args(["rev-parse", "--verify", "--quiet", "HEAD"])
+            .args(["rev-parse", "--verify", "--quiet", self.revision.as_str()])
             .output()
             .map_err(|error| format!("Couldn't read HEAD: {error}"))?;
         if !head.status.success() {
-            return Ok(Vec::new());
+            return if self.revision == "HEAD" {
+                Ok(Vec::new())
+            } else {
+                Err(format!("Commit {} was not found.", self.revision))
+            };
         }
         let output = self.read(&[
             "log",
@@ -81,7 +101,7 @@ impl Repository {
             "-z",
             &format!("--max-count={HISTORY_LIMIT}"),
             "--format=%H%x00%h%x00%an%x00%ad%x00%s",
-            "HEAD",
+            self.revision.as_str(),
             "--",
         ])?;
         parse_history(&output)
@@ -189,5 +209,17 @@ mod tests {
         assert!(parse_history("--output=somewhere\0short\0author\0date\0subject\0").is_err());
         assert!(!is_object_id(&"g".repeat(40)));
         assert!(!is_object_id(&"a".repeat(39)));
+        for invalid in ["--output=somewhere", "HEAD", "abc", "zzzzzzz"] {
+            assert!(
+                Repository::new(PathBuf::from("."))
+                    .with_revision(invalid.into())
+                    .is_err()
+            );
+        }
+        assert!(
+            Repository::new(PathBuf::from("."))
+                .with_revision("4890b1c2".into())
+                .is_ok()
+        );
     }
 }

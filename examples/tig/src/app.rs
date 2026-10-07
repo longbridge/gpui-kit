@@ -1,10 +1,14 @@
 use std::sync::Arc;
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{
-    ActiveTheme as _, Disableable as _, IconName, Selectable as _, Sizable as _, StyledExt as _,
-    TitleBar, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Icon, IconName, InteractiveElementExt as _,
+    Selectable as _, Sizable as _, StyledExt as _, Theme, ThemeMode, TitleBar, WindowExt as _,
     button::{Button, ButtonVariants as _},
-    diff::{Diff, DiffEvent, DiffFile, DiffFileStatus, DiffInlineUnit, DiffMode, DiffState},
+    diff::{
+        Diff, DiffEvent, DiffFile, DiffFileStatus, DiffInlineUnit, DiffLinePosition, DiffMode,
+        DiffSide, DiffState,
+    },
     h_flex,
     kbd::Kbd,
     list::ListItem,
@@ -13,14 +17,16 @@ use gpui_kit::component::{
     scroll::{ScrollableElement as _, Scrollbar},
     spinner::Spinner,
     status_bar::StatusBar,
+    text::TextView,
     tooltip::Tooltip,
     v_flex,
 };
 use gpui_kit::{
-    AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, FocusHandle, Focusable as _,
-    InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render, ScrollStrategy,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Task,
-    UniformListScrollHandle, Window, div, prelude::FluentBuilder as _, rems, uniform_list,
+    Anchor, AnyElement, App, AppContext as _, ClipboardItem, Context, Entity, FocusHandle,
+    Focusable as _, InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _, Render,
+    ScrollHandle, ScrollStrategy, SharedString, StatefulInteractiveElement as _, Styled as _,
+    Subscription, Task, UniformListScrollHandle, Window, div, prelude::FluentBuilder as _, rems,
+    uniform_list,
 };
 
 use super::repository::{Commit, CommitDetails, Repository};
@@ -45,6 +51,8 @@ mod commands {
             ToggleSidebar,
             UnifiedMode,
             SplitMode,
+            LightAppearance,
+            DarkAppearance,
             Words,
             Characters,
             WholeLines,
@@ -88,8 +96,11 @@ pub(super) struct Tig {
     files: Arc<Vec<DiffFile>>,
     selected: Option<usize>,
     selected_file: Option<SharedString>,
+    initial_file: Option<SharedString>,
+    initial_line: Option<usize>,
     diff: Entity<DiffState>,
     message: SharedString,
+    message_scroll: ScrollHandle,
     history_focus: FocusHandle,
     history_scroll: UniformListScrollHandle,
     files_focus: FocusHandle,
@@ -110,7 +121,8 @@ pub(super) struct Tig {
 impl Tig {
     pub(super) fn new(repository: Repository, window: &mut Window, cx: &mut Context<Self>) -> Self {
         window.set_window_title("Git history — GPUI Kit");
-        let diff = cx.new(|cx| DiffState::new([], cx));
+        Theme::change(ThemeMode::Dark, Some(window), cx);
+        let diff = cx.new(|cx| DiffState::new([], cx).with_mode(DiffMode::Split));
         let history_focus = cx.focus_handle().tab_stop(true);
         history_focus.focus(window, cx);
         let files_focus = cx.focus_handle().tab_stop(true);
@@ -133,8 +145,11 @@ impl Tig {
             files: Arc::default(),
             selected: None,
             selected_file: None,
+            initial_file: None,
+            initial_line: None,
             diff,
             message: SharedString::default(),
+            message_scroll: ScrollHandle::new(),
             history_focus,
             history_scroll: UniformListScrollHandle::new(),
             files_focus,
@@ -153,6 +168,16 @@ impl Tig {
         };
         this.refresh(cx);
         this
+    }
+
+    pub(super) fn with_initial_file(
+        mut self,
+        file: Option<SharedString>,
+        line: Option<usize>,
+    ) -> Self {
+        self.initial_file = file;
+        self.initial_line = line;
+        self
     }
 
     fn selected_commit(&self) -> Option<&Commit> {
@@ -175,6 +200,7 @@ impl Tig {
         self.selected_file = None;
         self.files = Arc::default();
         self.message = SharedString::default();
+        self.message_scroll.set_offset(Default::default());
         let repository = self.repository.clone();
         self._history_task = cx.spawn(async move |this, cx| {
             let result = cx
@@ -214,6 +240,7 @@ impl Tig {
         let revision = self.revision;
         self.loading_commit = true;
         self.message_visible = false;
+        self.message_scroll.set_offset(Default::default());
         self.error = None;
         self.message = SharedString::default();
         self.selected_file = None;
@@ -244,7 +271,28 @@ impl Tig {
             Ok(details) => {
                 self.message = details.message;
                 self.files = Arc::new(details.files);
-                self.load_file(0, cx);
+                let ix = if let Some(path) = self.initial_file.take() {
+                    let Some(ix) = self.files.iter().position(|file| file.path() == &path) else {
+                        self.error = Some(format!("File {path} is not changed in this commit."));
+                        self.initial_line = None;
+                        cx.notify();
+                        return;
+                    };
+                    ix
+                } else {
+                    0
+                };
+                self.load_file(ix, cx);
+                if let Some(line) = self.initial_line.take() {
+                    if let Some(path) = self.selected_file.clone() {
+                        self.diff.update(cx, |state, cx| {
+                            state.scroll_to_line(
+                                DiffLinePosition::new(path, DiffSide::Modified, line),
+                                cx,
+                            );
+                        });
+                    }
+                }
             }
             Err(error) => self.error = Some(error),
         }
@@ -342,6 +390,7 @@ impl Tig {
     }
 
     fn render_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let dark = cx.theme().is_dark();
         let mode = self.diff.read(cx).mode();
         let context = self.diff.read(cx).context_lines();
         let inline = self.diff.read(cx).inline_unit();
@@ -353,12 +402,8 @@ impl Tig {
             .iter()
             .any(|file| !file.is_binary() && (file.additions() > 0 || file.deletions() > 0));
         h_flex()
-            .h_10()
             .flex_none()
             .gap_2()
-            .px_4()
-            .border_b_1()
-            .border_color(cx.theme().border)
             .child(
                 h_flex()
                     .gap_1()
@@ -387,20 +432,25 @@ impl Tig {
                             })),
                     ),
             )
-            .child(div().flex_1())
             .child(
                 Button::new("display-options")
                     .outline()
                     .small()
-                    .label("Display")
-                    .dropdown_caret(true)
-                    .dropdown_menu(move |menu, window, cx| {
+                    .icon(IconName::Settings2)
+                    .accessibility_label("Diff display options")
+                    .tooltip("Diff display options")
+                    .dropdown_menu_with_anchor(Anchor::TopRight, move |menu, window, cx| {
                         menu.menu_with_check(
                             "Unified",
                             mode == DiffMode::Unified,
                             Box::new(UnifiedMode),
                         )
                         .menu_with_check("Split", mode == DiffMode::Split, Box::new(SplitMode))
+                        .separator()
+                        .submenu("Appearance", window, cx, move |menu, _, _| {
+                            menu.menu_with_check("Light", !dark, Box::new(LightAppearance))
+                                .menu_with_check("Dark", dark, Box::new(DarkAppearance))
+                        })
                         .separator()
                         .menu_with_check("Wrap long lines", wrap, Box::new(ToggleWrap))
                         .menu_with_check("Line numbers", numbers, Box::new(ToggleNumbers))
@@ -461,6 +511,8 @@ impl Tig {
                     .flex_none()
                     .px_4()
                     .gap_2()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
                     .child(div().text_sm().font_medium().child("Commits"))
                     .child(
                         div()
@@ -567,6 +619,9 @@ impl Tig {
     }
 
     fn render_diff(&self, cx: &mut Context<Self>) -> AnyElement {
+        let (additions, deletions) = self.files.iter().fold((0, 0), |(added, deleted), file| {
+            (added + file.additions(), deleted + file.deletions())
+        });
         let content = if self.loading_history || self.loading_commit {
             v_flex()
                 .size_full()
@@ -625,7 +680,6 @@ impl Tig {
             Diff::new(&self.diff)
                 .line_number(self.line_numbers)
                 .soft_wrap(self.wrap)
-                .border_0()
                 .into_any_element()
         };
         v_flex()
@@ -635,15 +689,50 @@ impl Tig {
             .when_some(self.selected_commit(), |this, commit| {
                 this.child(
                     v_flex()
+                        .border_b_1()
+                        .border_color(cx.theme().border)
                         .px_4()
                         .py_3()
                         .gap_1()
                         .flex_none()
                         .child(
-                            div()
-                                .text_base()
-                                .font_medium()
-                                .child(commit.subject.clone()),
+                            h_flex()
+                                .items_start()
+                                .gap_1()
+                                .child(div().min_w_0().text_base().font_medium().child(
+                                    if commit.subject.is_empty() {
+                                        "(No subject)".into()
+                                    } else {
+                                        commit.subject.clone()
+                                    },
+                                ))
+                                .when(!self.message.is_empty(), |this| {
+                                    this.child(
+                                        Button::new("commit-message-toggle")
+                                            .flex_none()
+                                            .ghost()
+                                            .small()
+                                            .icon(if self.message_visible {
+                                                IconName::ChevronUp
+                                            } else {
+                                                IconName::ChevronDown
+                                            })
+                                            .toggled(self.message_visible)
+                                            .accessibility_label(if self.message_visible {
+                                                "Hide commit message"
+                                            } else {
+                                                "Show commit message"
+                                            })
+                                            .tooltip(if self.message_visible {
+                                                "Hide commit message"
+                                            } else {
+                                                "Show commit message"
+                                            })
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.toggle_message(cx)
+                                            })),
+                                    )
+                                }),
                         )
                         .child(
                             h_flex()
@@ -674,27 +763,26 @@ impl Tig {
                                 )
                                 .child(div().min_w_0().truncate().child(commit.author.clone()))
                                 .child(div().flex_none().child("·"))
-                                .child(div().flex_none().child(commit.date.clone())),
-                        )
-                        .when(!self.message.is_empty(), |this| {
-                            this.child(
-                                Button::new("commit-message-toggle")
-                                    .ghost()
-                                    .small()
-                                    .w_auto()
-                                    .label("Commit message")
-                                    .icon(if self.message_visible {
-                                        IconName::ChevronUp
-                                    } else {
-                                        IconName::ChevronDown
-                                    })
-                                    .selected(self.message_visible)
-                                    .toggled(self.message_visible)
-                                    .on_click(cx.listener(|this, _, _, cx| {
-                                        this.toggle_message(cx);
-                                    })),
-                            )
-                        }),
+                                .child(div().flex_none().child(commit.date.clone()))
+                                .child(div().flex_1())
+                                .when(!self.loading_commit, |this| {
+                                    this.child(
+                                        h_flex()
+                                            .flex_none()
+                                            .gap_2()
+                                            .text_xs()
+                                            .child(format!("{} files", self.files.len()))
+                                            .child(
+                                                div()
+                                                    .font_family(
+                                                        cx.theme().mono_font_family.clone(),
+                                                    )
+                                                    .child(format!("+{additions} −{deletions}")),
+                                            ),
+                                    )
+                                })
+                                .child(self.render_toolbar(cx)),
+                        ),
                 )
             })
             .when(
@@ -703,14 +791,31 @@ impl Tig {
                     this.child(
                         div()
                             .id("commit-message")
-                            .max_h(rems(10.))
-                            .overflow_y_scrollbar()
-                            .child(div().px_4().py_3().text_sm().child(self.message.clone())),
+                            .relative()
+                            .h_40()
+                            .flex_none()
+                            .min_h_0()
+                            .border_b_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().group_box)
+                            .overflow_y_scroll()
+                            .lock_scroll_axis()
+                            .track_scroll(&self.message_scroll)
+                            .child(
+                                div().flex_none().px_4().py_3().text_sm().child(
+                                    TextView::markdown(
+                                        "commit-message-content",
+                                        self.message.clone(),
+                                    )
+                                    .selectable(true),
+                                ),
+                            )
+                            .vertical_scrollbar(&self.message_scroll)
+                            .test_support(),
                     )
                 },
             )
-            .child(self.render_toolbar(cx))
-            .child(div().flex_1().min_h_0().min_w_0().child(content))
+            .child(div().flex_1().min_h_0().min_w_0().p_3().child(content))
             .into_any_element()
     }
 
@@ -732,6 +837,8 @@ impl Tig {
                     .flex_none()
                     .gap_2()
                     .px_4()
+                    .border_b_1()
+                    .border_color(cx.theme().border)
                     .child(div().font_medium().text_sm().child("Changed files"))
                     .child(
                         div()
@@ -816,7 +923,8 @@ impl Tig {
                                         .tooltip(move |window, cx| {
                                             Tooltip::new(tooltip.clone()).build(window, cx)
                                         })
-                                        .h_10()
+                                        .h_12()
+                                        .py_1()
                                         .px_4()
                                         .w_full()
                                         .min_w_0()
@@ -837,27 +945,43 @@ impl Tig {
                                                 .min_w_0()
                                                 .gap_2()
                                                 .child(
-                                                    v_flex()
-                                                        .min_w_0()
+                                                    h_flex()
                                                         .flex_1()
-                                                        .gap_0()
+                                                        .min_w_0()
+                                                        .gap_2()
                                                         .child(
-                                                            div()
-                                                                .text_sm()
-                                                                .line_height(rems(1.25))
-                                                                .truncate()
-                                                                .child(filename.to_owned()),
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .h_4()
-                                                                .text_xs()
-                                                                .line_height(rems(1.))
-                                                                .truncate()
+                                                            Icon::new(IconName::FileText)
+                                                                .small()
                                                                 .text_color(
                                                                     cx.theme().muted_foreground,
+                                                                ),
+                                                        )
+                                                        .child(
+                                                            v_flex()
+                                                                .min_w_0()
+                                                                .flex_1()
+                                                                .gap_0()
+                                                                .child(
+                                                                    div()
+                                                                        .text_sm()
+                                                                        .line_height(rems(1.25))
+                                                                        .truncate()
+                                                                        .child(filename.to_owned()),
                                                                 )
-                                                                .child(directory.to_owned()),
+                                                                .child(
+                                                                    div()
+                                                                        .h_4()
+                                                                        .text_xs()
+                                                                        .line_height(rems(1.))
+                                                                        .truncate()
+                                                                        .text_color(
+                                                                            cx.theme()
+                                                                                .muted_foreground,
+                                                                        )
+                                                                        .child(
+                                                                            directory.to_owned(),
+                                                                        ),
+                                                                ),
                                                         ),
                                                 )
                                                 .child(
@@ -1002,6 +1126,12 @@ impl Render for Tig {
             .on_action(cx.listener(|this, _: &PreviousChange, _, cx| {
                 this.diff.update(cx, |state, cx| state.previous_change(cx))
             }))
+            .on_action(cx.listener(|_, _: &LightAppearance, window, cx| {
+                Theme::change(ThemeMode::Light, Some(window), cx);
+            }))
+            .on_action(cx.listener(|_, _: &DarkAppearance, window, cx| {
+                Theme::change(ThemeMode::Dark, Some(window), cx);
+            }))
             .on_action(cx.listener(|this, _: &UnifiedMode, _, cx| {
                 this.diff
                     .update(cx, |state, cx| state.set_mode(DiffMode::Unified, cx));
@@ -1063,7 +1193,7 @@ impl Render for Tig {
                             div()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child("HEAD history"),
+                                .child(format!("{} history", self.repository.revision())),
                         )
                         .child(div().flex_1()),
                 ),

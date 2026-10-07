@@ -2,7 +2,7 @@
 
 一个受 tig 启发的桌面 Git 浏览器。浏览 HEAD 可达的最近 200 条提交，在 `Diff` 中查看
 每个文件的变更，并在当前提交修改的文件之间跳转。提交和文件导航共用可调整宽度的侧栏，
-Diff 占据主要工作区。提交正文默认收起，可通过 **Commit message** 展开。
+Diff 占据主要工作区。提交正文默认收起，可通过标题后的展开按钮查看。默认使用 Dark 主题和 Split 布局。
 
 ```sh
 cargo run -p example-tig -- .
@@ -17,10 +17,11 @@ Git 必须在 PATH 中。路径参数默认为当前目录，也可以指向工�
 
 先在 **Commits** 中选择提交，再在 **Changed files** 中选择文件。视口只显示选中的文件，
 确保文件头与源文本始终属于同一个对象。再次选择当前文件会滚动到文件头，若文件已收起则先展开。Diff 上方显示当前提交的标题、作者、日期和短哈希。
-哈希旁的复制按钮复制完整的对象 ID；**Commit message** 显示提交正文，避免长正文默认挤占代码空间。
+哈希旁的复制按钮复制完整的对象 ID；标题后的展开按钮显示提交正文；正文有独立的滚动区域，避免长正文默认挤占代码空间。
 
-在 **Display → Unified / Split** 中切换布局并保留源文本选区。使用箭头按钮或 n / Shift+N 在当前文件的变更组之间跳转。
-**Display** 集中提供换行、行号、单词或字素强调，以及上下文展开选项。
+在 **Diff display options → Unified / Split** 中切换布局并保留源文本选区。使用箭头按钮或 n / Shift+N 在当前文件的变更组之间跳转。
+设置图标打开 **Diff display options**，集中提供换行、行号、单词或字素强调，以及上下文展开选项。
+Appearance 子菜单可切换 Light 和 Dark 主题。
 这些选项更新已有状态，不重新创建状态实体。长行默认换行；保留 Diff 的主题化增删行背景，
 配合 gutter 中的符号和行内强调区分变更。
 
@@ -66,11 +67,23 @@ merge commit 与第一父提交比较，生成普通的两侧 patch。根提交�
 cargo run -p example-tig -- --check /path/to/repository
 ```
 
-示例包含 parser 回归测试，以及使用实际视图的 UI integration test，覆盖提交导航、
-文件导航、过期结果拒绝和焦点切换。
+示例包含 parser 回归测试，以及使用实际视图的 UI integration tests，覆盖提交和文件导航、
+启动文件定位、过期结果拒绝、焦点切换，以及提交正文的独立滚动。
 
-下图早于最后一轮操作入口调整：侧栏折叠已移到状态栏左侧，Unified/Split 已收进 Display。
+## 演示
 
-![Git history 的文件列表预览](screenshots/unified.png)
+定位到一个真实的 Rust 变更，复现截图中的位置：
+
+```sh
+cargo run -p example-tig -- --commit 4890b1c2 --file crates/component/src/speech/waveform.rs --line 70 .
+```
+
+`--commit` 接受 7–64 位十六进制对象 ID，从该提交开始读取历史。`--file` 选中一个变更文件；
+`--line` 定位到修改侧从 1 开始的源文本行号，必须与 `--file` 一起使用。
+这些启动参数不会限制后续导航。
+
+![Dark 主题的 Split 视图：语法高亮、换行和行内变更](screenshots/split-dark.png)
+
+早期截图也已保留：[最初预览](screenshots/before.png) 和 [中间版本](screenshots/unified.png)。
 
 [English](README.md)

@@ -3,7 +3,8 @@
 A small desktop Git browser inspired by tig. Browse the latest 200 commits
 reachable from HEAD, inspect each file in `Diff`, and jump between the commit’s
 changed files. Commit and file navigation share a resizable sidebar; the diff
-owns the main work area. The commit body is available through **Commit message**.
+owns the main work area. The commit body opens from the disclosure beside the subject. Dark appearance and
+Split layout are the defaults.
 
 ```sh
 cargo run -p example-tig -- .
@@ -23,12 +24,13 @@ shows only the selected file, so its header and source always share the same
 scope. Selecting a file again reveals its header and expands it if collapsed.
 The selected commit shows its subject, author, date and short hash above the
 diff. The copy button next to the hash copies the full object ID.
-**Commit message** reveals the remaining commit message without making a long message displace the code by default.
+The disclosure beside the subject reveals the remaining commit message in a
+separate, scrollable region without displacing the code by default.
 
-**Display → Unified / Split** changes the layout while retaining source selection.
+**Diff display options → Unified / Split** changes the layout while retaining source selection.
 Use the arrow buttons or n / Shift+N to navigate change groups in the selected file.
-**Display** contains
-wrapping, line numbers, inline word/grapheme emphasis and context expansion.
+The settings icon opens **Diff display options**, containing
+wrapping, line numbers, inline word/grapheme emphasis and context expansion. Its Appearance submenu switches between Light and Dark.
 These choices update the retained state rather than replacing it. Long lines
 wrap by default. Diff retains its themed added/deleted line backgrounds, gutter
 signs and inline emphasis so changes remain easy to scan.
@@ -84,12 +86,26 @@ To check repository loading without opening a window:
 cargo run -p example-tig -- --check /path/to/repository
 ```
 
-The example includes parser regression tests and a production-view UI
-integration test for commit/file navigation, stale-result rejection and focus.
+The example includes parser regression tests and production-view UI integration
+tests for commit/file navigation, startup file selection, stale-result rejection,
+focus and independent commit-message scrolling.
 
-The preview below predates the final command placement: the sidebar toggle is
-now at the left of the status bar and Unified/Split are in Display.
+## Showcase
 
-![Git history preview with aligned file statistics](screenshots/unified.png)
+Open a real Rust change at a reproducible position:
+
+```sh
+cargo run -p example-tig -- --commit 4890b1c2 --file crates/component/src/speech/waveform.rs --line 70 .
+```
+
+`--commit` accepts a 7–64 character hexadecimal object ID and starts history
+from that commit. `--file` selects a changed file; `--line` reveals a one-based
+modified-side source line and requires `--file`. These startup choices do not
+restrict subsequent navigation.
+
+![Dark Split view with syntax highlighting, wrapped rows and inline changes](screenshots/split-dark.png)
+
+Earlier screenshots remain available: [initial preview](screenshots/before.png)
+and [intermediate preview](screenshots/unified.png).
 
 [中文说明](README.zh-CN.md)
