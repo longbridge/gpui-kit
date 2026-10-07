@@ -41,6 +41,9 @@ pub struct WebView {
     bounds: Bounds<Pixels>,
     #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
     composition: Option<composition::NativeWebViewSurface>,
+    /// The GPUI scale factor the page zoom was last matched to.
+    #[cfg(target_os = "linux")]
+    scale_factor: Cell<f32>,
 }
 
 impl Drop for WebView {
@@ -76,6 +79,8 @@ impl WebView {
             webview: Rc::new(webview),
             #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
             composition,
+            #[cfg(target_os = "linux")]
+            scale_factor: Cell::new(0.),
         }
     }
 
@@ -286,6 +291,10 @@ impl Element for WebViewElement {
         #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
         if let Some(surface) = &parent.composition {
             surface.set_scale_factor(window.scale_factor());
+        }
+        #[cfg(target_os = "linux")]
+        if parent.scale_factor.replace(window.scale_factor()) != window.scale_factor() {
+            linux::match_scale_factor(&parent.webview, window.scale_factor());
         }
         #[cfg(target_os = "linux")]
         let rect = linux::device_bounds(bounds, window.scale_factor());

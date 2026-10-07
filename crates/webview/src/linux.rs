@@ -80,3 +80,12 @@ pub(crate) fn device_bounds(bounds: Bounds<Pixels>, scale_factor: f32) -> wry::R
         size: PhysicalSize::new(device(bounds.size.width), device(bounds.size.height)).into(),
     }
 }
+
+/// Zoom the page so its CSS pixels match GPUI's scale; GDK only supports integer scales.
+pub(crate) fn match_scale_factor(webview: &wry::WebView, scale_factor: f32) {
+    use gtk::prelude::WidgetExt as _;
+    use wry::WebViewExtUnix as _;
+
+    let gdk_scale = webview.webview().scale_factor().max(1);
+    let _ = webview.zoom(f64::from(scale_factor) / f64::from(gdk_scale));
+}

@@ -72,7 +72,7 @@ fn main() {
 }
 ```
 
-`WebView::build` 在做任何初始化之前，会先检查窗口是否为 X11 窗口。窗口运行在 Wayland 时，它返回说明这一要求的错误，配置不对的应用会在创建时就失败，而不是显示一块空白。窗口是 X11 时，它以 X11 后端初始化 GTK，由一个 GPUI task 分发 GTK 事件，再把视图挂到窗口上。桌面环境需要提供 XWayland，GNOME、KDE Plasma 和 Hyprland 默认都已启用。在分数缩放下，XWayland 窗口可能比原生 Wayland 窗口略模糊，具体取决于 compositor。
+`WebView::build` 在做任何初始化之前，会先检查窗口是否为 X11 窗口。窗口运行在 Wayland 时，它返回说明这一要求的错误，配置不对的应用会在创建时就失败，而不是显示一块空白。窗口是 X11 时，它以 X11 后端初始化 GTK，由一个 GPUI task 分发 GTK 事件，再把视图挂到窗口上。桌面环境需要提供 XWayland，GNOME、KDE Plasma 和 Hyprland 默认都已启用。GTK 只支持整数缩放（`GDK_SCALE`），因此 wrapper 把 Wry 的页面缩放设为 GPUI 缩放除以 GDK 缩放：页面按 GDK 的分辨率渲染，但大小与 GPUI 一致。窗口缩放变化时会重新设置，并覆盖应用通过 `zoom()` 设置的缩放。在分数缩放下，XWayland 窗口可能比原生 Wayland 窗口略模糊，具体取决于 compositor。
 
 构建前需安装 WebKitGTK 4.1 和 GTK 3 的开发包，例如 Debian 和 Ubuntu 的 `libwebkit2gtk-4.1-dev`、Arch Linux 的 `webkit2gtk-4.1`。
 

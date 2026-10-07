@@ -72,7 +72,7 @@ fn main() {
 }
 ```
 
-`WebView::build` checks that the window is an X11 window before doing any setup. On a Wayland window it returns an error naming this requirement, so a misconfigured application fails at construction rather than showing a blank area. On X11 it initializes GTK on its X11 backend, dispatches GTK events from a GPUI task, and attaches the view to the window. The desktop must provide XWayland, which GNOME, KDE Plasma, and Hyprland enable by default. Under fractional scaling, an XWayland window may look softer than a native Wayland window, depending on the compositor.
+`WebView::build` checks that the window is an X11 window before doing any setup. On a Wayland window it returns an error naming this requirement, so a misconfigured application fails at construction rather than showing a blank area. On X11 it initializes GTK on its X11 backend, dispatches GTK events from a GPUI task, and attaches the view to the window. The desktop must provide XWayland, which GNOME, KDE Plasma, and Hyprland enable by default. GTK only supports integer scales (`GDK_SCALE`), so the wrapper sets Wry's page zoom to GPUI's scale divided by GDK's; the page renders at GDK's resolution but at GPUI's size. It reapplies this zoom when the window's scale changes, replacing any zoom the application set through `zoom()`. Under fractional scaling, an XWayland window may look softer than a native Wayland window, depending on the compositor.
 
 Install the WebKitGTK 4.1 and GTK 3 development packages (for example `libwebkit2gtk-4.1-dev` on Debian and Ubuntu, `webkit2gtk-4.1` on Arch Linux) before building.
 
