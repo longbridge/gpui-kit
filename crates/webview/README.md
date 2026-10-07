@@ -6,6 +6,15 @@ This crate was previously published as `gpui-wry`. Replace the dependency with `
 
 This still a experimental with limited features, please file issues for any bugs or missing features.
 
+Supported platforms:
+
+| Platform | Engine | GPUI overlays above the page (`gpui-fast`) |
+| --- | --- | --- |
+| macOS | WKWebView | Supported |
+| Windows | WebView2 | Not yet; the WebView covers overlays |
+| Linux (X11 / XWayland) | WebKitGTK | Supported |
+| Linux (Wayland) | — | Not supported; run on XWayland |
+
 - With the default backend, native WebViews render above GPUI content.
 - On macOS, enabling `gpui-fast` makes `WebView::new()` register the native view with window composition so GPUI overlays can render above it. Composition failures are logged and fall back to the default native attachment.
 - On Linux, enabling `gpui-fast` makes `WebView::build()` build the native view in a window composition surface, with the same fallback.

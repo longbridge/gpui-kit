@@ -7,7 +7,7 @@ maturity: [experimental, platform-dependent]
 
 # WebView
 
-[`gpui-webview`](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) 是 GPUI Kit 基于 [Wry](https://github.com/tauri-apps/wry) 的**实验性**集成。需要浏览器行为时可以使用它；[TextView HTML](../component/text-view.md#html) 用于渲染文档内容，并不是浏览器。要在默认外部浏览器中打开 URL，使用 [`cx.open_url`](./context)。0.7.1 及更早版本以 `gpui-wry` 发布；升级时把依赖换成 `gpui-webview`，并把 `gpui_wry::` 路径改为 `gpui_webview::`。支持的操作系统和显示服务见[平台支持](#平台支持)。
+[`gpui-webview`](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) 是 GPUI Kit 基于 [Wry](https://github.com/tauri-apps/wry) 的**实验性**集成。需要浏览器行为时可以使用它；[TextView HTML](../component/text-view.md#html) 用于渲染文档内容，并不是浏览器。要在默认外部浏览器中打开 URL，使用 [`cx.open_url`](./context)。0.7.1 及更早版本以 `gpui-wry` 发布；升级时把依赖换成 `gpui-webview`，并把 `gpui_wry::` 路径改为 `gpui_webview::`。它支持 macOS、Windows 和 Linux；各平台使用的引擎和显示服务见[平台支持](#平台支持)。
 
 ## 平台支持
 
@@ -15,7 +15,7 @@ maturity: [experimental, platform-dependent]
 | --- | --- | --- |
 | macOS | WKWebView | 实验性。启用 `gpui-fast` 后，延后绘制的 GPUI 浮层可以显示在网页上方。 |
 | Windows | WebView2 | 实验性。示例关闭了 GPUI 的 DirectComposition，子视图才能正常渲染。 |
-| Linux（X11） | WebKitGTK | 实验性。应用必须以 X11 启动，见 [Linux](#linux)。 |
+| Linux（X11） | WebKitGTK | 实验性。应用必须以 X11 启动，见 [Linux](#linux)。启用 `gpui-fast` 后，延后绘制的 GPUI 浮层可以显示在网页上方。 |
 | Linux（Wayland） | — | 不支持。请让应用通过 XWayland 以 X11 运行。 |
 
 ## 运行示例

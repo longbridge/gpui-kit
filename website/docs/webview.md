@@ -7,7 +7,7 @@ maturity: [experimental, platform-dependent]
 
 # WebView
 
-[`gpui-webview`](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) is GPUI Kit's **experimental** integration with [Wry](https://github.com/tauri-apps/wry). Use it when a screen needs browser behavior; [TextView HTML](../component/text-view.md#html) renders document content but is not a browser. To open a URL in the user's default external browser, use [`cx.open_url`](./context#open-a-url-in-the-default-browser). Versions up to 0.7.1 were published as `gpui-wry`; replace that dependency with `gpui-webview` and `gpui_wry::` paths with `gpui_webview::`. See [Platform support](#platform-support) for the operating systems and display servers it runs on.
+[`gpui-webview`](https://github.com/longbridge/gpui-kit/tree/main/crates/webview) is GPUI Kit's **experimental** integration with [Wry](https://github.com/tauri-apps/wry). Use it when a screen needs browser behavior; [TextView HTML](../component/text-view.md#html) renders document content but is not a browser. To open a URL in the user's default external browser, use [`cx.open_url`](./context#open-a-url-in-the-default-browser). Versions up to 0.7.1 were published as `gpui-wry`; replace that dependency with `gpui-webview` and `gpui_wry::` paths with `gpui_webview::`. It supports macOS, Windows, and Linux; see [Platform support](#platform-support) for the engine and display server on each.
 
 ## Platform support
 
@@ -15,7 +15,7 @@ maturity: [experimental, platform-dependent]
 | --- | --- | --- |
 | macOS | WKWebView | Experimental. With `gpui-fast`, deferred GPUI overlays can render above the page. |
 | Windows | WebView2 | Experimental. The example disables GPUI's DirectComposition so the child view renders. |
-| Linux (X11) | WebKitGTK | Experimental. The application must start on X11; see [Linux](#linux). |
+| Linux (X11) | WebKitGTK | Experimental. The application must start on X11; see [Linux](#linux). With `gpui-fast`, deferred GPUI overlays can render above the page. |
 | Linux (Wayland) | — | Not supported. Run the application on X11 through XWayland instead. |
 
 ## Run the example

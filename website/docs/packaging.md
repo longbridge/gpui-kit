@@ -308,5 +308,5 @@ Do the final checks against the **downloaded package**, not the original build d
 4. Install version N, install N+1 over it, and check both application data and shortcuts. Then uninstall and check which files remain by design. Test portable archives separately because they have no package-managed upgrade or removal.
 5. Verify signatures and notarization where applicable, publish SHA-256 checksums, and download the artifact again to compare its checksum before announcing it.
 
-Package format does not guarantee platform support for every optional feature. In particular, check the [WebView](./webview.md) target limitations before promising a Linux WebView build.
+Package format does not guarantee platform support for every optional feature. In particular, a Linux [WebView](./webview.md#linux) build needs WebKitGTK on the target and runs on X11, or XWayland in a Wayland session.
 For in-app version checks and upgrades after packaging, continue with [Auto Update](./auto-update.md).
