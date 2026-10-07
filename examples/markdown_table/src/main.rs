@@ -7,7 +7,9 @@
 //! - nowrap (adaptive + `style.table_cell` white-space: nowrap): cells stay
 //!   on a single line, the table scrolls as soon as the content overflows.
 //!
-//! Edit `src/report.md` to change the markdown source.
+//! Edit `src/report.md` to change the markdown source. Its last two tables
+//! hold the same content in Chinese and in English; resize the window to see
+//! narrow columns keep their text on one line while the wide one wraps.
 //!
 //! Run: `cargo run -p markdown_table`
 

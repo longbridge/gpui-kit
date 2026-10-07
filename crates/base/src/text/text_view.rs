@@ -2740,6 +2740,75 @@ mod tests {
         }
     }
 
+    /// A table wider than its frame shrinks its widest column. A narrower
+    /// column keeps its content width rather than shrinking by the same
+    /// ratio and wrapping the end of its text onto a line of its own.
+    #[test]
+    fn table_keeps_narrow_columns_on_one_line_while_wide_ones_wrap() {
+        use crate::text::inline::test_fonts::WideMonoTextSystem;
+        use gpui::TestApp;
+        use std::sync::Arc;
+
+        const HEAD_BACKGROUND: u32 = 0x11aa77;
+
+        struct TableRoot {
+            text_view: Entity<TextViewState>,
+            width: Pixels,
+            scroll: bool,
+        }
+
+        impl Render for TableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let mut table = StyleRefinement::default();
+                if self.scroll {
+                    table.overflow.x = Some(gpui::Overflow::Scroll);
+                }
+                let style = TextViewStyle::default()
+                    .with_code_background(gpui::rgb(HEAD_BACKGROUND).into())
+                    .with_table(table);
+                div()
+                    .w(self.width)
+                    .child(TextView::new(&self.text_view).style(style))
+            }
+        }
+
+        let source = format!(
+            "| Operating revenue (USD) | Note |\n| --- | --- |\n| 1 | {} |",
+            "word ".repeat(30)
+        );
+        let header_height = |width: f32, scroll: bool| {
+            let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+            app.update(crate::init);
+            let mut window = app.open_window(|_, cx| TableRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(&source, cx)),
+                width: px(width),
+                scroll,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+            window.update(|_, window, _| {
+                let head: gpui::Background = gpui::rgb(HEAD_BACKGROUND).into();
+                window
+                    .painted_quads()
+                    .into_iter()
+                    .find(|quad| quad.background == head)
+                    .expect("the header background quad is painted")
+                    .bounds
+                    .size
+                    .height
+            })
+        };
+
+        for scroll in [false, true] {
+            assert_eq!(
+                header_height(700., scroll),
+                header_height(4000., scroll),
+                "scroll: {scroll}: the header wraps although its column fits"
+            );
+        }
+    }
+
     #[gpui::test]
     fn markdown_link_opens_url_without_handler(cx: &mut TestAppContext) {
         cx.update(crate::init);

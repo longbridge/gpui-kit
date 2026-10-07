@@ -1253,6 +1253,12 @@ fn line_ranges(
                     step = step * 2.;
                 }
             }
+            // The wrapper can also break a rest that fits: kerning makes a
+            // shaped run narrower than its summed characters. A table column
+            // sized to its measured text would drop its last character.
+            if end < hard_line.end && spans_width(&spans, start..hard_line.end) <= wrap_width {
+                end = hard_line.end;
+            }
             ranges.push(start..end);
             start = end;
         }
