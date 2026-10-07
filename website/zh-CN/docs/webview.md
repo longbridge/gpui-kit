@@ -26,12 +26,7 @@ maturity: [experimental, platform-dependent]
 cargo run -p webview
 ```
 
-[完整示例](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs)是可运行的起点：它在 `open_window` 回调中创建原生子视图，把它包装为 `Entity<WebView>`，再放在地址输入框下方渲染。在输入框按 Enter 会调用 `load_url`；示例还包含返回上一页的处理函数。从仓库根目录运行上面的命令。其他应用请参照[示例的依赖配置](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml)：这条集成路径直接依赖启用了 `gpui-fast` feature 的 `gpui-kit`、`gpui-webview` 和 `wry`（package 名为 `lb-wry`）。
-
-```toml
-[dependencies]
-gpui-kit = { version = "0.7", features = ["gpui-fast"] }
-```
+[完整示例](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs)是可运行的起点：它在 `open_window` 回调中创建原生子视图，把它包装为 `Entity<WebView>`，再放在地址输入框下方渲染。在输入框按 Enter 会调用 `load_url`；示例还包含返回上一页的处理函数。从仓库根目录运行上面的命令。其他应用请参照[示例的依赖配置](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml)：这条集成路径直接依赖 `gpui-kit`、`gpui-webview` 和 `wry`（package 名为 `lb-wry`）。
 
 ```rust
 use gpui_kit::*;
@@ -51,7 +46,7 @@ div().flex_1().child(webview.clone())
 
 ## GPUI Fast 原生合成
 
-`gpui-webview` 基于 GPUI Fast 构建，使用它的应用必须启用 `gpui-kit` 的 `gpui-fast` feature，不支持默认的 gpui-pre 后端。它自身的 `gpui-fast` feature 已不起作用，只为让现有的 Cargo.toml 继续可以解析而保留。macOS 上，现有 `WebView::new()` 会自动把 WKWebView 注册到窗口合成树。Linux 上，`WebView::build()` 会把视图建在合成 surface 中，即一个 X11 子窗口，GPUI 会把位于其上方的浮层区域从中挖空。这样延后绘制的 GPUI 浮层就能显示在网页上方。Windows 保留原生子视图的行为。
+`gpui-webview` 基于 GPUI Fast 构建。依赖它会同时启用 `gpui-kit` 的 `gpui-fast` feature，整个应用随之运行在 GPUI Fast 上，无需额外配置；不支持 gpui-pre 后端。它自身的 `gpui-fast` feature 已不起作用，只为让现有的 Cargo.toml 继续可以解析而保留。macOS 上，现有 `WebView::new()` 会自动把 WKWebView 注册到窗口合成树。Linux 上，`WebView::build()` 会把视图建在合成 surface 中，即一个 X11 子窗口，GPUI 会把位于其上方的浮层区域从中挖空。这样延后绘制的 GPUI 浮层就能显示在网页上方。Windows 保留原生子视图的行为。
 
 在 Linux 上，GPUI Fast 会把阴影和半透明内容（例如 dialog 的遮罩）画进网页上方的透明窗口，由窗口合成器叠加到网页上；XWayland 下始终有合成器。在没有窗口合成器的 X11 桌面上，浮层改为从网页中挖空，网页上方的阴影不会绘制。Hyprland 会把置顶窗口画在所有窗口之上，因此在置顶窗口（Omarchy 的弹出窗口）中，浮层仍会显示，但网页上方没有阴影和遮罩压暗。
 

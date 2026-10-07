@@ -54,13 +54,13 @@ jobs:
           components: clippy
           cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       # Lints every member and, as a side effect, type-checks the example
-      # crates that the `test` job leaves out. The webview example enables
+      # crates that the `test` job leaves out. `gpui-webview` enables
       # `gpui-kit/gpui-fast`, which feature unification would spread to every
-      # member, so it is linted on its own.
+      # member, so it and its example are linted on their own.
       - name: Lint
-        run: cargo clippy --workspace --exclude gpui-shell --exclude webview --locked -- --deny warnings
-      - name: Lint WebView example (GPUI Fast)
-        run: cargo clippy -p webview --locked -- --deny warnings
+        run: cargo clippy --workspace --exclude gpui-shell --exclude gpui-webview --exclude webview --locked -- --deny warnings
+      - name: Lint WebView (GPUI Fast)
+        run: cargo clippy -p gpui-webview -p webview --locked -- --deny warnings
 
   no-default-features:
     name: No default features
@@ -112,6 +112,8 @@ jobs:
       # most of the warm-cache build time; the `lint` job type-checks them
       # instead. Leaving them out changes no crate's feature set. The recipes
       # crate stays in: its tests are what certify the documentation's code.
+      # `gpui-webview` enables `gpui-kit/gpui-fast`, which feature unification
+      # would spread to every member; the GPUI Fast job tests it instead.
       # `jq -j` writes the list as one line with no newline at all: on Windows
       # `jq` emits CRLF, and a `\r` left on a name breaks `--exclude`.
       - name: Leave the example crates to the lint job
@@ -119,8 +121,8 @@ jobs:
           excludes=$(cargo metadata --no-deps --format-version 1 | jq -j '
             ((.workspace_root | gsub("\\\\"; "/")) + "/examples/") as $examples
             | .packages[]
-            | select((.manifest_path | gsub("\\\\"; "/")) | startswith($examples))
-            | select(.name != "gpui-kit-recipes")
+            | select((((.manifest_path | gsub("\\\\"; "/")) | startswith($examples))
+                and .name != "gpui-kit-recipes") or .name == "gpui-webview")
             | "--exclude \(.name) "')
           echo "TEST_EXCLUDES=$excludes" >> "$GITHUB_ENV"
       # `gpui-component-story/test-support` turns on `gpui-kit/test-support`, so
@@ -169,6 +171,8 @@ jobs:
         run: script/bootstrap
       - name: Test GPUI Fast facade and UI integration
         run: cargo test -p gpui-kit --features gpui-fast,test-support --locked
+      - name: Test WebView
+        run: cargo test -p gpui-webview --locked
 
   gpui-fast-web:
     name: GPUI Fast (WebAssembly)

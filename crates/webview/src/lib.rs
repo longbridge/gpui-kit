@@ -1,4 +1,4 @@
-extern crate gpui_fast as gpui;
+extern crate gpui_kit as gpui;
 
 #[cfg(target_os = "macos")]
 mod composition;

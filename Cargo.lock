@@ -5064,7 +5064,7 @@ name = "gpui-webview"
 version = "0.7.1"
 dependencies = [
  "anyhow",
- "gpui-fast",
+ "gpui-kit",
  "gtk",
  "lb-wry",
  "log",

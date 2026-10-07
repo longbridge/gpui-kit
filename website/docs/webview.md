@@ -26,12 +26,7 @@ From the repository root:
 cargo run -p webview
 ```
 
-The [complete example](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs) is the runnable starting point. It creates the child view inside the `open_window` callback, wraps it in an `Entity<WebView>`, and renders that Entity below an address input. Enter in the input calls `load_url`; the example also contains a back handler. Run it from the repository root with the command above. For another application, match the dependency versions in [the example manifest](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml): `gpui-kit` with its `gpui-fast` feature, `gpui-webview`, and `wry` (package `lb-wry`) are direct dependencies of this integration.
-
-```toml
-[dependencies]
-gpui-kit = { version = "0.7", features = ["gpui-fast"] }
-```
+The [complete example](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs) is the runnable starting point. It creates the child view inside the `open_window` callback, wraps it in an `Entity<WebView>`, and renders that Entity below an address input. Enter in the input calls `load_url`; the example also contains a back handler. Run it from the repository root with the command above. For another application, match the dependency versions in [the example manifest](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml): `gpui-kit`, `gpui-webview`, and `wry` (package `lb-wry`) are direct dependencies of this integration.
 
 ```rust
 use gpui_kit::*;
@@ -51,7 +46,7 @@ div().flex_1().child(webview.clone())
 
 ## GPUI Fast native composition
 
-`gpui-webview` is built on GPUI Fast, so an application that uses it must enable the `gpui-fast` feature of `gpui-kit`; the default gpui-pre backend is not supported. Its own `gpui-fast` feature has no effect and remains only so existing manifests still resolve. On macOS, the existing `WebView::new()` automatically registers the WKWebView in the window composition tree. On Linux, `WebView::build()` builds the view in a composition surface, an X11 child window that GPUI cuts the overlays above it out of. Deferred GPUI overlays can then render above the page. Windows retains the native child-view behavior.
+`gpui-webview` is built on GPUI Fast. Depending on it enables the `gpui-fast` feature of `gpui-kit`, so the whole application runs on GPUI Fast without further configuration; the gpui-pre backend is not supported. The crate's own `gpui-fast` feature has no effect and remains only so existing manifests still resolve. On macOS, the existing `WebView::new()` automatically registers the WKWebView in the window composition tree. On Linux, `WebView::build()` builds the view in a composition surface, an X11 child window that GPUI cuts the overlays above it out of. Deferred GPUI overlays can then render above the page. Windows retains the native child-view behavior.
 
 On Linux, GPUI Fast draws shadows and translucent content, such as a dialog's backdrop, into a transparent window above the page, which the compositing manager blends over it; XWayland always has one. On an X11 desktop without a compositing manager, overlays are cut out of the page instead, and shadows over the page are not drawn. Hyprland draws a pinned window above all others, so in a pinned window (Omarchy's pop-out) overlays show without the shadows and backdrops over the page.
 

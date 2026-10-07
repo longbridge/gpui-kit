@@ -15,7 +15,7 @@ Supported platforms:
 | Linux (X11 / XWayland) | WebKitGTK | Supported |
 | Linux (Wayland) | — | Not supported; run on XWayland |
 
-- This crate is built on GPUI Fast: enable the `gpui-fast` feature of `gpui-kit` in the application. The default gpui-pre backend is not supported. The crate's own `gpui-fast` feature has no effect and is kept only so existing manifests still resolve.
+- This crate is built on GPUI Fast. Depending on it enables the `gpui-fast` feature of `gpui-kit`, so the whole application runs on GPUI Fast without further configuration. The gpui-pre backend is not supported. The crate's own `gpui-fast` feature has no effect and is kept only so existing manifests still resolve.
 - On macOS, `WebView::new()` registers the native view with window composition so GPUI overlays can render above it. Composition failures are logged and fall back to the plain native attachment.
 - On Linux, `WebView::build()` builds the native view in a window composition surface, with the same fallback.
 - Use `WebView::set_bounds()` and `WebView::set_visible()` to keep the managed container and Wry child synchronized. Raw Wry handles bypass this coordination.

@@ -1,4 +1,4 @@
-//! AppKit adapter for gpui-fast's native window composition.
+//! AppKit adapter for GPUI Fast's native window composition.
 //! The existing Wry parent stays unchanged for focus_parent(); only WKWebView
 //! is reattached. All positioning goes through the surface instead of Wry's
 //! original parent coordinates.

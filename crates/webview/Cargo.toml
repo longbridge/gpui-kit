@@ -21,7 +21,9 @@ doctest = false
 
 [dependencies]
 anyhow.workspace = true
-gpui-fast.workspace = true
+# Enabling `gpui-fast` here selects GPUI Fast for the application's `gpui-kit` too, through
+# feature unification, so applications need no extra configuration.
+gpui-kit = { path = "../kit", version = "0.7.1", default-features = false, features = ["gpui-fast"] }
 log = "0.4"
 wry = { version = "0.53.3", package = "lb-wry" }
 
