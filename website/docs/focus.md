@@ -147,6 +147,37 @@ div()
 
 GPUI Kit's `Dialog` and `Sheet` components provide their own modal focus behavior; use them for ordinary modal UI. The manual trap is useful for a custom surface whose entry, dismissal, and restoration lifecycle you explicitly own. An `on_focus_out` listener on a container can help observe Focus leaving; it is not a substitute for the modal lifecycle.
 
+## When the focused element stops rendering
+
+A view can stop rendering the element that holds Focus: a table is replaced by an empty state, a panel collapses, or a row is deleted. The window keeps the old `FocusHandle` as its Focus, but that handle has no node in the rendered dispatch tree. GPUI then dispatches key bindings and actions from the tree's root node. The view's `key_context` and `on_action` handlers are no longer on the path, so the view's shortcuts stop working. Only handlers on the root node and global `cx.on_action` handlers still run.
+
+GPUI reports this case through `cx.on_focus_lost(window, ...)`. The listener runs when a newly drawn frame has no rendered path to Focus, although the previous frame had one. Inside the listener, `window.focus_lost_restore_target(cx)` returns the closest ancestor of the lost element that is still rendered and can take Focus. Register one listener per window, usually on the root view, and retain its `Subscription`:
+
+```rust
+struct Library {
+    focus_handle: FocusHandle,
+    _focus_lost: Subscription,
+}
+
+impl Library {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus_lost = cx.on_focus_lost(window, |this, window, cx| {
+            let target = window
+                .focus_lost_restore_target(cx)
+                .unwrap_or_else(|| this.focus_handle.clone());
+            target.focus(window, cx);
+        });
+
+        Self {
+            focus_handle: cx.focus_handle(),
+            _focus_lost: focus_lost,
+        }
+    }
+}
+```
+
+Attach `focus_handle` with `.track_focus(&self.focus_handle)` to the element that carries the view's `key_context`. That element is then a focusable ancestor of the view's children, so when a child disappears it becomes the restore target and the view's bindings apply again. When the view removes the focused element on purpose, it can also move Focus in the same update instead of waiting for the listener.
+
 ## Verify and debug
 
 Start with the `focus_trap` example to see pointer entry and both Tab directions in a running window. In an application test, render the real view, click its intended control, send Tab or the command key, and assert the resulting owner state. The [Testing](./test) guide covers Kit's UI integration test helpers; focus scopes need an explicit tracked handle for reliable inspection.
@@ -159,5 +190,6 @@ Start with the `focus_trap` example to see pointer entry and both Tab directions
 | Panel appears inactive when a child is focused | Use `contains_focused`, and verify the child's tracked element is nested under the panel's tracked element. |
 | Tab escapes a custom trap | Focus entered the trap first; the container is rendered through Kit's Base `Root`; children are actual Tab stops. |
 | Focus disappears after closing an overlay | Save the previous target and restore an existing rendered target after dismissal. |
+| Shortcuts stop working after a view hides its focused element | The focused element is no longer rendered, so dispatch starts at the root. Move Focus to a rendered element, or restore it from `cx.on_focus_lost`. |
 
 Related guides: [Window](./window), [Action](./action), [KeyBinding](./keybinding), [Accessibility](./accessibility), and [Testing](./test).

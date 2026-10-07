@@ -6,6 +6,7 @@
 
 pub(super) use super::support::bool_method;
 
+mod diff;
 mod editor;
 mod image;
 
@@ -14,5 +15,6 @@ use gpui_shell::{ComponentRegistry, RegistryError};
 pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryError> {
     image::register(registry)?;
     editor::register(registry)?;
+    diff::register(registry)?;
     Ok(())
 }

@@ -147,6 +147,37 @@ div()
 
 GPUI Kit 的 `Dialog` 和 `Sheet` 自带其模态焦点行为；普通模态界面优先使用它们。手动 trap 适用于你明确负责进入、关闭和恢复生命周期的自定义容器。容器上的 `on_focus_out` listener 可用于观察 Focus 离开，但不能代替完整模态流程。
 
+## 聚焦元素不再渲染时
+
+View 可能不再渲染持有 Focus 的元素：表格被空状态替换、面板折叠，或某一行被删除。窗口仍把旧的 `FocusHandle` 当作 Focus，但该句柄在已渲染的 dispatch tree 中已没有节点。此时 GPUI 从 dispatch tree 的根节点分发按键绑定和 action。View 的 `key_context` 与 `on_action` handler 不在这条路径上，View 的快捷键因此失效；只有根节点上的 handler 和全局 `cx.on_action` handler 仍会执行。
+
+GPUI 用 `cx.on_focus_lost(window, ...)` 处理这种情况：当上一帧中 Focus 有已渲染路径、而新绘制的一帧中没有时，listener 会被调用。在 listener 内，`window.focus_lost_restore_target(cx)` 返回丢失元素最近的、仍在渲染且可获得 Focus 的祖先。每个窗口注册一个 listener，通常放在根 View 上，并保存返回的 `Subscription`：
+
+```rust
+struct Library {
+    focus_handle: FocusHandle,
+    _focus_lost: Subscription,
+}
+
+impl Library {
+    fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus_lost = cx.on_focus_lost(window, |this, window, cx| {
+            let target = window
+                .focus_lost_restore_target(cx)
+                .unwrap_or_else(|| this.focus_handle.clone());
+            target.focus(window, cx);
+        });
+
+        Self {
+            focus_handle: cx.focus_handle(),
+            _focus_lost: focus_lost,
+        }
+    }
+}
+```
+
+在带有 View `key_context` 的元素上调用 `.track_focus(&self.focus_handle)`。该元素因此成为 View 子元素的可聚焦祖先：子元素消失时，它就是恢复目标，View 的绑定重新生效。若 View 有意移除聚焦元素，也可以在同一次更新中直接移动 Focus，不必等待 listener。
+
 ## 验证与排错
 
 先运行 `focus_trap` 示例，观察鼠标进入以及两个方向的 Tab 行为。应用测试应渲染真实 View，点击目标控件，发送 Tab 或命令按键，并断言 owner 最终状态。[Testing](./test) 介绍 Kit 的 UI 集成测试辅助方法；焦点范围需要明确的已登记句柄，检查结果才可靠。
@@ -159,5 +190,6 @@ GPUI Kit 的 `Dialog` 和 `Sheet` 自带其模态焦点行为；普通模态界�
 | 子控件聚焦时面板显得不活动 | 使用 `contains_focused`，并确认子元素在面板的已登记元素内部。 |
 | Tab 离开自定义 trap | Focus 已先进入 trap；容器通过 Kit 的 Base `Root` 渲染；子控件是真正的 Tab stop。 |
 | 关闭弹层后 Focus 消失 | 保存先前目标，并在关闭后恢复当前仍存在的已渲染目标。 |
+| View 隐藏聚焦元素后快捷键失效 | 聚焦元素已不再渲染，分发从根节点开始。把 Focus 移到已渲染元素，或在 `cx.on_focus_lost` 中恢复。 |
 
 相关章节：[Window](./window)、[Action](./action)、[KeyBinding](./keybinding)、[Accessibility](./accessibility) 和 [Testing](./test)。

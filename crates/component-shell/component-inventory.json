@@ -342,6 +342,25 @@
     },
     {
       "source": "ui",
+      "name": "diff",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Diff",
+        "exports": [
+          "Diff"
+        ],
+        "states": [
+          {
+            "export": "DiffState",
+            "kind": "DiffState",
+            "role": "retained-patch-state"
+          }
+        ]
+      }
+    },
+    {
+      "source": "ui",
       "name": "dock",
       "classification": "infrastructure",
       "explanation": "Dock is an application layout subsystem already exposed directly by gpui-shell; it is not a singular gpui-component constructor."
@@ -1574,6 +1593,25 @@
         "descriptor": "Dialog",
         "exports": [
           "Dialog"
+        ]
+      }
+    },
+    {
+      "source": "story",
+      "name": "diff",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Diff",
+        "exports": [
+          "Diff"
+        ],
+        "states": [
+          {
+            "export": "DiffState",
+            "kind": "DiffState",
+            "role": "retained-patch-state"
+          }
         ]
       }
     },

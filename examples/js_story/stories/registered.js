@@ -44,6 +44,8 @@ import {
   DescriptionItem,
   DescriptionList,
   Dialog,
+  Diff,
+  DiffState,
   DropdownButton,
   DropdownMenu,
   Editor,
@@ -161,6 +163,18 @@ import {
  * @param {unknown} value
  * @returns {import("gpui-kit").Element}
  */
+const REVIEW_PATCH = [
+  "diff --git a/src/retry.rs b/src/retry.rs",
+  "--- a/src/retry.rs",
+  "+++ b/src/retry.rs",
+  "@@ -1,3 +1,3 @@",
+  " fn retry_delay(attempt: u32) -> u64 {",
+  "-    100 * attempt as u64",
+  "+    100 * 2_u64.pow(attempt.min(6))",
+  " }",
+  "",
+].join("\n");
+
 const asElement = (value) =>
   /** @type {import("gpui-kit").Element} */ (/** @type {unknown} */ (value));
 
@@ -295,6 +309,7 @@ export function initializeRegisteredExamples() {
     EditorState("fn main() {\n    println!(\"hello\");\n}", "rust"),
   );
   retained("editor-readonly", () => EditorState("// generated, do not edit", "rust"));
+  retained("diff-review", () => DiffState(REVIEW_PATCH));
 }
 
 /**
@@ -2959,6 +2974,17 @@ export function registeredExamples(surface, cx) {
                   ),
               ),
             ),
+        },
+      ];
+    case "Diff":
+      return [
+        {
+          label: "Unified patch",
+          element: asElement(
+            new Diff(retained("diff-review", () => DiffState(REVIEW_PATCH)))
+              .w_full()
+              .h(220),
+          ),
         },
       ];
     case "Editor":

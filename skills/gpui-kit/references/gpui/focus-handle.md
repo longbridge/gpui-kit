@@ -204,6 +204,28 @@ impl Searchable {
 }
 ```
 
+### 4. Restore Lost Focus
+
+If the focused element is no longer rendered (a table swapped for an empty
+state), key dispatch starts at the dispatch tree's root node, so the view's
+`key_context` bindings and `on_action` handlers stop firing. Register one
+`cx.on_focus_lost` listener per window, usually on the root view, and move
+Focus to `window.focus_lost_restore_target(cx)`: the closest focusable
+ancestor that is still rendered. Track the view's own handle on the element
+that carries its `key_context`, so that element is the ancestor Focus returns
+to.
+
+```rust
+let focus_lost = cx.on_focus_lost(window, |this, window, cx| {
+    let target = window
+        .focus_lost_restore_target(cx)
+        .unwrap_or_else(|| this.focus_handle.clone());
+    target.focus(window, cx);
+});
+// `this.focus_handle` is the view's tracked handle. Keep `focus_lost:
+// Subscription` on the view; dropping it unregisters.
+```
+
 ## Best Practices
 
 ### ✅ Track Focus on Interactive Elements
