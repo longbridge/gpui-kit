@@ -4,7 +4,6 @@ use gpui_kit::component::{
     h_flex,
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
-    popover::Popover,
     v_flex,
 };
 use gpui_kit::*;
@@ -107,18 +106,10 @@ impl Render for Example {
                             .on_click(cx.listener(Self::go_forward)),
                     )
                     .child(Input::new(&self.address_input))
-                    // Overlays that open above the WebView, to verify they are not covered.
                     .child(
-                        Popover::new("popover")
-                            .trigger(Button::new("popover-trigger").outline().label("Popover"))
-                            .w(px(320.))
-                            .h(px(240.))
-                            .child("This popover should render above the WebView."),
-                    )
-                    .child(
-                        Button::new("menu-trigger")
-                            .outline()
-                            .label("Menu")
+                        Button::new("more")
+                            .ghost()
+                            .icon(IconName::Ellipsis)
                             .dropdown_menu({
                                 let webview = self.webview.clone();
                                 move |menu, _, _| {
@@ -139,18 +130,6 @@ impl Render for Example {
                                         }),
                                     )
                                 }
-                            }),
-                    )
-                    .child(
-                        Button::new("dialog-trigger")
-                            .outline()
-                            .label("Dialog")
-                            .on_click(|_, window, cx| {
-                                window.open_dialog(cx, |dialog, _, _| {
-                                    dialog
-                                        .title("Dialog")
-                                        .child("This dialog should render above the WebView.")
-                                });
                             }),
                     ),
             )
@@ -178,7 +157,7 @@ fn main() {
     #[cfg(not(target_os = "linux"))]
     let app = gpui_kit::application();
 
-    app.run(move |cx| {
+    app.with_assets(gpui_kit::assets::Assets).run(move |cx| {
         // This must be called before using any GPUI Component features.
         gpui_kit::init(cx);
 
