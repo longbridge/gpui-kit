@@ -13,9 +13,9 @@ maturity: [experimental, platform-dependent]
 
 | 平台 | 引擎 | 状态 |
 | --- | --- | --- |
-| macOS | WKWebView | 实验性。启用 `gpui-fast` 后，延后绘制的 GPUI 浮层可以显示在网页上方。 |
+| macOS | WKWebView | 实验性。延后绘制的 GPUI 浮层显示在网页上方。 |
 | Windows | WebView2 | 实验性。示例关闭了 GPUI 的 DirectComposition，子视图才能正常渲染。 |
-| Linux（X11） | WebKitGTK | 实验性。应用必须以 X11 启动，见 [Linux](#linux)。启用 `gpui-fast` 后，延后绘制的 GPUI 浮层可以显示在网页上方。 |
+| Linux（X11） | WebKitGTK | 实验性。应用必须以 X11 启动，见 [Linux](#linux)。延后绘制的 GPUI 浮层显示在网页上方。 |
 | Linux（Wayland） | — | 不支持。请让应用通过 XWayland 以 X11 运行。 |
 
 ## 运行示例
@@ -26,7 +26,12 @@ maturity: [experimental, platform-dependent]
 cargo run -p webview
 ```
 
-[完整示例](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs)是可运行的起点：它在 `open_window` 回调中创建原生子视图，把它包装为 `Entity<WebView>`，再放在地址输入框下方渲染。在输入框按 Enter 会调用 `load_url`；示例还包含返回上一页的处理函数。从仓库根目录运行上面的命令。其他应用请参照[示例的依赖配置](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml)：这条集成路径直接依赖 `gpui-kit`、`gpui-webview` 和 `wry`（package 名为 `lb-wry`）。
+[完整示例](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/src/main.rs)是可运行的起点：它在 `open_window` 回调中创建原生子视图，把它包装为 `Entity<WebView>`，再放在地址输入框下方渲染。在输入框按 Enter 会调用 `load_url`；示例还包含返回上一页的处理函数。从仓库根目录运行上面的命令。其他应用请参照[示例的依赖配置](https://github.com/longbridge/gpui-kit/blob/main/examples/webview/Cargo.toml)：这条集成路径直接依赖启用了 `gpui-fast` feature 的 `gpui-kit`、`gpui-webview` 和 `wry`（package 名为 `lb-wry`）。
+
+```toml
+[dependencies]
+gpui-kit = { version = "0.7", features = ["gpui-fast"] }
+```
 
 ```rust
 use gpui_kit::*;
@@ -46,7 +51,7 @@ div().flex_1().child(webview.clone())
 
 ## GPUI Fast 原生合成
 
-在 `gpui-kit` 和 `gpui-webview` 上同时启用 `gpui-fast`，让两者使用同一个后端。macOS 上，现有 `WebView::new()` 会自动把 WKWebView 注册到窗口合成树。Linux 上，`WebView::build()` 会把视图建在合成 surface 中，即一个 X11 子窗口，GPUI 会把位于其上方的浮层区域从中挖空。这样延后绘制的 GPUI 浮层就能显示在网页上方，无需新增合成 feature。默认后端和 Windows 保留原生子视图的行为。
+`gpui-webview` 基于 GPUI Fast 构建，使用它的应用必须启用 `gpui-kit` 的 `gpui-fast` feature，不支持默认的 gpui-pre 后端。它自身的 `gpui-fast` feature 已不起作用，只为让现有的 Cargo.toml 继续可以解析而保留。macOS 上，现有 `WebView::new()` 会自动把 WKWebView 注册到窗口合成树。Linux 上，`WebView::build()` 会把视图建在合成 surface 中，即一个 X11 子窗口，GPUI 会把位于其上方的浮层区域从中挖空。这样延后绘制的 GPUI 浮层就能显示在网页上方。Windows 保留原生子视图的行为。
 
 在 Linux 上，GPUI Fast 会把阴影和半透明内容（例如 dialog 的遮罩）画进网页上方的透明窗口，由窗口合成器叠加到网页上；XWayland 下始终有合成器。在没有窗口合成器的 X11 桌面上，浮层改为从网页中挖空，网页上方的阴影不会绘制。Hyprland 会把置顶窗口画在所有窗口之上，因此在置顶窗口（Omarchy 的弹出窗口）中，浮层仍会显示，但网页上方没有阴影和遮罩压暗。
 
@@ -140,10 +145,10 @@ WebView 及其 handle 应在父窗口销毁前结束生命周期。销毁所属 
 | 范围 | 当前行为 |
 | --- | --- |
 | 平台 | macOS、Windows 和 X11 上的 Linux 为实验性支持。不支持 Wayland；Linux 应用必须以 X11 或 XWayland 启动。 |
-| Overlay 层级 | 原生 WebView 位于 GPUI surface 上方，会遮住同一矩形范围内的 GPUI 内容，包括 popover、dialog、menu 和 tooltip。默认后端和 Windows 上，GPUI overlay 无法可靠地显示在它上方。macOS 和 Linux 启用 `gpui-fast` 后，延后绘制的浮层通过原生合成显示在网页上方。 |
+| Overlay 层级 | 原生 WebView 位于 GPUI surface 上方，会遮住同一矩形范围内的 GPUI 内容，包括 popover、dialog、menu 和 tooltip。Windows 上，GPUI overlay 无法可靠地显示在它上方。macOS 和 Linux 上，延后绘制的浮层通过原生合成显示在网页上方。 |
 | Windows renderer | 仓库示例在启动 GPUI 前设置 `GPUI_DISABLE_DIRECT_COMPOSITION=true`，以便当前子视图方案正常渲染。这是此示例的要求，不是 GPUI 的通用设置建议。 |
 
-需要显示 overlay 时，可以将 WebView 放在单独窗口，或安排布局使 overlay 不跨过 WebView 的 bounds。这一限制适用于默认后端和 Windows；macOS 和 Linux 启用 `gpui-fast` 后，可通过原生合成支持延后绘制的 GPUI 浮层。
+需要显示 overlay 时，可以将 WebView 放在单独窗口，或安排布局使 overlay 不跨过 WebView 的 bounds。这一限制只适用于 Windows；macOS 和 Linux 通过原生合成支持延后绘制的 GPUI 浮层。
 
 ## 尚未合并的 Composition 尝试
 

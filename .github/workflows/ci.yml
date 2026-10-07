@@ -54,9 +54,13 @@ jobs:
           components: clippy
           cache-save-if: ${{ github.ref == 'refs/heads/main' }}
       # Lints every member and, as a side effect, type-checks the example
-      # crates that the `test` job leaves out.
+      # crates that the `test` job leaves out. The webview example enables
+      # `gpui-kit/gpui-fast`, which feature unification would spread to every
+      # member, so it is linted on its own.
       - name: Lint
-        run: cargo clippy --workspace --exclude gpui-shell --locked -- --deny warnings
+        run: cargo clippy --workspace --exclude gpui-shell --exclude webview --locked -- --deny warnings
+      - name: Lint WebView example (GPUI Fast)
+        run: cargo clippy -p webview --locked -- --deny warnings
 
   no-default-features:
     name: No default features

@@ -1,14 +1,13 @@
-#[cfg(feature = "gpui-fast")]
 extern crate gpui_fast as gpui;
 
-#[cfg(all(feature = "gpui-fast", target_os = "macos"))]
+#[cfg(target_os = "macos")]
 mod composition;
 #[cfg(target_os = "linux")]
 mod linux;
 
-#[cfg(all(feature = "gpui-fast", target_os = "macos"))]
+#[cfg(target_os = "macos")]
 use composition::NativeWebViewSurface;
-#[cfg(all(feature = "gpui-fast", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use linux::NativeWebViewSurface;
 
 use std::{cell::Cell, ops::Deref, rc::Rc};
@@ -44,7 +43,7 @@ pub struct WebView {
     webview: Rc<wry::WebView>,
     visible: Cell<bool>,
     bounds: Bounds<Pixels>,
-    #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     composition: Option<NativeWebViewSurface>,
     /// The GPUI scale factor the page zoom was last matched to.
     #[cfg(target_os = "linux")]
@@ -57,7 +56,7 @@ pub struct WebView {
 impl Drop for WebView {
     fn drop(&mut self) {
         self.hide();
-        #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         if let Some(surface) = self.composition.take() {
             surface.release(self.webview.clone());
         }
@@ -69,7 +68,7 @@ impl WebView {
     pub fn new(webview: wry::WebView, window: &mut Window, cx: &mut App) -> Self {
         let _ = webview.set_bounds(Rect::default());
 
-        #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
+        #[cfg(target_os = "macos")]
         let composition = match NativeWebViewSurface::new(&webview, window, cx) {
             Ok(surface) => Some(surface),
             Err(error) => {
@@ -81,7 +80,7 @@ impl WebView {
         let origin = Rc::new(Cell::new(gpui::Point::default()));
         #[cfg(target_os = "linux")]
         linux::forward_mouse_down(&webview, origin.clone(), window, cx);
-        #[cfg(not(any(all(feature = "gpui-fast", target_os = "macos"), target_os = "linux")))]
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         let _ = window;
 
         Self {
@@ -89,9 +88,9 @@ impl WebView {
             visible: Cell::new(true),
             bounds: Bounds::default(),
             webview: Rc::new(webview),
-            #[cfg(all(feature = "gpui-fast", target_os = "macos"))]
+            #[cfg(target_os = "macos")]
             composition,
-            #[cfg(all(feature = "gpui-fast", target_os = "linux"))]
+            #[cfg(target_os = "linux")]
             composition: None,
             #[cfg(target_os = "linux")]
             scale_factor: Cell::new(0.),
@@ -104,8 +103,8 @@ impl WebView {
     ///
     /// On Linux the window must run on X11 or XWayland: start the application with
     /// `gpui_kit::platform::linux(WindowingModes::X11)`. A Wayland window returns an error.
-    /// This also initializes GTK and drives its main loop from GPUI. With GPUI Fast, the webview
-    /// is built in a window composition surface so GPUI overlays can render above it.
+    /// This also initializes GTK and drives its main loop from GPUI. The webview is built in a
+    /// window composition surface so GPUI overlays can render above it.
     pub fn build(
         builder: wry::WebViewBuilder,
         window: &mut Window,
@@ -116,7 +115,6 @@ impl WebView {
             let parent = linux::X11Parent::new(window)?;
             linux::ensure_gtk(cx)?;
 
-            #[cfg(feature = "gpui-fast")]
             match NativeWebViewSurface::new(window, cx) {
                 Ok(surface) => {
                     let webview = builder.build_as_child(&surface.parent()?)?;
@@ -136,9 +134,9 @@ impl WebView {
     }
 
     /// Set window-relative bounds, including offscreen loading bounds.
-    /// With GPUI Fast, position the managed container and its child together.
+    /// With window composition, position the managed container and its child together.
     pub fn set_bounds(&self, bounds: Rect) -> wry::Result<()> {
-        #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         if let Some(surface) = &self.composition {
             return surface
                 .set_bounds(&self.webview, bounds)
@@ -156,7 +154,7 @@ impl WebView {
             Ok(())
         };
         self.webview.set_visible(visible)?;
-        #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         if let Some(surface) = &self.composition {
             surface
                 .set_visible(visible)
@@ -322,7 +320,7 @@ impl Element for WebViewElement {
         }
 
         let parent = self.parent.read(cx);
-        #[cfg(all(feature = "gpui-fast", any(target_os = "macos", target_os = "linux")))]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         if let Some(surface) = &parent.composition {
             surface.set_scale_factor(window.scale_factor());
         }

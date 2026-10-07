@@ -6,11 +6,11 @@ publish = false
 edition.workspace = true
 
 [features]
-gpui-fast = ["gpui-kit/gpui-fast", "gpui-webview/gpui-fast"]
 inspector = []
 
 [dependencies]
-gpui-kit.workspace = true
+# gpui-webview is built on GPUI Fast, so the application must use it too.
+gpui-kit = { workspace = true, features = ["gpui-fast"] }
 anyhow.workspace = true
 
 # WebView dependencies

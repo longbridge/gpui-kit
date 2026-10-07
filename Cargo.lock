@@ -5065,7 +5065,6 @@ version = "0.7.1"
 dependencies = [
  "anyhow",
  "gpui-fast",
- "gpui-pre",
  "gtk",
  "lb-wry",
  "log",

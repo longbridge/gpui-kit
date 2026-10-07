@@ -12,7 +12,8 @@ publish = true
 version = "0.7.1"
 
 [features]
-gpui-fast = ["dep:gpui-fast", "dep:objc2", "dep:objc2-app-kit", "dep:objc2-foundation", "dep:log"]
+# GPUI Fast is always used; this feature is kept so existing manifests that enable it still resolve.
+gpui-fast = []
 inspector = ["wry/devtools"]
 
 [lib]
@@ -20,15 +21,14 @@ doctest = false
 
 [dependencies]
 anyhow.workspace = true
-gpui.workspace = true
-gpui-fast = { workspace = true, optional = true }
-log = { version = "0.4", optional = true }
+gpui-fast.workspace = true
+log = "0.4"
 wry = { version = "0.53.3", package = "lb-wry" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = { version = "0.6", optional = true }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView"], optional = true }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"], optional = true }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk = "0.18"
