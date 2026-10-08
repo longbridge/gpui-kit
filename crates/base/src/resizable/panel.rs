@@ -172,6 +172,11 @@ impl RenderOnce for ResizablePanelGroup {
             .on_prepaint({
                 let state = state.clone();
                 move |bounds, window, cx| {
+                    // The same bounds as last frame change nothing; updating
+                    // the state for them would mark it changed every frame.
+                    if state.read(cx).bounds == bounds {
+                        return;
+                    }
                     state.update(cx, |state, cx| {
                         let size_changed =
                             state.bounds.size.along(self.axis) != bounds.size.along(self.axis);
@@ -351,6 +356,12 @@ impl RenderOnce for ResizablePanel {
             .on_prepaint({
                 let state = state.clone();
                 move |bounds, _, cx| {
+                    if !state
+                        .read(cx)
+                        .panel_size_changes(self.panel_ix, bounds, &self.size_range)
+                    {
+                        return;
+                    }
                     state.update(cx, |state, cx| {
                         state.update_panel_size(self.panel_ix, bounds, self.size_range, cx)
                     })
