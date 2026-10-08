@@ -243,6 +243,17 @@ Text input system based on Rope data structure:
    else reads as a competing context. A callback receiving both takes the GPUI one as `cx`
    and names the other after what it holds (`trigger`, `state`).
 
+## Pull Request Reviews
+
+Every PR review must present its conclusions in this order:
+
+1. Explain the PR's purpose: the problem it addresses and the scope of its changes.
+2. Assess whether the requirement and proposed approach are reasonable.
+3. Report concrete findings, followed by validation performed and its limitations.
+
+Do not start a review with findings alone; include the purpose and reasonableness
+assessment even when no issues are found.
+
 ## Code Style
 
 - Follow naming and organization patterns from existing code
