@@ -7,7 +7,8 @@ use crate::{
     StyledExt as _, WindowExt as _,
     button::ButtonVariant,
     dialog::{
-        Dialog, DialogButtonProps, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+        Dialog, DialogButtonProps, DialogDescription, DialogEntrance, DialogFooter, DialogHeader,
+        DialogTitle,
     },
     h_flex, v_flex,
 };
@@ -259,12 +260,11 @@ impl AlertDialog {
         self
     }
 
-    /// Set the alert dialog to pop in at its resting spot, defaults to `false`.
+    /// Sets how the alert dialog enters, defaulting to [`DialogEntrance::SlideDown`].
     ///
-    /// See [`Dialog::pop_in`]: the card settles over the fade from 8px above
-    /// its resting spot instead of sliding down from the window top.
-    pub fn pop_in(mut self, pop_in: bool) -> Self {
-        self.base = self.base.pop_in(pop_in);
+    /// Shares the surface, backdrop, and reduced-motion policy of [`Dialog::entrance`].
+    pub fn entrance(mut self, entrance: DialogEntrance) -> Self {
+        self.base = self.base.entrance(entrance);
         self
     }
 

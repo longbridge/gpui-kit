@@ -6,8 +6,8 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants as _},
     date_picker::{DatePicker, DatePickerState},
     dialog::{
-        Dialog, DialogAction, DialogClose, DialogDescription, DialogFooter, DialogHeader,
-        DialogTitle,
+        Dialog, DialogAction, DialogClose, DialogDescription, DialogEntrance, DialogFooter,
+        DialogHeader, DialogTitle,
     },
     h_flex,
     input::{Input, InputState},
@@ -27,7 +27,12 @@ enum ToggleDialogOption {
     OverlayClosable,
     CloseButton,
     Keyboard,
-    PopIn,
+}
+
+#[derive(Action, Clone, PartialEq, Eq, Deserialize)]
+#[action(namespace = dialog_story, no_json)]
+struct SetDialogEntrance {
+    entrance: DialogEntrance,
 }
 
 pub struct DialogStory {
@@ -42,7 +47,7 @@ pub struct DialogStory {
     close_button: bool,
     keyboard: bool,
     overlay_closable: bool,
-    pop_in: bool,
+    entrance: DialogEntrance,
 }
 
 struct MyTable {
@@ -142,7 +147,7 @@ impl DialogStory {
             close_button: true,
             keyboard: true,
             overlay_closable: true,
-            pop_in: false,
+            entrance: DialogEntrance::default(),
             table,
         }
     }
@@ -173,7 +178,7 @@ impl DialogStory {
                     .keyboard(self.keyboard)
                     .close_button(self.close_button)
                     .overlay_closable(overlay_closable)
-                    .pop_in(self.pop_in)
+                    .entrance(self.entrance)
                     .on_ok({
                         let view = view.clone();
                         let input1 = input1.clone();
@@ -627,8 +632,11 @@ impl Render for DialogStory {
                     }
                     ToggleDialogOption::CloseButton => this.close_button = !this.close_button,
                     ToggleDialogOption::Keyboard => this.keyboard = !this.keyboard,
-                    ToggleDialogOption::PopIn => this.pop_in = !this.pop_in,
                 }
+                cx.notify();
+            }))
+            .on_action(cx.listener(|this, action: &SetDialogEntrance, _, cx| {
+                this.entrance = action.entrance;
                 cx.notify();
             }))
             .size_full()
@@ -642,8 +650,8 @@ impl Render for DialogStory {
                             let overlay_closable = self.overlay_closable;
                             let close_button = self.close_button;
                             let keyboard = self.keyboard;
-                            let pop_in = self.pop_in;
-                            move |menu, _, _| {
+                            let entrance = self.entrance;
+                            move |menu, window, cx| {
                                 menu.menu_with_check(
                                     "Overlay",
                                     overlay,
@@ -664,10 +672,31 @@ impl Render for DialogStory {
                                     keyboard,
                                     Box::new(ToggleDialogOption::Keyboard),
                                 )
-                                .menu_with_check(
-                                    "Pop in",
-                                    pop_in,
-                                    Box::new(ToggleDialogOption::PopIn),
+                                .submenu(
+                                    "Entrance",
+                                    window,
+                                    cx,
+                                    move |menu, _, _| {
+                                        [
+                                            ("Slide down", DialogEntrance::SlideDown),
+                                            ("Fade", DialogEntrance::Fade),
+                                            ("Fade and slide", DialogEntrance::FadeSlide),
+                                            ("No animation", DialogEntrance::None),
+                                        ]
+                                        .into_iter()
+                                        .fold(
+                                            menu,
+                                            |menu, (label, option)| {
+                                                menu.menu_with_check(
+                                                    label,
+                                                    entrance == option,
+                                                    Box::new(SetDialogEntrance {
+                                                        entrance: option,
+                                                    }),
+                                                )
+                                            },
+                                        )
+                                    },
                                 )
                             }
                         },

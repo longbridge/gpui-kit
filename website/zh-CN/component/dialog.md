@@ -109,6 +109,20 @@ window.open_dialog(cx, |dialog, _, _| {
 })
 ```
 
+### 入场动画
+
+`Dialog` 和 `AlertDialog` 共用 `DialogEntrance`。默认的 `SlideDown` 保留从窗口顶部滑入的效果；`Fade` 在最终位置淡入；`FadeSlide` 淡入时按主题定义的短移动距离向下移动；`None` 立即显示弹窗和遮罩。
+
+```rust
+use gpui_kit::component::dialog::DialogEntrance;
+
+window.open_dialog(cx, |dialog, _, _| {
+    dialog.title("设置").entrance(DialogEntrance::FadeSlide)
+});
+```
+
+`Fade` 和 `FadeSlide` 使用主题的普通动画时长及入场缓动。`FadeSlide` 在完成窗口边界定位后施加偏移，移动距离不会超过弹窗上方的可用空间。启用 reduced motion 时，所有方式都会立即显示最终状态。所有方式均保持立即关闭。
+
 ### 操作按钮
 
 `Dialog` 自己的按钮放在 [`footer`](#dialogfooter) 里并派发 `Confirm` / `Cancel`；`on_ok`、`on_cancel` 决定 Enter 与 Esc 的行为。需要默认按钮的确认框请用 [AlertDialog](./alert-dialog.md)。

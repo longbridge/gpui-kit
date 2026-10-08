@@ -25,6 +25,10 @@ use gpui_kit::component::WindowExt;
 
 ## 用法
 
+### 入场动画
+
+使用 `.entrance(DialogEntrance::Fade)`、`.entrance(DialogEntrance::FadeSlide)` 或 `.entrance(DialogEntrance::None)` 可以替换默认的 `SlideDown` 入场方式。AlertDialog 与 [Dialog](./dialog.md#入场动画) 共用主题时长、窗口边界处理和 reduced motion 策略。关闭仍然立即生效。
+
 ### 配置应用根视图
 
 与 Dialog 一样，你需要在应用根视图中渲染 dialog layer。具体可参考 [Dialog 文档](./dialog.md#setup-application-root-view)。
@@ -390,6 +394,7 @@ window.open_alert_dialog(cx, |alert, _, _| {
 | `overlay_closable(bool)` | 是否允许点击遮罩关闭，默认 `false` |
 | `close_button(bool)` | 是否显示关闭按钮，默认 `false` |
 | `keyboard(bool)` | 是否支持 ESC 关闭，默认 `true` |
+| `entrance(DialogEntrance)` | 设置入场动画，默认 `SlideDown` |
 | `on_ok(callback)` | 设置确认回调，返回 `true` 时关闭 |
 | `on_cancel(callback)` | 设置取消回调，返回 `true` 时关闭 |
 | `on_close(callback)` | 设置关闭后的回调 |

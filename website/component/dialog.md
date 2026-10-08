@@ -111,6 +111,26 @@ window.open_dialog(cx, |dialog, _, _| {
 })
 ```
 
+### Entrance animation
+
+`Dialog` and `AlertDialog` share `DialogEntrance`. The default `SlideDown`
+preserves the existing slide from the window top. `Fade` fades at the final
+position; `FadeSlide` fades while moving down by the theme's short motion
+distance; `None` immediately displays both the surface and backdrop.
+
+```rust
+use gpui_kit::component::dialog::DialogEntrance;
+
+window.open_dialog(cx, |dialog, _, _| {
+    dialog.title("Settings").entrance(DialogEntrance::FadeSlide)
+});
+```
+
+`Fade` and `FadeSlide` use the theme's normal duration and enter easing.
+`FadeSlide` applies travel after resolving window boundaries and limits it to
+available space above the surface. Reduced motion displays every entrance at
+rest immediately. Closing remains immediate for every option.
+
 ### Action Buttons
 
 A `Dialog` puts its own buttons in the [`footer`](#dialogfooter) and has them
@@ -420,6 +440,7 @@ window.open_dialog(cx, |dialog, _, _| {
 | `w(px)` / `width(px)`    | Set dialog width                                      |
 | `max_w(px)`              | Set maximum width                                     |
 | `margin_top(px)`         | Set top margin                                        |
+| `entrance(DialogEntrance)` | Set entrance animation (default: `SlideDown`)       |
 | `overlay(bool)`          | Show/hide overlay (default: true)                     |
 | `overlay_closable(bool)` | Allow closing by clicking overlay (default: true)     |
 | `keyboard(bool)`         | Allow closing with ESC key (default: true)            |
