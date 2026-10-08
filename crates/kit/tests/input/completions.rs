@@ -644,6 +644,87 @@ fn continued_typing_refreshes_provider_filtered_suggestions(cx: &mut TestAppCont
 }
 
 #[gpui_kit::test]
+fn completion_popup_follows_caret_on_first_frame(cx: &mut TestAppContext) {
+    // The popup anchors to the caret from the input's current-frame prepaint
+    // geometry, so it must sit at the new caret position on the very frame
+    // the caret moves — not one frame later.
+    let fixture = Fixture::new(cx);
+    fixture.start_completion(cx);
+
+    let before = cx
+        .update_window(fixture.handle.into(), |_, window, _| {
+            window.find("completion-menu").bounds()
+        })
+        .unwrap();
+
+    // Type a character and render exactly one frame.
+    cx.update_window(fixture.handle.into(), |_, window, cx| {
+        window.input("r", cx);
+    })
+    .unwrap();
+    cx.update_window(fixture.handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+
+    let after = cx
+        .update_window(fixture.handle.into(), |_, window, _| {
+            window.find("completion-menu").bounds()
+        })
+        .unwrap();
+
+    assert!(
+        after.origin.x > before.origin.x,
+        "popup must follow the caret right on the first frame (before {before:?}, after {after:?})"
+    );
+    // Same line, so y must not move.
+    assert_eq!(after.origin.y, before.origin.y);
+
+    // And it must sit at the freshly laid-out caret, not just have moved.
+    let expected_x = cx.update(|cx| {
+        let geometry = fixture
+            .state
+            .read(cx)
+            .prepaint_caret_geometry()
+            .expect("prepaint stashes caret geometry");
+        geometry.cursor_bounds.origin.x - px(4.)
+    });
+    assert!(
+        (after.origin.x - expected_x).abs() < px(2.),
+        "popup at {after:?} must match fresh caret x {expected_x:?}"
+    );
+}
+
+#[gpui_kit::test]
+fn ordinary_input_schedules_no_followup_frame(cx: &mut TestAppContext) {
+    // The caret-anchored popup fix must not cost ordinary inputs an extra
+    // frame: geometry changes notify during paint, but nothing may schedule
+    // a follow-up frame.
+    let fixture = Fixture::new(cx);
+    // Focus the ordinary input and type.
+    cx.update_window(fixture.handle.into(), |_, window, cx| {
+        window.click("other", cx);
+    })
+    .unwrap();
+    cx.update_window(fixture.handle.into(), |_, window, cx| {
+        window.input("hello", cx);
+    })
+    .unwrap();
+    fixture.settle(cx);
+
+    let callbacks = cx
+        .update_window(fixture.handle.into(), |_, window, cx| {
+            window.simulate_next_frame(cx)
+        })
+        .unwrap();
+    assert_eq!(
+        callbacks, 0,
+        "an ordinary input must not schedule a follow-up frame"
+    );
+}
+
+#[gpui_kit::test]
 fn typing_over_a_selection_measures_the_prefix_from_where_the_text_begins(cx: &mut TestAppContext) {
     let fixture = Fixture::new(cx);
     // No menu has opened yet, so nothing but the replaced range locates the
