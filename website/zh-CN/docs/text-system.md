@@ -154,6 +154,8 @@ div()
 
 GPUI Kit 的 [TextView](https://github.com/longbridge/gpui-kit/blob/main/crates/component/src/text/compat.rs) 能渲染带样式 run、选择与可选滚动的 Markdown 或 HTML；解析、布局和选择行为由 Base 承担。富文档可用 `TextView::markdown("article", source)`。[Input](https://github.com/longbridge/gpui-kit/blob/main/crates/base/src/input/base/element.rs) 在 [`prepaint`](./element#prepaint) 中塑形可见行，此时已知最终宽度与输入几何；光标和指针映射使用同一份塑形布局。普通标签不需要自行实现这些工作。
 
+`gpui_kit::base::TextSelection::is_selectable_at(position, window, cx)` 检查窗口坐标中的一点是否命中当前选择作用域内已注册的可选择文字。应在指针事件分发期间传入事件的位置，让 hitbox 对应所查询的点。查询使用当前帧的文字几何与 hitbox，不启动或改变选区；空白处、非当前作用域的文字和触摸选择控件都不命中。外层控件可在认领长按前查询，让窗口级选词优先处理。`ContextMenu` 已自动采用这一规则：长按可选择文字会选词，长按空白处则打开对象菜单。
+
 ## 字体解析与度量
 
 `Font` 包含字体族，以及 weight、style、features 和可选的 fallback。`font("Family")` 构造字体；`Font::default()` 请求 `.SystemUIFont`。`cx.text_system().resolve_font(&font)` 返回 `FontId`；请求的字体族无法加载时，会尝试 GPUI 的回退栈。若所有回退都失败，则会 panic。`all_font_names()` 列出可用字体族，包括由 `add_fonts(...)` 注册的字体。应在第一帧之前注册打包字体，让第一次布局使用预期度量；之后再添加字体会使已缓存的字体解析和行布局失效，而已经开始的布局可能仍使用旧字体集合。

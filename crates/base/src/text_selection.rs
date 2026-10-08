@@ -2308,6 +2308,23 @@ fn with_text_selection_scope<T>(
 pub struct TextSelection;
 
 impl TextSelection {
+    /// Returns whether `position` hits selectable text in the active scope.
+    ///
+    /// Uses the current frame's registered text geometry and hitboxes without
+    /// starting or changing a selection. Blank space and text outside the active
+    /// selection scope do not match. A containing control can yield a long press
+    /// to the window's text selection before claiming the gesture itself.
+    /// Call during pointer dispatch with the event's position, so the hitboxes
+    /// reflect the point being queried. Touch-selection controls do not match.
+    pub fn is_selectable_at(position: Point<Pixels>, window: &Window, cx: &mut App) -> bool {
+        live_text_selection_state(window, cx).is_some_and(|state| {
+            state.update(cx, |state, cx| {
+                !state.touch.covers(position)
+                    && state.endpoint(position, Some(window), cx).inside_text
+            })
+        })
+    }
+
     /// Returns the currently selected text in logical document order.
     pub fn selected_text(window: &mut Window, cx: &mut App) -> String {
         let Some(state) = live_text_selection_state(window, cx) else {

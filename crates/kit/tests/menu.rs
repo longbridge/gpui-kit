@@ -3,12 +3,14 @@ use gpui_kit::component::{
     button::Button,
     input::{Copy, Input, InputState, SelectAll, Textarea, TextareaState},
     menu::{ContextMenuExt, DropdownMenu, PopupMenuItem},
+    text::{TextView, TextViewState},
 };
 use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, ClipboardItem, Context, Entity, FocusHandle, Focusable as _,
-    InputEvent, KeyDownEvent, KeyUpEvent, Keystroke, MouseButton, MouseDownEvent, MouseUpEvent,
-    TestAppContext, Window, actions, div, point, prelude::*, px, size,
+    InputEvent, KeyDownEvent, KeyUpEvent, Keystroke, LongPressEvent, MouseButton, MouseDownEvent,
+    MouseUpEvent, Pixels, Point, TestAppContext, TouchPhase, Window, WindowHandle, actions,
+    base::Root, div, point, prelude::*, px, size,
 };
 use std::{cell::Cell, rc::Rc, time::Duration};
 
@@ -601,6 +603,163 @@ fn submenu_select_all_uses_the_parent_input_action_target(cx: &mut TestAppContex
         assert_eq!(source.read(cx).value().as_ref(), "alpha\ncopy");
         assert_eq!(other.read(cx).value().as_ref(), "other");
         assert!(source.focus_handle(cx).is_focused(window));
+    })
+    .unwrap();
+}
+
+struct LongPressMenus {
+    input: Entity<InputState>,
+    text: Entity<TextViewState>,
+}
+
+impl Render for LongPressMenus {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .p_4()
+            .flex()
+            .flex_col()
+            .gap_4()
+            .child(
+                div()
+                    .id("row")
+                    .test_support()
+                    .w(px(320.))
+                    .h(px(40.))
+                    .child("Long press me")
+                    .context_menu(|menu, _, _| menu.menu("Copy", Box::new(Copy))),
+            )
+            .child(
+                div()
+                    .w(px(320.))
+                    .child(Input::new(&self.input).id("row-input"))
+                    .context_menu(|menu, _, _| menu.menu("Copy", Box::new(Copy))),
+            )
+            .child(
+                div()
+                    .id("text-row")
+                    .test_support()
+                    .w(px(320.))
+                    .h(px(80.))
+                    .child(TextView::new(&self.text).selectable(true))
+                    .context_menu(|menu, _, _| menu.menu("Copy", Box::new(Copy))),
+            )
+    }
+}
+
+fn long_press(window: &mut Window, cx: &mut App, position: Point<Pixels>) {
+    for phase in [TouchPhase::Started, TouchPhase::Ended] {
+        window.dispatch_event(
+            LongPressEvent {
+                phase,
+                start_position: position,
+                position,
+            }
+            .to_platform_input(),
+            cx,
+        );
+        window.render_frame(cx);
+    }
+}
+
+fn long_press_menus(cx: &mut TestAppContext) -> (WindowHandle<Root>, Entity<LongPressMenus>) {
+    cx.update(gpui_kit::init);
+    common::open_window(cx, Some(size(px(640.), px(480.))), |window, cx| {
+        cx.new(|cx| LongPressMenus {
+            input: cx.new(|cx| InputState::new(window, cx).default_value("quick select")),
+            text: cx.new(|cx| TextViewState::markdown("quick select", cx)),
+        })
+    })
+}
+
+/// A finger has no right button, so a long press opens the same menu.
+#[gpui_kit::test]
+fn long_press_opens_the_context_menu(cx: &mut TestAppContext) {
+    let (handle, _) = long_press_menus(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let row = window.find("row").bounds();
+        long_press(window, cx, row.center());
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("popup-menu").is_some());
+    })
+    .unwrap();
+}
+
+/// An input inside the trigger keeps its own long press.
+#[gpui_kit::test]
+fn long_press_on_an_input_in_a_context_menu_trigger_selects(cx: &mut TestAppContext) {
+    let (handle, view) = long_press_menus(cx);
+    let input = view.read_with(cx, |view, _| view.input.clone());
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let bounds = window.find("row-input").bounds();
+        long_press(
+            window,
+            cx,
+            point(bounds.left() + px(24.), bounds.center().y),
+        );
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(input.read(cx).selected_range(), 0..5);
+        assert!(window.try_find("popup-menu").is_none());
+    })
+    .unwrap();
+}
+
+/// Window-level text selection takes priority over the trigger's menu.
+#[gpui_kit::test]
+fn long_press_on_text_in_a_context_menu_trigger_selects(cx: &mut TestAppContext) {
+    let (handle, _) = long_press_menus(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let bounds = window.find("text-row").bounds();
+        long_press(
+            window,
+            cx,
+            point(bounds.left() + px(24.), bounds.top() + px(10.)),
+        );
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            gpui_kit::base::TextSelection::selected_text(window, cx).trim(),
+            "quick"
+        );
+        assert!(gpui_kit::base::TextSelection::touch_selection(window, cx).is_some());
+        assert!(window.try_find("popup-menu").is_none());
+    })
+    .unwrap();
+}
+
+/// Blank space in a selectable text row still opens the object's menu.
+#[gpui_kit::test]
+fn long_press_on_blank_space_in_a_text_trigger_opens_the_menu(cx: &mut TestAppContext) {
+    let (handle, _) = long_press_menus(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let bounds = window.find("text-row").bounds();
+        long_press(
+            window,
+            cx,
+            point(bounds.right() - px(12.), bounds.bottom() - px(12.)),
+        );
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(gpui_kit::base::TextSelection::selected_text(window, cx).is_empty());
+        assert!(window.try_find("popup-menu").is_some());
     })
     .unwrap();
 }
