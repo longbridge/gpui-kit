@@ -10,8 +10,6 @@ use gpui::{
     div, point, px, relative,
 };
 
-const FOLDER_TAB_GROUP: &str = "folder-tab";
-
 /// Room between two [`TabVariant::Folder`] tabs, holding their separator.
 pub(super) const FOLDER_TAB_GAP: Pixels = px(4.);
 
@@ -557,6 +555,9 @@ pub struct Tab {
     pub(super) indicator_epoch: u64,
     /// Whether a [`TabVariant::Folder`] tab draws the divider after it.
     pub(super) separator: bool,
+    /// Whether the [`super::TabBar`] reports the pointer over this tab. Kept
+    /// there rather than in a hover group, which would replace the caller's.
+    pub(super) hovered: bool,
     pub(super) max_width: Option<Pixels>,
     on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
 }
@@ -607,6 +608,7 @@ impl Default for Tab {
             indicator_ready: true,
             indicator_epoch: 0,
             separator: false,
+            hovered: false,
             prefix: None,
             suffix: None,
             variant: TabVariant::default(),
@@ -963,9 +965,7 @@ impl RenderOnce for Tab {
             })
             .rounded(radius)
             .when(folder, |this| {
-                this.group(FOLDER_TAB_GROUP)
-                    .px(metrics.padding_x)
-                    .pb(metrics.top_padding)
+                this.px(metrics.padding_x).pb(metrics.top_padding)
             })
             .when(!self.selected && !self.disabled, |this| {
                 this.text_color(normal_style.fg)
@@ -998,20 +998,21 @@ impl RenderOnce for Tab {
                     cx.theme().tokens.tab_active.into(),
                 ))
             })
-            .when(folder && !self.selected && !self.disabled, |this| {
-                this.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .bottom(metrics.top_padding)
-                        .rounded(metrics.radius)
-                        .group_hover(FOLDER_TAB_GROUP, |this| {
-                            this.bg(cx.theme().tokens.secondary)
-                        }),
-                )
-            })
+            .when(
+                folder && self.hovered && !self.selected && !self.disabled,
+                |this| {
+                    this.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .right_0()
+                            .bottom(metrics.top_padding)
+                            .rounded(metrics.radius)
+                            .bg(cx.theme().tokens.secondary),
+                    )
+                },
+            )
             // In the gap after the tab, on a whole pixel, level with the content.
             .when(folder && self.separator, |this| {
                 this.child(

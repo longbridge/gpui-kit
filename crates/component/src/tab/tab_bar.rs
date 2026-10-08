@@ -458,8 +458,8 @@ impl RenderOnce for TabBar {
         let tabs = self.base;
         let mut rendered_tabs = Vec::with_capacity(self.children.len());
         let max_width = self.max_width;
-        // A folder tab hides the separators beside it while hovered, which
-        // its own hover style cannot reach.
+        // A hovered folder tab shows its fill and hides the separators beside
+        // it, one of which belongs to its neighbor, so the bar tracks the hover.
         let hovered_tab = (self.variant == TabVariant::Folder).then(|| {
             window.use_keyed_state(format!("{}-tab-hovered", self.id), cx, |_, _| None::<usize>)
         });
@@ -478,6 +478,7 @@ impl RenderOnce for TabBar {
             tab.indicator_active = has_indicator;
             tab.indicator_ready = indicator_ready;
             tab.indicator_epoch = indicator_epoch;
+            tab.hovered = hovered_ix == Some(ix);
             tab.separator = self.variant == TabVariant::Folder
                 && ix + 1 < num_tabs
                 && !has_shape(ix)
