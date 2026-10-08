@@ -559,7 +559,7 @@ pub struct Tab {
     /// there rather than in a hover group, which would replace the caller's.
     pub(super) hovered: bool,
     pub(super) max_width: Option<Pixels>,
-    on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
+    pub(super) on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
 }
 
 impl From<&'static str> for Tab {

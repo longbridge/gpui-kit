@@ -296,7 +296,7 @@ TabBar::new("custom-tabs")
 | `prefix(element)`           | Add element before the tabs                        |
 | `suffix(element)`           | Add element after the tabs                         |
 | `last_empty_space(element)` | Custom element for empty space at the end          |
-| `track_scroll(handle)`      | Enable scrolling with a scroll handle              |
+| `track_scroll(handle)`      | Track scrolling with a handle to reveal a tab explicitly; clicking a tab scrolls it into view with part of the next tab showing |
 | `with_menu(bool)`           | Enable dropdown menu for tab selection             |
 | `max_width(width)`      | Set maximum width of each tab; truncates           |
 

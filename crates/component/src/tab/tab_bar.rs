@@ -1,9 +1,10 @@
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{
-    Anchor, AnyElement, App, Background, Bounds, Edges, ElementId, InteractiveElement, IntoElement,
-    ParentElement, Pixels, RenderOnce, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, px,
+    Anchor, AnyElement, App, Background, Bounds, ClickEvent, Edges, ElementId, Entity, EntityId,
+    InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div, point,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_base::spring;
 use rust_i18n::t;
@@ -131,8 +132,9 @@ impl TabBar {
 
     /// Track the scroll of the TabBar.
     ///
-    /// This does not automatically reveal the selected tab. Use the tracked
-    /// [`ScrollHandle`] to request an explicit reveal when needed.
+    /// Clicking a tab scrolls it into view along with part of the next tab,
+    /// but changing the selection, the tabs or the layout does not. Use the
+    /// tracked [`ScrollHandle`] to request an explicit reveal when needed.
     pub fn track_scroll(mut self, scroll_handle: &ScrollHandle) -> Self {
         self.scroll_handle = Some(scroll_handle.clone());
         self
@@ -445,6 +447,29 @@ impl RenderOnce for TabBar {
             None
         };
 
+        // Without a tracked handle the bar still needs one to reveal a clicked tab.
+        let scroll_handle = self.scroll_handle.clone().unwrap_or_else(|| {
+            window
+                .use_keyed_state(format!("{}-scroll", self.id), cx, |_, _| {
+                    ScrollHandle::new()
+                })
+                .read(cx)
+                .clone()
+        });
+        let reveal = TabReveal {
+            spring_id: format!("{}-reveal", self.id).into(),
+            target: window.use_keyed_state(format!("{}-reveal", self.id), cx, |_, _| None),
+            scroll_handle: scroll_handle.clone(),
+            view: window.current_view(),
+            peek: match self.size {
+                Size::XSmall | Size::Small => px(24.),
+                Size::Large => px(40.),
+                _ => px(32.),
+            },
+            num_tabs,
+        };
+        reveal.advance(window, cx);
+
         let padding_x = paddings.left;
         let indicator = self.render_indicator(&bounds_rc, window, cx);
         let indicator_epoch = indicator.as_ref().map(|(_, epoch)| *epoch).unwrap_or(0);
@@ -488,8 +513,24 @@ impl RenderOnce for TabBar {
                 .when_some(selected_index, |tab, selected_index| {
                     tab.selected(selected_index == ix)
                 })
-                .when_some(self.on_click.clone(), move |tab, on_click| {
-                    tab.on_click(move |_, window, cx| on_click(&ix, window, cx))
+                .map(|mut tab| {
+                    // The bar's callback replaces the tab's own.
+                    let on_click: Option<TabClickHandler> = match self.on_click.clone() {
+                        Some(on_click) => {
+                            Some(Rc::new(move |_, window, cx| on_click(&ix, window, cx)))
+                        }
+                        None => tab.on_click.take(),
+                    };
+                    tab.on_click = on_click.map(|on_click| {
+                        let reveal = reveal.clone();
+                        Rc::new(
+                            move |event: &ClickEvent, window: &mut Window, cx: &mut App| {
+                                reveal.reveal(ix, cx);
+                                on_click(event, window, cx)
+                            },
+                        ) as TabClickHandler
+                    });
+                    tab
                 });
             // The wrapper below is the flex item the bar lays out, so a tab's
             // own `flex_grow` / `flex_basis` (e.g. `flex_1()`) must size it.
@@ -607,9 +648,7 @@ impl RenderOnce for TabBar {
                             .gap(gap)
                             .overflow_x_scroll()
                             .lock_scroll_axis()
-                            .when_some(self.scroll_handle, |this, scroll_handle| {
-                                this.track_scroll(&scroll_handle)
-                            })
+                            .track_scroll(&scroll_handle)
                             .children(rendered_tabs)
                             .when(has_suffix_or_menu, |this| this.child(self.last_empty_space)),
                     ),
@@ -634,7 +673,9 @@ impl RenderOnce for TabBar {
                                     base.checked(selected_index == Some(ix))
                                         .disabled(*disabled)
                                         .when_some(on_click.clone(), |this, on_click| {
+                                            let reveal = reveal.clone();
                                             this.on_click(move |_, window, cx| {
+                                                reveal.reveal(ix, cx);
                                                 on_click(&ix, window, cx)
                                             })
                                         }),
@@ -647,6 +688,128 @@ impl RenderOnce for TabBar {
                 )
             })
             .when_some(self.suffix, |this, suffix| this.child(suffix))
+    }
+}
+
+type TabClickHandler = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+
+/// Scrolls a clicked tab into view, the way an `NSScrollView` reveals a
+/// clicked row, and leaves part of the tab beyond it showing so the strip
+/// visibly continues. Only a click starts this; selection, tab and layout
+/// changes leave the offset where the user put it.
+#[derive(Clone)]
+struct TabReveal {
+    spring_id: SharedString,
+    /// The offset a reveal is travelling to, while one is.
+    target: Entity<Option<RevealTarget>>,
+    scroll_handle: ScrollHandle,
+    view: EntityId,
+    /// How much of the neighbouring tab stays visible.
+    peek: Pixels,
+    num_tabs: usize,
+}
+
+#[derive(Clone, Copy)]
+struct RevealTarget {
+    to: Pixels,
+    /// The offset the previous frame set, `None` before the first frame.
+    last: Option<Pixels>,
+}
+
+impl TabReveal {
+    fn reveal(&self, ix: usize, cx: &mut App) {
+        let Some(to) = self.offset_revealing(ix) else {
+            return;
+        };
+        let running = self.target.read(cx).is_some();
+        if !running && to == self.scroll_handle.offset().x {
+            return;
+        }
+        self.target.update(cx, |target, _| match target {
+            // Retargeting keeps the spring's velocity.
+            Some(target) => target.to = to,
+            None => *target = Some(RevealTarget { to, last: None }),
+        });
+        cx.notify(self.view);
+    }
+
+    /// The horizontal offset that shows tab `ix` and `peek` of each neighbour,
+    /// moving as little as possible. The tab itself wins on a narrow bar.
+    fn offset_revealing(&self, ix: usize) -> Option<Pixels> {
+        let handle = &self.scroll_handle;
+        let viewport = handle.bounds();
+        let tab = handle.bounds_for_item(ix)?;
+        let max = handle.max_offset().x;
+        // Child bounds are laid out unscrolled: content at x is on screen at
+        // x + offset, so the visible content spans `viewport - offset`.
+        let want_left = match ix.checked_sub(1).and_then(|ix| handle.bounds_for_item(ix)) {
+            Some(prev) => (prev.right() - self.peek).max(prev.left()),
+            None => viewport.left(),
+        };
+        let want_right = match (ix + 1 < self.num_tabs)
+            .then(|| handle.bounds_for_item(ix + 1))
+            .flatten()
+        {
+            Some(next) => (next.left() + self.peek).min(next.right()),
+            None => viewport.right() + max,
+        };
+
+        let mut offset = handle.offset().x;
+        let show_left = |offset: &mut Pixels, left: Pixels| {
+            if left < viewport.left() - *offset {
+                *offset = viewport.left() - left;
+            }
+        };
+        let show_right = |offset: &mut Pixels, right: Pixels| {
+            if right > viewport.right() - *offset {
+                *offset = viewport.right() - right;
+            }
+        };
+        // Whichever is applied last wins: the neighbour the click heads
+        // toward over the one behind it, and the tab over both.
+        if tab.center().x + offset > viewport.center().x {
+            show_left(&mut offset, want_left);
+            show_right(&mut offset, want_right);
+        } else {
+            show_right(&mut offset, want_right);
+            show_left(&mut offset, want_left);
+        }
+        show_right(&mut offset, tab.right());
+        show_left(&mut offset, tab.left());
+        Some(offset.min(px(0.)).max(-max))
+    }
+
+    /// Steps a running reveal by one frame.
+    fn advance(&self, window: &mut Window, cx: &mut App) {
+        let Some(target) = *self.target.read(cx) else {
+            return;
+        };
+        let offset = self.scroll_handle.offset();
+        // A wheel or trackpad scroll since the last frame hands the strip back.
+        if target.last.is_some_and(|last| last != offset.x) {
+            self.target.update(cx, |target, _| *target = None);
+            return;
+        }
+
+        let policy = cx.theme().motion_tokens().spring_move;
+        if target.last.is_none() {
+            // Start from where the strip is, not where a previous reveal ended.
+            spring(
+                self.spring_id.clone(),
+                offset.x,
+                policy.with_travel(false),
+                window,
+                cx,
+            );
+        }
+        let x = spring(self.spring_id.clone(), target.to, policy, window, cx);
+        self.scroll_handle.set_offset(point(x, offset.y));
+        self.target.update(cx, |state, _| {
+            *state = (x != target.to).then_some(RevealTarget {
+                last: Some(x),
+                ..target
+            })
+        });
     }
 }
 
@@ -1168,5 +1331,127 @@ mod tests {
                 bar.right()
             );
         }
+    }
+
+    struct ClickRevealHarness {
+        group_handler: bool,
+        scroll_handle: Option<ScrollHandle>,
+    }
+
+    impl Render for ClickRevealHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            // Neither callback notifies.
+            div()
+                .w(px(100.))
+                .debug_selector(|| "click-bar".into())
+                .child(
+                    TabBar::new("click-reveal-tabs")
+                        .w_full()
+                        .when_some(self.scroll_handle.as_ref(), |tabs, handle| {
+                            tabs.track_scroll(handle)
+                        })
+                        .children((0..5).map(|ix| {
+                            Tab::new()
+                                .w(px(60.))
+                                .label(format!("Tab {ix}"))
+                                .debug_selector(move || format!("click-tab-{ix}"))
+                                .on_click(|_, _, _| {})
+                        }))
+                        .when(self.group_handler, |tabs| tabs.on_click(|_, _, _| {})),
+                )
+        }
+    }
+
+    fn click_reveal_harness(
+        cx: &mut TestAppContext,
+        group_handler: bool,
+        scroll_handle: Option<ScrollHandle>,
+        reduce_motion: bool,
+    ) -> &mut gpui::VisualTestContext {
+        cx.update(|cx| {
+            crate::theme::init(cx);
+            cx.set_reduce_motion(reduce_motion);
+        });
+        let (_, cx) = cx.add_window_view(move |_, _| ClickRevealHarness {
+            group_handler,
+            scroll_handle,
+        });
+        draw(cx);
+        cx
+    }
+
+    fn next_frame(cx: &mut gpui::VisualTestContext) {
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(16));
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        draw(cx);
+    }
+
+    #[gpui::test]
+    fn clicking_a_clipped_tab_reveals_it_and_part_of_the_next(cx: &mut TestAppContext) {
+        for group_handler in [false, true] {
+            let cx = click_reveal_harness(cx, group_handler, None, true);
+            let bar = cx.debug_bounds("click-bar").unwrap();
+            let tab = cx.debug_bounds("click-tab-1").unwrap();
+            assert!(tab.right() > bar.right(), "tab 1 starts clipped");
+
+            cx.simulate_click(tab.center(), Modifiers::default());
+            draw(cx);
+
+            let tab = cx.debug_bounds("click-tab-1").unwrap();
+            let next = cx.debug_bounds("click-tab-2").unwrap();
+            assert!(tab.left() >= bar.left() && tab.right() <= bar.right());
+            assert_eq!(bar.right() - next.left(), px(32.), "group: {group_handler}");
+        }
+    }
+
+    #[gpui::test]
+    fn clicking_the_last_tab_reveals_the_end_of_the_bar(cx: &mut TestAppContext) {
+        let scroll_handle = ScrollHandle::new();
+        let cx = click_reveal_harness(cx, true, Some(scroll_handle.clone()), true);
+        scroll_handle.set_offset(gpui::point(px(-160.), px(0.)));
+        draw(cx);
+
+        let tab = cx.debug_bounds("click-tab-4").unwrap();
+        cx.simulate_click(
+            tab.origin + gpui::point(px(10.), px(10.)),
+            Modifiers::default(),
+        );
+        draw(cx);
+
+        assert_eq!(scroll_handle.offset().x, -scroll_handle.max_offset().x);
+    }
+
+    #[gpui::test]
+    fn reveal_animates_and_yields_to_manual_scrolling(cx: &mut TestAppContext) {
+        let scroll_handle = ScrollHandle::new();
+        let cx = click_reveal_harness(cx, true, Some(scroll_handle.clone()), false);
+
+        let tab = cx.debug_bounds("click-tab-1").unwrap();
+        cx.simulate_click(tab.center(), Modifiers::default());
+        draw(cx);
+        next_frame(cx);
+        let moving = scroll_handle.offset().x;
+        assert!(
+            moving < px(0.) && moving > px(-52.),
+            "mid-flight at {moving:?}"
+        );
+
+        // The user scrolls while the reveal is still travelling.
+        scroll_handle.set_offset(gpui::point(px(-10.), px(0.)));
+        for _ in 0..30 {
+            next_frame(cx);
+        }
+        assert_eq!(scroll_handle.offset().x, px(-10.));
+
+        // A new click travels all the way.
+        cx.simulate_click(
+            tab.center() - gpui::point(px(10.), px(0.)),
+            Modifiers::default(),
+        );
+        for _ in 0..60 {
+            next_frame(cx);
+        }
+        assert_eq!(scroll_handle.offset().x, px(-52.));
     }
 }
