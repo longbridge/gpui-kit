@@ -623,27 +623,88 @@ impl DockArea {
         let Some(region) = self.placement_of_panel(panel) else {
             return;
         };
-        // A panel takes the keyboard with it when it goes. If it had it, the
-        // panel its group displays in its place takes it over, or the next
-        // keystroke would land nowhere.
+        let focused = window.focused(cx);
         let had_focus = self
             .panel(panel)
             .is_some_and(|view| view.focus_handle(cx).contains_focused(window, cx));
-        let node = self
-            .layout(region)
-            .and_then(|tree| tree.find_panel_node(panel));
+        // Prefer the same group, then the groups following it in layout order,
+        // then preceding groups from nearest to farthest. Preserve this order
+        // before normalization removes an emptied group or collapses its split.
+        let mut candidates = Vec::new();
+        if had_focus && let Some(tree) = self.layout(region) {
+            tree.root().walk(&mut |node| {
+                if matches!(node.kind(), PaneRef::Tabs { .. }) {
+                    candidates.push(node.id());
+                }
+            });
+            if let Some(ix) = tree
+                .find_panel_node(panel)
+                .and_then(|node| candidates.iter().position(|candidate| *candidate == node))
+            {
+                candidates = candidates[ix..]
+                    .iter()
+                    .chain(candidates[..ix].iter().rev())
+                    .copied()
+                    .collect();
+            }
+        }
         let Some(tree) = self.tree_mut(region) else {
             return;
         };
         let result = tree.remove_panel(panel);
         self.commit(result, window, cx);
 
-        if had_focus
-            && let Some(next) = node
-                .and_then(|node| self.groups.get(&node))
-                .and_then(|group| group.entity.read(cx).active_panel(cx))
-        {
+        // on_removed may deliberately focus another control (or clear focus).
+        // Automatic handoff is only the fallback when the callback left it alone.
+        if !had_focus || window.focused(cx) != focused {
+            return;
+        }
+        let next = candidates
+            .into_iter()
+            .find_map(|node| self.focus_target_in_group(node, cx))
+            .or_else(|| {
+                [
+                    DockPlacement::Center,
+                    DockPlacement::Left,
+                    DockPlacement::Right,
+                    DockPlacement::Bottom,
+                ]
+                .into_iter()
+                .filter(|placement| *placement != region)
+                .filter(|placement| {
+                    *placement == DockPlacement::Center
+                        || self
+                            .docks
+                            .get(placement)
+                            .is_some_and(|pane| pane.dock.is_open())
+                })
+                .find_map(|placement| {
+                    self.layout(placement)
+                        .and_then(|tree| self.focus_target_in_node(tree.root(), cx))
+                })
+            });
+        if let Some(next) = next {
             next.focus_handle(cx).focus(window, cx);
+        }
+    }
+
+    fn focus_target_in_group(&self, node: NodeId, cx: &App) -> Option<Arc<dyn PanelView>> {
+        if self.zoomed.is_some_and(|zoom| zoom != Zoomed::Group(node)) {
+            return None;
+        }
+        let group = self.groups.get(&node)?.entity.read(cx);
+        if group.is_collapsed() {
+            return None;
+        }
+        group.active_panel(cx)
+    }
+
+    fn focus_target_in_node(&self, node: &PaneNode, cx: &App) -> Option<Arc<dyn PanelView>> {
+        match node.kind() {
+            PaneRef::Tabs { .. } => self.focus_target_in_group(node.id(), cx),
+            PaneRef::Split { children, .. } => children
+                .iter()
+                .find_map(|child| self.focus_target_in_node(child, cx)),
         }
     }
 }
