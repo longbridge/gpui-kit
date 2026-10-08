@@ -296,7 +296,7 @@ impl Element for InlineObject {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let view = GlobalState::global(cx).text_view_state().cloned();
+        let view = GlobalState::global(cx).text_view_state();
         let selectable = view
             .as_ref()
             .is_some_and(|view| view.read(cx).is_selectable());
@@ -365,9 +365,11 @@ impl Element for InlineObject {
             }
             let visible = bounds.intersect(&window.content_mask().bounds);
             if visible.size.width > Pixels::ZERO && visible.size.height > Pixels::ZERO {
-                view.as_ref().unwrap().update(cx, |state, _| {
-                    state.selection_adapter.register_inline(vec![visible]);
-                });
+                view.as_ref()
+                    .unwrap()
+                    .read(cx)
+                    .selection_adapter
+                    .register_inline(vec![visible]);
             }
             let hitbox = hitbox.clone();
             let selected_state = self.selected.clone();

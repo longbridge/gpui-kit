@@ -201,7 +201,7 @@ impl Element for CustomBlockElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let view = GlobalState::global(cx).text_view_state().cloned();
+        let view = GlobalState::global(cx).text_view_state();
         let selection = view.as_ref().and_then(|view| {
             let state = view.read(cx);
             if !state.is_selectable() {
@@ -236,9 +236,9 @@ impl Element for CustomBlockElement {
                 && visible.size.width > Pixels::ZERO
                 && visible.size.height > Pixels::ZERO
             {
-                view.update(cx, |state, _| {
-                    state.selection_adapter.register_inline(vec![visible]);
-                });
+                view.read(cx)
+                    .selection_adapter
+                    .register_inline(vec![visible]);
             }
         }
         self.content.paint(window, cx);

@@ -114,6 +114,10 @@ impl WindowState {
         root.update(cx, |root, cx| f(root, window, cx))
     }
 
+    pub(crate) fn try_read<'a>(window: &Window, cx: &'a App) -> Option<&'a Self> {
+        Self::entity(window, cx).map(|root| root.read(cx))
+    }
+
     pub(crate) fn try_update<F, R>(window: &mut Window, cx: &mut App, f: F) -> Option<R>
     where
         F: FnOnce(&mut Self, &mut Window, &mut Context<Self>) -> R,

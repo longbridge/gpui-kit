@@ -72,12 +72,21 @@ impl VirtualBlockSelection {
 #[derive(Clone)]
 pub(super) struct TextViewSelectionAdapter {
     selection: TextSelectionHandle,
+    /// What the view's text painted this frame, shared by the adapter's
+    /// clones. Inlines report it as they paint, through a read of the view's
+    /// state: reporting it is not a change of the view.
+    frame: Rc<RefCell<PaintedText>>,
+    layout_revision: Option<usize>,
+}
+
+/// The text a [`TextViewSelectionAdapter`]'s view painted this frame.
+#[derive(Default)]
+struct PaintedText {
     text_bounds: Vec<Bounds<Pixels>>,
     text_runs: Vec<TextSelectionRun>,
     /// The caret boxes at the first and last selected character painted this
     /// frame, where the touch handles go.
     selection_edges: Option<(Bounds<Pixels>, Bounds<Pixels>)>,
-    layout_revision: Option<usize>,
 }
 
 impl TextViewSelectionAdapter {
@@ -175,9 +184,7 @@ impl TextViewSelectionAdapter {
 
         Self {
             selection,
-            text_bounds: Vec::new(),
-            text_runs: Vec::new(),
-            selection_edges: None,
+            frame: Rc::default(),
             layout_revision: None,
         }
     }
@@ -192,25 +199,24 @@ impl TextViewSelectionAdapter {
         changed && !is_selecting
     }
 
-    pub(super) fn begin_frame(&mut self) {
-        self.text_bounds.clear();
-        self.text_runs.clear();
-        self.selection_edges = None;
+    pub(super) fn begin_frame(&self) {
+        *self.frame.borrow_mut() = PaintedText::default();
     }
 
     /// Records one inline's painted selection ends. Inlines paint in document
     /// order, so the first start and the last end are the view's.
-    pub(super) fn register_selection_edges(&mut self, start: Bounds<Pixels>, end: Bounds<Pixels>) {
-        let first = self.selection_edges.map_or(start, |(first, _)| first);
-        self.selection_edges = Some((first, end));
+    pub(super) fn register_selection_edges(&self, start: Bounds<Pixels>, end: Bounds<Pixels>) {
+        let mut frame = self.frame.borrow_mut();
+        let first = frame.selection_edges.map_or(start, |(first, _)| first);
+        frame.selection_edges = Some((first, end));
     }
 
-    pub(super) fn register_text_run(&mut self, run: TextSelectionRun) {
-        self.text_runs.push(run);
+    pub(super) fn register_text_run(&self, run: TextSelectionRun) {
+        self.frame.borrow_mut().text_runs.push(run);
     }
 
-    pub(super) fn register_inline(&mut self, bounds: Vec<Bounds<Pixels>>) {
-        self.text_bounds.extend(bounds);
+    pub(super) fn register_inline(&self, bounds: Vec<Bounds<Pixels>>) {
+        self.frame.borrow_mut().text_bounds.extend(bounds);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -224,17 +230,19 @@ impl TextViewSelectionAdapter {
         window: &mut Window,
         cx: &mut App,
     ) {
-        self.selection.set_hit_test_runs(&self.text_runs, cx);
+        let frame = self.frame.borrow();
+        self.selection.set_hit_test_runs(&frame.text_runs, cx);
         let registration = TextSelectionRegistration::new(hitbox, bounds)
             .with_scroll_offset(scroll_offset)
             .with_document_order(document_order)
-            .with_text_bounds(self.text_bounds.clone())
+            .with_text_bounds(frame.text_bounds.clone())
             .with_self_scroll(self_scroll)
             .with_rendered_element(&self.selection, window, cx);
-        let registration = match self.selection_edges {
+        let registration = match frame.selection_edges {
             Some((start, end)) => registration.with_selection_edges(start, end),
             None => registration,
         };
+        drop(frame);
         self.selection.register(registration, window, cx);
     }
 
@@ -283,6 +291,6 @@ impl TextViewSelectionAdapter {
 
     #[cfg(test)]
     pub(super) fn text_bounds(&self) -> Vec<Bounds<Pixels>> {
-        self.text_bounds.clone()
+        self.frame.borrow().text_bounds.clone()
     }
 }
