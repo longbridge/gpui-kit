@@ -771,11 +771,24 @@ where
             .count()
     }
 
+    /// One header row. An unset header height matches the body rows.
+    fn header_row_height(&self) -> Pixels {
+        self.options
+            .header_height
+            .unwrap_or(self.options.size.table_row_height())
+    }
+
+    /// Every header row, including column-group rows. An empty layout still
+    /// reserves one row, matching the vertical scrollbar's top inset.
+    fn header_band_height(&self) -> Pixels {
+        self.header_row_height() * self.header_layout.len().max(1) as f32
+    }
+
     fn page_item_count(&self) -> usize {
         let row_height = self.options.size.table_row_height();
-        let height = self.bounds.size.height;
-        let count = (height / row_height).floor() as usize;
-        count.saturating_sub(1).max(1)
+        let body_height = (self.bounds.size.height - self.header_band_height()).max(px(0.));
+        let count = (body_height / row_height).floor() as usize;
+        count.max(1)
     }
 
     fn on_row_right_click(
@@ -1821,6 +1834,7 @@ where
             self.calculate_visible_leaf_col_range(left_columns_count);
 
         let layout_len = self.header_layout.len();
+        let header_row_height = self.header_row_height();
 
         // Reset fixed head columns bounds, if no fixed columns are present
         if left_columns_count == 0 {
@@ -1881,7 +1895,7 @@ where
                             layout.iter().enumerate().map(|(_row_ix, row_cells)| {
                                 h_flex()
                                     .min_w_full()
-                                    .h(self.options.size.table_row_height())
+                                    .h(header_row_height)
                                     .border_b_1()
                                     .border_color(cx.theme().border)
                                     .children(row_cells.iter().filter_map(|cell| {
@@ -1942,7 +1956,7 @@ where
                             let is_leaf_row = row_ix + 1 == layout_len;
                             h_flex()
                                 .min_w_full()
-                                .h(self.options.size.table_row_height())
+                                .h(header_row_height)
                                 .border_b_1()
                                 .border_color(cx.theme().border)
                                 .map(|this| {
@@ -2395,7 +2409,7 @@ where
         Some(
             div()
                 .absolute()
-                .top(self.options.size.table_row_height() * self.header_layout.len().max(1) as f32)
+                .top(self.header_band_height())
                 .right_0()
                 .bottom_0()
                 .w(Scrollbar::width())
