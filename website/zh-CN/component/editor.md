@@ -104,6 +104,24 @@ let editor = cx.new(|cx| {
 });
 ```
 
+## 主动补全
+
+`ShowCompletions` 可以在不修改文本的情况下请求补全，**没有默认快捷键**。应用应结合平台习惯选择绑定，避开 Ctrl+Space 等输入法快捷键。Editor 的绑定可以使用 `Input && mode == editor` 条件；现有 `Input` 绑定仍然有效。
+
+```rust
+use gpui_kit::component::input::ShowCompletions;
+
+// 从应用命令分发给当前聚焦的 Editor。
+window.dispatch_action(Box::new(ShowCompletions), cx);
+
+// 也可以指定 Editor；此方法同时将焦点交给它。
+editor.update(cx, |state, cx| state.show_completions(window, cx));
+```
+
+菜单使用光标前的标识符前缀，沿用编辑器按字母、数字和下划线识别单词的规则；前缀为空时仍会请求建议。手动请求使用 LSP 的 `INVOKED` 类型，不传触发字符。禁用、只读、没有 provider 或处于 IME 预编辑状态的 Editor 不会发出请求。IME 文本提交后，可以再次调用命令。
+
+补全菜单已打开时，命令保留当前选择。否则，它会取消上一轮浮层请求和 inline suggestion，并关闭 code action 菜单，再请求补全。编辑、移动光标、关闭菜单或失去焦点后，迟到的结果不会重新打开补全。
+
 ## 快捷键与矩形列选
 
 以下默认快捷键在编辑器聚焦时生效。macOS 的 Option 对应 Alt 修饰键；Linux 的这些操作不使用 Super/Win。
@@ -116,7 +134,6 @@ let editor = cx.new(|cx| {
 | 鼠标添加光标 | Option+左键点击 | Alt+左键点击 | Alt+左键点击 |
 | 矩形列选 | Option+Shift+左键拖动 | Alt+Shift+左键拖动 | Alt+Shift+左键拖动 |
 | 只保留活动光标 | Escape | Escape | Escape |
-| 不输入也显示补全（`ShowCompletions`） | Ctrl+Space | Ctrl+Space | Ctrl+Space |
 
 Linux 额外支持与 Ghostty 一致的 Ctrl+Alt+左键拖动列选，以及 Alt+Shift+← / → 按词选择。Windows 额外支持 Alt+Shift+← / → 逐字符选择。三个平台都兼容 Alt/Option+左键拖动列选：单击添加光标，继续拖动则以鼠标按下位置为起点建立新的矩形选区。
 

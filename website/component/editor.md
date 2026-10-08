@@ -118,6 +118,35 @@ let editor = cx.new(|cx| {
 });
 ```
 
+## Manual completions
+
+`ShowCompletions` requests suggestions without editing text. It has **no default
+shortcut**, so applications can choose bindings that fit the platform and avoid
+input-method shortcuts such as Ctrl+Space. Editor bindings can use the context
+expression `Input && mode == editor`; existing `Input` bindings continue to work.
+
+```rust
+use gpui_kit::component::input::ShowCompletions;
+
+// Dispatch to the focused editor from an application command.
+window.dispatch_action(Box::new(ShowCompletions), cx);
+
+// Or address a specific editor; this also focuses it.
+editor.update(cx, |state, cx| state.show_completions(window, cx));
+```
+
+The menu refines against the identifier prefix before the caret, using the same
+letter, digit, and underscore boundaries as the editor's word helpers. An empty
+prefix still requests suggestions. Manual requests use the LSP `INVOKED` trigger
+kind without a trigger character. Disabled/readonly editors, editors without a
+provider, and IME preedit do not issue a request. After committing IME text, the
+command is available again.
+
+If the completion menu is already open, the command preserves its selection.
+Otherwise it cancels the previous overlay request and inline suggestion and
+closes code actions before requesting completions. Late results cannot reopen
+suggestions after editing, moving the caret, dismissing, or losing focus.
+
 ## Keyboard shortcuts and column selection
 
 These defaults apply while the editor is focused. On macOS, Option is the Alt
@@ -131,7 +160,6 @@ modifier. Linux uses no Super/Win bindings for these operations.
 | Add a cursor with the mouse | Option+left click | Alt+left click | Alt+left click |
 | Select a rectangular block | Option+Shift+left drag | Alt+Shift+left drag | Alt+Shift+left drag |
 | Keep only the active cursor | Escape | Escape | Escape |
-| Show completions without typing (`ShowCompletions`) | Ctrl+Space | Ctrl+Space | Ctrl+Space |
 
 Linux also accepts Ctrl+Alt+left drag for rectangular selection, matching
 Ghostty, and Alt+Shift+Left / Right for word selection. Windows additionally
