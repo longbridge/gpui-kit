@@ -43,6 +43,9 @@ const ZOOM_CONTROL_SELECTOR: &str = "dock-tab-bar-zoom-control";
 /// Debug-bounds selector for a tab's close (X) button, for tests.
 const CLOSE_BUTTON_SELECTOR: &str = "dock-tab-close-button";
 
+/// Debug-bounds selector prefix for a tab, suffixed with its panel index.
+const TAB_SELECTOR: &str = "dock-tab";
+
 /// The size the styled drag preview occupies, reported to base so a drop
 /// placeholder knows where to fly in from.
 const DRAG_PREVIEW_SIZE: gpui::Size<gpui::Pixels> = gpui::size(px(96.), px(30.));
@@ -191,7 +194,7 @@ pub(crate) struct TabGroupSkin {
     /// The displayed tab the last frame drew, so a change scrolls the new tab
     /// into view. The old dock recorded this at the moment of selection; the
     /// group now owns selection, so the skin notices instead of being told.
-    last_active_ix: Cell<Option<usize>>,
+    last_active_ix: Rc<Cell<Option<usize>>>,
 }
 
 impl TabGroupSkin {
@@ -199,7 +202,7 @@ impl TabGroupSkin {
         Self {
             shared,
             scroll_handle: ScrollHandle::default(),
-            last_active_ix: Cell::new(None),
+            last_active_ix: Rc::new(Cell::new(None)),
         }
     }
 
@@ -495,6 +498,7 @@ impl TabGroupSkin {
 
                         Tab::new()
                             .ix(ix)
+                            .debug_selector(move || format!("{TAB_SELECTOR}-{ix}"))
                             .tab_bar_prefix(has_leading)
                             .map(|this| match handle.and_then(|handle| handle.tab_name(cx)) {
                                 Some(tab_name) => this.child(tab_name),
@@ -555,7 +559,11 @@ impl TabGroupSkin {
                             .on_click({
                                 let group = group.clone();
                                 let area = self.shared.area().clone();
+                                let last_active_ix = self.last_active_ix.clone();
                                 move |_, window, cx| {
+                                    // The tab bar reveals a clicked tab itself,
+                                    // so the change must not snap it into view.
+                                    last_active_ix.set(Some(ix));
                                     group.select_tab(ix, window, cx);
 
                                     // Clicking the strip of a collapsed bottom
@@ -1775,6 +1783,67 @@ mod tests {
         assert!(
             !activated.get(),
             "stop_propagation keeps the close click from also selecting the tab"
+        );
+    }
+
+    /// A click is left to the tab bar's animated reveal: the skin's own snap
+    /// for a changed tab would land the strip on the first frame and cut the
+    /// animation short.
+    #[gpui::test]
+    fn a_clicked_tab_is_revealed_by_the_tab_bar_not_snapped(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(false);
+        });
+        let (area, cx) = cx.add_window_view(|window, cx| {
+            DockArea::new("skin", None, window, cx).with_renderer(DockSkin::new(cx))
+        });
+        cx.simulate_resize(gpui::size(px(300.), px(300.)));
+        cx.update(|window, cx| {
+            let layout = (0..8).fold(DockLayout::tabs(), |layout, _| {
+                layout.panel_view(panel_handle(Probe::new(cx)), cx)
+            });
+            area.update(cx, |area, cx| area.set_center(layout, window, cx));
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        // `debug_bounds` takes a `'static` selector.
+        let tab = |cx: &mut VisualTestContext, ix: usize| {
+            cx.debug_bounds(format!("{TAB_SELECTOR}-{ix}").leak())
+                .unwrap()
+        };
+        let first_left = |cx: &mut VisualTestContext| tab(cx, 0).left();
+        let start = first_left(cx);
+        // The tab that runs off the 300px window: only its first few pixels
+        // show before the bar's toolbar.
+        let clipped = (0..8)
+            .map(|ix| tab(cx, ix))
+            .find(|tab| tab.right() > px(300.))
+            .unwrap();
+
+        cx.simulate_click(
+            clipped.origin + gpui::point(px(4.), px(16.)),
+            Modifiers::none(),
+        );
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(first_left(cx), start, "the first frame has not snapped");
+
+        let mut lefts = Vec::new();
+        for _ in 0..60 {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(16));
+            cx.update(|window, cx| {
+                window.simulate_next_frame(cx);
+                window.draw(cx).clear(cx);
+            });
+            lefts.push(first_left(cx));
+        }
+        let end = *lefts.last().unwrap();
+        assert!(end < start, "the strip scrolled");
+        assert!(
+            lefts.iter().any(|left| *left < start && *left > end),
+            "the strip slid rather than jumped: {lefts:?}"
         );
     }
 
