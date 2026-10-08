@@ -87,6 +87,28 @@ TabBar::new("segmented-tabs")
     .children(vec!["Settings", "About"])
 ```
 
+#### Folder
+
+形似文件夹索引签的标签，常见于网页浏览器：选中的标签从标签栏中升起，顶部为圆角，底部以弧线向外过渡到下方内容，其余标签之间以分隔线隔开。将标签栏紧贴在使用 `tab.active.background` 主题色绘制的内容上方，选中标签即可与内容连为一体。
+
+```rust
+use gpui_kit::component::{
+    IconName,
+    button::{Button, ButtonVariants as _},
+};
+
+TabBar::new("folder-tabs")
+    .folder()
+    .selected_index(0)
+    .child(
+        Tab::new()
+            .label("Account")
+            .suffix(Button::new("close").ghost().xsmall().icon(IconName::Close)),
+    )
+    .child(Tab::new().label("Profile"))
+    .child(Tab::new().label("Documents"))
+```
+
 ### 不同尺寸
 
 ```rust
@@ -240,6 +262,7 @@ TabBar::new("tabs-with-max-width")
 | `pill()` | 胶囊样式 |
 | `outline()` | 描边样式 |
 | `segmented()` | 分段控制样式 |
+| `folder()` | 文件夹索引签样式 |
 
 ### Tab
 

@@ -9,7 +9,10 @@ use gpui_base::spring;
 use rust_i18n::t;
 use smallvec::SmallVec;
 
-use super::{Tab, TabVariant};
+use super::{
+    Tab, TabVariant,
+    tab::{FOLDER_TAB_GAP, FolderTabMetrics},
+};
 use crate::button::{Button, ButtonVariants as _};
 use crate::menu::{DropdownMenu as _, PopupMenuItem};
 use crate::{
@@ -103,6 +106,12 @@ impl TabBar {
     /// Set the Tab variant to Underline, all children will inherit the variant.
     pub fn underline(mut self) -> Self {
         self.variant = TabVariant::Underline;
+        self
+    }
+
+    /// Set the Tab variant to Folder, all children will inherit the variant.
+    pub fn folder(mut self) -> Self {
+        self.variant = TabVariant::Folder;
         self
     }
 
@@ -401,6 +410,18 @@ impl RenderOnce for TabBar {
 
                 (cx.theme().transparent.into(), Edges::all(px(0.)), gap)
             }
+            TabVariant::Folder => (
+                cx.theme().tokens.tab_bar.into(),
+                Edges::all(px(0.)),
+                FOLDER_TAB_GAP,
+            ),
+        };
+        let overhang = self.variant.overhang(self.size, cx);
+        // Inside the tabs rather than on the bar, so the bar's prefix and
+        // suffix center on the full height like the tabs' content does.
+        let tabs_top_padding = match self.variant {
+            TabVariant::Folder => FolderTabMetrics::new(self.size, cx).top_padding,
+            _ => px(0.),
         };
 
         let has_indicator = matches!(
@@ -437,6 +458,13 @@ impl RenderOnce for TabBar {
         let tabs = self.base;
         let mut rendered_tabs = Vec::with_capacity(self.children.len());
         let max_width = self.max_width;
+        // A folder tab hides the separators beside it while hovered, which
+        // its own hover style cannot reach.
+        let hovered_tab = (self.variant == TabVariant::Folder).then(|| {
+            window.use_keyed_state(format!("{}-tab-hovered", self.id), cx, |_, _| None::<usize>)
+        });
+        let hovered_ix = hovered_tab.as_ref().and_then(|state| *state.read(cx));
+        let has_shape = |ix| selected_index == Some(ix) || hovered_ix == Some(ix);
 
         for (ix, child) in self.children.into_iter().enumerate() {
             item_metas.push((child.label.clone(), child.icon.clone(), child.disabled));
@@ -450,6 +478,11 @@ impl RenderOnce for TabBar {
             tab.indicator_active = has_indicator;
             tab.indicator_ready = indicator_ready;
             tab.indicator_epoch = indicator_epoch;
+            tab.separator = self.variant == TabVariant::Folder
+                && ix + 1 < num_tabs
+                && !has_shape(ix)
+                && !has_shape(ix + 1);
+            let disabled = tab.disabled;
             let mut tab = tab
                 .when_some(selected_index, |tab, selected_index| {
                     tab.selected(selected_index == ix)
@@ -483,6 +516,32 @@ impl RenderOnce for TabBar {
                     .when(ix == 0, |this| {
                         this.when_some(indicator_element.take(), |this, indicator| {
                             this.child(indicator)
+                        })
+                    })
+                    .child(tab)
+                    .into_any_element()
+            } else if let Some(hovered_tab) = hovered_tab.clone() {
+                div()
+                    .id(("folder-tab", ix))
+                    .flex_shrink_0()
+                    .map(|mut this| {
+                        this.style().flex_grow = flex_grow;
+                        this.style().flex_basis = flex_basis;
+                        this
+                    })
+                    .when(!disabled, |this| {
+                        this.on_hover(move |hovered, _, cx| {
+                            hovered_tab.update(cx, |state, cx| {
+                                let next = match *hovered {
+                                    true => Some(ix),
+                                    false if *state == Some(ix) => None,
+                                    false => *state,
+                                };
+                                if next != *state {
+                                    *state = next;
+                                    cx.notify();
+                                }
+                            });
                         })
                     })
                     .child(tab)
@@ -541,6 +600,9 @@ impl RenderOnce for TabBar {
                             // Keep the scroll viewport inside the wrapper padding so
                             // explicit reveals leave space at both ends of the bar.
                             .relative()
+                            // Room for the end tabs' curves inside the viewport.
+                            .px(overhang)
+                            .pt(tabs_top_padding)
                             .gap(gap)
                             .overflow_x_scroll()
                             .lock_scroll_axis()

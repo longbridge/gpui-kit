@@ -4,10 +4,48 @@ use crate::animation::{Lerp, ease_in_out_cubic};
 use crate::{ActiveTheme, Icon, IconName, Selectable, Sizable, Size, StyledExt, h_flex};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, Background, ClickEvent, Edges, ElementId, Hsla,
-    InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString,
-    StatefulInteractiveElement, Styled, Window, div, px, relative,
+    Animation, AnimationExt as _, AnyElement, App, Background, ClickEvent, Edges, ElementId,
+    FillOptions, Hsla, InteractiveElement, IntoElement, ParentElement, PathBuilder, PathStyle,
+    Pixels, Point, RenderOnce, SharedString, StatefulInteractiveElement, Styled, Window, canvas,
+    div, point, px, relative,
 };
+
+const FOLDER_TAB_GROUP: &str = "folder-tab";
+
+/// Room between two [`TabVariant::Folder`] tabs, holding their separator.
+pub(super) const FOLDER_TAB_GAP: Pixels = px(4.);
+
+/// Geometry of [`TabVariant::Folder`].
+#[derive(Clone, Copy)]
+pub(super) struct FolderTabMetrics {
+    /// Bar space above the tabs. The content sits this much above the tab's
+    /// center so that it centers on the whole bar.
+    pub(super) top_padding: Pixels,
+    /// Radius of the top corners and of the curves joining the selected tab
+    /// to the content below.
+    pub(super) radius: Pixels,
+    pub(super) padding_x: Pixels,
+    pub(super) separator_height: Pixels,
+}
+
+impl FolderTabMetrics {
+    pub(super) fn new(size: Size, cx: &App) -> Self {
+        let (top_padding, padding_x, separator_height, radius) = match size {
+            Size::XSmall => (px(2.), px(8.), px(12.), cx.theme().radius),
+            Size::Small => (px(4.), px(8.), px(12.), cx.theme().radius),
+            Size::Large => (px(8.), px(16.), px(16.), cx.theme().radius_lg),
+            _ => (px(4.), px(12.), px(16.), cx.theme().radius_lg),
+        };
+        Self {
+            top_padding,
+            // Past a third of the height a curve reaches under its neighbor's
+            // hover fill.
+            radius: radius.min(TabVariant::Folder.height(size) / 3.),
+            padding_x,
+            separator_height,
+        }
+    }
+}
 
 /// Tab variants.
 #[derive(Debug, Clone, Default, Copy, PartialEq, Eq, Hash)]
@@ -18,6 +56,10 @@ pub enum TabVariant {
     Pill,
     Segmented,
     Underline,
+    /// Tabs shaped like a folder's index tabs, as in a web browser: the
+    /// selected tab rises from the bar with rounded top corners and curves out
+    /// into the content below it.
+    Folder,
 }
 
 impl TabVariant {
@@ -46,23 +88,23 @@ impl TabVariant {
         match size {
             Size::XSmall => match self {
                 TabVariant::Tab | TabVariant::Outline | TabVariant::Pill => px(18.),
-                TabVariant::Segmented => px(16.),
+                TabVariant::Segmented | TabVariant::Folder => px(16.),
                 TabVariant::Underline => px(20.),
             },
             Size::Small => match self {
                 TabVariant::Tab | TabVariant::Outline | TabVariant::Pill => px(22.),
-                TabVariant::Segmented => px(18.),
+                TabVariant::Segmented | TabVariant::Folder => px(18.),
                 TabVariant::Underline => px(22.),
             },
             Size::Large => match self {
                 TabVariant::Tab | TabVariant::Outline | TabVariant::Pill => px(36.),
-                TabVariant::Segmented => px(28.),
+                TabVariant::Segmented | TabVariant::Folder => px(28.),
                 TabVariant::Underline => px(32.),
             },
             _ => match self {
                 TabVariant::Tab => px(30.),
                 TabVariant::Outline | TabVariant::Pill => px(26.),
-                TabVariant::Segmented => px(24.),
+                TabVariant::Segmented | TabVariant::Folder => px(24.),
                 TabVariant::Underline => px(26.),
             },
         }
@@ -77,7 +119,8 @@ impl TabVariant {
             _ => px(12.),
         };
 
-        if matches!(self, TabVariant::Underline) {
+        // A folder tab pads its content itself, see `FolderTabMetrics`.
+        if matches!(self, TabVariant::Underline | TabVariant::Folder) {
             padding_x = px(0.);
         }
 
@@ -166,6 +209,11 @@ impl TabVariant {
                 border_color: cx.theme().transparent,
                 ..Default::default()
             },
+            TabVariant::Folder => TabStyle {
+                fg: cx.theme().tab_foreground,
+                bg: cx.theme().transparent.into(),
+                ..Default::default()
+            },
         }
     }
 
@@ -215,6 +263,12 @@ impl TabVariant {
                 border_color: cx.theme().transparent,
                 ..Default::default()
             },
+            // The hover fill is an inset rounded layer, see `Tab::render`.
+            TabVariant::Folder => TabStyle {
+                fg: cx.theme().tab_active_foreground,
+                bg: cx.theme().transparent.into(),
+                ..Default::default()
+            },
         }
     }
 
@@ -258,6 +312,12 @@ impl TabVariant {
                     ..Default::default()
                 },
                 border_color: cx.theme().primary,
+                ..Default::default()
+            },
+            // The shape is painted by `folder_tab_shape`.
+            TabVariant::Folder => TabStyle {
+                fg: cx.theme().tab_active_foreground,
+                bg: cx.theme().transparent.into(),
                 ..Default::default()
             },
         }
@@ -328,6 +388,11 @@ impl TabVariant {
                 },
                 ..Default::default()
             },
+            TabVariant::Folder => TabStyle {
+                fg: cx.theme().muted_foreground,
+                bg: cx.theme().transparent.into(),
+                ..Default::default()
+            },
         }
     }
 
@@ -367,6 +432,82 @@ impl TabVariant {
             _ => px(0.),
         }
     }
+
+    /// How far a tab's painting reaches past its bounds on either side.
+    pub(super) fn overhang(&self, size: Size, cx: &App) -> Pixels {
+        match self {
+            TabVariant::Folder => FolderTabMetrics::new(size, cx).radius,
+            _ => px(0.),
+        }
+    }
+}
+
+/// The selected [`TabVariant::Folder`] tab: rounded on top and curving out at
+/// the bottom into the content below, traced after Chrome's tab path.
+fn folder_tab_shape(metrics: FolderTabMetrics, bg: Background) -> impl IntoElement {
+    let curve = metrics.radius;
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            let (top, bottom) = (bounds.top(), bounds.bottom());
+            let (left, right) = (bounds.left(), bounds.right());
+            let (tab_left, tab_right) = (left + curve, right - curve);
+            // Like Chrome, keep at least a third of the top flat on narrow tabs.
+            let radius = ((bounds.size.width - curve * 2.) / 3.).clamp(px(0.), curve);
+
+            let mut path =
+                PathBuilder::fill().with_style(PathStyle::Fill(FillOptions::tolerance(0.02)));
+            path.move_to(point(left, bottom));
+            quarter_circle_to(
+                &mut path,
+                point(left, bottom),
+                point(tab_left, bottom),
+                point(tab_left, bottom - curve),
+            );
+            path.line_to(point(tab_left, top + radius));
+            quarter_circle_to(
+                &mut path,
+                point(tab_left, top + radius),
+                point(tab_left, top),
+                point(tab_left + radius, top),
+            );
+            path.line_to(point(tab_right - radius, top));
+            quarter_circle_to(
+                &mut path,
+                point(tab_right - radius, top),
+                point(tab_right, top),
+                point(tab_right, top + radius),
+            );
+            path.line_to(point(tab_right, bottom - curve));
+            quarter_circle_to(
+                &mut path,
+                point(tab_right, bottom - curve),
+                point(tab_right, bottom),
+                point(right, bottom),
+            );
+            path.close();
+            if let Ok(path) = path.build() {
+                window.paint_path(path, bg);
+            }
+        },
+    )
+    .absolute()
+    .top_0()
+    .bottom_0()
+    .left(-curve)
+    .right(-curve)
+}
+
+/// Adds a quarter circle from `from` to `to`, whose tangents meet at `corner`.
+fn quarter_circle_to(
+    path: &mut PathBuilder,
+    from: Point<Pixels>,
+    corner: Point<Pixels>,
+    to: Point<Pixels>,
+) {
+    // Control point distance that makes a cubic Bézier a quarter circle.
+    const K: f32 = 0.552_284_8;
+    path.cubic_bezier_to(to, from + (corner - from) * K, to + (corner - to) * K);
 }
 
 #[allow(dead_code)]
@@ -414,6 +555,8 @@ pub struct Tab {
     /// tab switch. Used to key the selected tab's text color fade so it
     /// restarts in sync with the indicator slide.
     pub(super) indicator_epoch: u64,
+    /// Whether a [`TabVariant::Folder`] tab draws the divider after it.
+    pub(super) separator: bool,
     pub(super) max_width: Option<Pixels>,
     on_click: Option<Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
 }
@@ -463,6 +606,7 @@ impl Default for Tab {
             indicator_active: false,
             indicator_ready: true,
             indicator_epoch: 0,
+            separator: false,
             prefix: None,
             suffix: None,
             variant: TabVariant::default(),
@@ -528,6 +672,12 @@ impl Tab {
     /// Use Underline variant.
     pub fn underline(mut self) -> Self {
         self.variant = TabVariant::Underline;
+        self
+    }
+
+    /// Use Folder variant.
+    pub fn folder(mut self) -> Self {
+        self.variant = TabVariant::Folder;
         self
     }
 
@@ -648,6 +798,9 @@ impl RenderOnce for Tab {
         let inner_height = self.variant.inner_height(self.size);
         let height = self.variant.height(self.size);
         let aria_label = self.a11y_label();
+        let folder = self.variant == TabVariant::Folder;
+        let metrics = FolderTabMetrics::new(self.size, cx);
+        let has_prefix = self.prefix.is_some();
 
         let segmented_indicator_active =
             self.variant == TabVariant::Segmented && self.indicator_active;
@@ -740,7 +893,9 @@ impl RenderOnce for Tab {
                         (Some(label), None) => this.child(label),
                         (None, _) => this,
                     })
-                    .children(self.children),
+                    .children(self.children)
+                    // With the prefix's gap, 8px between icon and title, as in a Button.
+                    .when(folder && has_prefix, |this| this.pl(px(4.))),
             })
             .bg(inner_bg)
             .rounded(inner_radius)
@@ -799,13 +954,19 @@ impl RenderOnce for Tab {
             .items_center()
             .flex_shrink_0()
             .h(height)
-            .overflow_hidden()
+            // A folder tab's curves reach past its bounds.
+            .when(!folder, |this| this.overflow_hidden())
             .map(|this| match self.size {
                 Size::XSmall => this.text_xs(),
                 Size::Large => this.text_base(),
                 _ => this.text_sm(),
             })
             .rounded(radius)
+            .when(folder, |this| {
+                this.group(FOLDER_TAB_GROUP)
+                    .px(metrics.padding_x)
+                    .pb(metrics.top_padding)
+            })
             .when(!self.selected && !self.disabled, |this| {
                 this.text_color(normal_style.fg)
                     .bg(normal_style.bg)
@@ -830,6 +991,38 @@ impl RenderOnce for Tab {
                     .border_b(hover_style.borders.bottom)
                     .border_color(hover_style.border_color)
                     .rounded(radius)
+            })
+            .when(folder && self.selected, |this| {
+                this.child(folder_tab_shape(
+                    metrics,
+                    cx.theme().tokens.tab_active.into(),
+                ))
+            })
+            .when(folder && !self.selected && !self.disabled, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .bottom(metrics.top_padding)
+                        .rounded(metrics.radius)
+                        .group_hover(FOLDER_TAB_GROUP, |this| {
+                            this.bg(cx.theme().tokens.secondary)
+                        }),
+                )
+            })
+            // In the gap after the tab, on a whole pixel, level with the content.
+            .when(folder && self.separator, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .right(-(FOLDER_TAB_GAP / 2.))
+                        .top((height - metrics.top_padding - metrics.separator_height) / 2.)
+                        .w(px(1.))
+                        .h(metrics.separator_height)
+                        .bg(cx.theme().border),
+                )
             })
             .when(has_inline_inner_bg, |this| {
                 this.child(
@@ -880,12 +1073,13 @@ mod tests {
     use crate::tab::TabBar;
     use gpui::{Context, Render, TestAppContext, VisualTestContext};
 
-    const VARIANTS: [TabVariant; 5] = [
+    const VARIANTS: [TabVariant; 6] = [
         TabVariant::Tab,
         TabVariant::Outline,
         TabVariant::Pill,
         TabVariant::Segmented,
         TabVariant::Underline,
+        TabVariant::Folder,
     ];
 
     const LONG_LABEL: &str = "Account Settings & Preferences";

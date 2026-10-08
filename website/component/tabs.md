@@ -87,6 +87,31 @@ TabBar::new("segmented-tabs")
     .children(vec!["Settings", "About"])
 ```
 
+#### Folder Tabs
+
+Tabs shaped like a folder's index tabs, as in a web browser: the selected tab
+rises from the bar with rounded top corners and curves out into the content
+below it, and separators divide the other tabs. Place the bar directly above content painted with the
+`tab.active.background` theme color so the selected tab joins it.
+
+```rust
+use gpui_kit::component::{
+    IconName,
+    button::{Button, ButtonVariants as _},
+};
+
+TabBar::new("folder-tabs")
+    .folder()
+    .selected_index(0)
+    .child(
+        Tab::new()
+            .label("Account")
+            .suffix(Button::new("close").ghost().xsmall().icon(IconName::Close)),
+    )
+    .child(Tab::new().label("Profile"))
+    .child(Tab::new().label("Documents"))
+```
+
 ### Tab Sizes
 
 ```rust
@@ -284,6 +309,7 @@ TabBar::new("custom-tabs")
 | `pill()`                | Use pill variant                     |
 | `outline()`             | Use outline variant                  |
 | `segmented()`           | Use segmented variant                |
+| `folder()`             | Use folder variant                  |
 
 ### Tab
 
@@ -298,6 +324,7 @@ TabBar::new("custom-tabs")
 | `outline()`             | Use outline variant                            |
 | `segmented()`           | Use segmented variant                          |
 | `underline()`           | Use underline variant                          |
+| `folder()`             | Use folder variant                            |
 | `prefix(element)`       | Add element before tab content                 |
 | `suffix(element)`       | Add element after tab content                  |
 | `disabled(bool)`        | Set disabled state                             |
@@ -313,6 +340,7 @@ pub enum TabVariant {
     Pill,     // Rounded pill-shaped tabs
     Segmented, // Segmented control style
     Underline, // Underline indicator tabs
+    Folder,    // Folder index tabs, as in a web browser
 }
 ```
 
