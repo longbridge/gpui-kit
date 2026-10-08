@@ -30,6 +30,27 @@ window.open_dialog(cx, |dialog, _, _| {
 })
 ```
 
+### 构建器生命周期与初始焦点
+
+`open_dialog` 的构建器可能在对话框层重新构建时再次执行。它不是只执行一次的构造函数，也不保证在每个显示帧执行。`open_alert_dialog`、`open_sheet` 和 `open_sheet_at` 遵循相同的构建契约。构建器应保持轻量且幂等；持久实体应在打开前创建，并将其句柄传入构建器，以便重新构建时保留编辑状态。
+
+`open_dialog` 会先将焦点交给对话框外壳。若需要设置内容的初始焦点，应在构建器内使用一次性标记，每次打开时单独创建。在后续重新构建时无条件设置焦点，会抢走其他控件或嵌套对话框的焦点。
+
+```rust
+use std::cell::Cell;
+use gpui_kit::{AppContext as _, Focusable as _};
+use gpui_kit::component::{WindowExt as _, input::{Input, InputState}};
+
+let input = cx.new(|cx| InputState::new(window, cx).placeholder("URL"));
+let initial_focus = Cell::new(true);
+window.open_dialog(cx, move |dialog, window, cx| {
+    if initial_focus.replace(false) {
+        input.focus_handle(cx).focus(window, cx);
+    }
+    dialog.title("导入").child(Input::new(&input))
+});
+```
+
 ### 表单对话框
 
 ```rust

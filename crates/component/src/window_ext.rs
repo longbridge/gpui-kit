@@ -13,20 +13,20 @@ use std::rc::Rc;
 pub trait WindowExt: Sized {
     /// Opens a Sheet at right placement.
     ///
-    /// The builder follows the same per-frame contract as
-    /// [`WindowExt::open_dialog`]: it re-runs on every frame the sheet stays
-    /// open, so keep it cheap and create entities before opening, not inside
-    /// the builder.
+    /// The builder follows the same rendering contract as
+    /// [`WindowExt::open_dialog`]: it may run again when the sheet layer is
+    /// rebuilt. Keep it cheap and create persistent entities before opening,
+    /// not inside the builder.
     fn open_sheet<F>(&mut self, cx: &mut App, build: F)
     where
         F: Fn(Sheet, &mut Window, &mut App) -> Sheet + 'static;
 
     /// Opens a Sheet at the given placement.
     ///
-    /// The builder follows the same per-frame contract as
-    /// [`WindowExt::open_dialog`]: it re-runs on every frame the sheet stays
-    /// open, so keep it cheap and create entities before opening, not inside
-    /// the builder.
+    /// The builder follows the same rendering contract as
+    /// [`WindowExt::open_dialog`]: it may run again when the sheet layer is
+    /// rebuilt. Keep it cheap and create persistent entities before opening,
+    /// not inside the builder.
     fn open_sheet_at<F>(&mut self, placement: Placement, cx: &mut App, build: F)
     where
         F: Fn(Sheet, &mut Window, &mut App) -> Sheet + 'static;
@@ -39,36 +39,37 @@ pub trait WindowExt: Sized {
 
     /// Opens a Dialog.
     ///
-    /// The builder is a render closure, not a one-shot constructor: the dialog
-    /// layer re-runs it on every frame the dialog stays open, which is what
-    /// lets an open dialog reflect fresh state. That contract comes with two
-    /// rules:
+    /// The builder is a render closure, not a one-shot constructor. It may
+    /// run again when the dialog layer is rebuilt while the dialog is open.
+    /// View caching means a displayed frame need not rebuild the layer; the
+    /// builder is not a periodic update callback. Keep it cheap and idempotent.
     ///
-    /// - Keep the builder cheap and idempotent, it runs on every frame.
-    /// - Do not create entities inside it. Anything from `cx.new(...)` — an
-    ///   [`InputState`](crate::input::InputState), a child view —
-    ///   is dropped and rebuilt every frame, which resets input while the
-    ///   user types. Create entities before opening the dialog and clone them
-    ///   into the builder.
+    /// Create persistent entities, such as an [`InputState`](crate::input::InputState)
+    /// or a child view, before opening and capture their handles in the builder.
+    /// Creating them with `cx.new(...)` inside the builder replaces them on
+    /// each rebuild and loses their editing state.
     ///
-    /// To move focus into the dialog's content, focus from inside the builder:
-    /// `open_dialog` focuses the dialog shell when it is called, and the
-    /// builder runs after that, on the dialog's first render, so a handle
-    /// focused earlier — for example in the constructor of an entity created
-    /// before the call — is overwritten by the shell.
+    /// `open_dialog` initially focuses the dialog shell, replacing any focus
+    /// set before the call. To choose initial content focus, set it only on
+    /// the builder's first invocation, with a guard captured separately for
+    /// each opening. Never focus unconditionally on subsequent rebuilds: that
+    /// would steal focus from another control or a nested dialog.
     ///
     /// # Examples
     ///
     /// ```ignore
-    /// use gpui_kit::component::input::{Input, InputState};
+    /// use std::cell::Cell;
+    /// use gpui_kit::{AppContext as _, Focusable as _};
+    /// use gpui_kit::component::{WindowExt as _, input::{Input, InputState}};
     ///
-    /// // Created before opening, cloned into the builder: the input keeps
-    /// // its value across the builder's per-frame re-runs.
+    /// // Both the input and the one-time focus guard belong to this opening.
     /// let input = cx.new(|cx| InputState::new(window, cx).placeholder("URL"));
-    /// window.open_dialog(cx, move |dialog, _, _| {
-    ///     dialog
-    ///         .title("Import")
-    ///         .child(Input::new(&input))
+    /// let initial_focus = Cell::new(true);
+    /// window.open_dialog(cx, move |dialog, window, cx| {
+    ///     if initial_focus.replace(false) {
+    ///         input.focus_handle(cx).focus(window, cx);
+    ///     }
+    ///     dialog.title("Import").child(Input::new(&input))
     /// });
     /// ```
     fn open_dialog<F>(&mut self, cx: &mut App, build: F)
@@ -80,10 +81,10 @@ pub trait WindowExt: Sized {
     /// This is a convenience method for opening an alert dialog with opinionated defaults.
     /// The footer buttons are center-aligned and include an icon based on the variant.
     ///
-    /// The builder follows the same per-frame contract as
-    /// [`WindowExt::open_dialog`]: it re-runs on every frame the dialog stays
-    /// open, so keep it cheap and create entities before opening, not inside
-    /// the builder.
+    /// The builder follows the same rendering contract as
+    /// [`WindowExt::open_dialog`]: it may run again when the dialog layer is
+    /// rebuilt. Keep it cheap and create persistent entities before opening,
+    /// not inside the builder.
     ///
     /// # Examples
     ///

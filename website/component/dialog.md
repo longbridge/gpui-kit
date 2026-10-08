@@ -30,6 +30,34 @@ window.open_dialog(cx, |dialog, _, _| {
 })
 ```
 
+### Builder lifetime and initial focus
+
+The `open_dialog` builder may run again when the dialog layer is rebuilt; it
+is not a one-shot constructor or a callback guaranteed to run on every displayed
+frame. The same contract applies to `open_alert_dialog`, `open_sheet`, and
+`open_sheet_at`. Keep builders cheap and idempotent. Create persistent entities
+before opening and capture their handles, so rebuilding preserves editing state.
+
+`open_dialog` initially focuses the dialog shell. To focus its content, use a
+one-time guard inside the builder, created separately for each opening.
+Unconditionally focusing on every rebuild steals focus from other controls or
+nested dialogs.
+
+```rust
+use std::cell::Cell;
+use gpui_kit::{AppContext as _, Focusable as _};
+use gpui_kit::component::{WindowExt as _, input::{Input, InputState}};
+
+let input = cx.new(|cx| InputState::new(window, cx).placeholder("URL"));
+let initial_focus = Cell::new(true);
+window.open_dialog(cx, move |dialog, window, cx| {
+    if initial_focus.replace(false) {
+        input.focus_handle(cx).focus(window, cx);
+    }
+    dialog.title("Import").child(Input::new(&input))
+});
+```
+
 ### Form Dialog
 
 ```rust
