@@ -195,6 +195,9 @@ pub trait TableDelegate: Sized + 'static {
 
     /// Called when the visible range of the rows changed.
     ///
+    /// The range never ends past `rows_count`; a table whose rows drop to none
+    /// reports `0..0`.
+    ///
     /// NOTE: Make sure this method is fast, because it will be called frequently.
     ///
     /// This can used to handle some data update, to only update the visible rows.

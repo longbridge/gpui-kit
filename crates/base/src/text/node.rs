@@ -8,8 +8,8 @@ use std::{
 use gpui::{
     AnyElement, App, Axis, Bounds, DefiniteLength, Div, Element, ElementId, FontStyle, FontWeight,
     GlobalElementId, HighlightStyle, Hsla, Image, ImageFormat, ImageSource, InspectorElementId,
-    InteractiveElement as _, IntoElement, IsZero as _, LayoutId, Length, ObjectFit, Overflow,
-    ParentElement, Pixels, Point, Rems, ScrollHandle, SharedString, SharedUri,
+    InteractiveElement as _, IntoElement, IsZero as _, LayoutId, ObjectFit, Overflow,
+    ParentElement, Pixels, Point, Refineable as _, Rems, ScrollHandle, SharedString, SharedUri,
     StatefulInteractiveElement, StyleRefinement, Styled, StyledImage as _, TextStyleRefinement,
     WhiteSpace, Window, div, img, prelude::FluentBuilder as _, px, relative, rems,
 };
@@ -201,7 +201,7 @@ impl Element for CustomBlockElement {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let view = GlobalState::global(cx).text_view_state().cloned();
+        let view = GlobalState::global(cx).text_view_state();
         let selection = view.as_ref().and_then(|view| {
             let state = view.read(cx);
             if !state.is_selectable() {
@@ -236,9 +236,9 @@ impl Element for CustomBlockElement {
                 && visible.size.width > Pixels::ZERO
                 && visible.size.height > Pixels::ZERO
             {
-                view.update(cx, |state, _| {
-                    state.selection_adapter.register_inline(vec![visible]);
-                });
+                view.read(cx)
+                    .selection_adapter
+                    .register_inline(vec![visible]);
             }
         }
         self.content.paint(window, cx);
@@ -1760,13 +1760,57 @@ impl std::fmt::Debug for TableColumnWidthsCache {
 
 struct TableColumnWidths {
     text_system: Weak<gpui::WindowTextSystem>,
-    text_style: gpui::TextStyle,
+    /// The styles the header row and the body rows render with.
+    text_styles: TableTextStyles,
     rem_size: Pixels,
     mono_family: SharedString,
     inline_code: HighlightStyle,
     /// Maxima from ordinary text only. Custom cells may shrink after an update.
     widths: Vec<f32>,
     custom_cells: Vec<(usize, usize)>,
+}
+
+/// The text styles table rows render with: the window's, refined by
+/// `style.table` on the frame, `style.table_head` on the header row and
+/// `style.table_cell` on every cell, in the order the elements apply them.
+#[derive(Clone, PartialEq)]
+struct TableTextStyles {
+    head: gpui::TextStyle,
+    body: gpui::TextStyle,
+    head_refinement: TextStyleRefinement,
+    body_refinement: TextStyleRefinement,
+}
+
+impl TableTextStyles {
+    fn new(style: &TextViewStyle, window: &Window) -> Self {
+        let mut body_refinement = style.table().text.clone();
+        let mut head_refinement = body_refinement.clone();
+        head_refinement.refine(&style.table_head().text);
+        head_refinement.refine(&style.table_cell().text);
+        body_refinement.refine(&style.table_cell().text);
+        let mut head = window.text_style();
+        let mut body = head.clone();
+        head.refine(&head_refinement);
+        body.refine(&body_refinement);
+        Self {
+            head,
+            body,
+            head_refinement,
+            body_refinement,
+        }
+    }
+
+    fn row(&self, row_ix: usize) -> &gpui::TextStyle {
+        if row_ix == 0 { &self.head } else { &self.body }
+    }
+
+    fn row_refinement(&self, row_ix: usize) -> &TextStyleRefinement {
+        if row_ix == 0 {
+            &self.head_refinement
+        } else {
+            &self.body_refinement
+        }
+    }
 }
 
 /// Plain snapshot of a rendered Markdown table, passed to the
@@ -2886,6 +2930,26 @@ fn slice_backgrounds(
     slice_ranges(backgrounds, start, end, |range, color| (range, *color))
 }
 
+/// A table column's cell widths for layout, excluding the divider after it.
+struct TableColumn {
+    /// The width that fits the content on its widest line.
+    max: f32,
+    /// The width below which the column stops shrinking.
+    min: f32,
+    divider: f32,
+}
+
+/// Horizontal padding of a table cell: `px_3` unless `style.table_cell`
+/// sets it.
+fn table_cell_padding_x(style: &TextViewStyle, rem_size: Pixels) -> f32 {
+    let padding = &style.table_cell().padding;
+    let side = |length: Option<DefiniteLength>| match length {
+        Some(DefiniteLength::Absolute(length)) => f32::from(length.to_pixels(rem_size)),
+        _ => CELL_PAD_PX / 2.,
+    };
+    side(padding.left) + side(padding.right)
+}
+
 const CELL_PAD_PX: f32 = 24.0; // px_3 horizontal padding
 const CELL_MIN_PX: f32 = 48.0;
 const CELL_BORDER_PX: f32 = 1.0; // border_r_1 drawn by every column but the last
@@ -2901,7 +2965,7 @@ fn measure_table_columns(
     window: &mut Window,
     cx: &mut App,
 ) -> Vec<f32> {
-    let text_style = window.text_style();
+    let text_styles = TableTextStyles::new(&node_cx.style, window);
     let rem_size = window.rem_size();
     let mono_family = cx.theme().tokens.typography.mono.clone();
     let inline_code = node_cx.style.inline_code_highlight();
@@ -2910,7 +2974,7 @@ fn measure_table_columns(
             .as_ref()
             .filter(|cached| {
                 cached.widths.len() == col_count
-                    && cached.text_style == text_style
+                    && cached.text_styles == text_styles
                     && cached.rem_size == rem_size
                     && cached.mono_family == mono_family
                     && cached.inline_code == inline_code
@@ -2923,10 +2987,10 @@ fn measure_table_columns(
     });
     let measured = cached.unwrap_or_else(|| {
         let (widths, custom_cells) =
-            measure_table_text_columns(table, col_count, node_cx, window, cx);
+            measure_table_text_columns(table, col_count, &text_styles, node_cx, window, cx);
         let measured = Arc::new(TableColumnWidths {
             text_system: Arc::downgrade(window.text_system()),
-            text_style,
+            text_styles: text_styles.clone(),
             rem_size,
             mono_family,
             inline_code,
@@ -2946,7 +3010,10 @@ fn measure_table_columns(
     for &(row_ix, ix) in &measured.custom_cells {
         let cell = &table.children[row_ix].children[ix];
         let items = cell.children.inline_flow_items(None, &[], &[], node_cx, cx);
-        let width = super::inline_flow::intrinsic_width(&items, window, cx);
+        let style = text_styles.row_refinement(row_ix).clone();
+        let width = window.with_text_style(Some(style), |window| {
+            super::inline_flow::intrinsic_width(&items, window, cx)
+        });
         let border = if ix + 1 < col_count {
             CELL_BORDER_PX
         } else {
@@ -2962,15 +3029,16 @@ fn measure_table_columns(
 fn measure_table_text_columns(
     table: &Table,
     col_count: usize,
+    text_styles: &TableTextStyles,
     node_cx: &NodeContext,
     window: &mut Window,
     cx: &mut App,
 ) -> (Vec<f32>, Vec<(usize, usize)>) {
-    let text_style = window.text_style();
-    let font_size = text_style.font_size.to_pixels(window.rem_size());
     let mut col_w = vec![CELL_MIN_PX; col_count];
     let mut custom_cells = Vec::new();
     for (row_ix, row) in table.children.iter().enumerate() {
+        let text_style = text_styles.row(row_ix);
+        let font_size = text_style.font_size.to_pixels(window.rem_size());
         for (ix, cell) in row.children.iter().enumerate() {
             let Some(slot) = col_w.get_mut(ix) else {
                 continue;
@@ -3020,7 +3088,7 @@ fn measure_table_text_columns(
                     if highlights.iter().any(|(_, h)| h.font_size_scale.is_some()) {
                         line_w += px(crate::text::inline_flow::INLINE_CODE_PADDING * 2.);
                     }
-                    let runs = text_runs(range.len(), &text_style, &highlights);
+                    let runs = text_runs(range.len(), text_style, &highlights);
                     line_w += window
                         .text_system()
                         .layout_line(&line[range], font_size * scale, &runs, None)
@@ -3441,9 +3509,27 @@ impl BlockNode {
         }
     }
 
-    /// Render a Markdown table. Dispatches to a horizontally scrollable layout
-    /// when `style.table` opts in with overflow-x: scroll, otherwise to the
-    /// default layout that fits the container width and wraps cell content.
+    /// Render a Markdown table.
+    ///
+    /// Columns are sized from the measured max-content width of their cells,
+    /// so they line up and fit their content on proportional fonts and mixed
+    /// scripts alike. The layout adapts to the frame:
+    ///
+    /// - Wider than the content: every column fits its content and the spare
+    ///   width is shared in proportion to it.
+    /// - Narrower: the narrow columns keep their full content width and only
+    ///   the widest ones shrink and wrap, all down to one common width (see
+    ///   [`Self::render_table_rows`]). Shrinking every column by the same
+    ///   ratio would wrap the last word or character of a column that nearly
+    ///   fits onto a line of its own.
+    /// - Narrower than the column floors: the default layout clips, while
+    ///   `style.table` overflow-x: scroll keeps the floors and scrolls
+    ///   horizontally, so no content ever becomes unreachable.
+    ///
+    /// `white_space: nowrap` on `style.table_cell` composes like in CSS: the
+    /// refinement keeps cell text on a single line, and the scroll layout
+    /// raises the floors to the full content widths so the single-line
+    /// columns never shrink.
     fn render_table(
         item: &BlockNode,
         options: &NodeRenderOptions,
@@ -3452,39 +3538,138 @@ impl BlockNode {
         window: &mut Window,
         cx: &mut App,
     ) -> impl IntoElement {
-        const DEFAULT_LENGTH: usize = 5;
+        // A scrolling column stops shrinking (and the table starts to scroll)
+        // at a floor scaled to its content: roughly the width at which the
+        // text wraps to `CELL_WRAP_MAX_LINES` lines, clamped between the two
+        // bounds so moderate columns can still wrap meaningfully while one
+        // huge column cannot push the scroll threshold arbitrarily high.
+        const CELL_WRAP_MAX_LINES: f32 = 2.0;
+        const CELL_WRAP_MIN_PX: f32 = 160.0;
+        const CELL_WRAP_MAX_PX: f32 = 480.0;
+        const TABLE_BORDER_PX: f32 = 2.0; // the frame's border_1, left + right
 
         let table = match item {
             BlockNode::Table(table) => table,
             _ => return div().into_any_element(),
         };
 
-        // Scroll mode is opted in via `style.table` overflow-x: scroll.
-        if matches!(node_cx.style.table().overflow.x, Some(Overflow::Scroll)) {
-            let col_count = table
-                .children
-                .iter()
-                .map(|row| row.children.len())
-                .max()
-                .unwrap_or(0);
-            return Self::render_scroll_table(
-                table, col_count, options, node_cx, text_size, window, cx,
-            );
-        }
-
-        // Per-column max text length (in chars), used to proportion the columns
-        // in the default (wrap) layout.
-        let mut col_lens: Vec<usize> = vec![];
-        for row in table.children.iter() {
-            for (ix, cell) in row.children.iter().enumerate() {
-                if col_lens.len() <= ix {
-                    col_lens.push(DEFAULT_LENGTH);
+        let style = &node_cx.style;
+        let col_count = table
+            .children
+            .iter()
+            .map(|row| row.children.len())
+            .max()
+            .unwrap_or(0);
+        let col_w = measure_table_columns(table, col_count, node_cx, window, cx);
+        let scroll = matches!(style.table().overflow.x, Some(Overflow::Scroll));
+        let nowrap = style.table_cell().text.white_space == Some(WhiteSpace::Nowrap);
+        let rem_size = window.rem_size();
+        let wrap_min_px = f32::from(rems(4.).to_pixels(rem_size));
+        // Widths were measured with the default cell padding.
+        let padding_delta = table_cell_padding_x(style, rem_size) - CELL_PAD_PX;
+        // Lengths are rounded to device pixels for layout. Round the content
+        // widths up, or a column can lose the fraction of a pixel that keeps
+        // its text on one line.
+        let scale_factor = window.scale_factor();
+        let device_ceil = |width: f32| (width * scale_factor).ceil() / scale_factor;
+        let columns: Vec<TableColumn> = col_w
+            .iter()
+            .enumerate()
+            .map(|(ix, &w)| {
+                let w = w + padding_delta;
+                let floor = if scroll && nowrap {
+                    w
+                } else if scroll {
+                    (w / CELL_WRAP_MAX_LINES)
+                        .clamp(CELL_WRAP_MIN_PX, CELL_WRAP_MAX_PX)
+                        .min(w)
+                } else {
+                    w.min(wrap_min_px)
+                };
+                let divider = if ix + 1 < col_count {
+                    CELL_BORDER_PX
+                } else {
+                    0.
+                };
+                let max = device_ceil(w - divider);
+                TableColumn {
+                    min: device_ceil(floor - divider).min(max),
+                    max,
+                    divider,
                 }
-                col_lens[ix] = col_lens[ix].max(cell.children.text_len());
-            }
-        }
+            })
+            .collect();
 
-        Self::render_wrap_table(table, &col_lens, options, node_cx, text_size, window, cx)
+        let rows = Self::render_table_rows(table, &columns, node_cx, window, cx);
+        let frame = StyleRefinement::default()
+            .text_size(text_size)
+            .bg(style
+                .table_background()
+                .unwrap_or(cx.theme().tokens.colors.surface))
+            .border_1()
+            .border_color(style.border())
+            .refine_style(style.table());
+        let body = if scroll {
+            let scroll_handle = window
+                .use_keyed_state(
+                    block_element_id("table-scroll", table.span, options.ix),
+                    cx,
+                    |_, _| ScrollHandle::default(),
+                )
+                .read(cx)
+                .clone();
+            let min_total_w = columns
+                .iter()
+                .map(|column| column.min + column.divider)
+                .sum::<f32>()
+                + TABLE_BORDER_PX;
+            // Scroll viewport owns the visible frame, including any
+            // caller-provided radius. Keeping the border here makes the
+            // rounded frame stable while the wider row track moves below it.
+            //
+            // `horizontal_scroll_area` clips with `overflow_hidden` and
+            // delegates the wheel to a sibling `ScrollableMask`, so the
+            // gesture is locked to its starting axis and a horizontal swipe
+            // is consumed before an ancestor scroller (`gpui::list` under
+            // `TextView::scrollable`) can take its vertical component.
+            horizontal_scroll_area(
+                block_element_id("table", table.span, options.ix),
+                &scroll_handle,
+                &frame,
+                // Row track sized to `max(viewport, column floors)`:
+                // `min_w_full` fills the frame while the columns can still
+                // shrink-to-fit (their text wrapping), the definite
+                // `w(min_total_w)` keeps the floors once they are reached,
+                // letting the track exceed the viewport and scroll.
+                div().min_w_full().w(px(min_total_w)).children(rows),
+            )
+            .into_any_element()
+        } else {
+            div()
+                .w_full()
+                .overflow_hidden()
+                .refine_style(&frame)
+                .children(rows)
+                .into_any_element()
+        };
+
+        div()
+            .pb(block_gap(options, style))
+            .w_full()
+            .child(body)
+            // Custom actions row (e.g. copy / download) rendered below the
+            // table. The hook's element spans full width; alignment is up to
+            // the caller (e.g. `h_flex().justify_end()`). The gap keeps hover
+            // backgrounds of the action buttons off the table border, and the
+            // id scopes the caller's element ids per table, so plain ids like
+            // `"copy"` don't collide across tables (same as code blocks).
+            .children(node_cx.table_actions.clone().map(|f| {
+                div()
+                    .id(block_element_id("table-actions", table.span, options.ix))
+                    .mt_1()
+                    .child(f(&table.cached_table_data(), window, cx))
+            }))
+            .into_any_element()
     }
 
     /// Corner radii for the first and last table rows, derived from the
@@ -3512,110 +3697,100 @@ impl BlockNode {
         ]
     }
 
-    /// Horizontally scrollable table layout (opt-in via `style.table`
-    /// overflow-x: scroll).
+    /// The table rows, each a flex row laid out on the same column grid.
     ///
-    /// Column widths come from the **measured** shaped text of each cell (the
-    /// widest per column across all rows), so columns line up and fit their
-    /// content exactly — char-count heuristics are inaccurate on proportional
-    /// fonts. The layout adapts to the frame like CSS auto table layout:
+    /// Every column is a cell plus slack beside it. A cell grows from zero up
+    /// to its content width `max` and never below its floor `min`:
+    /// flex layout grows all cells equally and freezes each one that reaches
+    /// its content width, so the narrow columns fit their content and the
+    /// widest ones share what is left. The slack grows only after every cell
+    /// is frozen, so a frame wider than the content spreads the extra width
+    /// in proportion to the columns, placed after, around or before the cell
+    /// to follow the column alignment.
     ///
-    /// - Wider than the content: cells `flex_grow` proportionally to fill.
-    /// - Narrower: columns shrink and their text wraps, but not below a
-    ///   per-column floor.
-    /// - Narrower than the floors: the table keeps the floor widths and
-    ///   scrolls horizontally, so no content ever becomes unreachable.
-    ///
-    /// `white_space: nowrap` on `style.table_cell` composes like in CSS: the
-    /// refinement keeps cell text on a single line, and the floors are raised
-    /// to the full content widths so the single-line columns never shrink —
-    /// the table scrolls as soon as the content is wider than the frame.
-    fn render_scroll_table(
+    /// A row with fewer cells than the table keeps empty cells in their
+    /// place, so its columns line up with the other rows.
+    fn render_table_rows(
         table: &Table,
-        col_count: usize,
-        options: &NodeRenderOptions,
+        columns: &[TableColumn],
         node_cx: &NodeContext,
-        text_size: Pixels,
         window: &mut Window,
         cx: &mut App,
-    ) -> AnyElement {
-        // Shrinking columns stop (and the table starts to scroll) at a floor
-        // scaled to their content: roughly the width at which the text wraps
-        // to `CELL_WRAP_MAX_LINES` lines, clamped between the two bounds so
-        // moderate columns can still wrap meaningfully while one huge column
-        // cannot push the scroll threshold arbitrarily high.
-        const CELL_WRAP_MAX_LINES: f32 = 2.0;
-        const CELL_WRAP_MIN_PX: f32 = 160.0;
-        const CELL_WRAP_MAX_PX: f32 = 480.0;
-        const TABLE_BORDER_PX: f32 = 2.0; // the track's border_1, left + right
+    ) -> Vec<AnyElement> {
+        // The slack's share of the frame while any cell is still growing is
+        // `SLACK_GROW / (cells * CELL_GROW)`, a negligible fraction of a
+        // pixel. The slack factors still add up to `SLACK_GROW`: flex layout
+        // hands out only that fraction of the free space when the factors
+        // sum to less than one, and the slack must take all of it.
+        const CELL_GROW: f32 = 1e6;
+        const SLACK_GROW: f32 = 1.0;
 
-        let col_w = measure_table_columns(table, col_count, node_cx, window, cx);
         let style = &node_cx.style;
-        // Nowrap cells (via the `table_cell` refinement, which cascades to
-        // the cell text) must never shrink below their single-line content,
-        // so their floor is the content width itself.
-        let nowrap = style.table_cell().text.white_space == Some(WhiteSpace::Nowrap);
-        let col_min_w: Vec<f32> = if nowrap {
-            col_w.clone()
-        } else {
-            col_w
-                .iter()
-                .map(|w| {
-                    (w / CELL_WRAP_MAX_LINES)
-                        .clamp(CELL_WRAP_MIN_PX, CELL_WRAP_MAX_PX)
-                        .min(*w)
-                })
-                .collect()
+        let col_count = columns.len();
+        let total_w = columns.iter().map(|column| column.max).sum::<f32>().max(1.);
+        // The slack is part of the column, so it carries the cell's fill and
+        // the column divider in the cell's border color.
+        let mut slack_style = StyleRefinement::default();
+        slack_style.background = style.table_cell().background.clone();
+        slack_style.border_color = style.table_cell().border_color;
+        let slack = |grow: f32| {
+            div()
+                .flex_basis(px(0.))
+                .flex_grow(grow)
+                .flex_shrink(0.)
+                .border_color(style.border())
+                .refine_style(&slack_style)
         };
-        let min_total_w: f32 = col_min_w.iter().sum::<f32>() + TABLE_BORDER_PX;
 
-        let scroll_handle = window
-            .use_keyed_state(
-                block_element_id("table-scroll", table.span, options.ix),
-                cx,
-                |_, _| ScrollHandle::default(),
-            )
-            .read(cx)
-            .clone();
         let row_count = table.children.len();
         let [top_left, top_right, bottom_left, bottom_right] =
             Self::table_row_corner_radii(style, window);
         let mut rows = Vec::with_capacity(row_count);
         let mut cell_ordinal = 0;
         for (row_ix, row) in table.children.iter().enumerate() {
-            let mut cells = Vec::with_capacity(row.children.len());
-            for (ix, cell) in row.children.iter().enumerate() {
-                let fade_key = table
-                    .span
-                    .map(|span| TextLeafKey::table_cell(span.start, cell_ordinal));
-                cell_ordinal += 1;
+            let mut cells = Vec::with_capacity(col_count * 2);
+            for (ix, column) in columns.iter().enumerate() {
+                let is_last_col = ix + 1 == col_count;
                 let align = table.column_align(ix);
-                let is_last_col = ix == row.children.len() - 1;
-                let width = col_w.get(ix).copied().unwrap_or(CELL_MIN_PX);
-                let min_width = col_min_w.get(ix).copied().unwrap_or(CELL_MIN_PX);
+                let content = row.children.get(ix).map(|cell| {
+                    let fade_key = table
+                        .span
+                        .map(|span| TextLeafKey::table_cell(span.start, cell_ordinal));
+                    cell_ordinal += 1;
+                    cell.children.render(fade_key, node_cx, window, cx)
+                });
+
+                let grow = SLACK_GROW * column.max / total_w;
+                let (lead, trail) = match align {
+                    ColumnumnAlign::Left => (0., grow),
+                    ColumnumnAlign::Center => (grow / 2., grow / 2.),
+                    ColumnumnAlign::Right => (grow, 0.),
+                };
+                if lead > 0. {
+                    cells.push(slack(lead).into_any_element());
+                }
                 cells.push(
                     div()
-                        // Measured max-content width is the flex-basis;
-                        // `flex_grow` (proportional to it) distributes extra
-                        // space so a narrow table still fills the frame, while
-                        // shrinking is clamped at `min_w` — the flex engine
-                        // squeezes columns (their text wraps) down to the
-                        // floors before the track starts to scroll.
-                        .flex_basis(px(width))
-                        .flex_grow(width)
-                        .flex_shrink(1.)
-                        .min_w(px(min_width))
+                        .flex_basis(px(0.))
+                        .flex_grow(CELL_GROW)
+                        .min_w(px(column.min))
+                        .max_w(px(column.max))
                         .overflow_hidden()
                         .when(align == ColumnumnAlign::Center, |this| this.text_center())
                         .when(align == ColumnumnAlign::Right, |this| this.text_right())
                         .px_3()
                         .py(px(7.))
-                        .when(!is_last_col, |this| {
-                            this.border_r_1().border_color(style.border())
-                        })
                         .refine_style(&style.table_cell())
-                        .child(cell.children.render(fade_key, node_cx, window, cx)),
+                        .children(content)
+                        .into_any_element(),
                 );
+                if trail > 0. || !is_last_col {
+                    cells.push(
+                        slack(trail)
+                            .when(!is_last_col, |this| this.border_r_1())
+                            .into_any_element(),
+                    );
+                }
             }
             rows.push(
                 div()
@@ -3638,162 +3813,11 @@ impl BlockNode {
                         this.when_some(bottom_left, |this, radius| this.rounded_bl(radius))
                             .when_some(bottom_right, |this, radius| this.rounded_br(radius))
                     })
-                    .children(cells),
+                    .children(cells)
+                    .into_any_element(),
             );
         }
-
-        div()
-            .pb(block_gap(options, style))
-            .w_full()
-            .child(
-                // Scroll viewport owns the visible frame, including any
-                // caller-provided radius. Keeping the border here makes the
-                // rounded frame stable while the wider row track moves below it.
-                //
-                // `horizontal_scroll_area` clips with `overflow_hidden` and
-                // delegates the wheel to a sibling `ScrollableMask`, so the
-                // gesture is locked to its starting axis and a horizontal swipe
-                // is consumed before an ancestor scroller (`gpui::list` under
-                // `TextView::scrollable`) can take its vertical component.
-                horizontal_scroll_area(
-                    block_element_id("table", table.span, options.ix),
-                    &scroll_handle,
-                    &StyleRefinement::default()
-                        .text_size(text_size)
-                        .bg(style
-                            .table_background()
-                            .unwrap_or(cx.theme().tokens.colors.surface))
-                        .border_1()
-                        .border_color(style.border())
-                        .refine_style(style.table()),
-                    // Row track sized to `max(viewport, column floors)`:
-                    // `min_w_full` fills the frame while the columns can still
-                    // shrink-to-fit (their text wrapping), the definite
-                    // `w(min_total_w)` keeps the floors once they are reached,
-                    // letting the track exceed the viewport and scroll.
-                    div().min_w_full().w(px(min_total_w)).children(rows),
-                ),
-            )
-            // Custom actions row (e.g. copy / download) rendered below the
-            // table. The hook's element spans full width; alignment is up to
-            // the caller (e.g. `h_flex().justify_end()`). The gap keeps hover
-            // backgrounds of the action buttons off the table border, and the
-            // id scopes the caller's element ids per table, so plain ids like
-            // `"copy"` don't collide across tables (same as code blocks).
-            .children(node_cx.table_actions.clone().map(|f| {
-                div()
-                    .id(block_element_id("table-actions", table.span, options.ix))
-                    .mt_1()
-                    .child(f(&table.cached_table_data(), window, cx))
-            }))
-            .into_any_element()
-    }
-
-    /// Default table layout: a flex grid whose columns are proportioned by
-    /// content length and shrink to fit the container width (cell text wraps).
-    fn render_wrap_table(
-        table: &Table,
-        col_lens: &[usize],
-        options: &NodeRenderOptions,
-        node_cx: &NodeContext,
-        text_size: Pixels,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> AnyElement {
-        const MAX_LENGTH: usize = 150;
-
-        let style = &node_cx.style;
-        let row_count = table.children.len();
-        let [top_left, top_right, bottom_left, bottom_right] =
-            Self::table_row_corner_radii(style, window);
-        let mut rows = Vec::with_capacity(row_count);
-        let mut cell_ordinal = 0;
-        for (row_ix, row) in table.children.iter().enumerate() {
-            let mut cells = Vec::with_capacity(row.children.len());
-            for (ix, cell) in row.children.iter().enumerate() {
-                let fade_key = table
-                    .span
-                    .map(|span| TextLeafKey::table_cell(span.start, cell_ordinal));
-                cell_ordinal += 1;
-                let align = table.column_align(ix);
-                let is_last_col = ix == row.children.len() - 1;
-                let len = col_lens
-                    .get(ix)
-                    .copied()
-                    .unwrap_or(MAX_LENGTH)
-                    .min(MAX_LENGTH);
-
-                cells.push(
-                    div()
-                        .overflow_hidden()
-                        .when(align == ColumnumnAlign::Center, |this| this.text_center())
-                        .when(align == ColumnumnAlign::Right, |this| this.text_right())
-                        .min_w_16()
-                        .w(Length::Definite(relative(len as f32)))
-                        .px_3()
-                        .py(px(7.))
-                        .when(!is_last_col, |this| {
-                            this.border_r_1().border_color(style.border())
-                        })
-                        .refine_style(&style.table_cell())
-                        .child(cell.children.render(fade_key, node_cx, window, cx)),
-                );
-            }
-
-            rows.push(
-                div()
-                    .w_full()
-                    .when(row_ix < row_count - 1, |this| this.border_b_1())
-                    .border_color(style.border())
-                    .flex()
-                    .flex_row()
-                    // The first row is the header, as everywhere else that
-                    // reads a table (`table_data`, `to_markdown`). The
-                    // refinement comes last so it can override the defaults.
-                    .when(row_ix == 0, |this| {
-                        this.bg(style.code_background())
-                            .text_color(style.foreground())
-                            .when_some(top_left, |this, radius| this.rounded_tl(radius))
-                            .when_some(top_right, |this, radius| this.rounded_tr(radius))
-                            .refine_style(&style.table_head())
-                    })
-                    .when(row_ix + 1 == row_count, |this| {
-                        this.when_some(bottom_left, |this, radius| this.rounded_bl(radius))
-                            .when_some(bottom_right, |this, radius| this.rounded_br(radius))
-                    })
-                    .children(cells),
-            );
-        }
-
-        div()
-            .pb(block_gap(options, style))
-            .w_full()
-            .child(
-                div()
-                    .w_full()
-                    .text_size(text_size)
-                    .bg(style
-                        .table_background()
-                        .unwrap_or(cx.theme().tokens.colors.surface))
-                    .border_1()
-                    .border_color(style.border())
-                    .overflow_hidden()
-                    .children(rows)
-                    .refine_style(&style.table()),
-            )
-            // Custom actions row (e.g. copy / download) rendered below the
-            // table. The hook's element spans full width; alignment is up to
-            // the caller (e.g. `h_flex().justify_end()`). The gap keeps hover
-            // backgrounds of the action buttons off the table border, and the
-            // id scopes the caller's element ids per table, so plain ids like
-            // `"copy"` don't collide across tables (same as code blocks).
-            .children(node_cx.table_actions.clone().map(|f| {
-                div()
-                    .id(block_element_id("table-actions", table.span, options.ix))
-                    .mt_1()
-                    .child(f(&table.cached_table_data(), window, cx))
-            }))
-            .into_any_element()
+        rows
     }
 
     pub(crate) fn render_block(
@@ -4382,7 +4406,7 @@ mod tests {
         in_prepaint(&mut app, move |window, cx| {
             window.set_rem_size(cached.rem_size);
             window.with_text_style(
-                Some(cached.text_style.subtract(&Default::default())),
+                Some(cached.text_styles.body.subtract(&Default::default())),
                 |window| {
                     measure_table_columns(&table, 2, &node_cx, window, cx);
                     assert!(!Arc::ptr_eq(&cached, &cached_column_widths(&table)));

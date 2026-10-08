@@ -260,6 +260,17 @@ impl AlertDialog {
         self
     }
 
+    /// Sets the top offset of the alert dialog.
+    ///
+    /// Without this, the surface keeps the [`Dialog`] default: a tenth of the
+    /// viewport height below the top edge, which pins short alerts near the
+    /// top of a tall window. Pass a larger offset to seat an alert further
+    /// down, e.g. in the vertical middle of the window.
+    pub fn margin_top(mut self, margin_top: impl Into<Pixels>) -> Self {
+        self.base = self.base.margin_top(margin_top);
+        self
+    }
+
     /// Sets how the alert dialog enters, defaulting to [`DialogEntrance::SlideDown`].
     ///
     /// Shares the surface, backdrop, and reduced-motion policy of [`Dialog::entrance`].
@@ -490,5 +501,37 @@ mod tests {
                 assert_eq!(props.cancel_variant, Some(ButtonVariant::Ghost));
             }
         });
+    }
+
+    /// `margin_top` overrides the tenth-of-the-viewport default offset, which
+    /// seats a short alert near the top of a tall window.
+    #[gpui::test]
+    fn margin_top_moves_the_alert_surface_off_the_default_offset(cx: &mut TestAppContext) {
+        let cx = window(cx, size(px(800.), px(600.)));
+        cx.update(|window, cx| {
+            window.open_alert_dialog(cx, |alert, _, _| {
+                alert
+                    .title("Unsaved changes")
+                    .description("Discard the draft?")
+                    .confirm()
+                    .margin_top(px(100.))
+            })
+        });
+        cx.run_until_parked();
+        // One frame mounts the layer, the next paints it at rest.
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        let bounds = cx
+            .debug_bounds("dialog-0")
+            .expect("the alert dialog surface was not painted");
+        // The alert chrome carries fractional text metrics (this surface is
+        // 128.5px tall), so the painted origin lands within a subpixel of the
+        // requested offset. The default offset would be a tenth of the
+        // viewport: 60px.
+        assert!(
+            (bounds.origin.y - px(100.)).abs() <= px(0.5),
+            "expected the surface within 0.5px of y=100, got {bounds:?}"
+        );
     }
 }

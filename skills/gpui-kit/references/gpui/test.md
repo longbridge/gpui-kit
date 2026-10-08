@@ -50,7 +50,7 @@ is `cargo test -p gpui-kit --features test-support --test ui --locked`.
    Keep state entities and subscriptions owned by that view. Define a view
    inside a test only for a self-contained example or a deliberate fixture.
 2. Initialize with `cx.update(gpui_kit::init)`, open a headless window of an
-   explicit size, and wrap a Component application in `Root`. `Root` renders
+   explicit size through `gpui_kit::open_window`. Its Base `Root` renders
    the dialog, sheet and notification layers above the view automatically.
    Do not mount overlay layers in the application view.
 3. Render a frame and locate existing control IDs. Custom native elements opt
@@ -68,17 +68,17 @@ is `cargo test -p gpui-kit --features test-support --test ui --locked`.
 
 ## Complete example
 
-Copy this into `tests/ui.rs`. It is the exact Kit integration-test example
-from `crates/kit/tests/ui.rs`; the inline view makes this reference usable
+Copy this into `tests/ui.rs`. It follows the Kit integration-test example
+from `crates/kit/tests/ui.rs`, with window setup inlined so this reference works
 without a repository checkout. In an application, replace that view definition
 with an import of your production view.
 
 ```rust
 use gpui_kit::test::{TestSupportExt, TestWindowExt};
 use gpui_kit::{
-    AppContext, Context, Entity, SharedString, TestAppContext, Window,
+    AppContext, Bounds, Context, Entity, SharedString, TestAppContext, Window, WindowBounds,
+    WindowOptions,
     component::{
-        Root,
         button::Button,
         input::{Input, InputState},
     },
@@ -127,16 +127,26 @@ impl Render for Profile {
 #[gpui_kit::test]
 fn saves_a_profile_through_the_ui(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
-    let mut profile = None;
-    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
-        let view = cx.new(|cx| Profile {
-            name: cx.new(|cx| InputState::new(window, cx)),
-            submitted: None,
-        });
-        profile = Some(view.clone());
-        Root::new(view, window, cx)
+    let (handle, profile) = cx.update(|cx| {
+        gpui_kit::open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                    Default::default(),
+                    size(px(640.), px(480.)),
+                ))),
+                ..Default::default()
+            },
+            cx,
+            |window, cx| {
+                let view = cx.new(|cx| Profile {
+                    name: cx.new(|cx| InputState::new(window, cx)),
+                    submitted: None,
+                });
+                view
+            },
+        )
+        .expect("open test window")
     });
-    let profile = profile.unwrap();
 
     cx.update_window(handle.into(), |_, window, cx| {
         window.render_frame(cx);
@@ -204,6 +214,89 @@ not focus the target or replace its value. For a submenu with another
 `"popup-menu"` ID, retain the resolved outer scope before opening the submenu,
 then query its descendants.
 
+## Inspect accessibility targets and individual events
+
+Import `gpui_kit::test::{TestQueryExt, TestEventExt}` for additional observation
+and event control. `elements()` returns observed elements in the current frame;
+`find_by_label(label)`, `try_find_by_label(label)` and `find_all_by_label(label)`
+match exact, case-sensitive native accessibility labels. `find_all_by_role(role)` selects an
+AccessKit `Role`. Results include invisible registrations, ordered by y, then x
+and a path tie-breaker. Required queries panic on absence; all unique queries
+panic on ambiguity. Scoped queries include strict descendants, excluding the
+scope node itself. These queries also work inside `within` and do not discover
+unobserved text or offscreen virtual rows. A label is an accessibility name,
+not rendered text; use stable IDs when localization changes the name.
+The pinned GPUI version does not expose an enumeration of anonymous rendered
+text. Kit therefore has no general rendered-text `HasText` assertion; exact
+accessible-label queries cannot establish that text was actually drawn.
+
+For gestures whose intermediate state matters, dispatch each step explicitly:
+
+```rust
+use gpui_kit::test::TestEventExt;
+
+let start = window.find("handle").bounds().center();
+window.pointer_down(start, MouseButton::Left, cx);
+window.pointer_move(start + point(px(24.), px(0.)), Some(MouseButton::Left), cx);
+// Assert the state while the pointer is still held.
+window.pointer_up(start + point(px(24.), px(0.)), MouseButton::Left, cx);
+```
+
+Positions use window-local pixels. `pointer_move(position, pressed_button, cx)`
+receives the held button explicitly; these helpers do not remember button state.
+`pointer_down` and `pointer_up` dispatch one click event each. Ordinary click, hover, scroll, drag and individual pointer steps use
+the window's current modifiers. Configurable clicks temporarily use their
+explicit modifiers and restore the preceding state afterward. `change_modifiers(modifiers, cx)` changes them and
+preserves caps lock; restore the previous modifiers when the gesture ends.
+`key_down(key, is_held, cx)` and `key_up(key, cx)` allow separate key transitions
+and auto-repeat (`is_held = true`). Key events combine modifiers written in the
+key string with the window's held modifiers, without changing the retained
+modifier state. Each step refreshes before dispatch and
+completes a frame afterward. These key events do not insert text; use `input`
+for typing. Leave the window update and wait for deferred results when needed.
+
+## Exercise text composition through an input handler
+
+`gpui_kit::test::TestInput` bridges an explicit GPUI `InputHandler` to a window.
+For an entity implementing `EntityInputHandler`, construct the adapter with
+`gpui_kit::ElementInputHandler::new(bounds, entity.clone())`, then pass it to
+`TestInput::new(handler, window)`. Keep the entity owned by the
+production view and use its actual input geometry. This bridge calls that
+handler directly; it does not select the focused control or run an OS IME.
+
+`commit_text(text, cx)` commits through `replace_text_in_range`.
+`compose_text(replacement, text, selection, cx)` updates marked text through
+`replace_and_mark_text_in_range`. Replacement and selection ranges use UTF-16
+code units, not UTF-8 byte offsets; selection is relative to the composed text.
+With no replacement range, the handler replaces its current marked range or
+selection. Empty composition text cancels preedit according to the handler.
+`marked_text_range(cx)` returns a document-relative range;
+`selected_text_range(cx)` returns `Option<UTF16Selection>`, including direction;
+`unmark_text(cx)` ends marking while retaining its text. Mutation helpers complete a frame after the
+handler call. They can test composition transitions and commit behavior, while
+platform candidate windows, focus routing and OS IME integration still need
+native tests. Use `window.input` for ordinary text typed at the current focus.
+
+## Resize, display scale and clipboard
+
+Use GPUI's existing `TestAppContext::simulate_window_resize(handle, size)` and
+`simulate_window_scale_factor_change(handle, scale)` outside a window update,
+then call `render_frame` before inspecting layout. Pointer positions remain
+window-local logical pixels at every display scale. Assert both preserved
+editing state and resized geometry, then activate a control at its new bounds.
+
+Exercise clipboard behavior through production shortcuts (`secondary-c`,
+`secondary-x`, `secondary-v`) and inspect `cx.read_from_clipboard()` when needed.
+The test platform shares its clipboard across windows; editor state should
+remain window-specific. This verifies the test-platform adapter and application
+bindings, not the operating system's clipboard service.
+
+After activating an external Link, inspect `cx.opened_url()` to verify the URL
+received by the test platform and assert the application's click callback.
+This does not establish that a browser opened the destination. The test
+platform exposes no cursor-style reader; URL and callback assertions do not
+verify the pointer cursor.
+
 ## Frames and async work
 
 Snapshots are owned facts from the last completed frame, not live elements.
@@ -251,8 +344,11 @@ appropriate to that production animation before asserting final geometry.
   correct accessibility value does not establish correct pixels.
 - These tests run in-process. Pixel comparisons need GPUI's separate renderer;
   packaged-app behavior and full OS IME composition need other coverage. Kit's
-  explicit macOS rendering target is
+  explicit macOS (Metal) and Linux (WGPU) rendering target is
   `cargo test -p gpui-kit --features test-support --test rendering --locked`.
+  Linux requires a working WGPU adapter and can use Mesa lavapipe. Windows
+  explicitly skips this target because GPUI 0.3.8 has no Windows headless renderer.
+  Missing renderer support on macOS or Linux fails instead of producing fake images.
 
 ## Additional resources
 

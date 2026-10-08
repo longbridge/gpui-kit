@@ -17,6 +17,14 @@ use crate::{
 };
 use std::time::Duration;
 
+mod events;
+mod input;
+mod query;
+
+pub use events::TestEventExt;
+pub use input::TestInput;
+pub use query::TestQueryExt;
+
 pub use gpui_base::TestSupportExt;
 use gpui_base::test_support as observation;
 pub use gpui_base::test_support::ElementSnapshot;
@@ -236,9 +244,10 @@ fn click_target(
         offset,
         button,
         count,
-        modifiers,
+        modifiers: _,
     } = options;
     window.render_frame(cx);
+    let modifiers = window.modifiers();
     let position = target_position(window, scope, &id, offset);
     move_pointer(window, position, None, modifiers, cx);
     for click_count in 1..=count {
@@ -280,7 +289,7 @@ fn click_with_options_target(
 fn hover_target(window: &mut Window, scope: &[ElementId], id: ElementId, cx: &mut App) {
     window.render_frame(cx);
     let position = target_position(window, scope, &id, None);
-    move_pointer(window, position, None, Modifiers::default(), cx);
+    move_pointer(window, position, None, window.modifiers(), cx);
 }
 
 fn scroll_target(
@@ -292,11 +301,12 @@ fn scroll_target(
 ) {
     window.render_frame(cx);
     let position = target_position(window, scope, &id, None);
-    move_pointer(window, position, None, Modifiers::default(), cx);
+    move_pointer(window, position, None, window.modifiers(), cx);
     window.dispatch_event(
         ScrollWheelEvent {
             position,
             delta,
+            modifiers: window.modifiers(),
             ..Default::default()
         }
         .to_platform_input(),
@@ -382,8 +392,9 @@ impl TestWindowExt for Window {
     }
     fn drag(&mut self, from: Point<Pixels>, to: Point<Pixels>, cx: &mut App) {
         self.render_frame(cx);
-        move_pointer(self, from, None, Modifiers::default(), cx);
-        mouse_down(self, from, MouseButton::Left, 1, Modifiers::default(), cx);
+        let modifiers = self.modifiers();
+        move_pointer(self, from, None, modifiers, cx);
+        mouse_down(self, from, MouseButton::Left, 1, modifiers, cx);
         for step in 1..=8 {
             let fraction = step as f32 / 8.;
             move_pointer(
@@ -393,11 +404,11 @@ impl TestWindowExt for Window {
                     from.y + (to.y - from.y) * fraction,
                 ),
                 Some(MouseButton::Left),
-                Modifiers::default(),
+                modifiers,
                 cx,
             );
         }
-        mouse_up(self, to, MouseButton::Left, 1, Modifiers::default(), cx);
+        mouse_up(self, to, MouseButton::Left, 1, modifiers, cx);
     }
     fn press(&mut self, key: &str, cx: &mut App) {
         let key =

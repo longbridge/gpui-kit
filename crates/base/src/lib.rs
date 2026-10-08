@@ -163,7 +163,7 @@ pub use resizable::{
 };
 pub use root::{Root, RootPlugin};
 pub use scroll_bounce::{ScrollBounce, ScrollBounceMotion};
-pub use scrollable_mask::ScrollableMask;
+pub use scrollable_mask::{RoundedFrameCover, ScrollableMask};
 pub use scrollbar::{
     Scrollbar, ScrollbarAxis, ScrollbarEntrance, ScrollbarHandle, ScrollbarMode, ScrollbarMotion,
     ScrollbarStyles, ScrollbarThumbStyle, ScrollbarTrackStyle,

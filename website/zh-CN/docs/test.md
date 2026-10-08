@@ -251,6 +251,39 @@ assert_eq!(window.find("agree").checked(), Some(true)); // New frame.
 文本输入不模拟完整的系统 IME 组合输入；
 密码输入框不报告值，需要时通过应用状态验证结果。
 
+## 通过输入处理器验证文字组合
+
+`gpui_kit::test::TestInput` 将显式传入的 GPUI `InputHandler` 与窗口连接起来。
+如果 entity 实现了 `EntityInputHandler`，先用
+`gpui_kit::ElementInputHandler::new(bounds, entity.clone())` 创建适配器，再传给
+`TestInput::new(handler, window)`。entity 应由生产视图持有，bounds 使用
+真实输入区域。这个桥接器直接调用指定处理器，不会选择当前焦点控件，也不运行系统 IME。
+
+`commit_text(text, cx)` 通过 `replace_text_in_range` 提交文字；
+`compose_text(replacement, text, selection, cx)` 通过
+`replace_and_mark_text_in_range` 更新组合文字。替换范围和选区使用 UTF-16 code unit，
+不是 UTF-8 字节偏移；选区相对于组合文字。替换范围为 `None` 时，处理器替换现有的
+标记范围或选区。空的组合文字按处理器协议取消预编辑。
+`marked_text_range(cx)` 返回文档中的标记范围；`selected_text_range(cx)` 返回
+`Option<UTF16Selection>`，包含选区方向。`unmark_text(cx)` 结束标记并保留文字。修改方法调用处理器后完成一帧，可验证组合状态变化与提交行为。系统候选窗口、
+焦点路由和系统 IME 集成仍需原生测试。向当前焦点输入普通文字时使用 `window.input`。
+
+## 窗口尺寸、显示缩放与剪贴板
+
+在窗口 update 外调用 GPUI 已有的
+`TestAppContext::simulate_window_resize(handle, size)` 和
+`simulate_window_scale_factor_change(handle, scale)`，再用 `render_frame`
+刷新布局。不同显示缩放下，鼠标坐标仍使用窗口内的逻辑像素。应同时检查编辑状态是否
+保留、布局是否调整，并在新位置激活控件。
+
+用生产快捷键（`secondary-c`、`secondary-x`、`secondary-v`）验证剪贴板操作，
+需要时通过 `cx.read_from_clipboard()` 检查内容。测试平台在窗口之间共享剪贴板，
+编辑器状态则应互相独立。这些测试验证测试平台适配器与应用快捷键，不验证系统剪贴板服务。
+
+激活外部 Link 后，可以用 `cx.opened_url()` 检查测试平台收到的 URL，
+同时验证应用的点击回调。它不代表浏览器已打开目标页面。测试平台未公开鼠标指针
+样式的读取 API；不能根据 URL 或回调断言指针样式。
+
 ## 查询前完成一帧
 
 第一次查询、外部直接修改状态或焦点、调整尺寸后，调用 `window.render_frame(cx)`。
@@ -294,6 +327,41 @@ GPUI `dispatch_action` 会排队执行。继续修改 action 将读取的值之�
 Sheet/Notification 几何测试会等待真实入场时长，再断言最终边界。
 Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用于测试展开后的最终几何。
 
+## 按无障碍属性查询与分步事件
+
+导入 `gpui_kit::test::{TestQueryExt, TestEventExt}`，可使用更多查询与事件操作。
+`elements()` 返回当前帧中已观测的元素；`find_by_label(label)`、
+`try_find_by_label(label)` 和 `find_all_by_label(label)` 精确匹配原生无障碍标签，区分大小写；
+`find_all_by_role(role)` 按 AccessKit `Role` 查询。结果包括不可见的注册元素，
+先按 y、再按 x 排序，同位置按路径区分。必需查询缺少目标时 panic；唯一目标查询
+遇到歧义也会 panic。作用域查询只包含后代，不包含作用域节点自身。这些方法也支持 `within`
+作用域，不会发现未观测的文字或尚未绘制的虚拟行。标签是无障碍名称，不是屏幕文字；
+名称会随本地化变化时，优先使用稳定 ID。
+锁定版本的 GPUI 不提供匿名绘制文本的枚举。因此 Kit 没有通用的绘制文本
+`HasText` 断言；精确匹配无障碍标签不能证明文字已经实际绘制。
+
+需要检查手势中间状态时，可分别发送事件：
+
+```rust
+use gpui_kit::test::TestEventExt;
+
+let start = window.find("handle").bounds().center();
+window.pointer_down(start, MouseButton::Left, cx);
+window.pointer_move(start + point(px(24.), px(0.)), Some(MouseButton::Left), cx);
+// 在鼠标按住期间检查状态。
+window.pointer_up(start + point(px(24.), px(0.)), MouseButton::Left, cx);
+```
+
+坐标使用窗口内的像素位置。`pointer_move(position, pressed_button, cx)`
+需要显式指定按住的按钮；这些方法不保存按钮状态。`pointer_down` 与 `pointer_up`
+各发送一次点击事件。普通点击、悬停、滚动、拖动和分步鼠标事件使用窗口当前的修饰键；
+配置式点击临时使用指定修饰键，结束后恢复之前的状态。`change_modifiers(modifiers, cx)`
+修改修饰键并保留 caps lock，手势结束后应恢复之前的修饰键。
+`key_down(key, is_held, cx)` 与 `key_up(key, cx)` 支持分别发送按下、松开和自动重复
+事件（`is_held = true`）。键盘事件合并按键字符串中的修饰键与窗口已按住的修饰键，
+不修改窗口保存的修饰键状态。每一步先刷新，再发送事件并完成一帧。这些键盘事件不插入
+文字；输入文字使用 `input`。延迟结果仍需离开窗口 update 后等待。
+
 ## 覆盖范围与失败排查
 
 仓库通过真实输入、原生属性和布局边界验证以下组件流程。这些是具体的回归契约，
@@ -307,9 +375,17 @@ Base motion 则可以响应公开的 `cx.set_reduce_motion(true)` 偏好，用�
 | `search.rs` | Command 禁用项跳过、循环导航、中文关键词、空结果、Action 与原始索引回调、两阶段 Escape；Combobox 搜索、单选/多选、清除、空结果恢复、禁用行为及关闭时仅一次 Confirm |
 | `disclosure.rs` | Accordion 互斥展开、折叠与实际面板几何；Stepper 内容导航；禁用展开与步骤操作；Slider 轨道点击、滑块拖动与禁用行为 |
 | `collections.rs` | Tree 点击展开、键盘展开/折叠与选择；DataTable 行选择、键盘虚拟滚动与滚轮滚动 |
+| `query_helpers.rs` | 精确无障碍标签和角色、作用域歧义、不可见注册元素与不可变快照 |
+| `event_helpers.rs` | 分步鼠标和按键事件、自动重复与保持修饰键 |
+| `control_steps.rs` | Button 移出释放取消、Checkbox 按键重复及 Switch 在按键释放前禁用 |
+| `slider_steps.rs` | 滑轨与拖动中的实时值变化、释放事件顺序及禁用时的手势 |
+| `semantic_controls.rs` | RadioGroup 作用域内的无障碍名称、受控状态及单项和整组禁用 |
+| `collection_steps.rs` | List 释放时的修饰键、移出取消、重复导航与确认 |
+| `composition_helpers.rs` | 显式输入处理器桥接、UTF-16 预编辑、整段提交、取消及多行 Textarea/Editor 的撤销和 readonly 切换 |
+| `environment.rs` | 窗口尺寸和显示缩放、跨窗口剪贴板、Link URL 请求与应用回调 |
 | `date_picker.rs` | 打开、精确预设日期与日历日期选择、月份切换、清除、Escape 与禁用行为 |
 | `overlays.rs` | Dialog 校验 → 作用域 Input → 保存 → Notification；悬停显示关闭按钮；自动关闭计时；Dialog/Sheet Escape 与焦点恢复；表面边界 |
-| `menu.rs` | 禁用菜单项、键盘确认、Escape、焦点恢复、子菜单悬停及嵌套菜单项激活 |
+| `menu.rs` | 禁用菜单项、键盘确认、Escape、焦点恢复、子菜单悬停、嵌套菜单项激活及最内层右键菜单的事件归属 |
 | `dock.rs` | Tab 选择与重排、跨分组拖放、放大和恢复分割布局 |
 
 已有表单、Select、HoverCard、虚拟列表、指针、生命周期和隔离测试继续保留。
@@ -372,36 +448,44 @@ GPUI 没有公开未观察祖先的继承绘制透明度，因此无法推断该
 
 值或勾选标志正确，不代表控件正确绘制。GPUI 提供
 `HeadlessAppContext::with_platform`、`Window::render_to_image` 和
-`HeadlessAppContext::capture_screenshot`，可以生成真实离屏图片。当前锁定版本的
-平台 crate 仅在 macOS 提供 Metal 离屏渲染器。在支持 Metal 的 Mac 上执行：
+`HeadlessAppContext::capture_screenshot`，可以生成真实离屏图片。当前锁定的
+GPUI {{gpui_pre_version}} 平台 crate 在 macOS 提供 Metal 离屏渲染器，在 Linux 提供 WGPU
+离屏渲染器。使用可用的 Metal 或 WGPU 适配器 执行以下命令；Linux 可以使用
+Mesa lavapipe 等软件 Vulkan 适配器：
 
 ```sh
 cargo test -p gpui-kit --features test-support --test rendering --locked
 ```
 
-该目标设置了 `test = false`，默认 Cargo 命令不会选择它。macOS CI job 已增加必须
-通过的独立步骤，显式执行 `--test rendering`；Linux 和 Windows 只运行交互与布局
-测试。这使用 Cargo 的
+该目标设置了 `test = false`，默认 Cargo 命令不会选择它。macOS 和 Linux CI job
+都通过必需的独立步骤显式执行 `--test rendering`，同时运行交互与布局测试；
+Windows 运行交互与布局测试。这使用 Cargo 的
 [显式目标选择](https://doc.rust-lang.org/cargo/commands/cargo-test.html#target-selection)。
 目标还使用 `harness = false`，因为 AppKit 必须在主线程初始化；普通 Rust
-测试即使指定 `--test-threads=1` 仍运行在工作线程。其他平台明确报告跳过像素验证；
-macOS 缺少渲染能力时测试失败，不用假图片替代。
+测试即使指定 `--test-threads=1` 仍运行在工作线程。锁定版本的平台 crate 没有
+Windows 离屏渲染器，因此 Windows 明确报告跳过像素验证；macOS 或 Linux 缺少
+渲染能力时测试失败，不用假图片替代。
 
 测试向真实 Kit 控件注入两种故障：`checked()` 仍为 true，但勾号资源丢失；
 `value()` 仍正确，但输入文字变透明。故障图片必须与正常控件不同，重复绘制正常
-Checkbox 的图片必须一致。另一个原生事件测试断开 Checkbox 的状态更新处理器，
+Checkbox 的图片必须一致。受控 Checkbox 用例还在明暗主题下验证：鼠标按下时
+应用值和画面保持不变，释放时值只更新一次，画面同步更新。
+完整测试套件还检查含行内代码的 CJK 文本换行、明暗
+主题下焦点线的位置与对比度、指针激活 Button 时没有焦点线、指针与键盘切换时
+Menu 只有一个高亮项、List 的键盘选中状态，以及开启或关闭焦点环时 Table 只在
+键盘聚焦后显示焦点样式。另一个原生事件测试断开 Checkbox 的状态更新处理器，
 验证点击不会凭空产生已勾选结果。
 
 这些测试验证能否发现特定错误，不是完整的基准图片回归测试。应用的视觉回归应在
 固定字体、尺寸、主题、焦点和动画状态下，将图片与已审查的预期结果比较。状态与
 图片断言能发现不同的故障；两者都不能证明打包应用或完整 IME 行为正确。
 可执行示例见
-[`crates/kit/tests/rendering.rs`](https://github.com/longbridge/gpui-kit/blob/testing/crates/kit/tests/rendering.rs)。
+[`crates/kit/tests/rendering.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/kit/tests/rendering.rs)。
 
 ## 接入 CI
 
-Kit 仓库在 macOS、Linux 和 Windows 矩阵中运行交互与布局测试。macOS job 还运行两个
-Metal 像素测试，失败会使 job 失败。以下是用于 Kit 检出目录的最小 macOS workflow：
+Kit 仓库在 macOS、Linux 和 Windows 矩阵中运行交互与布局测试。macOS 和 Linux
+job 还分别通过 Metal 和 WGPU 运行完整绘制测试套件，失败会使 job 失败。以下是用于 Kit 检出目录的最小 macOS workflow：
 
 ```yaml
 name: UI tests

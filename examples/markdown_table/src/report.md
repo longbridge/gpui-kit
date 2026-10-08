@@ -78,6 +78,25 @@ Using the v2025 suite as the baseline [11]:
 
 Among the three finalists, the columnar engine has **the lowest direct exposure to the lookup regression** — its core traffic comes from range scans (69%) and immutable segment reads rather than point lookups. Directly impaired paths total only about 3-5% of traffic. The bigger risks are indirect: compaction pressure from the write path, and long-tail uncertainty over restoring dual-write parity. On the latency dimension, the scan-side tailwind most likely covers the lookup-side loss.
 
+### 6. Column fitting
+
+Short columns keep their content on one line while the long one wraps. The
+same table in Chinese and in English:
+
+| 平台（架构） | 冷启动（毫秒） | 内存占用（MB） | 说明 |
+|--------------|---------------:|---------------:|------|
+| macOS（Apple Silicon） | 182 | 96.4 | 首帧包含字体加载；开启 Metal HUD 后约增加 8%（实测） |
+| Windows（x86_64） | 241 | 118.0 | DirectWrite 字形缓存预热之前略慢（首次启动） |
+| Linux（Wayland） | 205 | 102.7 | 与 X11 相差不到 5%（同一台机器） |
+| Linux（X11） | 214 | 104.1 | 在同一台机器上测得（冷缓存） |
+
+| Platform (arch) | Cold start (ms) | Memory (MB) | Notes |
+|-----------------|----------------:|------------:|-------|
+| macOS (Apple Silicon) | 182 | 96.4 | The first frame includes font loading; Metal HUD adds about 8% (measured) |
+| Windows (x86_64) | 241 | 118.0 | Slightly slower before the DirectWrite glyph cache warms up (first launch) |
+| Linux (Wayland) | 205 | 102.7 | Within 5% of X11 (same machine) |
+| Linux (X11) | 214 | 104.1 | Measured on the same machine (cold cache) |
+
 If you want the latency sensitivity quantified across batch sizes of 1k / 10k / 100k rows, I can run that analysis next.
 
 [1]: https://example.com/architecture "Pipeline architecture overview"

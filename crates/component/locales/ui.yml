@@ -375,6 +375,12 @@ Carousel:
     zh-CN: 前往第 %{current} 张
     zh-HK: 前往第 %{current} 張
     zh-TW: 前往第 %{current} 張
+Table:
+  SortBy:
+    en: Sort by %{column}
+    zh-CN: 按 %{column} 排序
+    zh-HK: 按 %{column} 排序
+    zh-TW: 依 %{column} 排序
 Chart:
   open:
     en: Open

@@ -402,17 +402,19 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
             }
         });
 
-        if let Some(element) = &mut request_layout.element {
-            element.paint(window, cx);
-        }
-
-        // When right mouse click, to build content menu, and show it at the mouse position.
+        // Register before child paint so bubbling reaches the innermost
+        // trigger first, after its input has had a chance to take focus.
         let hitbox = hitbox.clone();
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
             if phase.bubble() && event.button == MouseButton::Right && hitbox.is_hovered(window) {
+                cx.stop_propagation();
                 open_menu(&shared_state, &builder, event.position, window, cx);
             }
         });
+
+        if let Some(element) = &mut request_layout.element {
+            element.paint(window, cx);
+        }
     }
 }
 

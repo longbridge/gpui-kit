@@ -12,7 +12,7 @@ use gpui_kit::{
     MouseUpEvent, Pixels, Point, TestAppContext, TouchPhase, Window, WindowHandle, actions,
     base::Root, div, point, prelude::*, px, size,
 };
-use std::time::Duration;
+use std::{cell::Cell, rc::Rc, time::Duration};
 
 actions!(menu_test, [Save, Unavailable]);
 struct Commands {
@@ -760,6 +760,120 @@ fn long_press_on_blank_space_in_a_text_trigger_opens_the_menu(cx: &mut TestAppCo
         window.render_frame(cx);
         assert!(gpui_kit::base::TextSelection::selected_text(window, cx).is_empty());
         assert!(window.try_find("popup-menu").is_some());
+    })
+    .unwrap();
+}
+
+struct NestedContextMenus {
+    inner_chosen: Rc<Cell<usize>>,
+    outer_chosen: Rc<Cell<usize>>,
+}
+
+impl Render for NestedContextMenus {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let inner_chosen = self.inner_chosen.clone();
+        let outer_chosen = self.outer_chosen.clone();
+        div().size_full().p_4().child(
+            div()
+                .id("card")
+                .flex()
+                .flex_col()
+                .gap_4()
+                .w(px(320.))
+                .child(
+                    div()
+                        .id("card-title")
+                        .test_support()
+                        .h(px(40.))
+                        .child("Card"),
+                )
+                .child(
+                    Button::new("share")
+                        .label("Share")
+                        .context_menu(move |menu, _, _| {
+                            let chosen = inner_chosen.clone();
+                            menu.item(PopupMenuItem::new("Copy link").on_click(move |_, _, _| {
+                                chosen.set(chosen.get() + 1);
+                            }))
+                        }),
+                )
+                .context_menu(move |menu, _, _| {
+                    let chosen = outer_chosen.clone();
+                    menu.item(PopupMenuItem::new("Remove card").on_click(move |_, _, _| {
+                        chosen.set(chosen.get() + 1);
+                    }))
+                }),
+        )
+    }
+}
+
+#[gpui_kit::test]
+fn nested_context_menu_uses_the_innermost_right_click_target(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let inner_chosen = Rc::new(Cell::new(0));
+    let outer_chosen = Rc::new(Cell::new(0));
+    let (handle, _) = common::open_window(cx, Some(size(px(640.), px(480.))), |_, cx| {
+        cx.new(|_| NestedContextMenus {
+            inner_chosen: inner_chosen.clone(),
+            outer_chosen: outer_chosen.clone(),
+        })
+    });
+
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.right_click("share", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let mut menu = window.within("popup-menu");
+        assert!(menu.find_by_label("Copy link").visible());
+        assert!(menu.try_find_by_label("Remove card").is_none());
+        menu.press("down", cx);
+        assert_eq!(menu.find_by_label("Copy link").selected(), Some(true));
+    })
+    .unwrap();
+    press_context_menu_key(handle.into(), "enter", cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("popup-menu").is_none());
+        assert_eq!(inner_chosen.get(), 1);
+        assert_eq!(outer_chosen.get(), 0);
+        window.right_click("card-title", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let menu = window.within("popup-menu");
+        assert!(menu.find_by_label("Remove card").visible());
+        assert!(menu.try_find_by_label("Copy link").is_none());
+    })
+    .unwrap();
+    press_context_menu_key(handle.into(), "escape", cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("popup-menu").is_none());
+        assert_eq!(inner_chosen.get(), 1);
+        assert_eq!(outer_chosen.get(), 0);
+        window.right_click("card-title", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let mut menu = window.within("popup-menu");
+        menu.press("down", cx);
+        assert_eq!(menu.find_by_label("Remove card").selected(), Some(true));
+    })
+    .unwrap();
+    press_context_menu_key(handle.into(), "enter", cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("popup-menu").is_none());
+        assert_eq!(inner_chosen.get(), 1);
+        assert_eq!(outer_chosen.get(), 1);
     })
     .unwrap();
 }

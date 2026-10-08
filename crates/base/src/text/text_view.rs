@@ -758,13 +758,11 @@ impl Element for TextView {
             }
             // Descendant `Inline`s report their line spans through the state
             // stack during prepaint (in addition to the paint-time push below).
-            GlobalState::global_mut(cx)
-                .text_view_state_stack
-                .push(state.clone());
+            GlobalState::global(cx).push_text_view_state(state.clone());
         }
         request_layout.element.prepaint(window, cx);
         if max_lines_active {
-            GlobalState::global_mut(cx).text_view_state_stack.pop();
+            GlobalState::global(cx).pop_text_view_state();
         }
 
         let mut clip_bottom = None;
@@ -826,12 +824,10 @@ impl Element for TextView {
     ) {
         let state = &request_layout.state;
         if self.selectable {
-            state.update(cx, |state, _| state.selection_adapter.begin_frame());
+            state.read(cx).selection_adapter.begin_frame();
         }
 
-        GlobalState::global_mut(cx)
-            .text_view_state_stack
-            .push(state.clone());
+        GlobalState::global(cx).push_text_view_state(state.clone());
         if let Some(clip_bottom) = prepaint.clip_bottom {
             // Snap the `max_lines` clip to the last whole line that fits, so a
             // line of glyphs is never cut in half.
@@ -844,7 +840,7 @@ impl Element for TextView {
         } else {
             request_layout.element.paint(window, cx);
         }
-        GlobalState::global_mut(cx).text_view_state_stack.pop();
+        GlobalState::global(cx).pop_text_view_state();
 
         // Every list has scrolled by now, so the line of a reveal is where
         // it ends up this frame.
@@ -876,7 +872,7 @@ impl Element for TextView {
                     state.text_view_style.selection().alpha(1.),
                 )
             };
-            let document_order = GlobalState::global_mut(cx).next_selection_document_order();
+            let document_order = GlobalState::global(cx).next_selection_document_order();
             adapter.register(
                 prepaint.hitbox.clone(),
                 content_bounds,
@@ -2738,6 +2734,102 @@ mod tests {
                 "{mode}: bottom right"
             );
         }
+    }
+
+    /// A table wider than its frame shrinks its widest column. A narrower
+    /// column keeps its content width rather than shrinking by the same
+    /// ratio and wrapping the end of its text onto a line of its own, in the
+    /// header and the body alike, and with the cell and frame refinements
+    /// the text renders with.
+    #[test]
+    fn table_keeps_narrow_columns_on_one_line_while_wide_ones_wrap() {
+        use crate::text::inline::test_fonts::WideMonoTextSystem;
+        use gpui::TestApp;
+        use std::sync::Arc;
+
+        const CELL_BACKGROUND: u32 = 0x11aa77;
+
+        struct TableRoot {
+            text_view: Entity<TextViewState>,
+            width: Pixels,
+            style: TextViewStyle,
+        }
+
+        impl Render for TableRoot {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(self.width)
+                    .child(TextView::new(&self.text_view).style(self.style.clone()))
+            }
+        }
+
+        let short = "Operating revenue (USD)";
+        let source = format!(
+            "| {short} | Note |\n| --- | --- |\n| {short} | x |\n| 1 | {} |",
+            "word ".repeat(30)
+        );
+        // Heights of the first column's cells, top to bottom.
+        let first_column = |width: f32, style: TextViewStyle| {
+            let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+            app.update(crate::init);
+            let cell = style.table_cell().clone().bg(gpui::rgb(CELL_BACKGROUND));
+            let style = style.with_table_cell(cell);
+            let mut window = app.open_window(|_, cx| TableRoot {
+                text_view: cx.new(|cx| TextViewState::markdown(&source, cx)),
+                width: px(width),
+                style,
+            });
+            window.draw();
+            app.run_until_parked();
+            window.draw();
+            window.update(|_, window, _| {
+                let background: gpui::Background = gpui::rgb(CELL_BACKGROUND).into();
+                let cells: Vec<_> = window
+                    .painted_quads()
+                    .into_iter()
+                    .filter(|quad| quad.background == background)
+                    .map(|quad| quad.bounds)
+                    .collect();
+                let left = cells.iter().map(|bounds| bounds.origin.x).min().unwrap();
+                let mut column: Vec<_> = cells
+                    .into_iter()
+                    .filter(|bounds| bounds.origin.x == left)
+                    .collect();
+                column.sort_by_key(|bounds| bounds.origin.y);
+                column
+                    .iter()
+                    .map(|bounds| bounds.size.height)
+                    .collect::<Vec<_>>()
+            })
+        };
+        let scroll = || {
+            let mut table = StyleRefinement::default();
+            table.overflow.x = Some(gpui::Overflow::Scroll);
+            TextViewStyle::default().with_table(table)
+        };
+
+        for (layout, style) in [("wrap", TextViewStyle::default()), ("scroll", scroll())] {
+            let fits = first_column(4000., style.clone());
+            let narrow = first_column(700., style);
+            assert_eq!(fits.len(), 3, "{layout}: three rows");
+            assert_eq!(fits[0], fits[2], "{layout}: the header fits on one line");
+            assert_eq!(narrow[..2], fits[..2], "{layout}: the short column wraps");
+        }
+
+        let single_line = first_column(4000., TextViewStyle::default())[0];
+        let padded = TextViewStyle::default().with_table_cell(StyleRefinement::default().px_4());
+        assert_eq!(
+            first_column(4000., padded)[0],
+            single_line,
+            "the cell padding refinement leaves the text its measured width"
+        );
+        let bold = TextViewStyle::default()
+            .with_table(StyleRefinement::default().font_weight(gpui::FontWeight::BOLD));
+        assert_eq!(
+            first_column(4000., bold)[0],
+            single_line,
+            "the table text refinement is measured"
+        );
     }
 
     #[gpui::test]

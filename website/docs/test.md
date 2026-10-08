@@ -297,6 +297,89 @@ Command presses, including Enter, must not inject newline text through an IME
 callback. Text input does not model complete OS IME composition. Masked inputs report
 no value; verify sensitive results through application state.
 
+## Inspect accessibility targets and individual events
+
+Import `gpui_kit::test::{TestQueryExt, TestEventExt}` for additional observation
+and event control. `elements()` returns observed elements in the current frame;
+`find_by_label(label)`, `try_find_by_label(label)` and `find_all_by_label(label)`
+match exact, case-sensitive native accessibility labels. `find_all_by_role(role)` selects an
+AccessKit `Role`. Results include invisible registrations, ordered by y, then x
+and a path tie-breaker. Required queries panic on absence; all unique queries
+panic on ambiguity. Scoped queries include strict descendants, excluding the
+scope node itself. These queries also work inside `within` and do not discover
+unobserved text or offscreen virtual rows. A label is an accessibility name,
+not rendered text; use stable IDs when localization changes the name.
+The pinned GPUI version does not expose an enumeration of anonymous rendered
+text. Kit therefore has no general rendered-text `HasText` assertion; exact
+accessible-label queries cannot establish that text was actually drawn.
+
+For gestures whose intermediate state matters, dispatch each step explicitly:
+
+```rust
+use gpui_kit::test::TestEventExt;
+
+let start = window.find("handle").bounds().center();
+window.pointer_down(start, MouseButton::Left, cx);
+window.pointer_move(start + point(px(24.), px(0.)), Some(MouseButton::Left), cx);
+// Assert the state while the pointer is still held.
+window.pointer_up(start + point(px(24.), px(0.)), MouseButton::Left, cx);
+```
+
+Positions use window-local pixels. `pointer_move(position, pressed_button, cx)`
+receives the held button explicitly; these helpers do not remember button state.
+`pointer_down` and `pointer_up` dispatch one click event each. Ordinary click, hover, scroll, drag and individual pointer steps use
+the window's current modifiers. Configurable clicks temporarily use their
+explicit modifiers and restore the preceding state afterward. `change_modifiers(modifiers, cx)` changes them and
+preserves caps lock; restore the previous modifiers when the gesture ends.
+`key_down(key, is_held, cx)` and `key_up(key, cx)` allow separate key transitions
+and auto-repeat (`is_held = true`). Key events combine modifiers written in the
+key string with the window's held modifiers, without changing the retained
+modifier state. Each step refreshes before dispatch and
+completes a frame afterward. These key events do not insert text; use `input`
+for typing. Leave the window update and wait for deferred results when needed.
+
+## Exercise text composition through an input handler
+
+`gpui_kit::test::TestInput` bridges an explicit GPUI `InputHandler` to a window.
+For an entity implementing `EntityInputHandler`, construct the adapter with
+`gpui_kit::ElementInputHandler::new(bounds, entity.clone())`, then pass it to
+`TestInput::new(handler, window)`. Keep the entity owned by the
+production view and use its actual input geometry. This bridge calls that
+handler directly; it does not select the focused control or run an OS IME.
+
+`commit_text(text, cx)` commits through `replace_text_in_range`.
+`compose_text(replacement, text, selection, cx)` updates marked text through
+`replace_and_mark_text_in_range`. Replacement and selection ranges use UTF-16
+code units, not UTF-8 byte offsets; selection is relative to the composed text.
+With no replacement range, the handler replaces its current marked range or
+selection. Empty composition text cancels preedit according to the handler.
+`marked_text_range(cx)` returns a document-relative range;
+`selected_text_range(cx)` returns `Option<UTF16Selection>`, including direction;
+`unmark_text(cx)` ends marking while retaining its text. Mutation helpers complete a frame after the
+handler call. They can test composition transitions and commit behavior, while
+platform candidate windows, focus routing and OS IME integration still need
+native tests. Use `window.input` for ordinary text typed at the current focus.
+
+## Resize, display scale and clipboard
+
+Use GPUI's existing `TestAppContext::simulate_window_resize(handle, size)` and
+`simulate_window_scale_factor_change(handle, scale)` outside a window update,
+then call `render_frame` before inspecting layout. Pointer positions remain
+window-local logical pixels at every display scale. Assert both preserved
+editing state and resized geometry, then activate a control at its new bounds.
+
+Exercise clipboard behavior through production shortcuts (`secondary-c`,
+`secondary-x`, `secondary-v`) and inspect `cx.read_from_clipboard()` when needed.
+The test platform shares its clipboard across windows; editor state should
+remain window-specific. This verifies the test-platform adapter and application
+bindings, not the operating system's clipboard service.
+
+After activating an external Link, inspect `cx.opened_url()` to verify the URL
+received by the test platform and assert the application's click callback.
+This does not establish that a browser opened the destination. The test
+platform exposes no cursor-style reader; URL and callback assertions do not
+verify the pointer cursor.
+
 ## Complete the frame before querying
 
 Call `window.render_frame(cx)` before the first query and after direct external
@@ -361,9 +444,17 @@ that every option or combination of every component has been exhaustively tested
 | `search.rs` | Command disabled-item skipping, wraparound, Unicode keywords, empty results, Action dispatch and original-index callbacks, two-stage Escape; Combobox search, single/multi selection, clearing, empty-result recovery, disabled behavior and exactly one Confirm on close |
 | `disclosure.rs` | Accordion exclusive expansion/collapse and actual panel geometry; Stepper content navigation; disabled disclosure/steps; Slider track click, thumb drag and disabled behavior |
 | `collections.rs` | Tree pointer expansion, keyboard collapse/expansion and selection; DataTable row selection, keyboard virtualization and wheel scrolling |
+| `query_helpers.rs` | Exact accessible labels and roles, scoped ambiguity, invisible registrations and immutable snapshots |
+| `event_helpers.rs` | Separate pointer/key transitions, auto-repeat and retained modifiers |
+| `control_steps.rs` | Button drag-out cancellation, Checkbox key repeat and Switch disabled before key release |
+| `slider_steps.rs` | Live track/drag changes, release ordering and disabled gestures |
+| `semantic_controls.rs` | Scoped RadioGroup accessible names, controlled state and item/group disabled behavior |
+| `collection_steps.rs` | List release modifiers, drag-out cancellation, repeated navigation and confirmation |
+| `composition_helpers.rs` | Explicit input-handler bridge, UTF-16 preedit, whole-text commit, cancellation and multiline Textarea/Editor undo/readonly transitions |
+| `environment.rs` | Resize and display scale, cross-window clipboard, Link URL requests and owner callbacks |
 | `date_picker.rs` | Opening, exact preset/day selection, month navigation, clearing, Escape and disabled behavior |
 | `overlays.rs` | Dialog validation → scoped Input → save → Notification; hover-revealed close; auto-dismiss timer; Dialog/Sheet Escape and focus restoration; surface bounds |
-| `menu.rs` | Disabled items, keyboard confirmation, Escape, focus restoration, submenu hover and nested item activation |
+| `menu.rs` | Disabled items, keyboard confirmation, Escape, focus restoration, submenu hover, nested item activation and innermost context-menu ownership |
 | `dock.rs` | Tab selection/reordering, cross-group drag/drop, zoom and restored split geometry |
 
 The existing form, Select, HoverCard, virtual-list, pointer, lifecycle and isolation
@@ -437,26 +528,34 @@ focus, clipping/overlays and asynchronous completion, in that order as relevant.
 A correct value or checked flag does not prove the control was drawn correctly.
 GPUI exposes `HeadlessAppContext::with_platform`, `Window::render_to_image` and
 `HeadlessAppContext::capture_screenshot` for real offscreen images. The currently
-pinned platform crate supplies its headless renderer on macOS (Metal) only. Run
-this target on a Mac with Metal available:
+pinned GPUI {{gpui_pre_version}} platform crate supplies headless renderers on macOS (Metal)
+and Linux (WGPU). Run this target with a working Metal or WGPU adapter; Linux
+can use a software Vulkan adapter such as Mesa lavapipe:
 
 ```sh
 cargo test -p gpui-kit --features test-support --test rendering --locked
 ```
 
 The target uses `test = false`, so the default Cargo command does not select it.
-The macOS CI job explicitly runs `--test rendering` as a required step, alongside
-the portable interaction suite. Linux and Windows run only the portable suite. Cargo supports this
+The macOS and Linux CI jobs explicitly run `--test rendering` as a required
+step, alongside the portable interaction suite. Windows runs the portable suite. Cargo supports this
 [explicit target selection](https://doc.rust-lang.org/cargo/commands/cargo-test.html#target-selection).
 It also uses `harness = false` because AppKit initialization requires the main
 thread; `--test-threads=1` would still run an ordinary Rust test on a worker thread.
-On other platforms it explicitly reports that pixel verification is skipped.
-Missing renderer support on macOS fails rather than substituting a fake image.
+Windows explicitly reports that pixel verification is skipped because the pinned
+platform crate has no Windows headless renderer. Missing renderer support on
+macOS or Linux fails rather than substituting a fake image.
 
 The tests inject two defects into real Kit controls: a missing check-mark asset
 while `checked()` remains true, and transparent input text while `value()` remains
 correct. Images must differ from the working control, and repeated working checkbox
-renders must match. A separate native-event test disconnects a checkbox's change
+renders must match. Controlled Checkbox cases also check that pointer-down leaves
+the owner value and pixels unchanged, while pointer-up updates both exactly once
+in light and dark themes. The suite also checks wrapped CJK text with inline code,
+focus-line placement and contrast in light and dark themes, pointer activation
+without a button focus line, a single menu highlight across pointer/key transitions,
+list keyboard selection, and table keyboard-only focus with the focus ring enabled
+and disabled. A separate native-event test disconnects a checkbox's change
 handler and checks that clicking cannot fabricate a checked result.
 
 These are sensitivity checks, not a complete golden-image suite. For application
@@ -464,12 +563,13 @@ visual regression, compare images against reviewed expectations under controlled
 fonts, dimensions, theme, focus and animation state. State assertions and image
 assertions detect different defects; neither establishes packaged-app or full IME
 correctness. The executable rendering examples are in
-[`crates/kit/tests/rendering.rs`](https://github.com/longbridge/gpui-kit/blob/testing/crates/kit/tests/rendering.rs).
+[`crates/kit/tests/rendering.rs`](https://github.com/longbridge/gpui-kit/blob/main/crates/kit/tests/rendering.rs).
 
 ## Run in CI
 
 The Kit repository runs the interaction/layout suite on macOS, Linux and Windows.
-The macOS job additionally runs the two Metal pixel checks; a failure fails the job.
+The macOS and Linux jobs additionally run the full rendering suite using Metal
+and WGPU respectively; a failure fails the job.
 A minimal macOS workflow for a Kit checkout is:
 
 ```yaml

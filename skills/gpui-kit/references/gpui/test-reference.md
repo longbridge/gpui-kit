@@ -218,9 +218,10 @@ Drive the component the way a user does. `SelectState` keeps its list state `pub
 ```rust
 use gpui_kit::test::{TestAppContextExt, TestWindowExt};
 use gpui_kit::{
-    AnyWindowHandle, AppContext, Context, Entity, TestAppContext, Window,
+    AnyWindowHandle, AppContext, Bounds, Context, Entity, TestAppContext, Window, WindowBounds,
+    WindowOptions,
     component::{
-        IndexPath, Root,
+        IndexPath,
         searchable_list::SearchableListChange,
         select::{SearchableVec, Select, SelectDelegate, SelectItem, SelectState},
     },
@@ -246,18 +247,31 @@ impl Render for Form {
 async fn confirming_from_the_keyboard_commits_the_value(cx: &mut TestAppContext) {
     cx.update(gpui_kit::init);
     let mut language = None;
-    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
-        let state = cx.new(|cx| {
-            SelectState::new(
-                SearchableVec::new(vec!["Rust", "Go"]),
-                Some(IndexPath::new(0)),
-                window,
-                cx,
-            )
-        });
-        language = Some(state.clone());
-        let view = cx.new(|_| Form { language: state });
-        Root::new(view, window, cx)
+    let (handle, _view) = cx.update(|cx| {
+        gpui_kit::open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                    Default::default(),
+                    size(px(640.), px(480.)),
+                ))),
+                ..Default::default()
+            },
+            cx,
+            |window, cx| {
+                let state = cx.new(|cx| {
+                    SelectState::new(
+                        SearchableVec::new(vec!["Rust", "Go"]),
+                        Some(IndexPath::new(0)),
+                        window,
+                        cx,
+                    )
+                });
+                language = Some(state.clone());
+                let view = cx.new(|_| Form { language: state });
+                view
+            },
+        )
+        .expect("open test window")
     });
     let language = language.unwrap();
 
@@ -334,7 +348,9 @@ impl SelectDelegate for Recording {
                     }
                 }
                 SearchableListChange::Deselect { index } => {
-                    self.log.borrow_mut().push(format!("deselect {}", index.row));
+                    self.log
+                        .borrow_mut()
+                        .push(format!("deselect {}", index.row));
                     if self.accept {
                         selection.retain(|(ix, _)| *ix != index);
                     }
@@ -368,16 +384,30 @@ fn open_picker(
     cx.update(gpui_kit::init);
     let log = Rc::new(RefCell::new(Vec::new()));
     let mut language = None;
-    let handle = cx.open_window(size(px(640.), px(480.)), |window, cx| {
-        let delegate = Recording {
-            items: vec!["Rust", "Go"],
-            accept,
-            log: log.clone(),
-        };
-        let state = cx.new(|cx| SelectState::new(delegate, Some(IndexPath::new(0)), window, cx));
-        language = Some(state.clone());
-        let view = cx.new(|_| Picker { language: state });
-        Root::new(view, window, cx)
+    let (handle, _view) = cx.update(|cx| {
+        gpui_kit::open_window(
+            WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                    Default::default(),
+                    size(px(640.), px(480.)),
+                ))),
+                ..Default::default()
+            },
+            cx,
+            |window, cx| {
+                let delegate = Recording {
+                    items: vec!["Rust", "Go"],
+                    accept,
+                    log: log.clone(),
+                };
+                let state =
+                    cx.new(|cx| SelectState::new(delegate, Some(IndexPath::new(0)), window, cx));
+                language = Some(state.clone());
+                let view = cx.new(|_| Picker { language: state });
+                view
+            },
+        )
+        .expect("open test window")
     });
     (handle.into(), language.unwrap(), log)
 }
@@ -401,7 +431,10 @@ async fn hooks_fire_in_order_with_the_final_selection(cx: &mut TestAppContext) {
     })
     .await;
     // Single selection proposes replacing the old item, then commits once.
-    assert_eq!(*log.borrow(), ["deselect 0", "select 1", r#"confirm ["Go"]"#]);
+    assert_eq!(
+        *log.borrow(),
+        ["deselect 0", "select 1", r#"confirm ["Go"]"#]
+    );
     cx.update(|cx| assert_eq!(language.read(cx).selected_value(), Some(&"Go")));
 }
 ```
