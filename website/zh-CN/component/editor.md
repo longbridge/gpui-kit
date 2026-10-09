@@ -118,6 +118,12 @@ let editor = cx.new(|cx| {
 
 `scroll_bounce(true)` 让超出编辑器高度的代码在触控板或 Magic Mouse 的精细像素滚动到达顶部或底部时越过边缘并弹回，与 [Textarea](./textarea.md#滚动回弹) 相同。行号栏随代码移动，外框和滚动条保持不动；普通鼠标滚轮的按行滚动不触发回弹。
 
+滚动条默认位于右侧和底部。使用 `scrollbar_placement` 可调整其位置；放在左侧的纵向滚动条位于编辑器左边缘，覆盖在行号之上。与覆盖最后一行的底部滚动条一样，顶部滚动条覆盖在第一行之上，不为自身预留空间。运行时可用 `set_scrollbar_placement` 替换位置。
+
+```rust
+EditorState::new(window, cx).scrollbar_placement(ScrollbarPlacement::BottomLeft)
+```
+
 ## 主动补全
 
 `ShowCompletions` 可以在不修改文本的情况下请求补全，**没有默认快捷键**。应用应结合平台习惯选择绑定，避开 Ctrl+Space 等输入法快捷键。Editor 的绑定可以使用 `Input && mode == editor` 条件；现有 `Input` 绑定仍然有效。
@@ -345,7 +351,8 @@ let ruler = editor.update(cx, |state, cx| {
   按惯例，版本控制使用 `Left`，搜索结果使用 `Center`，诊断使用 `Right`。每个标记按所在行占内容高度的比例定位，
   高度至少为 6 px。同一分区中颜色相同且相互接触的标记会合并。
 - 标记绘制在滚动条下方，无论滚动条是 Base 提供的还是由 `set_scrollbar_renderer` 提供的。
-  滑块淡出时，标记仍然可见。
+  滑块淡出时，标记仍然可见。`scrollbar_placement` 放在左侧时，轨道和标记随之移到左边缘；
+  自定义滚动条通过 `EditorScrollbarContext::placement` 读取位置。
 - 不调用 `with_color` 时，两个集合都使用编辑器前景色。版本控制的颜色可以读取高亮主题中
   Zed 的状态键 `created`、`modified` 和 `deleted`，对应方法为 `status.created(cx)`、
   `status.modified(cx)` 和 `status.deleted(cx)`。缺少对应键时，这些方法分别使用 `success`、

@@ -37,6 +37,7 @@ use super::{
     mode::LayoutMode,
     undo_manager::{EditIntent, UndoManager},
 };
+use crate::ScrollbarPlacement;
 use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use crate::input::blink_cursor::CURSOR_WIDTH;
 use crate::input::movement::MoveDirection;
@@ -542,6 +543,7 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) editor_scrollbar_snapshot: Cell<Option<EditorScrollbarSnapshot>>,
     /// Overview ruler marks in display rows, kept between frames.
     pub(super) overview_ruler_rows: std::cell::RefCell<OverviewRulerRows>,
+    pub(super) scrollbar_placement: ScrollbarPlacement,
     /// The widest measured unwrapped line width and what it was measured for.
     pub(super) longest_line_width: Cell<Option<(LongestLineKey, Pixels)>>,
     pub(super) editor_paddings: Edges<Pixels>,
@@ -1038,6 +1040,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             scroll_size: gpui::size(px(0.), px(0.)),
             editor_scrollbar_snapshot: Cell::new(None),
             overview_ruler_rows: Default::default(),
+            scrollbar_placement: ScrollbarPlacement::default(),
             longest_line_width: Cell::new(None),
             editor_paddings: Edges::default(),
             deferred_scroll_offset: None,
@@ -13141,6 +13144,26 @@ impl<M: crate::input::MultiLineMode> InputBaseState<M> {
     /// See [`InputBaseState::searchable`].
     pub fn set_searchable(&mut self, searchable: bool, cx: &mut Context<Self>) {
         self.searchable = searchable;
+        cx.notify();
+    }
+
+    /// The placement of the scrollbars, default is [`ScrollbarPlacement::BottomRight`].
+    ///
+    /// On the left, the vertical scrollbar sits on the input's left edge, over
+    /// the line numbers. At the top, the horizontal scrollbar overlays the
+    /// first line, as at the bottom it overlays the last.
+    pub fn scrollbar_placement(mut self, placement: ScrollbarPlacement) -> Self {
+        self.scrollbar_placement = placement;
+        self
+    }
+
+    /// See [`InputBaseState::scrollbar_placement`].
+    pub fn set_scrollbar_placement(
+        &mut self,
+        placement: ScrollbarPlacement,
+        cx: &mut Context<Self>,
+    ) {
+        self.scrollbar_placement = placement;
         cx.notify();
     }
 

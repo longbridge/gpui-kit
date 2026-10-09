@@ -17,7 +17,7 @@ use smallvec::SmallVec;
 use std::{collections::BTreeSet, ops::Range, rc::Rc};
 
 use crate::{
-    Scrollbar,
+    Scrollbar, ScrollbarPlacement,
     input::{RopeExt as _, blink_cursor::CURSOR_WIDTH, display_map::LineLayout},
 };
 
@@ -197,6 +197,7 @@ pub(super) struct EditorScrollbarSnapshot {
     line_height: Pixels,
     padding_top: Pixels,
     wrap_width: Option<Pixels>,
+    placement: ScrollbarPlacement,
 }
 
 impl EditorScrollbarSnapshot {
@@ -213,12 +214,14 @@ impl EditorScrollbarSnapshot {
                 last_layout.line_number_width,
                 scroll_size,
                 state.editor_paddings,
+                state.scrollbar_placement,
             ),
             cursor_scroll_offset,
             soft_wrap: state.soft_wrap,
             line_height: last_layout.line_height,
             padding_top: state.editor_paddings.top,
             wrap_width: last_layout.wrap_width,
+            placement: state.scrollbar_placement,
         }
     }
 }
@@ -229,8 +232,11 @@ impl EditorScrollbarLayout {
         line_number_width: Pixels,
         scroll_size: Size<Pixels>,
         paddings: Edges<Pixels>,
+        placement: ScrollbarPlacement,
     ) -> Self {
-        let left = if line_number_width == px(0.) {
+        let left = if placement.is_left() {
+            -paddings.left
+        } else if line_number_width == px(0.) {
             px(0.)
         } else {
             paddings.left + line_number_width - LINE_NUMBER_RIGHT_MARGIN
@@ -336,6 +342,7 @@ impl<M: InputModeKind> Element for EditorScrollbar<M> {
                 } else {
                     crate::ScrollbarAxis::Both
                 },
+                placement: snapshot.placement,
             };
             renderer(presentation, window, cx)
         } else {
@@ -344,6 +351,7 @@ impl<M: InputModeKind> Element for EditorScrollbar<M> {
             } else {
                 Scrollbar::vertical(&scroll_handle)
             }
+            .placement(snapshot.placement)
             .viewport_bounds(snapshot.layout.bounds)
             .scroll_viewport_size(snapshot.layout.scroll_viewport_size)
             .scroll_size(snapshot.layout.scroll_size)
@@ -580,8 +588,14 @@ fn layout_overview_ruler<M: InputModeKind>(
         return Vec::new();
     }
 
+    // The marks sit on the vertical track, on whichever side it is placed.
+    let track_left = if snapshot.placement.is_left() {
+        layout.bounds.left()
+    } else {
+        layout.bounds.right() - track_width
+    };
     let track = Bounds::new(
-        point(layout.bounds.right() - track_width, layout.bounds.top()),
+        point(track_left, layout.bounds.top()),
         size(track_width, layout.bounds.size.height),
     );
     let scale = track.size.height / content_height;
@@ -6604,6 +6618,46 @@ mod tests {
         });
     }
 
+    /// With the scrollbar placed on the left, the overview ruler marks follow
+    /// the vertical track there, and a supplied scrollbar is told the placement.
+    #[gpui::test]
+    fn overview_ruler_marks_follow_a_left_scrollbar(cx: &mut TestAppContext) {
+        let text = "x\n".repeat(99) + "x";
+        let (editor, window) = decoration_editor(cx, &text, false);
+        let presented = Rc::new(std::cell::Cell::new(None));
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            editor.update(cx, |state, cx| {
+                state.create_overview_ruler_decorations_collection(
+                    vec![
+                        OverviewRulerDecoration::new(0..10)
+                            .with_lane(OverviewRulerLane::Left)
+                            .with_color(gpui::green()),
+                    ],
+                    cx,
+                );
+                state.set_scrollbar_placement(ScrollbarPlacement::BottomLeft, cx);
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let snapshot = state.editor_scrollbar_snapshot.get().unwrap();
+            let marks = layout_overview_ruler(state, &snapshot, Scrollbar::width());
+            assert_eq!(marks.len(), 1);
+            assert_eq!(marks[0].bounds.left(), snapshot.layout.bounds.left());
+            assert_eq!(marks[0].bounds.size.width, Scrollbar::width() / 3.);
+
+            editor.update(cx, |state, _| {
+                let presented = presented.clone();
+                state.set_scrollbar_renderer(Some(Rc::new(move |context, _, _| {
+                    presented.set(Some(context.placement()));
+                    Scrollbar::vertical(&context).into_any_element()
+                })));
+            });
+            window.draw(cx).clear(cx);
+        });
+        assert_eq!(presented.get(), Some(ScrollbarPlacement::BottomLeft));
+    }
+
     #[gpui::test]
     fn overview_ruler_marks_follow_edits_folds_and_new_decorations(cx: &mut TestAppContext) {
         let text = "x\n".repeat(99) + "x";
@@ -7008,8 +7062,13 @@ mod tests {
             left: px(7.),
         };
 
-        let layout =
-            EditorScrollbarLayout::new(input_bounds, px(40.), size(px(1000.), px(200.)), paddings);
+        let layout = EditorScrollbarLayout::new(
+            input_bounds,
+            px(40.),
+            size(px(1000.), px(200.)),
+            paddings,
+            ScrollbarPlacement::BottomRight,
+        );
 
         assert_eq!(
             layout.bounds,
@@ -7018,8 +7077,13 @@ mod tests {
         assert_eq!(layout.scroll_size, size(px(972.), px(200.)));
         assert_eq!(layout.scroll_viewport_size, size(px(262.), px(80.)));
 
-        let layout_without_gutter =
-            EditorScrollbarLayout::new(input_bounds, px(0.), size(px(500.), px(120.)), paddings);
+        let layout_without_gutter = EditorScrollbarLayout::new(
+            input_bounds,
+            px(0.),
+            size(px(500.), px(120.)),
+            paddings,
+            ScrollbarPlacement::BottomRight,
+        );
 
         assert_eq!(
             layout_without_gutter.bounds,
@@ -7029,6 +7093,41 @@ mod tests {
         assert_eq!(
             layout_without_gutter.scroll_viewport_size,
             size(px(303.), px(80.))
+        );
+    }
+
+    #[test]
+    fn test_editor_scrollbar_layout_on_the_left_covers_the_gutter() {
+        let input_bounds = Bounds::new(point(px(10.), px(20.)), size(px(300.), px(80.)));
+        let paddings = Edges {
+            top: px(2.),
+            right: px(3.),
+            bottom: px(5.),
+            left: px(7.),
+        };
+
+        let layout = EditorScrollbarLayout::new(
+            input_bounds,
+            px(40.),
+            size(px(1000.), px(200.)),
+            paddings,
+            ScrollbarPlacement::BottomLeft,
+        );
+
+        assert_eq!(
+            layout.bounds,
+            Bounds::new(point(px(3.), px(18.)), size(px(310.), px(87.)))
+        );
+        assert_eq!(layout.scroll_size, size(px(1020.), px(200.)));
+        assert_eq!(
+            EditorScrollbarLayout::new(
+                input_bounds,
+                px(40.),
+                size(px(1000.), px(200.)),
+                paddings,
+                ScrollbarPlacement::TopLeft,
+            ),
+            layout
         );
     }
 
