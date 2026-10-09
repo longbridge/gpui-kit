@@ -774,7 +774,7 @@ where
     /// One header row. An unset header height matches the body rows.
     fn header_row_height(&self) -> Pixels {
         self.options
-            .header_height
+            .header_row_height
             .unwrap_or(self.options.size.table_row_height())
     }
 

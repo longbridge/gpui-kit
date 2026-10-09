@@ -438,7 +438,7 @@ impl TableDelegate for MyTableDelegate {
 
 ### Table Styling
 
-Customize table appearance. `DataTable` implements `Sizable`: use preset sizes such as `.small()` and `.large()` for standard density, or pass a custom pixel size to set a uniform header and body row height.
+Customize table appearance. `DataTable` implements `Sizable`: use preset sizes such as `.small()` and `.large()` for standard density, or pass a custom pixel size to set the row height. Header rows use the same height unless you set `header_row_height`, which applies to each header row, column-group rows included.
 
 ```rust
 use gpui_kit::px;
@@ -450,7 +450,8 @@ let state = cx.new(|cx| {
 
 // In render
 DataTable::new(&state)
-    .with_size(px(48.))             // Custom uniform row height
+    .with_size(px(32.))             // Custom body row height
+    .header_row_height(px(48.))     // Taller header rows
     .stripe(true)                   // Alternating row colors
     .bordered(true)                 // Border around table
     .scrollbar_visible(true, true)  // Vertical, horizontal scrollbars

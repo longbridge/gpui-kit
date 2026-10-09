@@ -30,6 +30,10 @@ struct ChangeSize(Size);
 
 #[derive(Action, Clone, PartialEq, Eq, Deserialize)]
 #[action(namespace = data_table_story, no_json)]
+struct ChangeHeaderRowHeight(Option<Pixels>);
+
+#[derive(Action, Clone, PartialEq, Eq, Deserialize)]
+#[action(namespace = data_table_story, no_json)]
 struct ChangeRows(usize);
 
 #[derive(Action, Clone, PartialEq, Eq, Deserialize)]
@@ -898,6 +902,7 @@ pub struct DataTableStory {
     stripe: bool,
     refresh_data: bool,
     size: Size,
+    header_row_height: Option<Pixels>,
 
     _subscriptions: Vec<Subscription>,
     _load_task: Task<()>,
@@ -980,6 +985,7 @@ impl DataTableStory {
             stripe: false,
             refresh_data: false,
             size: Size::default(),
+            header_row_height: None,
             _subscriptions,
             _load_task,
             _load_rows_task: Task::ready(()),
@@ -1056,6 +1062,16 @@ impl DataTableStory {
 
     fn on_change_size(&mut self, a: &ChangeSize, _: &mut Window, cx: &mut Context<Self>) {
         self.size = a.0;
+        cx.notify();
+    }
+
+    fn on_change_header_row_height(
+        &mut self,
+        a: &ChangeHeaderRowHeight,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.header_row_height = a.0;
         cx.notify();
     }
 
@@ -1173,6 +1189,7 @@ impl Render for DataTableStory {
         let rows_count = delegate.rows_count(cx);
         let columns_count = delegate.columns_count(cx);
         let size = self.size;
+        let header_row_height = self.header_row_height;
         let loop_selection = table.loop_selection;
         let col_resizable = table.col_resizable;
         let col_movable = table.col_movable;
@@ -1190,6 +1207,7 @@ impl Render for DataTableStory {
 
         v_flex()
             .on_action(cx.listener(Self::on_change_size))
+            .on_action(cx.listener(Self::on_change_header_row_height))
             .on_action(cx.listener(|this, action: &ChangeRows, _, cx| {
                 if action.0 == this.table.read(cx).delegate().stocks.len() {
                     return;
@@ -1332,6 +1350,30 @@ impl Render for DataTableStory {
                                 "XSmall",
                                 size == Size::XSmall,
                                 Box::new(ChangeSize(Size::XSmall)),
+                            )
+                        },
+                    )
+                    .dropdown_child(
+                        Button::new("header-row-height").label(format!(
+                            "Header Row Height: {}",
+                            header_row_height
+                                .map_or("Default".to_string(), |height| height.to_string())
+                        )),
+                        move |menu, _, _| {
+                            menu.menu_with_check(
+                                "Default",
+                                header_row_height.is_none(),
+                                Box::new(ChangeHeaderRowHeight(None)),
+                            )
+                            .menu_with_check(
+                                "40px",
+                                header_row_height == Some(px(40.)),
+                                Box::new(ChangeHeaderRowHeight(Some(px(40.)))),
+                            )
+                            .menu_with_check(
+                                "48px",
+                                header_row_height == Some(px(48.)),
+                                Box::new(ChangeHeaderRowHeight(Some(px(48.)))),
                             )
                         },
                     )
@@ -1492,6 +1534,9 @@ impl Render for DataTableStory {
                     .child(
                         DataTable::new(&self.table)
                             .with_size(self.size)
+                            .when_some(self.header_row_height, |this, height| {
+                                this.header_row_height(height)
+                            })
                             .stripe(self.stripe),
                     )
                     .child(

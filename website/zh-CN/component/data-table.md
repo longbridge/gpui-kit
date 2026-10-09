@@ -350,14 +350,15 @@ impl TableDelegate for MyTableDelegate {
 
 ## 表格样式
 
-`DataTable` 实现了 `Sizable`：可以用 `.small()`、`.large()` 等预设尺寸调整表格密度，也可以传入自定义像素值来设置统一的表头和表体行高。
+`DataTable` 实现了 `Sizable`：可以用 `.small()`、`.large()` 等预设尺寸调整表格密度，也可以传入自定义像素值来设置行高。表头默认沿用这个行高；用 `header_row_height` 可以单独设置每一行表头的高度，分组表头的每一行也使用这个高度。
 
 ```rust
 use gpui_kit::px;
 use gpui_kit::component::Sizable as _;
 
 DataTable::new(&state)
-    .with_size(px(48.))
+    .with_size(px(32.))
+    .header_row_height(px(48.))
     .stripe(true)
     .bordered(true)
     .scrollbar_visible(true, true)
