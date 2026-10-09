@@ -28,7 +28,7 @@ pub use gpui_base::input::{
     CompletionMenuOptions, CompletionProvider, Copy, Cut, DefinitionProvider, Delete,
     DeleteToBeginningOfLine, DeleteToEndOfLine, DeleteToNextWordEnd, DeleteToPreviousWordStart,
     DisplayMap, DisplayPoint, DocumentColorProvider, DocumentRangeSemanticTokensProvider,
-    EditorState, Enter, Escape, FoldRange, GoToDefinition, GutterDecoration,
+    EditorState, Enter, Escape, FoldRange, GoToDefinition, GutterColumn, GutterDecoration,
     GutterDecorationCollection, GutterMarker, HighlightStyleResolver, HoverPopoverState,
     HoverProvider, Indent, IndentInline, InputEdit, InputEditsEvent, InputEvent, InputHighlighter,
     InputHighlighterFactory, InputState, LineDecoration, LineDecorationCollection,

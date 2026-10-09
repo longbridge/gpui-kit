@@ -643,17 +643,24 @@ impl RenderOnce for Input {
         sync_focused_input_registry(&state, window, cx);
 
         state.ensure_highlighter_factory(crate::highlighter::input_highlighter_factory(), cx);
+        let presentation = state.presentation(cx);
         state.set_editor_paddings(
-            if state.presentation(cx).is_multi_line() {
+            if presentation.is_multi_line() {
+                let gutter_padding = if presentation.is_code_editor() {
+                    self.size.input_px().min(px(6.))
+                } else {
+                    self.size.input_px()
+                };
+                let (left, right) = if presentation.gutter_side().is_left() {
+                    (gutter_padding, self.size.input_px())
+                } else {
+                    (self.size.input_px(), gutter_padding)
+                };
                 Edges {
                     top: self.size.input_py(),
-                    right: self.size.input_px(),
+                    right,
                     bottom: self.size.input_py(),
-                    left: if state.presentation(cx).is_code_editor() {
-                        self.size.input_px().min(px(6.))
-                    } else {
-                        self.size.input_px()
-                    },
+                    left,
                 }
             } else {
                 Edges::default()

@@ -863,6 +863,7 @@ pub struct Scrollbar {
     viewport_bounds: Option<Bounds<Pixels>>,
     // Scroll range may use a smaller viewport than the padded track bounds.
     scroll_viewport_size: Option<Size<Pixels>>,
+    horizontal_viewport_bounds: Option<Bounds<Pixels>>,
     use_layout_bounds: bool,
     /// Maximum frames per second for scrolling by drag. Default is 120 FPS.
     ///
@@ -889,6 +890,7 @@ impl Scrollbar {
             scroll_size: None,
             viewport_bounds: None,
             scroll_viewport_size: None,
+            horizontal_viewport_bounds: None,
             use_layout_bounds: false,
             styles: ScrollbarStyles::default(),
         }
@@ -911,6 +913,13 @@ impl Scrollbar {
     /// NOTE: In most cases, you don't need to set a specific id for scrollbar.
     pub fn id(mut self, id: impl Into<ElementId>) -> Self {
         self.id = id.into();
+        self
+    }
+
+    /// Editors can exclude a fixed gutter from horizontal scrolling while the
+    /// vertical track stays at the outside edge of the full viewport.
+    pub(crate) fn horizontal_viewport_bounds(mut self, bounds: Bounds<Pixels>) -> Self {
+        self.horizontal_viewport_bounds = Some(bounds);
         self
     }
 
@@ -1006,6 +1015,21 @@ impl Scrollbar {
     /// The width of a track this theme gives scrollbars without styles of their own.
     pub(crate) fn themed_track_width(cx: &App) -> Pixels {
         cx.theme().scrollbar.styles().track.width.unwrap_or(WIDTH)
+    }
+
+    fn track_width(&self, cx: &App) -> Pixels {
+        self.styles
+            .track
+            .width
+            .or(cx.theme().scrollbar.styles().track.width)
+            .unwrap_or(WIDTH)
+    }
+
+    /// The width the scrollbar takes from the edge it sits on: its track, or
+    /// its active thumb where that reaches further.
+    pub(crate) fn full_width(&self, cx: &App) -> Pixels {
+        let (_, _, _, width, inset, _, _) = self.style_for_active(cx);
+        self.track_width(cx).max(inset + width)
     }
 
     fn resolve_track(
@@ -1440,25 +1464,28 @@ impl Element for Scrollbar {
 
         for axis in self.axis.all().into_iter() {
             let is_vertical = axis.is_vertical();
-            let track_width = self
-                .styles
-                .track
-                .width
-                .or(cx.theme().scrollbar.styles().track.width)
-                .unwrap_or(WIDTH);
+            let viewport = if is_vertical {
+                hitbox.bounds
+            } else {
+                self.horizontal_viewport_bounds.unwrap_or(hitbox.bounds)
+            };
+            let track_width = self.track_width(cx);
             let (scroll_area_size, container_size, scroll_viewport_size, scroll_position) =
                 if is_vertical {
                     (
                         scroll_size.height,
-                        hitbox.size.height,
+                        viewport.size.height,
                         scroll_viewport_size.height,
                         self.scroll_handle.offset().y,
                     )
                 } else {
+                    // Keep the scroll range unchanged when only the track's
+                    // viewport excludes a fixed gutter.
+                    let excluded = hitbox.size.width - viewport.size.width;
                     (
-                        scroll_size.width,
-                        hitbox.size.width,
-                        scroll_viewport_size.width,
+                        scroll_size.width - excluded,
+                        viewport.size.width,
+                        scroll_viewport_size.width - excluded,
                         self.scroll_handle.offset().x,
                     )
                 };
@@ -1479,29 +1506,29 @@ impl Element for Scrollbar {
             let bounds = Bounds {
                 origin: if is_vertical {
                     if self.placement.is_left() {
-                        hitbox.origin
+                        viewport.origin
                     } else {
                         point(
-                            hitbox.origin.x + hitbox.size.width - track_width,
-                            hitbox.origin.y,
+                            viewport.origin.x + viewport.size.width - track_width,
+                            viewport.origin.y,
                         )
                     }
                 } else if self.placement.is_top() {
-                    hitbox.origin
+                    viewport.origin
                 } else {
                     point(
-                        hitbox.origin.x,
-                        hitbox.origin.y + hitbox.size.height - track_width,
+                        viewport.origin.x,
+                        viewport.origin.y + viewport.size.height - track_width,
                     )
                 },
                 size: gpui::Size {
                     width: if is_vertical {
                         track_width
                     } else {
-                        hitbox.size.width
+                        viewport.size.width
                     },
                     height: if is_vertical {
-                        hitbox.size.height
+                        viewport.size.height
                     } else {
                         track_width
                     },
@@ -2579,6 +2606,23 @@ mod tests {
     }
 
     #[gpui::test]
+    fn the_full_width_is_the_track_or_an_active_thumb_reaching_further(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            let scrollbar = Scrollbar::vertical(&TestHandle::new(Size::default()));
+            assert_eq!(scrollbar.full_width(cx), Scrollbar::width());
+
+            crate::Theme::global_mut(cx).scrollbar = crate::ScrollbarTheme::new()
+                .with_styles(ScrollbarStyles::default().track(|style| style.width(px(24.))));
+            assert_eq!(scrollbar.full_width(cx), px(24.));
+
+            crate::Theme::global_mut(cx).scrollbar = crate::ScrollbarTheme::new().with_styles(
+                ScrollbarStyles::default().thumb_active(|style| style.width(px(20.)).inset(px(4.))),
+            );
+            assert_eq!(scrollbar.full_width(cx), px(24.));
+        });
+    }
+
+    #[gpui::test]
     fn auto_hide_modes_use_a_six_pixel_resting_thumb(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let handle = TestHandle::new(Size::default());
@@ -2618,6 +2662,47 @@ mod tests {
         cx.simulate_click(point(px(95.), px(80.)), Modifiers::default());
         assert!(vertical.offset().y < px(0.));
         assert_eq!(vertical.offset().x, px(0.));
+    }
+
+    #[gpui::test]
+    fn horizontal_viewport_excludes_fixed_content_without_changing_scroll_extent(
+        cx: &mut TestAppContext,
+    ) {
+        struct FixedGutterHarness(TestHandle);
+        impl Render for FixedGutterHarness {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().relative().size(px(100.)).child(
+                    Scrollbar::new(&self.0)
+                        .mode(ScrollbarMode::Always)
+                        .placement(ScrollbarPlacement::BottomLeft)
+                        .horizontal_viewport_bounds(Bounds::new(
+                            Point::default(),
+                            size(px(70.), px(100.)),
+                        )),
+                )
+            }
+        }
+        let handle = TestHandle::new(size(px(500.), px(500.)));
+        let (_, cx) = cx.add_window_view(|_, _| FixedGutterHarness(handle.clone()));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_click(point(px(90.), px(95.)), Modifiers::default());
+        assert_eq!(
+            handle.offset(),
+            Point::default(),
+            "fixed gutter must not be a horizontal track"
+        );
+        cx.simulate_click(point(px(69.), px(95.)), Modifiers::default());
+        assert_eq!(
+            handle.offset(),
+            point(px(-400.), px(0.)),
+            "cropping the track must preserve the horizontal range"
+        );
+        cx.simulate_click(point(px(5.), px(80.)), Modifiers::default());
+        assert_eq!(
+            handle.offset(),
+            point(px(-400.), px(-400.)),
+            "vertical range must use the full viewport"
+        );
     }
 
     #[gpui::test]

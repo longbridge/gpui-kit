@@ -1733,6 +1733,12 @@
     },
     {
       "source": "story",
+      "name": "editor_diff",
+      "classification": "infrastructure",
+      "explanation": "The Editor Diff story lays out two Editors, registered by the Editor story, as a side-by-side diff; it adds no constructor."
+    },
+    {
+      "source": "story",
       "name": "empty",
       "classification": "component",
       "registration": {

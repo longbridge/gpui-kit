@@ -143,13 +143,41 @@ frame and scrollbar stay put. Ordinary mouse-wheel line scrolling does not bounc
 
 The scrollbars sit on the right and bottom edges by default. Use
 `scrollbar_placement` to move them; a vertical scrollbar on the left sits on
-the editor's left edge, over the line numbers. Like the bottom scrollbar over
-the last line, a top scrollbar overlays the first line rather than reserving
-space for itself. `set_scrollbar_placement` replaces the placement at runtime.
+the editor's left edge, over the line numbers, or clear of the text when the
+gutter is on the right. Like the bottom scrollbar over the last line, a top
+scrollbar overlays the first line rather than reserving space for itself.
+`set_scrollbar_placement` replaces the placement at runtime.
+
+In a mirrored pane with a right gutter and left scrollbar, the horizontal track stops before the gutter while the vertical track stays at the outer edge.
 
 ```rust
 EditorState::new(window, cx).scrollbar_placement(ScrollbarPlacement::BottomLeft)
 ```
+
+The gutter with the line numbers and fold icons sits on the left by default.
+In a side-by-side diff, both gutters can face the center, so the line numbers
+of corresponding lines sit next to each other across the divider. The left pane
+puts its gutter on its right with `gutter_side` — mirrored, the fold icons next
+to the text — and its scrollbar on its outer edge:
+
+```rust
+EditorState::new(window, cx)
+    .scrollbar_placement(ScrollbarPlacement::BottomLeft)
+    .gutter_side(Side::Right)
+```
+
+On either side, the fold icons sit next to the text, then the line numbers,
+then the gutter markers, then the strip of the
+[gutter decorations](#gutter-and-overview-ruler-decorations). Use `gutter_order`
+to list the columns from the text outward; a column left out follows the listed
+ones. In a diff, this puts the change markers between the text and the line
+numbers:
+
+```rust
+EditorState::new(window, cx).gutter_order([GutterColumn::FoldIcons, GutterColumn::Markers])
+```
+
+The Editor Diff story shows both layouts, with the two panes scrolling together.
 
 ## Manual completions
 
@@ -371,7 +399,9 @@ The Editor showcase's **Decorations** tab demonstrates both collection types.
 
 Use these collections to mark whole lines outside the text, such as lines that a
 version-control diff added, modified, or deleted. A `GutterDecorationCollection`
-draws in a strip before the line numbers. An `OverviewRulerDecorationCollection`
+draws in a strip at the outer edge of the gutter, before the line numbers and
+the line decoration markers; `gutter_order` can move it, as
+`GutterColumn::Decorations`. An `OverviewRulerDecorationCollection`
 draws on the vertical scrollbar track. Monaco calls this track the overview ruler.
 Create one collection for each surface you want to use.
 
@@ -487,18 +517,19 @@ data by row, and read colors from `cx` when asked so they follow theme changes.
 Collections are independent, like the other decoration collections; later ones paint
 over earlier ones.
 
-A background spans the row from the gutter to the right edge, across all of its
-soft-wrapped lines, under the active line, indent guides, selection and text. A marker
-is painted in a slot of its own at the left of the line numbers, so it is shown only
-while line numbers are. The gutter reserves the slot while any collection has a
-provider, and keeps it as marked rows scroll in and out of view. The styled editor
-sizes the marker at 90% of its effective font size and the gap at 30%. The icon,
-reserved slot and vertical centering share the same size, so markers follow both
-interface zoom and an editor-specific `.text_size(...)` change. `DiffAdded`,
-`DiffRemoved`, `DiffChanged`, `Conflict`, `Bookmark` and `Breakpoint` take the
-theme's success, danger, warning and info colors; `GutterMarker::Custom { icon, color }`
-paints an icon asset path as given. Neither affects hit testing or focus, and neither
-has a pointer or keyboard action.
+A background spans the whole row, gutter included, across all of its soft-wrapped
+lines, under the active line, indent guides, selection and text. A marker is painted
+in a slot of its own, shown only while line numbers are. In the default order the
+slot is on the outer side of the line numbers; `gutter_order` can move it nearer the
+text, as IntelliJ IDEA places its markers. The gutter reserves the slot while any
+collection has a provider, and keeps it as marked rows scroll in and out of view.
+The styled editor sizes the marker at 90% of its effective font size and the gap at
+30%. The icon, reserved slot and vertical centering share the same size, so markers
+follow both interface zoom and an editor-specific `.text_size(...)` change.
+`DiffAdded`, `DiffRemoved`, `DiffChanged`, `Conflict`, `Bookmark` and `Breakpoint`
+take the theme's success, danger, warning and info colors;
+`GutterMarker::Custom { icon, color }` paints an icon asset path as given. Neither
+affects hit testing or focus, and neither has a pointer or keyboard action.
 
 `EditorState::row_bounds(row)` returns the band a row occupies in window coordinates,
 where it is painted: below a multi-line inline completion, rows move down with the

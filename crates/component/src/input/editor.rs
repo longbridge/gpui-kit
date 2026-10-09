@@ -288,6 +288,35 @@ mod tests {
     }
 
     #[gpui::test]
+    fn a_gutter_on_the_right_keeps_the_padding_it_has_on_the_left(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        let mut state = None;
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let editor = cx.new(|cx| EditorState::new(window, cx).default_value("fn main() {}"));
+            state = Some(editor.clone());
+            Harness {
+                state: editor,
+                text_size: None,
+            }
+        });
+        let state = state.unwrap();
+        let mut padding = |side: crate::Side| {
+            VisualTestContext::update(cx, |window, cx| {
+                state.update(cx, |state, cx| state.set_gutter_side(side, cx));
+                window.draw(cx).clear(cx);
+                let bounds = state.read(cx).input_bounds();
+                (bounds.left(), window.viewport_size().width - bounds.right())
+            })
+        };
+
+        let (left_outer, left_inner) = padding(crate::Side::Left);
+        let (right_inner, right_outer) = padding(crate::Side::Right);
+        assert!(left_outer < left_inner);
+        assert_eq!(right_outer, left_outer);
+        assert_eq!(right_inner, left_inner);
+    }
+
+    #[gpui::test]
     fn language_config_works_without_render_sync(cx: &mut TestAppContext) {
         use crate::input::{AutoClosingPair, language_config::LanguageConfig, set_language_config};
         use gpui::EntityInputHandler as _;
