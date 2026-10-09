@@ -6,6 +6,7 @@ use gpui_component::{
     input::{Input, InputState},
     popover::Popover,
     progress::{Progress, ProgressCircle},
+    sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
 };
 use gpui_kit::test::{TestSupportExt, TestWindowExt};
 use gpui_kit::{AppContext, Context, Entity, TestAppContext, Window, div, prelude::*, px, size};
@@ -164,6 +165,30 @@ fn dropdown_button_names_its_menu_trigger(cx: &mut TestAppContext) {
             Some("More options"),
             "the caret-only trigger needs a name without a caller-provided label"
         );
+    })
+    .unwrap();
+}
+
+struct SidebarSubmenus;
+impl Render for SidebarSubmenus {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Sidebar::new("sidebar").child(
+            SidebarMenu::new().child(
+                SidebarMenuItem::new("Projects").children([SidebarMenuItem::new("Website")]),
+            ),
+        )
+    }
+}
+
+#[gpui_kit::test]
+fn sidebar_submenu_caret_is_named_after_its_item(cx: &mut TestAppContext) {
+    cx.update(gpui_component::init);
+    let (handle, _) = common::open_window(cx, None, |_, cx| cx.new(|_| SidebarSubmenus));
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.draw(cx).clear(cx);
+        assert_eq!(window.find("caret").label(), Some("Expand Projects"));
+        window.click("caret", cx);
+        assert_eq!(window.find("caret").label(), Some("Collapse Projects"));
     })
     .unwrap();
 }

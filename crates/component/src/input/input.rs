@@ -481,6 +481,11 @@ impl Input {
             } else {
                 IconName::EyeOff
             })
+            .accessibility_label(if masked {
+                t!("Input.Show Password")
+            } else {
+                t!("Input.Hide Password")
+            })
             .xsmall()
             .text()
             .tab_stop(false)

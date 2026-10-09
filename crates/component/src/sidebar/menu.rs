@@ -13,6 +13,7 @@ use gpui::{
     Styled, Window, div, percentage, prelude::FluentBuilder,
 };
 use gpui_base::TestSupportExt as _;
+use rust_i18n::t;
 use std::rc::Rc;
 
 /// Menu for the [`super::Sidebar`]
@@ -145,7 +146,8 @@ impl SidebarMenuItem {
 
     /// Set the accessibility label of the item row.
     ///
-    /// Defaults to the visible label text.
+    /// Defaults to the visible label text. A submenu's caret button is named
+    /// after it, such as "Expand Projects".
     pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
         self
@@ -266,8 +268,10 @@ impl SidebarItem for SidebarMenuItem {
         let default_open = self.default_open;
         let collapsed_tooltip = self.collapsed_tooltip();
         let id = id.into();
-        let label_text = self.label.clone();
-        let accessibility_label = self.accessibility_label.clone();
+        let accessibility_label = self
+            .accessibility_label
+            .clone()
+            .unwrap_or_else(|| self.label.clone());
         let is_submenu = self.is_submenu();
         let open_state = if is_submenu {
             Some(window.use_keyed_state(id.clone(), cx, |_, _| default_open))
@@ -292,7 +296,7 @@ impl SidebarItem for SidebarMenuItem {
                     .size_full()
                     .id("item")
                     .role(Role::TreeItem)
-                    .aria_label(accessibility_label.unwrap_or_else(|| label_text.clone()))
+                    .aria_label(accessibility_label.clone())
                     .aria_selected(is_active)
                     .overflow_x_hidden()
                     .flex_shrink_0()
@@ -343,6 +347,11 @@ impl SidebarItem for SidebarMenuItem {
                                     Button::new("caret")
                                         .xsmall()
                                         .ghost()
+                                        .accessibility_label(if is_open {
+                                            t!("Sidebar.Collapse", name = accessibility_label)
+                                        } else {
+                                            t!("Sidebar.Expand", name = accessibility_label)
+                                        })
                                         .icon(
                                             Icon::new(IconName::ChevronRight)
                                                 .size_4()
