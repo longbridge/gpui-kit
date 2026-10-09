@@ -177,13 +177,7 @@ struct DeferredMenu {
 }
 
 impl DeferredMenu {
-    fn build_menu(&self, window: &mut Window, cx: &mut App) -> AnyElement {
-        // Focus the menu, so that can be handle the action.
-        let focus_handle = self.menu_view.focus_handle(cx);
-        if !focus_handle.contains_focused(window, cx) {
-            focus_handle.focus(window, cx);
-        }
-
+    fn build_menu(&self, window: &mut Window) -> AnyElement {
         deferred(
             anchored().child(
                 div()
@@ -254,7 +248,7 @@ impl Element for DeferredMenu {
         if !self.draws.get() {
             return;
         }
-        let mut menu = self.build_menu(window, cx);
+        let mut menu = self.build_menu(window);
         menu.prepaint_as_root(bounds.origin, window.viewport_size().into(), window, cx);
         self.menu = Some(menu);
     }
@@ -505,6 +499,11 @@ fn open_menu(
                 input.set_selection_focus(Some(menu.focus_handle(cx)), cx);
             }
 
+            // Focus before the menu's first frame, not while prepainting it:
+            // a frame reports one focused accessibility node, and the element
+            // that held focus may already have claimed it by then.
+            menu.focus_handle(cx).focus(window, cx);
+
             // Set up the subscription for dismiss handling.
             // Hold a Weak here, not a strong clone: the closure
             // would otherwise close the cycle
@@ -616,8 +615,8 @@ mod tests {
             click_count: 1,
             first_mouse: false,
         });
-        // The menu entity is built in a deferred callback, then rendered
-        // (which also focuses it) on the next draw.
+        // The menu entity is built and focused in a deferred callback, then
+        // rendered on the next draw.
         cx.run_until_parked();
         cx.update(|window, cx| {
             _ = window.draw(cx);
@@ -763,6 +762,74 @@ mod tests {
         // (which held the subscription's strong `Rc` clone) is too: any entity
         // leaked by the old cycle is still reachable and detected.
         cx.update(|cx| cx.assert_no_new_leaks(&before));
+    }
+
+    /// Records whether the content held focus as each frame began.
+    struct FocusRecordingRoot {
+        content_focus: FocusHandle,
+        content_focused_at_render: Rc<Cell<bool>>,
+    }
+
+    impl Render for FocusRecordingRoot {
+        fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            self.content_focused_at_render
+                .set(self.content_focus.is_focused(window));
+            div()
+                .size_full()
+                .child(
+                    div()
+                        .id("content")
+                        .h(px(40.))
+                        .track_focus(&self.content_focus),
+                )
+                .child(
+                    div()
+                        .id("tab")
+                        .h(px(60.))
+                        .context_menu(|menu, _, _| menu.menu("Close", Box::new(RemoveTab))),
+                )
+        }
+    }
+
+    /// The issue shape (#3364): a frame reports one focused accessibility
+    /// node, claimed in prepaint by whichever focused element comes first.
+    /// Moving focus to the menu while prepainting it let the previous focus
+    /// claim the frame first, which aborts debug builds.
+    #[gpui::test]
+    fn menu_takes_focus_before_its_first_frame(cx: &mut TestAppContext) {
+        cx.update(|cx| crate::init(cx));
+        let content_focused_at_render = Rc::new(Cell::new(false));
+        let (root, cx) = cx.add_window_view({
+            let content_focused_at_render = content_focused_at_render.clone();
+            move |window, cx| {
+                let content_focus = cx.focus_handle();
+                content_focus.focus(window, cx);
+                FocusRecordingRoot {
+                    content_focus,
+                    content_focused_at_render,
+                }
+            }
+        });
+        let content_focus = root.read_with(cx, |root, _| root.content_focus.clone());
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+        });
+        assert!(content_focused_at_render.get());
+
+        cx.simulate_mouse_down(
+            point(px(50.), px(70.)),
+            MouseButton::Right,
+            Default::default(),
+        );
+
+        assert!(
+            !content_focused_at_render.get(),
+            "focus must leave the content before the frame that draws the menu"
+        );
+        cx.update(|window, cx| {
+            let focused = window.focused(cx);
+            assert!(focused.is_some() && focused.as_ref() != Some(&content_focus));
+        });
     }
 
     #[gpui::test]

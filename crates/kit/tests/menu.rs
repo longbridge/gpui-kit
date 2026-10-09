@@ -9,8 +9,8 @@ use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, ClipboardItem, Context, Entity, FocusHandle, Focusable as _,
     InputEvent, KeyDownEvent, KeyUpEvent, Keystroke, LongPressEvent, MouseButton, MouseDownEvent,
-    MouseUpEvent, Pixels, Point, TestAppContext, TouchPhase, Window, WindowHandle, actions,
-    base::Root, div, point, prelude::*, px, size,
+    MouseMoveEvent, MouseUpEvent, Pixels, Point, TestAppContext, TouchPhase, Window, WindowHandle,
+    actions, base::Root, div, point, prelude::*, px, size,
 };
 use std::{cell::Cell, rc::Rc, time::Duration};
 
@@ -603,6 +603,78 @@ fn submenu_select_all_uses_the_parent_input_action_target(cx: &mut TestAppContex
         assert_eq!(source.read(cx).value().as_ref(), "alpha\ncopy");
         assert_eq!(other.read(cx).value().as_ref(), "other");
         assert!(source.focus_handle(cx).is_focused(window));
+    })
+    .unwrap();
+}
+
+/// Pointing at another item closes a submenu the keyboard had entered, so the
+/// parent menu must take focus back for its keys to keep working.
+#[gpui_kit::test]
+fn hovering_away_from_a_keyboard_entered_submenu_refocuses_its_parent(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, inputs) = common::open_window(cx, Some(size(px(640.), px(480.))), |window, cx| {
+        cx.new(|cx| ContextMenuInputs {
+            source: cx.new(|cx| TextareaState::new(window, cx).context_menu(false)),
+            other: cx.new(|cx| InputState::new(window, cx)),
+            action_target: None,
+        })
+    });
+    let source_id = inputs.read_with(cx, |inputs, _| ("input", inputs.source.entity_id()));
+    let mut press = Point::default();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        press = window.find(source_id).bounds().center();
+        window.right_click(source_id, cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.press("down", cx);
+        window.press("down", cx);
+        // There is no room on the right, so the submenu opens to the left.
+        window.press("left", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.within("submenu").find("popup-menu").focused(),
+            Some(true)
+        );
+
+        // The menu opens at the press, so its first item lies just below it.
+        let parent = window
+            .find_all("popup-menu")
+            .into_iter()
+            .map(|menu| menu.bounds())
+            .find(|bounds| bounds.contains(&(press + point(px(8.), px(8.)))))
+            .unwrap();
+        let first_item = window
+            .find_all(0usize)
+            .into_iter()
+            .map(|item| item.bounds())
+            .find(|bounds| parent.contains(&bounds.center()))
+            .unwrap();
+        window.dispatch_event(
+            MouseMoveEvent {
+                position: first_item.center(),
+                pressed_button: None,
+                modifiers: Default::default(),
+            }
+            .to_platform_input(),
+            cx,
+        );
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("submenu").is_none());
+        window.press("escape", cx);
+    })
+    .unwrap();
+    cx.run_until_parked();
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("popup-menu").is_none());
     })
     .unwrap();
 }

@@ -1242,6 +1242,15 @@ impl PopupMenu {
             .selected(selected)
             .on_hover(cx.listener(move |this, hovered, window, cx| {
                 if *hovered {
+                    // Pointing elsewhere closes the open submenu; take back
+                    // the focus the keyboard may have moved into it.
+                    if this.selected_index != Some(ix)
+                        && this.active_submenu().is_some_and(|submenu| {
+                            submenu.focus_handle(cx).contains_focused(window, cx)
+                        })
+                    {
+                        this.focus_handle.focus(window, cx);
+                    }
                     this.selected_index = Some(ix);
                 } else if !is_submenu
                     && this.selected_index == Some(ix)
