@@ -1,6 +1,6 @@
 //! Completion workflows through the styled editor, its real popup, and native input.
-//! The popup has no TestWindowExt observation; text, focus, and provider requests
-//! are the public evidence, with acceptance proving that menu actions were routed.
+//! Popup bounds verify caret anchoring; text, focus, and provider requests
+//! verify the workflow, with acceptance proving that menu actions were routed.
 
 use std::{
     cell::{Cell, RefCell},
@@ -10,16 +10,16 @@ use std::{
 };
 
 use gpui_kit::{
-    App, AppContext, Context, Entity, Result, SharedString, Subscription, Task, TestAppContext,
-    Window, WindowHandle,
+    App, AppContext, Bounds, Context, Entity, Keystroke, MouseButton, Pixels, Result, SharedString,
+    Subscription, Task, TestAppContext, Window, WindowHandle,
     component::input::{
         CodeActionProvider, CompletionProvider, Editor, EditorState, Input, InputEvent, InputState,
         Rope, ShowCompletions,
     },
-    div,
+    div, point,
     prelude::*,
     px, size,
-    test::TestWindowExt,
+    test::{TestEventExt, TestWindowExt},
 };
 use lsp_types::{
     CodeAction, CompletionContext, CompletionItem, CompletionResponse, CompletionTextEdit,
@@ -263,6 +263,23 @@ impl Fixture {
         cx.update_window(self.handle.into(), |_, window, cx| window.input(text, cx))
             .unwrap();
         self.settle(cx);
+    }
+
+    fn completion_after_first_frame(&self, text: &str, cx: &mut TestAppContext) -> Bounds<Pixels> {
+        // Dispatch native input without the test helper's automatic draw. The
+        // provider must finish before rendering the updated completion menu.
+        cx.update_window(self.handle.into(), |_, window, cx| {
+            let mut key = Keystroke::parse(text).expect("valid test keystroke");
+            key.key_char = Some(text.into());
+            window.dispatch_keystroke(key, cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        cx.update_window(self.handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.find("completion-menu").bounds()
+        })
+        .unwrap()
     }
 
     fn set_value(&self, value: &str, cx: &mut TestAppContext) {
@@ -657,22 +674,7 @@ fn completion_popup_follows_caret_on_first_frame(cx: &mut TestAppContext) {
         })
         .unwrap();
 
-    // Type a character and render exactly one frame.
-    cx.update_window(fixture.handle.into(), |_, window, cx| {
-        window.input("r", cx);
-    })
-    .unwrap();
-    cx.update_window(fixture.handle.into(), |_, window, cx| {
-        window.render_frame(cx);
-    })
-    .unwrap();
-    cx.run_until_parked();
-
-    let after = cx
-        .update_window(fixture.handle.into(), |_, window, _| {
-            window.find("completion-menu").bounds()
-        })
-        .unwrap();
+    let after = fixture.completion_after_first_frame("r", cx);
 
     assert!(
         after.origin.x > before.origin.x,
@@ -688,7 +690,7 @@ fn completion_popup_follows_caret_on_first_frame(cx: &mut TestAppContext) {
             .read(cx)
             .prepaint_caret_geometry()
             .expect("prepaint stashes caret geometry");
-        geometry.cursor_bounds.origin.x - px(4.)
+        geometry.cursor_bounds().origin.x - px(4.)
     });
     assert!(
         (after.origin.x - expected_x).abs() < px(2.),
@@ -711,7 +713,6 @@ fn ordinary_input_schedules_no_followup_frame(cx: &mut TestAppContext) {
         window.input("hello", cx);
     })
     .unwrap();
-    fixture.settle(cx);
 
     let callbacks = cx
         .update_window(fixture.handle.into(), |_, window, cx| {
@@ -722,6 +723,64 @@ fn ordinary_input_schedules_no_followup_frame(cx: &mut TestAppContext) {
         callbacks, 0,
         "an ordinary input must not schedule a follow-up frame"
     );
+}
+
+struct CaretSuggestions;
+
+impl CompletionProvider for CaretSuggestions {
+    fn completions(
+        &self,
+        _: &Rope,
+        _: usize,
+        _: CompletionContext,
+        _: &mut Window,
+        _: &mut App,
+    ) -> Task<Result<CompletionResponse>> {
+        Task::ready(Ok(CompletionResponse::Array(vec![CompletionItem {
+            label: "print".into(),
+            ..Default::default()
+        }])))
+    }
+
+    fn is_completion_trigger(&self, _: usize, _: &str, _: &mut App) -> bool {
+        true
+    }
+}
+
+#[gpui_kit::test]
+fn completion_popup_anchors_to_wrapped_and_scrolled_caret_on_first_frame(cx: &mut TestAppContext) {
+    for (text, scrolled) in [
+        ("p".repeat(240), false),
+        (format!("{}p", "p\n".repeat(40)), true),
+    ] {
+        let fixture = Fixture::new(cx);
+        fixture.state.update(cx, |state, _| {
+            state.lsp_mut().completion_provider = Some(Rc::new(CaretSuggestions));
+        });
+        fixture.set_value(&text, cx);
+        fixture.select(text.len()..text.len(), cx);
+        fixture.show_completions(cx);
+
+        let popup = fixture.completion_after_first_frame("r", cx);
+        fixture.state.read_with(cx, |state, _| {
+            // Compare with the geometry published by the completed input paint,
+            // independently of the popup's prepaint snapshot.
+            let (caret, line_height) = state.cursor_layout().expect("painted caret");
+            let scroll = state.scroll_offset();
+            assert!(caret.origin.y > state.input_bounds().origin.y + line_height);
+            if scrolled {
+                assert!(
+                    scroll.y < px(0.),
+                    "fixture must exercise vertical scrolling"
+                );
+            }
+            assert!((popup.origin.x - (caret.origin.x - px(4.))).abs() < px(2.));
+            assert!(
+                (popup.origin.y - (caret.origin.y + scroll.y + line_height + px(4.))).abs()
+                    < px(2.)
+            );
+        });
+    }
 }
 
 #[gpui_kit::test]
@@ -1191,6 +1250,32 @@ fn code_action_fixture(cx: &mut TestAppContext, providers: Vec<Rc<Actions>>) -> 
     fixture.press("shift-left", cx);
     fixture.press("shift-left", cx);
     fixture
+}
+
+#[gpui_kit::test]
+fn clicking_beside_code_action_menu_dismisses_it(cx: &mut TestAppContext) {
+    let provider = Actions::new("First action", false);
+    let fixture = code_action_fixture(cx, vec![provider.clone()]);
+    fixture.press(CODE_ACTIONS, cx);
+
+    cx.update_window(fixture.handle.into(), |_, window, cx| {
+        let popup = window.find("code-action-menu").bounds();
+        let outside = point(popup.right() + px(24.), popup.center().y);
+        assert!(
+            outside.x < window.viewport_size().width,
+            "popup {popup:?}, viewport {:?}",
+            window.viewport_size()
+        );
+        window.pointer_down(outside, MouseButton::Left, cx);
+        window.pointer_up(outside, MouseButton::Left, cx);
+        assert!(window.try_find("code-action-menu").is_none());
+    })
+    .unwrap();
+    fixture.settle(cx);
+    fixture.state.read_with(cx, |state, _| {
+        assert!(!state.code_action_menu_state().open);
+    });
+    assert!(provider.performed.borrow().is_empty());
 }
 
 #[gpui_kit::test]

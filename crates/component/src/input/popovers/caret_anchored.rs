@@ -20,8 +20,11 @@ use crate::input::{EditorState, PrepaintCaretGeometry};
 /// coordinates, matching where the caret itself is painted.
 pub(crate) fn caret_popup_anchor(geometry: PrepaintCaretGeometry) -> Point<Pixels> {
     Point::new(
-        geometry.cursor_bounds.origin.x - px(4.),
-        geometry.cursor_bounds.origin.y + geometry.scroll_offset.y + geometry.line_height + px(4.),
+        geometry.cursor_bounds().origin.x - px(4.),
+        geometry.cursor_bounds().origin.y
+            + geometry.scroll_offset().y
+            + geometry.line_height()
+            + px(4.),
     )
 }
 

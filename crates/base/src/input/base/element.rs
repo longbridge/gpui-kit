@@ -2884,12 +2884,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 input_bounds.size.width,
                 last_layout.text_align,
             );
-            PrepaintCaretGeometry {
-                cursor_bounds,
-                line_height,
-                input_bounds,
-                scroll_offset,
-            }
+            PrepaintCaretGeometry::new(cursor_bounds, line_height, input_bounds, scroll_offset)
         });
         self.state.update(cx, |state, _| {
             state.prepaint_caret_geometry = caret_geometry;

@@ -6,6 +6,7 @@ use gpui::{
     Styled, StyledText, Subscription, WeakEntity, Window, deferred, div, prelude::FluentBuilder,
     px, relative,
 };
+use gpui_base::TestSupportExt as _;
 pub(crate) use gpui_base::input::CodeActionItem;
 
 const MAX_MENU_WIDTH: Pixels = px(320.);
@@ -304,9 +305,13 @@ impl Render for CodeActionMenu {
             move |anchor, window, cx| {
                 let max_width = MAX_MENU_WIDTH.min(window.bounds().size.width - anchor.x);
 
+                // A flex root measures to its contents; a block root would
+                // stretch its outside-click hitbox across the viewport.
                 div()
+                    .flex()
                     .child(
                         editor_popover("code-action-menu", cx)
+                            .test_support()
                             .max_w(max_width)
                             .min_w(px(120.))
                             .child(List::new(&list).max_h(MAX_MENU_HEIGHT)),

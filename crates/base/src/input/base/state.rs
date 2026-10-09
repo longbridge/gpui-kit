@@ -347,15 +347,47 @@ struct PasteTarget {
 #[derive(Clone, Copy, Debug)]
 #[doc(hidden)]
 pub struct PrepaintCaretGeometry {
+    cursor_bounds: Bounds<Pixels>,
+    line_height: Pixels,
+    input_bounds: Bounds<Pixels>,
+    scroll_offset: Point<Pixels>,
+}
+
+impl PrepaintCaretGeometry {
+    pub(super) fn new(
+        cursor_bounds: Bounds<Pixels>,
+        line_height: Pixels,
+        input_bounds: Bounds<Pixels>,
+        scroll_offset: Point<Pixels>,
+    ) -> Self {
+        Self {
+            cursor_bounds,
+            line_height,
+            input_bounds,
+            scroll_offset,
+        }
+    }
+
     /// The active caret's bounds from the fresh prepaint layout.
-    pub cursor_bounds: Bounds<Pixels>,
+    pub fn cursor_bounds(&self) -> Bounds<Pixels> {
+        self.cursor_bounds
+    }
+
     /// Line height from the fresh prepaint layout.
-    pub line_height: Pixels,
+    pub fn line_height(&self) -> Pixels {
+        self.line_height
+    }
+
     /// The input container bounds from the fresh prepaint.
-    pub input_bounds: Bounds<Pixels>,
-    /// The scroll offset that will be in effect after paint (clamped like
-    /// `update_scroll_offset` clamps it).
-    pub scroll_offset: Point<Pixels>,
+    pub fn input_bounds(&self) -> Bounds<Pixels> {
+        self.input_bounds
+    }
+
+    /// The scroll offset that will be in effect after paint, clamped like
+    /// `InputBaseState::update_scroll_offset` clamps it.
+    pub fn scroll_offset(&self) -> Point<Pixels> {
+        self.scroll_offset
+    }
 }
 
 /// The shared text-editing engine behind [`crate::input::InputState`],
