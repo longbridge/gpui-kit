@@ -6121,6 +6121,43 @@ mod tests {
         });
     }
 
+    /// Regression test: changing the auto-grow limits keeps the rows fitted to
+    /// the text. `set_auto_grow` used to start over at `min_rows`, and the rows
+    /// were counted again only on the next edit or wrap width change.
+    #[gpui::test]
+    fn test_set_auto_grow_keeps_rows_fitted(cx: &mut TestAppContext) {
+        let mut input = None;
+        let window = cx.open_window(size(px(720.), px(400.)), |window, cx| {
+            cx.set_global(Theme::default());
+            super::super::init(cx);
+            let state = cx.new(|cx| crate::input::TextareaState::new(window, cx).auto_grow(1, 10));
+            input = Some(state.clone());
+            TestRoot(state)
+        });
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let input = input.unwrap();
+
+        let text: String = (1..=8)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        cx.update(|window, cx| {
+            input.update(cx, |state, cx| state.set_value(text, window, cx));
+        });
+        cx.run_until_parked();
+        cx.update(|_, cx| input.read_with(cx, |state, _| assert_eq!(state.mode.rows(), 8)));
+
+        // A larger maximum keeps all eight rows.
+        cx.update(|_, cx| input.update(cx, |state, cx| state.set_auto_grow(1, 12, cx)));
+        cx.run_until_parked();
+        cx.update(|_, cx| input.read_with(cx, |state, _| assert_eq!(state.mode.rows(), 8)));
+
+        // A smaller maximum caps them.
+        cx.update(|_, cx| input.update(cx, |state, cx| state.set_auto_grow(1, 4, cx)));
+        cx.run_until_parked();
+        cx.update(|_, cx| input.read_with(cx, |state, _| assert_eq!(state.mode.rows(), 4)));
+    }
+
     /// Regression test: `scroll_to` at end-of-buffer must produce a deferred
     /// scroll target within the safe scroll range, so the painted frame
     /// matches what `update_scroll_offset` persists (no jitter). A small
@@ -10993,6 +11030,7 @@ impl InputBaseState<crate::input::TextareaMode> {
 
     pub fn set_auto_grow(&mut self, min_rows: usize, max_rows: usize, cx: &mut Context<Self>) {
         self.mode = LayoutMode::auto_grow(min_rows, max_rows.max(min_rows));
+        self.mode.update_auto_grow(&self.display_map);
         cx.notify();
     }
 
