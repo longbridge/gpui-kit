@@ -326,6 +326,16 @@ Input:
     zh-CN: 显示代码操作
     zh-HK: 顯示代碼操作
     zh-TW: 顯示程式碼動作
+  Show Password:
+    en: Show password
+    zh-CN: 显示密码
+    zh-HK: 顯示密碼
+    zh-TW: 顯示密碼
+  Hide Password:
+    en: Hide password
+    zh-CN: 隐藏密码
+    zh-HK: 隱藏密碼
+    zh-TW: 隱藏密碼
 Settings:
   search_placeholder:
     en: Search...
@@ -339,6 +349,17 @@ Settings:
     zh-HK: 重置全部
     zh-TW: 全部重設
     it: Resetta Tutto
+Sidebar:
+  Expand:
+    en: Expand %{name}
+    zh-CN: 展开 %{name}
+    zh-HK: 展開 %{name}
+    zh-TW: 展開 %{name}
+  Collapse:
+    en: Collapse %{name}
+    zh-CN: 收起 %{name}
+    zh-HK: 收起 %{name}
+    zh-TW: 收合 %{name}
 Pagination:
   previous:
     en: Previous

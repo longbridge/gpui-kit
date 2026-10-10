@@ -45,7 +45,12 @@ impl Render for Inputs {
                     .disabled(self.disabled)
                     .readonly(self.readonly),
             )
-            .child(Input::new(&self.secret).id("secret").w(px(240.)))
+            .child(
+                Input::new(&self.secret)
+                    .id("secret")
+                    .mask_toggle()
+                    .w(px(240.)),
+            )
     }
 }
 fn inputs(cx: &mut TestAppContext) -> (WindowHandle<gpui_kit::base::Root>, Entity<Inputs>) {
@@ -123,6 +128,24 @@ fn masked_input_handles_typing_without_reporting_secret_value(cx: &mut TestAppCo
     .unwrap();
     common::update_content(handle, &handle_content, cx, |view, _, cx| {
         assert_eq!(view.secret.read(cx).value(), "secret")
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
+fn mask_toggle_is_named_for_the_action_it_takes(cx: &mut TestAppContext) {
+    let (handle, _) = inputs(cx);
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.draw(cx).clear(cx);
+        assert_eq!(
+            window.within("secret").find("toggle-mask").label(),
+            Some("Show password")
+        );
+        window.within("secret").click("toggle-mask", cx);
+        assert_eq!(
+            window.within("secret").find("toggle-mask").label(),
+            Some("Hide password")
+        );
     })
     .unwrap();
 }
