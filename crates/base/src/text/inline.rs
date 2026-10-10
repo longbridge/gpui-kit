@@ -992,9 +992,16 @@ impl Element for Inline {
             window.set_cursor_style(CursorStyle::IBeam, &hitbox);
         }
 
-        // link cursor pointer
-        let hovered_link =
-            Self::link_range_for_position(&text_layout, &self.links, window.mouse_position());
+        // link cursor pointer. Only text under the pointer reads where the pointer
+        // is: under GPUI's retained views, reading it makes the text depend on
+        // every pointer move, so a transcript of markdown would be drawn again
+        // whenever the pointer moved anywhere.
+        let hovered_link = hitbox
+            .is_hovered(window)
+            .then(|| {
+                Self::link_range_for_position(&text_layout, &self.links, window.mouse_position())
+            })
+            .flatten();
         if hovered_link.is_some() {
             window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
         }
