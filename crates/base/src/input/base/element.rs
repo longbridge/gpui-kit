@@ -21,7 +21,7 @@ use crate::{
 };
 
 use super::{
-    InputBaseState, RangeDecorationStyle, TextDecoration,
+    InputBaseState, PrepaintCaretGeometry, RangeDecorationStyle, TextDecoration,
     layout::{LastLayout, WhitespaceIndicators},
     mode::LayoutMode,
 };
@@ -2861,6 +2861,34 @@ impl<M: InputModeKind> Element for TextElement<M> {
             .iter()
             .find(|info| info.is_active)
             .map(|info| info.bounds);
+
+        // Stash the fresh caret geometry for caret-anchored popups. Their
+        // deferred prepaint runs after this prepaint but before paint, so
+        // they anchor to the current frame's caret instead of the previous
+        // frame's. Only the positioning geometry is stashed here; the rest
+        // of the paint-time state updates stay where they are.
+        let caret_geometry = last_layout.cursor_bounds.map(|cursor_bounds| {
+            let mut scroll_offset = cursor_scroll_offset;
+            // Mirror update_scroll_offset's clamping with the fresh values,
+            // so the stash matches what paint will publish.
+            let state = self.state.read(cx);
+            let safe_y_range = (-scroll_size.height + input_bounds.size.height).min(px(0.))..px(0.);
+            scroll_offset.y = if state.is_single_line() {
+                px(0.)
+            } else {
+                scroll_offset.y.clamp(safe_y_range.start, safe_y_range.end)
+            };
+            scroll_offset.x = clamp_horizontal_scroll_offset(
+                scroll_offset.x,
+                scroll_size.width,
+                input_bounds.size.width,
+                last_layout.text_align,
+            );
+            PrepaintCaretGeometry::new(cursor_bounds, line_height, input_bounds, scroll_offset)
+        });
+        self.state.update(cx, |state, _| {
+            state.prepaint_caret_geometry = caret_geometry;
+        });
 
         let search_match_paths = self.layout_search_matches(&last_layout, &mut bounds, cx);
         let selection_paths = self.layout_selections(&last_layout, &mut bounds, window, cx);

@@ -2,10 +2,11 @@ use std::rc::Rc;
 
 use gpui::{
     Action, AnyElement, App, AppContext, Context, DismissEvent, Empty, Entity, EventEmitter,
-    Half as _, InteractiveElement as _, IntoElement, ParentElement, Pixels, Point, Render,
-    RenderOnce, Styled, StyledText, Subscription, WeakEntity, Window, deferred, div,
-    prelude::FluentBuilder, px, relative,
+    Half as _, InteractiveElement as _, IntoElement, ParentElement, Pixels, Render, RenderOnce,
+    Styled, StyledText, Subscription, WeakEntity, Window, deferred, div, prelude::FluentBuilder,
+    px, relative,
 };
+use gpui_base::TestSupportExt as _;
 pub(crate) use gpui_base::input::CodeActionItem;
 
 const MAX_MENU_WIDTH: Pixels = px(320.);
@@ -13,7 +14,10 @@ const MAX_MENU_HEIGHT: Pixels = px(480.);
 
 use crate::{
     ActiveTheme, IndexPath, Selectable, actions, h_flex,
-    input::{self, EditorState, popovers::editor_popover},
+    input::{
+        self, EditorState,
+        popovers::{CaretAnchoredPopup, editor_popover},
+    },
     list::{List, ListDelegate, ListEvent, ListState},
 };
 
@@ -278,26 +282,10 @@ impl CodeActionMenu {
 
         cx.notify();
     }
-
-    fn origin(&self, cx: &App) -> Option<Point<Pixels>> {
-        let state = self.state.upgrade()?;
-        let state = state.read(cx);
-        let Some((cursor_bounds, line_height)) = state.cursor_layout() else {
-            return None;
-        };
-        let cursor_origin = cursor_bounds.origin;
-
-        let scroll_origin = state.scroll_offset();
-
-        Some(
-            scroll_origin + cursor_origin - state.input_bounds().origin
-                + Point::new(-px(4.), line_height + px(4.)),
-        )
-    }
 }
 
 impl Render for CodeActionMenu {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !self.open {
             return Empty.into_any_element();
         }
@@ -307,24 +295,38 @@ impl Render for CodeActionMenu {
             return Empty.into_any_element();
         }
 
-        let Some(pos) = self.origin(cx) else {
-            return Empty.into_any_element();
-        };
+        // The anchor is resolved in the popup's deferred prepaint from the
+        // input's current-frame geometry; the content below is built there.
+        let list = self.list.clone();
+        let menu = cx.weak_entity();
 
-        let max_width = MAX_MENU_WIDTH.min(window.bounds().size.width - pos.x);
+        deferred(CaretAnchoredPopup::new(
+            self.state.clone(),
+            move |anchor, window, cx| {
+                let max_width = MAX_MENU_WIDTH.min(window.bounds().size.width - anchor.x);
 
-        deferred(
-            editor_popover("code-action-menu", cx)
-                .absolute()
-                .left(pos.x)
-                .top(pos.y)
-                .max_w(max_width)
-                .min_w(px(120.))
-                .child(List::new(&self.list).max_h(MAX_MENU_HEIGHT))
-                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                    this.hide(cx);
-                })),
-        )
+                // A flex root measures to its contents; a block root would
+                // stretch its outside-click hitbox across the viewport.
+                div()
+                    .flex()
+                    .child(
+                        editor_popover("code-action-menu", cx)
+                            .test_support()
+                            .max_w(max_width)
+                            .min_w(px(120.))
+                            .child(List::new(&list).max_h(MAX_MENU_HEIGHT)),
+                    )
+                    .on_mouse_down_out({
+                        let menu = menu.clone();
+                        move |_, _, cx: &mut App| {
+                            if let Some(menu) = menu.upgrade() {
+                                menu.update(cx, |menu, cx| menu.hide(cx));
+                            }
+                        }
+                    })
+                    .into_any_element()
+            },
+        ))
         .into_any_element()
     }
 }
