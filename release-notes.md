@@ -1,15 +1,35 @@
 # Release Notes
 
+Feature notes accumulate under **Pending Updates** until a release ships
+them, then move under the version that first carried them. The GitHub
+Releases carry the full per-release notes.
+
 ## Pending Updates
 
-### 0.7.0 (unreleased)
+### Unreleased
 
-#### Root owns window overlays
+#### Added: standalone `resize_handle`
 
-`gpui_component::Root` now always mounts the dialog, sheet and notification
-layers above application content. Opening a dialog, sheet or notification no
-longer depends on the application's view rendering its layer. Notifications use
-the Root's full bounds, and cached content does not duplicate or suppress layers.
+```rust
+pub fn resize_handle<T, E: Render>(id: impl Into<ElementId>, axis: Axis) -> ResizeHandle<T, E> // gpui_base: the band
+pub fn resize_handle<T, E: Render>(id: impl Into<ElementId>, axis: Axis) -> ResizeHandle<T, E> // gpui_component: with the divider appearance
+impl InteractiveElement for ResizeHandle<T, E>
+impl StatefulInteractiveElement for ResizeHandle<T, E>
+impl InteractiveElementExt for ResizeHandle<T, E>
+```
+
+The handle `h_resizable` and the Dock put on their dividers can now edge
+anything else, such as an application's own sidebar. It keeps the band, the
+cursor and the hovered / pressed / dragging indicator; what a drag resizes is
+the caller's, through the handle's own `on_drag` and `on_drag_move`, and any
+other listener — `on_hover`, `on_double_click` — goes on the handle the usual
+way. The drag carries the `T` itself rather than an `Rc<T>`, so
+`on_drag_move::<T>` follows it, and the `on_drag` constructor is handed a `&T`
+the way GPUI's own `on_drag` is.
+
+## Released
+
+### 0.7.1 (2026-10-05)
 
 #### Questionnaire: choosing a single answer confirms the item
 
@@ -31,61 +51,6 @@ choosing the already selected answer confirms at once. Arrow keys still move
 the selection without confirming, multiple-choice items still only toggle, and
 freeform input is unchanged. `QuestionnaireState::choose` is the new activation
 path; `activate_choice` keeps changing the answer without confirming.
-
-#### Added: `SettingGroup::variant`
-
-```rust
-pub fn variant(self, variant: GroupBoxVariant) -> Self
-```
-
-Overrides, for one group, the variant that `Settings::with_group_variant`
-applies to every group. Use it when a single page should present its items
-directly — `GroupBoxVariant::Normal` removes the card surface the global
-default draws — while the other pages keep the global variant.
-
-#### Added: standalone `resize_handle`
-
-```rust
-pub fn resize_handle<T, E: Render>(id: impl Into<ElementId>, axis: Axis) -> ResizeHandle<T, E> // gpui_base: the band
-pub fn resize_handle<T, E: Render>(id: impl Into<ElementId>, axis: Axis) -> ResizeHandle<T, E> // gpui_component: with the divider appearance
-impl InteractiveElement for ResizeHandle<T, E>
-impl StatefulInteractiveElement for ResizeHandle<T, E>
-impl InteractiveElementExt for ResizeHandle<T, E>
-```
-
-The handle `h_resizable` and the Dock put on their dividers can now edge
-anything else, such as an application's own sidebar. It keeps the band, the
-cursor and the hovered / pressed / dragging indicator; what a drag resizes is
-the caller's, through the handle's own `on_drag` and `on_drag_move`, and any
-other listener — `on_hover`, `on_double_click` — goes on the handle the usual
-way. The drag carries the `T` itself rather than an `Rc<T>`, so
-`on_drag_move::<T>` follows it, and the `on_drag` constructor is handed a `&T`
-the way GPUI's own `on_drag` is.
-
-#### Plot moves to `gpui-base`
-
-The chart primitives — scales, shapes, `PlotAxis`, `Grid`, `PlotLabel`,
-`PathCaches`, the `Plot` trait and hover tracking — now live in
-`gpui_base::plot`, so a design system built on `gpui-base` alone can draw charts
-without depending on `gpui-component`. `gpui_component::plot` re-exports them,
-so existing import paths such as `gpui_kit::component::plot::scale::ScaleLinear`
-keep working; the API itself is tidied for 0.7.0 (see Breaking changes).
-
-```rust
-pub struct PlotElement<P>        // gpui_base::plot: the element behind every Plot
-pub fn hover_progress(window: &mut Window, cx: &mut App) -> f32
-pub fn is_hover_entering(window: &mut Window, cx: &mut App) -> bool
-pub fn pointer_spring(cx: &App) -> Spring
-pub struct PlotMotion            // pointer spring and hover enter/exit transitions
-pub struct PlotTheme             // gpui_base::Theme::plot, carrying PlotMotion
-```
-
-A hand-written plot becomes an element with
-`impl IntoElement for MyPlot { type Element = PlotElement<Self>; … }`;
-`#[derive(IntoPlot)]` now generates exactly that. Base plot motion is
-motionless by default, and `gpui-component` projects its motion tokens onto
-`gpui_base::Theme::plot` whenever its theme is applied. The `decimal` feature
-moves to `gpui-base`; `gpui-component`'s `decimal` feature forwards to it.
 
 #### Added: chart appear motion
 
@@ -126,6 +91,51 @@ before: `Plot::interactive` is `true`, and without an `appear_generation` a plot
 tracks no appear and asks for no frames. A chart with `interactive(false)` now
 returns its id from `Plot::id`, keeping its appear and path caches but still no
 hitbox.
+
+### 0.7.0 (2026-09-28)
+
+#### Root owns window overlays
+
+`gpui_component::Root` now always mounts the dialog, sheet and notification
+layers above application content. Opening a dialog, sheet or notification no
+longer depends on the application's view rendering its layer. Notifications use
+the Root's full bounds, and cached content does not duplicate or suppress layers.
+
+#### Added: `SettingGroup::variant`
+
+```rust
+pub fn variant(self, variant: GroupBoxVariant) -> Self
+```
+
+Overrides, for one group, the variant that `Settings::with_group_variant`
+applies to every group. Use it when a single page should present its items
+directly — `GroupBoxVariant::Normal` removes the card surface the global
+default draws — while the other pages keep the global variant.
+
+#### Plot moves to `gpui-base`
+
+The chart primitives — scales, shapes, `PlotAxis`, `Grid`, `PlotLabel`,
+`PathCaches`, the `Plot` trait and hover tracking — now live in
+`gpui_base::plot`, so a design system built on `gpui-base` alone can draw charts
+without depending on `gpui-component`. `gpui_component::plot` re-exports them,
+so existing import paths such as `gpui_kit::component::plot::scale::ScaleLinear`
+keep working; the API itself is tidied for 0.7.0 (see Breaking changes).
+
+```rust
+pub struct PlotElement<P>        // gpui_base::plot: the element behind every Plot
+pub fn hover_progress(window: &mut Window, cx: &mut App) -> f32
+pub fn is_hover_entering(window: &mut Window, cx: &mut App) -> bool
+pub fn pointer_spring(cx: &App) -> Spring
+pub struct PlotMotion            // pointer spring and hover enter/exit transitions
+pub struct PlotTheme             // gpui_base::Theme::plot, carrying PlotMotion
+```
+
+A hand-written plot becomes an element with
+`impl IntoElement for MyPlot { type Element = PlotElement<Self>; … }`;
+`#[derive(IntoPlot)]` now generates exactly that. Base plot motion is
+motionless by default, and `gpui-component` projects its motion tokens onto
+`gpui_base::Theme::plot` whenever its theme is applied. The `decimal` feature
+moves to `gpui-base`; `gpui-component`'s `decimal` feature forwards to it.
 
 #### Breaking changes
 
