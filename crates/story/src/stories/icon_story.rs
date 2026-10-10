@@ -1,5 +1,5 @@
 use gpui_kit::component::{
-    ActiveTheme as _, Icon, IconName, Sizable,
+    ActiveTheme as _, Icon, IconName, Sizable, SvgIcon,
     button::{Button, ButtonVariant, ButtonVariants},
     dock::PanelControl,
     h_flex,
@@ -81,6 +81,26 @@ impl Render for IconStory {
         v_flex()
             .items_center()
             .gap_6()
+            .child(
+                section("Embedded catalog icons")
+                    .description("Use catalog icons directly without a selection list or extra asset source.")
+                    .w(gpui_kit::rems(30.))
+                    .child(
+                        h_flex()
+                            .gap_4()
+                            .child(SvgIcon::ACCESSIBILITY)
+                            .child(Icon::new(SvgIcon::ALARM_CLOCK).large().text_color(cx.theme().primary))
+                            .child(
+                                Button::new("catalog-alarm")
+                                    .icon(SvgIcon::ALARM_CLOCK)
+                                    .label("Set alarm")
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.message = "Alarm selected from the button.";
+                                        cx.notify();
+                                    })),
+                            ),
+                    ),
+            )
             .child(
                 section("SVG bytes")
                     .description(

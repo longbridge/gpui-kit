@@ -70,6 +70,31 @@ fn main() {
         writeln!(code, "pub const {variant}: (&str, &[u8]) = ({path:?}, include_bytes!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/assets/{path}\")));").unwrap();
     }
     code.push_str("}\n");
+    // Expand constants in Component without making Assets depend on its Icon type.
+    code.push_str(concat!(
+        "/// Internal SVG catalog macro exclusively for `gpui-component`.\n",
+        "/// Not a supported extension point; may change without notice.\n",
+        "#[doc(hidden)]\n#[macro_export]\n",
+        "macro_rules! __component_svg_icons {\n    ($icon:ty) => { impl $icon {\n",
+    ));
+    let mut constants = BTreeSet::new();
+    for (variant, path) in &icons {
+        let stem = path
+            .strip_prefix("icons/")
+            .unwrap()
+            .strip_suffix(".svg")
+            .unwrap();
+        let name = stem.replace(['-', '.'], "_").to_ascii_uppercase();
+        assert!(
+            constants.insert(name.clone()),
+            "duplicate SVG constant: {name}"
+        );
+        writeln!(
+            code,
+            "        #[doc = {path:?}]\n        pub const {name}: Self = Self::new($crate::__private::{variant}.1);"
+        ).unwrap();
+    }
+    code.push_str("    } };\n}\n");
     let default_paths: BTreeSet<_> = fs::read_to_string("default-icons.txt")
         .expect("default component icon list")
         .lines()

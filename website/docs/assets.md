@@ -102,6 +102,49 @@ fn main() {
 
 `with_assets` installs one application-wide source. `gpui_kit::init(cx)` initializes the component layer before the window is constructed. `IconName::Inbox` resolves to `icons/inbox.svg`; GPUI passes that exact path to the source. Merely adding the crate dependency does not register a source. See [Getting Started](./getting-started.md) for the full application setup.
 
+## Use independently embedded icons
+
+For catalog icons selected directly in Rust, use `gpui_kit::component::SvgIcon`:
+
+```rust
+use gpui_kit::component::{Icon, SvgIcon, button::Button};
+
+Icon::new(SvgIcon::ACCESSIBILITY);
+Button::new("alarm").icon(SvgIcon::ALARM_CLOCK).label("Set alarm");
+
+let icon = if expanded {
+    SvgIcon::CHEVRON_DOWN
+} else {
+    SvgIcon::CHEVRON_RIGHT
+};
+Icon::new(icon);
+```
+
+`SvgIcon` is a small, copyable value containing static SVG bytes. Its constants
+cover the same catalog as `assets::IconName`, using uppercase names with
+underscores: `AlarmClock` becomes `ALARM_CLOCK`, and `CircleArrowOutUpRight`
+becomes `CIRCLE_ARROW_OUT_UP_RIGHT`. It also supports direct `.child(...)` use
+and `.view(cx)`. Customize size and color through `Icon::new(...)` as usual.
+`SvgIcon::new(include_bytes!("logo.svg"))` wraps a custom embedded SVG, and
+`.bytes()` returns its original bytes.
+
+Each constant references only its own SVG. There is no selection list to keep
+in sync with use sites, no runtime catalog lookup, and no `ALL` array retaining
+the whole catalog. Optimized builds can omit unreferenced SVGs; resources still
+referenced by another asset source or collection remain included. The downloaded
+crate and intermediate build artifacts still contain the catalog.
+
+These icons do not need an `AssetSource`. Keep the default `Assets` registration
+for components' internal path-based icons. Both existing `IconName` enums,
+`AllAssets`, and `icon_assets!` remain available. On WASM, `SvgIcon` embeds its
+selected bytes in the module; use the existing path sources for CDN loading.
+
+This is not a zero-copy rendering API: conversion currently copies the bytes
+through `Icon::data`, and building the underlying GPUI `Svg` copies them again
+and prepares its content cache key. Parsing and rasterization use GPUI's normal
+render cache. Independent resource selection does not require an upstream SVG
+API change.
+
 ## Pick additional catalog icons with `icon_assets!`
 
 If an app already depends on `gpui-kit`, use `gpui_kit::assets::icon_assets!`; its default `assets` feature exposes the macro and the shared catalog. **Do not add a second `gpui-kit-assets` dependency just to use it.** A crate that intentionally uses the asset layer without the umbrella can depend on `gpui-kit-assets` directly and call `gpui_kit_assets::icon_assets!` instead.

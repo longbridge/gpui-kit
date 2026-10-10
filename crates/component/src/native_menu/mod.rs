@@ -513,5 +513,14 @@ mod tests {
                 .expect("a later path should replace the data source");
             assert_eq!(image.bytes, ASSET_SVG);
         }
+
+        #[test]
+        fn test_native_menu_embedded_catalog_icon_needs_no_asset_source() {
+            let icon = Icon::new(crate::SvgIcon::ALARM_CLOCK);
+            let image = resolve_icon_image(&icon, &TestAssetSource(None))
+                .expect("embedded catalog icon should resolve without an asset source");
+            assert_eq!(image.format, ImageFormat::Svg);
+            assert_eq!(image.bytes, crate::SvgIcon::ALARM_CLOCK.bytes());
+        }
     }
 }
