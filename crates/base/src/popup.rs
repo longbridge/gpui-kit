@@ -140,6 +140,9 @@ impl RenderOnce for Popup {
             offset,
         )));
 
+        // A closed popup places nothing: it notes its trigger's bounds, for when
+        // it opens, without asking for another frame.
+        let has_content = self.content.is_some();
         let root = self
             .base
             .child(self.trigger)
@@ -158,7 +161,7 @@ impl RenderOnce for Popup {
                                 state.captured = true;
                                 first
                             });
-                            if first {
+                            if first && has_content {
                                 window.request_animation_frame();
                             }
                         }
@@ -305,6 +308,62 @@ mod tests {
             gpui::Modifiers::default(),
         );
         assert!(background_hovered.get());
+    }
+
+    /// A popup that may open later, rendering is counted.
+    struct ClosedHarness {
+        open: bool,
+        renders: Rc<Cell<usize>>,
+    }
+
+    impl Render for ClosedHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            self.renders.set(self.renders.get() + 1);
+            let popup = Popup::new(
+                "popup",
+                div()
+                    .debug_selector(|| "popup-trigger".into())
+                    .size(px(100.)),
+            );
+            if self.open {
+                popup.content(
+                    div()
+                        .debug_selector(|| "popup-content".into())
+                        .size(px(20.)),
+                )
+            } else {
+                popup
+            }
+        }
+    }
+
+    /// A closed popup notes its trigger's bounds without asking for another
+    /// frame: a list of rows holding closed popups is not drawn again for
+    /// each row that shows. Opened, it places its content at once.
+    #[gpui::test]
+    fn a_closed_popup_asks_for_no_frame_and_opens_at_once(cx: &mut gpui::TestAppContext) {
+        let renders = Rc::new(Cell::new(0));
+        let (view, window) = cx.add_window_view({
+            let renders = renders.clone();
+            move |_, _| ClosedHarness {
+                open: false,
+                renders,
+            }
+        });
+        window.update(|window, cx| window.draw(cx).clear(cx));
+        cx.run_until_parked();
+        window.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(renders.get(), 1, "no frame was asked for");
+
+        view.update(window, |harness, cx| {
+            harness.open = true;
+            cx.notify();
+        });
+        window.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(
+            window.debug_bounds("popup-content").unwrap().size,
+            gpui::Size::new(px(20.), px(20.))
+        );
     }
 
     #[gpui::test]
