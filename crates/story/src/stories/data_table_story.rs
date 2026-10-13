@@ -57,6 +57,7 @@ enum ToggleTableOption {
     RowHeader,
     FixedColumn,
     Striped,
+    RowHover,
     Loading,
     LazyLoad,
     RefreshData,
@@ -900,6 +901,7 @@ impl TableDelegate for StockTableDelegate {
 pub struct DataTableStory {
     table: Entity<TableState<StockTableDelegate>>,
     stripe: bool,
+    row_hover: bool,
     refresh_data: bool,
     size: Size,
     header_row_height: Option<Pixels>,
@@ -983,6 +985,7 @@ impl DataTableStory {
         Self {
             table,
             stripe: false,
+            row_hover: true,
             refresh_data: false,
             size: Size::default(),
             header_row_height: None,
@@ -1057,6 +1060,11 @@ impl DataTableStory {
 
     fn toggle_stripe(&mut self, checked: &bool, _: &mut Window, cx: &mut Context<Self>) {
         self.stripe = *checked;
+        cx.notify();
+    }
+
+    fn toggle_row_hover(&mut self, checked: &bool, _: &mut Window, cx: &mut Context<Self>) {
+        self.row_hover = *checked;
         cx.notify();
     }
 
@@ -1200,6 +1208,7 @@ impl Render for DataTableStory {
         let row_header = table.row_header;
         let col_fixed = table.col_fixed;
         let striped = self.stripe;
+        let row_hover = self.row_hover;
         let full_loading = delegate.full_loading;
         let lazy_load = delegate.lazy_load;
         let refresh_data = self.refresh_data;
@@ -1296,6 +1305,9 @@ impl Render for DataTableStory {
                     }
                     ToggleTableOption::Striped => {
                         this.toggle_stripe(&!this.stripe, window, cx);
+                    }
+                    ToggleTableOption::RowHover => {
+                        this.toggle_row_hover(&!this.row_hover, window, cx);
                     }
                     ToggleTableOption::Loading => {
                         this.table.update(cx, |table, cx| {
@@ -1491,6 +1503,11 @@ impl Render for DataTableStory {
                                 Box::new(ToggleTableOption::Striped),
                             )
                             .menu_with_check(
+                                "Row Hover",
+                                row_hover,
+                                Box::new(ToggleTableOption::RowHover),
+                            )
+                            .menu_with_check(
                                 "Loading",
                                 full_loading,
                                 Box::new(ToggleTableOption::Loading),
@@ -1537,7 +1554,8 @@ impl Render for DataTableStory {
                             .when_some(self.header_row_height, |this, height| {
                                 this.header_row_height(height)
                             })
-                            .stripe(self.stripe),
+                            .stripe(self.stripe)
+                            .row_hover(self.row_hover),
                     )
                     .child(
                         h_flex()

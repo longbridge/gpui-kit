@@ -2085,7 +2085,10 @@ where
                 .when(is_stripe_row, |this| this.bg(cx.theme().tokens.table_even))
                 .refine_style(&style)
                 .hover(|this| {
-                    if is_selected || self.right_clicked_row == Some(row_ix) {
+                    if !self.options.row_hover
+                        || is_selected
+                        || self.right_clicked_row == Some(row_ix)
+                    {
                         this
                     } else {
                         this.bg(cx.theme().tokens.table_hover)

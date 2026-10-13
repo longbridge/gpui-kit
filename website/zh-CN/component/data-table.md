@@ -361,6 +361,7 @@ DataTable::new(&state)
     .header_row_height(px(48.))
     .stripe(true)
     .bordered(true)
+    .row_hover(false)               // 行悬停时不铺底色
     .scrollbar_visible(true, true)
 ```
 

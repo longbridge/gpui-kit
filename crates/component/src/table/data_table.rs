@@ -35,6 +35,8 @@ pub(super) struct TableOptions {
     pub(super) stripe: bool,
     /// Set to use border style of the table.
     pub(super) bordered: bool,
+    /// Whether a hovered row paints the table hover background.
+    pub(super) row_hover: bool,
     /// The cell size of the table.
     pub(super) size: Size,
     /// Height of each header row. `None` uses [`Size::table_row_height`].
@@ -47,6 +49,7 @@ impl Default for TableOptions {
             scrollbar_visible: Edges::all(true),
             stripe: false,
             bordered: true,
+            row_hover: true,
             size: Size::default(),
             header_row_height: None,
         }
@@ -117,6 +120,14 @@ where
     /// Set to use border style of the table, default to true.
     pub fn bordered(mut self, bordered: bool) -> Self {
         self.options.bordered = bordered;
+        self
+    }
+
+    /// Set whether a hovered row paints the table hover background, default to true.
+    ///
+    /// Selected-row background and the right-click outline stay either way.
+    pub fn row_hover(mut self, row_hover: bool) -> Self {
+        self.options.row_hover = row_hover;
         self
     }
 

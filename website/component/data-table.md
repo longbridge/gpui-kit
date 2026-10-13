@@ -454,6 +454,7 @@ DataTable::new(&state)
     .header_row_height(px(48.))     // Taller header rows
     .stripe(true)                   // Alternating row colors
     .bordered(true)                 // Border around table
+    .row_hover(false)               // No hover background on rows
     .scrollbar_visible(true, true)  // Vertical, horizontal scrollbars
 ```
 
