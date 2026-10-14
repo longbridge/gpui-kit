@@ -793,6 +793,14 @@ impl<M: InputModeKind> InputBaseState<M> {
     /// Text edits use the cached wrapping parameters. Layout refreshes the
     /// cache after width or font changes; consume that count on a subsequent
     /// render, or use [`Self::prewrap`] to prepare it before the first layout.
+    ///
+    /// The map covers the whole buffer, including lines outside the viewport,
+    /// and the state owns all updates. Use [`DisplayMap::version`] to
+    /// invalidate cached mappings after edits, rewrapping, or folding changes.
+    ///
+    /// Display coordinates describe text after wrapping and folding. They do
+    /// not include inline completion ghost lines; use [`Self::row_bounds`] for
+    /// the actual painted geometry of a visible buffer line.
     pub fn display_map(&self) -> &DisplayMap {
         &self.display_map
     }

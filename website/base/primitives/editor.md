@@ -130,6 +130,16 @@ Read the configuration with `gutter_marker_renderer()`, `gutter_marker_size()`
 and `gutter_marker_gap()`. Pass `None` to `with_gutter_marker_renderer` to disable
 markers. Existing style fields keep their direct-access API.
 
+## Display map
+
+`EditorState::display_map()` returns a read-only `&DisplayMap` for custom coordinate
+queries across the whole prepared buffer. The editor owns updates; use
+`DisplayMap::version()` to invalidate cached mappings after edits, rewrapping, or
+fold changes. Import `DisplayMap`, `BufferPoint`, and `DisplayPoint` from
+`gpui_kit::base::input`. See the [Editor](../../component/editor.md#line-decorations)
+for query examples, layout timing, and the distinction between text projection
+and painted geometry with inline completion ghost lines.
+
 ## Highlighting and language features
 
 `InputHighlighterFactory`, `InputHighlighter`, diagnostic types, and the LSP

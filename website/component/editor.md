@@ -536,6 +536,39 @@ where it is painted: below a multi-line inline completion, rows move down with t
 text. It returns `None` while the row is not laid out. The **Decorations** tab of the Editor showcase
 marks its last three rows with a provider.
 
+`EditorState::display_map()` returns `&DisplayMap`, a read-only reference to the
+editor-owned text projection. `DisplayMap`, `BufferPoint`, and `DisplayPoint` are
+available from both `gpui_kit::base::input` and `gpui_kit::component::input`.
+The editor state owns updates; applications can query the map to build custom
+minimaps, synchronized views, or buffer/display coordinate conversions.
+
+```rust
+use gpui_kit::base::input::BufferPoint;
+
+let state = editor.read(cx);
+let map = state.display_map();
+let count = map.display_row_count();
+let rows = map.buffer_line_to_display_row_range(0); // None for a folded line
+let display = map.buffer_pos_to_display_pos(BufferPoint::new(0, 0));
+let buffer = map.display_pos_to_buffer_pos(display);
+let version = map.version();
+```
+
+The map covers the whole prepared text, including lines outside the viewport.
+Wrapping follows the latest prepared layout parameters; before text preparation,
+the map has no display rows. `map.version()` changes on edits, rewrapping, and
+fold changes. Compare versions on the same map to invalidate cached queries;
+scrolling does not change the version.
+
+The map excludes inline completion ghost lines. Display row indices multiplied
+by the line height describe text projection positions, not necessarily painted
+positions: multi-line inline completion shifts later text down without changing
+the map or its version. Use `row_bounds` for actual geometry of visible lines.
+
+Buffer and display indices are zero-based. A buffer line hidden by a fold has
+no display-row range (`None`); use the coordinate conversion methods for
+buffer/display positions.
+
 ## Value and events
 
 ```rust

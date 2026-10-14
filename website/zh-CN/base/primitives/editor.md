@@ -92,6 +92,14 @@ let style = InputEditorStyle::default()
 通过 `gutter_marker_renderer()`、`gutter_marker_size()` 和 `gutter_marker_gap()` 读取配置，
 向 `with_gutter_marker_renderer` 传入 `None` 可停用标记。既有样式字段仍可直接读写。
 
+## 显示映射
+
+`EditorState::display_map()` 返回只读的 `&DisplayMap`，供应用查询整个已准备缓冲区的坐标映射。
+编辑器负责更新；使用 `DisplayMap::version()` 判断编辑、重新换行或折叠变化后是否需要重新查询。
+从 `gpui_kit::base::input` 导入 `DisplayMap`、`BufferPoint` 和 `DisplayPoint`。
+查询示例、布局时机，以及文本映射与包含内联补全额外行的实际绘制坐标之间的区别，参见
+[Editor](../../component/editor.md#行装饰)。
+
 ## 高亮与语言功能
 
 `InputHighlighterFactory`、`InputHighlighter`、诊断类型和 LSP provider trait 是提供给设计系统作者的底层扩展点，作用于共享的 `InputBaseState`。样式组件的应用通常应通过编辑器集成配置它们，而不是普通文本框。

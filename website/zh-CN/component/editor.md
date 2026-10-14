@@ -437,6 +437,33 @@ info 颜色；`GutterMarker::Custom { icon, color }` 按原样绘制给定的图
 文字一起下移。该行尚未布局时返回 `None`。
 Editor 展示页的 **Decorations** 标签用 provider 标记了最后三行。
 
+`EditorState::display_map()` 返回 `&DisplayMap`，供应用只读查询编辑器拥有的文本映射。
+`DisplayMap`、`BufferPoint` 和 `DisplayPoint` 均可从 `gpui_kit::base::input` 或
+`gpui_kit::component::input` 导入。编辑器状态负责更新映射；应用可以用它实现自定义缩略图、
+同步视图，以及缓冲区坐标与显示坐标之间的转换。
+
+```rust
+use gpui_kit::base::input::BufferPoint;
+
+let state = editor.read(cx);
+let map = state.display_map();
+let count = map.display_row_count();
+let rows = map.buffer_line_to_display_row_range(0); // 折叠隐藏的行返回 None
+let display = map.buffer_pos_to_display_pos(BufferPoint::new(0, 0));
+let buffer = map.display_pos_to_buffer_pos(display);
+let version = map.version();
+```
+
+映射覆盖整个已准备的文本，包括视口外的行。软换行使用最近准备的布局参数；文本尚未准备时，
+映射没有显示行。编辑、重新换行或折叠变化会改变 `map.version()`。比较同一映射的版本可以判断
+何时需要重新查询；滚动不会改变版本。
+
+映射不包含内联补全的额外行。显示行序号乘以行高表示文本映射位置，不一定是实际绘制位置：
+多行内联补全会把后续文本向下推，而映射和版本不变。可见行的实际几何信息应通过 `row_bounds` 获取。
+
+缓冲区和显示坐标的序号均从零开始。被折叠隐藏的缓冲区行没有显示行范围（返回 `None`）；
+缓冲区位置与显示位置之间的转换使用映射的坐标转换方法。
+
 ## 值与事件
 
 ```rust
