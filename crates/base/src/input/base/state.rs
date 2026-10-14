@@ -9654,6 +9654,55 @@ mod tests {
     }
 
     #[gpui::test]
+    fn test_textarea_decorations_follow_typing(cx: &mut TestAppContext) {
+        let view = InputView::build_textarea(cx, |state| state);
+        let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);
+        let collection = cx.update(|window, cx| {
+            view.input.update(cx, |state, cx| {
+                state.set_value("abc def", window, cx);
+                let collection = state.create_decorations_collection(
+                    vec![crate::input::TextDecoration::new(
+                        4..7,
+                        gpui::HighlightStyle::default(),
+                    )],
+                    cx,
+                );
+                state.set_selected_range(0..0, cx);
+                state.replace_text_in_range(None, "X", window, cx);
+                let layers = state.extras.decoration_layers();
+                assert_eq!(layers.into_iter().flatten().next().unwrap().range, 5..8);
+                collection
+            })
+        });
+        cx.update(|_, cx| assert_eq!(collection.get_ranges(cx), vec![5..8]));
+    }
+
+    #[gpui::test]
+    fn test_textarea_decorations_beside_inline_tokens(cx: &mut TestAppContext) {
+        use crate::input::InlineToken;
+        let view = InputView::build_textarea(cx, |state| state.default_value("@a and **b**"));
+        view.window_handle
+            .update(cx, |_, window, cx| {
+                view.input.update(cx, |state, cx| {
+                    state
+                        .replace_range_with_token(0..2, InlineToken::new("a", "@a"), window, cx)
+                        .unwrap();
+                    state.create_decorations_collection(
+                        vec![crate::input::TextDecoration::new(
+                            9..10,
+                            gpui::HighlightStyle::default(),
+                        )],
+                        cx,
+                    );
+                    assert_eq!(state.tokens().len(), 1);
+                    let layers = state.extras.decoration_layers();
+                    assert_eq!(layers.into_iter().flatten().next().unwrap().range, 9..10);
+                });
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
     fn test_backspace_preserves_escaped_quote_terminator(cx: &mut TestAppContext) {
         let view = InputView::<EditorMode>::new(cx);
         let mut cx = VisualTestContext::from_window(view.window_handle.into(), cx);

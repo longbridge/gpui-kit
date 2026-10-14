@@ -1,4 +1,4 @@
-use crate::input::EditorMode;
+use crate::input::{EditorMode, InputModeKind, TextareaMode};
 use std::{collections::BTreeMap, ops::Range};
 
 use gpui::{App, Context, HighlightStyle, Hsla, WeakEntity};
@@ -88,64 +88,28 @@ struct DecorationCollectionId(usize);
 ///
 /// This is the GPUI Component counterpart of Monaco's
 /// [`IEditorDecorationsCollection`](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.IEditorDecorationsCollection.html).
-#[derive(Clone, Debug)]
-pub struct TextDecorationCollection {
-    state: WeakEntity<InputBaseState<EditorMode>>,
+/// A code editor and ordinary multi-line text can both hold collections; `M` is
+/// the mode of the input that owns this one.
+pub struct TextDecorationCollection<M: InputModeKind = EditorMode> {
+    state: WeakEntity<InputBaseState<M>>,
     id: DecorationCollectionId,
 }
 
-impl TextDecorationCollection {
-    /// Replace all decorations in this collection.
-    ///
-    /// This corresponds to Monaco's
-    /// [`IEditorDecorationsCollection.set`](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.IEditorDecorationsCollection.html#set).
-    pub fn set(&self, decorations: Vec<TextDecoration>, cx: &mut App) {
-        let _ = self.state.update(cx, |state, cx| {
-            let decorations = normalize(&state.text, decorations);
-            if state.extras.decorations.set(self.id, decorations) {
-                cx.notify();
-            }
-        });
+impl<M: InputModeKind> Clone for TextDecorationCollection<M> {
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+            id: self.id,
+        }
     }
+}
 
-    /// Add decorations to this collection.
-    ///
-    /// This corresponds to Monaco's
-    /// [`IEditorDecorationsCollection.append`](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.IEditorDecorationsCollection.html#append).
-    pub fn append(&self, decorations: Vec<TextDecoration>, cx: &mut App) {
-        let _ = self.state.update(cx, |state, cx| {
-            let decorations = normalize(&state.text, decorations);
-            if state.extras.decorations.append(self.id, decorations) {
-                cx.notify();
-            }
-        });
-    }
-
-    /// Remove all decorations from this collection.
-    ///
-    /// This corresponds to Monaco's
-    /// [`IEditorDecorationsCollection.clear`](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.IEditorDecorationsCollection.html#clear).
-    pub fn clear(&self, cx: &mut App) {
-        self.set(Vec::new(), cx);
-    }
-
-    /// Return the UTF-8 byte ranges in this collection.
-    ///
-    /// This corresponds to Monaco's
-    /// [`IEditorDecorationsCollection.getRanges`](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.IEditorDecorationsCollection.html#getRanges).
-    pub fn get_ranges(&self, cx: &App) -> Vec<Range<usize>> {
-        self.state
-            .read_with(cx, |state, _| {
-                state
-                    .extras
-                    .decorations
-                    .get(self.id)
-                    .unwrap_or_default()
-                    .iter()
-                    .map(|decoration| decoration.range.clone())
-                    .collect()
-            })
-            .unwrap_or_default()
+impl<M: InputModeKind> std::fmt::Debug for TextDecorationCollection<M> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextDecorationCollection")
+            .field("state", &self.state)
+            .field("id", &self.id)
+            .finish()
     }
 }
 
@@ -522,37 +486,102 @@ impl InputBaseState<EditorMode> {
             id,
         }
     }
-
-    /// Create an independently managed collection of text decorations.
-    ///
-    /// This follows Monaco's
-    /// [`createDecorationsCollection`](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.ICodeEditor.html#createDecorationsCollection)
-    /// ownership model. Ranges use UTF-8 byte offsets into [`Self::value`].
-    ///
-    /// Decoration ranges follow text edits and do not need to be set again
-    /// after each change. Insertions at a range boundary do not expand the
-    /// range, matching Monaco's
-    /// [`NeverGrowsWhenTypingAtEdges`](https://microsoft.github.io/monaco-editor/typedoc/enums/editor_editor_api.editor.TrackedRangeStickiness.html#NeverGrowsWhenTypingAtEdges)
-    /// behavior. Decorations are not rendered while the input is masked.
-    /// Collections live until their [`InputBaseState`] is dropped.
-    ///
-    /// Collections are layered in insertion order; the first collection wins
-    /// when overlapping decorations set the same [`HighlightStyle`] property.
-    /// Callers should avoid conflicting overlaps within one collection.
-    pub fn create_decorations_collection(
-        &mut self,
-        decorations: Vec<TextDecoration>,
-        cx: &mut Context<Self>,
-    ) -> TextDecorationCollection {
-        let decorations = normalize(&self.text, decorations);
-        let id = self.extras.decorations.create(decorations);
-        cx.notify();
-        TextDecorationCollection {
-            state: cx.entity().downgrade(),
-            id,
-        }
-    }
 }
+
+/// Text decorations for a mode whose extras hold them: a code editor and ordinary
+/// multi-line text.
+macro_rules! text_decoration_api {
+    ($mode:ty) => {
+        impl TextDecorationCollection<$mode> {
+            /// Replace all decorations in this collection.
+            ///
+            /// This corresponds to Monaco's
+            /// [`IEditorDecorationsCollection.set`](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.IEditorDecorationsCollection.html#set).
+            pub fn set(&self, decorations: Vec<TextDecoration>, cx: &mut App) {
+                let _ = self.state.update(cx, |state, cx| {
+                    let decorations = normalize(&state.text, decorations);
+                    if state.extras.decorations.set(self.id, decorations) {
+                        cx.notify();
+                    }
+                });
+            }
+
+            /// Add decorations to this collection.
+            ///
+            /// This corresponds to Monaco's
+            /// [`IEditorDecorationsCollection.append`](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.IEditorDecorationsCollection.html#append).
+            pub fn append(&self, decorations: Vec<TextDecoration>, cx: &mut App) {
+                let _ = self.state.update(cx, |state, cx| {
+                    let decorations = normalize(&state.text, decorations);
+                    if state.extras.decorations.append(self.id, decorations) {
+                        cx.notify();
+                    }
+                });
+            }
+
+            /// Remove all decorations from this collection.
+            ///
+            /// This corresponds to Monaco's
+            /// [`IEditorDecorationsCollection.clear`](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.IEditorDecorationsCollection.html#clear).
+            pub fn clear(&self, cx: &mut App) {
+                self.set(Vec::new(), cx);
+            }
+
+            /// Return the UTF-8 byte ranges in this collection.
+            ///
+            /// This corresponds to Monaco's
+            /// [`IEditorDecorationsCollection.getRanges`](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.IEditorDecorationsCollection.html#getRanges).
+            pub fn get_ranges(&self, cx: &App) -> Vec<Range<usize>> {
+                self.state
+                    .read_with(cx, |state, _| {
+                        state
+                            .extras
+                            .decorations
+                            .get(self.id)
+                            .unwrap_or_default()
+                            .iter()
+                            .map(|decoration| decoration.range.clone())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
+        }
+
+        impl InputBaseState<$mode> {
+            /// Create an independently managed collection of text decorations.
+            ///
+            /// This follows Monaco's
+            /// [`createDecorationsCollection`](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.ICodeEditor.html#createDecorationsCollection)
+            /// ownership model. Ranges use UTF-8 byte offsets into [`Self::value`].
+            ///
+            /// Decoration ranges follow text edits and do not need to be set again
+            /// after each change. Insertions at a range boundary do not expand the
+            /// range, matching Monaco's
+            /// [`NeverGrowsWhenTypingAtEdges`](https://microsoft.github.io/monaco-editor/typedoc/enums/editor_editor_api.editor.TrackedRangeStickiness.html#NeverGrowsWhenTypingAtEdges)
+            /// behavior. Decorations are not rendered while the input is masked.
+            /// Collections live until their [`InputBaseState`] is dropped.
+            ///
+            /// Collections are layered in insertion order; the first collection wins
+            /// when overlapping decorations set the same [`HighlightStyle`] property.
+            /// Callers should avoid conflicting overlaps within one collection.
+            pub fn create_decorations_collection(
+                &mut self,
+                decorations: Vec<TextDecoration>,
+                cx: &mut Context<Self>,
+            ) -> TextDecorationCollection<$mode> {
+                let decorations = normalize(&self.text, decorations);
+                let id = self.extras.decorations.create(decorations);
+                cx.notify();
+                TextDecorationCollection {
+                    state: cx.entity().downgrade(),
+                    id,
+                }
+            }
+        }
+    };
+}
+text_decoration_api!(EditorMode);
+text_decoration_api!(TextareaMode);
 
 #[cfg(test)]
 mod tests {

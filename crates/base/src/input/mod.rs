@@ -99,7 +99,8 @@ pub use highlighting::{
 pub use indent::TabSize;
 pub use input::{Input, InputState};
 pub use kind::{
-    EditorExtras, EditorMode, InputExtras, InputMode, InputModeKind, MultiLineMode, TextareaMode,
+    EditorExtras, EditorMode, InputExtras, InputMode, InputModeKind, MultiLineMode, TextareaExtras,
+    TextareaMode,
 };
 pub(crate) use language::EditorLanguage;
 pub use language::{LanguageProvider, set_language_config, set_language_provider};
