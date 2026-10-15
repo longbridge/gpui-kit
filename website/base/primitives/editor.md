@@ -113,6 +113,10 @@ backgrounds itself; markers are painted only through
 `InputEditorStyle::gutter_marker_renderer()`, which the styled editor projects. See
 [Line decorations](../../component/editor.md#line-decorations).
 
+`set_spacer_provider` attaches a `SpacerProvider`, which is asked for blank rows to
+stand above or below lines when the rows move. Base lays the rows out and paints their
+optional backgrounds. See [Spacers](../../component/editor.md#spacers).
+
 When using Base directly, the application supplies both the renderer and its
 geometry through builders:
 

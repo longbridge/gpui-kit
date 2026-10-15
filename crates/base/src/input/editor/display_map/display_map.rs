@@ -1,6 +1,6 @@
 /// DisplayMap: Public facade for Editor/Input display mapping.
 ///
-/// This combines WrapMap and FoldMap to provide a unified API:
+/// This combines WrapMap, FoldMap and SpacerMap to provide a unified API:
 /// - BufferPoint ↔ DisplayPoint conversion
 /// - Fold management (candidates, toggle, query)
 /// - Automatic projection updates on text/layout changes
@@ -11,19 +11,22 @@ use ropey::Rope;
 
 use super::fold_map::FoldMap;
 use super::folding::FoldRange;
+use super::spacer_map::{DisplayRow, SpacerMap};
 pub use super::text_wrapper::WrappingIndent;
 use super::text_wrapper::{LineItem, WrapDisplayPoint};
 use super::wrap_map::WrapMap;
 use super::{BufferPoint, DisplayPoint};
 use crate::input::Point as TreeSitterPoint;
+use crate::input::Spacer;
 use crate::input::display_map::WrapPoint;
 use crate::input::rope_ext::RopeExt as _;
 
 /// DisplayMap is the main interface for Editor/Input coordinate mapping.
 ///
-/// It manages the two-layer projection:
+/// It manages the three-layer projection:
 /// 1. Buffer → Wrap (soft-wrapping)
-/// 2. Wrap → Display (folding)
+/// 2. Wrap → Fold (folding)
+/// 3. Fold → Display (spacers)
 ///
 /// [`crate::input::InputBaseState::display_map`] exposes the editor-owned map
 /// through a shared reference for application coordinate queries. Text edits,
@@ -34,6 +37,15 @@ use crate::input::rope_ext::RopeExt as _;
 pub struct DisplayMap {
     wrap_map: WrapMap,
     fold_map: FoldMap,
+    spacer_map: SpacerMap,
+    /// The spacers as they were last set, before projection.
+    spacers: Vec<Spacer>,
+    /// The rows version the spacers were last projected at, `None` when they
+    /// must be projected again.
+    spacers_projected: Option<usize>,
+    /// Counts the changes of the spacers, so that [`Self::version`] moves with
+    /// them.
+    spacers_version: usize,
 }
 
 impl DisplayMap {
@@ -41,6 +53,10 @@ impl DisplayMap {
         Self {
             wrap_map: WrapMap::new(font, font_size, wrap_width),
             fold_map: FoldMap::new(),
+            spacer_map: SpacerMap::default(),
+            spacers: Vec::new(),
+            spacers_projected: None,
+            spacers_version: 0,
         }
     }
 
@@ -51,20 +67,28 @@ impl DisplayMap {
         // Buffer → Wrap
         let wrap_pos = self.wrap_map.buffer_pos_to_wrap_pos(pos);
 
-        // Wrap → Display
-        if let Some(display_row) = self.fold_map.wrap_row_to_display_row(wrap_pos.row) {
-            DisplayPoint::new(display_row, wrap_pos.col)
+        // Wrap → Fold → Display
+        if let Some(fold_row) = self.fold_map.wrap_row_to_display_row(wrap_pos.row) {
+            DisplayPoint::new(
+                self.spacer_map.fold_row_to_display_row(fold_row),
+                wrap_pos.col,
+            )
         } else {
             // Cursor is in a folded region, find nearest visible row
-            let display_row = self.fold_map.nearest_visible_display_row(wrap_pos.row);
+            let display_row = self.nearest_visible_display_row(wrap_pos.row);
             DisplayPoint::new(display_row, 0) // Column 0 at fold boundary
         }
     }
 
     /// Convert display position to buffer position
+    ///
+    /// A spacer row is read as the nearest row of the line it stands beside.
     pub fn display_pos_to_buffer_pos(&self, pos: DisplayPoint) -> BufferPoint {
-        // Display → Wrap
-        let wrap_row = self.fold_map.display_row_to_wrap_row(pos.row).unwrap_or(0);
+        // Display → Fold → Wrap
+        let wrap_row = self
+            .fold_map
+            .display_row_to_wrap_row(self.text_fold_row(pos.row))
+            .unwrap_or(0);
 
         // Wrap → Buffer
         let wrap_pos = WrapPoint::new(wrap_row, pos.col);
@@ -72,32 +96,45 @@ impl DisplayMap {
     }
 
     /// A number that changes whenever a buffer line may have taken different
-    /// display rows: an edit, a rewrap or a change of folds.
+    /// display rows: an edit, a rewrap, a change of folds or of spacers.
     ///
     /// Compare versions for equality on the same map to invalidate cached
     /// queries. The counter can wrap; it is not a document revision or a count
-    /// of edits. Scrolling and inline completion ghost lines do not change it.
+    /// of edits. Scrolling and inline completion ghost lines do not change it,
+    /// nor does a [`crate::input::SpacerProvider`] answering with the spacers
+    /// already shown.
     #[inline]
     pub fn version(&self) -> usize {
+        self.rows_version().wrapping_add(self.spacers_version)
+    }
+
+    /// Like [`Self::version`], without the spacers: what the spacers are
+    /// placed by and asked for again at, so that an answer does not ask anew.
+    #[inline]
+    pub(crate) fn rows_version(&self) -> usize {
         self.wrap_map
             .wrapper()
             .version()
             .wrapping_add(self.fold_map.version())
     }
 
-    /// Get total number of visible display rows
+    /// Get total number of visible display rows, spacer rows included
     #[inline]
     pub fn display_row_count(&self) -> usize {
-        self.fold_map.display_row_count()
+        self.fold_map.display_row_count() + self.spacer_map.row_count()
     }
 
     /// Get the buffer line for a given display row
+    ///
+    /// A spacer row belongs to the line it stands beside.
     pub fn display_row_to_buffer_line(&self, display_row: usize) -> usize {
-        // Display → Wrap
-        let wrap_row = self
-            .fold_map
-            .display_row_to_wrap_row(display_row)
-            .unwrap_or(0);
+        let fold_row = match self.spacer_map.display_row(display_row) {
+            DisplayRow::Text(fold_row) => fold_row,
+            DisplayRow::Spacer(index) => return self.spacer_map.run(index).line,
+        };
+
+        // Fold → Wrap
+        let wrap_row = self.fold_map.display_row_to_wrap_row(fold_row).unwrap_or(0);
 
         // Wrap → Buffer line
         self.wrap_map.wrap_row_to_buffer_line(wrap_row)
@@ -105,7 +142,19 @@ impl DisplayMap {
 
     /// Get the display row range for a buffer line: [start, end)
     /// Returns None if the buffer line is completely hidden
+    ///
+    /// The range holds the rows of the line's text, not its spacers.
     pub fn buffer_line_to_display_row_range(&self, line: usize) -> Option<Range<usize>> {
+        let rows = self.fold_row_range(line)?;
+        Some(
+            self.spacer_map.fold_row_to_display_row(rows.start)
+                ..self.spacer_map.fold_row_to_display_row(rows.end - 1) + 1,
+        )
+    }
+
+    /// The fold rows of a buffer line: [start, end)
+    /// Returns None if the buffer line is completely hidden
+    fn fold_row_range(&self, line: usize) -> Option<Range<usize>> {
         // Buffer line → Wrap row range
         let wrap_row_range = self.wrap_map.buffer_line_to_wrap_row_range(line);
 
@@ -142,9 +191,106 @@ impl DisplayMap {
             Some(range) => range.start,
             None => {
                 let wrap_row = self.wrap_map.buffer_line_to_first_wrap_row(line);
-                self.fold_map.nearest_visible_display_row(wrap_row)
+                self.nearest_visible_display_row(wrap_row)
             }
         }
+    }
+
+    // ==================== Spacers ====================
+
+    /// Replace the spacers. They are placed again whenever the rows move.
+    pub(crate) fn set_spacers(&mut self, spacers: Vec<Spacer>) {
+        if spacers == self.spacers {
+            return;
+        }
+        self.spacers = spacers;
+        self.spacers_version = self.spacers_version.wrapping_add(1);
+        self.spacers_projected = None;
+        self.project_spacers();
+    }
+
+    /// How many spacer rows there are, beside lines not hidden by a fold.
+    #[inline]
+    pub(crate) fn spacer_row_count(&self) -> usize {
+        self.spacer_map.row_count()
+    }
+
+    /// Whether a display row is a spacer row: a blank row that holds no text,
+    /// standing above or below a line. See [`Spacer`].
+    pub fn is_spacer_row(&self, display_row: usize) -> bool {
+        matches!(
+            self.spacer_map.display_row(display_row),
+            DisplayRow::Spacer(_)
+        )
+    }
+
+    /// How many spacer rows stand above and below a buffer line.
+    pub(crate) fn spacer_rows_beside(&self, line: usize) -> (usize, usize) {
+        self.spacer_map.rows_beside(line)
+    }
+
+    /// The spacer rows that have a background, beside the buffer lines within
+    /// `lines`: the display rows they take, and the color.
+    pub(crate) fn spacer_backgrounds(
+        &self,
+        lines: Range<usize>,
+    ) -> impl Iterator<Item = (Range<usize>, gpui::Hsla)> + '_ {
+        self.spacer_map
+            .runs_beside(lines)
+            .filter_map(|(start, run)| Some((start..start + run.rows, run.background?)))
+    }
+
+    /// The display row of text nearest a display row: the row itself when it
+    /// holds text, else the first one past its spacers in the direction of
+    /// `forward`, or the other way when there is none that way.
+    pub(crate) fn text_display_row(&self, display_row: usize, forward: bool) -> usize {
+        let row = display_row.min(self.display_row_count().saturating_sub(1));
+        let DisplayRow::Spacer(index) = self.spacer_map.display_row(row) else {
+            return row;
+        };
+        let before = self.spacer_map.run(index).before;
+        let fold_row = if forward && before < self.fold_map.display_row_count() {
+            before
+        } else {
+            before.saturating_sub(1)
+        };
+        self.spacer_map.fold_row_to_display_row(fold_row)
+    }
+
+    /// The fold row a display row stands for: its own, or for a spacer row the
+    /// nearest row of the line it stands beside.
+    fn text_fold_row(&self, display_row: usize) -> usize {
+        match self.spacer_map.display_row(display_row) {
+            DisplayRow::Text(fold_row) => fold_row,
+            DisplayRow::Spacer(index) => {
+                let run = self.spacer_map.run(index);
+                if run.above {
+                    run.before
+                } else {
+                    run.before.saturating_sub(1)
+                }
+            }
+        }
+    }
+
+    /// Place the spacers again if the rows moved since they were last placed.
+    fn project_spacers(&mut self) {
+        if self.spacers.is_empty() && self.spacer_map.row_count() == 0 {
+            return;
+        }
+        let version = self.rows_version();
+        if self.spacers_projected == Some(version) {
+            return;
+        }
+        self.spacers_projected = Some(version);
+        let line_count = self.buffer_line_count();
+        let mut map = std::mem::take(&mut self.spacer_map);
+        map.rebuild(&self.spacers, |line| {
+            (line < line_count)
+                .then(|| self.fold_row_range(line))
+                .flatten()
+        });
+        self.spacer_map = map;
     }
 
     /// Set fold candidates (from tree-sitter/LSP)
@@ -305,6 +451,7 @@ impl DisplayMap {
             self.fold_map
                 .mark_dirty_with_wrap_count(self.wrap_map.wrap_row_count());
         }
+        self.project_spacers();
     }
 
     // ==================== Wrap Display Point Operations ====================
@@ -351,25 +498,32 @@ impl DisplayMap {
     /// Returns None if the wrap row is folded.
     #[inline]
     pub fn wrap_row_to_display_row(&self, wrap_row: usize) -> Option<usize> {
-        self.fold_map.wrap_row_to_display_row(wrap_row)
+        self.fold_map
+            .wrap_row_to_display_row(wrap_row)
+            .map(|fold_row| self.spacer_map.fold_row_to_display_row(fold_row))
     }
 
     /// Find the nearest visible display row for a given wrap row.
     #[inline]
     pub fn nearest_visible_display_row(&self, wrap_row: usize) -> usize {
-        self.fold_map.nearest_visible_display_row(wrap_row)
+        self.spacer_map
+            .fold_row_to_display_row(self.fold_map.nearest_visible_display_row(wrap_row))
     }
 
     /// Convert a display row to a wrap row.
+    /// Returns None for a spacer row.
     #[inline]
     pub fn display_row_to_wrap_row(&self, display_row: usize) -> Option<usize> {
-        self.fold_map.display_row_to_wrap_row(display_row)
+        match self.spacer_map.display_row(display_row) {
+            DisplayRow::Text(fold_row) => self.fold_map.display_row_to_wrap_row(fold_row),
+            DisplayRow::Spacer(_) => None,
+        }
     }
 
     pub(crate) fn display_row_column_to_offset(&self, display_row: usize, column: usize) -> usize {
         let wrap_row = self
             .fold_map
-            .display_row_to_wrap_row(display_row)
+            .display_row_to_wrap_row(self.text_fold_row(display_row))
             .unwrap_or(0);
         self.wrap_map
             .wrapper()

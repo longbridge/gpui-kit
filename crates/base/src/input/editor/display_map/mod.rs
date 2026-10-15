@@ -2,7 +2,8 @@
 ///
 /// This module implements a layered display mapping architecture:
 /// - **WrapMap**: Handles soft-wrapping (buffer → wrap rows)
-/// - **FoldMap**: Handles folding (wrap rows → display rows)
+/// - **FoldMap**: Handles folding (wrap rows → fold rows)
+/// - **SpacerMap**: Handles spacers (fold rows → display rows)
 /// - **DisplayMap**: Public facade for Editor/Input
 ///
 /// The goal is to provide a clean, unified API where Editor only needs to know
@@ -12,6 +13,7 @@ mod inline_line;
 pub(crate) use inline_line::{InlineFragment, InputLine};
 mod fold_map;
 mod folding;
+mod spacer_map;
 mod text_wrapper;
 mod wrap_map;
 

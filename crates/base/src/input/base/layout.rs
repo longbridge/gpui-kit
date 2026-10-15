@@ -79,6 +79,9 @@ pub(super) struct LastLayout {
     pub(super) gutter_decorations_width: Pixels,
     /// The buffer row that inline completion ghost lines follow, and their height.
     pub(super) ghost_lines: Option<(usize, Pixels)>,
+    /// How many spacer rows stand above and below each laid-out row, in
+    /// `visible_buffer_lines` order; empty when the editor has no spacers.
+    pub(super) spacer_rows: Vec<(usize, usize)>,
     pub(super) gutter_side: Side,
     pub(super) gutter_order: [GutterColumn; 4],
     /// The x of the text, relative to the input bounds.
@@ -104,16 +107,30 @@ impl LastLayout {
         self.lines.get(pos)
     }
 
+    /// The heights of the spacer rows above and below the `ix`th laid-out row.
+    pub(super) fn spacers(&self, ix: usize) -> (Pixels, Pixels) {
+        self.spacer_rows
+            .get(ix)
+            .map_or((px(0.), px(0.)), |&(above, below)| {
+                (self.line_height * above, self.line_height * below)
+            })
+    }
+
     /// The top and height of each laid-out row, in `visible_buffer_lines` order.
     ///
     /// Tops are relative to the content origin and, as painted, rows after the
-    /// ghost lines are shifted down by their height.
+    /// ghost lines are shifted down by their height. A row's spacers are not
+    /// part of its height; ghost lines stand between its text and the spacers
+    /// below it.
     pub(super) fn row_extents(&self) -> impl Iterator<Item = (Pixels, Pixels)> + '_ {
         let mut top = self.visible_top;
         self.lines
             .iter()
             .zip(&self.visible_buffer_lines)
-            .map(move |(line, &row)| {
+            .enumerate()
+            .map(move |(ix, (line, &row))| {
+                let (above, below) = self.spacers(ix);
+                top += above;
                 let height = line.size(self.line_height).height;
                 let extent = (top, height);
                 top += height;
@@ -122,6 +139,7 @@ impl LastLayout {
                 {
                     top += ghost_height;
                 }
+                top += below;
                 extent
             })
     }

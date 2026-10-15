@@ -283,6 +283,10 @@ impl crate::input::InputExtras for super::EditorExtras {
         self.line_decorations.has_any_provider()
     }
 
+    fn spacer_provider(&self) -> Option<std::rc::Rc<dyn super::SpacerProvider>> {
+        self.spacer_provider.clone()
+    }
+
     fn semantic_token_styles(
         &self,
         text: &ropey::Rope,

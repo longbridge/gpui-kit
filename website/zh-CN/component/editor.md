@@ -455,7 +455,7 @@ let version = map.version();
 ```
 
 映射覆盖整个已准备的文本，包括视口外的行。软换行使用最近准备的布局参数；文本尚未准备时，
-映射没有显示行。编辑、重新换行或折叠变化会改变 `map.version()`。比较同一映射的版本可以判断
+映射没有显示行。编辑、重新换行、折叠或填充行变化会改变 `map.version()`。比较同一映射的版本可以判断
 何时需要重新查询；滚动不会改变版本。
 
 映射不包含内联补全的额外行。显示行序号乘以行高表示文本映射位置，不一定是实际绘制位置：
@@ -463,6 +463,65 @@ let version = map.version();
 
 缓冲区和显示坐标的序号均从零开始。被折叠隐藏的缓冲区行没有显示行范围（返回 `None`）；
 缓冲区位置与显示位置之间的转换使用映射的坐标转换方法。
+
+### 填充行
+
+`Spacer` 是位于某个缓冲区行上方或下方的一组空白行。它不包含文本：没有行号，光标会跳过它，
+点击它会落到旁边的文本行上，行装饰、选区、搜索匹配和内联颜色都不会覆盖它。它的行与其他显示行一样，
+因此滚动高度、滚动到某一行以及 `row_bounds` 都会把它计算在内。并排显示的两个编辑器可以用填充行补齐
+较矮的行，使两侧对应的行无论各自如何换行都从同一高度开始，就像并排 diff 那样。
+
+```rust
+use std::{ops::Range, rc::Rc};
+
+use gpui_kit::{App, WeakEntity};
+use gpui_kit::component::input::{EditorState, Spacer, SpacerProvider};
+
+/// 为每一行补上 `other` 中同一行因换行而多出的行数。
+struct Level {
+    this: WeakEntity<EditorState>,
+    other: WeakEntity<EditorState>,
+}
+
+impl SpacerProvider for Level {
+    fn spacers(&self, lines: Range<usize>, cx: &App) -> Vec<Spacer> {
+        let (Some(this), Some(other)) = (self.this.upgrade(), self.other.upgrade()) else {
+            return Vec::new();
+        };
+        let rows = |editor: &EditorState, line| {
+            editor
+                .display_map()
+                .buffer_line_to_display_row_range(line)
+                .map_or(0, |rows| rows.len())
+        };
+        let (this, other) = (this.read(cx), other.read(cx));
+        lines
+            .filter_map(|line| {
+                let (own, theirs) = (rows(this, line), rows(other, line));
+                (theirs > own).then(|| Spacer::below(line, theirs - own))
+            })
+            .collect()
+    }
+}
+
+let level = Rc::new(Level {
+    this: left.downgrade(),
+    other: right.downgrade(),
+});
+left.update(cx, |state, cx| state.set_spacer_provider(Some(level), cx));
+```
+
+与行装饰不同，填充行会推动其下方的所有行，因此编辑器一次性询问所有行的填充行并保留结果：设置 provider 时、
+编辑之后、文本重新换行或折叠变化之后，以及调用 `refresh_spacers` 时。询问发生在布局阶段，此时文本已按编辑器的
+宽度完成换行，并且不在编辑器的任何更新之内，因此 provider 可以读取本编辑器和其他编辑器。若结果依赖另一个
+编辑器的行，请在该编辑器的 `display_map().version()` 变化时调用 `refresh_spacers`。`Spacer::above(0, rows)`
+在文本顶部补行，`with_background` 为这些行（包括行号槽）填充颜色。位于折叠隐藏的行或最后一行之后的填充行不会显示。
+**Editor Diff** 展示页对两侧都启用换行，并用填充行使它们对齐。
+
+在显示映射中，填充行也是显示行：`display_row_count()` 会计入它们，`buffer_line_to_display_row_range(line)`
+只包含该行文本所占的行，`display_row_to_buffer_line(row)` 把填充行视为它旁边的那一行，`is_spacer_row(row)`
+用于区分填充行和文本行。填充行变化时 `version()` 也会变化，因此按版本缓存的行映射不会过期；provider 返回与当前相同的填充行时版本不变，
+所以在版本变化时调用 `refresh_spacers` 最终会稳定下来。
 
 ## 值与事件
 

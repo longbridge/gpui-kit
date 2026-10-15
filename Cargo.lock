@@ -2874,6 +2874,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-editor-spacers"
+version = "0.9.1"
+dependencies = [
+ "gpui-kit",
+]
+
+[[package]]
 name = "example-html"
 version = "0.9.1"
 dependencies = [

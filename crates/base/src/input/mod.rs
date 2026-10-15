@@ -72,6 +72,8 @@ mod scrollbar_presentation;
 mod search;
 #[path = "base/selection.rs"]
 mod selection;
+#[path = "editor/spacers.rs"]
+mod spacers;
 #[path = "base/state.rs"]
 mod state;
 #[path = "base/tab_stops.rs"]
@@ -136,5 +138,6 @@ pub use native::{NativeMenu, NativeMenuItem};
 pub use rope_ext::{InputEdit, Point, RopeExt, RopeLines};
 pub use ropey::Rope;
 pub use search::{SearchMatcher, SearchSession};
+pub use spacers::{Spacer, SpacerProvider};
 pub use state::*;
 pub use textarea::{Textarea, TextareaState};

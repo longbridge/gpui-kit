@@ -39,9 +39,9 @@ pub use gpui_base::input::{
     RangeDecoration, RangeDecorationCollection, RangeDecorationStyle, Redo, Replace, Rope, RopeExt,
     RopeLines, Search, SelectAll, SelectToEnd, SelectToEndOfLine, SelectToNextWordEnd,
     SelectToPreviousWordStart, SelectToStart, SelectToStartOfLine, Selection, ShowCharacterPalette,
-    ShowCompletions, ShowDocumentHandler, TabSize, TextDecoration, TextDecorationCollection,
-    TextareaState, ToggleCodeActions, Undo, WrappingIndent, highlight_characters,
-    highlight_contains, highlight_prefix,
+    ShowCompletions, ShowDocumentHandler, Spacer, SpacerProvider, TabSize, TextDecoration,
+    TextDecorationCollection, TextareaState, ToggleCodeActions, Undo, WrappingIndent,
+    highlight_characters, highlight_contains, highlight_prefix,
 };
 pub use gpui_base::input::{EditorMode, InputMode, InputModeKind, TextareaMode};
 #[doc(hidden)]
