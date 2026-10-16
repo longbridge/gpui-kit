@@ -345,6 +345,26 @@ info 颜色；`GutterMarker::Custom { icon, color }` 按原样绘制给定的图
 文字一起下移。该行尚未布局时返回 `None`。
 Editor 展示页的 **Decorations** 标签用 provider 标记了最后三行。
 
+`EditorState::hit_test(position)` 按最近一次绘制，返回窗口坐标中的某个点落在什么上：文本（附带在该处
+单击时光标所在的偏移量），或行号栏（附带所在的 `GutterColumn`，落在边距中时为 `None`）。两种情况都会
+给出该点旁边的缓冲区行，以及该点是否位于这一行的间隔行上。在行号栏中，第一行之上和最后一行之下的行为
+`None`。`EditorState::gutter_bounds()` 返回行号栏实际绘制的区域。首次绘制之前两者都返回 `None`；
+它们都不会改变编辑器对单击的处理。
+
+```rust
+use gpui_kit::component::input::{GutterColumn, InputHitArea};
+
+if let Some(hit) = editor.read(cx).hit_test(position) {
+    match hit.area() {
+        InputHitArea::Gutter { column: Some(GutterColumn::LineNumbers), .. } => {
+            // 行号：`hit.row()` 是缓冲区行。
+        }
+        InputHitArea::Text { offset, .. } => { /* 文本，位于 `offset` */ }
+        _ => {}
+    }
+}
+```
+
 `EditorState::display_map()` 返回 `&DisplayMap`，供应用只读查询编辑器拥有的文本映射。
 `DisplayMap`、`BufferPoint` 和 `DisplayPoint` 均可从 `gpui_kit::base::input` 或
 `gpui_kit::component::input` 导入。编辑器状态负责更新映射；应用可以用它实现自定义缩略图、
@@ -430,6 +450,38 @@ left.update(cx, |state, cx| state.set_spacer_provider(Some(level), cx));
 只包含该行文本所占的行，`display_row_to_buffer_line(row)` 把填充行视为它旁边的那一行，`is_spacer_row(row)`
 用于区分填充行和文本行。填充行变化时 `version()` 也会变化，因此按版本缓存的行映射不会过期；provider 返回与当前相同的填充行时版本不变，
 所以在版本变化时调用 `refresh_spacers` 最终会稳定下来。
+
+## 行号栏右键菜单
+
+`Editor::context_menu_with` 在构建右键菜单时知道它是在哪里打开的：
+除了 capabilities，它还会收到这次单击的 `hit_test` 结果，因此菜单可以只针对行号栏
+中的某一行，而文本上仍保留通常的菜单（由 `default_context_menu` 构建）。在行号栏上右键单击会像在文本
+上一样把光标移到该行；`gutter_context_menu_moves_cursor(false)` 则在行号栏菜单打开期间保留当前选区。
+
+```rust
+use gpui_kit::component::input::{Editor, EditorState, default_context_menu};
+
+let editor = cx.new(|cx| {
+    EditorState::new(window, cx)
+        .line_number(true)
+        .gutter_context_menu_moves_cursor(false)
+});
+
+Editor::new(&editor).context_menu_with(|menu, capabilities, hit, _, _| {
+    match hit {
+        Some(hit) if hit.is_gutter() => match hit.row() {
+            Some(row) => menu
+                .menu(format!("Bookmark Line {}", row + 1), Box::new(ToggleBookmark))
+                .menu(format!("Copy Line {}", row + 1), Box::new(CopyLine)),
+            None => menu, // 最后一行之下：不显示菜单
+        },
+        _ => default_context_menu(menu, capabilities),
+    }
+})
+```
+
+构建函数在菜单打开时运行；可以在这里记下行号，供菜单操作读取。
+`examples/editor_gutter_menu` 演示了为单击的行添加书签、选中和复制。
 
 ## 值与事件
 

@@ -215,6 +215,15 @@ Input::new(&input).context_menu(|menu, window, cx| {
         .menu("Copy", Box::new(input::Copy))
         .menu("Paste", Box::new(input::Paste))
 })
+
+// 或者根据菜单打开的位置决定内容，其余情况保留内置菜单项。`hit` 是这次单击的
+// `hit_test` 结果：文本，或编辑器行号栏中的某一行。
+Input::new(&input).context_menu_with(|menu, capabilities, hit, window, cx| {
+    match hit {
+        Some(hit) if hit.is_gutter() => menu.menu("Custom Action", Box::new(CustomAction)),
+        _ => input::default_context_menu(menu, capabilities),
+    }
+})
 ```
 
 ### 触摸选择

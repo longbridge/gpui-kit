@@ -409,6 +409,28 @@ where it is painted: below a multi-line inline completion, rows move down with t
 text. It returns `None` while the row is not laid out. The **Decorations** tab of the Editor showcase
 marks its last three rows with a provider.
 
+`EditorState::hit_test(position)` tells what a point in window coordinates is over, as
+last painted: the text, at the offset a click there places the caret at, or the gutter,
+in one of its `GutterColumn`s or in its margin. Either way it names the buffer row beside
+the point, and whether the point is on one of that row's spacer rows. In the gutter the
+row is `None` above the first row and below the last. `EditorState::gutter_bounds()`
+returns the gutter's painted bounds. Both return `None` before the first paint; neither
+changes what the editor does with a click.
+
+```rust
+use gpui_kit::component::input::{GutterColumn, InputHitArea};
+
+if let Some(hit) = editor.read(cx).hit_test(position) {
+    match hit.area() {
+        InputHitArea::Gutter { column: Some(GutterColumn::LineNumbers), .. } => {
+            // A line number: `hit.row()` is the buffer row.
+        }
+        InputHitArea::Text { offset, .. } => { /* the text, at `offset` */ }
+        _ => {}
+    }
+}
+```
+
 `EditorState::display_map()` returns `&DisplayMap`, a read-only reference to the
 editor-owned text projection. `DisplayMap`, `BufferPoint`, and `DisplayPoint` are
 available from both `gpui_kit::base::input` and `gpui_kit::component::input`.
@@ -509,6 +531,40 @@ In the display map, spacer rows are display rows: `display_row_count()` counts t
 `is_spacer_row(row)` tells a spacer row from a row of text. `version()` changes when the
 spacers do, so a cache of rows stays valid; a provider answering with the spacers already
 shown leaves it unchanged, so refreshing on a version change settles.
+
+## Gutter context menu
+
+`Editor::context_menu_with` builds the right-click menu knowing what it was opened on:
+besides the capabilities, it is handed the [`hit_test`](#line-decorations) of the click,
+so a menu can be about a row of the gutter and leave the text its usual one, which
+`default_context_menu` builds. A right-click on the gutter moves the caret to the
+row, as one on the text does; `gutter_context_menu_moves_cursor(false)` keeps the
+selection instead while the gutter's menu is open.
+
+```rust
+use gpui_kit::component::input::{Editor, EditorState, default_context_menu};
+
+let editor = cx.new(|cx| {
+    EditorState::new(window, cx)
+        .line_number(true)
+        .gutter_context_menu_moves_cursor(false)
+});
+
+Editor::new(&editor).context_menu_with(|menu, capabilities, hit, _, _| {
+    match hit {
+        Some(hit) if hit.is_gutter() => match hit.row() {
+            Some(row) => menu
+                .menu(format!("Bookmark Line {}", row + 1), Box::new(ToggleBookmark))
+                .menu(format!("Copy Line {}", row + 1), Box::new(CopyLine)),
+            None => menu, // below the last line: no menu
+        },
+        _ => default_context_menu(menu, capabilities),
+    }
+})
+```
+
+The builder runs when the menu opens; remember the row there for the actions to read.
+`examples/editor_gutter_menu` bookmarks, selects and copies the line clicked.
 
 ## Value and events
 

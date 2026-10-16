@@ -136,12 +136,13 @@ impl TextInputState {
             .update(cx, |state, _| state.ensure_highlighter_factory(factory)))
     }
 
-    pub(crate) fn on_context_menu(
+    pub(crate) fn on_context_menu_with_hit(
         &self,
         handler: std::rc::Rc<
             dyn Fn(
                 gpui_base::input::NativeMenu,
                 gpui_base::input::InputContextMenuCapabilities,
+                Option<gpui_base::input::InputHit>,
                 gpui::Point<gpui::Pixels>,
                 &mut Window,
                 &mut App,
@@ -150,7 +151,7 @@ impl TextInputState {
         cx: &mut App,
     ) {
         dispatch!(self, |state| state
-            .update(cx, |state, _| state.on_context_menu(handler)))
+            .update(cx, |state, _| state.on_context_menu_with_hit(handler)))
     }
 
     /// The selection a long press made, laid out for its handles and menu.

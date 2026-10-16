@@ -231,6 +231,16 @@ Input::new(&input).context_menu(|menu, window, cx| {
         .menu("Copy", Box::new(input::Copy))
         .menu("Paste", Box::new(input::Paste))
 })
+
+// Or decide by what the menu was opened on, keeping the built-in items for
+// the rest. `hit` is the click's `hit_test`: the text, or a row of an
+// editor's gutter.
+Input::new(&input).context_menu_with(|menu, capabilities, hit, window, cx| {
+    match hit {
+        Some(hit) if hit.is_gutter() => menu.menu("Custom Action", Box::new(CustomAction)),
+        _ => input::default_context_menu(menu, capabilities),
+    }
+})
 ```
 
 ### Touch Selection

@@ -40,7 +40,9 @@ use crate::actions::{SelectDown, SelectLeft, SelectRight, SelectUp};
 use crate::input::blink_cursor::CURSOR_WIDTH;
 use crate::input::movement::MoveDirection;
 use crate::input::{
-    InputExtras as _, Position, RopeExt as _, element::RIGHT_MARGIN, layout::LastLayout,
+    InputExtras as _, Position, RopeExt as _,
+    element::RIGHT_MARGIN,
+    layout::{InputHit, InputHitArea, LastLayout},
 };
 use crate::{AutoScroll, StepAction};
 
@@ -405,6 +407,8 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) input_bounds: Bounds<Pixels>,
     /// The text bounds
     pub(super) last_bounds: Option<Bounds<Pixels>>,
+    /// The gutter bounds, `None` without a gutter.
+    pub(super) last_gutter_bounds: Option<Bounds<Pixels>>,
     pub(super) last_selected_range: Option<CursorSelection>,
     pub(super) selecting: bool,
     /// Anchor point of an in-progress columnar (block) selection.
@@ -464,9 +468,21 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) diagnostic_popover: Option<Rc<crate::input::DiagnosticEntry>>,
 
     context_menu_handler: Option<
-        Rc<dyn Fn(NativeMenu, InputContextMenuCapabilities, Point<Pixels>, &mut Window, &mut App)>,
+        Rc<
+            dyn Fn(
+                NativeMenu,
+                InputContextMenuCapabilities,
+                Option<InputHit>,
+                Point<Pixels>,
+                &mut Window,
+                &mut App,
+            ),
+        >,
     >,
-    pending_context_menu: Option<(Point<Pixels>, usize)>,
+    pending_context_menu: Option<(Point<Pixels>, usize, Option<InputHit>)>,
+    /// Whether a right-click on the gutter moves the caret to its row, as one
+    /// on the text does.
+    pub(super) gutter_context_menu_moves_cursor: bool,
 
     /// Whether the context menu that shows on right-click is enabled.
     ///
@@ -685,6 +701,28 @@ impl<M: InputModeKind> InputBaseState<M> {
             dyn Fn(NativeMenu, InputContextMenuCapabilities, Point<Pixels>, &mut Window, &mut App),
         >,
     ) {
+        self.context_menu_handler = Some(Rc::new(
+            move |menu, capabilities, _, position, window, cx| {
+                handler(menu, capabilities, position, window, cx)
+            },
+        ));
+    }
+
+    /// Like [`Self::on_context_menu`], also told what the right-click was over.
+    #[doc(hidden)]
+    pub fn on_context_menu_with_hit(
+        &mut self,
+        handler: Rc<
+            dyn Fn(
+                NativeMenu,
+                InputContextMenuCapabilities,
+                Option<InputHit>,
+                Point<Pixels>,
+                &mut Window,
+                &mut App,
+            ),
+        >,
+    ) {
         self.context_menu_handler = Some(handler);
     }
 
@@ -774,6 +812,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             mode: LayoutMode::default(),
             last_layout: None,
             last_bounds: None,
+            last_gutter_bounds: None,
             last_selected_range: None,
             column_select_start: None,
             last_cursor: None,
@@ -794,6 +833,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             diagnostic_popover: None,
             context_menu_handler: None,
             pending_context_menu: None,
+            gutter_context_menu_moves_cursor: true,
             enable_context_menu: true,
             completion_inserting: false,
             overlay_action_handler: None,
@@ -815,6 +855,25 @@ impl<M: InputModeKind> InputBaseState<M> {
     pub fn context_menu(mut self, enable: bool) -> Self {
         self.enable_context_menu = enable;
         self
+    }
+
+    /// Sets whether a right-click on the gutter moves the caret to the row
+    /// clicked, as a right-click on the text does.
+    ///
+    /// It does by default. Turn it off to keep the selection while a menu for
+    /// a row of the gutter is open.
+    pub fn gutter_context_menu_moves_cursor(mut self, moves: bool) -> Self {
+        self.gutter_context_menu_moves_cursor = moves;
+        self
+    }
+
+    pub fn set_gutter_context_menu_moves_cursor(&mut self, moves: bool) {
+        self.gutter_context_menu_moves_cursor = moves;
+    }
+
+    /// Returns true when a right-click at `hit` leaves the caret where it is.
+    fn keeps_cursor_on_context_menu(&self, hit: Option<InputHit>) -> bool {
+        !self.gutter_context_menu_moves_cursor && hit.is_some_and(|hit| hit.is_gutter())
     }
 
     pub fn set_context_menu_enabled(&mut self, enabled: bool) {
@@ -2141,6 +2200,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         &mut self,
         position: Point<Pixels>,
         offset: usize,
+        hit: Option<InputHit>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2151,18 +2211,19 @@ impl<M: InputModeKind> InputBaseState<M> {
             return;
         }
 
-        if !self.active_selection().contains(offset) {
+        let keep_cursor = self.keeps_cursor_on_context_menu(hit);
+        if !keep_cursor && !self.active_selection().contains(offset) {
             self.move_to(offset, None, cx);
         }
 
-        if self.is_code_editor() {
+        if self.is_code_editor() && !keep_cursor {
             M::on_hover_definition(self, offset, window, cx);
         }
 
         if let Some(handler) = self.context_menu_handler.clone() {
             let capabilities = self.context_menu_capabilities();
             cx.defer_in(window, move |_, window, cx| {
-                handler(NativeMenu::new(), capabilities, position, window, cx);
+                handler(NativeMenu::new(), capabilities, hit, position, window, cx);
             });
         }
     }
@@ -2382,10 +2443,13 @@ impl<M: InputModeKind> InputBaseState<M> {
         // Show Mouse context menu
         if event.button == MouseButton::Right {
             if self.enable_context_menu {
-                if !self.active_selection().contains(offset) {
+                let hit = self.hit_test(event.position);
+                if !self.keeps_cursor_on_context_menu(hit)
+                    && !self.active_selection().contains(offset)
+                {
                     self.move_to(offset, None, cx);
                 }
-                self.pending_context_menu = Some((event.position, offset));
+                self.pending_context_menu = Some((event.position, offset, hit));
             }
             return;
         }
@@ -2424,8 +2488,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         if event.button == MouseButton::Right {
-            if let Some((position, offset)) = self.pending_context_menu.take() {
-                self.handle_right_click_menu(position, offset, window, cx);
+            if let Some((position, offset, hit)) = self.pending_context_menu.take() {
+                self.handle_right_click_menu(position, offset, hit, window, cx);
             }
         }
         if self.active_selection().is_empty() {
@@ -3123,7 +3187,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         let mut last_line_pos = None;
 
         // Traverse visible buffer lines (compact, no hidden entries)
-        for (vi, (line_layout, _buffer_line)) in last_layout
+        for (vi, (line_layout, &buffer_line)) in last_layout
             .lines
             .iter()
             .zip(last_layout.visible_buffer_lines.iter())
@@ -3133,14 +3197,21 @@ impl<M: InputModeKind> InputBaseState<M> {
             let (spacer_above, spacer_below) = last_layout.spacers(vi);
             y_offset += spacer_above;
             let height = line_layout.size(line_height).height;
+            // Ghost lines stand between the row's text and its spacers below,
+            // and push every row after it down, as `row_extents` lays them out.
+            let ghost_height = match last_layout.ghost_lines {
+                Some((ghost_row, ghost_height)) if ghost_row == buffer_line => ghost_height,
+                _ => px(0.),
+            };
 
             // Calculate line origin for this display row
             let line_origin = point(px(0.), y_offset);
             let mut pos = inner_position - line_origin;
-            // A pointer on a spacer row is on the row of text it stands beside.
+            // A pointer on a spacer row, or on the ghost lines, is on the row
+            // of text it stands beside.
             if pos.y < px(0.) && pos.y >= -spacer_above {
                 pos.y = px(0.);
-            } else if pos.y >= height && pos.y < height + spacer_below {
+            } else if pos.y >= height && pos.y < height + ghost_height + spacer_below {
                 pos.y = height - line_height;
             }
 
@@ -3169,7 +3240,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                 return (self.resolve_index(line_start_offset), false, 0);
             }
 
-            y_offset += height + spacer_below;
+            y_offset += height + ghost_height + spacer_below;
             last_line_pos = Some(pos);
         }
 
@@ -3703,6 +3774,60 @@ impl<M: InputModeKind> InputBaseState<M> {
         Some(Bounds::new(
             point(self.input_bounds.origin.x, last_bounds.origin.y + top),
             gpui::size(self.input_bounds.size.width, height),
+        ))
+    }
+
+    /// Return the bounds of the gutter as last painted, from the text's margin to
+    /// the outer edge of the input's padding.
+    ///
+    /// Returns `None` before the first paint and when the input has no gutter.
+    pub fn gutter_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.last_gutter_bounds
+    }
+
+    /// Return what `position`, in window coordinates, is over, as last painted.
+    ///
+    /// A point on a spacer row is beside the row of text it stands by, as for
+    /// a click. Returns `None` before the first paint and outside the input.
+    pub fn hit_test(&self, position: Point<Pixels>) -> Option<InputHit> {
+        let last_layout = self.last_layout.as_ref()?;
+        let last_bounds = self.last_bounds?;
+        let beside = last_layout.row_at(position.y - last_bounds.origin.y);
+        let spacer = beside.is_some_and(|(_, spacer)| spacer);
+
+        if self
+            .last_gutter_bounds
+            .is_some_and(|gutter| gutter.contains(&position))
+        {
+            let folding = self.mode.is_folding();
+            let column = last_layout.gutter_order.iter().copied().find(|&column| {
+                let (x, width) = super::element::gutter_column(last_layout, folding, column);
+                let left = self.input_bounds.origin.x + x;
+                position.x >= left && position.x < left + width
+            });
+            return Some(InputHit::new(
+                InputHitArea::Gutter { column },
+                beside.map(|(row, _)| row),
+                spacer,
+            ));
+        }
+
+        // As for the gutter, the ghost lines extend the text below its bounds.
+        let paddings = self.editor_paddings;
+        let ghost_height = last_layout.ghost_lines.map_or(px(0.), |(_, height)| height);
+        let outer = Bounds::from_corners(
+            self.input_bounds.origin - point(paddings.left, paddings.top),
+            self.input_bounds.bottom_right()
+                + point(paddings.right, paddings.bottom + ghost_height),
+        );
+        if !outer.contains(&position) {
+            return None;
+        }
+        let (offset, _) = self.index_for_mouse_position(position);
+        Some(InputHit::new(
+            InputHitArea::Text { offset },
+            Some(self.text.offset_to_point(offset).row),
+            spacer,
         ))
     }
 
@@ -5943,7 +6068,7 @@ mod tests {
                     calls2.set(calls2.get() + 1);
                     items2.set(menu.items.len());
                 }));
-                state.handle_right_click_menu(point(px(0.), px(0.)), 0, window, cx);
+                state.handle_right_click_menu(point(px(0.), px(0.)), 0, None, window, cx);
             })
         });
         assert_eq!(calls.get(), 1);
@@ -5952,7 +6077,7 @@ mod tests {
         cx.update(|window, cx| {
             input.update(cx, |state, cx| {
                 state.disabled = true;
-                state.handle_right_click_menu(point(px(0.), px(0.)), 0, window, cx);
+                state.handle_right_click_menu(point(px(0.), px(0.)), 0, None, window, cx);
             })
         });
         assert_eq!(calls.get(), 1);

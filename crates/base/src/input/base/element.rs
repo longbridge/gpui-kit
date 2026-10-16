@@ -394,7 +394,7 @@ fn editor_text_bounds(
 /// From the text outward, a gutter holds a margin, then its columns in the
 /// order of `gutter_order`. A gutter on the right is the mirror of one on the
 /// left.
-fn gutter_column(
+pub(super) fn gutter_column(
     last_layout: &LastLayout,
     folding: bool,
     column: GutterColumn,
@@ -3695,6 +3695,8 @@ impl<M: InputModeKind> Element for TextElement<M> {
                 });
             state.last_layout = Some(prepaint.last_layout.clone());
             state.last_bounds = Some(bounds);
+            state.last_gutter_bounds =
+                (prepaint.last_layout.line_number_width > px(0.)).then_some(gutter_bounds);
             state.last_cursor = Some(state.cursor());
             state.set_input_bounds(input_bounds, cx);
             state.last_selected_range = Some(selected_range);
@@ -3985,6 +3987,7 @@ fn split_runs_by_bg_segments(
 mod tests {
     use super::*;
     use crate::input::{EditorMode, EditorState, FoldRange, Position, RangeDecoration, Redo, Undo};
+    use crate::input::{InputHit, InputHitArea};
     use crate::{ScrollbarMode, ScrollbarStyles, ScrollbarTheme, Theme};
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, Render, TestAppContext,
@@ -6987,5 +6990,228 @@ mod tests {
             cursor_surrounding_padding(false, None, visible_lines, line_height),
             raw.min(half),
         );
+    }
+
+    /// The middle of the `column`'s band in the gutter, in window coordinates.
+    fn gutter_column_middle(state: &EditorState, column: GutterColumn) -> Option<Pixels> {
+        let layout = state.last_layout.as_ref().unwrap();
+        let (x, width) = gutter_column(layout, state.mode.is_folding(), column);
+        (width > px(0.)).then(|| state.input_bounds.origin.x + x + width.half())
+    }
+
+    #[gpui::test]
+    fn hit_test_tells_the_gutter_from_the_text(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "one\ntwo\nthree", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let unpainted = cx.new(|cx| EditorState::new(window, cx).default_value("a"));
+            assert!(unpainted.read(cx).gutter_bounds().is_none());
+            assert!(unpainted.read(cx).hit_test(point(px(1.), px(1.))).is_none());
+
+            for side in [Side::Left, Side::Right] {
+                editor.update(cx, |state, cx| state.set_gutter_side(side, cx));
+                window.draw(cx).clear(cx);
+                let state = editor.read(cx);
+                let gutter = state.gutter_bounds().unwrap();
+                let row = state.row_bounds(1).unwrap();
+                let y = row.center().y;
+                if side.is_left() {
+                    assert_eq!(
+                        gutter.left(),
+                        state.input_bounds.left() - state.editor_paddings.left
+                    );
+                } else {
+                    assert_eq!(
+                        gutter.right(),
+                        state.input_bounds.right() + state.editor_paddings.right
+                    );
+                }
+
+                let mut columns = 0;
+                for column in [
+                    GutterColumn::FoldIcons,
+                    GutterColumn::LineNumbers,
+                    GutterColumn::Markers,
+                ] {
+                    let Some(x) = gutter_column_middle(state, column) else {
+                        continue;
+                    };
+                    columns += 1;
+                    let hit = state.hit_test(point(x, y)).unwrap();
+                    assert!(hit.is_gutter(), "{side:?} {column:?}");
+                    assert_eq!(hit.gutter_column(), Some(column), "{side:?}");
+                    assert_eq!(hit.row(), Some(1));
+                    assert_eq!(hit.offset(), None);
+                    assert!(!hit.is_spacer());
+                }
+                assert!(columns >= 2, "fold icons and line numbers");
+
+                // The margin between the text and the gutter's columns is the
+                // gutter, in no column.
+                let margin = if side.is_left() {
+                    gutter.right() - px(1.)
+                } else {
+                    gutter.left() + px(1.)
+                };
+                let hit = state.hit_test(point(margin, y)).unwrap();
+                assert_eq!(hit.area(), InputHitArea::Gutter { column: None });
+                assert_eq!(hit.row(), Some(1));
+
+                // Below the last row the gutter is beside no row.
+                let below = state.row_bounds(2).unwrap().bottom() + state.line_height().unwrap();
+                let x = gutter_column_middle(state, GutterColumn::LineNumbers).unwrap();
+                let hit = state.hit_test(point(x, below)).unwrap();
+                assert!(hit.is_gutter());
+                assert_eq!(hit.row(), None);
+
+                // The text is where a click places the caret.
+                let x = if side.is_left() {
+                    gutter.right() + px(30.)
+                } else {
+                    gutter.left() - px(30.)
+                };
+                let hit = state.hit_test(point(x, y)).unwrap();
+                assert!(!hit.is_gutter());
+                assert_eq!(hit.row(), Some(1));
+                assert_eq!(
+                    hit.offset(),
+                    Some(state.index_for_mouse_position(point(x, y)).0)
+                );
+                assert!((4..=7).contains(&hit.offset().unwrap()), "{hit:?}");
+
+                let outside = point(state.input_bounds.right() + px(500.), y);
+                assert!(state.hit_test(outside).is_none());
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn hit_test_puts_a_spacer_row_beside_its_line(cx: &mut TestAppContext) {
+        use crate::input::Spacer;
+        let (editor, window, _) =
+            spaced_editor(cx, false, vec![Spacer::above(1, 1), Spacer::below(1, 2)]);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let line_height = state.line_height().unwrap();
+            let row = state.row_bounds(1).unwrap();
+            let gutter_x = gutter_column_middle(state, GutterColumn::LineNumbers).unwrap();
+            let text_x = state.gutter_bounds().unwrap().right() + px(10.);
+            for (y, spacer) in [
+                (row.top() - line_height.half(), true),
+                (row.center().y, false),
+                (row.bottom() + line_height.half(), true),
+                (row.bottom() + line_height * 1.5, true),
+            ] {
+                for x in [gutter_x, text_x] {
+                    let hit = state.hit_test(point(x, y)).unwrap();
+                    assert_eq!(hit.row(), Some(1), "{y:?} {hit:?}");
+                    assert_eq!(hit.is_spacer(), spacer, "{y:?} {hit:?}");
+                }
+            }
+            let probe = point(gutter_x, state.row_bounds(2).unwrap().top() + px(1.));
+            let next = state.hit_test(probe).unwrap();
+            assert_eq!((next.row(), next.is_spacer()), (Some(2), false));
+
+            // Ghost lines stand between the row's text and its spacers below.
+            editor.update(cx, |state, cx| {
+                state.set_cursor_position(lsp_types::Position::new(1, 3), window, cx);
+                state.extras.inline_completion.item = Some(lsp_types::InlineCompletionItem {
+                    insert_text: "\nghost".into(),
+                    filter_text: None,
+                    range: None,
+                    command: None,
+                    insert_text_format: None,
+                });
+                cx.notify();
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let row = state.row_bounds(1).unwrap();
+            let ghost = state.hit_test(point(gutter_x, row.bottom() + line_height.half()));
+            assert_eq!(ghost.unwrap().row(), None);
+            // In the text, the ghost lines are on the row they follow.
+            let ghost = state.hit_test(point(text_x, row.bottom() + line_height.half()));
+            assert_eq!(
+                ghost.map(|hit| (hit.row(), hit.is_spacer())),
+                Some((Some(1), false))
+            );
+            for y in [
+                row.bottom() + line_height * 1.5,
+                row.bottom() + line_height * 2.5,
+            ] {
+                for x in [gutter_x, text_x] {
+                    let hit = state.hit_test(point(x, y)).unwrap();
+                    assert_eq!((hit.row(), hit.is_spacer()), (Some(1), true), "{y:?}");
+                }
+            }
+            for x in [gutter_x, text_x] {
+                let probe = point(x, state.row_bounds(2).unwrap().top() + px(1.));
+                let next = state.hit_test(probe).unwrap();
+                assert_eq!((next.row(), next.is_spacer()), (Some(2), false));
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn a_right_click_on_the_gutter_tells_the_menu_its_row(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "one\ntwo\nthree", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let opened: Rc<std::cell::RefCell<Vec<Option<InputHit>>>> = Default::default();
+        cx.update(|window, cx| {
+            editor.update(cx, |state, _| {
+                let opened = opened.clone();
+                state.on_context_menu_with_hit(Rc::new(move |_, _, hit, _, _, _| {
+                    opened.borrow_mut().push(hit);
+                }));
+            });
+            window.draw(cx).clear(cx);
+        });
+        let (gutter, text, rows) = cx.update(|_, cx| {
+            let state = editor.read(cx);
+            let gutter = gutter_column_middle(state, GutterColumn::LineNumbers).unwrap();
+            let text = state.gutter_bounds().unwrap().right() + px(10.);
+            let rows: Vec<Pixels> = (0..3)
+                .map(|row| state.row_bounds(row).unwrap().center().y)
+                .collect();
+            (gutter, text, rows)
+        });
+        let right_click = |cx: &mut VisualTestContext, position: Point<Pixels>| {
+            cx.simulate_mouse_down(position, MouseButton::Right, Default::default());
+            cx.simulate_mouse_up(position, MouseButton::Right, Default::default());
+            cx.run_until_parked();
+            let hit = opened.borrow_mut().pop().expect("the menu opened");
+            let selected = cx.update(|_, cx| editor.read(cx).selected_range());
+            (hit.unwrap(), selected)
+        };
+        let select = |cx: &mut VisualTestContext| {
+            cx.update(|_, cx| editor.update(cx, |state, cx| state.set_selected_range(0..2, cx)));
+        };
+
+        // By default the gutter moves the caret to its row, as the text does.
+        select(&mut cx);
+        let (hit, selected) = right_click(&mut cx, point(gutter, rows[1]));
+        assert_eq!(hit.gutter_column(), Some(GutterColumn::LineNumbers));
+        assert_eq!(hit.row(), Some(1));
+        assert_eq!(selected, 4..4);
+
+        // Turned off, a menu for a row of the gutter keeps the selection.
+        cx.update(|_, cx| {
+            editor.update(cx, |state, _| {
+                state.set_gutter_context_menu_moves_cursor(false)
+            })
+        });
+        select(&mut cx);
+        let (hit, selected) = right_click(&mut cx, point(gutter, rows[2]));
+        assert!(hit.is_gutter());
+        assert_eq!(hit.row(), Some(2));
+        assert_eq!(selected, 0..2);
+
+        // The text still moves the caret.
+        let (hit, selected) = right_click(&mut cx, point(text, rows[2]));
+        assert_eq!(hit.row(), Some(2));
+        assert_eq!(selected, hit.offset().unwrap()..hit.offset().unwrap());
+        assert!(hit.offset().unwrap() >= 8);
     }
 }

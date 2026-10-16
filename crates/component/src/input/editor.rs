@@ -5,7 +5,8 @@ use gpui::{
     Window, prelude::FluentBuilder as _, relative,
 };
 
-use super::{EditorState, Input};
+use super::input::ContextMenuBuilder;
+use super::{EditorState, Input, InputContextMenuCapabilities, InputHit};
 use crate::native_menu::NativeMenu;
 use crate::{ActiveTheme as _, RoleOverride, StyledExt as _};
 
@@ -30,7 +31,7 @@ pub struct Editor {
     /// An optional context menu builder to allow a custom context menu.
     ///
     /// If set, this overrides the built-in context menu.
-    context_menu_builder: Option<Rc<dyn Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu>>,
+    context_menu_builder: Option<ContextMenuBuilder>,
 
     paste_handler: Option<Rc<dyn Fn(&gpui::ClipboardItem, &mut Window, &mut App) -> bool>>,
 }
@@ -108,6 +109,27 @@ impl Editor {
         mut self,
         f: impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static,
     ) -> Self {
+        self.context_menu_builder =
+            Some(Rc::new(move |menu, _, _, window, cx| f(menu, window, cx)));
+        self
+    }
+
+    /// Replace the built-in context menu, told what it was opened on.
+    ///
+    /// See [`Input::context_menu_with`]: a menu for a row of the gutter reads
+    /// the row from the [`InputHit`] it is given, and
+    /// [`super::default_context_menu`] keeps the built-in items for the text.
+    pub fn context_menu_with(
+        mut self,
+        f: impl Fn(
+            NativeMenu,
+            InputContextMenuCapabilities,
+            Option<InputHit>,
+            &mut Window,
+            &mut App,
+        ) -> NativeMenu
+        + 'static,
+    ) -> Self {
         self.context_menu_builder = Some(Rc::new(f));
         self
     }
@@ -153,7 +175,9 @@ impl RenderOnce for Editor {
             .when_some(self.height, |this, height| this.h(height))
             .when_some(self.aria_label, |this, label| this.aria_label(label))
             .when_some(self.context_menu_builder, |this, build| {
-                this.context_menu(move |menu, window, cx| build(menu, window, cx))
+                this.context_menu_with(move |menu, capabilities, hit, window, cx| {
+                    build(menu, capabilities, hit, window, cx)
+                })
             })
             .when_some(self.paste_handler, |this, handler| {
                 this.on_paste(move |item, window, cx| handler(item, window, cx))
@@ -587,5 +611,77 @@ mod tests {
             assert!(editor.paste_handler.is_some());
             PasteProbe
         });
+    }
+
+    /// An editor whose right-click menu records what it was opened on, through
+    /// `context_menu_with` or, with `with` off, through `context_menu`.
+    struct MenuHarness {
+        state: Entity<EditorState>,
+        with: bool,
+        opened: Rc<std::cell::RefCell<Vec<Option<crate::input::InputHit>>>>,
+    }
+
+    impl Render for MenuHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let opened = self.opened.clone();
+            let editor = Editor::new(&self.state);
+            let editor = if self.with {
+                editor.context_menu_with(move |menu, _, hit, _, _| {
+                    opened.borrow_mut().push(hit);
+                    menu
+                })
+            } else {
+                editor.context_menu(move |menu, _, _| {
+                    opened.borrow_mut().push(None);
+                    menu
+                })
+            };
+            div().size_full().child(editor)
+        }
+    }
+
+    #[gpui::test]
+    fn a_menu_built_with_its_target_knows_the_row_of_the_gutter(cx: &mut TestAppContext) {
+        cx.update(crate::init);
+        for with in [true, false] {
+            let opened: Rc<std::cell::RefCell<Vec<_>>> = Default::default();
+            let mut state = None;
+            let (_, cx) = cx.add_window_view(|window, cx| {
+                let editor =
+                    cx.new(|cx| EditorState::new(window, cx).default_value("one\ntwo\nthree"));
+                state = Some(editor.clone());
+                MenuHarness {
+                    state: editor,
+                    with,
+                    opened: opened.clone(),
+                }
+            });
+            let state = state.unwrap();
+            VisualTestContext::update(cx, |window, cx| window.draw(cx).clear(cx));
+            let (gutter, text) = cx.read(|cx| {
+                let state = state.read(cx);
+                let y = state.row_bounds(1).unwrap().center().y;
+                let gutter = state.gutter_bounds().unwrap();
+                (
+                    gpui::point(gutter.center().x, y),
+                    gpui::point(gutter.right() + px(10.), y),
+                )
+            });
+            for position in [gutter, text] {
+                cx.simulate_mouse_down(position, gpui::MouseButton::Right, Default::default());
+                cx.simulate_mouse_up(position, gpui::MouseButton::Right, Default::default());
+                cx.run_until_parked();
+            }
+
+            let opened = opened.borrow();
+            assert_eq!(opened.len(), 2, "with {with}");
+            if with {
+                let (on_gutter, on_text) = (opened[0].unwrap(), opened[1].unwrap());
+                assert!(on_gutter.is_gutter());
+                assert_eq!(on_gutter.row(), Some(1));
+                assert!(!on_text.is_gutter());
+                assert_eq!(on_text.row(), Some(1));
+            }
+        }
     }
 }

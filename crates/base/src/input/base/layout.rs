@@ -49,6 +49,74 @@ impl GutterColumn {
     }
 }
 
+/// What a point of an input is over, as it was last painted.
+///
+/// Returned by [`hit_test`](super::InputBaseState::hit_test). The fields are private
+/// and reached through the methods below, so that more can be told about a
+/// point without breaking its readers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InputHit {
+    area: InputHitArea,
+    row: Option<usize>,
+    spacer: bool,
+}
+
+/// The part of an input a point is over.
+#[non_exhaustive]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputHitArea {
+    /// The text, at the byte offset a click there places the caret at.
+    #[non_exhaustive]
+    Text { offset: usize },
+    /// The gutter, in one of its columns, or `None` in its margin or padding.
+    #[non_exhaustive]
+    Gutter { column: Option<GutterColumn> },
+}
+
+impl InputHit {
+    pub(crate) fn new(area: InputHitArea, row: Option<usize>, spacer: bool) -> Self {
+        Self { area, row, spacer }
+    }
+
+    pub fn area(&self) -> InputHitArea {
+        self.area
+    }
+
+    /// The zero-based buffer row the point is beside.
+    ///
+    /// In the text it is the row of [`Self::offset`]. In the gutter it is
+    /// `None` above the first laid-out row and below the last.
+    pub fn row(&self) -> Option<usize> {
+        self.row
+    }
+
+    /// The byte offset in the text, when the point is over the text.
+    pub fn offset(&self) -> Option<usize> {
+        match self.area {
+            InputHitArea::Text { offset } => Some(offset),
+            InputHitArea::Gutter { .. } => None,
+        }
+    }
+
+    pub fn is_gutter(&self) -> bool {
+        matches!(self.area, InputHitArea::Gutter { .. })
+    }
+
+    /// The gutter column the point is in, when it is in one.
+    pub fn gutter_column(&self) -> Option<GutterColumn> {
+        match self.area {
+            InputHitArea::Gutter { column } => column,
+            InputHitArea::Text { .. } => None,
+        }
+    }
+
+    /// Returns true when the point is on a spacer row beside [`Self::row`]
+    /// rather than on the row itself.
+    pub fn is_spacer(&self) -> bool {
+        self.spacer
+    }
+}
+
 #[derive(Clone)]
 pub(super) struct LastLayout {
     pub(super) visible_range: Range<usize>,
@@ -129,6 +197,26 @@ impl LastLayout {
                 }
                 top += below;
                 extent
+            })
+    }
+
+    /// The buffer row at `y`, relative to the content origin, and whether `y`
+    /// is on one of its spacer rows. `None` above the first row, below the
+    /// last and on ghost lines.
+    pub(super) fn row_at(&self, y: Pixels) -> Option<(usize, bool)> {
+        self.row_extents()
+            .zip(&self.visible_buffer_lines)
+            .enumerate()
+            .find_map(|(ix, ((top, height), &row))| {
+                let (above, below) = self.spacers(ix);
+                let bottom = top + height;
+                let below_top = match self.ghost_lines {
+                    Some((ghost_row, ghost_height)) if ghost_row == row => bottom + ghost_height,
+                    _ => bottom,
+                };
+                let spacer =
+                    (y >= top - above && y < top) || (y >= below_top && y < below_top + below);
+                (spacer || (y >= top && y < bottom)).then_some((row, spacer))
             })
     }
 

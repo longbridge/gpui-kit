@@ -21,7 +21,9 @@ use gpui_base::InputBase as BaseInput;
 use rust_i18n::t;
 
 use super::state::{TextInputState, sync_focused_input_registry};
-use super::{InputContentType, InputState, sync_native_content_type};
+use super::{
+    InputContentType, InputContextMenuCapabilities, InputHit, InputState, sync_native_content_type,
+};
 use crate::ThemeStyled as _;
 
 fn accessibility_role(
@@ -106,6 +108,17 @@ pub(crate) fn input_style(disabled: bool, cx: &App) -> (Hsla, Hsla) {
     }
 }
 
+/// A custom context menu builder, told what the menu was opened on.
+pub(crate) type ContextMenuBuilder = Rc<
+    dyn Fn(
+        NativeMenu,
+        InputContextMenuCapabilities,
+        Option<InputHit>,
+        &mut Window,
+        &mut App,
+    ) -> NativeMenu,
+>;
+
 /// A text input element bind to an [`InputState`].
 #[derive(IntoElement)]
 pub struct Input {
@@ -136,7 +149,7 @@ pub struct Input {
     /// An optional context menu builder to allow a custom context menu on the input.
     ///
     /// If set, this overrides the built-in context menu.
-    context_menu_builder: Option<Rc<dyn Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu>>,
+    context_menu_builder: Option<ContextMenuBuilder>,
 
     /// An optional paste handler. If set, it is invoked with the clipboard item
     /// before the default text insertion. Return `true` if handled.
@@ -372,6 +385,31 @@ impl Input {
         mut self,
         f: impl Fn(NativeMenu, &mut Window, &mut App) -> NativeMenu + 'static,
     ) -> Self {
+        self.context_menu_builder =
+            Some(Rc::new(move |menu, _, _, window, cx| f(menu, window, cx)));
+        self
+    }
+
+    /// Sets a custom context menu builder that is told what the menu was
+    /// opened on.
+    ///
+    /// Like [`Self::context_menu`], with the input's
+    /// [`InputContextMenuCapabilities`], what the menu may offer, and the
+    /// [`InputHit`] of the right-click: whether it was on the text or on a row
+    /// of the gutter, `None` when the menu was not opened by a click on the
+    /// input. [`default_context_menu`] builds the built-in items, for the
+    /// clicks the builder leaves alone.
+    pub fn context_menu_with(
+        mut self,
+        f: impl Fn(
+            NativeMenu,
+            InputContextMenuCapabilities,
+            Option<InputHit>,
+            &mut Window,
+            &mut App,
+        ) -> NativeMenu
+        + 'static,
+    ) -> Self {
         self.context_menu_builder = Some(Rc::new(f));
         self
     }
@@ -602,6 +640,59 @@ impl Styled for Input {
     }
 }
 
+/// Add the built-in items of an input's right-click menu to `menu`: Cut, Copy,
+/// Paste and Select All, and for a code editor Go to Definition and Show Code
+/// Actions, each enabled as `capabilities` allow.
+///
+/// For a builder set with [`Input::context_menu_with`] that keeps the built-in
+/// menu for some clicks.
+pub fn default_context_menu(
+    mut menu: NativeMenu,
+    capabilities: InputContextMenuCapabilities,
+) -> NativeMenu {
+    let enabled = !capabilities.is_disabled();
+    // A read-only input can still navigate the code, it only
+    // rejects the items that would change the text.
+    let editable = enabled && !capabilities.is_readonly();
+    if capabilities.is_code_editor() {
+        menu = menu
+            .menu_with_disabled(
+                t!("Input.Go to Definition"),
+                !(enabled && capabilities.has_definition()),
+                Box::new(gpui_base::input::GoToDefinition),
+            )
+            .menu_with_disabled(
+                t!("Input.Show Code Actions"),
+                !(editable && capabilities.has_code_actions()),
+                Box::new(gpui_base::input::ToggleCodeActions),
+            )
+            .separator();
+    }
+    menu.menu_with_disabled(
+        t!("Input.Cut"),
+        !(editable && capabilities.is_copyable()),
+        Box::new(gpui_base::input::Cut),
+    )
+    .menu_with_disabled(
+        t!("Input.Copy"),
+        !capabilities.is_copyable(),
+        Box::new(gpui_base::input::Copy),
+    )
+    // Offered whenever the text can change, without peeking
+    // at the clipboard: the synchronous read is always empty
+    // on the web, and an empty clipboard pastes nothing.
+    .menu_with_disabled(
+        t!("Input.Paste"),
+        !editable,
+        Box::new(gpui_base::input::Paste),
+    )
+    .separator()
+    .menu(
+        t!("Input.Select All"),
+        Box::new(gpui_base::input::SelectAll),
+    )
+}
+
 impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         const LINE_HEIGHT: Rems = Rems(1.25);
@@ -651,53 +742,12 @@ impl RenderOnce for Input {
         state.set_readonly(self.readonly, cx);
         state.set_text_align(text_align, cx);
         let custom = self.context_menu_builder.clone();
-        state.on_context_menu(
-            Rc::new(move |_, capabilities, position, window, cx| {
+        state.on_context_menu_with_hit(
+            Rc::new(move |_, capabilities, hit, position, window, cx| {
                 let menu = if let Some(custom) = custom.as_ref() {
-                    custom(NativeMenu::new(), window, cx)
+                    custom(NativeMenu::new(), capabilities, hit, window, cx)
                 } else {
-                    let enabled = !capabilities.is_disabled();
-                    // A read-only input can still navigate the code, it only
-                    // rejects the items that would change the text.
-                    let editable = enabled && !capabilities.is_readonly();
-                    let mut menu = NativeMenu::new();
-                    if capabilities.is_code_editor() {
-                        menu = menu
-                            .menu_with_disabled(
-                                t!("Input.Go to Definition"),
-                                !(enabled && capabilities.has_definition()),
-                                Box::new(gpui_base::input::GoToDefinition),
-                            )
-                            .menu_with_disabled(
-                                t!("Input.Show Code Actions"),
-                                !(editable && capabilities.has_code_actions()),
-                                Box::new(gpui_base::input::ToggleCodeActions),
-                            )
-                            .separator();
-                    }
-                    menu.menu_with_disabled(
-                        t!("Input.Cut"),
-                        !(editable && capabilities.is_copyable()),
-                        Box::new(gpui_base::input::Cut),
-                    )
-                    .menu_with_disabled(
-                        t!("Input.Copy"),
-                        !capabilities.is_copyable(),
-                        Box::new(gpui_base::input::Copy),
-                    )
-                    // Offered whenever the text can change, without peeking
-                    // at the clipboard: the synchronous read is always empty
-                    // on the web, and an empty clipboard pastes nothing.
-                    .menu_with_disabled(
-                        t!("Input.Paste"),
-                        !editable,
-                        Box::new(gpui_base::input::Paste),
-                    )
-                    .separator()
-                    .menu(
-                        t!("Input.Select All"),
-                        Box::new(gpui_base::input::SelectAll),
-                    )
+                    default_context_menu(NativeMenu::new(), capabilities)
                 };
                 menu.show(position, window, cx);
             }),

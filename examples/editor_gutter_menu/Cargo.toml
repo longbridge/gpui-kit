@@ -1,0 +1,12 @@
+[package]
+name = "example-editor-gutter-menu"
+description = "An editor whose gutter has a right-click menu of its own, for the line clicked."
+version = "0.7.1"
+publish = false
+edition.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+
+[lints]
+workspace = true

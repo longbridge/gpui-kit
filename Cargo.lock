@@ -2914,6 +2914,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-editor-gutter-menu"
+version = "0.7.1"
+dependencies = [
+ "gpui-kit",
+]
+
+[[package]]
 name = "example-editor-spacers"
 version = "0.7.1"
 dependencies = [

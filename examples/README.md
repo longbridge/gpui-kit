@@ -10,6 +10,7 @@ not enable the gallery's test-support development dependency.
 | --- | --- |
 | Editor | `cargo run -p example-editor` |
 | Editor spacers: two versions side by side, wrapped and padded level | `cargo run -p example-editor-spacers` |
+| Editor gutter menu: a right-click menu of its own on a line number | `cargo run -p example-editor-gutter-menu` |
 | Brush | `cargo run -p example-brush` |
 | Dock | `cargo run -p example-dock` |
 | HTML | `cargo run -p example-html` |
