@@ -49,7 +49,7 @@ API 形态跟随 Rust 原型：`App` 上的方法放在 `cx`，`Window` 上的�
 
 `PathBuilder.fill()` 与 `.stroke(width)` 返回一个句柄，可链式调用 `move_to`、`line_to`、`curve_to`、`cubic_bezier_to`、`arc_to`、`add_polygon`、`close` 与 `dash_array`，最后以 `build()` 收尾。用 `window.paint_path(path, background)` 把结果画出来——它是唯一一个通过对象取到的元素构造器，因为它镜像的东西在 Rust 侧就是窗口上的一个方法。
 
-`list` 和 `uniform_list` 是 GPUI 自己的惰性列表，参数是 `(id, item_count, get_key, render)`，即 `gpui-base` 的 `v_virtual_list` 去掉 `item_sizes` 的形状：没有尺寸表，因为 GPUI 自己测量各项。`uniform_list` 测量一行，其余各行按它排布，`render(range, cx)` 和虚拟列表一样按区间返回元素数组。`list` 会测量画出的每一项并记住尺寸，`render(index, cx)` 为一项返回一个元素，所以高度不等的行或面板不必事先说明有多高。两者都只绘制屏幕内的内容外加折叠线下方的一小段，自己处理滚动，并按名字与 `Scrollbar` 配对；都不接受 `VirtualListScrollHandle`。`list` 的 `item_count` 变化时，读者停留在视口顶部的那一项上：列表按 `get_key` 给出的键重新找到这一项并滚回去，所以在上方插入一页更早的条目、或在下方追加一条，都不会挪动正在读的内容。
+`list` 和 `uniform_list` 是 GPUI 自己的惰性列表，参数是 `(id, item_count, get_key, render)`，即 `gpui-base` 的 `v_virtual_list` 去掉 `item_sizes` 的形状：没有尺寸表，因为 GPUI 自己测量各项。`uniform_list` 测量一行，其余各行按它排布，`render(range, cx)` 和虚拟列表一样按区间返回元素数组。`list` 会测量画出的每一项并记住尺寸，`render(index, cx)` 为一项返回一个元素，所以高度不等的行或面板不必事先说明有多高。两者都只绘制屏幕内的内容外加折叠线下方的一小段，自己处理滚动，并按名字与 `Scrollbar` 配对；都不接受 `VirtualListScrollHandle`。`list` 的 `item_count` 变化时，读者停留在视口顶部的那一项上：列表按 `get_key` 给出的键重新找到这一项并滚回去，所以在上方插入一页更早的条目、或在下方追加一条，都不会挪动正在读的内容。加上 `with_follow_mode("tail")` 后，`list` 改为停在末尾，追加条目或最后一项变高时都跟到底，直到读者向上滚动。
 
 字符串本身也是元素，和 GPUI 里 `&str` 实现 `IntoElement` 完全一样：`.child("hello")` 就是写文本的方式，样式来自持有它的那个元素。
 
@@ -696,6 +696,7 @@ render(_cx) {
 | `viewport_from_layout()`                            | 让 `Scrollbar` 从自身的盒子取 viewport         |
 | `track_scroll(handle)`                              | 给虚拟列表一个脚本可以驱动的滚动位置           |
 | `with_item_to_measure_index(index)`                 | 虚拟列表在它滚动的那个轴上测量哪一项           |
+| `with_follow_mode(mode)`                            | `"tail"` 让 `list` 在追加条目时停在末尾        |
 | `size_range(min, max?)`                             | `resizable_panel()` 可被拖拽的范围，单位为像素 |
 
 ### 锚定浮层

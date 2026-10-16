@@ -457,6 +457,9 @@ struct Behavior {
     /// Which item a `VirtualList` measures to infer its cross-axis size.
     /// `None` keeps base's own default, which is the first.
     item_to_measure_index: Option<usize>,
+    /// Whether a `list` follows its tail. `None` is GPUI's own default,
+    /// `FollowMode::Normal`.
+    follow_mode: Option<gpui::FollowMode>,
     /// The dock commands a chrome element carries — what base is asked to do
     /// when it is clicked or dragged.
     ///
@@ -3178,6 +3181,16 @@ fn apply_behavior(behavior: &mut Behavior, name: &str, args: &[Bridged]) {
                 .and_then(|value| value.as_f32().ok())
                 .filter(|index| *index >= 0.0 && index.fract() == 0.0)
                 .map(|index| index as usize);
+        }
+        "with_follow_mode" => {
+            behavior.follow_mode =
+                args.first()
+                    .and_then(|value| value.as_str().ok())
+                    .and_then(|mode| match mode {
+                        "normal" => Some(gpui::FollowMode::Normal),
+                        "tail" => Some(gpui::FollowMode::Tail),
+                        _ => None,
+                    });
         }
         "track_focus" => {
             behavior.focus_handle = match args.first() {
