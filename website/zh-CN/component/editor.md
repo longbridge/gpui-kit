@@ -437,6 +437,26 @@ info 颜色；`GutterMarker::Custom { icon, color }` 按原样绘制给定的图
 文字一起下移。该行尚未布局时返回 `None`。
 Editor 展示页的 **Decorations** 标签用 provider 标记了最后三行。
 
+`EditorState::hit_test(position)` 按最近一次绘制，返回窗口坐标中的某个点落在什么上：文本（附带在该处
+单击时光标所在的偏移量），或行号栏（附带所在的 `GutterColumn`，落在边距中时为 `None`）。两种情况都会
+给出该点旁边的缓冲区行，以及该点是否位于这一行的间隔行上。在行号栏中，第一行之上和最后一行之下的行为
+`None`。`EditorState::gutter_bounds()` 返回行号栏实际绘制的区域。首次绘制之前两者都返回 `None`；
+它们都不会改变编辑器对单击的处理。
+
+```rust
+use gpui_kit::component::input::{GutterColumn, InputHitArea};
+
+if let Some(hit) = editor.read(cx).hit_test(position) {
+    match hit.area() {
+        InputHitArea::Gutter { column: Some(GutterColumn::LineNumbers), .. } => {
+            // 行号：`hit.row()` 是缓冲区行。
+        }
+        InputHitArea::Text { offset, .. } => { /* 文本，位于 `offset` */ }
+        _ => {}
+    }
+}
+```
+
 `EditorState::display_map()` 返回 `&DisplayMap`，供应用只读查询编辑器拥有的文本映射。
 `DisplayMap`、`BufferPoint` 和 `DisplayPoint` 均可从 `gpui_kit::base::input` 或
 `gpui_kit::component::input` 导入。编辑器状态负责更新映射；应用可以用它实现自定义缩略图、

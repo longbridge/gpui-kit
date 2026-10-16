@@ -536,6 +536,28 @@ where it is painted: below a multi-line inline completion, rows move down with t
 text. It returns `None` while the row is not laid out. The **Decorations** tab of the Editor showcase
 marks its last three rows with a provider.
 
+`EditorState::hit_test(position)` tells what a point in window coordinates is over, as
+last painted: the text, at the offset a click there places the caret at, or the gutter,
+in one of its `GutterColumn`s or in its margin. Either way it names the buffer row beside
+the point, and whether the point is on one of that row's spacer rows. In the gutter the
+row is `None` above the first row and below the last. `EditorState::gutter_bounds()`
+returns the gutter's painted bounds. Both return `None` before the first paint; neither
+changes what the editor does with a click.
+
+```rust
+use gpui_kit::component::input::{GutterColumn, InputHitArea};
+
+if let Some(hit) = editor.read(cx).hit_test(position) {
+    match hit.area() {
+        InputHitArea::Gutter { column: Some(GutterColumn::LineNumbers), .. } => {
+            // A line number: `hit.row()` is the buffer row.
+        }
+        InputHitArea::Text { offset, .. } => { /* the text, at `offset` */ }
+        _ => {}
+    }
+}
+```
+
 `EditorState::display_map()` returns `&DisplayMap`, a read-only reference to the
 editor-owned text projection. `DisplayMap`, `BufferPoint`, and `DisplayPoint` are
 available from both `gpui_kit::base::input` and `gpui_kit::component::input`.
