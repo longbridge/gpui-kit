@@ -25,6 +25,9 @@ use crate::{
 struct TabIndicatorBounds {
     container: Bounds<Pixels>,
     tabs: Vec<Bounds<Pixels>>,
+    /// Where the last render placed the indicator: its left edge from the
+    /// first tab's, and its width (zero before the tabs were measured).
+    placed: (Pixels, Pixels),
 }
 
 impl TabIndicatorBounds {
@@ -32,6 +35,7 @@ impl TabIndicatorBounds {
         Self {
             container: Bounds::default(),
             tabs: vec![Bounds::default(); num_tabs],
+            placed: (px(0.), px(0.)),
         }
     }
 
@@ -228,6 +232,9 @@ impl TabBar {
         self.update_anim_params(selected_ix, bounds_rc, &prev_selected, &anim_params, cx);
 
         let (to_left, to_width, epoch) = *anim_params.read(cx);
+        if let Some(rc) = bounds_rc {
+            rc.borrow_mut().placed = (to_left, to_width);
+        }
         if to_width <= px(0.) {
             return None;
         }
@@ -478,6 +485,7 @@ impl RenderOnce for TabBar {
         let indicator_ready = indicator_element.is_some();
 
         let has_suffix_or_menu = self.suffix.is_some() || self.menu;
+        let view = window.current_view();
         let mut item_metas: Vec<(Option<SharedString>, Option<Icon>, bool)> = Vec::new();
         let selected_index = self.selected_index;
         let on_click = self.on_click.clone();
@@ -540,6 +548,7 @@ impl RenderOnce for TabBar {
 
             rendered_tabs.push(if let Some(ref rc) = bounds_rc {
                 let rc = rc.clone();
+                let selected = selected_index == Some(ix);
                 // `tabs-inner` is tracked by `ScrollHandle`, which indexes its
                 // direct children. Keep the indicator inside the first tab so
                 // only logical tabs occupy those indices.
@@ -550,9 +559,26 @@ impl RenderOnce for TabBar {
                         this.style().flex_basis = flex_basis;
                         this
                     })
-                    .on_prepaint(move |bounds, _, _| {
-                        if let Some(slot) = rc.borrow_mut().tabs.get_mut(ix) {
+                    .on_prepaint(move |bounds, window, _| {
+                        let mut measured = rc.borrow_mut();
+                        if let Some(slot) = measured.tabs.get_mut(ix) {
                             *slot = bounds;
+                        }
+                        // Render places the indicator from the bounds an
+                        // earlier frame measured, and a view that nothing
+                        // changed may not render again. When the selected tab
+                        // is measured elsewhere than its indicator (on the
+                        // bar's first frame above all), render the view again
+                        // on the next frame. Not while the bar has no width:
+                        // render leaves the indicator where it was then.
+                        if selected && measured.container.size.width > px(0.) {
+                            let first = measured
+                                .tabs
+                                .first()
+                                .map_or(bounds.origin.x, |tab| tab.origin.x);
+                            if (bounds.origin.x - first, bounds.size.width) != measured.placed {
+                                window.on_next_frame(move |_, cx| cx.notify(view));
+                            }
                         }
                     })
                     .relative()
@@ -1891,5 +1917,83 @@ mod tests {
         let first_after = cx.debug_bounds("wheel-tab-0").unwrap();
         assert!(first_after.left() < first_before.left());
         assert_eq!(first_after.top(), first_before.top());
+    }
+
+    /// A bar of two underlined tabs, the first selected, in a box `width`
+    /// wide, which the view shows once `shown`.
+    struct LateBar {
+        shown: bool,
+        width: Pixels,
+    }
+
+    impl Render for LateBar {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(self.width)
+                .overflow_hidden()
+                .when(self.shown, |this| {
+                    this.child(
+                        TabBar::new("late-tabs")
+                            .underline()
+                            .selected_index(0)
+                            .child(Tab::new().label("First"))
+                            .child(Tab::new().label("Second")),
+                    )
+                })
+        }
+    }
+
+    /// Shows a bar in a window drawn before, as a view shows one once its
+    /// data came, and draws the bar's first frame.
+    fn show_late_bar(cx: &mut TestAppContext, width: Pixels) -> &mut gpui::VisualTestContext {
+        cx.update(crate::theme::init);
+        let (view, cx) = cx.add_window_view(move |_, _| LateBar {
+            shown: false,
+            width,
+        });
+        draw(cx);
+        view.update(cx, |bar, cx| {
+            bar.shown = true;
+            cx.notify();
+        });
+        draw(cx);
+        cx
+    }
+
+    /// The underline indicators the frame drawn last painted.
+    fn painted_indicators(cx: &mut gpui::VisualTestContext) -> Vec<Bounds<Pixels>> {
+        cx.update(|window, cx| {
+            let primary: Background = cx.theme().tokens.primary.into();
+            let scale_factor = window.scale_factor();
+            window
+                .painted_quads()
+                .into_iter()
+                .filter(|quad| quad.background == primary)
+                .map(|quad| quad.bounds.map(|value| px(value.0 / scale_factor)))
+                .filter(|bounds| bounds.size.height == px(2.))
+                .collect()
+        })
+    }
+
+    /// The frame after a bar's first, which measured its tabs, draws the
+    /// indicator under the selected tab, though nothing the view holding
+    /// the bar renders from changed. Then the bar asks for no more frames.
+    #[gpui::test]
+    fn a_bar_shown_later_draws_its_indicator_on_the_next_frame(cx: &mut TestAppContext) {
+        let cx = show_late_bar(cx, px(300.));
+        next_frame(cx);
+        let indicators = painted_indicators(cx);
+        assert_eq!(indicators.len(), 1, "{indicators:?}");
+        assert!(indicators[0].size.width > px(0.), "{indicators:?}");
+        assert!(indicators[0].right() <= px(150.), "{indicators:?}");
+        assert_eq!(cx.update(|window, cx| window.simulate_next_frame(cx)), 0);
+    }
+
+    /// A bar squeezed to no width asks for no frames to place its indicator.
+    #[gpui::test]
+    fn a_bar_with_no_width_asks_for_no_frames(cx: &mut TestAppContext) {
+        let cx = show_late_bar(cx, px(0.));
+        next_frame(cx);
+        assert_eq!(cx.update(|window, cx| window.simulate_next_frame(cx)), 0);
     }
 }
