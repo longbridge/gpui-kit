@@ -233,7 +233,7 @@ TextView::new(&document).motion(
 
 `TextViewState::set_range_highlights` 在 `rendered_text()`（与纯文本复制得到的文字一致）的指定范围后面绘制背景，应用可以借此显示搜索结果或引用位置，无需重新解析或修改文档样式。这些范围只参与绘制、不参与排版，因此不会改变布局。Markdown 源码里的范围（例如 `selected_source_range()` 返回的范围）可以用 `rendered_text().range_for_source(range)` 转换过来。`reveal_range` 通过视图自身的列表、外层 `gpui::list`，或者其他容器上的 `TextView::on_reveal`，把范围起点所在的行滚动到可见区域内；规则详见[高亮文本范围](../component/text-view.md#高亮文本范围)和[滚动到范围](../component/text-view.md#滚动到范围)。
 
-通过 `SelectionFormat` 可以选择复制渲染文本或 Markdown 源码。链接路由、代码块操作、表格操作、图片和 Markdown 插件继续使用与兼容 API 相同的 builder，详见 [gpui-component TextView 文档](../component/text-view.md)。
+通过 `SelectionFormat` 可以选择复制渲染文本或 Markdown 源码；`SelectionFormat::SourceAcrossStyles` 只在选区跨越多种样式时复制源码，例如跨过 `**bold**` 的边界或跨越两个块。链接路由、代码块操作、表格操作、图片和 Markdown 插件继续使用与兼容 API 相同的 builder，详见 [gpui-component TextView 文档](../component/text-view.md)。
 
 ## 可运行源码
 

@@ -276,7 +276,7 @@ view's own list, an enclosing `gpui::list`, or `TextView::on_reveal` for any
 other container; see [Highlight ranges](../component/text-view.md#highlight-ranges)
 and [Scroll to a range](../component/text-view.md#scroll-to-a-range).
 
-Selection can copy rendered text or Markdown source through `SelectionFormat`. Link routing, code-block actions, table actions, images, and custom Markdown plugins use the same builders as the compatibility API documented on the [gpui-component TextView page](../component/text-view.md).
+Selection can copy rendered text or Markdown source through `SelectionFormat`; `SelectionFormat::SourceAcrossStyles` copies the source only when the selection takes in more than one style, such as text on both sides of a `**bold**` boundary or two blocks. Link routing, code-block actions, table actions, images, and custom Markdown plugins use the same builders as the compatibility API documented on the [gpui-component TextView page](../component/text-view.md).
 
 ## Runnable source
 

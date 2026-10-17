@@ -273,6 +273,27 @@ fn custom_block_is_selected(
             ))
 }
 
+/// How many styles a selection takes in, which decides whether
+/// [`SelectionFormat::SourceAcrossStyles`] copies the rendered text or the
+/// source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SelectionStyles {
+    None,
+    One,
+    Mixed,
+}
+
+impl SelectionStyles {
+    /// Combine two separately selected parts. They are two styles even when
+    /// their marks match, because they sit in different blocks or cells.
+    fn merge(&mut self, other: Self) {
+        *self = match (*self, other) {
+            (Self::None, other) | (other, Self::None) => other,
+            _ => Self::Mixed,
+        };
+    }
+}
+
 #[derive(Clone, Copy)]
 enum BlockTextKind {
     All,
@@ -325,8 +346,50 @@ impl BlockNode {
     pub(super) fn selected_text(&self, format: SelectionFormat) -> String {
         self.text_by_kind(match format {
             SelectionFormat::Plain => BlockTextKind::Selected,
-            SelectionFormat::Source => BlockTextKind::SelectedSource,
+            SelectionFormat::Source | SelectionFormat::SourceAcrossStyles => {
+                BlockTextKind::SelectedSource
+            }
         })
+    }
+
+    /// How many styles the selection within this block takes in.
+    pub(super) fn selection_styles(&self) -> SelectionStyles {
+        let mut styles = SelectionStyles::None;
+        match self {
+            BlockNode::Root { children, .. }
+            | BlockNode::Blockquote { children, .. }
+            | BlockNode::List { children, .. }
+            | BlockNode::ListItem { children, .. } => {
+                for child in children {
+                    styles.merge(child.selection_styles());
+                }
+            }
+            BlockNode::Paragraph(paragraph) => styles = paragraph.selection_styles(),
+            BlockNode::Heading { children, .. } => styles = children.selection_styles(),
+            BlockNode::Table(table) => {
+                for row in &table.children {
+                    for cell in &row.children {
+                        styles.merge(cell.children.selection_styles());
+                    }
+                }
+            }
+            BlockNode::CodeBlock(code_block) => {
+                if code_block.has_selection() {
+                    styles = SelectionStyles::One;
+                }
+            }
+            // A plugin's text stands in for content its source spells out.
+            BlockNode::Custom { state, .. } => {
+                if state.is_selected() {
+                    styles = SelectionStyles::Mixed;
+                }
+            }
+            BlockNode::Definition { .. }
+            | BlockNode::Break { .. }
+            | BlockNode::HorizontalRule { .. }
+            | BlockNode::Unknown => {}
+        }
+        styles
     }
 
     pub(super) fn selected_source_range(&self) -> SourceRangeSelection {
@@ -891,6 +954,9 @@ pub(crate) fn wrap_with_mark(text: &str, mark: &TextMark) -> String {
 #[derive(Default)]
 struct MarkdownSource {
     pieces: Vec<(String, Vec<TextMark>)>,
+    /// Whether an inline object or image was emitted, whose rendered text
+    /// stands in for source that spells out more.
+    has_objects: bool,
 }
 
 impl MarkdownSource {
@@ -964,7 +1030,16 @@ impl MarkdownSource {
         }
     }
 
+    fn push_images(&mut self, images: &[String]) {
+        if images.is_empty() {
+            return;
+        }
+        self.has_objects = true;
+        self.push_str(&images.join(""));
+    }
+
     fn push_object(&mut self, node: &InlineNode) {
+        self.has_objects = true;
         let mut mark = TextMark::default();
         for (_, layer) in &node.marks {
             mark.merge(layer.clone());
@@ -974,6 +1049,16 @@ impl MarkdownSource {
 
     fn is_empty(&self) -> bool {
         self.pieces.is_empty()
+    }
+
+    fn styles(&self) -> SelectionStyles {
+        if self.is_empty() {
+            SelectionStyles::None
+        } else if !self.has_objects && self.pieces.windows(2).all(|pair| pair[0].1 == pair[1].1) {
+            SelectionStyles::One
+        } else {
+            SelectionStyles::Mixed
+        }
     }
 
     fn finish(mut self) -> String {
@@ -1059,7 +1144,7 @@ fn emit_run(
 
         if !selected.emitted {
             if selected.at_start {
-                out.push_str(&pending_images.join(""));
+                out.push_images(pending_images);
             }
             pending_images.clear();
         }
@@ -1601,6 +1686,17 @@ impl Paragraph {
     /// or ends with an image has no run on that side, which counts as reaching
     /// it.
     pub(super) fn selected_source(&self) -> String {
+        self.selected_markdown().finish()
+    }
+
+    /// How many styles the selection within this paragraph takes in.
+    pub(super) fn selection_styles(&self) -> SelectionStyles {
+        self.selected_markdown().styles()
+    }
+
+    /// The selection as Markdown pieces, before their marks are serialized;
+    /// see [`selected_source`](Self::selected_source).
+    fn selected_markdown(&self) -> MarkdownSource {
         let mut source = MarkdownSource::default();
         let mut pending_images: Vec<String> = Vec::new();
         let mut run: Vec<(usize, &InlineNode)> = Vec::new();
@@ -1616,7 +1712,7 @@ impl Paragraph {
                     .is_ok_and(|selected| *selected);
                 if object_selected {
                     if run.is_empty() || (selected.emitted && selected.at_end) {
-                        source.push_str(&pending_images.join(""));
+                        source.push_images(&pending_images);
                     }
                     source.push_object(child);
                 }
@@ -1651,10 +1747,10 @@ impl Paragraph {
         let trailing = emit_run(&self.state, &run, &mut pending_images, &mut source);
         // Trailing images have no run after them to flush them.
         if !trailing.emitted && enters_image && !source.is_empty() {
-            source.push_str(&pending_images.join(""));
+            source.push_images(&pending_images);
         }
 
-        source.finish()
+        source
     }
 
     pub(super) fn text(&self) -> String {
@@ -4752,6 +4848,144 @@ mod tests {
         set_paragraph_selection(&paragraph, 0..11);
         assert_eq!(paragraph.selected_source(), "plain words");
         assert_eq!(paragraph.selected_text(), "plain words");
+    }
+
+    /// Copy `blocks` the way a view in [`SelectionFormat::SourceAcrossStyles`]
+    /// does, with every block painted.
+    fn copy_across_styles(blocks: Vec<BlockNode>) -> String {
+        let document = crate::text::document::ParsedDocument {
+            blocks: blocks.into(),
+            ..Default::default()
+        };
+        document.selected_text(SelectionFormat::SourceAcrossStyles, None)
+    }
+
+    #[test]
+    fn source_across_styles_copies_plain_text_within_one_style() {
+        // "This has **bold** text." rendered as ["This has ", "bold", " text."].
+        let paragraph = || {
+            paragraph_with_children(vec![
+                InlineNode::new("This has ").marks(vec![(0..9, TextMark::default())]),
+                InlineNode::new("bold").marks(vec![(0..4, TextMark::default().bold())]),
+                InlineNode::new(" text.").marks(vec![(0..6, TextMark::default())]),
+            ])
+        };
+        let copy = |range: Range<usize>| {
+            let paragraph = paragraph();
+            set_paragraph_selection(&paragraph, range);
+            copy_across_styles(vec![BlockNode::Paragraph(paragraph)])
+        };
+
+        // Inside the bold run, and up to both of its boundaries.
+        assert_eq!(copy(10..12), "ol\n");
+        assert_eq!(copy(9..13), "bold\n");
+        // Inside the plain text before it, up to the boundary.
+        assert_eq!(copy(0..9), "This has \n");
+        // Across the boundary, the selection takes in two styles.
+        assert_eq!(copy(5..16), "has **bold** te");
+        assert_eq!(copy(8..10), " **b**");
+    }
+
+    #[test]
+    fn source_across_styles_drops_the_url_of_a_link_selected_alone() {
+        let link = TextMark::default().link(LinkMark {
+            url: "https://example.com".into(),
+            ..Default::default()
+        });
+        let paragraph = paragraph_with_children(vec![
+            InlineNode::new("see ").marks(vec![(0..4, TextMark::default())]),
+            InlineNode::new("the docs").marks(vec![(0..8, link)]),
+        ]);
+
+        set_paragraph_selection(&paragraph, 4..12);
+        assert_eq!(
+            copy_across_styles(vec![BlockNode::Paragraph(paragraph.clone())]),
+            "the docs\n"
+        );
+
+        set_paragraph_selection(&paragraph, 0..12);
+        assert_eq!(
+            copy_across_styles(vec![BlockNode::Paragraph(paragraph)]),
+            "see [the docs](https://example.com)"
+        );
+    }
+
+    #[test]
+    fn source_across_styles_drops_the_markup_of_a_single_block() {
+        let heading = BlockNode::Heading {
+            level: 2,
+            children: selected_paragraph("Title"),
+            span: None,
+        };
+        assert_eq!(copy_across_styles(vec![heading]), "Title\n");
+
+        let code = CodeBlock::from_code("let a = 1;\nlet b = 2;", Some("rust"));
+        code.set_selection(0..10);
+        assert_eq!(
+            copy_across_styles(vec![BlockNode::CodeBlock(code)]),
+            "let a = 1;\n"
+        );
+
+        let item = |text: &str| BlockNode::ListItem {
+            children: vec![BlockNode::Paragraph(selected_paragraph(text))],
+            spread: false,
+            checked: None,
+            span: None,
+        };
+        let unselected_item = BlockNode::ListItem {
+            children: vec![BlockNode::Paragraph(paragraph_with_children(vec![
+                InlineNode::new("two"),
+            ]))],
+            spread: false,
+            checked: None,
+            span: None,
+        };
+        let list = BlockNode::List {
+            ordered: false,
+            start: None,
+            span: None,
+            children: vec![item("one"), unselected_item],
+        };
+        assert_eq!(copy_across_styles(vec![list]), "one\n");
+    }
+
+    #[test]
+    fn source_across_styles_keeps_the_source_across_blocks() {
+        let item = |text: &str| BlockNode::ListItem {
+            children: vec![BlockNode::Paragraph(selected_paragraph(text))],
+            spread: false,
+            checked: None,
+            span: None,
+        };
+        let list = BlockNode::List {
+            ordered: false,
+            start: None,
+            span: None,
+            children: vec![item("one"), item("two")],
+        };
+        assert_eq!(copy_across_styles(vec![list]), "- one\n- two");
+
+        assert_eq!(
+            copy_across_styles(vec![
+                BlockNode::Paragraph(selected_paragraph("start")),
+                BlockNode::Paragraph(selected_paragraph("end")),
+            ]),
+            "start\n\nend"
+        );
+    }
+
+    #[test]
+    fn source_across_styles_keeps_the_source_of_an_inline_object() {
+        let formula = InlineNode::custom(MarkdownNode::new("math", ()).text("x").markdown("$x$"));
+        *formula.custom_selection.lock().unwrap() = true;
+        let paragraph = Paragraph {
+            children: vec![formula],
+            ..Default::default()
+        };
+        assert_eq!(
+            copy_across_styles(vec![BlockNode::Paragraph(paragraph)]),
+            "$x$"
+        );
     }
 
     fn selected_paragraph(text: &str) -> Paragraph {

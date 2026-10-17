@@ -9,7 +9,7 @@ use std::{
 
 use crate::text::{
     SelectionFormat,
-    node::{BlockNode, NodeContext, SourceRangeSelection},
+    node::{BlockNode, NodeContext, SelectionStyles, SourceRangeSelection},
 };
 
 /// The parsed document AST.
@@ -129,6 +129,20 @@ impl ParsedDocument {
         let (first, last) = match blocks {
             Some(blocks) => (*blocks.start().min(&last_ix), *blocks.end().min(&last_ix)),
             None => (painted_first, painted_last),
+        };
+
+        // A selection within one style copies as the text it renders; one
+        // that is only partly painted cannot tell, and keeps its source.
+        let format = match format {
+            SelectionFormat::SourceAcrossStyles
+                if first == last
+                    && painted[first]
+                    && self.blocks[first].selection_styles() != SelectionStyles::Mixed =>
+            {
+                SelectionFormat::Plain
+            }
+            SelectionFormat::SourceAcrossStyles => SelectionFormat::Source,
+            format => format,
         };
 
         if format == SelectionFormat::Plain {
