@@ -130,8 +130,10 @@ where
     }
 
     pub fn set_searchable(&mut self, searchable: bool, cx: &mut Context<Self>) {
-        self.searchable = searchable;
-        cx.notify();
+        if self.searchable != searchable {
+            self.searchable = searchable;
+            cx.notify();
+        }
     }
 
     /// Sets whether the list is selectable, default is true.
