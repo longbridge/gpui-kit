@@ -620,3 +620,9 @@ Diff:
     en: Diff for %{count} files
     zh-CN: "%{count} 个文件的差异"
     zh-HK: "%{count} 個檔案的差異"
+
+Notification:
+  Dismiss:
+    en: Dismiss notification
+    zh-CN: 关闭通知
+    zh-HK: 關閉通知

@@ -419,8 +419,16 @@ impl Render for Notification {
         let has_icon = icon.is_some();
         let placement = self.placement.unwrap_or(cx.theme().notification.placement);
 
+        let accessible_label: Option<SharedString> = match (&self.title, &self.message) {
+            (Some(title), Some(message)) => Some(format!("{title}\n{message}").into()),
+            (Some(title), None) => Some(title.clone()),
+            (None, Some(message)) => Some(message.clone()),
+            (None, None) => None,
+        };
+
         BaseToast::new("notification")
             .transition_status(transition_status)
+            .when_some(accessible_label, |toast, label| toast.aria_label(label))
             .h_flex()
             .group("")
             .occlude()
@@ -461,6 +469,7 @@ impl Render for Notification {
                     .group_hover("", |this| this.visible())
                     .child(
                         Button::new("close")
+                            .accessibility_label(rust_i18n::t!("Notification.Dismiss"))
                             .icon(IconName::Close)
                             .ghost()
                             .xsmall()
@@ -1802,5 +1811,46 @@ mod tests {
             cx.dismissed_system_notifications(),
             vec![NotificationId::Id(TypeId::of::<BarKind>()).system_tag()]
         );
+    }
+    #[cfg(feature = "test-support")]
+    #[gpui::test]
+    fn notification_exposes_its_text_and_named_dismiss_control(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_global(Theme::default()));
+        let (note, cx) = cx.add_window_view(|_, _| {
+            let mut note = Notification::error("The remote file already exists.")
+                .title("Upload failed")
+                .autohide(false);
+            note.transition_status = ToastTransitionStatus::Present;
+            note
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| {
+            let nodes = gpui_base::test_support::snapshots(window);
+            assert!(nodes.iter().any(|node| {
+                node.role() == Some(gpui::accesskit::Role::Alert)
+                    && node.label() == Some("Upload failed\nThe remote file already exists.")
+            }));
+            assert!(nodes.iter().any(|node| {
+                node.role() == Some(gpui::accesskit::Role::Button)
+                    && node.label() == Some("Dismiss notification")
+            }));
+        });
+        note.update(cx, |note, cx| {
+            note.title = None;
+            note.message = Some("File downloaded.".into());
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, _| {
+            let nodes = gpui_base::test_support::snapshots(window);
+            assert!(nodes.iter().any(|node| {
+                node.role() == Some(gpui::accesskit::Role::Alert)
+                    && node.label() == Some("File downloaded.")
+            }));
+            assert!(!nodes.iter().any(|node| {
+                node.label()
+                    .is_some_and(|label| label.contains("Upload failed"))
+            }));
+        });
     }
 }
