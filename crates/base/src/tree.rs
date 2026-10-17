@@ -468,12 +468,11 @@ impl Render for TreeState {
                             })
                             .child((render_item)(ix, entry, entry_state, window, cx))
                             .when(!entry.is_disabled(), |this| {
-                                this.on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |state, _, _, cx| {
-                                        state.on_entry_click(ix, cx);
-                                    }),
-                                )
+                                // Select and toggle on a full click, like `List` and `Table`
+                                // rows, so a press that is dragged away leaves the entry alone.
+                                this.on_click(cx.listener(move |state, _, _, cx| {
+                                    state.on_entry_click(ix, cx);
+                                }))
                                 .on_mouse_down(
                                     MouseButton::Right,
                                     cx.listener(move |state, _, _, cx| {
@@ -675,6 +674,66 @@ mod tests {
 
             state.toggle_expand(1, cx);
             assert_eq!(state.index_of(&"docs/guide/a".into()), Some(2));
+        });
+    }
+
+    use gpui::{Modifiers, MouseUpEvent, point, px};
+
+    struct TreeHarness {
+        state: Entity<TreeState>,
+    }
+
+    impl Render for TreeHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                Tree::new(&self.state)
+                    .size_full()
+                    .list_style(StyleRefinement::default().size_full())
+                    .item(|ix, _, _, _, _| {
+                        div()
+                            .debug_selector(move || format!("tree-entry-{ix}"))
+                            .h(px(20.))
+                            .w_full()
+                            .into_any_element()
+                    }),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn entries_select_and_toggle_on_click_not_mouse_down(cx: &mut gpui::TestAppContext) {
+        let root = TreeItem::new("src", "src").child(TreeItem::new("src/lib.rs", "lib.rs"));
+        let state = cx.new(|cx| TreeState::new(cx).items(vec![root]));
+        let (_, cx) = cx.add_window_view({
+            let state = state.clone();
+            move |_, _| TreeHarness { state }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let entry = cx
+            .debug_bounds("tree-entry-0")
+            .expect("the first entry is painted")
+            .center();
+
+        // A press alone (e.g. the start of a drag) must not select or expand.
+        cx.simulate_mouse_down(entry, MouseButton::Left, Modifiers::default());
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.selected_index(), None);
+            assert_eq!(state.entries.len(), 1);
+        });
+        // Releasing away from the entry cancels the click.
+        cx.simulate_event(MouseUpEvent {
+            position: point(px(10.), px(500.)),
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+            click_count: 1,
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        state.read_with(cx, |state, _| assert_eq!(state.selected_index(), None));
+
+        cx.simulate_click(entry, Modifiers::default());
+        state.read_with(cx, |state, _| {
+            assert_eq!(state.selected_index(), Some(0));
+            assert_eq!(state.entries.len(), 2);
         });
     }
 
