@@ -387,6 +387,9 @@ fn parse_paragraph(paragraph: &mut Paragraph, node: &Rc<Node>) {
                     Some(TextMark::default().link(link_mark)),
                 );
             }
+            local_name!("br") => {
+                paragraph.push(InlineNode::new("\n"));
+            }
             local_name!("img") => {
                 let Some(src) = attr_value(attrs, local_name!("src")) else {
                     if cfg!(debug_assertions) {
@@ -437,10 +440,13 @@ fn parse_node(
             ref attrs,
             ..
         } => match name.local {
-            local_name!("br") => Some(BlockNode::Break {
-                html: true,
-                span: None,
-            }),
+            // A line break inside the paragraph being built, as a markdown
+            // hard break becomes. As a block of its own it landed apart from
+            // the text on both sides, which then stayed on one line.
+            local_name!("br") => {
+                paragraph.push(InlineNode::new("\n"));
+                None
+            }
             local_name!("h1")
             | local_name!("h2")
             | local_name!("h3")
@@ -666,6 +672,17 @@ fn consume_children_nodes(
 }
 
 fn consume_paragraph(children: &mut Vec<BlockNode>, paragraph: &mut Paragraph) {
+    // A `<br>` that ends a block breaks no line, as in a browser. A `<br>`
+    // on its own still stands for the break: markdown parses inline HTML one
+    // tag at a time and takes it from here.
+    if paragraph.children.len() > 1
+        && paragraph
+            .children
+            .last()
+            .is_some_and(|node| node.text == "\n" && node.marks.is_empty())
+    {
+        paragraph.children.pop();
+    }
     if paragraph.is_empty() {
         return;
     }
@@ -766,6 +783,33 @@ mod tests {
             "#}
             .trim()
         );
+    }
+
+    /// The text of the one paragraph `html` parses to.
+    fn paragraph_text(html: &str) -> String {
+        let mut cx = NodeContext::default();
+        let document = super::parse(html, &mut cx).unwrap();
+        let BlockNode::Paragraph(paragraph) = &document.blocks[0] else {
+            panic!("expected one paragraph, got {:?}", document.blocks);
+        };
+        paragraph.text()
+    }
+
+    #[test]
+    fn test_br_breaks_the_line_where_it_stands() {
+        assert_eq!(paragraph_text("<p>one<br>two</p>"), "one\ntwo");
+        assert_eq!(
+            paragraph_text("one<br>two<br><br>three"),
+            "one\ntwo\n\nthree"
+        );
+        assert_eq!(paragraph_text("<b>one<br>two</b>"), "one\ntwo");
+        // The minifier trims the spaces around it.
+        assert_eq!(paragraph_text("<p>one <br> two</p>"), "one\ntwo");
+        // As in a browser, a break that ends a block adds no line.
+        assert_eq!(paragraph_text("<p>one<br></p>"), "one");
+        assert_eq!(paragraph_text("<p>one<br><br></p>"), "one\n");
+        // Markdown parses inline HTML one tag at a time and needs the break.
+        assert_eq!(paragraph_text("<br>"), "\n");
     }
 
     #[test]
