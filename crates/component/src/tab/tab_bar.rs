@@ -478,9 +478,13 @@ impl RenderOnce for TabBar {
         let indicator_ready = indicator_element.is_some();
 
         let has_suffix_or_menu = self.suffix.is_some() || self.menu;
-        let mut item_metas: Vec<(Option<SharedString>, Option<Icon>, bool)> = Vec::new();
+        let mut item_metas: Vec<(
+            Option<SharedString>,
+            Option<Icon>,
+            bool,
+            Option<TabClickHandler>,
+        )> = Vec::new();
         let selected_index = self.selected_index;
-        let on_click = self.on_click.clone();
         let tabs = self.base;
         let mut rendered_tabs = Vec::with_capacity(self.children.len());
         let max_width = self.max_width;
@@ -493,7 +497,12 @@ impl RenderOnce for TabBar {
         let has_shape = |ix| selected_index == Some(ix) || hovered_ix == Some(ix);
 
         for (ix, child) in self.children.into_iter().enumerate() {
-            item_metas.push((child.label.clone(), child.icon.clone(), child.disabled));
+            item_metas.push((
+                child.label.clone(),
+                child.icon.clone(),
+                child.disabled,
+                None,
+            ));
             let tab_bar_prefix = child.tab_bar_prefix.unwrap_or(true);
             let mut tab = child
                 .ix(ix)
@@ -533,6 +542,11 @@ impl RenderOnce for TabBar {
                     });
                     tab
                 });
+            // The overflow menu item runs the same handler as the visible tab:
+            // the bar's callback when set, otherwise the tab's own.
+            if let Some(meta) = item_metas.last_mut() {
+                meta.3 = tab.on_click.clone();
+            }
             // The wrapper below is the flex item the bar lays out, so a tab's
             // own `flex_grow` / `flex_basis` (e.g. `flex_1()`) must size it.
             let flex_grow = tab.style().flex_grow;
@@ -664,7 +678,9 @@ impl RenderOnce for TabBar {
                         .dropdown_caret(true)
                         .dropdown_menu(move |mut this, _, _| {
                             this = this.scrollable(true);
-                            for (ix, (label, icon, disabled)) in item_metas.iter().enumerate() {
+                            for (ix, (label, icon, disabled, on_click)) in
+                                item_metas.iter().enumerate()
+                            {
                                 let base = if let Some(label) = label.clone() {
                                     PopupMenuItem::new(label)
                                 } else if let Some(icon) = icon.clone() {
@@ -676,10 +692,8 @@ impl RenderOnce for TabBar {
                                     base.checked(selected_index == Some(ix))
                                         .disabled(*disabled)
                                         .when_some(on_click.clone(), |this, on_click| {
-                                            let reveal = reveal.clone();
-                                            this.on_click(move |_, window, cx| {
-                                                reveal.reveal(ix, cx);
-                                                on_click(&ix, window, cx)
+                                            this.on_click(move |event, window, cx| {
+                                                on_click(event, window, cx)
                                             })
                                         }),
                                 );
@@ -818,9 +832,12 @@ impl TabReveal {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::Cell, rc::Rc};
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
 
-    use gpui::{Context, Modifiers, Render, TestAppContext};
+    use gpui::{Context, Modifiers, MouseButton, MouseUpEvent, Render, TestAppContext};
 
     use super::*;
     use crate::scroll::ScrollableElement as _;
@@ -902,6 +919,75 @@ mod tests {
         cx.simulate_click(position, Modifiers::default());
         assert_eq!(child_clicks.get(), 0);
         assert_eq!(group_clicks.get(), 0);
+    }
+
+    struct MenuHarness {
+        group_handler: bool,
+        clicks: Rc<RefCell<Vec<String>>>,
+    }
+
+    impl Render for MenuHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let tab = |label: &'static str, clicks: Rc<RefCell<Vec<String>>>| {
+                Tab::new()
+                    .debug_selector(move || format!("{label}-tab"))
+                    .label(label)
+                    .on_click(move |_, _, _| clicks.borrow_mut().push(format!("tab {label}")))
+            };
+            let clicks = self.clicks.clone();
+            div().size_full().child(
+                TabBar::new("menu-tabs")
+                    .w(px(240.))
+                    .menu(true)
+                    .child(tab("First", self.clicks.clone()))
+                    .child(tab("Second", self.clicks.clone()))
+                    .when(self.group_handler, |tabs| {
+                        tabs.on_click(move |ix, _, _| clicks.borrow_mut().push(format!("bar {ix}")))
+                    }),
+            )
+        }
+    }
+
+    /// Opens the overflow menu and activates its first item.
+    fn choose_first_menu_item(group_handler: bool, cx: &mut TestAppContext) -> Vec<String> {
+        cx.update(crate::init);
+        let clicks = Rc::new(RefCell::new(Vec::new()));
+        let (_, cx) = cx.add_window_view({
+            let clicks = clicks.clone();
+            move |_, _| MenuHarness {
+                group_handler,
+                clicks,
+            }
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let tab = cx.debug_bounds("First-tab").unwrap();
+        // The menu button is the last thing in the 240px bar.
+        let more = point(px(232.), tab.center().y);
+        cx.simulate_mouse_down(more, MouseButton::Left, Modifiers::default());
+        cx.simulate_event(MouseUpEvent {
+            position: more,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+            click_count: 1,
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_keystrokes("down enter");
+        cx.run_until_parked();
+        clicks.borrow().clone()
+    }
+
+    #[gpui::test]
+    fn overflow_menu_runs_the_tab_callback_without_a_bar_callback(cx: &mut TestAppContext) {
+        assert_eq!(
+            choose_first_menu_item(false, cx),
+            vec!["tab First".to_string()]
+        );
+    }
+
+    #[gpui::test]
+    fn overflow_menu_prefers_the_bar_callback(cx: &mut TestAppContext) {
+        assert_eq!(choose_first_menu_item(true, cx), vec!["bar 0".to_string()]);
     }
 
     struct ContentHarness;
