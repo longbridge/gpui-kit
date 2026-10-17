@@ -2354,7 +2354,10 @@ impl PrepaintState {
 /// Text positions are fractional, and a one-pixel caret at a fractional x is
 /// spread over two device pixels by antialiasing, which draws it faint and
 /// thin. Rounding its edges to the device grid keeps every caret crisp.
-fn snap_caret_to_device_pixels(bounds: Bounds<Pixels>, scale_factor: f32) -> Bounds<Pixels> {
+pub(crate) fn snap_caret_to_device_pixels(
+    bounds: Bounds<Pixels>,
+    scale_factor: f32,
+) -> Bounds<Pixels> {
     let x = (bounds.origin.x * scale_factor).round() / scale_factor;
     let width = (bounds.size.width * scale_factor).round().max(px(1.)) / scale_factor;
     Bounds::new(point(x, bounds.origin.y), size(width, bounds.size.height))

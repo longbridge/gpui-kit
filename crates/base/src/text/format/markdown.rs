@@ -1040,6 +1040,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
             let segments = code_source_segments(source, &raw.value, span, cx.offset);
             BlockNode::CodeBlock(
                 CodeBlock::new(raw.value.into(), raw.lang.map(Into::into), span)
+                    .with_meta(raw.meta.map(Into::into))
                     .source_segments(segments),
             )
         }

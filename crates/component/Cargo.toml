@@ -15,6 +15,7 @@ edition.workspace = true
 doctest = false
 
 [features]
+block-editor = ["gpui-base/block-editor"]
 gpui-fast = ["dep:gpui-fast", "gpui-base/gpui-fast", "gpui-kit-assets/gpui-fast"]
 test-support = ["gpui/test-support", "gpui-base/test-support", "gpui-fast?/test-support"]
 decimal = ["gpui-base/decimal"]

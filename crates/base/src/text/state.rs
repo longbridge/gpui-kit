@@ -1076,6 +1076,7 @@ impl Render for TextViewState {
             table_actions: self.table_actions.clone(),
             link_click_handler: self.link_click_handler.clone(),
             image_source: self.image_source.clone(),
+            image_policy: Default::default(),
             markdown_extensions: self.markdown_extensions.clone(),
             stream_fade,
             range_highlights: self.range_highlights.clone(),

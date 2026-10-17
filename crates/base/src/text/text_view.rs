@@ -36,6 +36,18 @@ pub struct TextViewDefaults {
 impl Global for TextViewDefaults {}
 
 impl TextViewDefaults {
+    /// The style every text view starts from, when one was set.
+    #[cfg_attr(not(feature = "block-editor"), allow(dead_code))]
+    pub(crate) fn style(&self) -> Option<&TextViewStyle> {
+        self.style.as_ref()
+    }
+
+    /// The fenced code block highlighter, when one was set.
+    #[cfg_attr(not(feature = "block-editor"), allow(dead_code))]
+    pub(crate) fn code_block_highlighter(&self) -> Option<Arc<CodeBlockHighlighterFn>> {
+        self.code_block_highlighter.clone()
+    }
+
     /// Creates defaults that leave every text view as Base renders it.
     pub fn new() -> Self {
         Self::default()

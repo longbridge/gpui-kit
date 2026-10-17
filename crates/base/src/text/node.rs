@@ -878,27 +878,141 @@ pub(crate) fn wrap_with_mark(text: &str, mark: &TextMark) -> String {
     }
     if let Some(link) = &mark.link {
         out = match &link.title {
-            Some(title) => format!("[{}]({} \"{}\")", out, link.url, title),
-            None => format!("[{}]({})", out, link.url),
+            Some(title) => format!(
+                "[{}]({} {})",
+                out,
+                markdown_destination(&link.url),
+                markdown_title(title)
+            ),
+            None => format!("[{}]({})", out, markdown_destination(&link.url)),
         };
     }
     out
+}
+
+/// Delimiter-safe shared writer seam for links, references and images.
+pub(crate) fn markdown_destination(value: &str) -> String {
+    let angled = value
+        .chars()
+        .any(|ch| ch.is_whitespace() || matches!(ch, '(' | ')' | '<' | '>'));
+    let mut escaped = String::new();
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '&' => escaped.push_str("\\&"),
+            '<' => escaped.push_str("\\<"),
+            '>' => escaped.push_str("\\>"),
+            '\n' => escaped.push_str("&#10;"),
+            '\r' => escaped.push_str("&#13;"),
+            _ => escaped.push(ch),
+        }
+    }
+    if angled {
+        format!("<{escaped}>")
+    } else {
+        escaped
+    }
+}
+pub(crate) fn markdown_title(value: &str) -> String {
+    let escaped = value
+        .replace('\\', "\\\\")
+        .replace('&', "\\&")
+        .replace('"', "\\\"")
+        .replace('\n', "&#10;")
+        .replace('\r', "&#13;");
+    format!("\"{escaped}\"")
+}
+
+/// How [`MarkdownSource`] writes its output. `Default` is the behaviour
+/// TextView's copy-as-source has always had, so existing callers are
+/// unchanged; the block editor's serializer turns all three on.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(feature = "block-editor"), allow(dead_code))]
+pub(crate) struct MarkdownSourceOptions {
+    /// Write highlight as inline `<mark>` (with a `color` attribute unless it
+    /// is the default colour) instead of `==x==`, which the parser reads back
+    /// as literal text.
+    pub(crate) highlight_as_html: bool,
+    /// Move leading and trailing whitespace of a marked group outside its
+    /// delimiters: `**a **b` is literal text, `**a** b` is emphasis.
+    pub(crate) hoist_whitespace: bool,
+    /// Backslash-escape Markdown punctuation in text pushed with
+    /// [`MarkdownSource::push_literal`], so literal `*` stays literal.
+    pub(crate) escape_literals: bool,
+}
+
+/// The highlight colour `<mark>` gets when it carries no colour of its own
+/// (`format::html::default_mark_color`).
+#[cfg_attr(not(feature = "block-editor"), allow(dead_code))]
+fn default_highlight_color() -> Hsla {
+    gpui::rgb(0xfef08a).into()
+}
+
+/// `#rrggbb`, or `#rrggbbaa` when the colour is not opaque.
+#[cfg_attr(not(feature = "block-editor"), allow(dead_code))]
+pub(crate) fn hex_color(color: Hsla) -> String {
+    let rgba = gpui::Rgba::from(color);
+    let byte = |value: f32| (value.clamp(0., 1.) * 255.).round() as u8;
+    let (r, g, b, a) = (byte(rgba.r), byte(rgba.g), byte(rgba.b), byte(rgba.a));
+    if a == 255 {
+        format!("#{r:02x}{g:02x}{b:02x}")
+    } else {
+        format!("#{r:02x}{g:02x}{b:02x}{a:02x}")
+    }
 }
 
 /// Keep syntax and marks separate until all selected runs and atomic objects
 /// have been collected. Wrapping every run independently creates adjacent `*`
 /// delimiters that can turn italic formulas into bold ones when pasted.
 #[derive(Default)]
-struct MarkdownSource {
+pub(crate) struct MarkdownSource {
     pieces: Vec<(String, Vec<TextMark>)>,
+    options: MarkdownSourceOptions,
 }
 
 impl MarkdownSource {
-    fn push_str(&mut self, source: &str) {
+    #[cfg_attr(not(feature = "block-editor"), allow(dead_code))]
+    pub(crate) fn with_options(options: MarkdownSourceOptions) -> Self {
+        Self {
+            pieces: Vec::new(),
+            options,
+        }
+    }
+
+    pub(crate) fn push_str(&mut self, source: &str) {
         self.push_marked(source, &TextMark::default());
     }
 
-    fn push_marked(&mut self, source: &str, mark: &TextMark) {
+    /// Push plain text (not Markdown source) carrying `mark`. With
+    /// `escape_literals`, Markdown punctuation is backslash-escaped, except
+    /// inside code, where escapes are not interpreted.
+    #[cfg_attr(not(feature = "block-editor"), allow(dead_code))]
+    pub(crate) fn push_literal(&mut self, text: &str, mark: &TextMark) {
+        if !self.options.escape_literals || mark.code {
+            self.push_marked(text, mark);
+            return;
+        }
+        let mut escaped = String::with_capacity(text.len());
+        for ch in text.chars() {
+            if ch == '\n' {
+                // Hard breaks, including terminal/table/styled breaks, need
+                // an explicit semantic form. Backslash-newline at EOF reparses
+                // as a literal backslash; whitespace hoisting can break marks.
+                escaped.push_str("<br>");
+                continue;
+            }
+            if matches!(
+                ch,
+                '\\' | '`' | '*' | '_' | '[' | ']' | '<' | '>' | '~' | '$' | '&' | '|'
+            ) {
+                escaped.push('\\');
+            }
+            escaped.push(ch);
+        }
+        self.push_marked(&escaped, mark);
+    }
+
+    pub(crate) fn push_marked(&mut self, source: &str, mark: &TextMark) {
         if source.is_empty() {
             return;
         }
@@ -935,7 +1049,7 @@ impl MarkdownSource {
         self.pieces.push((source.to_string(), layers));
     }
 
-    fn push_text(
+    pub(crate) fn push_text(
         &mut self,
         text: &str,
         marks: &[(Range<usize>, TextMark)],
@@ -964,7 +1078,7 @@ impl MarkdownSource {
         }
     }
 
-    fn push_object(&mut self, node: &InlineNode) {
+    pub(crate) fn push_object(&mut self, node: &InlineNode) {
         let mut mark = TextMark::default();
         for (_, layer) in &node.marks {
             mark.merge(layer.clone());
@@ -976,18 +1090,37 @@ impl MarkdownSource {
         self.pieces.is_empty()
     }
 
-    fn finish(mut self) -> String {
-        fn write(pieces: &mut [(String, Vec<TextMark>)]) -> String {
+    pub(crate) fn finish(mut self) -> String {
+        /// `before` / `after`: the characters just outside `pieces`, for the
+        /// delimiter flanking check (`None` = start or end of the text).
+        fn write(
+            pieces: &mut [(String, Vec<TextMark>)],
+            options: MarkdownSourceOptions,
+            before: Option<char>,
+            after: Option<char>,
+        ) -> String {
             let mut out = String::new();
             let mut offset = 0;
+            let mut prev_marked = false;
             while offset < pieces.len() {
+                // Nothing inside a code span is parsed, so in the editor's
+                // mode code is always the innermost layer.
+                let only_code = |mark: &&TextMark| {
+                    !options.hoist_whitespace || !mark.code || pieces[offset].1.len() == 1
+                };
                 let Some((mark, count)) = pieces[offset]
                     .1
                     .iter()
+                    .filter(only_code)
                     .map(|mark| {
                         let count = pieces[offset..]
                             .iter()
-                            .take_while(|(_, layers)| layers.contains(mark))
+                            .take_while(|(_, layers)| {
+                                layers.contains(mark)
+                                    && (!options.hoist_whitespace
+                                        || !mark.code
+                                        || layers.len() == 1)
+                            })
                             .count();
                         (mark.clone(), count)
                     })
@@ -1001,20 +1134,130 @@ impl MarkdownSource {
                 else {
                     out.push_str(&pieces[offset].0);
                     offset += 1;
+                    prev_marked = false;
                     continue;
+                };
+                // A directly adjacent marked neighbour has delimiters of its
+                // own that could merge with ours into one run (`***`), so
+                // count it as a word character: only a non-punctuation edge
+                // is then safe.
+                let outside_before = if prev_marked {
+                    Some('a')
+                } else {
+                    out.chars().last().or(before)
+                };
+                let outside_after = match pieces.get(offset + count) {
+                    Some((_, layers)) if !layers.is_empty() => Some('a'),
+                    Some((text, _)) => text.chars().next(),
+                    None => after,
                 };
                 let group = &mut pieces[offset..offset + count];
                 for (_, layers) in group.iter_mut() {
                     layers.retain(|layer| layer != &mark);
                 }
-                let content = write(group);
-                out.push_str(&wrap_with_mark(&content, &mark));
+                let content = write(group, options, Some('*'), Some('*'));
+                out.push_str(&wrap_layer(
+                    &content,
+                    &mark,
+                    options,
+                    outside_before,
+                    outside_after,
+                ));
                 offset += count;
+                prev_marked = true;
             }
             out
         }
-        write(&mut self.pieces)
+        let options = self.options;
+        write(&mut self.pieces, options, None, None)
     }
+}
+
+/// Wrap one mark layer around already-written content, per `options`.
+///
+/// With `hoist_whitespace`, delimiters are also kept *flanking* in the
+/// CommonMark sense: when `*`, `**` or `~~` would sit between a word
+/// character outside and punctuation inside (`a*`code`*`), it could not open
+/// or close, so the HTML form the parser reads back (`<em>`, `<strong>`,
+/// `<s>`) is used instead.
+fn wrap_layer(
+    content: &str,
+    mark: &TextMark,
+    options: MarkdownSourceOptions,
+    before: Option<char>,
+    after: Option<char>,
+) -> String {
+    if mark.code && options.escape_literals {
+        // Code delimiters must not collide with literal backtick runs. Code
+        // whitespace belongs inside the span, never hoisted into prose.
+        let longest = content
+            .split(|ch| ch != '`')
+            .map(str::len)
+            .max()
+            .unwrap_or(0);
+        let fence = "`".repeat(longest + 1);
+        let pad = content.starts_with('`')
+            || content.ends_with('`')
+            || (content.starts_with(' ')
+                && content.ends_with(' ')
+                && content.chars().any(|ch| ch != ' '));
+        return if pad {
+            format!("{fence} {content} {fence}")
+        } else {
+            format!("{fence}{content}{fence}")
+        };
+    }
+    let (lead, core, trail) = if options.hoist_whitespace {
+        let core = content.trim_matches(char::is_whitespace);
+        if core.is_empty() {
+            return content.to_string();
+        }
+        let start = content.len() - content.trim_start_matches(char::is_whitespace).len();
+        (&content[..start], core, &content[start + core.len()..])
+    } else {
+        ("", content, "")
+    };
+    let wrapped = match mark.highlight {
+        Some(color) if options.highlight_as_html && !core.is_empty() => {
+            if color == default_highlight_color() {
+                format!("<mark>{core}</mark>")
+            } else {
+                format!("<mark color=\"{}\">{core}</mark>", hex_color(color))
+            }
+        }
+        _ if options.hoist_whitespace
+            && (mark.bold || mark.italic || mark.strikethrough)
+            && !delimiters_flank(
+                lead.chars().last().or(before),
+                core,
+                trail.chars().next().or(after),
+            ) =>
+        {
+            let tag = if mark.bold {
+                "strong"
+            } else if mark.italic {
+                "em"
+            } else {
+                "s"
+            };
+            format!("<{tag}>{core}</{tag}>")
+        }
+        _ => wrap_with_mark(core, mark),
+    };
+    format!("{lead}{wrapped}{trail}")
+}
+
+/// Whether delimiters around `core` would be left-flanking at the start and
+/// right-flanking at the end, given the characters outside.
+fn delimiters_flank(before: Option<char>, core: &str, after: Option<char>) -> bool {
+    let weak =
+        |ch: Option<char>| ch.is_none_or(|ch| ch.is_whitespace() || ch.is_ascii_punctuation());
+    let (Some(first), Some(last)) = (core.chars().next(), core.chars().last()) else {
+        return true;
+    };
+    let opens = !first.is_whitespace() && (!first.is_ascii_punctuation() || weak(before));
+    let closes = !last.is_whitespace() && (!last.is_ascii_punctuation() || weak(after));
+    opens && closes
 }
 
 /// How a selection covers one rendered run, so the caller can tell whether it
@@ -1133,6 +1376,7 @@ fn table_selected_source(table: &Table) -> String {
             let aligns: Vec<String> = (0..row.children.len())
                 .map(|ix| {
                     match table.column_align(ix) {
+                        ColumnumnAlign::None => "---",
                         ColumnumnAlign::Left => ":--",
                         ColumnumnAlign::Center => ":-:",
                         ColumnumnAlign::Right => "--:",
@@ -1867,6 +2111,7 @@ impl Table {
                 let aligns: Vec<String> = (0..row.children.len())
                     .map(|ix| {
                         match self.column_align(ix) {
+                            ColumnumnAlign::None => "---",
                             ColumnumnAlign::Left => ":--",
                             ColumnumnAlign::Center => ":-:",
                             ColumnumnAlign::Right => "--:",
@@ -1920,7 +2165,9 @@ impl Table {
 
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub(crate) enum ColumnumnAlign {
+    /// No alignment in the delimiter row (`---`); renders like `Left`.
     #[default]
+    None,
     Left,
     Center,
     Right,
@@ -1929,7 +2176,7 @@ pub(crate) enum ColumnumnAlign {
 impl From<mdast::AlignKind> for ColumnumnAlign {
     fn from(value: mdast::AlignKind) -> Self {
         match value {
-            mdast::AlignKind::None => ColumnumnAlign::Left,
+            mdast::AlignKind::None => ColumnumnAlign::None,
             mdast::AlignKind::Left => ColumnumnAlign::Left,
             mdast::AlignKind::Center => ColumnumnAlign::Center,
             mdast::AlignKind::Right => ColumnumnAlign::Right,
@@ -2017,6 +2264,7 @@ impl Paragraph {
 #[derive(Debug, Clone)]
 pub struct CodeBlock {
     lang: Option<SharedString>,
+    meta: Option<SharedString>,
     state: Arc<Mutex<InlineState>>,
     highlight_cache: Arc<Mutex<Option<CachedCodeBlockHighlights>>>,
     /// Rendered UTF-8 byte spans of the code paired with their exact Markdown
@@ -2040,14 +2288,32 @@ impl std::fmt::Debug for CachedCodeBlockHighlights {
 
 impl PartialEq for CodeBlock {
     fn eq(&self, other: &Self) -> bool {
-        self.lang == other.lang && self.code() == other.code() && self.span == other.span
+        self.lang == other.lang
+            && self.meta == other.meta
+            && self.code() == other.code()
+            && self.span == other.span
     }
 }
 
 impl CodeBlock {
+    /// The rendered text state, for the block editor's seam (design D3).
+    #[cfg_attr(not(feature = "block-editor"), allow(dead_code))]
+    pub(crate) fn inline_state(&self) -> &Arc<Mutex<InlineState>> {
+        &self.state
+    }
+
     /// Get the language of the code block.
     pub fn lang(&self) -> Option<SharedString> {
         self.lang.clone()
+    }
+
+    #[cfg_attr(not(feature = "block-editor"), allow(dead_code))]
+    pub(crate) fn meta(&self) -> Option<SharedString> {
+        self.meta.clone()
+    }
+    pub(crate) fn with_meta(mut self, meta: Option<SharedString>) -> Self {
+        self.meta = meta;
+        self
     }
 
     /// Get the code content of the code block.
@@ -2079,6 +2345,7 @@ impl CodeBlock {
 
         Self {
             lang,
+            meta: None,
             state,
             highlight_cache: Arc::new(Mutex::new(None)),
             source_segments: vec![],
@@ -2318,6 +2585,16 @@ impl CodeBlock {
 }
 
 /// A context for rendering nodes, contains link references.
+/// Whether image atoms may load resources during presentation. Placeholder
+/// preserves the atomic document/source/selection but never resolves URLs,
+/// decodes data, reads paths or creates GPUI image elements.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ImagePolicy {
+    #[default]
+    Load,
+    Placeholder,
+}
+
 #[derive(Default, Clone)]
 pub(crate) struct NodeContext {
     /// The byte offset of the node in the original markdown text.
@@ -2329,6 +2606,7 @@ pub(crate) struct NodeContext {
     pub(crate) code_block_highlighter: Option<Arc<CodeBlockHighlighterFn>>,
     pub(crate) table_actions: Option<Arc<TableActionsFn>>,
     pub(crate) image_source: Option<Arc<super::text_view::ImageSourceFn>>,
+    pub(crate) image_policy: ImagePolicy,
     pub(crate) link_click_handler: Option<Arc<LinkClickHandlerFn>>,
     pub(crate) markdown_extensions: Arc<MarkdownExtensions>,
     /// This frame's streamed fade-in, when any text is still fading.
@@ -2380,7 +2658,9 @@ impl NodeContext {
 
 impl PartialEq for NodeContext {
     fn eq(&self, other: &Self) -> bool {
-        self.link_refs == other.link_refs && self.style == other.style
+        self.link_refs == other.link_refs
+            && self.style == other.style
+            && self.image_policy == other.image_policy
         // Note: code_block_actions, table_actions and markdown_extensions are
         // intentionally not compared (closures can't be compared)
     }
@@ -2465,13 +2745,18 @@ impl Paragraph {
         let fades = node_cx.stream_fades(fade_key);
         let backgrounds = node_cx.range_backgrounds(fade_key);
 
-        if self.should_render_inline_flow() {
-            return InlineFlow::new(
+        if self.should_render_inline_flow()
+            || (node_cx.image_policy == ImagePolicy::Placeholder
+                && self.children.iter().any(|child| child.image.is_some()))
+        {
+            let flow = InlineFlow::new(
                 leaf_element_id(fade_key),
                 self.inline_flow_items(fade_key, fades, backgrounds, node_cx, cx),
                 node_cx.link_click_handler.clone(),
-            )
-            .into_any_element();
+            );
+            #[cfg(feature = "block-editor")]
+            let flow = flow.editor_key(self.state.lock().ok().and_then(|s| s.editor_key));
+            return flow.into_any_element();
         }
 
         let has_image = children.iter().any(|child| child.image.is_some());
@@ -2479,7 +2764,13 @@ impl Paragraph {
         // text, highlights and links are cached across frames.
         if !has_image {
             let (text, highlights, mut links) = self.plain_render(node_cx, cx);
-            if text.is_empty() {
+            // An editor leaf is laid out even when empty, so the editor gets
+            // a line box for the caret.
+            #[cfg(feature = "block-editor")]
+            let editor_leaf = self.state.lock().ok().and_then(|s| s.editor_key).is_some();
+            #[cfg(not(feature = "block-editor"))]
+            let editor_leaf = false;
+            if text.is_empty() && !editor_leaf {
                 return div().into_any_element();
             }
             for (_, link_mark) in &mut links {
@@ -2653,6 +2944,18 @@ impl Paragraph {
     fn should_render_inline_flow(&self) -> bool {
         let has_image = self.children.iter().any(|child| child.image.is_some());
         let has_text = self.children.iter().any(|child| !child.text.is_empty());
+        // A block editor leaf with an image always uses the flow, which
+        // reports its pieces to the editor (an image-only paragraph would
+        // otherwise take the plain image path, which reports nothing).
+        #[cfg(feature = "block-editor")]
+        if has_image
+            && self
+                .state
+                .lock()
+                .is_ok_and(|state| state.editor_key.is_some())
+        {
+            return true;
+        }
         self.children.iter().any(|child| child.custom.is_some())
             || (has_image && has_text)
             || self
@@ -2756,13 +3059,33 @@ impl Paragraph {
                     });
                 }
 
-                items.push(InlineFlowItem::Image {
-                    source: node_cx.image_source(image),
-                    link: image.link.clone(),
-                    title: image.title(),
-                    width: image.width,
-                    height: image.height,
-                });
+                if node_cx.image_policy == ImagePolicy::Placeholder {
+                    let label: SharedString = image
+                        .alt
+                        .clone()
+                        .filter(|alt| !alt.is_empty())
+                        .unwrap_or_else(|| "Image".into());
+                    // The existing object renderer keeps one atomic caret/
+                    // selection unit while its text fallback is visible and
+                    // accessible. Crucially no image source is resolved here.
+                    items.push(InlineFlowItem::Object {
+                        text: label.clone(),
+                        accessibility_label: label,
+                        id: image.span.map_or(items.len(), |span| span.start),
+                        renderer: Arc::new(|_, _, _| None),
+                        selected: inline_node.custom_selection.clone(),
+                        style: HighlightStyle::default(),
+                        link: None,
+                    });
+                } else {
+                    items.push(InlineFlowItem::Image {
+                        source: node_cx.image_source(image),
+                        link: image.link.clone(),
+                        title: image.title(),
+                        width: image.width,
+                        height: image.height,
+                    });
+                }
 
                 consumed += text.len();
                 text.clear();
@@ -3762,7 +4085,7 @@ impl BlockNode {
 
                 let grow = SLACK_GROW * column.max / total_w;
                 let (lead, trail) = match align {
-                    ColumnumnAlign::Left => (0., grow),
+                    ColumnumnAlign::None | ColumnumnAlign::Left => (0., grow),
                     ColumnumnAlign::Center => (grow / 2., grow / 2.),
                     ColumnumnAlign::Right => (grow, 0.),
                 };
@@ -5420,5 +5743,57 @@ mod tests {
         let second = CodeBlock::new("let value = 2;".into(), Some("rust".into()), None::<Span>);
 
         assert_ne!(first, second);
+    }
+
+    fn editor_source_options() -> MarkdownSourceOptions {
+        MarkdownSourceOptions {
+            highlight_as_html: true,
+            hoist_whitespace: true,
+            escape_literals: true,
+        }
+    }
+
+    #[test]
+    fn markdown_source_default_options_are_unchanged() {
+        let mut source = MarkdownSource::default();
+        source.push_marked("a ", &TextMark::default().bold());
+        source.push_str("b");
+        source.push_marked(
+            "c",
+            &TextMark::default().highlight(gpui::rgb(0x336699).into()),
+        );
+        assert_eq!(source.finish(), "**a **b==c==");
+    }
+
+    #[test]
+    fn markdown_source_hoists_whitespace_out_of_emphasis() {
+        let mut source = MarkdownSource::with_options(editor_source_options());
+        source.push_literal("a ", &TextMark::default().bold());
+        source.push_literal("b", &TextMark::default());
+        assert_eq!(source.finish(), "**a** b");
+    }
+
+    #[test]
+    fn markdown_source_escapes_literals_but_not_code() {
+        let mut source = MarkdownSource::with_options(editor_source_options());
+        source.push_literal("a * b ", &TextMark::default());
+        source.push_literal("x*y", &TextMark::default().code());
+        assert_eq!(source.finish(), "a \\* b `x*y`");
+    }
+
+    #[test]
+    fn markdown_source_writes_highlight_as_mark_tag() {
+        let mut source = MarkdownSource::with_options(editor_source_options());
+        source.push_literal(
+            "x",
+            &TextMark::default().highlight(gpui::rgb(0xfef08a).into()),
+        );
+        source.push_literal(" ", &TextMark::default());
+        let red: Hsla = gpui::Rgba::try_from("#ff000059").unwrap().into();
+        source.push_literal("y", &TextMark::default().highlight(red));
+        assert_eq!(
+            source.finish(),
+            "<mark>x</mark> <mark color=\"#ff000059\">y</mark>"
+        );
     }
 }

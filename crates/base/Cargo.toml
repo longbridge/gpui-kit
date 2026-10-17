@@ -29,6 +29,8 @@ gpui-fast = ["dep:gpui-fast"]
 decimal = ["dep:rust_decimal"]
 test-support = ["gpui/test-support", "gpui-fast?/test-support"]
 inspector = ["gpui_macros/inspector", "gpui/inspector", "gpui-fast?/inspector"]
+# Headless block editor model (spike for longbridge/gpui-kit#3049). Off by default.
+block-editor = []
 
 [dependencies]
 anyhow.workspace = true

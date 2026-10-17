@@ -77,6 +77,12 @@ const renderableRegistrations = [...inventorySurfaces.keys()].sort();
 // that does.
 const NOT_MIRRORED = new Map([
   [
+    "block_editor",
+    "BlockEditorStory exercises the experimental block editing model. It " +
+      "is not exposed to gpui-shell yet, so there is no script component " +
+      "to mirror until the model and UI settle.",
+  ],
+  [
     "shell",
     "ShellStory embeds a gpui-shell script view inside a Rust story. This " +
       "gallery is already such a view, so a route for it would demonstrate " +

@@ -30,7 +30,16 @@ pub(super) struct InlineFlow {
     id: ElementId,
     items: Vec<InlineFlowItem>,
     link_click_handler: Option<Arc<LinkClickHandlerFn>>,
+    /// The block editor leaf this flow renders (design D3): its fragments
+    /// and atoms are reported to the editor sink as pieces.
+    #[cfg(feature = "block-editor")]
+    editor_key: Option<u64>,
 }
+
+/// Bytes an image or custom inline node occupies in an editor leaf (one
+/// U+FFFC).
+#[cfg(feature = "block-editor")]
+const EDITOR_ATOM_LEN: usize = '\u{FFFC}'.len_utf8();
 
 pub(super) type InlineRenderer = dyn Fn(&super::InlineRenderContext, &mut Window, &mut App) -> Option<super::InlineElement>
     + Send
@@ -251,7 +260,15 @@ impl InlineFlow {
             id: id.into(),
             items,
             link_click_handler,
+            #[cfg(feature = "block-editor")]
+            editor_key: None,
         }
+    }
+
+    #[cfg(feature = "block-editor")]
+    pub(super) fn editor_key(mut self, key: Option<u64>) -> Self {
+        self.editor_key = key;
+        self
     }
 
     fn image_element(
@@ -463,6 +480,38 @@ impl Element for InlineFlow {
             .reduce(|found, next| if found.1 { found } else { next })
             .map(|(ix, _)| ix);
 
+        // Editor leaf byte offset where each item starts: text items count
+        // their bytes, images and custom nodes one U+FFFC.
+        #[cfg(feature = "block-editor")]
+        let editor = self
+            .editor_key
+            .and_then(|key| super::editor_seam::current().map(|sink| (key, sink)));
+        #[cfg(feature = "block-editor")]
+        let item_starts: Vec<usize> = {
+            if let Some((key, sink)) = &editor {
+                sink.begin_pieces(*key);
+            }
+            let mut at = 0;
+            self.items
+                .iter()
+                .map(|item| {
+                    let start = at;
+                    at += match item {
+                        InlineFlowItem::Text { text, .. } => text.len(),
+                        _ => EDITOR_ATOM_LEN,
+                    };
+                    start
+                })
+                .collect()
+        };
+        #[cfg(feature = "block-editor")]
+        let report_box = |item_ix: usize, bounds: Bounds<Pixels>| {
+            if let Some((key, sink)) = &editor {
+                let start = item_starts[item_ix];
+                sink.report_box_piece(*key, start..start + EDITOR_ATOM_LEN, bounds);
+            }
+        };
+
         let mut text_fragment_count = 0;
         for (fragment_ix, fragment) in layout.fragments.iter().enumerate() {
             match fragment {
@@ -484,6 +533,8 @@ impl Element for InlineFlow {
                         continue;
                     };
                     let object_size = object.metrics.size;
+                    #[cfg(feature = "block-editor")]
+                    report_box(*item_ix, Bounds::new(bounds.origin + *origin, object_size));
                     let mut element = InlineObject::new(
                         ("inline-object", *id),
                         text.clone(),
@@ -559,7 +610,7 @@ impl Element for InlineFlow {
                     fragment_style.font_size = font_size.into();
                     fragment_style.line_height = fragment_size.height.into();
                     fragment_style.white_space = WhiteSpace::Nowrap;
-                    let mut element = Inline::new(
+                    let element = Inline::new(
                         state,
                         links.clone(),
                         highlights.clone(),
@@ -578,13 +629,20 @@ impl Element for InlineFlow {
                             .filter(|_| reveal_fragment == Some(fragment_ix))
                             .map(|reveal| reveal.clamp(source_range.start, source_range.end)),
                     )
-                    .text_style(fragment_style.clone())
-                    .selection_bounds(Bounds::new(
-                        point(bounds.left(), bounds.top() + selection_bounds.top()),
-                        size(bounds.size.width, selection_bounds.size.height),
-                    ))
-                    .paint_origin(bounds.origin + origin + point(padding, Pixels::ZERO))
-                    .into_any_element();
+                    .text_style(fragment_style.clone());
+                    #[cfg(feature = "block-editor")]
+                    let element = element.editor_piece(
+                        editor
+                            .as_ref()
+                            .map(|(key, _)| (*key, item_starts[*item_ix] + source_range.start)),
+                    );
+                    let mut element = element
+                        .selection_bounds(Bounds::new(
+                            point(bounds.left(), bounds.top() + selection_bounds.top()),
+                            size(bounds.size.width, selection_bounds.size.height),
+                        ))
+                        .paint_origin(bounds.origin + origin + point(padding, Pixels::ZERO))
+                        .into_any_element();
                     // The `Inline` is its own layout root, with no box around
                     // it: its text measures with the window's text style, so
                     // the fragment's style is pushed for the layout.
@@ -623,6 +681,8 @@ impl Element for InlineFlow {
                         continue;
                     };
                     let (origin, fragment_size) = (*origin, *fragment_size);
+                    #[cfg(feature = "block-editor")]
+                    report_box(*item_ix, Bounds::new(bounds.origin + origin, fragment_size));
                     let mut element = Self::image_element(
                         elements.len(),
                         source,

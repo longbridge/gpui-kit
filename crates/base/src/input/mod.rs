@@ -28,6 +28,8 @@ mod display_map;
 mod editor;
 #[path = "base/element.rs"]
 mod element;
+#[cfg(feature = "block-editor")]
+pub(crate) use element::snap_caret_to_device_pixels;
 #[path = "editor/highlighting.rs"]
 mod highlighting;
 #[path = "editor/indent.rs"]

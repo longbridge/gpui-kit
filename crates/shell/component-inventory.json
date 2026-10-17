@@ -70,6 +70,12 @@
     },
     {
       "source": "ui",
+      "name": "block_editor",
+      "classification": "infrastructure",
+      "explanation": "Feature-gated (block-editor) experimental block editor; it is not exposed to gpui-shell until the model and UI settle."
+    },
+    {
+      "source": "ui",
       "name": "breadcrumb",
       "classification": "component",
       "registration": {
@@ -1266,6 +1272,12 @@
           "Badge"
         ]
       }
+    },
+    {
+      "source": "story",
+      "name": "block_editor",
+      "classification": "infrastructure",
+      "explanation": "Experimental block editor story for the in-progress block editing model; it is not exposed to gpui-shell until the model and UI settle."
     },
     {
       "source": "story",

@@ -136,6 +136,8 @@ impl Gallery {
                 StoryContainer::panel::<TabsStory>(window, cx),
                 StoryContainer::panel::<TagStory>(window, cx),
                 StoryContainer::panel::<TextareaStory>(window, cx),
+                #[cfg(feature = "block-editor")]
+                StoryContainer::panel::<BlockEditorStory>(window, cx),
                 StoryContainer::panel::<ThemeColorsStory>(window, cx),
                 StoryContainer::panel::<TimeFieldStory>(window, cx),
                 StoryContainer::panel::<ToggleStory>(window, cx),

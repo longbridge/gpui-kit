@@ -29,6 +29,8 @@ test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui-base/te
 profiler = ["gpui/profiler", "gpui-fast?/profiler"]
 inspector = ["gpui/inspector", "gpui-base/inspector", "gpui-component?/inspector", "gpui-fast?/inspector"]
 decimal = ["component", "gpui-component/decimal"]
+# Experimental block-based Markdown editor (spike, `gpui_kit::base::text::block_editor`).
+block-editor = ["gpui-base/block-editor", "gpui-component?/block-editor"]
 # Speech input: microphone capture and the system speech recognizer.
 speech = ["component", "gpui-component/speech"]
 # Syntax highlighting from a tree-sitter syntax tree, which also drives folding

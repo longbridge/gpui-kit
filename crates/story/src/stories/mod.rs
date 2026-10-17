@@ -7,6 +7,8 @@ mod alert_story;
 mod attachment_story;
 mod avatar_story;
 mod badge_story;
+#[cfg(feature = "block-editor")]
+mod block_editor_story;
 mod breadcrumb_story;
 mod bubble_story;
 mod button_story;
@@ -89,6 +91,8 @@ pub use alert_story::AlertStory;
 pub use attachment_story::AttachmentStory;
 pub use avatar_story::AvatarStory;
 pub use badge_story::BadgeStory;
+#[cfg(feature = "block-editor")]
+pub use block_editor_story::BlockEditorStory;
 pub use breadcrumb_story::BreadcrumbStory;
 pub use bubble_story::BubbleStory;
 pub use button_story::ButtonStory;

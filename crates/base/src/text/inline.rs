@@ -229,6 +229,10 @@ pub(super) struct Inline {
     /// The shaped text is in the table, not in `styled_text`, until paint
     /// takes it back.
     handed_over: bool,
+    /// A fragment of an editor leaf laid out by `InlineFlow`: the leaf's key
+    /// and the leaf byte offset of this text's index 0.
+    #[cfg(feature = "block-editor")]
+    editor_piece: Option<(u64, usize)>,
 
     state: Arc<Mutex<InlineState>>,
 }
@@ -239,6 +243,11 @@ pub(crate) struct InlineState {
     /// The text that actually rendering, matched with selection.
     pub(super) text: SharedString,
     pub(super) selection: Option<Selection>,
+    /// Set only by the block editor's projection (design D3): the leaf
+    /// reports its layout to the installed `editor_seam` sink. Only exists
+    /// with the `block-editor` feature, so plain `TextView`s pay nothing.
+    #[cfg(feature = "block-editor")]
+    pub(crate) editor_key: Option<u64>,
 }
 
 /// One frame's [`StyledText`], kept for the next frame's [`Inline`] of the
@@ -265,6 +274,12 @@ struct RetainedLayout {
     text: SharedString,
     runs: Vec<TextRun>,
     text_style: TextStyle,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// `(reused, shaped)` layouts at `Inline` layout time (tests).
+    pub(crate) static LAYOUT_REUSE: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) };
 }
 
 thread_local! {
@@ -317,6 +332,38 @@ impl InlineState {
 }
 
 impl Inline {
+    /// Editor seam (design D3): report this leaf's layout and take the
+    /// editor's backgrounds. Inert unless the state carries an editor key
+    /// and an editor sink is installed.
+    #[cfg(feature = "block-editor")]
+    fn report_to_editor(&mut self) {
+        // The sink (a thread-local read) is checked first: outside an
+        // editor's prepaint no lock is taken.
+        let Some(sink) = super::editor_seam::current() else {
+            return;
+        };
+        if let Some((key, start)) = self.editor_piece {
+            let layout = self.styled_text.layout();
+            let end = start + layout.len();
+            sink.report_text_piece(key, start, layout);
+            self.range_backgrounds
+                .extend(
+                    sink.backgrounds(key)
+                        .into_iter()
+                        .filter_map(|(range, color)| {
+                            let (lo, hi) = (range.start.max(start), range.end.min(end));
+                            (lo < hi).then(|| (lo - start..hi - start, color))
+                        }),
+                );
+            return;
+        }
+        let Some(key) = self.state.lock().ok().and_then(|state| state.editor_key) else {
+            return;
+        };
+        sink.report(key, self.styled_text.layout());
+        self.range_backgrounds.extend(sink.backgrounds(key));
+    }
+
     /// Hands the shaped text to the next frame (see [`RetainedLayout`]).
     /// Called after prepaint, so an element that is laid out but never
     /// painted (scrolled out of view) keeps its layout too; paint takes it
@@ -386,6 +433,8 @@ impl Inline {
             link_click_handler,
             retained_key: None,
             handed_over: false,
+            #[cfg(feature = "block-editor")]
+            editor_piece: None,
             state,
         }
     }
@@ -397,6 +446,14 @@ impl Inline {
     }
 
     /// Preserve the shared inline-flow baseline through GPUI's element-bound snapping.
+    /// Report this text as a fragment of the editor leaf `key`, starting at
+    /// the leaf's byte `start` (see `report_to_editor`).
+    #[cfg(feature = "block-editor")]
+    pub(super) fn editor_piece(mut self, piece: Option<(u64, usize)>) -> Self {
+        self.editor_piece = piece;
+        self
+    }
+
     pub(super) fn paint_origin(mut self, origin: Point<Pixels>) -> Self {
         self.paint_origin = Some(origin);
         self
@@ -892,6 +949,15 @@ impl Element for Inline {
         let retained = take_retained_layout(&self.state).filter(|retained| {
             retained.text == self.text && retained.runs == runs && retained.text_style == text_style
         });
+        #[cfg(test)]
+        LAYOUT_REUSE.with(|c| {
+            let (hit, miss) = c.get();
+            c.set(if retained.is_some() {
+                (hit + 1, miss)
+            } else {
+                (hit, miss + 1)
+            });
+        });
         self.styled_text = match retained {
             Some(retained) => retained.styled_text.with_runs(runs.clone()),
             None => StyledText::new(self.text.clone()).with_runs(runs.clone()),
@@ -916,6 +982,8 @@ impl Element for Inline {
         let bounds = Bounds::new(self.paint_origin.unwrap_or(bounds.origin), bounds.size);
         self.styled_text
             .prepaint(id, inspector_id, bounds, &mut (), window, cx);
+        #[cfg(feature = "block-editor")]
+        self.report_to_editor();
 
         // Report this element's laid-out extent so an ancestor TextView with
         // `max_lines` can snap its clip to a whole-line boundary. The state
