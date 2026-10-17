@@ -30,6 +30,7 @@ pub(crate) struct WindowState {
     pub notification: Entity<NotificationList>,
     pub(crate) tooltip_overlay: Entity<gpui_base::TooltipOverlay>,
     tooltip_hovered_trigger: Option<GlobalElementId>,
+    tooltip_trigger_lifetime: std::rc::Weak<()>,
     /// Bounds of the tooltip trigger last pressed, whose tooltip stays
     /// dismissed until the pointer moves outside them.
     tooltip_pressed_trigger: Option<Bounds<Pixels>>,
@@ -84,6 +85,7 @@ impl WindowState {
             tooltip_overlay: cx
                 .new(|_| gpui_base::TooltipOverlay::new().render_with(render_tooltip)),
             tooltip_hovered_trigger: None,
+            tooltip_trigger_lifetime: std::rc::Weak::new(),
             tooltip_pressed_trigger: None,
             native_menu_overlay: cx.new(|_| FallbackMenuOverlay::new()),
             touch_selection_overlay: cx.new(|cx| WindowTouchSelectionOverlay::new(window, cx)),
@@ -436,6 +438,7 @@ impl WindowState {
     /// reverse paint order, so a new trigger can enter before the old one leaves.
     pub(crate) fn tooltip_overlay_for_trigger(
         trigger: &GlobalElementId,
+        lifetime: std::rc::Weak<()>,
         hovered: bool,
         window: &Window,
         cx: &mut App,
@@ -443,13 +446,38 @@ impl WindowState {
         Self::entity(window, cx)?.update(cx, |state, _| {
             if hovered {
                 state.tooltip_hovered_trigger = Some(trigger.clone());
+                state.tooltip_trigger_lifetime = lifetime;
             } else if state.tooltip_hovered_trigger.as_ref() == Some(trigger) {
                 state.tooltip_hovered_trigger = None;
+                state.tooltip_trigger_lifetime = std::rc::Weak::new();
             } else {
                 return None;
             }
             Some(state.tooltip_overlay.clone())
         })
+    }
+
+    fn dismiss_removed_tooltip(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(trigger) = self.tooltip_hovered_trigger.clone() else {
+            return;
+        };
+        let state = cx.weak_entity();
+        // Defer until GPUI has retained this frame's element states and dropped
+        // absent ones. A reused cached subtree keeps its trigger alive.
+        window.defer(cx, move |_, cx| {
+            _ = state.update(cx, |state, cx| {
+                if state.tooltip_hovered_trigger.as_ref() != Some(&trigger)
+                    || state.tooltip_trigger_lifetime.upgrade().is_some()
+                {
+                    return;
+                }
+                state.tooltip_hovered_trigger = None;
+                state.tooltip_trigger_lifetime = std::rc::Weak::new();
+                state
+                    .tooltip_overlay
+                    .update(cx, |overlay, cx| overlay.hide(cx));
+            });
+        });
     }
 
     /// Keeps the tooltip of the trigger at `bounds` dismissed until the
@@ -506,6 +534,7 @@ impl WindowState {
 
 impl gpui_base::RootPlugin for WindowState {
     fn prepare(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.dismiss_removed_tooltip(window, cx);
         window.set_rem_size(cx.theme().font_size);
         TextSelection::activate_scope(self.active_text_selection_scope(), window, cx);
     }

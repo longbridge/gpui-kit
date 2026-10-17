@@ -1,5 +1,9 @@
 use crate::root::WindowState;
-use std::{cell::RefCell, rc::Rc, time::Duration};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+    time::Duration,
+};
 
 use gpui::{
     Action, AnyElement, AnyView, App, AppContext, Bounds, Context, ElementId, GlobalElementId,
@@ -230,8 +234,12 @@ impl ComponentTooltip {
 // ── Internal managed tooltip trait ──────────────────────────────────────────
 
 #[derive(Default)]
+struct TooltipLifetime(Rc<()>);
+
+#[derive(Default)]
 struct TooltipTrigger {
     id: Option<GlobalElementId>,
+    lifetime: Weak<()>,
     bounds: Bounds<Pixels>,
 }
 
@@ -265,8 +273,15 @@ pub(crate) trait ManagedTooltipExt:
 
         self.on_prepaint(move |bounds, window, _| {
             let id = window.with_global_id("managed-tooltip-trigger".into(), |id, _| id.clone());
+            // GPUI retains keyed element state for cached subtrees too, and
+            // drops it after a frame that no longer contains the trigger.
+            let lifetime = window.with_element_state(&id, |state: Option<TooltipLifetime>, _| {
+                let state = state.unwrap_or_default();
+                (Rc::downgrade(&state.0), state)
+            });
             *trigger_writer.borrow_mut() = TooltipTrigger {
                 id: Some(id),
+                lifetime,
                 bounds,
             };
         })
@@ -285,9 +300,13 @@ pub(crate) trait ManagedTooltipExt:
                 if *hovered && WindowState::is_tooltip_trigger_pressed(bounds, window, cx) {
                     return;
                 }
-                if let Some(overlay) =
-                    WindowState::tooltip_overlay_for_trigger(id, *hovered, window, cx)
-                {
+                if let Some(overlay) = WindowState::tooltip_overlay_for_trigger(
+                    id,
+                    trigger.lifetime.clone(),
+                    *hovered,
+                    window,
+                    cx,
+                ) {
                     if *hovered {
                         overlay.update(cx, |o: &mut BaseTooltipOverlay, cx| {
                             let build = build_tooltip.clone();
@@ -635,5 +654,135 @@ mod tests {
             builds.get() > before,
             "the trigger shown again has its tooltip"
         );
+    }
+
+    struct Buttons {
+        shown: [bool; 2],
+        delay: Duration,
+    }
+
+    impl Render for Buttons {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().children((0..2).filter_map(|index| {
+                self.shown[index].then(|| {
+                    crate::button::Button::new(("button", index))
+                        .absolute()
+                        .left(px(10. + index as f32 * 100.))
+                        .top(px(10.))
+                        .w(px(80.))
+                        .h(px(30.))
+                        .label(if index == 0 { "A" } else { "B" })
+                        .tooltip(if index == 0 { "First" } else { "Second" })
+                        .tooltip_show_delay(self.delay)
+                })
+            }))
+        }
+    }
+
+    struct CachedButtons(Entity<Buttons>);
+
+    impl Render for CachedButtons {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                self.0
+                    .clone()
+                    .cached(gpui::StyleRefinement::default().size_full()),
+            )
+        }
+    }
+
+    fn open_buttons(
+        cx: &mut TestAppContext,
+        shown: [bool; 2],
+        delay: Duration,
+    ) -> (VisualTestContext, Entity<Buttons>, Rc<Cell<usize>>) {
+        cx.update(crate::init);
+        let buttons = cx.new(|_| Buttons { shown, delay });
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                let content = cx.new(|_| CachedButtons(buttons.clone()));
+                cx.new(|cx| Root::new(content, window, cx))
+            })
+            .unwrap()
+        });
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        draw(&mut cx);
+        let builds = Rc::new(Cell::new(0));
+        cx.update(|window, cx| {
+            let builds = builds.clone();
+            // Observe the real Button's overlay without changing Base's public
+            // API or adding test-only markup to the production Tooltip.
+            super::WindowState::tooltip_overlay(window, cx)
+                .unwrap()
+                .update(cx, |overlay, _| {
+                    *overlay =
+                        std::mem::take(overlay).render_with(move |view, transition, window, cx| {
+                            builds.set(builds.get() + 1);
+                            super::render_tooltip(view, transition, window, cx)
+                        });
+                });
+        });
+        (cx, buttons, builds)
+    }
+
+    fn assert_button_tooltip(cx: &mut VisualTestContext, builds: &Cell<usize>, shown: bool) {
+        let before = builds.get();
+        draw(cx);
+        assert_eq!(builds.get() > before, shown);
+    }
+
+    #[gpui::test]
+    fn removing_button_hides_visible_tooltip(cx: &mut TestAppContext) {
+        let (mut cx, buttons, builds) = open_buttons(cx, [true, false], Duration::ZERO);
+        cx.simulate_mouse_move(point(px(50.), px(25.)), None, Default::default());
+        wait(&mut cx);
+        assert_button_tooltip(&mut cx, &builds, true);
+        // A redraw reusing the cached button subtree preserves the owner.
+        draw(&mut cx);
+        assert_button_tooltip(&mut cx, &builds, true);
+        cx.update(|_, cx| {
+            buttons.update(cx, |buttons, cx| {
+                buttons.shown[0] = false;
+                cx.notify();
+            })
+        });
+        draw(&mut cx);
+        cx.run_until_parked();
+        assert_button_tooltip(&mut cx, &builds, false);
+    }
+
+    #[gpui::test]
+    fn removing_button_cancels_pending_tooltip(cx: &mut TestAppContext) {
+        let (mut cx, buttons, builds) = open_buttons(cx, [true, false], Duration::from_millis(500));
+        cx.simulate_mouse_move(point(px(50.), px(25.)), None, Default::default());
+        cx.update(|_, cx| {
+            buttons.update(cx, |buttons, cx| {
+                buttons.shown[0] = false;
+                cx.notify();
+            })
+        });
+        draw(&mut cx);
+        cx.run_until_parked();
+        wait(&mut cx);
+        assert_eq!(builds.get(), 0);
+    }
+
+    #[gpui::test]
+    fn removing_old_button_preserves_new_tooltip(cx: &mut TestAppContext) {
+        let (mut cx, buttons, builds) = open_buttons(cx, [true, true], Duration::ZERO);
+        cx.simulate_mouse_move(point(px(50.), px(25.)), None, Default::default());
+        wait(&mut cx);
+        cx.simulate_mouse_move(point(px(150.), px(25.)), None, Default::default());
+        wait(&mut cx);
+        assert_button_tooltip(&mut cx, &builds, true);
+        cx.update(|_, cx| {
+            buttons.update(cx, |buttons, cx| {
+                buttons.shown[0] = false;
+                cx.notify();
+            })
+        });
+        draw(&mut cx);
+        cx.run_until_parked();
+        assert_button_tooltip(&mut cx, &builds, true);
     }
 }
