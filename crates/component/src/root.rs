@@ -36,7 +36,11 @@ pub(crate) struct WindowState {
     pub(crate) native_menu_overlay: Entity<FallbackMenuOverlay>,
     touch_selection_overlay: Entity<WindowTouchSelectionOverlay>,
     sheet_size: Option<DefiniteLength>,
-    pending_focus_restore: Option<WeakFocusHandle>,
+    pending_focus_restore: Option<Rc<PendingFocusRestore>>,
+}
+
+struct PendingFocusRestore {
+    handle: WeakFocusHandle,
 }
 
 #[derive(Clone)]
@@ -255,8 +259,8 @@ impl WindowState {
 
         // Use pending focus restore if available to maintain correct focus chain
         // when a new dialog is opened immediately after closing another dialog.
-        if let Some(pending_handle) = self.pending_focus_restore.take() {
-            previous_focused_handle = Some(pending_handle);
+        if let Some(pending) = self.pending_focus_restore.take() {
+            previous_focused_handle = Some(pending.handle.clone());
         }
 
         let focus_handle = cx.focus_handle();
@@ -276,11 +280,12 @@ impl WindowState {
     }
 
     fn close_dialog_internal(&mut self) -> Option<FocusHandle> {
+        let dialog = self.active_dialogs.pop()?;
         self.focused_input = None;
-        self.active_dialogs
-            .pop()
-            .and_then(|d| d.previous_focused_handle)
-            .and_then(|h| h.upgrade())
+        self.pending_focus_restore = None;
+        dialog
+            .previous_focused_handle
+            .and_then(|handle| handle.upgrade())
     }
 
     pub fn close_dialog(&mut self, window: &mut Window, cx: &mut Context<'_, WindowState>) {
@@ -297,20 +302,29 @@ impl WindowState {
         cx: &mut Context<'_, WindowState>,
     ) {
         if let Some(handle) = self.close_dialog_internal() {
-            let dialogs_count = self.active_dialogs.len();
-
             // Save for new dialogs opened during animation to maintain focus chain
-            self.pending_focus_restore = Some(handle.downgrade());
+            let pending = Rc::new(PendingFocusRestore {
+                handle: handle.downgrade(),
+            });
+            self.pending_focus_restore = Some(pending.clone());
 
             cx.spawn_in(window, async move |this, cx| {
                 cx.background_executor().timer(*ANIMATION_DURATION).await;
                 let _ = this.update_in(cx, |this, window, cx| {
-                    let current_dialogs_count = this.active_dialogs.len();
-                    // Only restore focus if no new dialogs were opened during animation
-                    if current_dialogs_count == dialogs_count {
-                        window.focus(&handle, cx);
+                    // A newer dialog can have the same stack depth, and a
+                    // newer close can return to the same opener. Only this
+                    // exact pending request may restore or clear its target.
+                    if !this
+                        .pending_focus_restore
+                        .as_ref()
+                        .is_some_and(|current| Rc::ptr_eq(current, &pending))
+                    {
+                        return;
                     }
                     this.pending_focus_restore = None;
+                    if let Some(handle) = pending.handle.upgrade() {
+                        window.focus(&handle, cx);
+                    }
                 });
             })
             .detach();
@@ -321,11 +335,15 @@ impl WindowState {
 
     pub fn close_all_dialogs(&mut self, window: &mut Window, cx: &mut Context<'_, WindowState>) {
         self.focused_input = None;
-        let previous_focused_handle = self
-            .active_dialogs
-            .first()
-            .and_then(|d| d.previous_focused_handle.clone());
+        let previous_focused_handle = match self.active_dialogs.first() {
+            Some(dialog) => dialog.previous_focused_handle.clone(),
+            None => self
+                .pending_focus_restore
+                .as_ref()
+                .map(|pending| pending.handle.clone()),
+        };
         self.active_dialogs.clear();
+        self.pending_focus_restore = None;
         if let Some(handle) = previous_focused_handle.and_then(|h| h.upgrade()) {
             window.focus(&handle, cx);
         }
@@ -564,5 +582,191 @@ impl RenderOnce for WindowStateLayers {
             .children(WindowState::sheet_layer(root.clone(), window, cx))
             .children(WindowState::dialog_layer(&root, window, cx))
             .children(WindowState::notification_layer(&root, cx))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::WindowExt as _;
+    use gpui::{TestAppContext, VisualTestContext, px};
+    use std::time::Duration;
+
+    struct Host(FocusHandle);
+
+    impl Render for Host {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                div()
+                    .id("opener")
+                    .track_focus(&self.0)
+                    .tab_index(0)
+                    .size(px(40.)),
+            )
+        }
+    }
+
+    fn window(cx: &mut TestAppContext) -> (&mut VisualTestContext, FocusHandle) {
+        cx.update(|cx| {
+            crate::init(cx);
+            cx.set_reduce_motion(true);
+        });
+        let opener = cx.update(|cx| cx.focus_handle().tab_stop(true));
+        let (_, cx) = cx.add_window_view({
+            let opener = opener.clone();
+            move |window, cx| {
+                let host = cx.new(|_| Host(opener));
+                crate::Root::new(host, window, cx)
+            }
+        });
+        cx.update(|window, cx| {
+            opener.focus(window, cx);
+            window.draw(cx).clear(cx);
+        });
+        (cx, opener)
+    }
+
+    fn open(cx: &mut VisualTestContext, title: &'static str) -> FocusHandle {
+        let control = cx.update(|_, cx| cx.focus_handle().tab_stop(true));
+        cx.update({
+            let control = control.clone();
+            move |window, cx| {
+                window.open_dialog(cx, move |dialog, _, _| {
+                    dialog.title(title).child(
+                        div()
+                            .id(title)
+                            .track_focus(&control)
+                            .tab_index(0)
+                            .size(px(40.)),
+                    )
+                });
+            }
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            control.focus(window, cx);
+            window.draw(cx).clear(cx);
+            assert!(
+                WindowState::read(window, cx)
+                    .active_dialogs
+                    .last()
+                    .unwrap()
+                    .focus_handle
+                    .contains_focused(window, cx)
+            );
+        });
+        control
+    }
+
+    fn defer_close(cx: &mut VisualTestContext) {
+        cx.update(|window, cx| {
+            WindowState::update(window, cx, |state, window, cx| {
+                state.defer_close_dialog(window, cx)
+            });
+            window.draw(cx).clear(cx);
+        });
+        cx.run_until_parked();
+    }
+
+    fn advance(cx: &mut VisualTestContext, duration: Duration) {
+        cx.executor().advance_clock(duration);
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+    }
+
+    fn assert_focus(cx: &mut VisualTestContext, handle: &FocusHandle) {
+        cx.update(|window, cx| assert_eq!(window.focused(cx).as_ref(), Some(handle)));
+    }
+
+    #[gpui::test]
+    fn delayed_close_cannot_focus_a_replaced_dialog_at_the_same_stack_depth(
+        cx: &mut TestAppContext,
+    ) {
+        let (cx, opener) = window(cx);
+        let _outer = open(cx, "Outer");
+        let _inner = open(cx, "Inner");
+        defer_close(cx);
+        cx.update(|window, cx| window.close_dialog(cx));
+        let replacement = open(cx, "Replacement");
+
+        // The old close timer expects one remaining dialog. There is still
+        // one, but its identity and opener have both changed.
+        advance(cx, *ANIMATION_DURATION);
+        assert_focus(cx, &replacement);
+        cx.update(|window, cx| window.close_dialog(cx));
+        assert_focus(cx, &opener);
+    }
+
+    #[gpui::test]
+    fn older_close_timer_cannot_clear_a_newer_pending_restore(cx: &mut TestAppContext) {
+        let (cx, opener) = window(cx);
+        let _first = open(cx, "First");
+        defer_close(cx);
+        advance(cx, Duration::from_millis(100));
+        let _second = open(cx, "Second");
+        defer_close(cx);
+
+        // Only the first close timer has elapsed. The second still owns the
+        // pending opener until its own animation window completes.
+        advance(cx, *ANIMATION_DURATION - Duration::from_millis(100));
+        cx.update(|window, cx| {
+            assert!(
+                WindowState::read(window, cx)
+                    .pending_focus_restore
+                    .is_some()
+            );
+            assert_ne!(window.focused(cx).as_ref(), Some(&opener));
+        });
+        advance(cx, Duration::from_millis(100));
+        assert_focus(cx, &opener);
+    }
+
+    #[gpui::test]
+    fn delayed_nested_close_and_replacement_preserve_the_original_opener(cx: &mut TestAppContext) {
+        let (cx, opener) = window(cx);
+        let outer = open(cx, "Outer");
+        let _inner = open(cx, "Inner");
+        defer_close(cx);
+        advance(cx, *ANIMATION_DURATION);
+        assert_focus(cx, &outer);
+
+        // Replacing the outer dialog during its close animation inherits the
+        // original background opener, not the unmounted dialog control.
+        defer_close(cx);
+        let replacement = open(cx, "Replacement");
+        advance(cx, *ANIMATION_DURATION);
+        assert_focus(cx, &replacement);
+        cx.update(|window, cx| window.close_dialog(cx));
+        assert_focus(cx, &opener);
+    }
+
+    #[gpui::test]
+    fn closing_all_dialogs_retires_pending_restoration(cx: &mut TestAppContext) {
+        let (cx, opener) = window(cx);
+        let _outer = open(cx, "Outer");
+        let _inner = open(cx, "Inner");
+        defer_close(cx);
+        cx.update(|window, cx| window.close_all_dialogs(cx));
+        assert_focus(cx, &opener);
+        let replacement = open(cx, "Replacement");
+        advance(cx, *ANIMATION_DURATION);
+        assert_focus(cx, &replacement);
+
+        // Closing all while the last dialog is already leaving completes its
+        // return to the opener immediately and leaves no stale timer owner.
+        defer_close(cx);
+        cx.update(|window, cx| {
+            window.close_all_dialogs(cx);
+            assert!(
+                WindowState::read(window, cx)
+                    .pending_focus_restore
+                    .is_none()
+            );
+        });
+        assert_focus(cx, &opener);
+        let next = open(cx, "Next");
+        advance(cx, *ANIMATION_DURATION);
+        assert_focus(cx, &next);
     }
 }

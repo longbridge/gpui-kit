@@ -190,6 +190,7 @@ impl ButtonVariant {
 pub struct Button {
     id: ElementId,
     base: gpui_base::Button,
+    menu_focus_handle: Option<gpui::FocusHandle>,
     icon: Option<ButtonIcon>,
     label: Option<SharedString>,
     /// The announced name, when the visible content is not it.
@@ -239,12 +240,18 @@ impl From<Button> for AnyElement {
 }
 
 impl Button {
+    pub(crate) fn menu_focus(mut self, handle: &gpui::FocusHandle) -> Self {
+        self.menu_focus_handle = Some(handle.clone());
+        self
+    }
+
     pub fn new(id: impl Into<ElementId>) -> Self {
         let id = id.into();
 
         Self {
             id: id.clone(),
             base: gpui_base::Button::new(id),
+            menu_focus_handle: None,
             icon: None,
             label: None,
             accessibility_label: None,
@@ -637,10 +644,12 @@ impl RenderOnce for Button {
             FocusLine::Inside(normal_style.fg.opacity(FOCUS_LINE_OPACITY))
         };
 
-        let focus_handle = window
-            .use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle())
-            .read(cx)
-            .clone();
+        let focus_handle = self.menu_focus_handle.unwrap_or_else(|| {
+            window
+                .use_keyed_state(self.id.clone(), cx, |_, cx| cx.focus_handle())
+                .read(cx)
+                .clone()
+        });
         let is_focused = focus_handle.is_focused(window);
 
         let rounding = match self.rounded {
