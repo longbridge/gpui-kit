@@ -84,7 +84,9 @@ impl Checkbox {
 
     /// Set the name a screen reader announces, overriding the visible label.
     ///
-    /// This does not change the label drawn on screen.
+    /// This does not change the label drawn on screen. A checkbox without a
+    /// [`label`](Self::label) or text children has no accessible name, so set this
+    /// whenever the checkbox is drawn without visible text.
     pub fn accessibility_label(mut self, label: impl Into<SharedString>) -> Self {
         self.accessibility_label = Some(label.into());
         self

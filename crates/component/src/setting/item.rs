@@ -206,6 +206,7 @@ impl SettingItem {
     }
 
     fn render_field(
+        title: SharedString,
         field: Rc<dyn AnySettingField>,
         options: RenderOptions,
         window: &mut Window,
@@ -216,7 +217,7 @@ impl SettingItem {
         let type_id = field.deref().type_id();
         let renderer: Box<dyn SettingFieldRender> = match type_id {
             t if t == std::any::TypeId::of::<bool>() => {
-                Box::new(BoolField::new(field_type.is_switch()))
+                Box::new(BoolField::new(field_type.is_switch(), title))
             }
             t if t == TypeId::of::<f64>() && field_type.is_number_input() => {
                 Box::new(NumberField::new(field_type.number_input_options()))
@@ -290,7 +291,7 @@ impl SettingItem {
                                         this.w_full()
                                     }
                                 })
-                                .child(Label::new(title).text_sm())
+                                .child(Label::new(title.clone()).text_sm())
                                 .when_some(description, |this, description| {
                                     this.child(
                                         div()
@@ -302,6 +303,7 @@ impl SettingItem {
                                 }),
                         )
                         .child(div().id("field").child(Self::render_field(
+                            title,
                             field,
                             options.with_layout(layout).with_disabled(disabled),
                             window,
