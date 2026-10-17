@@ -78,6 +78,26 @@ state and compose the control inside your own frame. If you want the ready-made
 theme, sizing, borders, prefix/suffix slots, and clear button, use the styled
 [`gpui-component` Input](../../component/input.md).
 
+## Cursor blinking
+
+A focused input blinks its cursor every 500 ms and keeps it shown while the
+user types or moves it. Install `CursorBlinkDefaults` to change the interval,
+turn blinking off with `None`, or stop blinking after a timeout, for every
+Input, Textarea, Editor and OTP input in the application:
+
+```rust
+use std::time::Duration;
+use gpui_kit::base::input::CursorBlinkDefaults;
+
+CursorBlinkDefaults::new()
+    .with_interval(Some(Duration::from_millis(530)))
+    .with_timeout(Some(Duration::from_secs(5)))
+    .install(cx);
+```
+
+Every blink repaints the view the input is in; with a timeout, an idle input
+stops causing repaints until the next focus, edit or cursor move.
+
 ## Runnable example
 
 ```bash

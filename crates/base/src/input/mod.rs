@@ -81,6 +81,7 @@ pub(crate) fn init(cx: &mut App) {
 
 pub use crate::number_input::{NumberInputEvent, NumberStep};
 pub use base::{InputBase, InputContextMenuCapabilities, InputStyles};
+pub use blink_cursor::CursorBlinkDefaults;
 pub use cursor::Selection;
 pub use decorations::{
     RangeDecoration, RangeDecorationCollection, RangeDecorationStyle, TextDecoration,

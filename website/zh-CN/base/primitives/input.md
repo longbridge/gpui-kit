@@ -56,6 +56,22 @@ let password = cx.new(|cx| {
 
 `gpui-base` 不安装产品样式。向状态提供 `InputEditorStyle`，并把控件组合进自己的边框容器。若需要现成主题、尺寸、边框、前后缀槽位和清除按钮，请使用 [`gpui-component` Input](../../component/input.md)。
 
+## 光标闪烁
+
+获得焦点的输入框中，文本光标每 500 ms 闪烁一次，用户输入或移动光标时保持显示。安装 `CursorBlinkDefaults` 可为应用中所有 Input、Textarea、Editor 和 OTP 输入框修改闪烁间隔、用 `None` 关闭闪烁，或在超时后停止闪烁：
+
+```rust
+use std::time::Duration;
+use gpui_kit::base::input::CursorBlinkDefaults;
+
+CursorBlinkDefaults::new()
+    .with_interval(Some(Duration::from_millis(530)))
+    .with_timeout(Some(Duration::from_secs(5)))
+    .install(cx);
+```
+
+每次闪烁都会重绘输入框所在的视图；设置超时后，空闲的输入框不再引起重绘，直到下一次获得焦点、编辑或移动光标。
+
 ## 可运行示例
 
 ```bash
