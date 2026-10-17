@@ -3988,6 +3988,7 @@ dependencies = [
  "gpui-shell",
  "gtk",
  "itertools 0.14.0",
+ "lsp-types 0.97.0",
  "rand 0.8.8",
  "regex",
  "rust-i18n",

@@ -23,20 +23,21 @@ pub struct Tree;
 /// through the concrete state of their control, never across the public API.
 pub(crate) use gpui_base::input::InputBaseState;
 pub use gpui_base::input::{
-    Backspace, BufferPoint, CodeActionItem, CodeActionProvider, CompletionMenuOptions,
-    CompletionProvider, Copy, Cut, DefinitionProvider, Delete, DeleteToBeginningOfLine,
-    DeleteToEndOfLine, DeleteToNextWordEnd, DeleteToPreviousWordStart, DisplayMap, DisplayPoint,
-    DocumentColorProvider, DocumentRangeSemanticTokensProvider, EditorState, Enter, Escape,
-    FoldRange, GoToDefinition, HighlightStyleResolver, HoverPopoverState, HoverProvider, Indent,
-    IndentInline, InputEdit, InputEvent, InputHighlighter, InputHighlighterFactory, InputState,
-    Lsp, MaskPattern, MoveDown, MoveEnd, MoveHome, MoveLeft, MovePageDown, MovePageUp, MoveRight,
-    MoveToEnd, MoveToEndOfLine, MoveToNextWord, MoveToPreviousWord, MoveToStart, MoveToStartOfLine,
-    MoveUp, Outdent, OutdentInline, Paste, Point, PrepaintCaretGeometry, RangeDecoration,
-    RangeDecorationCollection, RangeDecorationStyle, Redo, Replace, Rope, RopeExt, RopeLines,
-    Search, SelectAll, SelectToEnd, SelectToEndOfLine, SelectToNextWordEnd,
-    SelectToPreviousWordStart, SelectToStart, SelectToStartOfLine, Selection, ShowCharacterPalette,
-    ShowCompletions, ShowDocumentHandler, TabSize, TextDecoration, TextDecorationCollection,
-    TextareaState, ToggleCodeActions, Undo, WrappingIndent,
+    Backspace, BufferPoint, CodeActionItem, CodeActionProvider, CompletionHighlighter,
+    CompletionMenuOptions, CompletionProvider, Copy, Cut, DefinitionProvider, Delete,
+    DeleteToBeginningOfLine, DeleteToEndOfLine, DeleteToNextWordEnd, DeleteToPreviousWordStart,
+    DisplayMap, DisplayPoint, DocumentColorProvider, DocumentRangeSemanticTokensProvider,
+    EditorState, Enter, Escape, FoldRange, GoToDefinition, HighlightStyleResolver,
+    HoverPopoverState, HoverProvider, Indent, IndentInline, InputEdit, InputEvent,
+    InputHighlighter, InputHighlighterFactory, InputState, Lsp, MaskPattern, MoveDown, MoveEnd,
+    MoveHome, MoveLeft, MovePageDown, MovePageUp, MoveRight, MoveToEnd, MoveToEndOfLine,
+    MoveToNextWord, MoveToPreviousWord, MoveToStart, MoveToStartOfLine, MoveUp, Outdent,
+    OutdentInline, Paste, Point, PrepaintCaretGeometry, RangeDecoration, RangeDecorationCollection,
+    RangeDecorationStyle, Redo, Replace, Rope, RopeExt, RopeLines, Search, SelectAll, SelectToEnd,
+    SelectToEndOfLine, SelectToNextWordEnd, SelectToPreviousWordStart, SelectToStart,
+    SelectToStartOfLine, Selection, ShowCharacterPalette, ShowCompletions, ShowDocumentHandler,
+    TabSize, TextDecoration, TextDecorationCollection, TextareaState, ToggleCodeActions, Undo,
+    WrappingIndent, highlight_characters, highlight_contains, highlight_prefix,
 };
 pub use gpui_base::input::{EditorMode, InputMode, InputModeKind, TextareaMode};
 #[doc(hidden)]

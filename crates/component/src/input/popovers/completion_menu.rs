@@ -1,25 +1,62 @@
-use std::rc::Rc;
+use std::{ops::Range, rc::Rc};
 
 use gpui::{
     Action, AnyElement, App, AppContext, Context, DismissEvent, Empty, Entity, EventEmitter,
-    Half as _, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement, Pixels, Render,
+    HighlightStyle, InteractiveElement as _, IntoElement, ParentElement, Pixels, Render,
     RenderOnce, SharedString, Styled, StyledText, Subscription, WeakEntity, Window, deferred, div,
-    prelude::FluentBuilder, px, relative,
+    prelude::FluentBuilder, px,
 };
 use gpui_base::TestSupportExt as _;
+use gpui_base::input::CompletionHighlighter;
 use lsp_types::CompletionItem;
 
 const MAX_MENU_HEIGHT: Pixels = px(240.);
 const POPOVER_GAP: Pixels = px(4.);
 
+/// Drop ranges a custom highlighter cannot safely paint, then order the rest.
+///
+/// A range past the label, or one that begins or ends inside a character,
+/// would split a glyph. Empty ranges paint nothing, so they go too. What
+/// remains is sorted and merged: GPUI builds text runs assuming highlights
+/// are ordered and do not overlap, and an overlap makes the run longer than
+/// the label.
+fn retained_highlight_ranges(
+    label: &str,
+    ranges: impl IntoIterator<Item = Range<usize>>,
+) -> Vec<Range<usize>> {
+    let mut ranges: Vec<Range<usize>> = ranges
+        .into_iter()
+        .filter(|range| {
+            range.start < range.end
+                && range.end <= label.len()
+                && label.is_char_boundary(range.start)
+                && label.is_char_boundary(range.end)
+        })
+        .collect();
+    ranges.sort_by_key(|range| range.start);
+
+    let mut merged: Vec<Range<usize>> = Vec::new();
+    for range in ranges {
+        if let Some(last) = merged.last_mut() {
+            if range.start <= last.end {
+                last.end = last.end.max(range.end);
+                continue;
+            }
+        }
+        merged.push(range);
+    }
+    merged
+}
+
 use crate::{
-    ActiveTheme, IndexPath, Selectable, actions, h_flex,
+    ActiveTheme, IndexPath, Selectable, ThemeStyled as _, actions, h_flex,
     input::{
         self, EditorState,
         popovers::{CaretAnchoredPopup, editor_popover, render_markdown},
     },
     label::Label,
     list::{List, ListDelegate, ListEvent, ListState},
+    menu::MenuItemElement,
 };
 
 struct ContextMenuDelegate {
@@ -27,6 +64,7 @@ struct ContextMenuDelegate {
     menu: Entity<CompletionMenu>,
     items: Vec<Rc<CompletionItem>>,
     selected_ix: usize,
+    highlight: Rc<CompletionHighlighter>,
 }
 
 impl ContextMenuDelegate {
@@ -46,23 +84,25 @@ struct CompletionMenuItem {
     item: Rc<CompletionItem>,
     children: Vec<AnyElement>,
     selected: bool,
-    highlight_prefix: SharedString,
+    query: SharedString,
+    highlight: Rc<CompletionHighlighter>,
 }
 
 impl CompletionMenuItem {
-    fn new(ix: usize, item: Rc<CompletionItem>) -> Self {
+    fn new(
+        ix: usize,
+        item: Rc<CompletionItem>,
+        query: SharedString,
+        highlight: Rc<CompletionHighlighter>,
+    ) -> Self {
         Self {
             ix,
             item,
             children: vec![],
             selected: false,
-            highlight_prefix: "".into(),
+            query,
+            highlight,
         }
-    }
-
-    fn highlight_prefix(mut self, s: impl Into<SharedString>) -> Self {
-        self.highlight_prefix = s.into();
-        self
     }
 }
 impl Selectable for CompletionMenuItem {
@@ -86,43 +126,47 @@ impl RenderOnce for CompletionMenuItem {
         let item = self.item;
 
         let deprecated = item.deprecated.unwrap_or(false);
-        let matched_len = item
-            .filter_text
-            .as_ref()
-            .map(|s| s.len())
-            .unwrap_or(self.highlight_prefix.len())
-            .min(item.label.len());
+        let highlights = retained_highlight_ranges(
+            &item.label,
+            (self.highlight)(self.query.as_ref(), item.as_ref()),
+        )
+        .into_iter()
+        .map(|range| {
+            (
+                range,
+                HighlightStyle {
+                    color: Some(cx.theme().blue),
+                    ..Default::default()
+                },
+            )
+        })
+        .collect::<Vec<_>>();
 
-        let highlights = vec![(
-            0..matched_len,
-            HighlightStyle {
-                color: Some(cx.theme().blue),
-                ..Default::default()
-            },
-        )];
-
-        h_flex()
-            .id(self.ix)
-            .gap_2()
-            .p_1()
-            .text_xs()
-            .line_height(relative(1.))
-            .rounded(cx.theme().radius.half())
+        MenuItemElement::new(self.ix)
+            .aria_label(item.label.clone())
+            .selected(self.selected)
+            .text_sm()
+            .py_0()
+            .px_2()
+            .h(px(26.))
+            .mb_0p5()
+            .rounded(cx.theme().radius.min(px(8.)))
             .when(item.deprecated.unwrap_or(false), |this| this.line_through())
-            .hover(|this| this.bg(cx.theme().accent.opacity(0.8)))
-            .when(self.selected, |this| {
-                this.bg(cx.theme().tokens.accent)
-                    .text_color(cx.theme().accent_foreground)
-            })
-            .child(div().child(StyledText::new(item.label.clone()).with_highlights(highlights)))
-            .when(item.detail.is_some(), |this| {
-                this.child(
-                    Label::new(item.detail.as_deref().unwrap_or("").to_string())
-                        .text_color(cx.theme().muted_foreground)
-                        .when(deprecated, |this| this.line_through())
-                        .italic(),
-                )
-            })
+            .child(
+                h_flex()
+                    .w_full()
+                    .gap_3()
+                    .justify_between()
+                    .child(StyledText::new(item.label.clone()).with_highlights(highlights))
+                    .when_some(item.detail.as_ref(), |this, detail| {
+                        this.child(
+                            Label::new(detail.clone())
+                                .text_color(cx.theme().muted_foreground)
+                                .when(deprecated, |this| this.line_through())
+                                .italic(),
+                        )
+                    }),
+            )
             .children(self.children)
     }
 }
@@ -143,7 +187,12 @@ impl ListDelegate for ContextMenuDelegate {
         _: &mut Context<ListState<Self>>,
     ) -> Option<Self::Item> {
         let item = self.items.get(ix.row)?;
-        Some(CompletionMenuItem::new(ix.row, item.clone()).highlight_prefix(self.query.clone()))
+        Some(CompletionMenuItem::new(
+            ix.row,
+            item.clone(),
+            self.query.clone(),
+            self.highlight.clone(),
+        ))
     }
 
     fn set_selected_index(
@@ -196,6 +245,7 @@ impl CompletionMenu {
                 menu: view,
                 items: vec![],
                 selected_ix: 0,
+                highlight: Rc::new(gpui_base::input::highlight_prefix),
             };
 
             let list = cx.new(|cx| ListState::new(menu, window, cx));
@@ -343,6 +393,21 @@ impl CompletionMenu {
 
         cx.notify();
     }
+
+    /// Replace the label highlighter and repaint an open menu.
+    pub(crate) fn set_highlight(
+        &mut self,
+        highlight: Rc<CompletionHighlighter>,
+        cx: &mut Context<Self>,
+    ) {
+        self.list.update(cx, |list, cx| {
+            if Rc::ptr_eq(&list.delegate().highlight, &highlight) {
+                return;
+            }
+            list.delegate_mut().highlight = highlight;
+            cx.notify();
+        });
+    }
 }
 
 impl Render for CompletionMenu {
@@ -388,6 +453,10 @@ impl Render for CompletionMenu {
                     .when(vertical_layout, |this| this.flex_col())
                     .child(
                         editor_popover("completion-menu", cx)
+                            .popover_style(cx)
+                            .text_sm()
+                            // Each virtual row includes the menu's inter-item gap.
+                            .pb_0p5()
                             .test_support()
                             .max_w(max_width)
                             .min_w(px(120.))
@@ -405,6 +474,8 @@ impl Render for CompletionMenu {
                         this.child(
                             div().child(
                                 editor_popover("completion-menu", cx)
+                                    .popover_style(cx)
+                                    .text_sm()
                                     .w(configured_max)
                                     .px_2()
                                     .child(render_markdown("doc", doc, window, cx)),
@@ -429,6 +500,20 @@ impl Render for CompletionMenu {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn highlight_ranges_are_ordered_and_do_not_overlap() {
+        assert_eq!(
+            retained_highlight_ranges("flag", [2..3, 0..1]),
+            vec![0..1, 2..3]
+        );
+        assert_eq!(retained_highlight_ranges("flag", [0..3, 2..4]), vec![0..4]);
+        assert_eq!(
+            retained_highlight_ranges("flag", [0..1, 1..2, 5..9, 2..3]),
+            vec![0..3]
+        );
+        assert_eq!(retained_highlight_ranges("你", [0..1, 0..3]), vec![0..3]);
+    }
 
     #[gpui::test]
     fn hiding_an_old_menu_does_not_dismiss_a_new_completion_response(

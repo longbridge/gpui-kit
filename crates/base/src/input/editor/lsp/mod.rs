@@ -58,6 +58,12 @@ pub struct Lsp {
     /// Display options for the completion popover.
     pub completion_menu: CompletionMenuOptions,
 
+    /// Decides which bytes of each completion label the menu paints.
+    ///
+    /// Defaults to [`highlight_prefix`]. Replace it to paint a contiguous
+    /// match, a character-by-character match, or ranges the host computed.
+    pub completion_highlighter: Rc<CompletionHighlighter>,
+
     pub(crate) document_colors: Vec<(lsp_types::Range, Hsla)>,
     /// Cached semantic tokens as absolute position ranges + theme token-type
     /// names. Color is resolved from the name at paint time so theme switches
@@ -78,6 +84,7 @@ impl Default for Lsp {
             definition_provider: None,
             document_color_provider: None,
             completion_menu: CompletionMenuOptions::default(),
+            completion_highlighter: Rc::new(highlight_prefix),
             semantic_tokens_provider: None,
             show_document: None,
             document_colors: vec![],
