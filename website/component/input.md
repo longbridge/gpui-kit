@@ -231,6 +231,16 @@ Input::new(&input).context_menu(|menu, window, cx| {
         .menu("Copy", Box::new(input::Copy))
         .menu("Paste", Box::new(input::Paste))
 })
+
+// Or decide by what the menu was opened on, keeping the built-in items for
+// the rest. `hit` is the click's `hit_test`: the text, or a row of an
+// editor's gutter.
+Input::new(&input).context_menu_with(|menu, capabilities, hit, window, cx| {
+    match hit {
+        Some(hit) if hit.is_gutter() => menu.menu("Custom Action", Box::new(CustomAction)),
+        _ => input::default_context_menu(menu, capabilities),
+    }
+})
 ```
 
 A right-click outside the selection moves the cursor to the click. A right-click inside the selection keeps the selection and the cursor, so read `context_menu_offset()` to act on the text under the pointer, as a spelling menu does:

@@ -659,6 +659,40 @@ In the display map, spacer rows are display rows: `display_row_count()` counts t
 spacers do, so a cache of rows stays valid; a provider answering with the spacers already
 shown leaves it unchanged, so refreshing on a version change settles.
 
+## Gutter context menu
+
+`Editor::context_menu_with` builds the right-click menu knowing what it was opened on:
+besides the capabilities, it is handed the [`hit_test`](#line-decorations) of the click,
+so a menu can be about a row of the gutter and leave the text its usual one, which
+`default_context_menu` builds. A right-click on the gutter moves the caret to the
+row, as one on the text does; `gutter_context_menu_moves_cursor(false)` keeps the
+selection instead while the gutter's menu is open.
+
+```rust
+use gpui_kit::component::input::{Editor, EditorState, default_context_menu};
+
+let editor = cx.new(|cx| {
+    EditorState::new(window, cx)
+        .line_number(true)
+        .gutter_context_menu_moves_cursor(false)
+});
+
+Editor::new(&editor).context_menu_with(|menu, capabilities, hit, _, _| {
+    match hit {
+        Some(hit) if hit.is_gutter() => match hit.row() {
+            Some(row) => menu
+                .menu(format!("Bookmark Line {}", row + 1), Box::new(ToggleBookmark))
+                .menu(format!("Copy Line {}", row + 1), Box::new(CopyLine)),
+            None => menu, // below the last line: no menu
+        },
+        _ => default_context_menu(menu, capabilities),
+    }
+})
+```
+
+The builder runs when the menu opens; remember the row there for the actions to read.
+`examples/editor_gutter_menu` bookmarks, selects and copies the line clicked.
+
 ## Value and events
 
 ```rust

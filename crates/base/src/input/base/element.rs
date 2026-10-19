@@ -4863,12 +4863,12 @@ fn split_runs_by_bg_segments(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::InputHitArea;
     use crate::input::{
         EditorMode, EditorState, FoldPlaceholderRenderer, FoldRange, GutterDecoration,
         GutterDecorationCollection, OverviewRulerDecoration, OverviewRulerDecorationCollection,
         Position, RangeDecoration, Redo, Undo,
     };
+    use crate::input::{InputHit, InputHitArea};
     use crate::{ScrollbarMode, ScrollbarStyles, ScrollbarTheme, Theme};
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, ListAlignment, ListOffset, ListState,
@@ -9420,5 +9420,66 @@ mod tests {
                 assert_eq!((next.row(), next.is_spacer()), (Some(2), false));
             }
         });
+    }
+
+    #[gpui::test]
+    fn a_right_click_on_the_gutter_tells_the_menu_its_row(cx: &mut TestAppContext) {
+        let (editor, window) = decoration_editor(cx, "one\ntwo\nthree", false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        let opened: Rc<std::cell::RefCell<Vec<Option<InputHit>>>> = Default::default();
+        cx.update(|window, cx| {
+            editor.update(cx, |state, _| {
+                let opened = opened.clone();
+                state.on_context_menu_with_hit(Rc::new(move |_, _, hit, _, _, _| {
+                    opened.borrow_mut().push(hit);
+                }));
+            });
+            window.draw(cx).clear(cx);
+        });
+        let (gutter, text, rows) = cx.update(|_, cx| {
+            let state = editor.read(cx);
+            let gutter = gutter_column_middle(state, GutterColumn::LineNumbers).unwrap();
+            let text = state.gutter_bounds().unwrap().right() + px(10.);
+            let rows: Vec<Pixels> = (0..3)
+                .map(|row| state.row_bounds(row).unwrap().center().y)
+                .collect();
+            (gutter, text, rows)
+        });
+        let right_click = |cx: &mut VisualTestContext, position: Point<Pixels>| {
+            cx.simulate_mouse_down(position, MouseButton::Right, Default::default());
+            cx.simulate_mouse_up(position, MouseButton::Right, Default::default());
+            cx.run_until_parked();
+            let hit = opened.borrow_mut().pop().expect("the menu opened");
+            let selected = cx.update(|_, cx| editor.read(cx).selected_range());
+            (hit.unwrap(), selected)
+        };
+        let select = |cx: &mut VisualTestContext| {
+            cx.update(|_, cx| editor.update(cx, |state, cx| state.set_selected_range(0..2, cx)));
+        };
+
+        // By default the gutter moves the caret to its row, as the text does.
+        select(&mut cx);
+        let (hit, selected) = right_click(&mut cx, point(gutter, rows[1]));
+        assert_eq!(hit.gutter_column(), Some(GutterColumn::LineNumbers));
+        assert_eq!(hit.row(), Some(1));
+        assert_eq!(selected, 4..4);
+
+        // Turned off, a menu for a row of the gutter keeps the selection.
+        cx.update(|_, cx| {
+            editor.update(cx, |state, _| {
+                state.set_gutter_context_menu_moves_cursor(false)
+            })
+        });
+        select(&mut cx);
+        let (hit, selected) = right_click(&mut cx, point(gutter, rows[2]));
+        assert!(hit.is_gutter());
+        assert_eq!(hit.row(), Some(2));
+        assert_eq!(selected, 0..2);
+
+        // The text still moves the caret.
+        let (hit, selected) = right_click(&mut cx, point(text, rows[2]));
+        assert_eq!(hit.row(), Some(2));
+        assert_eq!(selected, hit.offset().unwrap()..hit.offset().unwrap());
+        assert!(hit.offset().unwrap() >= 8);
     }
 }

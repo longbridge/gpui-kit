@@ -543,6 +543,38 @@ left.update(cx, |state, cx| state.set_spacer_provider(Some(level), cx));
 用于区分填充行和文本行。填充行变化时 `version()` 也会变化，因此按版本缓存的行映射不会过期；provider 返回与当前相同的填充行时版本不变，
 所以在版本变化时调用 `refresh_spacers` 最终会稳定下来。
 
+## 行号栏右键菜单
+
+`Editor::context_menu_with` 在构建右键菜单时知道它是在哪里打开的：
+除了 capabilities，它还会收到这次单击的 `hit_test` 结果，因此菜单可以只针对行号栏
+中的某一行，而文本上仍保留通常的菜单（由 `default_context_menu` 构建）。在行号栏上右键单击会像在文本
+上一样把光标移到该行；`gutter_context_menu_moves_cursor(false)` 则在行号栏菜单打开期间保留当前选区。
+
+```rust
+use gpui_kit::component::input::{Editor, EditorState, default_context_menu};
+
+let editor = cx.new(|cx| {
+    EditorState::new(window, cx)
+        .line_number(true)
+        .gutter_context_menu_moves_cursor(false)
+});
+
+Editor::new(&editor).context_menu_with(|menu, capabilities, hit, _, _| {
+    match hit {
+        Some(hit) if hit.is_gutter() => match hit.row() {
+            Some(row) => menu
+                .menu(format!("Bookmark Line {}", row + 1), Box::new(ToggleBookmark))
+                .menu(format!("Copy Line {}", row + 1), Box::new(CopyLine)),
+            None => menu, // 最后一行之下：不显示菜单
+        },
+        _ => default_context_menu(menu, capabilities),
+    }
+})
+```
+
+构建函数在菜单打开时运行；可以在这里记下行号，供菜单操作读取。
+`examples/editor_gutter_menu` 演示了为单击的行添加书签、选中和复制。
+
 ## 值与事件
 
 ```rust

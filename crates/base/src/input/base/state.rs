@@ -586,10 +586,22 @@ pub struct InputBaseState<M: InputModeKind> {
     pub(super) diagnostic_popover: Option<Rc<crate::input::DiagnosticEntry>>,
 
     context_menu_handler: Option<
-        Rc<dyn Fn(NativeMenu, InputContextMenuCapabilities, Point<Pixels>, &mut Window, &mut App)>,
+        Rc<
+            dyn Fn(
+                NativeMenu,
+                InputContextMenuCapabilities,
+                Option<InputHit>,
+                Point<Pixels>,
+                &mut Window,
+                &mut App,
+            ),
+        >,
     >,
-    pending_context_menu: Option<(Point<Pixels>, usize)>,
+    pending_context_menu: Option<(Point<Pixels>, usize, Option<InputHit>)>,
     context_menu_offset: Option<usize>,
+    /// Whether a right-click on the gutter moves the caret to its row, as one
+    /// on the text does.
+    pub(super) gutter_context_menu_moves_cursor: bool,
 
     /// Whether the context menu that shows on right-click is enabled.
     ///
@@ -940,6 +952,28 @@ impl<M: InputModeKind> InputBaseState<M> {
             dyn Fn(NativeMenu, InputContextMenuCapabilities, Point<Pixels>, &mut Window, &mut App),
         >,
     ) {
+        self.context_menu_handler = Some(Rc::new(
+            move |menu, capabilities, _, position, window, cx| {
+                handler(menu, capabilities, position, window, cx)
+            },
+        ));
+    }
+
+    /// Like [`Self::on_context_menu`], also told what the right-click was over.
+    #[doc(hidden)]
+    pub fn on_context_menu_with_hit(
+        &mut self,
+        handler: Rc<
+            dyn Fn(
+                NativeMenu,
+                InputContextMenuCapabilities,
+                Option<InputHit>,
+                Point<Pixels>,
+                &mut Window,
+                &mut App,
+            ),
+        >,
+    ) {
         self.context_menu_handler = Some(handler);
     }
 
@@ -1086,6 +1120,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             context_menu_handler: None,
             pending_context_menu: None,
             context_menu_offset: None,
+            gutter_context_menu_moves_cursor: true,
             enable_context_menu: true,
             completion_inserting: false,
             overlay_action_handler: None,
@@ -1107,6 +1142,25 @@ impl<M: InputModeKind> InputBaseState<M> {
     pub fn context_menu(mut self, enable: bool) -> Self {
         self.enable_context_menu = enable;
         self
+    }
+
+    /// Sets whether a right-click on the gutter moves the caret to the row
+    /// clicked, as a right-click on the text does.
+    ///
+    /// It does by default. Turn it off to keep the selection while a menu for
+    /// a row of the gutter is open.
+    pub fn gutter_context_menu_moves_cursor(mut self, moves: bool) -> Self {
+        self.gutter_context_menu_moves_cursor = moves;
+        self
+    }
+
+    pub fn set_gutter_context_menu_moves_cursor(&mut self, moves: bool) {
+        self.gutter_context_menu_moves_cursor = moves;
+    }
+
+    /// Returns true when a right-click at `hit` leaves the caret where it is.
+    fn keeps_cursor_on_context_menu(&self, hit: Option<InputHit>) -> bool {
+        !self.gutter_context_menu_moves_cursor && hit.is_some_and(|hit| hit.is_gutter())
     }
 
     pub fn set_context_menu_enabled(&mut self, enabled: bool) {
@@ -2621,6 +2675,7 @@ impl<M: InputModeKind> InputBaseState<M> {
         &mut self,
         position: Point<Pixels>,
         offset: usize,
+        hit: Option<InputHit>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -2632,11 +2687,12 @@ impl<M: InputModeKind> InputBaseState<M> {
         }
 
         self.context_menu_offset = Some(offset);
-        if !self.active_selection().contains(offset) {
+        let keep_cursor = self.keeps_cursor_on_context_menu(hit);
+        if !keep_cursor && !self.active_selection().contains(offset) {
             self.move_to(offset, None, cx);
         }
 
-        if self.is_code_editor() {
+        if self.is_code_editor() && !keep_cursor {
             M::on_hover_definition(self, offset, window, cx);
         }
 
@@ -2650,7 +2706,7 @@ impl<M: InputModeKind> InputBaseState<M> {
                     return;
                 }
                 let previous_focus = window.focused(cx);
-                handler(NativeMenu::new(), capabilities, position, window, cx);
+                handler(NativeMenu::new(), capabilities, hit, position, window, cx);
                 // A drawn menu takes focus synchronously; native menus leave it
                 // on the input. Capture it here rather than in the handler.
                 input
@@ -2903,10 +2959,13 @@ impl<M: InputModeKind> InputBaseState<M> {
         // Show Mouse context menu
         if event.button == MouseButton::Right {
             if self.enable_context_menu {
-                if !self.active_selection().contains(offset) {
+                let hit = self.hit_test(event.position);
+                if !self.keeps_cursor_on_context_menu(hit)
+                    && !self.active_selection().contains(offset)
+                {
                     self.move_to(offset, None, cx);
                 }
-                self.pending_context_menu = Some((event.position, offset));
+                self.pending_context_menu = Some((event.position, offset, hit));
             }
             return;
         }
@@ -2945,8 +3004,8 @@ impl<M: InputModeKind> InputBaseState<M> {
         cx: &mut Context<Self>,
     ) {
         if event.button == MouseButton::Right {
-            if let Some((position, offset)) = self.pending_context_menu.take() {
-                self.handle_right_click_menu(position, offset, window, cx);
+            if let Some((position, offset, hit)) = self.pending_context_menu.take() {
+                self.handle_right_click_menu(position, offset, hit, window, cx);
             }
         }
         if self.active_selection().is_empty() {
@@ -7437,7 +7496,7 @@ mod tests {
                     items2.set(menu.items.len());
                     menu_focus.focus(window, cx);
                 }));
-                state.handle_right_click_menu(point(px(0.), px(0.)), 0, window, cx);
+                state.handle_right_click_menu(point(px(0.), px(0.)), 0, None, window, cx);
             })
         });
         assert_eq!(calls.get(), 1);
@@ -7457,7 +7516,7 @@ mod tests {
         // A custom handler may keep using the same, already-focused menu.
         cx.update(|window, cx| {
             input.update(cx, |state, cx| {
-                state.handle_right_click_menu(point(px(0.), px(0.)), 0, window, cx);
+                state.handle_right_click_menu(point(px(0.), px(0.)), 0, None, window, cx);
             });
         });
         assert_eq!(calls.get(), 2);
@@ -7468,7 +7527,7 @@ mod tests {
         cx.update(|window, cx| {
             input.update(cx, |state, cx| {
                 state.disabled = true;
-                state.handle_right_click_menu(point(px(0.), px(0.)), 0, window, cx);
+                state.handle_right_click_menu(point(px(0.), px(0.)), 0, None, window, cx);
             })
         });
         assert_eq!(calls.get(), 2);
@@ -7491,7 +7550,7 @@ mod tests {
                 state.on_context_menu(Rc::new(move |_, _, _, _, cx| {
                     cursor.set(weak.upgrade().map(|input| input.read(cx).cursor()));
                 }));
-                state.handle_right_click_menu(point(px(0.), px(0.)), 2, window, cx);
+                state.handle_right_click_menu(point(px(0.), px(0.)), 2, None, window, cx);
             })
         });
         assert_eq!(cursor.get(), Some(2));
@@ -7520,7 +7579,7 @@ mod tests {
                     }));
                 }));
                 // A right-click inside the selection keeps the cursor at its end.
-                state.handle_right_click_menu(point(px(0.), px(0.)), 2, window, cx);
+                state.handle_right_click_menu(point(px(0.), px(0.)), 2, None, window, cx);
             })
         });
         assert_eq!(seen.get(), Some((11, Some(2))));
