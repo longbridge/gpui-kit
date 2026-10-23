@@ -161,7 +161,7 @@ impl RenderOnce for Tab {
             .flex()
             .items_center()
             .justify_center()
-            .line_height(relative(1.))
+            .line_height(relative(1.25))
             .when_some(self.accessibility_label, |this, label| {
                 this.aria_label(label)
             })
