@@ -324,7 +324,7 @@ fn write_a11y_info(&self, node: &mut accesskit::Node) {
 
 ## 测试无障碍契约
 
-UI 集成测试启用 GPUI Kit 的 `test-support` feature，并导入 `gpui_kit::test::TestWindowExt`；观察自定义 `div` 时还要导入 `TestSupportExt`。在 `window.render_frame(cx)` 后查询**已绘制**的元素。`ElementSnapshot` 提供 `role()`、`label()`、`value()`、`focused()`、`checked()`、`indeterminate()`、`selected()` 和 `expanded()`。每次交互后重新查询，因为 snapshot 只描述一个已完成的帧。上面的可运行 Profile 测试就是断言示例：它检查 role、名称、值、焦点、几何位置和保存后的模型值。
+UI 集成测试启用 GPUI Kit 的 `test-support` feature，并导入 `gpui_kit::test::TestWindowExt`；观察自定义 `div` 时还要导入 `TestSupportExt`。在 `window.render_frame(cx)` 后查询**已绘制**的元素。`ElementSnapshot` 提供 `role()`、`label()`、`description()`、`placeholder()`、`value()`、`focused()`、`checked()`、`indeterminate()`、`selected()` 和 `expanded()`。每次交互后重新查询，因为 snapshot 只描述一个已完成的帧。上面的可运行 Profile 测试就是断言示例：它检查 role、名称、值、焦点、几何位置和保存后的模型值。
 
 状态读取结果为 `None` 表示属性不可用，并不表示 `false`。特别是 `.disabled()` 只有在节点暴露 disabled 标志时才返回 `Some(true)`；测试禁用行为时应尝试激活，并确认结果未改变。`ElementSnapshot::value()` 读取的是字符串无障碍值，不是 Slider 的数值或绘制的文字。遮罩和密码输入有意不暴露无障碍值。当前 Input 实现只要未禁用就注册 `SetValue`，包括只读模式；handler 使用程序化替换路径。如果只读数据必须受到保护，应核实所需行为，不要假定 `readonly(true)` 能阻止这条无障碍写入路径。测试配置、帧与焦点细节见[测试](./test)。
 

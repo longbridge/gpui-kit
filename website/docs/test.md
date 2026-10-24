@@ -127,7 +127,7 @@ observation adds no layout container:
 | Control | Native properties beyond geometry and visibility |
 | --- | --- |
 | Button | Accessibility label, focus scope |
-| Input | Non-sensitive accessibility value, label, focus scope |
+| Input | Non-sensitive accessibility value, label, placeholder, focus scope |
 | Checkbox | Checked, indeterminate, label, focus scope |
 | Switch / Toggle | Checked, label, focus scope |
 | Radio | Checked, selected, label, focus scope |
@@ -188,13 +188,16 @@ not prove that the element cannot receive focus. Debug output marks a detected m
 binding as `focused: <binding missed>` without panicking.
 
 Snapshots read native `role`, `aria_toggled`, `aria_selected`, `aria_expanded`,
-`aria_label` and `aria_value`. There are no `TestProps` or hand-supplied fallback values.
+`aria_label`, `aria_description`, `aria_placeholder` and `aria_value`. There are no
+`TestProps` or hand-supplied fallback values.
 Input uses its existing accessibility-value path in tests, with the same masking and
 sensitive-content restrictions. Select's `value()` is its accessible value, including
 any title prefix; it is not a selected item ID.
 
 `label()` means accessibility label, not visible text. `value()` means accessibility
-value, not pixels. These properties can still contain component bugs. Do not add
+value, not pixels. `description()` is read after the label and does not replace it;
+`placeholder()` is the prompt shown while the element has no value, not a value.
+These properties can still contain component bugs. Do not add
 `aria_label` or `aria_value` solely to make a visual assertion pass. The example's
 Status role and label serve the production accessibility announcement. Arbitrary
 child text is not discovered automatically, and there is no `text()` shortcut that
@@ -287,9 +290,10 @@ character, with scope checks against each completed frame.
 
 `ElementSnapshot` is an owned, immutable record of a completed paint. Its readers
 are `role()`, `path()`, `bounds()`, `visible()`, `focused()`, `disabled()`, `label()`,
-`value()`, `checked()`, `indeterminate()`, `selected()` and `expanded()`.
+`description()`, `placeholder()`, `value()`, `checked()`, `indeterminate()`,
+`selected()` and `expanded()`.
 Focused, disabled, checked, indeterminate, selected and expanded readers return
-`Option<bool>`: `None` means unavailable, not false. Label/value are also optional. Re-query after interactions:
+`Option<bool>`: `None` means unavailable, not false. Label, description, placeholder and value are also optional. Re-query after interactions:
 
 ```rust
 let before = window.find("agree");
