@@ -280,10 +280,9 @@ fn parse_table_row(source: &str, table: &mut Table, node: &mdast::TableRow, cx: 
             _ => {}
         };
     });
-    // GFM fixes the column count with the header/delimiter, not each body row.
-    // Padding/truncation keeps every row on the same measured column grid.
-    row.children
-        .resize_with(table.column_aligns.len(), Default::default);
+    // GFM fixes the column count with the header/delimiter. Leave missing
+    // cells implicit; the renderer places them on the shared column grid.
+    row.children.truncate(table.column_aligns.len());
     table.children.push(row);
 }
 
@@ -1267,10 +1266,10 @@ mod tests {
     }
 
     #[test]
-    fn table_rows_use_header_column_count() {
+    fn table_rows_keep_missing_cells_implicit() {
         let mut cx = NodeContext::default();
         let document = parse(
-            "| A | B | C |\n| --- | --- | --- |\n| one |\n| two | three | four | ignored |\n",
+            "| A | B | C |\n| --- | --- | --- |\n| one |\n| two | three | four | ignored |\n| five | | six |\n",
             &mut cx,
         )
         .unwrap();
@@ -1278,10 +1277,51 @@ mod tests {
             panic!("expected table");
         };
         assert_eq!(table.column_aligns.len(), 3);
-        assert!(table.children.iter().all(|row| row.children.len() == 3));
+        assert_eq!(
+            table
+                .children
+                .iter()
+                .map(|row| row.children.len())
+                .collect::<Vec<_>>(),
+            [3, 1, 3, 3]
+        );
         assert_eq!(table.children[1].children[0].children.text(), "one");
-        assert!(table.children[1].children[1].children.text().is_empty());
         assert_eq!(table.children[2].children[2].children.text(), "four");
+        assert!(table.children[3].children[1].children.text().is_empty());
+        assert_eq!(table.children[3].children[2].children.text(), "six");
+    }
+
+    #[test]
+    fn sparse_table_cell_count_tracks_source_cells() {
+        for (columns, rows) in [(32, 64), (64, 128)] {
+            let source = format!(
+                "{}|\n{}|\n{}",
+                "|h".repeat(columns),
+                "|---".repeat(columns),
+                "|x|\n".repeat(rows),
+            );
+            let mut cx = NodeContext::default();
+            let document = parse(&source, &mut cx).unwrap();
+            let BlockNode::Table(table) = &document.blocks[0] else {
+                panic!("expected table");
+            };
+            assert_eq!(table.column_aligns.len(), columns);
+            assert_eq!(table.children.len(), rows + 1);
+            assert_eq!(table.children[0].children.len(), columns);
+            assert!(
+                table.children[1..]
+                    .iter()
+                    .all(|row| row.children.len() == 1)
+            );
+            assert_eq!(
+                table
+                    .children
+                    .iter()
+                    .map(|row| row.children.len())
+                    .sum::<usize>(),
+                columns + rows
+            );
+        }
     }
 
     #[test]
