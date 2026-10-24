@@ -16,7 +16,7 @@ use gpui::{
 
 use crate::text_boundary::{line_range_at, word_range_at};
 use crate::touch_selection::{
-    EdgeDrag, SelectionEdge, TouchHandle, TouchSelectionSnapshot, caret_in_view,
+    EdgeDrag, SelectionEdge, TouchHandle, TouchSelectionSnapshot, caret_in_view, caret_line_box,
 };
 use crate::{AutoScroll, GlobalState};
 
@@ -365,6 +365,9 @@ pub struct TextSelectionRun {
     layout: TextLayout,
     /// The run's window-coordinate paint bounds.
     bounds: Bounds<Pixels>,
+    /// The laid-out row the run is one piece of, which a triple click selects
+    /// whole instead of a line of the run's text.
+    row: Option<Bounds<Pixels>>,
 }
 
 impl TextSelectionRun {
@@ -375,12 +378,19 @@ impl TextSelectionRun {
             text: text.into(),
             layout,
             bounds,
+            row: None,
         }
     }
 
     /// Sets the run's logical order within the participant.
     pub const fn with_document_order(mut self, document_order: u64) -> Self {
         self.document_order = document_order;
+        self
+    }
+
+    /// Sets the laid-out row, in window coordinates, the run is one piece of.
+    pub(crate) const fn with_row(mut self, row: Option<Bounds<Pixels>>) -> Self {
+        self.row = row;
         self
     }
 
@@ -533,16 +543,37 @@ pub(crate) fn text_rows_extent(text_layout: &TextLayout, line_height: Pixels) ->
     (top, last_row_top + line_height)
 }
 
-fn points_for_multi_click(
+/// The carets at the two ends of what `click_count` clicks at `position`
+/// select: the word under it for two, its line for three.
+fn carets_for_multi_click(
     runs: &[TextSelectionRun],
     position: Point<Pixels>,
     click_count: usize,
-) -> Option<(Point<Pixels>, Point<Pixels>)> {
+) -> Option<(Bounds<Pixels>, Bounds<Pixels>)> {
     let run = runs.iter().find(|run| run.bounds.contains(&position))?;
     if run.text.len() != run.layout.len() {
         return None;
     }
     let offset = run.layout.index_for_position(position).ok()?;
+    unit_carets(run, offset, click_count)
+}
+
+/// The carets at the two ends of the word (`click_count` 2) or the line (3 or
+/// more) at the byte `offset` of `run`. A run laid out as a piece of a row
+/// takes the whole row as its line.
+fn unit_carets(
+    run: &TextSelectionRun,
+    offset: usize,
+    click_count: usize,
+) -> Option<(Bounds<Pixels>, Bounds<Pixels>)> {
+    if click_count >= 3
+        && let Some(row) = run.row
+    {
+        return Some((
+            caret_line_box(row.origin, row.size.height),
+            caret_line_box(row.top_right(), row.size.height),
+        ));
+    }
     let range = match click_count {
         2 => word_range_at(&run.text, offset)?,
         3.. => line_range_at(&run.text, offset),
@@ -551,9 +582,10 @@ fn points_for_multi_click(
     if range.is_empty() {
         return None;
     }
+    let line_height = run.layout.line_height();
     Some((
-        run.layout.position_for_index(range.start)?,
-        run.layout.position_for_index(range.end)?,
+        caret_line_box(run.layout.position_for_index(range.start)?, line_height),
+        caret_line_box(run.layout.position_for_index(range.end)?, line_height),
     ))
 }
 
@@ -923,6 +955,27 @@ impl TextSelectionHandle {
         *self.0.read(cx).runs.borrow_mut() = runs.to_vec();
     }
 
+    /// Lets a drag from a double or triple click that this participant
+    /// selected for itself, from the caret `start` to the caret `end` in
+    /// window coordinates, extend the selection by the same unit through the
+    /// window selection, as a shift-click after it does.
+    pub(crate) fn hold_multi_click(
+        &self,
+        start: Bounds<Pixels>,
+        end: Bounds<Pixels>,
+        click_count: usize,
+        cx: &mut App,
+    ) {
+        let Some(state) = self.window_selection(cx) else {
+            return;
+        };
+        state.update(cx, |state, cx| {
+            if let Some(unit) = state.unit_of(&self.0, start, end, click_count, cx) {
+                state.hold_unit(unit, cx);
+            }
+        });
+    }
+
     /// Subscribes to participant selection notifications.
     pub fn subscribe(
         &self,
@@ -1126,6 +1179,33 @@ impl SelectionEndpoint {
             .as_ref()
             .map(|participant| participant.entity_id())
     }
+
+    /// This endpoint moved by `delta` within its participant, its content
+    /// key to be resolved again.
+    fn moved(&self, delta: Point<Pixels>) -> Self {
+        let point = self.point + delta;
+        Self {
+            point,
+            content_key: None,
+            content_key_resolver: self
+                .content_key_resolver
+                .clone()
+                .map(|(resolver, _)| (resolver, point)),
+            ..self.clone()
+        }
+    }
+}
+
+/// The word or line a double or triple click selected. A drag from the
+/// click, and a shift-click after it, extend the selection by the same unit,
+/// and it stays selected whichever way they go.
+#[derive(Clone)]
+struct SelectionUnit {
+    click_count: usize,
+    start: SelectionEndpoint,
+    end: SelectionEndpoint,
+    /// The heights of the rows the unit starts and ends on.
+    row_heights: (Pixels, Pixels),
 }
 
 /// What a long press left behind: the handles and the edit menu.
@@ -1203,6 +1283,7 @@ struct WindowSelectionState {
     anchor: Option<SelectionEndpoint>,
     cursor: Option<SelectionEndpoint>,
     pending_extension_anchor: Option<SelectionEndpoint>,
+    unit: Option<SelectionUnit>,
     is_selecting: bool,
     did_hit_text: bool,
     frame_generation: Cell<u64>,
@@ -1377,6 +1458,7 @@ impl WindowSelectionState {
             ]
             .into_iter()
             .flatten()
+            .chain(self.unit.iter().flat_map(|unit| [&unit.start, &unit.end]))
             .any(|endpoint| endpoint.entity_id() == Some(*id))
         });
         let mut handlers = if endpoint_departed {
@@ -1556,6 +1638,7 @@ impl WindowSelectionState {
         self.anchor = None;
         self.cursor = None;
         self.pending_extension_anchor = None;
+        self.unit = None;
         self.is_selecting = false;
         self.did_hit_text = false;
         if self.touch.reset() {
@@ -1675,6 +1758,7 @@ impl WindowSelectionState {
 
     fn prepare_for_mouse_down(&mut self, extend: bool, cx: &mut App) -> Vec<ClearHandler> {
         let pending_extension_anchor = extend.then(|| self.anchor.clone()).flatten();
+        let unit = extend.then(|| self.unit.take()).flatten();
         if !extend {
             self.table_cell_anchor.set(None);
             self.touch_select_all = false;
@@ -1683,6 +1767,7 @@ impl WindowSelectionState {
         self.anchor = None;
         self.cursor = None;
         self.pending_extension_anchor = None;
+        self.unit = unit;
         self.is_selecting = false;
         self.did_hit_text = false;
         if self.touch.reset() {
@@ -2011,45 +2096,54 @@ impl WindowSelectionState {
         }
     }
 
+    /// Selects the word or line under `position`, and returns it.
     fn select_at(
         &mut self,
         position: Point<Pixels>,
         click_count: usize,
         window: &mut Window,
         cx: &mut App,
-    ) {
+    ) -> Option<SelectionUnit> {
         GlobalState::init(cx);
         if GlobalState::is_text_selection_suppressed(cx) {
-            return;
+            return None;
         }
         let hit = self.endpoint(position, Some(window), cx);
         if !hit.inside_text {
-            return;
+            return None;
         }
-        let Some(participant) = hit
-            .participant
-            .and_then(|participant| participant.upgrade())
-        else {
-            return;
-        };
-        let points =
-            points_for_multi_click(&participant.read(cx).runs.borrow(), position, click_count);
-        let Some((anchor, cursor)) = points else {
-            return;
-        };
-        let Some(registration) = self
+        let participant = hit.participant?.upgrade()?;
+        let (start, end) =
+            carets_for_multi_click(&participant.read(cx).runs.borrow(), position, click_count)?;
+        let unit = self.unit_of(&participant, start, end, click_count, cx)?;
+        self.anchor = Some(unit.start.clone());
+        self.cursor = Some(unit.end.clone());
+        self.did_hit_text = true;
+        self.is_selecting = false;
+        participant.update(cx, |state, cx| state.focus(window, cx));
+        self.publish_snapshots(cx);
+        Some(unit)
+    }
+
+    /// The word or line of `participant` from the caret `start` to the caret
+    /// `end`, both in window coordinates, that `click_count` clicks selected.
+    fn unit_of(
+        &self,
+        participant: &Entity<SelectableTextState>,
+        start: Bounds<Pixels>,
+        end: Bounds<Pixels>,
+        click_count: usize,
+        cx: &App,
+    ) -> Option<SelectionUnit> {
+        let registration = self
             .participants
             .borrow()
-            .get(&participant.entity_id())
-            .cloned()
-        else {
-            return;
-        };
+            .get(&participant.entity_id())?
+            .registration
+            .clone();
         let content_key_resolver = participant.read(cx).content_key_resolver.clone();
         let to_endpoint = |point: Point<Pixels>| {
-            let content_point = point
-                - registration.registration.bounds.origin
-                - registration.registration.scroll_offset;
+            let content_point = point - registration.bounds.origin - registration.scroll_offset;
             SelectionEndpoint {
                 participant: Some(participant.downgrade()),
                 point: content_point,
@@ -2061,12 +2155,99 @@ impl WindowSelectionState {
                     .map(|resolver| (resolver, content_point)),
             }
         };
-        self.anchor = Some(to_endpoint(anchor));
-        self.cursor = Some(to_endpoint(cursor));
-        self.did_hit_text = true;
-        self.is_selecting = false;
-        participant.update(cx, |state, cx| state.focus(window, cx));
+        Some(SelectionUnit {
+            click_count,
+            start: to_endpoint(start.origin),
+            end: to_endpoint(end.origin),
+            row_heights: (start.size.height, end.size.height),
+        })
+    }
+
+    /// Keeps the gesture of the click that selected `unit` going: a drag
+    /// from it, until the button is released, and a shift-click after it
+    /// extend the selection by the same unit.
+    fn hold_unit(&mut self, unit: SelectionUnit, cx: &mut App) {
+        self.unit = Some(unit);
+        self.is_selecting = true;
         self.publish_snapshots(cx);
+    }
+
+    /// Moves the cursor to the edge of the unit at `position`, which
+    /// `endpoint` hit, and the anchor to the far edge of `unit`. A pointer
+    /// over no text moves the cursor to itself, as a plain drag does.
+    fn extend_unit(
+        &mut self,
+        unit: &SelectionUnit,
+        position: Point<Pixels>,
+        endpoint: SelectionEndpoint,
+        cx: &App,
+    ) {
+        let (start, end) = {
+            let participants = self.participants.borrow();
+            (
+                unit.start.resolve(&participants),
+                unit.end.resolve(&participants),
+            )
+        };
+        let (Some(start), Some(end)) = (start, end) else {
+            self.did_hit_text |= endpoint.inside_text;
+            self.cursor = Some(endpoint);
+            return;
+        };
+        let (start_height, end_height) = unit.row_heights;
+        let before =
+            position.y < start.y || (position.y < start.y + start_height && position.x < start.x);
+        let after = position.y >= end.y + end_height || (position.y >= end.y && position.x > end.x);
+        if !before && !after {
+            // A participant's own multi-click selection stands until the
+            // pointer leaves it.
+            if self.anchor.is_some() {
+                self.anchor = Some(unit.start.clone());
+                self.cursor = Some(unit.end.clone());
+                self.did_hit_text = true;
+            }
+            return;
+        }
+        let (edge, anchor) = if before {
+            (SelectionEdge::Start, &unit.end)
+        } else {
+            (SelectionEdge::End, &unit.start)
+        };
+        let cursor = Self::unit_edge_at(&endpoint, position, unit.click_count, edge, cx);
+        self.anchor = Some(anchor.clone());
+        self.cursor = Some(cursor.unwrap_or(endpoint));
+        self.did_hit_text = true;
+    }
+
+    /// `endpoint`, hit at `position`, moved to the `edge` of the word or line
+    /// under the pointer.
+    fn unit_edge_at(
+        endpoint: &SelectionEndpoint,
+        position: Point<Pixels>,
+        click_count: usize,
+        edge: SelectionEdge,
+        cx: &App,
+    ) -> Option<SelectionEndpoint> {
+        if !endpoint.inside {
+            return None;
+        }
+        let participant = endpoint.participant.as_ref()?.upgrade()?;
+        let runs = participant.read(cx).runs.borrow();
+        let run = runs.iter().find(|run| run.bounds.contains(&position))?;
+        if run.text.len() != run.layout.len() {
+            return None;
+        }
+        // Past the end of a row, the pointer takes the character closest to it.
+        let offset = run
+            .layout
+            .index_for_position(position)
+            .unwrap_or_else(|closest| closest);
+        let (start, end) = unit_carets(run, offset, click_count)?;
+        let caret = match edge {
+            SelectionEdge::Start => start,
+            SelectionEdge::End => end,
+        };
+        Some(endpoint.moved(caret.origin - position))
     }
 
     #[cfg(test)]
@@ -2116,6 +2297,10 @@ impl WindowSelectionState {
         self.cursor = Some(endpoint.clone());
         self.did_hit_text = anchor.inside_text || endpoint.inside_text;
         self.is_selecting = true;
+        // A shift-click after a double or triple click extends by its unit.
+        if let Some(unit) = extend.then(|| self.unit.clone()).flatten() {
+            self.extend_unit(&unit, position, endpoint, cx);
+        }
         if let Some(participant) = focus_participant.and_then(|participant| participant.upgrade()) {
             if let Some(window) = window {
                 participant.update(cx, |state, cx| state.focus(window, cx));
@@ -2129,8 +2314,13 @@ impl WindowSelectionState {
             return;
         }
         let endpoint = self.endpoint(position, window, cx);
-        self.did_hit_text |= endpoint.inside_text;
-        self.cursor = Some(endpoint);
+        match self.unit.clone() {
+            Some(unit) => self.extend_unit(&unit, position, endpoint, cx),
+            None => {
+                self.did_hit_text |= endpoint.inside_text;
+                self.cursor = Some(endpoint);
+            }
+        }
         if window.is_none() {
             self.update_participant_auto_scroll(position, cx);
         }
@@ -2967,11 +3157,13 @@ fn paint_text_selection(state: &Entity<WindowSelectionState>, window: &mut Windo
             }
             let touch = GlobalState::is_touch_press(cx);
             state.update(cx, |state, cx| {
-                state.select_at(event.position, event.click_count, window, cx);
+                let unit = state.select_at(event.position, event.click_count, window, cx);
                 // A double tap is touch's other way to select a word, and it
                 // gets the handles and the menu like a long press does.
                 if touch {
                     state.keep_touch_selection(cx);
+                } else if let Some(unit) = unit {
+                    state.hold_unit(unit, cx);
                 }
             });
             WindowSelectionState::resolve_content_keys(&state, cx);
@@ -3636,8 +3828,8 @@ mod tests {
         let click = layout.position_for_index(6).unwrap();
 
         let (anchor, cursor) =
-            points_for_multi_click(std::slice::from_ref(&run), click, 2).unwrap();
-        let states = project_ranges(Some(plain_snapshot(anchor, cursor)), &[run]);
+            carets_for_multi_click(std::slice::from_ref(&run), click, 2).unwrap();
+        let states = project_ranges(Some(plain_snapshot(anchor.origin, cursor.origin)), &[run]);
 
         assert_eq!(states.ranges(), &[Some(4..9)]);
     }
@@ -3653,8 +3845,8 @@ mod tests {
         let click = layout.position_for_index(7).unwrap();
 
         let (anchor, cursor) =
-            points_for_multi_click(std::slice::from_ref(&run), click, 2).unwrap();
-        let projection = project_ranges(Some(plain_snapshot(anchor, cursor)), &[run]);
+            carets_for_multi_click(std::slice::from_ref(&run), click, 2).unwrap();
+        let projection = project_ranges(Some(plain_snapshot(anchor.origin, cursor.origin)), &[run]);
 
         assert_eq!(projection.ranges(), &[Some(6..10)]);
     }
@@ -3666,8 +3858,8 @@ mod tests {
         let click = layout.position_for_index(4).unwrap();
 
         let (anchor, cursor) =
-            points_for_multi_click(std::slice::from_ref(&run), click, 4).unwrap();
-        let states = project_ranges(Some(plain_snapshot(anchor, cursor)), &[run]);
+            carets_for_multi_click(std::slice::from_ref(&run), click, 4).unwrap();
+        let states = project_ranges(Some(plain_snapshot(anchor.origin, cursor.origin)), &[run]);
 
         assert_eq!(states.ranges(), &[Some(0..11)]);
         assert_eq!(line_range_at("first line\nsecond line\nthird", 15), 11..22);
@@ -4913,5 +5105,149 @@ mod tests {
             selection.update_runs(&[text_run(0, text, layout)], cx);
             assert_eq!(TextSelection::selected_text(window, cx), "alpha beta");
         });
+    }
+
+    /// Each text a [`crate::SelectableText`] of its own, one below the other.
+    struct SelectableTextsView {
+        texts: Vec<&'static str>,
+    }
+
+    impl Render for SelectableTextsView {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .child(TextSelectionLayer)
+                .child(
+                    div()
+                        .w(px(400.))
+                        .children(self.texts.iter().enumerate().map(|(ix, text)| {
+                            crate::SelectableText::new(("text", ix), *text)
+                                .document_order(ix as u64)
+                        })),
+                )
+        }
+    }
+
+    /// The middle of the character at `index` of `text`, as it was painted.
+    fn painted_position(text: &str, index: usize, window: &Window, cx: &App) -> Point<Pixels> {
+        let state = WindowSelectionState::existing(window, cx).unwrap();
+        let participants = state.read(cx).participants.borrow();
+        participants
+            .values()
+            .filter_map(|registration| registration.participant.upgrade())
+            .find_map(|participant| {
+                let runs = participant.read(cx).runs.borrow();
+                let run = runs.iter().find(|run| run.text.as_ref() == text)?;
+                let position = run.layout.position_for_index(index)?;
+                Some(point(
+                    position.x + px(1.),
+                    position.y + run.layout.line_height() / 2.,
+                ))
+            })
+            .unwrap()
+    }
+
+    /// Presses the left button `click_count` times at the character `index`
+    /// of `text`, and returns where.
+    fn press_at(
+        text: &str,
+        index: usize,
+        click_count: usize,
+        shift: bool,
+        cx: &mut gpui::VisualTestContext,
+    ) -> Point<Pixels> {
+        let position = cx.update(|window, cx| painted_position(text, index, window, cx));
+        cx.simulate_event(MouseDownEvent {
+            position,
+            modifiers: gpui::Modifiers {
+                shift,
+                ..Default::default()
+            },
+            button: MouseButton::Left,
+            click_count,
+            first_mouse: false,
+        });
+        position
+    }
+
+    /// Drags the pressed button to the character `index` of `text`, and
+    /// returns the text selected there.
+    fn drag_to(text: &str, index: usize, cx: &mut gpui::VisualTestContext) -> String {
+        let position = cx.update(|window, cx| painted_position(text, index, window, cx));
+        cx.simulate_event(MouseMoveEvent {
+            position,
+            pressed_button: Some(MouseButton::Left),
+            modifiers: gpui::Modifiers::default(),
+        });
+        painted_selection(cx)
+    }
+
+    fn release(click_count: usize, cx: &mut gpui::VisualTestContext) {
+        let position = cx.update(|window, _| window.mouse_position());
+        cx.simulate_event(MouseUpEvent {
+            position,
+            modifiers: gpui::Modifiers::default(),
+            button: MouseButton::Left,
+            click_count,
+        });
+    }
+
+    fn painted_selection(cx: &mut gpui::VisualTestContext) -> String {
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+            TextSelection::selected_text(window, cx)
+        })
+    }
+
+    #[gpui::test]
+    fn double_click_drag_extends_the_selection_by_words(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| SelectableTextsView {
+            texts: vec!["one two three", "four five six"],
+        });
+        painted_selection(cx);
+
+        press_at("one two three", 5, 2, false, cx);
+        assert_eq!(painted_selection(cx), "two");
+        assert_eq!(drag_to("one two three", 9, cx), "two three");
+        // Backward, the whole of the word the drag started from stays.
+        assert_eq!(drag_to("one two three", 1, cx), "one two");
+        assert_eq!(drag_to("four five six", 6, cx), "two three\nfour five");
+        release(2, cx);
+        assert_eq!(painted_selection(cx), "two three\nfour five");
+    }
+
+    #[gpui::test]
+    fn triple_click_drag_extends_the_selection_by_lines(cx: &mut TestAppContext) {
+        let text = "first line\nsecond line\nthird line";
+        let (_, cx) = cx.add_window_view(|_, _| SelectableTextsView { texts: vec![text] });
+        painted_selection(cx);
+
+        press_at(text, 13, 3, false, cx);
+        assert_eq!(painted_selection(cx), "second line");
+        assert_eq!(drag_to(text, 25, cx), "second line\nthird line");
+        assert_eq!(drag_to(text, 2, cx), "first line\nsecond line");
+        release(3, cx);
+        assert_eq!(painted_selection(cx), "first line\nsecond line");
+    }
+
+    #[gpui::test]
+    fn shift_click_after_a_double_click_extends_by_words(cx: &mut TestAppContext) {
+        let text = "one two three";
+        let (_, cx) = cx.add_window_view(|_, _| SelectableTextsView { texts: vec![text] });
+        painted_selection(cx);
+
+        press_at(text, 5, 2, false, cx);
+        release(2, cx);
+        press_at(text, 9, 1, true, cx);
+        release(1, cx);
+        assert_eq!(painted_selection(cx), "two three");
+        press_at(text, 1, 1, true, cx);
+        release(1, cx);
+        assert_eq!(painted_selection(cx), "one two");
+
+        // A plain click ends the word selection: a drag from it is by characters.
+        press_at(text, 5, 1, false, cx);
+        assert_eq!(drag_to(text, 9, cx), "wo t");
+        release(1, cx);
     }
 }

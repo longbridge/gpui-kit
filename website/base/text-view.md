@@ -38,6 +38,8 @@ If the application already calls `gpui_kit::component::init`, Base initializatio
 
 TextView is selectable by default. While dragging a selection near a viewport edge, the shared selection layer scrolls the related `overflow_*_scroll` region automatically; no TextView scroll or selection parameter is required. Use `.selectable(false)` only to disable selection explicitly.
 
+Double-click selects a word and triple-click a paragraph. A drag that continues the click, or a Shift-click after it, extends the selection by whole words or paragraphs and keeps the first one selected.
+
 A drag that starts in a table cell selects only in that cell; when the pointer leaves the cell, the selection stops at its edge. A drag that starts outside the table selects through it. Use `table_actions` to offer a copy of the whole table.
 
 ## Markdown and HTML

@@ -3788,6 +3788,158 @@ mod tests {
         assert_eq!(selected_text.trim(), "quick select value");
     }
 
+    mod multi_click_drag {
+        use super::*;
+
+        struct Root {
+            text_view: Entity<TextViewState>,
+        }
+
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(400.))
+                    .child(crate::TextSelectionLayer)
+                    .child(TextView::new(&self.text_view).selectable(true))
+            }
+        }
+
+        fn setup<'a>(
+            markdown: &str,
+            cx: &'a mut TestAppContext,
+        ) -> (Entity<TextViewState>, &'a mut VisualTestContext) {
+            cx.update(crate::init);
+            let (root, cx) = cx.add_window_view(|_, cx| Root {
+                text_view: cx.new(|cx| TextViewState::markdown(markdown, cx)),
+            });
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            (root.read_with(cx, |root, _| root.text_view.clone()), cx)
+        }
+
+        /// Just inside the character at `index` of the painted `text`.
+        fn position(
+            state: &Entity<TextViewState>,
+            text: &str,
+            index: usize,
+            cx: &mut VisualTestContext,
+        ) -> gpui::Point<Pixels> {
+            state.read_with(cx, |state, _| {
+                state.selection_adapter.text_position(text, index)
+            })
+        }
+
+        fn press(
+            position: gpui::Point<Pixels>,
+            click_count: usize,
+            shift: bool,
+            cx: &mut VisualTestContext,
+        ) {
+            cx.simulate_event(MouseDownEvent {
+                position,
+                modifiers: Modifiers {
+                    shift,
+                    ..Default::default()
+                },
+                button: MouseButton::Left,
+                click_count,
+                first_mouse: false,
+            });
+        }
+
+        fn drag(position: gpui::Point<Pixels>, cx: &mut VisualTestContext) {
+            cx.simulate_event(gpui::MouseMoveEvent {
+                position,
+                pressed_button: Some(MouseButton::Left),
+                modifiers: Modifiers::default(),
+            });
+        }
+
+        fn release(position: gpui::Point<Pixels>, click_count: usize, cx: &mut VisualTestContext) {
+            cx.simulate_event(MouseUpEvent {
+                position,
+                modifiers: Modifiers::default(),
+                button: MouseButton::Left,
+                click_count,
+            });
+        }
+
+        fn selected(state: &Entity<TextViewState>, cx: &mut VisualTestContext) -> String {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            state.read_with(cx, |state, _| state.selected_text().trim().to_string())
+        }
+
+        #[gpui::test]
+        fn double_click_drag_extends_the_selection_by_words(cx: &mut TestAppContext) {
+            let (first, second) = ("alpha beta gamma", "delta epsilon zeta");
+            let (state, cx) = setup(&format!("{first}\n\n{second}"), cx);
+
+            press(position(&state, first, 7, cx), 2, false, cx);
+            assert_eq!(selected(&state, cx), "beta");
+            drag(position(&state, first, 8, cx), cx);
+            assert_eq!(selected(&state, cx), "beta");
+            drag(position(&state, first, 13, cx), cx);
+            assert_eq!(selected(&state, cx), "beta gamma");
+            // Backward, the whole of the word the drag started from stays.
+            drag(position(&state, first, 1, cx), cx);
+            assert_eq!(selected(&state, cx), "alpha beta");
+            let end = position(&state, second, 8, cx);
+            drag(end, cx);
+            assert_eq!(selected(&state, cx), "beta gamma\ndelta epsilon");
+            release(end, 2, cx);
+            assert_eq!(selected(&state, cx), "beta gamma\ndelta epsilon");
+        }
+
+        #[gpui::test]
+        fn triple_click_drag_extends_the_selection_by_paragraphs(cx: &mut TestAppContext) {
+            let (state, cx) = setup("first one\n\nsecond one\n\nthird one", cx);
+
+            press(position(&state, "second one", 2, cx), 3, false, cx);
+            assert_eq!(selected(&state, cx), "second one");
+            drag(position(&state, "third one", 2, cx), cx);
+            assert_eq!(selected(&state, cx), "second one\nthird one");
+            let end = position(&state, "first one", 2, cx);
+            drag(end, cx);
+            assert_eq!(selected(&state, cx), "first one\nsecond one");
+            release(end, 3, cx);
+            assert_eq!(selected(&state, cx), "first one\nsecond one");
+        }
+
+        /// Inline code lays a paragraph out in pieces; the drag snaps the same.
+        #[gpui::test]
+        fn multi_click_drag_snaps_across_inline_code(cx: &mut TestAppContext) {
+            let (state, cx) = setup("plain words\n\nuse `code` in here", cx);
+
+            press(position(&state, "plain words", 8, cx), 2, false, cx);
+            drag(position(&state, " in here", 6, cx), cx);
+            assert_eq!(selected(&state, cx), "words\nuse code in here");
+            release(position(&state, " in here", 6, cx), 2, cx);
+
+            press(position(&state, "plain words", 2, cx), 3, false, cx);
+            assert_eq!(selected(&state, cx), "plain words");
+            drag(position(&state, "use ", 1, cx), cx);
+            assert_eq!(selected(&state, cx), "plain words\nuse code in here");
+        }
+
+        #[gpui::test]
+        fn shift_click_after_a_double_click_extends_by_words(cx: &mut TestAppContext) {
+            let text = "alpha beta gamma";
+            let (state, cx) = setup(text, cx);
+
+            let word = position(&state, text, 7, cx);
+            press(word, 2, false, cx);
+            release(word, 2, cx);
+            let after = position(&state, text, 13, cx);
+            press(after, 1, true, cx);
+            release(after, 1, cx);
+            assert_eq!(selected(&state, cx), "beta gamma");
+            let before = position(&state, text, 1, cx);
+            press(before, 1, true, cx);
+            release(before, 1, cx);
+            assert_eq!(selected(&state, cx), "alpha beta");
+        }
+    }
+
     mod copy_before_paint {
         use super::*;
         use crate::{TextSelection, text::SelectionFormat};

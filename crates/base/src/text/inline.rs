@@ -1336,11 +1336,14 @@ impl Element for Inline {
                 );
                 let adapter = &text_view_state.read(cx).selection_adapter;
                 adapter.register_inline(text_bounds);
-                adapter.register_text_run(crate::TextSelectionRun::new(
-                    self.text.clone(),
-                    text_layout.clone(),
-                    hitbox.bounds,
-                ));
+                adapter.register_text_run(
+                    crate::TextSelectionRun::new(
+                        self.text.clone(),
+                        text_layout.clone(),
+                        hitbox.bounds,
+                    )
+                    .with_row(self.selection_bounds),
+                );
                 let (source, range) = self
                     .selection_source
                     .as_ref()
@@ -1410,6 +1413,9 @@ impl Element for Inline {
                     ) else {
                         return;
                     };
+                    let Some(carets) = range_carets(&text_layout, &range, line_bounds) else {
+                        return;
+                    };
 
                     let selected_text = text[range.clone()].to_string();
 
@@ -1426,6 +1432,7 @@ impl Element for Inline {
                                 event.position,
                                 kind,
                                 selected_text,
+                                carets,
                                 cx,
                             );
                         });
@@ -1668,6 +1675,26 @@ fn selection_for_multi_click(
             (!text.is_empty()).then_some(0..text.len())
         }
     }
+}
+
+/// The carets at the two ends of `range` in `text_layout`, spanning the
+/// laid-out `row` when the text is one piece of a row.
+fn range_carets(
+    text_layout: &TextLayout,
+    range: &Range<usize>,
+    row: Option<Bounds<Pixels>>,
+) -> Option<(Bounds<Pixels>, Bounds<Pixels>)> {
+    let caret = |index| {
+        let position = text_layout.position_for_index(index)?;
+        Some(match row {
+            Some(row) => crate::touch_selection::caret_line_box(
+                point(position.x, row.top()),
+                row.size.height,
+            ),
+            None => crate::touch_selection::caret_line_box(position, text_layout.line_height()),
+        })
+    };
+    Some((caret(range.start)?, caret(range.end)?))
 }
 
 trait SelectionGeometry {

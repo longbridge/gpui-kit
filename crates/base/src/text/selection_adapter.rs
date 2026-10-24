@@ -159,6 +159,9 @@ impl TextViewSelectionAdapter {
                             }
                             state.is_selecting =
                                 snapshot.is_some_and(|snapshot| snapshot.is_selecting());
+                            if state.is_selecting {
+                                state.end_multi_click_selection(cx);
+                            }
                             cx.notify();
                         });
                     }
@@ -415,6 +418,17 @@ impl TextViewSelectionAdapter {
         self.selection.set_local_selection(active, cx);
     }
 
+    /// See [`TextSelectionHandle::hold_multi_click`].
+    pub(super) fn hold_multi_click(
+        &self,
+        start: Bounds<Pixels>,
+        end: Bounds<Pixels>,
+        click_count: usize,
+        cx: &mut App,
+    ) {
+        self.selection.hold_multi_click(start, end, click_count, cx);
+    }
+
     pub(super) fn is_part_of_window_selection(&self, cx: &App) -> bool {
         let id = self.selection.entity_id();
         self.selection.snapshot(cx).is_some_and(|snapshot| {
@@ -429,6 +443,21 @@ impl TextViewSelectionAdapter {
     #[cfg(test)]
     pub(super) fn text_bounds(&self) -> Vec<Bounds<Pixels>> {
         self.frame.borrow().text_bounds.clone()
+    }
+
+    /// Just inside the character at `index` of the text run painted this
+    /// frame with `text`, in the middle of its row.
+    #[cfg(test)]
+    pub(super) fn text_position(&self, text: &str, index: usize) -> Point<Pixels> {
+        let frame = self.frame.borrow();
+        let layout = frame
+            .text_runs
+            .iter()
+            .find(|run| run.text().as_ref() == text)
+            .unwrap()
+            .layout();
+        layout.position_for_index(index).unwrap()
+            + gpui::point(gpui::px(1.), layout.line_height() / 2.)
     }
 
     #[cfg(test)]
