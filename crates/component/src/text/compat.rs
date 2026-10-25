@@ -113,6 +113,19 @@ impl TextView {
         self.inner = self.inner.inline_code_style(style);
         self
     }
+    /// Refines bullet and number list markers over the resolved theme or
+    /// explicit style. The text color also outlines unchecked task-list
+    /// checkboxes. Unspecified properties are inherited.
+    pub fn list_marker_style(mut self, style: StyleRefinement) -> Self {
+        self.inner = self.inner.list_marker_style(style);
+        self
+    }
+    /// Refines the blockquote container, including its left border, over the
+    /// resolved theme or explicit style. Unspecified properties are inherited.
+    pub fn blockquote_style(mut self, style: StyleRefinement) -> Self {
+        self.inner = self.inner.blockquote_style(style);
+        self
+    }
     /// Sets whether a copied selection carries Markdown source or plain text.
     pub fn selection_format(mut self, value: SelectionFormat) -> Self {
         self.inner = self.inner.selection_format(value);

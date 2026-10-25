@@ -3690,6 +3690,7 @@ impl BlockNode {
                         .pr(indent * 0.3)
                         .text_right()
                         .text_color(style.muted_foreground())
+                        .refine_style(style.list_marker_style())
                         .child(
                             list_item_prefix(
                                 ix,
@@ -3725,7 +3726,13 @@ impl BlockNode {
                                 .justify_center()
                                 .rounded(px(4.))
                                 .border(px(1.5))
-                                .border_color(style.muted_foreground())
+                                .border_color(
+                                    style
+                                        .list_marker_style()
+                                        .text
+                                        .color
+                                        .unwrap_or(style.muted_foreground()),
+                                )
                                 .when(checked, |this| {
                                     this.bg(style.link()).border_color(style.link()).child(
                                         img(Arc::new(Image::from_bytes(
@@ -4310,20 +4317,27 @@ impl BlockNode {
                     .border_l_2()
                     .border_color(node_cx.style.border())
                     .pl(body_font_size(node_cx, window) * 0.9)
+                    .refine_style(node_cx.style.blockquote_style())
+                    // Nested tables measure while rendering, before this div applies its text style.
                     .children({
                         let children_len = children.len();
                         children.into_iter().enumerate().map(move |(index, c)| {
                             let is_last = index == children_len - 1;
                             let (is_first, prev) = flow_position(children, index);
-                            c.render_block(
-                                NodeRenderOptions {
-                                    is_first,
-                                    prev,
-                                    ..options.is_last(is_last)
+                            window.with_text_style(
+                                Some(node_cx.style.blockquote_style().text.clone()),
+                                |window| {
+                                    c.render_block(
+                                        NodeRenderOptions {
+                                            is_first,
+                                            prev,
+                                            ..options.is_last(is_last)
+                                        },
+                                        node_cx,
+                                        window,
+                                        cx,
+                                    )
                                 },
-                                node_cx,
-                                window,
-                                cx,
                             )
                         })
                     })
@@ -4724,6 +4738,62 @@ mod tests {
 
     fn cached_column_widths(table: &Table) -> Arc<TableColumnWidths> {
         table.column_widths_cache.0.lock().unwrap().clone().unwrap()
+    }
+
+    #[test]
+    fn blockquote_typography_reaches_nested_table_measurement() {
+        use crate::text::inline::test_draw::in_prepaint;
+        use crate::text::inline::test_fonts::{BODY, MONO, WideMonoTextSystem};
+        use gpui::TestApp;
+
+        let quote = BlockNode::Blockquote {
+            children: vec![BlockNode::Table(table_of(
+                vec![vec![plain_cell("0123456789")]],
+                vec![],
+            ))],
+            span: None,
+        };
+        let mut app = TestApp::with_text_system(Arc::new(WideMonoTextSystem));
+        in_prepaint(&mut app, move |window, cx| {
+            cx.set_global(crate::Theme::default());
+            window.with_text_style(
+                Some(
+                    StyleRefinement::default()
+                        .font_family(BODY)
+                        .text_size(px(15.))
+                        .text,
+                ),
+                |window| {
+                    for (refinement, expected_width) in [
+                        (StyleRefinement::default(), 94.),
+                        (
+                            StyleRefinement::default()
+                                .font_family(MONO)
+                                .text_size(px(30.))
+                                .font_weight(FontWeight::BOLD),
+                            199.,
+                        ),
+                    ] {
+                        let node_cx = NodeContext {
+                            style: Arc::new(
+                                TextViewStyle::default().with_blockquote_style(refinement),
+                            ),
+                            body_font_size: px(15.),
+                            ..Default::default()
+                        };
+                        quote.render_block(NodeRenderOptions::default(), &node_cx, window, cx);
+                        let BlockNode::Blockquote { children, .. } = &quote else {
+                            unreachable!()
+                        };
+                        let BlockNode::Table(table) = &children[0] else {
+                            unreachable!()
+                        };
+                        // Ten glyphs at the table's 14px size, plus 24px cell padding.
+                        assert_eq!(cached_column_widths(table).widths, vec![expected_width]);
+                    }
+                },
+            );
+        });
     }
 
     #[test]

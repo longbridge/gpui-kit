@@ -159,6 +159,8 @@ pub struct TextView {
     link_underline: Option<bool>,
     link_underline_on_hover: Option<bool>,
     inline_code_style: Option<StyleRefinement>,
+    list_marker_style: Option<StyleRefinement>,
+    blockquote_style: Option<StyleRefinement>,
     style: StyleRefinement,
     selectable: bool,
     selection_format: SelectionFormat,
@@ -209,6 +211,8 @@ impl TextView {
             link_underline: None,
             link_underline_on_hover: None,
             inline_code_style: None,
+            list_marker_style: None,
+            blockquote_style: None,
             style: StyleRefinement::default(),
             selectable: true,
             selection_format: SelectionFormat::default(),
@@ -235,6 +239,8 @@ impl TextView {
             link_underline: None,
             link_underline_on_hover: None,
             inline_code_style: None,
+            list_marker_style: None,
+            blockquote_style: None,
             style: StyleRefinement::default(),
             state: None,
             selectable: true,
@@ -262,6 +268,8 @@ impl TextView {
             link_underline: None,
             link_underline_on_hover: None,
             inline_code_style: None,
+            list_marker_style: None,
+            blockquote_style: None,
             style: StyleRefinement::default(),
             state: None,
             selectable: true,
@@ -309,6 +317,22 @@ impl TextView {
     /// for the supported properties. Unspecified properties are inherited.
     pub fn inline_code_style(mut self, style: StyleRefinement) -> Self {
         self.inline_code_style = Some(super::style::normalize_inline_code_style(style));
+        self
+    }
+
+    /// Refines list markers over the resolved style. See
+    /// [`TextViewStyle::with_list_marker_style`] for where it applies.
+    /// Unspecified properties are inherited.
+    pub fn list_marker_style(mut self, style: StyleRefinement) -> Self {
+        self.list_marker_style = Some(style);
+        self
+    }
+
+    /// Refines blockquotes over the resolved style. See
+    /// [`TextViewStyle::with_blockquote_style`] for where it applies.
+    /// Unspecified properties are inherited.
+    pub fn blockquote_style(mut self, style: StyleRefinement) -> Self {
+        self.blockquote_style = Some(style);
         self
     }
 
@@ -710,6 +734,22 @@ impl Element for TextView {
             style.refine(refinement);
             inline_style = text_view_style.clone().with_inline_code_style(style);
             text_view_style = &inline_style;
+        }
+        let block_style;
+        if self.list_marker_style.is_some() || self.blockquote_style.is_some() {
+            let mut style = text_view_style.clone();
+            if let Some(refinement) = &self.list_marker_style {
+                let mut marker = style.list_marker_style().clone();
+                marker.refine(refinement);
+                style = style.with_list_marker_style(marker);
+            }
+            if let Some(refinement) = &self.blockquote_style {
+                let mut quote = style.blockquote_style().clone();
+                quote.refine(refinement);
+                style = style.with_blockquote_style(quote);
+            }
+            block_style = style;
+            text_view_style = &block_style;
         }
         let link_style;
         if self.link_underline.is_some() || self.link_underline_on_hover.is_some() {
@@ -1686,6 +1726,48 @@ mod tests {
             assert_eq!(style.background, Some(gpui::red().into()));
             assert_eq!(style.border_color, Some(gpui::blue()));
             assert_eq!(style.border_widths.left, Some(px(1.).into()));
+        });
+    }
+
+    #[gpui::test]
+    fn list_marker_and_blockquote_view_refinements_keep_unspecified_style_properties(
+        cx: &mut TestAppContext,
+    ) {
+        use super::{TextViewDefaults, TextViewStyle};
+        struct StyledBlocks(Entity<TextViewState>);
+        impl Render for StyledBlocks {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                TextView::new(&self.0)
+                    .list_marker_style(StyleRefinement::default().text_color(gpui::blue()))
+                    .blockquote_style(StyleRefinement::default().border_color(gpui::blue()))
+                    .into_any_element()
+            }
+        }
+        cx.update(crate::init);
+        cx.update(|cx| {
+            cx.set_global(
+                TextViewDefaults::default().with_style(
+                    TextViewStyle::default()
+                        .with_list_marker_style(
+                            StyleRefinement::default().font_weight(gpui::FontWeight::BOLD),
+                        )
+                        .with_blockquote_style(StyleRefinement::default().border_l_4()),
+                ),
+            )
+        });
+        let (root, cx) = cx.add_window_view(|_, cx| {
+            StyledBlocks(cx.new(|cx| TextViewState::markdown("- item\n\n> quote", cx)))
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        root.read_with(cx, |root, cx| {
+            let style = &root.0.read(cx).text_view_style;
+            let marker = style.list_marker_style();
+            assert_eq!(marker.text.color, Some(gpui::blue()));
+            assert_eq!(marker.text.font_weight, Some(gpui::FontWeight::BOLD));
+            let quote = style.blockquote_style();
+            assert_eq!(quote.border_color, Some(gpui::blue()));
+            assert_eq!(quote.border_widths.left, Some(px(4.).into()));
         });
     }
 
