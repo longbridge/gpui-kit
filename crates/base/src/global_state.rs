@@ -1,7 +1,7 @@
 #[cfg(not(target_family = "wasm"))]
 use std::time::Instant;
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     rc::{Rc, Weak},
 };
 #[cfg(target_family = "wasm")]
@@ -27,9 +27,6 @@ pub struct GlobalState {
     /// apart from what views read of this global: pushing and popping as
     /// they draw is not a change of it.
     text_view_state_stack: RefCell<Vec<Entity<TextViewState>>>,
-    /// The order the next selectable text painted this frame takes, which
-    /// changes as text paints without changing this global.
-    selection_document_order: Cell<u64>,
     /// The table cells being prepainted or painted, innermost last.
     table_cell_stack: RefCell<Vec<Bounds<Pixels>>>,
     /// When a finger last went down. A tap reaches controls as a mouse press;
@@ -46,7 +43,6 @@ impl GlobalState {
             deferred_popovers: Vec::new(),
             suppress_text_selection: false,
             text_view_state_stack: RefCell::new(Vec::new()),
-            selection_document_order: Cell::new(1),
             table_cell_stack: RefCell::new(Vec::new()),
             last_touch: None,
         }
@@ -131,15 +127,8 @@ impl GlobalState {
     }
 
     #[doc(hidden)]
-    pub fn begin_selection_frame(&self) {
-        self.selection_document_order.set(1);
-    }
-
-    pub(crate) fn next_selection_document_order(&self) -> u64 {
-        let order = self.selection_document_order.get();
-        self.selection_document_order.set(order.wrapping_add(1));
-        order
-    }
+    // Kept for compatibility; automatic order now belongs to the window's selection state.
+    pub fn begin_selection_frame(&self) {}
 
     /// Returns the application menus.
     pub fn app_menus(&self) -> &[OwnedMenu] {
