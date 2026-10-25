@@ -100,6 +100,43 @@ fn check_materializes_valid_typed_children_and_preserves_print_spec() {
     assert!(stdout.contains("check passed:"), "{stdout}");
 }
 
+#[test]
+fn check_enforces_mermaid_state_and_leaf_contracts() {
+    for (expression, diagnostic) in [
+        (
+            "new Mermaid(this.diagram).accessibility_label('A leads to B').h(160)",
+            None,
+        ),
+        (
+            "new Mermaid(this.diagram).child('unexpected')",
+            Some("Mermaid does not accept children"),
+        ),
+        ("new Mermaid(this.editor)", Some("MermaidState")),
+    ] {
+        let app = CheckApp::new(&format!(
+            r#"
+import {{ View }} from "gpui-kit";
+import {{ Mermaid, MermaidState, EditorState }} from "gpui-component";
+export default class Diagram extends View {{
+  init() {{
+    this.diagram = MermaidState("flowchart LR\nA --> B");
+    this.editor = EditorState("");
+  }}
+  render() {{ return {expression}; }}
+}}
+"#
+        ));
+        let (status, stdout, stderr) = app.run();
+        if let Some(diagnostic) = diagnostic {
+            assert_eq!(status.code(), Some(1), "{stdout}\n{stderr}");
+            assert!(stderr.contains(diagnostic), "{stderr}");
+        } else {
+            assert!(status.success(), "{stdout}\n{stderr}");
+            assert!(stdout.contains("Mermaid"), "{stdout}");
+        }
+    }
+}
+
 /// A scroll area keeps its position in window element state, which GPUI only
 /// hands out while a frame is drawn, so `check` materializes inside one. This
 /// covers the scroll path end to end; the abort it guards against depended on

@@ -69,6 +69,7 @@ const RUST_STORY_ORDER = [
   "ListStory",
   "MenuStory",
   "MarkerStory",
+  "MermaidStory",
   "MessageStory",
   "MessageScrollerStory",
   "NativeMenuStory",

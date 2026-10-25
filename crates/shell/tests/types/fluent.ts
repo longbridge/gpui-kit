@@ -1,6 +1,7 @@
 import { div, View, Background, type Element, type NativeElement, type Context, type BoxShadowSpec } from 'gpui-kit';
 import { Button, Spinner, Separator, Skeleton, HForm, Field, type SpinnerElement } from 'gpui-component';
 import { TextView } from 'gpui-base';
+import { Mermaid, MermaidState, type MermaidElement } from 'gpui-component';
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription, EmptyContent } from 'gpui-component';
 import {
   InputState, TextareaState, InputGroup, InputGroupInput, InputGroupTextarea,
@@ -14,13 +15,18 @@ function padded(element: Element): Element {
 export default class FluentContracts extends View {
   query!: ReturnType<typeof InputState>;
   message!: ReturnType<typeof TextareaState>;
+  diagram!: ReturnType<typeof MermaidState>;
 
   init() {
     this.query = InputState('Search');
     this.message = TextareaState();
+    this.diagram = MermaidState('flowchart LR\nA --> B');
   }
 
   render(_cx: Context): Element {
+    const diagram: MermaidElement = new Mermaid(this.diagram)
+      .w_full().h(160)
+      .when(true, current => current.accessibility_label('A leads to B'));
     const spinner: SpinnerElement = new Spinner()
       .size('medium').p(4).flex()
       .hover(style => style.p(2))
@@ -43,6 +49,7 @@ export default class FluentContracts extends View {
     ];
     return native.p(2).size(240).role('status').transition('opacity', 120).children([
       padded(element),
+      diagram,
       Button.new('typed-action').label('Run').p(2)
         .accessibility_label('Run the primary action').primary()
         .on_click((_event, _cx) => {}),

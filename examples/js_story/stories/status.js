@@ -40,6 +40,7 @@ export const REGISTERED_SURFACES = [
   "List",
   "MenuBar",
   "Marker",
+  "Mermaid",
   "Message",
   "MessageScroller",
   "NumberInput",

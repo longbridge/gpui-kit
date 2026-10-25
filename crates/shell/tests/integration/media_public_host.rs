@@ -269,8 +269,8 @@ fn catalog_exposes_only_renderable_media_surfaces() {
     .unwrap();
     media::register(&mut registry).unwrap();
     let frozen = registry.freeze().unwrap();
-    let mut descriptors = vec!["Image", "Editor", "Diff"];
-    let mut states = vec!["EditorState", "DiffState"];
+    let mut descriptors = vec!["Image", "Editor", "Diff", "Mermaid"];
+    let mut states = vec!["EditorState", "DiffState", "MermaidState"];
     if cfg!(feature = "webview") {
         descriptors.push("WebView");
         states.push("WebViewState");
@@ -289,4 +289,29 @@ fn catalog_exposes_only_renderable_media_surfaces() {
             .collect::<Vec<_>>(),
         states
     );
+}
+
+#[gpui::test]
+fn mermaid_state_crosses_the_public_host_and_survives_refresh(cx: &mut TestAppContext) {
+    let source = r#"
+import { View } from "gpui-kit";
+import { Mermaid, MermaidState } from "gpui-component";
+export default class Diagram extends View {
+  init() { this.diagram = MermaidState("flowchart LR\nA --> B"); }
+  render() { return new Mermaid(this.diagram)
+    .accessibility_label("A leads to B").w_full().h(160); }
+}
+"#;
+    let (mut context, view, _app) = mount(cx, source);
+    for _ in 0..2 {
+        draw(&mut context, view.clone());
+        context.update(|_, cx| {
+            let state = view.read(cx);
+            assert_eq!(state.build_error(), None);
+            let tree = state.snapshot().unwrap().debug_tree();
+            assert!(tree.contains("Mermaid"), "{tree}");
+            assert!(tree.contains(":accessibility_label(registered)"), "{tree}");
+        });
+        context.update(|_, cx| view.update(cx, |view, cx| view.refresh(cx)));
+    }
 }

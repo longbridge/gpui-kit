@@ -9,6 +9,7 @@ pub(super) use super::support::bool_method;
 mod diff;
 mod editor;
 mod image;
+mod mermaid;
 #[cfg(feature = "webview")]
 mod webview;
 
@@ -18,6 +19,7 @@ pub(super) fn register(registry: &mut ComponentRegistry) -> Result<(), RegistryE
     image::register(registry)?;
     editor::register(registry)?;
     diff::register(registry)?;
+    mermaid::register(registry)?;
     #[cfg(feature = "webview")]
     webview::register(registry)?;
     Ok(())

@@ -18,7 +18,7 @@ Merman 0.9.2 requires Rust 1.95 or newer, in addition to GPUI's requirements.
 
 ```toml
 [dependencies]
-gpui-kit = { version = "0.8", features = ["mermaid"] }
+gpui-kit = { version = "{{gpui_kit_version}}", features = ["mermaid"] }
 ```
 
 Initialize with `gpui_kit::init(cx)` and open windows with
@@ -91,6 +91,28 @@ For responsive development builds in your own application, optimize `resvg`,
 `tiny-skia` and `tiny-skia-path` in your workspace's `[profile.dev.package]`
 settings, as this repository does. Optimizing `resvg` alone leaves its underlying
 pixel loops unoptimized; dependency crates cannot set your application's profiles.
+
+## GPUI Shell
+
+The Shell `components` catalog exposes `MermaidState(source)` and
+`new Mermaid(state)`. Retain the state in the script view's `init()` method:
+
+```js
+import { View } from "gpui-kit";
+import { Mermaid, MermaidState } from "gpui-component";
+
+export default class Diagram extends View {
+  init() { this.diagram = MermaidState("flowchart LR\nA --> B"); }
+  render() {
+    return new Mermaid(this.diagram)
+      .accessibility_label("A leads to B")
+      .w_full().h(240);
+  }
+}
+```
+
+The binding supports element styling and `accessibility_label`; it rejects
+children. Source mutation and loading/error readers are currently Rust APIs only.
 
 ## Compatibility
 

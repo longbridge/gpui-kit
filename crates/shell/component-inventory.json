@@ -2693,6 +2693,28 @@
       "registration": { "status": "registered", "descriptor": "TitleBar", "exports": ["TitleBar"] }
     },
     {
+      "source": "ui",
+      "name": "mermaid",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Mermaid",
+        "exports": ["Mermaid"],
+        "states": [{ "export": "MermaidState", "kind": "MermaidState", "role": "retained-diagram-source" }]
+      }
+    },
+    {
+      "source": "story",
+      "name": "mermaid",
+      "classification": "component",
+      "registration": {
+        "status": "registered",
+        "descriptor": "Mermaid",
+        "exports": ["Mermaid"],
+        "states": [{ "export": "MermaidState", "kind": "MermaidState", "role": "retained-diagram-source" }]
+      }
+    },
+    {
       "source": "webview",
       "name": "webview",
       "classification": "platform",

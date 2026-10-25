@@ -17,7 +17,7 @@ Merman 负责解析和布局，生成兼容 resvg 的 SVG，再由 GPUI 转成�
 
 ```toml
 [dependencies]
-gpui-kit = { version = "0.8", features = ["mermaid"] }
+gpui-kit = { version = "{{gpui_kit_version}}", features = ["mermaid"] }
 ```
 
 使用 `gpui_kit::init(cx)` 初始化，通过 `gpui_kit::open_window` 打开窗口，
@@ -82,6 +82,28 @@ SVG 视口。生成的 HTML 标签回退允许字形溢出，避免估算宽度�
 在自己的应用中，可参考本仓库，在工作区的 `[profile.dev.package]` 中优化 `resvg`、
 `tiny-skia` 和 `tiny-skia-path`，提升开发构建的响应速度。仅优化 `resvg` 不会优化底层
 像素循环；依赖库无法替应用设置编译 profile。
+
+## GPUI Shell
+
+Shell 的 `components` 组件目录提供 `MermaidState(source)` 和
+`new Mermaid(state)`。在脚本视图的 `init()` 方法中创建并保留状态：
+
+```js
+import { View } from "gpui-kit";
+import { Mermaid, MermaidState } from "gpui-component";
+
+export default class Diagram extends View {
+  init() { this.diagram = MermaidState("flowchart LR\nA --> B"); }
+  render() {
+    return new Mermaid(this.diagram)
+      .accessibility_label("A 指向 B")
+      .w_full().h(240);
+  }
+}
+```
+
+绑定支持元素样式和 `accessibility_label`，不接受子元素。
+修改源码、读取加载状态和错误信息目前仅通过 Rust API 提供。
 
 ## 兼容性
 

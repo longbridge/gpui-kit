@@ -55,7 +55,7 @@ gpui_platform.workspace = true
 gpui-fast-platform = { workspace = true, optional = true }
 gpui-base = { workspace = true, features = ["inspector"] }
 gpui-fps.workspace = true
-gpui-component = { workspace = true, features = ["syntect"], optional = true }
+gpui-component = { workspace = true, features = ["syntect", "mermaid"], optional = true }
 gpui-webview = { workspace = true, optional = true }
 # Not named in the source: `gpui-webview` takes its GPUI types from the Kit, whose backend
 # follows the runtime's `gpui-fast`. It stays non-optional because GPUI's macros route their

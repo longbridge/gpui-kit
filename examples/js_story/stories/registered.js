@@ -46,6 +46,8 @@ import {
   Dialog,
   Diff,
   DiffState,
+  Mermaid,
+  MermaidState,
   DropdownButton,
   DropdownMenu,
   Editor,
@@ -311,6 +313,7 @@ export function initializeRegisteredExamples() {
   );
   retained("editor-readonly", () => EditorState("// generated, do not edit", "rust"));
   retained("diff-review", () => DiffState(REVIEW_PATCH));
+  retained("mermaid-flowchart", () => MermaidState("flowchart LR\nSource --> Preview"));
 }
 
 /**
@@ -3001,6 +3004,20 @@ export function registeredExamples(surface, cx) {
                   ),
               ),
             ),
+        },
+      ];
+    case "Mermaid":
+      return [
+        {
+          label: "Flowchart",
+          element: asElement(
+            new Mermaid(retained("mermaid-flowchart", () =>
+              MermaidState("flowchart LR\nSource --> Preview"),
+            ))
+              .accessibility_label("Source leads to Preview")
+              .w_full()
+              .h(220),
+          ),
         },
       ];
     case "Diff":

@@ -92,6 +92,16 @@ export const stories = [
     api: "Marker",
   }),
   pendingStory({
+    id: "mermaid",
+    title: "Mermaid",
+    group: "Content",
+    rustStory: "MermaidStory",
+    description: "Native diagram previews from Mermaid source.",
+    states: ["flowchart"],
+    availability: "registered",
+    api: "Mermaid",
+  }),
+  pendingStory({
     id: "message",
     title: "Message",
     group: "Content",
