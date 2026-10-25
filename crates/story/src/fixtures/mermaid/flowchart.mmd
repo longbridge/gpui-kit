@@ -1,0 +1,5 @@
+flowchart LR
+    A[开始 / Start] --> B{Ready?}
+    B -->|Yes| C[Render SVG]
+    B -->|No| A
+    C --> D[GPUI]

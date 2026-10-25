@@ -1,4 +1,157 @@
 _version: 2
+MermaidStory:
+  Source:
+    en: Mermaid source
+    zh-CN: Mermaid 源码
+    zh-HK: Mermaid 原始碼
+  Preview:
+    en: Diagram preview
+    zh-CN: 图表预览
+    zh-HK: 圖表預覽
+  Flowchart:
+    en: Flowchart
+    zh-CN: 流程图
+    zh-HK: 流程圖
+  Sequence:
+    en: Sequence diagram
+    zh-CN: 时序图
+    zh-HK: 時序圖
+  Class:
+    en: Class diagram
+    zh-CN: 类图
+    zh-HK: 類別圖
+  Timeline:
+    en: Timeline
+    zh-CN: 时间线图
+    zh-HK: 時間線圖
+  Railroad:
+    en: Railroad diagram
+    zh-CN: Railroad 图
+    zh-HK: Railroad 圖
+  State:
+    en: State diagram
+    zh-CN: 状态图
+    zh-HK: 狀態圖
+  Er:
+    en: Entity relationship
+    zh-CN: 实体关系图
+    zh-HK: 實體關係圖
+  Agentflow:
+    en: Agent Flow
+    zh-CN: Agent Flow 图
+    zh-HK: Agent Flow 圖
+  Architecture:
+    en: Architecture
+    zh-CN: 架构图
+    zh-HK: 架構圖
+  Block:
+    en: Block diagram
+    zh-CN: 块图
+    zh-HK: 區塊圖
+  C4:
+    en: C4
+    zh-CN: C4 图
+    zh-HK: C4 圖
+  Cynefin:
+    en: Cynefin
+    zh-CN: Cynefin 图
+    zh-HK: Cynefin 圖
+  EventModeling:
+    en: Event Modeling
+    zh-CN: 事件建模图
+    zh-HK: 事件建模圖
+  Gantt:
+    en: Gantt chart
+    zh-CN: 甘特图
+    zh-HK: 甘特圖
+  GitGraph:
+    en: Git graph
+    zh-CN: Git 分支图
+    zh-HK: Git 分支圖
+  Info:
+    en: Info
+    zh-CN: 版本信息
+    zh-HK: 版本資訊
+  Ishikawa:
+    en: Ishikawa diagram
+    zh-CN: 鱼骨图
+    zh-HK: 魚骨圖
+  Journey:
+    en: User journey
+    zh-CN: 用户旅程图
+    zh-HK: 使用者旅程圖
+  Kanban:
+    en: Kanban
+    zh-CN: 看板
+    zh-HK: 看板
+  Mindmap:
+    en: Mindmap
+    zh-CN: 思维导图
+    zh-HK: 思維導圖
+  Packet:
+    en: Packet diagram
+    zh-CN: 数据包图
+    zh-HK: 封包圖
+  Pie:
+    en: Pie chart
+    zh-CN: 饼图
+    zh-HK: 圓餅圖
+  Quadrant:
+    en: Quadrant chart
+    zh-CN: 象限图
+    zh-HK: 象限圖
+  Radar:
+    en: Radar chart
+    zh-CN: 雷达图
+    zh-HK: 雷達圖
+  Requirement:
+    en: Requirement diagram
+    zh-CN: 需求图
+    zh-HK: 需求圖
+  Sankey:
+    en: Sankey diagram
+    zh-CN: 桑基图
+    zh-HK: 桑基圖
+  Swimlane:
+    en: Swimlane
+    zh-CN: 泳道图
+    zh-HK: 泳道圖
+  Treemap:
+    en: Treemap
+    zh-CN: 矩形树图
+    zh-HK: 矩形樹圖
+  TreeView:
+    en: Tree View
+    zh-CN: 树形视图
+    zh-HK: 樹狀檢視
+  UseCase:
+    en: Use Case
+    zh-CN: 用例图
+    zh-HK: 使用案例圖
+  Venn:
+    en: Venn diagram
+    zh-CN: 韦恩图
+    zh-HK: 韋恩圖
+  Wardley:
+    en: Wardley map
+    zh-CN: Wardley 地图
+    zh-HK: Wardley 地圖
+  XyChart:
+    en: XY chart
+    zh-CN: XY 图表
+    zh-HK: XY 圖表
+  ZenUml:
+    en: ZenUML
+    zh-CN: ZenUML 图
+    zh-HK: ZenUML 圖
+  ExamplePrefix:
+    en: "Example: "
+    zh-CN: "示例："
+    zh-HK: "範例："
+  SearchExamples:
+    en: Search diagram examples…
+    zh-CN: 搜索图表示例…
+    zh-HK: 搜尋圖表範例…
 gpui_component:
   Calendar:
     week.0:

@@ -1,0 +1,10 @@
+classDiagram
+    class MermaidState {
+        source() SharedString
+        set_source(source)
+        is_loading() bool
+    }
+    class Mermaid {
+        new(state) Mermaid
+    }
+    Mermaid --> MermaidState : displays

@@ -42,6 +42,8 @@ mod label_story;
 mod list_story;
 mod marker_story;
 mod menu_story;
+#[cfg(not(target_family = "wasm"))]
+mod mermaid_story;
 mod message_scroller_story;
 mod message_story;
 mod native_menu_story;
@@ -123,6 +125,8 @@ pub use label_story::LabelStory;
 pub use list_story::ListStory;
 pub use marker_story::MarkerStory;
 pub use menu_story::MenuStory;
+#[cfg(not(target_family = "wasm"))]
+pub use mermaid_story::MermaidStory;
 pub use message_scroller_story::MessageScrollerStory;
 pub use message_story::MessageStory;
 pub use native_menu_story::NativeMenuStory;

@@ -1,0 +1,8 @@
+sequenceDiagram
+    participant User
+    participant App
+    participant Merman
+    User->>App: Edit source
+    App->>Merman: Render in background
+    Merman-->>App: SVG
+    App-->>User: Diagram

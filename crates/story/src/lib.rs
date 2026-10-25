@@ -737,6 +737,8 @@ impl StoryState {
             "InputStory" => story!(InputStory),
             "ListStory" => story!(ListStory),
             "MarkerStory" => story!(MarkerStory),
+            #[cfg(not(target_family = "wasm"))]
+            "MermaidStory" => story!(MermaidStory),
             "MessageStory" => story!(MessageStory),
             "MessageScrollerStory" => story!(MessageScrollerStory),
             "DialogStory" => story!(DialogStory),

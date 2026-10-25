@@ -1,4 +1,17 @@
 _version: 2
+Mermaid:
+  Empty:
+    en: Enter Mermaid source to display a diagram.
+    zh-CN: 输入 Mermaid 源码以显示图表。
+    zh-HK: 輸入 Mermaid 原始碼以顯示圖表。
+  Loading:
+    en: Rendering diagram…
+    zh-CN: 正在渲染图表…
+    zh-HK: 正在繪製圖表…
+  Error:
+    en: Unable to render diagram
+    zh-CN: 无法渲染图表
+    zh-HK: 無法繪製圖表
 Attachment:
   Remove:
     en: Remove

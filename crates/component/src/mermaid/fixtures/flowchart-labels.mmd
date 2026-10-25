@@ -1,0 +1,9 @@
+flowchart TD
+  subgraph Group[订单处理 / Order processing]
+    A[中文与 English 混排] -->|检查库存<br/>Check inventory| B{Available?}
+    B -->|Yes| C[Reserve and confirm the customer order]
+    B -->|No| D[通知客户 / Notify customer]
+  end
+  C --> E((完成 / Done))
+  D --> A
+  style C fill:#dbeafe,stroke:#2563eb,color:#172554

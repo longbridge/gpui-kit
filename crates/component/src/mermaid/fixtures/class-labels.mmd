@@ -1,0 +1,12 @@
+classDiagram
+  class Order {
+    +String orderNumber
+    +List~Item~ items
+    +submit() bool
+    +cancel(reason) void
+  }
+  class Customer {
+    +String name
+    +placeOrder() Order
+  }
+  Customer "1" --> "many" Order : 创建订单 / creates

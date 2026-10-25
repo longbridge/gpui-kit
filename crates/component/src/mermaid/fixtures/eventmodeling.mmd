@@ -1,0 +1,11 @@
+eventmodeling
+tf 01 ui Shop.Cart
+tf 02 cmd Ordering.AddItem ->> 01 { sku: "SKU-1" }
+tf 03 evt Cart.ItemAdded ->> 02 [[ItemAddedData]]
+rf 04 rmo Read.CartSummary
+tf 05 evt Checkout.CheckedOut
+
+data ItemAddedData {
+  sku: "SKU-1"
+  quantity: 1
+}

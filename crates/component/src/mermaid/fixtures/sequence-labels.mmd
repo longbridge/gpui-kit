@@ -1,0 +1,14 @@
+sequenceDiagram
+  autonumber
+  actor User as 用户 / User
+  participant App as Application
+  participant DB as Database
+  User->>+App: 查询订单 / Fetch orders
+  Note over App,DB: 中文与 English 混排
+  alt Found
+    App->>DB: SELECT orders
+    DB-->>App: Results
+  else Missing
+    App-->>User: No orders
+  end
+  App-->>-User: 完成 / Done

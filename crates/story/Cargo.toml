@@ -39,6 +39,7 @@ dirs = "6.0.0"
 
 # Native-only dependencies (not available on WASM)
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+gpui-kit = { workspace = true, features = ["mermaid"] }
 # Without `webview`: that feature enables GPUI Fast, which feature
 # unification would spread to every workspace member built with the Story.
 gpui-shell = { path = "../shell", default-features = false, features = ["quickjs", "components"] }

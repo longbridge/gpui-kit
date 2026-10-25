@@ -59,6 +59,8 @@ pub mod link;
 pub mod list;
 pub mod marker;
 pub mod menu;
+#[cfg(all(feature = "mermaid", not(target_family = "wasm")))]
+pub mod mermaid;
 pub mod message;
 pub mod message_scroller;
 pub mod native_menu;

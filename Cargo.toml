@@ -155,6 +155,10 @@ split-debuginfo = "unpacked"
 # long unoptimized, so optimizing them only adds compile time.
 [profile.dev.package]
 resvg = { opt-level = 3 }
+# resvg's pixel loops and path operations live in these dependencies. Leaving
+# them unoptimized makes SVG rasterization (especially sequence diagrams) slow.
+tiny-skia = { opt-level = 3 }
+tiny-skia-path = { opt-level = 3 }
 rustybuzz = { opt-level = 3 }
 taffy = { opt-level = 3 }
 ttf-parser = { opt-level = 3 }

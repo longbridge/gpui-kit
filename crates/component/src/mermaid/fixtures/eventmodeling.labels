@@ -1,0 +1,10 @@
+UI/A: Shop
+C/RM: Ordering
+C/RM: Read
+Stream: Cart
+Stream: Checkout
+Cart
+AddItem
+ItemAdded
+CartSummary
+CheckedOut

@@ -103,6 +103,8 @@ impl Gallery {
                 StoryContainer::panel::<ListStory>(window, cx),
                 StoryContainer::panel::<MenuStory>(window, cx),
                 StoryContainer::panel::<MarkerStory>(window, cx),
+                #[cfg(not(target_family = "wasm"))]
+                StoryContainer::panel::<MermaidStory>(window, cx),
                 StoryContainer::panel::<MessageStory>(window, cx),
                 StoryContainer::panel::<MessageScrollerStory>(window, cx),
                 StoryContainer::panel::<NativeMenuStory>(window, cx),

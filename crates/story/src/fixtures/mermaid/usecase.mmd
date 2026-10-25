@@ -1,0 +1,8 @@
+usecase-beta
+actor Customer("客户 / Customer")
+systemBoundary "Order system"
+  Checkout("Place order")
+  Track("Track delivery")
+end
+Customer --> Checkout
+Customer --> Track

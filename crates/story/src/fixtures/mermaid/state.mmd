@@ -1,0 +1,8 @@
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Rendering : Edit source
+    Rendering --> Ready : SVG ready
+    Rendering --> Error : Invalid source
+    Error --> Rendering : Retry
+    Ready --> Rendering : Edit source
+    Ready --> [*]

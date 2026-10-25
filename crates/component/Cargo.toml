@@ -15,6 +15,7 @@ edition.workspace = true
 doctest = false
 
 [features]
+mermaid = ["dep:merman", "dep:roxmltree"]
 gpui-fast = ["dep:gpui-fast", "gpui-base/gpui-fast", "gpui-kit-assets/gpui-fast"]
 test-support = ["gpui/test-support", "gpui-base/test-support", "gpui-fast?/test-support"]
 decimal = ["gpui-base/decimal"]
@@ -165,6 +166,8 @@ instant.workspace = true
 
 # Native-only dependencies (not available on WASM)
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+merman = { version = "=0.9.2", default-features = false, features = ["all-diagrams", "svg", "layout-cytoscape"], optional = true }
+roxmltree = { version = "0.20", optional = true }
 smol.workspace = true
 cpal = { version = "0.15.3", optional = true }
 tree-sitter = { version = "0.26.13", optional = true }
