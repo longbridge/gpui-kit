@@ -12,7 +12,7 @@ mod state;
 
 pub use conflict::{DiffConflict, DiffConflictResolution};
 pub use document::{DiffFile, DiffFileStatus, DiffLinePosition, DiffLineRange, DiffSide};
-pub use parser::DiffParseError;
+pub use parser::{DiffParseError, DiffParseOptions};
 pub use presentation::DiffInlineUnit;
 pub use state::{DiffEvent, DiffState};
 

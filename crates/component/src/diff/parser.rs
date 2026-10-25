@@ -34,6 +34,31 @@ impl std::error::Error for DiffParseError {}
 
 type Result<T> = std::result::Result<T, DiffParseError>;
 
+/// Relaxations for [`DiffFile::parse_with`]. Every relaxation is off by
+/// default, which parses exactly as [`DiffFile::parse`] does.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DiffParseOptions {
+    truncated_hunks: bool,
+}
+
+impl DiffParseOptions {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Accept hunks that end before their declared line counts, as in a patch
+    /// cut at a size limit, and count each from the lines present. Declared
+    /// counts still bound a hunk, so a line beyond them remains an error.
+    pub fn truncated_hunks(mut self, truncated_hunks: bool) -> Self {
+        self.truncated_hunks = truncated_hunks;
+        self
+    }
+
+    pub fn has_truncated_hunks(&self) -> bool {
+        self.truncated_hunks
+    }
+}
+
 /// Source prefixes Git writes on each side: the default `a/` and `b/`, the
 /// `diff.mnemonicPrefix` pairs, `--no-index` and `diff.noprefix`.
 const GIT_PREFIXES: [(&str, &str); 7] = [
@@ -129,7 +154,7 @@ impl File {
     }
 }
 
-pub(crate) fn parse(patch: &str) -> Result<Vec<DiffFile>> {
+pub(crate) fn parse(patch: &str, options: DiffParseOptions) -> Result<Vec<DiffFile>> {
     let raw: Vec<&str> = patch
         .split_inclusive('\n')
         .map(|line| line.strip_suffix('\n').unwrap_or(line))
@@ -225,7 +250,7 @@ pub(crate) fn parse(patch: &str) -> Result<Vec<DiffFile>> {
                     "hunk requires original and modified file headers",
                 ));
             }
-            ix = parse_hunk(file, &lines, ix)?;
+            ix = parse_hunk(file, &lines, ix, options)?;
             continue;
         }
         // Binary payload is opaque to the UI. Keep its marker, not thousands
@@ -282,7 +307,12 @@ pub(crate) fn parse(patch: &str) -> Result<Vec<DiffFile>> {
 }
 
 /// Parses the hunk whose header is `lines[ix]` and returns the next line index.
-fn parse_hunk(file: &mut File, lines: &[&str], mut ix: usize) -> Result<usize> {
+fn parse_hunk(
+    file: &mut File,
+    lines: &[&str],
+    mut ix: usize,
+    options: DiffParseOptions,
+) -> Result<usize> {
     let header = lines[ix];
     let (old_start, old_count, new_start, new_count) = hunk_header(header, ix + 1)?;
     let last_line = |side: &SideBuilder| side.lines.last().map(|(number, _)| *number);
@@ -333,16 +363,17 @@ fn parse_hunk(file: &mut File, lines: &[&str], mut ix: usize) -> Result<usize> {
         }
         // Editors and mail transports may strip the space from an empty
         // context line; `git apply` accepts that, so accept it here too.
-        let (tag, text) = match content.as_bytes().first() {
-            None => (b' ', ""),
-            Some(&tag) => (tag, &content[1..]),
-        };
+        let tag = content.as_bytes().first().copied().unwrap_or(b' ');
         if !matches!(tag, b' ' | b'+' | b'-') {
+            if options.truncated_hunks {
+                break;
+            }
             return Err(DiffParseError::new(
                 ix + 1,
                 "hunk ended before its declared line counts",
             ));
         }
+        let text = content.get(1..).unwrap_or_default();
         if tag != b'+' && file.original.no_newline || tag != b'-' && file.modified.no_newline {
             return Err(DiffParseError::new(
                 ix + 1,
@@ -389,7 +420,8 @@ fn parse_hunk(file: &mut File, lines: &[&str], mut ix: usize) -> Result<usize> {
         last = Some(tag);
         ix += 1;
     }
-    if old_used != old_count || new_used != new_count {
+    let truncated = old_used != old_count || new_used != new_count;
+    if truncated && !options.truncated_hunks {
         return Err(DiffParseError::new(
             ix + 1,
             "hunk ended before its declared line counts",
@@ -403,7 +435,8 @@ fn parse_hunk(file: &mut File, lines: &[&str], mut ix: usize) -> Result<usize> {
         original_start..file.original.lines.len(),
         modified_start..file.modified.lines.len(),
         header.to_owned().into(),
-        first_original..first_original + old_count,
+        first_original..first_original + old_used,
+        truncated,
     ));
     Ok(ix)
 }
@@ -428,7 +461,7 @@ fn hunk_header(line: &str, number: usize) -> Result<(usize, usize, usize, usize)
         let (start, count) = value.split_once(',').unwrap_or((value, "1"));
         let start = start.parse::<usize>().ok()?;
         let count = count.parse::<usize>().ok()?;
-        if count > 0 && start == 0 || start.checked_add(count).is_none() {
+        if count > 0 && start == 0 || start.checked_add(count.max(1)).is_none() {
             return None;
         }
         Some((start, count))

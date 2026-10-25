@@ -19,7 +19,7 @@ use gpui_kit::*;
 use gpui_kit::component::diff::{
     Diff, DiffAnnotation, DiffChangeIndicator, DiffConflictResolution, DiffFile, DiffHoverHighlight,
     DiffHunkSeparator, DiffInlineUnit, DiffLinePosition, DiffLineRange, DiffMode,
-    DiffSide, DiffState,
+    DiffParseOptions, DiffSide, DiffState,
 };
 ```
 
@@ -76,6 +76,20 @@ Diff 不计算差异，不加载仓库文件，也不应用修改。patch 未提
 `is_binary()` 判断二进制变更。二进制文件、仅修改权限或纯重命名等没有源文本行的文件，
 在文件头下方显示摘要。格式错误的 hunk 和不支持的 combined diff 返回 `DiffParseError`，
 通过 `line()` 和 `message()` 获取 patch 位置与原因。
+
+因大小限制被截断的 patch 通常在某个 hunk 中间结束。`DiffFile::parse_with` 接受
+`DiffParseOptions` 启用的宽松规则；`DiffFile::parse` 仍保持严格解析：
+
+```rust
+let options = DiffParseOptions::new().truncated_hunks(true);
+let files = DiffFile::parse_with(patch, options)?;
+let cut = files.iter().any(DiffFile::is_truncated);
+```
+
+启用 `truncated_hunks(true)` 后，hunk 可以在达到头部声明的行数之前结束，行数按实际出现的行计算。
+这类 hunk 中的空行视为空的上下文行。声明的行数仍是每个 hunk 的上限；格式错误的头部、
+无效路径和顺序错乱的 hunk 仍会返回错误。`is_truncated()` 判断文件是否包含这类 hunk。
+如果应用会在截断的 patch 末尾追加标记，请在解析前移除它。
 
 另有两个构造方法用于不属于 patch 的文件，二者在任何显示模式下都只显示一列：
 

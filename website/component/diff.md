@@ -22,7 +22,7 @@ use gpui_kit::*;
 use gpui_kit::component::diff::{
     Diff, DiffAnnotation, DiffChangeIndicator, DiffConflictResolution, DiffFile, DiffHoverHighlight,
     DiffHunkSeparator, DiffInlineUnit, DiffLinePosition, DiffLineRange, DiffMode,
-    DiffSide, DiffState,
+    DiffParseOptions, DiffSide, DiffState,
 };
 ```
 
@@ -89,6 +89,23 @@ changes. A file without source rows, such as a binary file, a mode change or a
 pure rename, shows a summary below its header. Malformed hunks and unsupported
 combined diffs return a `DiffParseError`; its `line()` and `message()` identify
 the patch location and reason.
+
+A patch cut at a size limit usually ends inside a hunk. `DiffFile::parse_with`
+accepts the relaxations a `DiffParseOptions` enables; `DiffFile::parse` stays
+strict:
+
+```rust
+let options = DiffParseOptions::new().truncated_hunks(true);
+let files = DiffFile::parse_with(patch, options)?;
+let cut = files.iter().any(DiffFile::is_truncated);
+```
+
+With `truncated_hunks(true)`, a hunk may end before its declared line counts,
+and its counts come from the lines present. An empty line inside such a hunk is
+an empty context line. Declared counts still bound each hunk, and malformed
+headers, invalid paths and unordered hunks are still errors. `is_truncated()`
+reports a file with such a hunk. Remove any marker the application appends to a
+cut patch before parsing it.
 
 Two constructors cover files that are not part of a patch. Both show one column
 in every display mode:
