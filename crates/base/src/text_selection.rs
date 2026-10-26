@@ -365,9 +365,15 @@ pub struct TextSelectionRun {
     layout: TextLayout,
     /// The run's window-coordinate paint bounds.
     bounds: Bounds<Pixels>,
-    /// The laid-out row the run is one piece of, which a triple click selects
-    /// whole instead of a line of the run's text.
-    row: Option<Bounds<Pixels>>,
+    /// The boundary a triple-click drag snaps to in this run.
+    triple_click: TripleClickSelection,
+}
+
+#[derive(Clone, Copy)]
+enum TripleClickSelection {
+    LogicalLine,
+    Paragraph,
+    Row(Bounds<Pixels>),
 }
 
 impl TextSelectionRun {
@@ -378,7 +384,7 @@ impl TextSelectionRun {
             text: text.into(),
             layout,
             bounds,
-            row: None,
+            triple_click: TripleClickSelection::LogicalLine,
         }
     }
 
@@ -388,9 +394,13 @@ impl TextSelectionRun {
         self
     }
 
-    /// Sets the laid-out row, in window coordinates, the run is one piece of.
-    pub(crate) const fn with_row(mut self, row: Option<Bounds<Pixels>>) -> Self {
-        self.row = row;
+    /// Uses TextView's triple-click boundary: the whole paragraph, or the
+    /// laid-out row when this run is one piece of an inline flow.
+    pub(crate) const fn with_paragraph(mut self, row: Option<Bounds<Pixels>>) -> Self {
+        self.triple_click = match row {
+            Some(row) => TripleClickSelection::Row(row),
+            None => TripleClickSelection::Paragraph,
+        };
         self
     }
 
@@ -544,7 +554,7 @@ pub(crate) fn text_rows_extent(text_layout: &TextLayout, line_height: Pixels) ->
 }
 
 /// The carets at the two ends of what `click_count` clicks at `position`
-/// select: the word under it for two, its line for three.
+/// select: the word under it for two, its line or paragraph for three.
 fn carets_for_multi_click(
     runs: &[TextSelectionRun],
     position: Point<Pixels>,
@@ -558,25 +568,25 @@ fn carets_for_multi_click(
     unit_carets(run, offset, click_count)
 }
 
-/// The carets at the two ends of the word (`click_count` 2) or the line (3 or
-/// more) at the byte `offset` of `run`. A run laid out as a piece of a row
-/// takes the whole row as its line.
+/// The carets at the two ends of the word (`click_count` 2) or the run's
+/// triple-click boundary (3 or more) at the byte `offset` of `run`.
 fn unit_carets(
     run: &TextSelectionRun,
     offset: usize,
     click_count: usize,
 ) -> Option<(Bounds<Pixels>, Bounds<Pixels>)> {
-    if click_count >= 3
-        && let Some(row) = run.row
-    {
-        return Some((
-            caret_line_box(row.origin, row.size.height),
-            caret_line_box(row.top_right(), row.size.height),
-        ));
-    }
     let range = match click_count {
         2 => word_range_at(&run.text, offset)?,
-        3.. => line_range_at(&run.text, offset),
+        3.. => match run.triple_click {
+            TripleClickSelection::LogicalLine => line_range_at(&run.text, offset),
+            TripleClickSelection::Paragraph => 0..run.text.len(),
+            TripleClickSelection::Row(row) => {
+                return Some((
+                    caret_line_box(row.origin, row.size.height),
+                    caret_line_box(row.top_right(), row.size.height),
+                ));
+            }
+        },
         _ => return None,
     };
     if range.is_empty() {

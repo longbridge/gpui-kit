@@ -1342,7 +1342,7 @@ impl Element for Inline {
                         text_layout.clone(),
                         hitbox.bounds,
                     )
-                    .with_row(self.selection_bounds),
+                    .with_paragraph(self.selection_bounds),
                 );
                 let (source, range) = self
                     .selection_source
