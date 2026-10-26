@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use crate::{
     IconName, Sizable, Size, StyledExt,
+    empty::{Empty, EmptyDescription, EmptyHeader, EmptyTitle},
     group_box::GroupBoxVariant,
     h_resizable,
     input::{Input, InputState},
@@ -10,9 +11,9 @@ use crate::{
     sidebar::{Sidebar, SidebarMenu, SidebarMenuItem},
 };
 use gpui::{
-    App, AppContext as _, Axis, ElementId, Entity, IntoElement, ParentElement as _, Pixels,
-    RenderOnce, StyleRefinement, Styled, Window, container_query, div, prelude::FluentBuilder as _,
-    px, relative,
+    App, AppContext as _, Axis, ElementId, Entity, InteractiveElement as _, IntoElement,
+    ParentElement as _, Pixels, RenderOnce, StyleRefinement, Styled, Window, container_query, div,
+    prelude::FluentBuilder as _, px, relative,
 };
 use rust_i18n::t;
 
@@ -126,7 +127,30 @@ impl Settings {
                 .into_any_element();
         }
 
-        div().into_any_element()
+        div()
+            .v_flex()
+            .size_full()
+            .when(
+                !state.read(cx).search_input.read(cx).value().is_empty(),
+                |this| {
+                    this.child(
+                        Empty::new().header(
+                            EmptyHeader::new()
+                                .title(
+                                    EmptyTitle::new().child(
+                                        div()
+                                            .debug_selector(|| "settings-no-results".into())
+                                            .child(t!("Settings.no_results")),
+                                    ),
+                                )
+                                .description(
+                                    EmptyDescription::new().child(t!("Settings.no_results_hint")),
+                                ),
+                        ),
+                    )
+                },
+            )
+            .into_any_element()
     }
 
     fn render_sidebar(

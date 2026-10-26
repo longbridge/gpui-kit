@@ -4,9 +4,7 @@ use crate::{
     group_box::GroupBoxVariant,
     setting::{SettingGroup, SettingItem},
 };
-use gpui::{
-    Context, InteractiveElement as _, Render, TestAppContext, VisualTestContext, point, size,
-};
+use gpui::{Context, Focusable as _, Render, TestAppContext, VisualTestContext, point, size};
 
 struct SettingsHost {
     pages: Vec<SettingPage>,
@@ -147,6 +145,56 @@ fn search_preserves_the_page_and_clicks_use_original_indices(cx: &mut TestAppCon
     assert!(cx.debug_bounds("setting-1-2-1").is_none());
     search(&host, "", cx);
     assert_eq!(selection(&host, cx), (1, None));
+}
+
+#[gpui::test]
+fn empty_search_keeps_input_editable_and_restores_selected_page(cx: &mut TestAppContext) {
+    let (host, cx) = setup(cx);
+    let input = cx.update(|window, cx| {
+        let input = host
+            .read(cx)
+            .state
+            .as_ref()
+            .unwrap()
+            .read(cx)
+            .search_input
+            .clone();
+        input.update(cx, |input, cx| input.focus(window, cx));
+        input
+    });
+    draw(cx);
+    assert!(cx.debug_bounds("settings-no-results").is_none());
+
+    cx.simulate_input("no matching setting");
+    draw(cx);
+    assert!(cx.debug_bounds("settings-no-results").is_some());
+    assert!(cx.debug_bounds("setting-1-2-1").is_none());
+    assert_eq!(selection(&host, cx), (1, None));
+    cx.update(|window, cx| {
+        assert!(input.read(cx).focus_handle(cx).is_focused(window));
+    });
+
+    // Continue typing without refocusing while the empty state is visible.
+    cx.simulate_input("x");
+    draw(cx);
+    cx.update(|window, cx| {
+        assert_eq!(input.read(cx).value(), "no matching settingx");
+        assert!(input.read(cx).focus_handle(cx).is_focused(window));
+    });
+    assert!(cx.debug_bounds("settings-no-results").is_some());
+
+    #[cfg(target_os = "macos")]
+    cx.simulate_keystrokes("cmd-a backspace");
+    #[cfg(not(target_os = "macos"))]
+    cx.simulate_keystrokes("ctrl-a backspace");
+    draw(cx);
+    cx.update(|window, cx| {
+        assert!(input.read(cx).value().is_empty());
+        assert!(input.read(cx).focus_handle(cx).is_focused(window));
+    });
+    assert!(cx.debug_bounds("settings-no-results").is_none());
+    assert_eq!(selection(&host, cx), (1, None));
+    assert!(cx.debug_bounds("setting-1-2-1").is_some());
 }
 
 #[gpui::test]

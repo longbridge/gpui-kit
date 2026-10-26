@@ -407,6 +407,14 @@ Input:
     zh-HK: 隱藏密碼
     zh-TW: 隱藏密碼
 Settings:
+  no_results:
+    en: No matching settings
+    zh-CN: 未找到匹配的设置
+    zh-HK: 找不到相符的設定
+  no_results_hint:
+    en: Try another keyword.
+    zh-CN: 请尝试其他关键词。
+    zh-HK: 請嘗試其他關鍵字。
   search_placeholder:
     en: Search...
     pt-BR: "Buscar…"
