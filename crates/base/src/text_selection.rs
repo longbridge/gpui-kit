@@ -1573,11 +1573,20 @@ impl WindowSelectionState {
                 },
                 |previous| previous.document_order,
             );
-            // A content scroll changes the projection, not document order.
-            // A moved viewport, or a new node among retained siblings, needs
-            // a complete paint before we can know its position among them.
-            if previous.is_some_and(|previous| previous.registration.bounds != registration.bounds)
-            {
+            // Reparenting an element changes its keyed marker and may move it
+            // among retained siblings. Geometry alone is not a topology change:
+            // scrolling an ancestor moves its text without changing its order.
+            if previous.is_some_and(|previous| {
+                previous
+                    .registration
+                    .rendered
+                    .as_ref()
+                    .map(|marker| marker.entity_id())
+                    != registration
+                        .rendered
+                        .as_ref()
+                        .map(|marker| marker.entity_id())
+            }) {
                 order.dirty = true;
             }
             let inverted = order.last.is_some_and(|last| last > number);
@@ -3292,6 +3301,8 @@ pub(crate) fn clear_window_text_selection(window_id: gpui::WindowId, cx: &mut Ap
 mod tests {
     use super::*;
     use crate::ElementExt as _;
+    #[cfg(feature = "gpui-fast")]
+    use gpui::StatefulInteractiveElement as _;
     use gpui::{
         Bounds, ContentMask, Context, Hitbox, HitboxBehavior, HitboxId, InteractiveElement as _,
         IntoElement, ParentElement as _, Render, SharedString, Styled as _, StyledText,
@@ -4735,6 +4746,35 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "gpui-fast")]
+    struct RetainedScrollingSelectionRoot {
+        text: Entity<RetainedSelectionText>,
+        unrelated: Entity<RetainedSelectionText>,
+        scroll: gpui::ScrollHandle,
+    }
+
+    #[cfg(feature = "gpui-fast")]
+    impl Render for RetainedScrollingSelectionRoot {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(TextSelectionLayer)
+                .child(
+                    div()
+                        .id("scrolling-texts")
+                        .w(px(240.))
+                        .h(px(64.))
+                        .flex_none()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.scroll)
+                        .child(div().h(px(352.)).child(self.text.clone())),
+                )
+                .child(self.unrelated.clone())
+        }
+    }
+
     fn draw_selection_frame(cx: &mut gpui::VisualTestContext) {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         cx.run_until_parked();
@@ -4949,6 +4989,61 @@ mod tests {
             before,
             "a content scroll must not request a full order rebuild"
         );
+    }
+
+    #[cfg(feature = "gpui-fast")]
+    #[gpui::test]
+    fn ancestor_scrolling_keeps_unrelated_text_views_retained(cx: &mut TestAppContext) {
+        for selected in [false, true] {
+            cx.update(crate::init);
+            let (root, cx) = cx.add_window_view(|_, cx| RetainedScrollingSelectionRoot {
+                text: RetainedSelectionText::new("alpha", cx),
+                unrelated: RetainedSelectionText::new("unrelated", cx),
+                scroll: gpui::ScrollHandle::new(),
+            });
+            draw_selection_frame(cx);
+            draw_selection_frame(cx);
+            if selected {
+                assert_eq!(select_retained_texts(0, true, cx).trim(), "alpha");
+                draw_selection_frame(cx);
+                draw_selection_frame(cx);
+            }
+            let (scroll, renders, text) = root.read_with(cx, |root, cx| {
+                (
+                    root.scroll.clone(),
+                    root.unrelated.read(cx).renders.clone(),
+                    root.text.read(cx).text.clone(),
+                )
+            });
+            let before = renders.get();
+            let bounds_before = text.read_with(cx, |text, _| text.bounds());
+            for _ in 0..4 {
+                let previous_offset = scroll.offset();
+                cx.update(|window, cx| {
+                    window.dispatch_event(
+                        gpui::PlatformInput::ScrollWheel(ScrollWheelEvent {
+                            position: point(px(20.), px(20.)),
+                            delta: ScrollDelta::Pixels(point(px(0.), px(-4.))),
+                            touch_phase: TouchPhase::Moved,
+                            ..Default::default()
+                        }),
+                        cx,
+                    );
+                });
+                for _ in 0..3 {
+                    draw_selection_frame(cx);
+                }
+                assert_ne!(scroll.offset(), previous_offset, "the ancestor must scroll");
+                assert_eq!(
+                    renders.get(),
+                    before,
+                    "ancestor scrolling rebuilt an unrelated text view (selected: {selected})"
+                );
+                let copied = cx.update(|window, cx| TextSelection::selected_text(window, cx));
+                assert_eq!(copied.trim(), if selected { "alpha" } else { "" });
+            }
+            assert_ne!(text.read_with(cx, |text, _| text.bounds()), bounds_before);
+        }
     }
 
     #[gpui::test]
