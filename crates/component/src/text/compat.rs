@@ -116,8 +116,8 @@ impl TextView {
     /// Refines bullet and number list markers over the resolved theme or
     /// explicit style. The text color also outlines unchecked task-list
     /// checkboxes. Unspecified properties are inherited.
-    pub fn list_marker_style(mut self, style: StyleRefinement) -> Self {
-        self.inner = self.inner.list_marker_style(style);
+    pub fn list_style(mut self, style: StyleRefinement) -> Self {
+        self.inner = self.inner.list_style(style);
         self
     }
     /// Refines the blockquote container, including its left border, over the

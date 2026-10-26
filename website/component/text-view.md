@@ -545,9 +545,9 @@ has no border. Padding and border widths participate in wrapping and table
 measurement. Margin, positioning, flex, explicit box size, overflow, and
 interaction properties are not used; line height remains owned by the paragraph.
 
-## List marker and blockquote style
+## List and blockquote style
 
-`TextView::list_marker_style(StyleRefinement)` and
+`TextView::list_style(StyleRefinement)` and
 `blockquote_style(StyleRefinement)` refine list markers and blockquotes after
 the resolved theme/style and surface-color adaptation. Unspecified properties
 keep their defaults, and explicit colors remain unchanged on inverted surfaces.
@@ -558,7 +558,7 @@ use gpui_kit::{StyleRefinement, Styled as _};
 use gpui_kit::component::ActiveTheme as _;
 
 TextView::markdown("notes", "1. First\n2. Second\n\n> Quoted")
-    .list_marker_style(StyleRefinement::default().text_color(cx.theme().primary))
+    .list_style(StyleRefinement::default().text_color(cx.theme().primary))
     .blockquote_style(StyleRefinement::default().border_color(cx.theme().primary))
 ```
 

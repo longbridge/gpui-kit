@@ -30,7 +30,7 @@ pub struct TextViewStyle {
     /// Explicit inline code refinements, applied after theme and surface colors.
     inline_code_style: StyleRefinement,
     /// Explicit list marker refinements, applied after theme and surface colors.
-    list_marker_style: StyleRefinement,
+    list_style: StyleRefinement,
     /// Explicit blockquote refinements, applied after theme and surface colors.
     blockquote_style: StyleRefinement,
     /// The table body background, or the theme surface when `None`. Only
@@ -59,7 +59,7 @@ impl PartialEq for TextViewStyle {
             && self.table_cell == other.table_cell
             && self.inline_code == other.inline_code
             && self.inline_code_style == other.inline_code_style
-            && self.list_marker_style == other.list_marker_style
+            && self.list_style == other.list_style
             && self.blockquote_style == other.blockquote_style
             && self.table_background == other.table_background
             && self.is_dark == other.is_dark
@@ -107,7 +107,7 @@ impl TextViewStyle {
                 ..Default::default()
             },
             inline_code_style: StyleRefinement::default(),
-            list_marker_style: StyleRefinement::default(),
+            list_style: StyleRefinement::default(),
             blockquote_style: StyleRefinement::default(),
             table_background: None,
             is_dark,
@@ -224,8 +224,8 @@ impl TextViewStyle {
     /// also outlines an unchecked task-list checkbox; a checked one keeps the
     /// link color. Unspecified properties keep the existing defaults, and
     /// explicit refinements also take precedence on inverted surfaces.
-    pub fn with_list_marker_style(mut self, style: StyleRefinement) -> Self {
-        self.list_marker_style = style;
+    pub fn with_list_style(mut self, style: StyleRefinement) -> Self {
+        self.list_style = style;
         self
     }
 
@@ -360,8 +360,8 @@ impl TextViewStyle {
     }
 
     /// Explicit list marker refinements.
-    pub fn list_marker_style(&self) -> &StyleRefinement {
-        &self.list_marker_style
+    pub fn list_style(&self) -> &StyleRefinement {
+        &self.list_style
     }
 
     /// Explicit blockquote refinements.
@@ -503,7 +503,7 @@ mod tests {
         assert!(
             base != base
                 .clone()
-                .with_list_marker_style(StyleRefinement::default().text_color(gpui::red()))
+                .with_list_style(StyleRefinement::default().text_color(gpui::red()))
         );
         assert!(
             base != base
@@ -621,10 +621,10 @@ mod tests {
     }
 
     #[test]
-    fn list_marker_and_blockquote_refinements_remain_explicit_on_an_inverted_surface() {
+    fn list_and_blockquote_refinements_remain_explicit_on_an_inverted_surface() {
         let colors = ColorTokens::light();
         let plain = TextViewStyle::from_colors(&colors, false);
-        assert_eq!(plain.list_marker_style(), &StyleRefinement::default());
+        assert_eq!(plain.list_style(), &StyleRefinement::default());
         assert_eq!(plain.blockquote_style(), &StyleRefinement::default());
 
         let marker = StyleRefinement::default()
@@ -635,13 +635,13 @@ mod tests {
             .border_color(gpui::blue())
             .bg(gpui::green());
         let style = plain
-            .with_list_marker_style(marker.clone())
+            .with_list_style(marker.clone())
             .with_blockquote_style(quote.clone());
-        assert_eq!(style.list_marker_style(), &marker);
+        assert_eq!(style.list_style(), &marker);
         assert_eq!(style.blockquote_style(), &quote);
 
         let inverted = style.on_text_color(colors.primary_foreground);
-        assert_eq!(inverted.list_marker_style(), &marker);
+        assert_eq!(inverted.list_style(), &marker);
         assert_eq!(inverted.blockquote_style(), &quote);
     }
 

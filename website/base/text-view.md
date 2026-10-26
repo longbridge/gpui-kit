@@ -375,14 +375,14 @@ has no border. Padding and border widths participate in wrapping and table
 measurement. Margin, positioning, flex, explicit box size, overflow, and
 interaction properties are not used; line height remains owned by the paragraph.
 
-## List marker and blockquote style
+## List and blockquote style
 
-`TextView::list_marker_style(StyleRefinement)` and
+`TextView::list_style(StyleRefinement)` and
 `blockquote_style(StyleRefinement)` refine list markers and blockquotes after
 the resolved theme/style and surface-color adaptation. Unspecified properties
 keep their defaults, and explicit colors remain unchanged on inverted surfaces.
-The Base style also exposes `TextViewStyle::with_list_marker_style` and
-`with_blockquote_style`, with `list_marker_style()` and `blockquote_style()`
+The Base style also exposes `TextViewStyle::with_list_style` and
+`with_blockquote_style`, with `list_style()` and `blockquote_style()`
 readers.
 
 ```rust
@@ -391,7 +391,7 @@ use gpui_kit::{StyleRefinement, Styled as _};
 let primary = gpui_kit::base::Theme::global(cx).tokens.colors.primary;
 
 TextView::markdown("notes", "1. First\n2. Second\n\n> Quoted")
-    .list_marker_style(StyleRefinement::default().text_color(primary))
+    .list_style(StyleRefinement::default().text_color(primary))
     .blockquote_style(StyleRefinement::default().border_color(primary))
 ```
 

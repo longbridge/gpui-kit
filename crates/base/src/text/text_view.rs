@@ -159,7 +159,7 @@ pub struct TextView {
     link_underline: Option<bool>,
     link_underline_on_hover: Option<bool>,
     inline_code_style: Option<StyleRefinement>,
-    list_marker_style: Option<StyleRefinement>,
+    list_style: Option<StyleRefinement>,
     blockquote_style: Option<StyleRefinement>,
     style: StyleRefinement,
     selectable: bool,
@@ -211,7 +211,7 @@ impl TextView {
             link_underline: None,
             link_underline_on_hover: None,
             inline_code_style: None,
-            list_marker_style: None,
+            list_style: None,
             blockquote_style: None,
             style: StyleRefinement::default(),
             selectable: true,
@@ -239,7 +239,7 @@ impl TextView {
             link_underline: None,
             link_underline_on_hover: None,
             inline_code_style: None,
-            list_marker_style: None,
+            list_style: None,
             blockquote_style: None,
             style: StyleRefinement::default(),
             state: None,
@@ -268,7 +268,7 @@ impl TextView {
             link_underline: None,
             link_underline_on_hover: None,
             inline_code_style: None,
-            list_marker_style: None,
+            list_style: None,
             blockquote_style: None,
             style: StyleRefinement::default(),
             state: None,
@@ -321,10 +321,10 @@ impl TextView {
     }
 
     /// Refines list markers over the resolved style. See
-    /// [`TextViewStyle::with_list_marker_style`] for where it applies.
+    /// [`TextViewStyle::with_list_style`] for where it applies.
     /// Unspecified properties are inherited.
-    pub fn list_marker_style(mut self, style: StyleRefinement) -> Self {
-        self.list_marker_style = Some(style);
+    pub fn list_style(mut self, style: StyleRefinement) -> Self {
+        self.list_style = Some(style);
         self
     }
 
@@ -736,12 +736,12 @@ impl Element for TextView {
             text_view_style = &inline_style;
         }
         let block_style;
-        if self.list_marker_style.is_some() || self.blockquote_style.is_some() {
+        if self.list_style.is_some() || self.blockquote_style.is_some() {
             let mut style = text_view_style.clone();
-            if let Some(refinement) = &self.list_marker_style {
-                let mut marker = style.list_marker_style().clone();
+            if let Some(refinement) = &self.list_style {
+                let mut marker = style.list_style().clone();
                 marker.refine(refinement);
-                style = style.with_list_marker_style(marker);
+                style = style.with_list_style(marker);
             }
             if let Some(refinement) = &self.blockquote_style {
                 let mut quote = style.blockquote_style().clone();
@@ -1730,7 +1730,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn list_marker_and_blockquote_view_refinements_keep_unspecified_style_properties(
+    fn list_and_blockquote_view_refinements_keep_unspecified_style_properties(
         cx: &mut TestAppContext,
     ) {
         use super::{TextViewDefaults, TextViewStyle};
@@ -1738,7 +1738,7 @@ mod tests {
         impl Render for StyledBlocks {
             fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
                 TextView::new(&self.0)
-                    .list_marker_style(StyleRefinement::default().text_color(gpui::blue()))
+                    .list_style(StyleRefinement::default().text_color(gpui::blue()))
                     .blockquote_style(StyleRefinement::default().border_color(gpui::blue()))
                     .into_any_element()
             }
@@ -1748,7 +1748,7 @@ mod tests {
             cx.set_global(
                 TextViewDefaults::default().with_style(
                     TextViewStyle::default()
-                        .with_list_marker_style(
+                        .with_list_style(
                             StyleRefinement::default().font_weight(gpui::FontWeight::BOLD),
                         )
                         .with_blockquote_style(StyleRefinement::default().border_l_4()),
@@ -1762,7 +1762,7 @@ mod tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         root.read_with(cx, |root, cx| {
             let style = &root.0.read(cx).text_view_style;
-            let marker = style.list_marker_style();
+            let marker = style.list_style();
             assert_eq!(marker.text.color, Some(gpui::blue()));
             assert_eq!(marker.text.font_weight, Some(gpui::FontWeight::BOLD));
             let quote = style.blockquote_style();

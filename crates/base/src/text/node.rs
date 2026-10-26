@@ -3690,7 +3690,7 @@ impl BlockNode {
                         .pr(indent * 0.3)
                         .text_right()
                         .text_color(style.muted_foreground())
-                        .refine_style(style.list_marker_style())
+                        .refine_style(style.list_style())
                         .child(
                             list_item_prefix(
                                 ix,
@@ -3728,7 +3728,7 @@ impl BlockNode {
                                 .border(px(1.5))
                                 .border_color(
                                     style
-                                        .list_marker_style()
+                                        .list_style()
                                         .text
                                         .color
                                         .unwrap_or(style.muted_foreground()),

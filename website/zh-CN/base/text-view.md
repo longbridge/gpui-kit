@@ -294,11 +294,11 @@ TextView::markdown("notes", "Run `cargo build` first.")
 
 支持字体、字号、字体特性、后备字体、字重、斜体、文字颜色、下划线、删除线、背景、边框宽度／颜色／线型、圆角和内边距。字号使用像素或相对于窗口的 rem；非有限值和非正值会被忽略。默认字号仍为周围文字的 0.875 倍，默认不绘制边框。内边距和边框宽度参与换行与表格列宽计算。外边距、定位、flex、显式容器尺寸、overflow 和交互属性不参与渲染；行高由段落控制。
 
-## 列表标记与引用块样式
+## 列表与引用块样式
 
-通过 `TextView::list_marker_style(StyleRefinement)` 和 `blockquote_style(StyleRefinement)` 覆盖列表标记和引用块样式。覆盖在主题、显式样式和表面颜色适配之后应用；未指定的属性保留默认值，指定的颜色在反色表面上也保持不变。
+通过 `TextView::list_style(StyleRefinement)` 和 `blockquote_style(StyleRefinement)` 覆盖列表标记和引用块样式。覆盖在主题、显式样式和表面颜色适配之后应用；未指定的属性保留默认值，指定的颜色在反色表面上也保持不变。
 
-Base 样式提供对应的 `TextViewStyle::with_list_marker_style`、`with_blockquote_style` 构建方法，以及 `list_marker_style()`、`blockquote_style()` 读取方法。
+Base 样式提供对应的 `TextViewStyle::with_list_style`、`with_blockquote_style` 构建方法，以及 `list_style()`、`blockquote_style()` 读取方法。
 
 ```rust
 use gpui_kit::{StyleRefinement, Styled as _};
@@ -306,7 +306,7 @@ use gpui_kit::{StyleRefinement, Styled as _};
 let primary = gpui_kit::base::Theme::global(cx).tokens.colors.primary;
 
 TextView::markdown("notes", "1. First\n2. Second\n\n> Quoted")
-    .list_marker_style(StyleRefinement::default().text_color(primary))
+    .list_style(StyleRefinement::default().text_color(primary))
     .blockquote_style(StyleRefinement::default().border_color(primary))
 ```
 
