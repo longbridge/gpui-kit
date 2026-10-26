@@ -335,14 +335,14 @@ fn parse_hunk(file: &mut File, lines: &[&str], mut ix: usize) -> Result<usize> {
         // context line; `git apply` accepts that, so accept it here too.
         let (tag, text) = match content.as_bytes().first() {
             None => (b' ', ""),
-            Some(&tag) => (tag, &content[1..]),
+            Some(&tag) if matches!(tag, b' ' | b'+' | b'-') => (tag, &content[1..]),
+            Some(_) => {
+                return Err(DiffParseError::new(
+                    ix + 1,
+                    "hunk ended before its declared line counts",
+                ));
+            }
         };
-        if !matches!(tag, b' ' | b'+' | b'-') {
-            return Err(DiffParseError::new(
-                ix + 1,
-                "hunk ended before its declared line counts",
-            ));
-        }
         if tag != b'+' && file.original.no_newline || tag != b'-' && file.modified.no_newline {
             return Err(DiffParseError::new(
                 ix + 1,
