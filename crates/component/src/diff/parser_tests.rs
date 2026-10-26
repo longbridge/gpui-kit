@@ -219,3 +219,46 @@ fn non_ascii_lines_after_a_short_hunk_do_not_panic() {
     assert_eq!(files[0].source(DiffSide::Original), "old\n");
     assert_eq!(files[0].source(DiffSide::Modified), "new\n");
 }
+
+#[test]
+fn truncated_unified_hunks_stop_before_the_next_file_headers() {
+    let options = DiffParseOptions::new().truncated_hunks(true);
+    let patch =
+        "--- a/a\n+++ b/a\n@@ -1,9 +1,9 @@\n keep\n--- a/b\n+++ b/b\n@@ -10 +10 @@\n-old\n+new\n";
+    let files = DiffFile::parse_with(patch, options).unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0].path().as_str(), "a");
+    assert!(files[0].is_truncated());
+    assert_eq!(files[0].source(DiffSide::Original), "keep\n");
+    assert_eq!(files[0].source(DiffSide::Modified), "keep\n");
+    assert_eq!(files[1].path().as_str(), "b");
+    assert!(!files[1].is_truncated());
+    assert_eq!(files[1].source(DiffSide::Original), "old\n");
+    assert_eq!(files[1].source(DiffSide::Modified), "new\n");
+
+    // Header-looking source remains source when it completes the declared hunk.
+    let patch = "--- a/a\n+++ b/a\n@@ -1,2 +1,2 @@\n--- source\n+++ source\n tail\n";
+    let files = DiffFile::parse_with(patch, options).unwrap();
+    assert_eq!(files.len(), 1);
+    assert!(!files[0].is_truncated());
+    assert_eq!(files[0].source(DiffSide::Original), "-- source\ntail\n");
+    assert_eq!(files[0].source(DiffSide::Modified), "++ source\ntail\n");
+}
+
+#[test]
+fn empty_truncated_hunks_preserve_order_on_both_sides() {
+    let options = DiffParseOptions::new().truncated_hunks(true);
+    for next in ["@@ -1 +1 @@", "@@ -10 +1 @@", "@@ -1 +10 @@"] {
+        let patch = format!("--- a/a\n+++ b/a\n@@ -10,2 +10,2 @@\n{next}\n same\n");
+        let error = DiffFile::parse_with(&patch, options).err().unwrap();
+        assert_eq!(error.line(), 4);
+        assert_eq!(error.message().as_str(), "overlapping or unordered hunks");
+    }
+    let files = DiffFile::parse_with(
+        "--- a/a\n+++ b/a\n@@ -10,2 +10,2 @@\n@@ -20 +20 @@\n same\n",
+        options,
+    )
+    .unwrap();
+    assert!(files[0].is_truncated());
+    assert_eq!(files[0].line_number(DiffSide::Original, 0), 20);
+}

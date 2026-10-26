@@ -110,6 +110,8 @@ struct File {
     modified: SideBuilder,
     pairs: Vec<LinePair>,
     hunks: Vec<Hunk>,
+    /// Empty truncated hunks still constrain the next hunk's position.
+    last_hunk_start: Option<(usize, usize)>,
     extended_headers: Vec<SharedString>,
     binary: bool,
     headers: bool,
@@ -315,8 +317,15 @@ fn parse_hunk(
 ) -> Result<usize> {
     let header = lines[ix];
     let (old_start, old_count, new_start, new_count) = hunk_header(header, ix + 1)?;
+    // A zero-count side names the line before its insertion point.
+    let first_original = old_start + usize::from(old_count == 0);
+    let first_modified = new_start + usize::from(new_count == 0);
     let last_line = |side: &SideBuilder| side.lines.last().map(|(number, _)| *number);
-    if last_line(&file.original).is_some_and(|number| number >= old_start) && old_count > 0
+    if options.truncated_hunks
+        && file
+            .last_hunk_start
+            .is_some_and(|(old, new)| first_original < old || first_modified < new)
+        || last_line(&file.original).is_some_and(|number| number >= old_start) && old_count > 0
         || last_line(&file.modified).is_some_and(|number| number >= new_start) && new_count > 0
     {
         return Err(DiffParseError::new(
@@ -334,10 +343,18 @@ fn parse_hunk(
     let original_start = file.original.lines.len();
     let modified_start = file.modified.lines.len();
     ix += 1;
+    let next_file = if options.truncated_hunks {
+        truncated_file_header(lines, ix, old_count, new_count)
+    } else {
+        None
+    };
     let (mut old_used, mut new_used) = (0, 0);
     let (mut deleted, mut added) = (Vec::new(), Vec::new());
     let mut last = None;
     while ix < lines.len() {
+        if Some(ix) == next_file {
+            break;
+        }
         let content = lines[ix];
         if content == "\\ No newline at end of file" {
             match last {
@@ -428,8 +445,6 @@ fn parse_hunk(
         ));
     }
     file.flush_changes(&mut deleted, &mut added);
-    // A zero-count side names the line before its insertion point.
-    let first_original = old_start + usize::from(old_count == 0);
     file.hunks.push(Hunk::new(
         pairs_start..file.pairs.len(),
         original_start..file.original.lines.len(),
@@ -438,7 +453,51 @@ fn parse_hunk(
         first_original..first_original + old_used,
         truncated,
     ));
+    file.last_hunk_start = Some((first_original, first_modified));
     Ok(ix)
+}
+
+/// Finds a unified file header inside a short hunk. A header-looking pair
+/// can also be source text, so a complete hunk interpretation wins. Scan
+/// once before parsing rather than looking ahead again at every such pair.
+fn truncated_file_header(
+    lines: &[&str],
+    start: usize,
+    mut old_remaining: usize,
+    mut new_remaining: usize,
+) -> Option<usize> {
+    let mut header = None;
+    for ix in start..lines.len() {
+        let line = lines[ix];
+        if line == "\\ No newline at end of file" {
+            continue;
+        }
+        if old_remaining == 0 && new_remaining == 0 {
+            return None;
+        }
+        if header.is_none()
+            && line.starts_with("--- ")
+            && lines
+                .get(ix + 1)
+                .is_some_and(|line| line.starts_with("+++ "))
+        {
+            header = Some(ix);
+        }
+        match line.as_bytes().first().copied().unwrap_or(b' ') {
+            b' ' if old_remaining > 0 && new_remaining > 0 => {
+                old_remaining -= 1;
+                new_remaining -= 1;
+            }
+            b'-' if old_remaining > 0 => old_remaining -= 1,
+            b'+' if new_remaining > 0 => new_remaining -= 1,
+            _ => return header,
+        }
+    }
+    if old_remaining == 0 && new_remaining == 0 {
+        None
+    } else {
+        header
+    }
 }
 
 fn hunk_header(line: &str, number: usize) -> Result<(usize, usize, usize, usize)> {

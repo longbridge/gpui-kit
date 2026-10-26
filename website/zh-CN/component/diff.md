@@ -91,6 +91,10 @@ let cut = files.iter().any(DiffFile::is_truncated);
 无效路径和顺序错乱的 hunk 仍会返回错误。`is_truncated()` 判断文件是否包含这类 hunk。
 如果应用会在截断的 patch 末尾追加标记，请在解析前移除它。
 
+对于没有 `diff --git` 分隔符的多文件 unified diff，成对的 `---` 和 `+++` 文件头会结束未完整的 hunk。
+这些前缀也可能是源代码正文；如果按正文解释能够凑齐 hunk 声明的行数，则优先保留这一解释。
+即使截断的 hunk 没有正文，原始侧和修改侧的 hunk 位置也必须保持有序。
+
 另有两个构造方法用于不属于 patch 的文件，二者在任何显示模式下都只显示一列：
 
 ```rust

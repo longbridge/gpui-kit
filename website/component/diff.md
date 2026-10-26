@@ -107,6 +107,12 @@ headers, invalid paths and unordered hunks are still errors. `is_truncated()`
 reports a file with such a hunk. Remove any marker the application appends to a
 cut patch before parsing it.
 
+In a multi-file unified diff without `diff --git` separators, a paired `---`
+and `+++` header ends a short hunk. These prefixes can also be source text:
+when that interpretation completes the declared hunk, it takes precedence.
+Hunk positions must stay ordered on both sides even when a short hunk supplies
+no lines.
+
 Two constructors cover files that are not part of a patch. Both show one column
 in every display mode:
 
