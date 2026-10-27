@@ -29,8 +29,8 @@ use ropey::Rope;
 use super::decorations::DecorationCollections;
 use super::lsp::{ContextMenuContent, HoverDefinition, InlineCompletion};
 use crate::input::{
-    HighlightStyleResolver, InputEdit, InputHighlighter, RangeDecoration, SyntaxContext,
-    TextDecoration,
+    GutterDecoration, HighlightStyleResolver, InputEdit, InputHighlighter, OverviewRulerDecoration,
+    RangeDecoration, SyntaxContext, TextDecoration,
 };
 use crate::input::{HoverPopoverState, Lsp};
 use gpui::Task;
@@ -85,6 +85,22 @@ pub trait InputExtras: Default + 'static {
 
     /// Geometric decorations intersecting visible, non-folded buffer spans.
     fn range_decorations(&self, _ranges: &[std::ops::Range<usize>]) -> Vec<&RangeDecoration> {
+        Vec::new()
+    }
+
+    /// Return the gutter decoration strip width, or `None` when no gutter
+    /// collection exists.
+    fn gutter_decorations_width(&self) -> Option<gpui::Pixels> {
+        None
+    }
+
+    /// Return all gutter decorations in paint order.
+    fn gutter_decorations(&self) -> Vec<&GutterDecoration> {
+        Vec::new()
+    }
+
+    /// Return all overview ruler decorations in paint order.
+    fn overview_ruler_decorations(&self) -> Vec<&OverviewRulerDecoration> {
         Vec::new()
     }
 
@@ -354,6 +370,9 @@ pub struct EditorExtras {
     pub(crate) lsp: Lsp,
     pub(crate) decorations: DecorationCollections,
     pub(crate) range_decorations: DecorationCollections<RangeDecoration>,
+    pub(crate) gutter_decorations: DecorationCollections<GutterDecoration>,
+    pub(crate) gutter_decorations_width: gpui::Pixels,
+    pub(crate) overview_ruler_decorations: DecorationCollections<OverviewRulerDecoration>,
     pub(crate) inline_completion: InlineCompletion,
     pub(crate) context_menu_content: ContextMenuContent,
     pub(crate) hover_popover: Option<HoverPopoverState>,
@@ -367,6 +386,9 @@ impl Default for EditorExtras {
             lsp: Lsp::default(),
             decorations: DecorationCollections::default(),
             range_decorations: DecorationCollections::default(),
+            gutter_decorations: DecorationCollections::default(),
+            gutter_decorations_width: gpui::px(3.),
+            overview_ruler_decorations: DecorationCollections::default(),
             inline_completion: InlineCompletion::default(),
             context_menu_content: ContextMenuContent::default(),
             hover_popover: None,

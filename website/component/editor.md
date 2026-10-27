@@ -357,6 +357,74 @@ do not scan every decoration per frame. Setting/appending entries rebuilds that
 collection's index; edits update affected collections linearly without re-sorting.
 The Editor showcase's **Decorations** tab demonstrates both collection types.
 
+### Gutter and overview ruler decorations
+
+Use these collections to mark whole lines outside the text, such as lines that a
+version-control diff added, modified, or deleted. A `GutterDecorationCollection`
+draws in a strip before the line numbers. An `OverviewRulerDecorationCollection`
+draws on the vertical scrollbar track. Monaco calls this track the overview ruler.
+Create one collection for each surface you want to use.
+
+```rust
+use gpui_kit::component::input::{
+    GutterDecoration, OverviewRulerDecoration, OverviewRulerLane,
+};
+
+let style = &cx.theme().highlight_theme.style;
+let (added, deleted) = (style.status.created(cx), style.status.deleted(cx));
+
+let gutter = editor.update(cx, |state, cx| {
+    state.create_gutter_decorations_collection(
+        vec![
+            GutterDecoration::new(10..42).with_color(added), // Marks every line touched by the range.
+            GutterDecoration::new(60..60).with_color(deleted), // Marks the boundary above the line that starts at 60.
+        ],
+        cx,
+    )
+});
+let ruler = editor.update(cx, |state, cx| {
+    state.create_overview_ruler_decorations_collection(
+        vec![
+            OverviewRulerDecoration::new(10..42)
+                .with_lane(OverviewRulerLane::Left)
+                .with_color(added.opacity(0.6)),
+        ],
+        cx,
+    )
+});
+```
+
+- Use a non-empty range to mark every line it touches, like Monaco's
+  `isWholeLine`. A range that ends at a line start does not mark that line. Use an
+  **empty** range to mark a line boundary, such as where lines were deleted. When
+  the range is at the start of a line, the mark appears above that line. Otherwise
+  it appears below the line. In a document without a final newline, `text.len()`
+  marks below the last line. The gutter draws a bar for a non-empty range and a
+  pill for a boundary.
+- These collections keep empty ranges; text and geometric collections discard them.
+  Text inserted at an empty range goes after the range. If an edit empties a range,
+  the collection keeps it as a boundary. Use the same handles and
+  `set`/`append`/`clear`/`dispose` methods as the other decoration collections.
+  Recompute the decorations and call `set` on the whole collection. Edit tracking
+  keeps the marks on their lines between updates.
+- The gutter reserves its strip while any gutter collection exists, including an
+  empty collection. This keeps the text from shifting as marks change. The strip is
+  3 px wide by default. Set its width with `gutter_decorations_width` or
+  `set_gutter_decorations_width`. If a range starts inside a fold, the gutter draws
+  one bar on the fold's row. `with_folded_color` sets that bar's color.
+- The overview ruler has four lanes. `Left`, `Center` (the default), and `Right`
+  each use one third of the track. `Full` uses the whole track. By convention, use
+  `Left` for version-control changes, `Center` for search results, and `Right` for
+  diagnostics. A mark's position on the track is proportional to its lines' position
+  in the document, and each mark is at least 6 px tall. Touching marks with the same color in the same lane merge.
+- The marks draw under the scrollbar, whether it is Base's scrollbar or one supplied
+  with `set_scrollbar_renderer`. They remain visible while the thumb fades.
+- Without `with_color`, both collections use the editor foreground color. For
+  version-control colors, read the highlight theme's Zed status keys `created`,
+  `modified`, and `deleted` with `status.created(cx)`, `status.modified(cx)`, and
+  `status.deleted(cx)`. If a key is missing, these methods use `success`,
+  `warning`, and `error`.
+
 ## Value and events
 
 ```rust

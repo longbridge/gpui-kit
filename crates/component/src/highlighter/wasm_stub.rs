@@ -417,6 +417,18 @@ impl StatusColors {
     pub fn hint_border(&self, _cx: &gpui::App) -> gpui::Hsla {
         gpui::Hsla::default()
     }
+
+    pub fn created(&self, _cx: &gpui::App) -> gpui::Hsla {
+        gpui::Hsla::default()
+    }
+
+    pub fn modified(&self, _cx: &gpui::App) -> gpui::Hsla {
+        gpui::Hsla::default()
+    }
+
+    pub fn deleted(&self, _cx: &gpui::App) -> gpui::Hsla {
+        gpui::Hsla::default()
+    }
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]

@@ -1,4 +1,4 @@
-use crate::input::{InputExtras as _, InputModeKind};
+use crate::input::{DisplayMap, InputExtras as _, InputModeKind, OverviewRulerLane};
 use gpui::Corners;
 use gpui::Half;
 use gpui::{
@@ -7,9 +7,10 @@ use gpui::{
 };
 use gpui::{
     HighlightStyle, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, LayoutId,
-    LongPressEvent, MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement as _, Path, Pixels,
-    Point, Position, ShapedLine, SharedString, Size, Style, Styled as _, TextAlign, TextRun,
-    TextStyle, TouchDragEvent, TouchPhase, UnderlineStyle, Window, fill, point, px, relative, size,
+    LongPressEvent, MouseButton, MouseMoveEvent, MouseUpEvent, PaintQuad, ParentElement as _, Path,
+    Pixels, Point, Position, ShapedLine, SharedString, Size, Style, Styled as _, TextAlign,
+    TextRun, TextStyle, TouchDragEvent, TouchPhase, UnderlineStyle, Window, fill, point, px,
+    relative, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -52,6 +53,11 @@ pub(super) const RIGHT_MARGIN: Pixels = px(10.);
 pub(super) const LINE_NUMBER_RIGHT_MARGIN: Pixels = px(6.);
 const FOLD_ICON_WIDTH: Pixels = px(14.);
 const FOLD_ICON_HITBOX_WIDTH: Pixels = px(18.);
+/// Space between the gutter decoration strip and the line numbers.
+const GUTTER_DECORATION_GAP: Pixels = px(4.);
+/// Height of the pill an empty gutter decoration paints on a line boundary.
+const GUTTER_BOUNDARY_MARK_HEIGHT: Pixels = px(8.);
+const MIN_OVERVIEW_RULER_MARK_HEIGHT: Pixels = px(6.);
 const MAX_HIGHLIGHT_LINE_LENGTH: usize = 10_000;
 const MIN_LINE_NUMBER_DIGITS: usize = 3;
 const MAX_LINE_NUMBER_DIGITS: usize = 7;
@@ -142,6 +148,8 @@ pub(super) struct EditorScrollbarSnapshot {
     layout: EditorScrollbarLayout,
     cursor_scroll_offset: Point<Pixels>,
     soft_wrap: bool,
+    line_height: Pixels,
+    padding_top: Pixels,
 }
 
 impl EditorScrollbarSnapshot {
@@ -161,6 +169,8 @@ impl EditorScrollbarSnapshot {
             ),
             cursor_scroll_offset,
             soft_wrap: state.soft_wrap,
+            line_height: last_layout.line_height,
+            padding_top: state.editor_paddings.top,
         }
     }
 }
@@ -220,7 +230,7 @@ impl<M: InputModeKind> IntoElement for EditorScrollbar<M> {
 
 impl<M: InputModeKind> Element for EditorScrollbar<M> {
     type RequestLayoutState = ();
-    type PrepaintState = Option<AnyElement>;
+    type PrepaintState = (Vec<PaintQuad>, Option<AnyElement>);
 
     fn id(&self) -> Option<ElementId> {
         Some("editor-scrollbar".into())
@@ -256,8 +266,9 @@ impl<M: InputModeKind> Element for EditorScrollbar<M> {
     ) -> Self::PrepaintState {
         let state = self.state.read(cx);
         let Some(snapshot) = state.editor_scrollbar_snapshot.get() else {
-            return None;
+            return (Vec::new(), None);
         };
+        let ruler = layout_overview_ruler(state, &snapshot);
         let scroll_handle = state.scroll_handle.clone();
 
         if scroll_handle.offset() != snapshot.cursor_scroll_offset {
@@ -296,7 +307,7 @@ impl<M: InputModeKind> Element for EditorScrollbar<M> {
             window,
             cx,
         );
-        Some(scrollbar)
+        (ruler, Some(scrollbar))
     }
 
     fn paint(
@@ -309,7 +320,12 @@ impl<M: InputModeKind> Element for EditorScrollbar<M> {
         window: &mut Window,
         cx: &mut App,
     ) {
-        if let Some(scrollbar) = prepaint.as_mut() {
+        // Beneath the scrollbar, so its thumb passes over the marks and fades
+        // without taking them along.
+        for mark in std::mem::take(&mut prepaint.0) {
+            window.paint_quad(mark);
+        }
+        if let Some(scrollbar) = prepaint.1.as_mut() {
             scrollbar.paint(window, cx);
         }
     }
@@ -355,6 +371,133 @@ fn editor_gutter_bounds(
             input_bounds.size.height + ghost_lines_height + paddings.top + paddings.bottom,
         ),
     }
+}
+
+/// Where a gutter or overview ruler decoration sits, in display rows.
+#[derive(Clone, Debug, PartialEq)]
+enum DecorationRows {
+    /// The rows of every line a non-empty range touches.
+    Lines(Range<usize>),
+    /// The boundary at the top of this row, for an empty range.
+    Boundary(usize),
+    /// The row of the fold the range starts in.
+    Folded(usize),
+}
+
+fn decoration_rows(text: &Rope, display_map: &DisplayMap, range: &Range<usize>) -> DecorationRows {
+    let start_line = text.offset_to_point(range.start).row;
+    if display_map.is_buffer_line_hidden(start_line) {
+        return DecorationRows::Folded(display_map.buffer_line_to_display_row(start_line));
+    }
+    if range.is_empty() {
+        let rows = display_map
+            .buffer_line_to_display_row_range(start_line)
+            .unwrap_or_default();
+        // At a line's start the boundary is above it; anywhere else, such as the
+        // end of a document without a final newline, below it.
+        return DecorationRows::Boundary(if text.line_start_offset(start_line) == range.start {
+            rows.start
+        } else {
+            rows.end
+        });
+    }
+    let mut end_line = text.offset_to_point(range.end).row;
+    // A half-open range ending at a line's start does not touch that line.
+    if end_line > start_line && text.line_start_offset(end_line) == range.end {
+        end_line -= 1;
+    }
+    let end = match display_map.buffer_line_to_display_row_range(end_line) {
+        Some(rows) => rows.end,
+        None => display_map.buffer_line_to_display_row(end_line) + 1,
+    };
+    DecorationRows::Lines(display_map.buffer_line_to_display_row(start_line)..end)
+}
+
+/// Overview ruler marks on the vertical track at the right of the scrollbar's bounds.
+fn layout_overview_ruler<M: InputModeKind>(
+    state: &InputBaseState<M>,
+    snapshot: &EditorScrollbarSnapshot,
+) -> Vec<PaintQuad> {
+    let decorations = state.extras.overview_ruler_decorations();
+    let layout = &snapshot.layout;
+    // The content height the thumb maps onto the track, padding included.
+    let content_height =
+        layout.scroll_size.height + layout.bounds.size.height - layout.scroll_viewport_size.height;
+    if decorations.is_empty() || content_height <= px(0.) {
+        return Vec::new();
+    }
+    let track = Bounds::new(
+        point(
+            layout.bounds.right() - Scrollbar::width(),
+            layout.bounds.top(),
+        ),
+        size(Scrollbar::width(), layout.bounds.size.height),
+    );
+    let scale = track.size.height / content_height;
+    let y = |row: usize| {
+        track.top() + (snapshot.padding_top + snapshot.line_height * row as f32) * scale
+    };
+    let lane_index = |lane: OverviewRulerLane| match lane {
+        OverviewRulerLane::Left => 0,
+        OverviewRulerLane::Center => 1,
+        OverviewRulerLane::Right => 2,
+        OverviewRulerLane::Full => 3,
+    };
+
+    let foreground = state.editor_style.foreground;
+    let mut marks: Vec<(OverviewRulerLane, Hsla, Pixels, Pixels)> = decorations
+        .into_iter()
+        .map(|decoration| {
+            let (top, bottom) =
+                match decoration_rows(&state.text, &state.display_map, decoration.range()) {
+                    DecorationRows::Lines(rows) => (y(rows.start), y(rows.end)),
+                    DecorationRows::Boundary(row) => (y(row), y(row)),
+                    DecorationRows::Folded(row) => (y(row), y(row + 1)),
+                };
+            // A short mark grows around its centre and stays inside the track.
+            let height = (bottom - top).max(MIN_OVERVIEW_RULER_MARK_HEIGHT);
+            let top = (top + (bottom - top - height).half())
+                .clamp(track.top(), (track.bottom() - height).max(track.top()));
+            (
+                decoration.lane(),
+                decoration.color().unwrap_or(foreground),
+                top,
+                top + height,
+            )
+        })
+        .collect();
+    marks.sort_by(|a, b| {
+        lane_index(a.0)
+            .cmp(&lane_index(b.0))
+            .then(a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+    });
+    let mut merged: Vec<(OverviewRulerLane, Hsla, Pixels, Pixels)> =
+        Vec::with_capacity(marks.len());
+    for mark in marks {
+        match merged.last_mut() {
+            Some(last) if last.0 == mark.0 && last.1 == mark.1 && mark.2 <= last.3 + px(1.) => {
+                last.3 = last.3.max(mark.3);
+            }
+            _ => merged.push(mark),
+        }
+    }
+
+    let third = track.size.width / 3.;
+    merged
+        .into_iter()
+        .map(|(lane, color, top, bottom)| {
+            let (left, width) = match lane {
+                OverviewRulerLane::Left => (px(0.), third),
+                OverviewRulerLane::Center => (third, third),
+                OverviewRulerLane::Right => (third * 2., third),
+                OverviewRulerLane::Full => (px(0.), track.size.width),
+            };
+            fill(
+                Bounds::new(point(track.left() + left, top), size(width, bottom - top)),
+                color,
+            )
+        })
+        .collect()
 }
 
 use super::MASK_CHAR;
@@ -1215,6 +1358,10 @@ impl<M: InputModeKind> TextElement<M> {
             line_number_width += FOLD_ICON_HITBOX_WIDTH
         }
 
+        if let Some(width) = state.extras.gutter_decorations_width() {
+            line_number_width += width + GUTTER_DECORATION_GAP;
+        }
+
         (line_number_width, line_number_len)
     }
 
@@ -1363,6 +1510,67 @@ impl<M: InputModeKind> TextElement<M> {
     ///
     /// This creates hitboxes for the fold icon area, positioned to the right of line numbers.
     /// Icons are created and prepainted here to avoid panics.
+    /// Bars and boundary pills for gutter decorations, in the strip at `origin_x`
+    /// before the line numbers. Rows below `ghost_rows.0` move down by the
+    /// inline completion's ghost lines, `ghost_rows.1` tall, as line numbers do.
+    fn layout_gutter_decorations(
+        &self,
+        origin_x: Pixels,
+        bounds: &Bounds<Pixels>,
+        viewport: &Bounds<Pixels>,
+        line_height: Pixels,
+        ghost_rows: Option<(usize, Pixels)>,
+        cx: &App,
+    ) -> Vec<PaintQuad> {
+        let state = self.state.read(cx);
+        let Some(width) = state.extras.gutter_decorations_width() else {
+            return Vec::new();
+        };
+        let top = |row: usize| {
+            let ghost = ghost_rows
+                .filter(|(after, _)| row > *after)
+                .map_or(px(0.), |(_, height)| height);
+            bounds.origin.y + line_height * row as f32 + ghost
+        };
+        let bar = |rows: Range<usize>, color: Hsla| {
+            let bottom = top(rows.end.saturating_sub(1).max(rows.start)) + line_height;
+            fill(
+                Bounds::from_corners(
+                    point(origin_x, top(rows.start)),
+                    point(origin_x + width, bottom),
+                ),
+                color,
+            )
+        };
+
+        let foreground = state.editor_style.foreground;
+        state
+            .extras
+            .gutter_decorations()
+            .into_iter()
+            .map(|decoration| {
+                let color = decoration.color().unwrap_or(foreground);
+                match decoration_rows(&state.text, &state.display_map, decoration.range()) {
+                    DecorationRows::Lines(rows) => bar(rows, color),
+                    DecorationRows::Folded(row) => {
+                        bar(row..row + 1, decoration.folded_color().unwrap_or(color))
+                    }
+                    DecorationRows::Boundary(row) => fill(
+                        Bounds::new(
+                            point(origin_x, top(row) - GUTTER_BOUNDARY_MARK_HEIGHT.half()),
+                            size(width, GUTTER_BOUNDARY_MARK_HEIGHT),
+                        ),
+                        color,
+                    )
+                    .corner_radii(width.half()),
+                }
+            })
+            .filter(|mark| {
+                mark.bounds.bottom() >= viewport.top() && mark.bounds.top() <= viewport.bottom()
+            })
+            .collect()
+    }
+
     fn layout_fold_icons(
         &self,
         origin_x: Pixels,
@@ -2451,6 +2659,9 @@ pub(super) struct PrepaintState {
     document_color_paths: Vec<(Path<Pixels>, Hsla)>,
     range_decoration_fills: Vec<(Path<Pixels>, Hsla)>,
     range_decoration_frames: Vec<(Path<Pixels>, Hsla)>,
+    gutter_decorations: Vec<PaintQuad>,
+    /// How far the gutter decoration strip pushes the line numbers right.
+    line_number_offset: Pixels,
     hover_definition_hitbox: Option<Hitbox>,
     indent_guides_path: Option<Path<Pixels>>,
     /// The whole input, for deciding whether a long press started in it.
@@ -3177,6 +3388,27 @@ impl<M: InputModeKind> Element for TextElement<M> {
             )));
         let fold_icon_layout =
             self.layout_fold_icons(original_x, &bounds, &last_layout, window, cx);
+        let ghost_rows = current_row.filter(|_| !ghost_lines.is_empty()).map(|row| {
+            let display_map = &self.state.read(cx).display_map;
+            let rows = display_map
+                .buffer_line_to_display_row_range(row)
+                .unwrap_or_default();
+            (rows.end.saturating_sub(1), ghost_lines_height)
+        });
+        let gutter_decorations = self.layout_gutter_decorations(
+            original_x,
+            &bounds,
+            &input_bounds,
+            line_height,
+            ghost_rows,
+            cx,
+        );
+        let line_number_offset = self
+            .state
+            .read(cx)
+            .extras
+            .gutter_decorations_width()
+            .map_or(px(0.), |width| width + GUTTER_DECORATION_GAP);
         let hitbox = window.insert_hitbox(input_bounds, HitboxBehavior::Normal);
         self.request_reveal(
             input_bounds,
@@ -3205,6 +3437,8 @@ impl<M: InputModeKind> Element for TextElement<M> {
             document_color_paths,
             range_decoration_fills,
             range_decoration_frames,
+            gutter_decorations,
+            line_number_offset,
             indent_guides_path,
             fold_icon_layout,
             ghost_first_line,
@@ -3495,6 +3729,7 @@ impl<M: InputModeKind> Element for TextElement<M> {
                     }
                 }
 
+                let p = point(p.x + prepaint.line_number_offset, p.y);
                 for line in lines {
                     _ = line.paint(p, line_height, TextAlign::Left, None, window, cx);
                     offset_y += line_height;
@@ -3505,6 +3740,10 @@ impl<M: InputModeKind> Element for TextElement<M> {
                     offset_y += prepaint.ghost_lines_height;
                 }
             }
+        }
+
+        for mark in std::mem::take(&mut prepaint.gutter_decorations) {
+            window.paint_quad(mark);
         }
 
         // Paint fold icons (only visible on hover or for current line)
@@ -3808,7 +4047,10 @@ fn split_runs_by_bg_segments(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::{EditorMode, EditorState, FoldRange, RangeDecoration, Redo, Undo};
+    use crate::input::{
+        EditorMode, EditorState, FoldRange, GutterDecoration, OverviewRulerDecoration,
+        RangeDecoration, Redo, Undo,
+    };
     use gpui::{
         AppContext as _, Context, EntityInputHandler as _, ListAlignment, ListOffset, ListState,
         Render, TestAppContext, VisualTestContext, div, list, prelude::FluentBuilder as _,
@@ -4717,6 +4959,203 @@ mod tests {
             );
             assert!(fills.is_empty());
             assert_eq!(frames.len(), 5);
+        });
+    }
+
+    #[gpui::test]
+    fn gutter_decorations_reserve_a_strip_and_mark_lines_and_boundaries(cx: &mut TestAppContext) {
+        let text = "one\ntwo\nthree\nfour";
+        let (editor, window) = decoration_editor(cx, text, false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let gutter_width = |cx: &App| {
+                editor
+                    .read(cx)
+                    .last_layout
+                    .as_ref()
+                    .unwrap()
+                    .line_number_width
+            };
+            window.draw(cx).clear(cx);
+            let without = gutter_width(cx);
+            let collection = editor.update(cx, |state, cx| {
+                state.create_gutter_decorations_collection(Vec::new(), cx)
+            });
+            window.draw(cx).clear(cx);
+            assert_eq!(
+                gutter_width(cx),
+                without + px(3.) + GUTTER_DECORATION_GAP,
+                "an empty collection still reserves the strip"
+            );
+
+            let two = text.find("two").unwrap();
+            let four = text.find("four").unwrap();
+            collection.set(
+                vec![
+                    GutterDecoration::new(two..four).with_color(gpui::red()),
+                    GutterDecoration::new(four..four),
+                    GutterDecoration::new(text.len()..text.len()),
+                ],
+                cx,
+            );
+            window.draw(cx).clear(cx);
+            {
+                let state = editor.read(cx);
+                let rows: Vec<_> = state
+                    .extras
+                    .gutter_decorations()
+                    .into_iter()
+                    .map(|decoration| {
+                        decoration_rows(&state.text, &state.display_map, decoration.range())
+                    })
+                    .collect();
+                // A range ending at a line's start leaves that line alone, and the
+                // end of a document without a final newline is below its last line.
+                assert_eq!(
+                    rows,
+                    vec![
+                        DecorationRows::Lines(1..3),
+                        DecorationRows::Boundary(3),
+                        DecorationRows::Boundary(4),
+                    ]
+                );
+                let line_height = state.last_layout.as_ref().unwrap().line_height;
+                let bounds = state.input_bounds;
+                let marks = TextElement::new(editor.clone()).layout_gutter_decorations(
+                    bounds.origin.x,
+                    &bounds,
+                    &bounds,
+                    line_height,
+                    None,
+                    cx,
+                );
+                assert_eq!(
+                    marks[0].bounds,
+                    Bounds::new(
+                        point(bounds.origin.x, bounds.origin.y + line_height),
+                        size(px(3.), line_height * 2.)
+                    )
+                );
+                assert_eq!(marks[0].background, gpui::red().into());
+                assert_eq!(
+                    marks[1].bounds.center().y,
+                    bounds.origin.y + line_height * 3.
+                );
+                assert_eq!(
+                    marks[2].bounds.center().y,
+                    bounds.origin.y + line_height * 4.
+                );
+            }
+
+            collection.dispose(cx);
+            window.draw(cx).clear(cx);
+            assert_eq!(gutter_width(cx), without, "no collection, no strip");
+        });
+    }
+
+    #[gpui::test]
+    fn gutter_decorations_starting_in_a_fold_mark_the_folds_row(cx: &mut TestAppContext) {
+        let text = "top\nhidden one\nhidden two\nend\nlast";
+        let (editor, window) = decoration_editor(cx, text, false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let hidden = 4..text.find("end").unwrap();
+            editor.update(cx, |state, cx| {
+                state.apply_highlighter_fold_candidates(vec![FoldRange::new(0, 3)], cx);
+                state.display_map.set_folded(0, true);
+                state.create_gutter_decorations_collection(
+                    vec![
+                        GutterDecoration::new(hidden)
+                            .with_color(gpui::red())
+                            .with_folded_color(gpui::blue()),
+                        GutterDecoration::new(0..text.len()),
+                    ],
+                    cx,
+                );
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let rows: Vec<_> = state
+                .extras
+                .gutter_decorations()
+                .into_iter()
+                .map(|decoration| {
+                    decoration_rows(&state.text, &state.display_map, decoration.range())
+                })
+                .collect();
+            assert_eq!(
+                rows,
+                vec![DecorationRows::Folded(0), DecorationRows::Lines(0..3)]
+            );
+            let line_height = state.last_layout.as_ref().unwrap().line_height;
+            let bounds = state.input_bounds;
+            let marks = TextElement::new(editor.clone()).layout_gutter_decorations(
+                bounds.origin.x,
+                &bounds,
+                &bounds,
+                line_height,
+                None,
+                cx,
+            );
+            assert_eq!(marks[0].bounds.size.height, line_height);
+            assert_eq!(marks[0].background, gpui::blue().into());
+        });
+    }
+
+    #[gpui::test]
+    fn overview_ruler_marks_follow_the_content_height_and_merge(cx: &mut TestAppContext) {
+        let text = "x\n".repeat(99) + "x";
+        let (editor, window) = decoration_editor(cx, &text, false);
+        let mut cx = VisualTestContext::from_window(window.into(), cx);
+        cx.update(|window, cx| {
+            let line = |n: usize| n * 2;
+            let (green, red, blue) = (gpui::green(), gpui::red(), gpui::blue());
+            editor.update(cx, |state, cx| {
+                state.create_overview_ruler_decorations_collection(
+                    vec![
+                        OverviewRulerDecoration::new(line(0)..line(50))
+                            .with_lane(OverviewRulerLane::Left)
+                            .with_color(green),
+                        OverviewRulerDecoration::new(line(80)..line(80))
+                            .with_lane(OverviewRulerLane::Left)
+                            .with_color(red),
+                        OverviewRulerDecoration::new(line(50)..line(60))
+                            .with_lane(OverviewRulerLane::Left)
+                            .with_color(green),
+                        OverviewRulerDecoration::new(line(10)..line(11)).with_color(blue),
+                    ],
+                    cx,
+                );
+            });
+            window.draw(cx).clear(cx);
+            let state = editor.read(cx);
+            let snapshot = state.editor_scrollbar_snapshot.get().unwrap();
+            let layout = &snapshot.layout;
+            let content_height = layout.scroll_size.height + layout.bounds.size.height
+                - layout.scroll_viewport_size.height;
+            assert!(content_height > layout.bounds.size.height);
+            let y = |row: usize| {
+                layout.bounds.top()
+                    + (snapshot.padding_top + snapshot.line_height * row as f32)
+                        * (layout.bounds.size.height / content_height)
+            };
+            let track_left = layout.bounds.right() - Scrollbar::width();
+            let third = Scrollbar::width() / 3.;
+
+            let marks = layout_overview_ruler(state, &snapshot);
+            assert_eq!(marks.len(), 3, "touching marks of one color merge");
+            // Left lane, in document order: the merged run, then the boundary.
+            assert_eq!(
+                marks[0].bounds,
+                Bounds::new(point(track_left, y(0)), size(third, y(60) - y(0)))
+            );
+            assert_eq!(marks[0].background, green.into());
+            assert_eq!(marks[1].bounds.size.height, MIN_OVERVIEW_RULER_MARK_HEIGHT);
+            assert!((marks[1].bounds.center().y - y(80)).abs() < px(0.01));
+            assert_eq!(marks[1].background, red.into());
+            // The center lane is the default.
+            assert_eq!(marks[2].bounds.left(), track_left + third);
+            assert_eq!(marks[2].bounds.size.height, MIN_OVERVIEW_RULER_MARK_HEIGHT);
         });
     }
 

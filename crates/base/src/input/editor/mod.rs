@@ -39,6 +39,8 @@ impl InputModeKind for EditorMode {
         state.extras.hover_popover = None;
         state.extras.decorations.clear();
         state.extras.range_decorations.clear();
+        state.extras.gutter_decorations.clear();
+        state.extras.overview_ruler_decorations.clear();
     }
 
     fn editing_syntax_context(state: &InputBaseState<Self>, offset: usize) -> super::SyntaxContext {
@@ -54,6 +56,14 @@ impl InputModeKind for EditorMode {
         state
             .extras
             .range_decorations
+            .adjust_for_edit(range, new_len);
+        state
+            .extras
+            .gutter_decorations
+            .adjust_for_edit(range, new_len);
+        state
+            .extras
+            .overview_ruler_decorations
             .adjust_for_edit(range, new_len);
     }
 
@@ -241,6 +251,20 @@ impl crate::input::InputExtras for super::EditorExtras {
 
     fn range_decorations(&self, ranges: &[std::ops::Range<usize>]) -> Vec<&super::RangeDecoration> {
         self.range_decorations.intersecting(ranges)
+    }
+
+    fn gutter_decorations_width(&self) -> Option<gpui::Pixels> {
+        self.gutter_decorations
+            .has_collections()
+            .then_some(self.gutter_decorations_width)
+    }
+
+    fn gutter_decorations(&self) -> Vec<&super::GutterDecoration> {
+        self.gutter_decorations.iter().flatten().collect()
+    }
+
+    fn overview_ruler_decorations(&self) -> Vec<&super::OverviewRulerDecoration> {
+        self.overview_ruler_decorations.iter().flatten().collect()
     }
 
     fn semantic_token_styles(

@@ -87,6 +87,12 @@ share UTF-8 normalization and edit tracking. See
 for ownership, boundary affinity, deletion, undo/redo, folding, layering, and
 indexing semantics; import the same types from `gpui_kit::base::input`.
 
+Use `create_gutter_decorations_collection` to mark whole lines in a strip before
+the line numbers. Use `create_overview_ruler_decorations_collection` to mark lines
+on the vertical scrollbar track. Monaco calls this track the overview ruler. These
+collections keep empty ranges, which mark line boundaries. See
+[Gutter and overview ruler decorations](../../component/editor.md#gutter-and-overview-ruler-decorations).
+
 ## Highlighting and language features
 
 `InputHighlighterFactory`, `InputHighlighter`, diagnostic types, and the LSP

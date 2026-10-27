@@ -59,6 +59,11 @@ Editor::new(&editor)
 [几何范围装饰](../../component/editor.md#几何范围装饰)；直接使用 Base 时，从
 `gpui_kit::base::input` 导入相同的类型。
 
+使用 `create_gutter_decorations_collection` 在行号之前的窄带中标记整行。
+使用 `create_overview_ruler_decorations_collection` 在垂直滚动条轨道上标记整行。
+Monaco 将这条轨道称为概览标尺。这两个集合会保留表示行边界的空范围。
+参见[行号槽与概览标尺装饰](../../component/editor.md#行号槽与概览标尺装饰)。
+
 ## 高亮与语言功能
 
 `InputHighlighterFactory`、`InputHighlighter`、诊断类型和 LSP provider trait 是提供给设计系统作者的底层扩展点，作用于共享的 `InputBaseState`。样式组件的应用通常应通过编辑器集成配置它们，而不是普通文本框。

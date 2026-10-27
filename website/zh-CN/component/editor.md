@@ -293,6 +293,63 @@ review_ranges.dispose(cx); // 释放集合，使该句柄及其克隆全部失�
 会重建对应集合的索引；编辑文本时线性更新受影响的集合，不重新排序。
 Editor 展示页的 **Decorations** 标签演示了两种集合的组合使用。
 
+### 行号槽与概览标尺装饰
+
+需要在文本之外标记整行（例如版本控制 diff 中新增、修改或删除的行）时，使用这两个集合。
+`GutterDecorationCollection` 在行号之前的窄带中绘制标记。
+`OverviewRulerDecorationCollection` 在垂直滚动条轨道上绘制标记，Monaco 将这条轨道称为概览标尺。
+要同时在两处显示标记，请分别创建两个集合。
+
+```rust
+use gpui_kit::component::input::{
+    GutterDecoration, OverviewRulerDecoration, OverviewRulerLane,
+};
+
+let style = &cx.theme().highlight_theme.style;
+let (added, deleted) = (style.status.created(cx), style.status.deleted(cx));
+
+let gutter = editor.update(cx, |state, cx| {
+    state.create_gutter_decorations_collection(
+        vec![
+            GutterDecoration::new(10..42).with_color(added), // 标记范围触及的每一行。
+            GutterDecoration::new(60..60).with_color(deleted), // 标记从偏移 60 开始的那一行上方的边界。
+        ],
+        cx,
+    )
+});
+let ruler = editor.update(cx, |state, cx| {
+    state.create_overview_ruler_decorations_collection(
+        vec![
+            OverviewRulerDecoration::new(10..42)
+                .with_lane(OverviewRulerLane::Left)
+                .with_color(added.opacity(0.6)),
+        ],
+        cx,
+    )
+});
+```
+
+- 使用非空范围可以标记它触及的每一行，相当于 Monaco 的 `isWholeLine`。结束在行首的范围不标记该行。
+  使用**空**范围可以标记行边界，例如被删除的行原来所在的位置。范围位于行首时，标记显示在该行上方；
+  位于其他位置时，标记显示在该行下方。没有末尾换行的文档中，`text.len()` 会标记最后一行下方。
+  行号槽用竖条表示非空范围，用胶囊表示边界。
+- 这两种集合会保留空范围，文本装饰和几何装饰会丢弃空范围。在空范围处插入文字时，文字会插入到范围之后。
+  编辑使一个范围变空时，集合会保留它并把它作为边界。它们使用与其他装饰集合相同的句柄和
+  `set`/`append`/`clear`/`dispose` 方法。重新计算装饰后，请对整个集合调用 `set`；两次更新之间，
+  编辑跟踪会让标记留在原来的行上。
+- 只要存在行号槽集合（包括空集合），行号槽就会预留窄带，标记变化时文本不会移动。
+  默认宽度为 3 px，可用 `gutter_decorations_width` 或 `set_gutter_decorations_width` 修改。
+  如果范围起点位于折叠内部，行号槽会在折叠所在行绘制一条竖条；`with_folded_color` 可以设置该竖条的颜色。
+- 概览标尺有四个分区（lane）。`Left`、`Center`（默认）和 `Right` 各占轨道的三分之一；`Full` 占用整个轨道。
+  按惯例，版本控制使用 `Left`，搜索结果使用 `Center`，诊断使用 `Right`。每个标记按所在行占内容高度的比例定位，
+  高度至少为 6 px。同一分区中颜色相同且相互接触的标记会合并。
+- 标记绘制在滚动条下方，无论滚动条是 Base 提供的还是由 `set_scrollbar_renderer` 提供的。
+  滑块淡出时，标记仍然可见。
+- 不调用 `with_color` 时，两个集合都使用编辑器前景色。版本控制的颜色可以读取高亮主题中
+  Zed 的状态键 `created`、`modified` 和 `deleted`，对应方法为 `status.created(cx)`、
+  `status.modified(cx)` 和 `status.deleted(cx)`。缺少对应键时，这些方法分别使用 `success`、
+  `warning` 和 `error`。
+
 ## 值与事件
 
 ```rust
