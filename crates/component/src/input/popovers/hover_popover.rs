@@ -174,6 +174,7 @@ impl Element for Popover {
                 .refine_style(&self.style)
                 .child((self.content_builder)(window, cx)),
         )
+        .with_priority(gpui_base::POPUP_PRIORITY)
         .into_any_element();
 
         let popover_size = popover.layout_as_root(AvailableSpace::min_size(), window, cx);
