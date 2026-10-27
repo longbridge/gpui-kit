@@ -414,6 +414,20 @@ Settings:
     zh-HK: 搜索...
     zh-TW: 搜尋...
     it: Ricerca...
+  no_results:
+    en: No matching settings
+    pt-BR: "Nenhuma configuração encontrada"
+    zh-CN: 没有匹配的设置
+    zh-HK: 沒有相符的設定
+    zh-TW: 沒有相符的設定
+    it: Nessuna impostazione corrispondente
+  no_results_description:
+    en: Try a different keyword.
+    pt-BR: "Tente outra palavra-chave."
+    zh-CN: 请尝试其他关键词。
+    zh-HK: 請嘗試其他關鍵字。
+    zh-TW: 請嘗試其他關鍵字。
+    it: Prova con un'altra parola chiave.
   Reset All:
     en: Reset All
     pt-BR: "Restaurar tudo"
