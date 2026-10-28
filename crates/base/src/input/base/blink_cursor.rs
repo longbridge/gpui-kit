@@ -7,11 +7,16 @@ static PAUSE_DELAY: Duration = Duration::from_millis(300);
 
 pub(super) const CURSOR_WIDTH: Pixels = px(1.);
 
+/// Application-wide caret visibility policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CursorBlink {
+    /// Keep the focused caret visible without a timer.
     Steady,
+    /// Alternate visible and hidden phases until the optional idle deadline.
     Blinking {
+        /// Duration of each visible or hidden phase; zero means steady.
         interval: Duration,
+        /// Time since the last activity after which blinking stops visibly.
         idle_timeout: Option<Duration>,
     },
 }
@@ -494,6 +499,30 @@ mod tests {
         assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
 
         cx.update(|cx| set_cursor_blink(policy, cx));
+        assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
+        advance(cx, Duration::from_millis(249));
+        assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
+        advance(cx, Duration::from_millis(1));
+        assert_idle(&cursor, true, cx);
+    }
+
+    #[gpui::test]
+    fn unrelated_theme_changes_preserve_the_blink_phase_and_idle_deadline(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            set_cursor_blink(
+                CursorBlink::Blinking {
+                    interval: INTERVAL,
+                    idle_timeout: Some(Duration::from_millis(750)),
+                },
+                cx,
+            );
+        });
+        let cursor = cx.new(BlinkCursor::new);
+        cursor.update(cx, |cursor, cx| cursor.start(cx));
+        advance(cx, INTERVAL);
+        assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
+
+        cx.update(|cx| crate::Theme::global_mut(cx).appearance = crate::ThemeAppearance::Dark);
         assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
         advance(cx, Duration::from_millis(249));
         assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
