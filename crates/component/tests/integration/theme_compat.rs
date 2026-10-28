@@ -20,19 +20,15 @@ fn legacy_text_view_style_struct_literal_shape_is_unchanged() {
 }
 
 #[test]
-fn legacy_theme_config_struct_literal_shape_is_unchanged() {
-    let _ = ThemeConfig {
-        is_default: false,
-        name: "Compatibility".into(),
-        mode: ThemeMode::Light,
-        font_size: None,
-        font_family: None,
-        mono_font_family: None,
-        mono_font_size: None,
-        radius: None,
-        radius_lg: None,
-        shadow: None,
-        colors: ThemeConfigColors::default(),
-        highlight: None,
-    };
+fn theme_config_is_built_from_default() {
+    // `ThemeConfig` is `#[non_exhaustive]`, so callers outside the crate
+    // start from `Default` and assign the fields they set.
+    let mut config = ThemeConfig::default();
+    config.name = "Compatibility".into();
+    config.mode = ThemeMode::Light;
+    config.colors = ThemeConfigColors::default();
+
+    assert_eq!(config.name.as_ref(), "Compatibility");
+    assert_eq!(config.mode, ThemeMode::Light);
+    assert!(config.highlight.is_none());
 }

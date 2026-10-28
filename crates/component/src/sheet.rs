@@ -24,6 +24,7 @@ pub(crate) fn init(_: &mut App) {}
 
 /// The settings for sheets.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct SheetSettings {
     /// The margin top for the sheet, default is [`TITLE_BAR_HEIGHT`].
     pub margin_top: Pixels,

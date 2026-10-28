@@ -57,7 +57,7 @@ Button::new("save")
 `gpui-base` 通过 `ColorTokens::light()` 和 `ColorTokens::dark()` 提供可直接使用的浅色、深色语义调色板。`ColorTokens::default()` 使用浅色调色板。两套颜色均使用 `Hsla`，并与 `gpui-component` 的默认浅色、深色主题保持相同的语义角色。
 
 ```rust
-use gpui_kit::base::{ColorTokens, SemanticThemeTokens, Theme};
+use gpui_kit::base::{ColorTokens, Theme};
 
 // 根据应用当前外观选择对应调色板。
 let colors = if is_dark {
@@ -66,10 +66,7 @@ let colors = if is_dark {
     ColorTokens::light()
 };
 
-Theme::global_mut(cx).tokens = SemanticThemeTokens {
-    colors,
-    ..Default::default()
-};
+Theme::global_mut(cx).tokens.colors = colors;
 ```
 
 调色板描述的是语义角色，而不是某个组件的专用颜色：`background` 与 `foreground`、`surface` 与 `surface_foreground`、`primary`、`secondary`、`muted`、`accent`、`destructive`、`border`、`input`、`ring` 和 `selection`，以及对应的前景色。能从既有角色推导的细节，Base 组件就直接推导，例如链接颜色取自 `primary`，不再为它单独加 token。`selection` 之所以自成一个角色，是因为没有别的角色能替代：选区绘制在文字下方，必须保证文字依然清晰，而 `accent` 和 `ring` 都无法保证这一点。

@@ -5,6 +5,7 @@ use gpui_base::{Easing, Spring};
 
 /// Semantic motion policy shared by styled components.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct MotionTokens {
     pub duration_instant: Duration,
     pub duration_fast: Duration,

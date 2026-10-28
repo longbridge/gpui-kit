@@ -534,6 +534,7 @@ impl Render for Notification {
 
 /// The settings for notifications.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct NotificationSettings {
     /// The placement of the notifications, default: [`Anchor::TopRight`]
     ///

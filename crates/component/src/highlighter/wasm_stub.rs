@@ -149,6 +149,7 @@ pub enum FontWeightContent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ThemeStyle {
     pub color: Option<gpui::Hsla>,
     pub font_style: Option<FontStyle>,
@@ -181,6 +182,7 @@ impl From<ThemeStyle> for HighlightStyle {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct SyntaxColors {
     pub attribute: Option<ThemeStyle>,
     pub boolean: Option<ThemeStyle>,
@@ -420,6 +422,7 @@ impl StatusColors {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct HighlightThemeStyle {
     pub editor_background: Option<gpui::Hsla>,
     pub editor_foreground: Option<gpui::Hsla>,
@@ -436,6 +439,7 @@ pub struct HighlightThemeStyle {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct HighlightTheme {
     pub name: String,
     #[serde(default)]

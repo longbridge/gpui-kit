@@ -113,6 +113,7 @@ impl LanguageConfig {
 ///
 /// https://docs.rs/tree-sitter-highlight/0.26.8/tree_sitter_highlight/
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct SyntaxColors {
     pub attribute: Option<ThemeStyle>,
     pub boolean: Option<ThemeStyle>,
@@ -436,6 +437,7 @@ impl StatusColors {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct HighlightThemeStyle {
     #[serde(rename = "editor.background")]
     pub editor_background: Option<Hsla>,
@@ -465,6 +467,7 @@ pub struct HighlightThemeStyle {
 ///
 /// https://zed.dev/docs/extensions/languages#syntax-highlighting
 #[derive(Debug, Clone, PartialEq, Eq, Hash, JsonSchema, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct HighlightTheme {
     pub name: String,
     #[serde(default)]

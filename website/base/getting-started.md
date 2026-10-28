@@ -63,7 +63,7 @@ the light palette. Both palettes use `Hsla` values and match the semantic roles
 of the default `gpui-component` themes.
 
 ```rust
-use gpui_kit::base::{ColorTokens, SemanticThemeTokens, Theme};
+use gpui_kit::base::{ColorTokens, Theme};
 
 // Pick the palette that matches the application's current appearance.
 let colors = if is_dark {
@@ -72,10 +72,7 @@ let colors = if is_dark {
     ColorTokens::light()
 };
 
-Theme::global_mut(cx).tokens = SemanticThemeTokens {
-    colors,
-    ..Default::default()
-};
+Theme::global_mut(cx).tokens.colors = colors;
 ```
 
 The palette contains semantic roles rather than component-specific colors:

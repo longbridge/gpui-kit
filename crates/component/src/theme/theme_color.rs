@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// A theme token that keeps a solid representative color and its renderable background.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct ThemeToken {
     pub color: Hsla,
     pub background: Background,
@@ -56,6 +57,7 @@ impl From<ThemeToken> for Fill {
 
 /// Theme colors used throughout the UI components.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[non_exhaustive]
 pub struct ThemeColor {
     /// Used for accents such as hover background on MenuItem, ListItem, etc.
     pub accent: Hsla,
