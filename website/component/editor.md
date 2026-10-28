@@ -411,7 +411,8 @@ let ruler = editor.update(cx, |state, cx| {
   empty collection. This keeps the text from shifting as marks change. The strip is
   3 px wide by default. Set its width with `gutter_decorations_width` or
   `set_gutter_decorations_width`. If a range starts inside a fold, the gutter draws
-  one bar on the fold's row. `with_folded_color` sets that bar's color.
+  a bar on the fold's row and marks the rest of the range after the fold as usual.
+  `with_folded_color` sets the color of the bar on the fold's row.
 - The overview ruler has four lanes. `Left`, `Center` (the default), and `Right`
   each use one third of the track. `Full` uses the whole track. By convention, use
   `Left` for version-control changes, `Center` for search results, and `Right` for

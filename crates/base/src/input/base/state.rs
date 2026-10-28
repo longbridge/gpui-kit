@@ -28,7 +28,7 @@ use super::{
     change::Change,
     cursor::{CursorSelection, Selections},
     element::{
-        EditorScrollbar, EditorScrollbarSnapshot, LongestLineKey, TextElement,
+        EditorScrollbar, EditorScrollbarSnapshot, LongestLineKey, OverviewRulerRows, TextElement,
         clamp_horizontal_scroll_offset,
     },
     kind::InputModeKind,
@@ -513,6 +513,8 @@ pub struct InputBaseState<M: InputModeKind> {
     /// The size of the scrollable content.
     pub(crate) scroll_size: gpui::Size<Pixels>,
     pub(super) editor_scrollbar_snapshot: Cell<Option<EditorScrollbarSnapshot>>,
+    /// Overview ruler marks in display rows, kept between frames.
+    pub(super) overview_ruler_rows: std::cell::RefCell<OverviewRulerRows>,
     /// The widest measured unwrapped line width and what it was measured for.
     pub(super) longest_line_width: Cell<Option<(LongestLineKey, Pixels)>>,
     pub(super) editor_paddings: Edges<Pixels>,
@@ -1001,6 +1003,7 @@ impl<M: InputModeKind> InputBaseState<M> {
             overscroll: Overscroll::default(),
             scroll_size: gpui::size(px(0.), px(0.)),
             editor_scrollbar_snapshot: Cell::new(None),
+            overview_ruler_rows: Default::default(),
             longest_line_width: Cell::new(None),
             editor_paddings: Edges::default(),
             deferred_scroll_offset: None,

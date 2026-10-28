@@ -71,7 +71,11 @@ impl RangeDecoration {
 /// with `isWholeLine`. An empty range marks a line boundary, such as where lines
 /// were deleted. When the range is at the start of a line, the mark appears above
 /// that line. Otherwise it appears below the line.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// The default is an empty range at the start of the document, a boundary above
+/// the first line, in the editor foreground color.
+#[non_exhaustive]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct GutterDecoration {
     range: Range<usize>,
     color: Option<Hsla>,
@@ -142,7 +146,11 @@ pub enum OverviewRulerLane {
 /// This is the counterpart of Monaco's
 /// [`overviewRuler`](https://microsoft.github.io/monaco-editor/typedoc/interfaces/editor_editor_api.editor.IModelDecorationOverviewRulerOptions.html)
 /// decoration option. Like a [`GutterDecoration`], an empty range marks a line boundary.
-#[derive(Clone, Debug, PartialEq)]
+///
+/// The default is an empty range at the start of the document in the center lane,
+/// in the editor foreground color.
+#[non_exhaustive]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct OverviewRulerDecoration {
     range: Range<usize>,
     lane: OverviewRulerLane,
@@ -346,10 +354,22 @@ impl RangeDecorationCollection {
 /// Each clone refers to the same collection. Dropping a handle does not clear it.
 /// Call [`Self::clear`] to empty it or [`Self::dispose`] to release it. Calls after
 /// disposal or after the editor is dropped do nothing.
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct GutterDecorationCollection {
     state: WeakEntity<InputBaseState<EditorMode>>,
     id: DecorationCollectionId,
+}
+
+/// A handle that addresses no editor, so every operation on it does nothing. It
+/// can stand in for a collection until the editor that owns one exists.
+impl Default for GutterDecorationCollection {
+    fn default() -> Self {
+        Self {
+            state: WeakEntity::new_invalid(),
+            id: DecorationCollectionId(0),
+        }
+    }
 }
 
 impl GutterDecorationCollection {
@@ -382,13 +402,7 @@ impl GutterDecorationCollection {
     /// its strip after the last gutter collection is released.
     pub fn dispose(&self, cx: &mut App) {
         let _ = self.state.update(cx, |state, cx| {
-            if state
-                .extras
-                .gutter_decorations
-                .entries
-                .remove(&self.id)
-                .is_some()
-            {
+            if state.extras.gutter_decorations.remove(self.id) {
                 cx.notify();
             }
         });
@@ -416,10 +430,22 @@ impl GutterDecorationCollection {
 /// Each clone refers to the same collection. Dropping a handle does not clear it.
 /// Call [`Self::clear`] to empty it or [`Self::dispose`] to release it. Calls after
 /// disposal or after the editor is dropped do nothing.
+#[non_exhaustive]
 #[derive(Clone, Debug)]
 pub struct OverviewRulerDecorationCollection {
     state: WeakEntity<InputBaseState<EditorMode>>,
     id: DecorationCollectionId,
+}
+
+/// A handle that addresses no editor, so every operation on it does nothing. It
+/// can stand in for a collection until the editor that owns one exists.
+impl Default for OverviewRulerDecorationCollection {
+    fn default() -> Self {
+        Self {
+            state: WeakEntity::new_invalid(),
+            id: DecorationCollectionId(0),
+        }
+    }
 }
 
 impl OverviewRulerDecorationCollection {
@@ -459,13 +485,7 @@ impl OverviewRulerDecorationCollection {
     /// Release this collection. Its cloned handles stop working.
     pub fn dispose(&self, cx: &mut App) {
         let _ = self.state.update(cx, |state, cx| {
-            if state
-                .extras
-                .overview_ruler_decorations
-                .entries
-                .remove(&self.id)
-                .is_some()
-            {
+            if state.extras.overview_ruler_decorations.remove(self.id) {
                 cx.notify();
             }
         });
@@ -584,15 +604,20 @@ impl DecorationIndex {
         if span.is_empty() || range.is_empty() {
             return 0;
         }
+        // An empty decoration that is kept, a line boundary, touches the range
+        // when it lies inside it, including at its start.
+        let touches = |end: usize, empty: bool| {
+            end > range.start || (T::KEEPS_EMPTY && empty && end == range.start)
+        };
         let mid = span.start + span.len() / 2;
-        if self.max_ends[mid] <= range.start {
+        if !touches(self.max_ends[mid], true) {
             return 1;
         }
         let mut visited = 1 + self.query(decorations, span.start..mid, range, matches);
         let ix = self.indices[mid];
         let candidate = decorations[ix].range();
         if candidate.start < range.end {
-            if candidate.end > range.start {
+            if touches(candidate.end, candidate.is_empty()) {
                 matches.push(ix);
             }
             visited += self.query(decorations, mid + 1..span.end, range, matches);
@@ -620,6 +645,9 @@ impl<T: TrackedDecoration> DecorationEntries<T> {
 pub(crate) struct DecorationCollections<T = TextDecoration> {
     entries: BTreeMap<DecorationCollectionId, DecorationEntries<T>>,
     next_id: usize,
+    /// Changes whenever an owner creates, replaces, extends, clears or releases a
+    /// collection, so painting can keep work derived from them until then.
+    revision: u64,
 }
 
 impl<T> Default for DecorationCollections<T> {
@@ -627,6 +655,7 @@ impl<T> Default for DecorationCollections<T> {
         Self {
             entries: BTreeMap::new(),
             next_id: 0,
+            revision: 0,
         }
     }
 }
@@ -636,6 +665,7 @@ impl<T: TrackedDecoration> DecorationCollections<T> {
         let id = DecorationCollectionId(self.next_id);
         self.next_id += 1;
         self.entries.insert(id, DecorationEntries::new(decorations));
+        self.revision += 1;
         id
     }
 
@@ -644,6 +674,7 @@ impl<T: TrackedDecoration> DecorationCollections<T> {
             return false;
         };
         *current = DecorationEntries::new(decorations);
+        self.revision += 1;
         true
     }
 
@@ -653,7 +684,18 @@ impl<T: TrackedDecoration> DecorationCollections<T> {
         };
         current.decorations.extend(decorations);
         current.reindex();
+        self.revision += 1;
         true
+    }
+
+    fn remove(&mut self, id: DecorationCollectionId) -> bool {
+        let removed = self.entries.remove(&id).is_some();
+        self.revision += u64::from(removed);
+        removed
+    }
+
+    pub(super) fn revision(&self) -> u64 {
+        self.revision
     }
 
     fn get(&self, id: DecorationCollectionId) -> Option<&[T]> {
@@ -698,6 +740,7 @@ impl<T: TrackedDecoration> DecorationCollections<T> {
         for entry in self.entries.values_mut() {
             *entry = DecorationEntries::new(Vec::new());
         }
+        self.revision += 1;
     }
 
     /// Whether any collection exists, even an empty one.
@@ -798,8 +841,13 @@ fn normalize<T: TrackedDecoration>(text: &Rope, decorations: Vec<T>) -> Vec<T> {
         .filter_map(|mut decoration| {
             let range = decoration.range();
             // Reject reversed ranges before clipping, which could otherwise turn a
-            // reversed pair within a multibyte character into a nonempty range.
-            if range.start > range.end || (range.is_empty() && !T::KEEPS_EMPTY) {
+            // reversed pair within a multibyte character into a nonempty range, and
+            // ranges past the end, which clipping would otherwise turn into a
+            // boundary at the end of the document.
+            if range.start > range.end
+                || range.start > text.len()
+                || (range.is_empty() && !T::KEEPS_EMPTY)
+            {
                 return None;
             }
             let start = text.clip_offset(range.start, Bias::Left);
@@ -888,8 +936,9 @@ impl InputBaseState<EditorMode> {
     /// Ranges track edits as [range decorations](Self::create_range_decorations_collection)
     /// do, but empty ranges are kept. They stay before text inserted at their offset,
     /// and a range that an edit empties becomes a boundary. A mark whose range starts
-    /// inside a fold draws one bar on the fold's row, using its
-    /// [folded color](GutterDecoration::with_folded_color). Later collections and
+    /// inside a fold draws a bar on the fold's row, using its
+    /// [folded color](GutterDecoration::with_folded_color), and marks the lines of the
+    /// range after the fold as usual. Later collections and
     /// items draw over earlier ones. After you recompute the decorations, call
     /// [`set`](GutterDecorationCollection::set) with the whole collection. Tracking
     /// keeps marks on their lines between updates.
@@ -996,6 +1045,8 @@ mod tests {
                 GutterDecoration::new(8..13),
                 GutterDecoration::new(9..8),
                 GutterDecoration::new(100..100),
+                GutterDecoration::new(100..200),
+                GutterDecoration::new(13..13),
             ],
         ));
         let ranges = |collections: &DecorationCollections<GutterDecoration>| {
@@ -1006,7 +1057,8 @@ mod tests {
                 .map(|decoration| decoration.range().clone())
                 .collect::<Vec<_>>()
         };
-        // The reversed range is dropped and the one past the end clamped to it.
+        // Reversed ranges and ranges past the end are dropped; a boundary at the
+        // end of the document is kept.
         assert_eq!(ranges(&collections), vec![4..4, 8..13, 13..13]);
         // Text typed at a boundary goes after it.
         collections.adjust_for_edit(&(4..4), 2);
@@ -1017,6 +1069,28 @@ mod tests {
         // A replacement covering a boundary moves it to the replacement's start.
         collections.adjust_for_edit(&(2..6), 1);
         assert_eq!(ranges(&collections), vec![2..2, 7..7, 7..7]);
+    }
+
+    #[test]
+    fn gutter_queries_find_boundaries_inside_the_span() {
+        let mut collections = DecorationCollections::<GutterDecoration>::default();
+        collections.create(vec![
+            GutterDecoration::new(4..4),
+            GutterDecoration::new(8..13),
+            GutterDecoration::new(13..13),
+            GutterDecoration::new(20..20),
+        ]);
+        let ranges = |query: Range<usize>| {
+            collections
+                .intersecting(&[query])
+                .iter()
+                .map(|decoration| decoration.range().clone())
+                .collect::<Vec<_>>()
+        };
+        // A boundary at the span's start is inside it; one at its end is not.
+        assert_eq!(ranges(4..13), vec![4..4, 8..13]);
+        assert_eq!(ranges(13..21), vec![13..13, 20..20]);
+        assert_eq!(ranges(5..8), Vec::<Range<usize>>::new());
     }
 
     #[test]

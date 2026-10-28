@@ -339,7 +339,8 @@ let ruler = editor.update(cx, |state, cx| {
   编辑跟踪会让标记留在原来的行上。
 - 只要存在行号槽集合（包括空集合），行号槽就会预留窄带，标记变化时文本不会移动。
   默认宽度为 3 px，可用 `gutter_decorations_width` 或 `set_gutter_decorations_width` 修改。
-  如果范围起点位于折叠内部，行号槽会在折叠所在行绘制一条竖条；`with_folded_color` 可以设置该竖条的颜色。
+  如果范围起点位于折叠内部，行号槽会在折叠所在行绘制一条竖条，折叠之后的剩余部分照常标记；
+  `with_folded_color` 可以设置折叠所在行那条竖条的颜色。
 - 概览标尺有四个分区（lane）。`Left`、`Center`（默认）和 `Right` 各占轨道的三分之一；`Full` 占用整个轨道。
   按惯例，版本控制使用 `Left`，搜索结果使用 `Center`，诊断使用 `Right`。每个标记按所在行占内容高度的比例定位，
   高度至少为 6 px。同一分区中颜色相同且相互接触的标记会合并。

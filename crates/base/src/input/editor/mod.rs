@@ -259,12 +259,16 @@ impl crate::input::InputExtras for super::EditorExtras {
             .then_some(self.gutter_decorations_width)
     }
 
-    fn gutter_decorations(&self) -> Vec<&super::GutterDecoration> {
-        self.gutter_decorations.iter().flatten().collect()
+    fn gutter_decorations(&self, range: std::ops::Range<usize>) -> Vec<&super::GutterDecoration> {
+        self.gutter_decorations.intersecting(&[range])
     }
 
     fn overview_ruler_decorations(&self) -> Vec<&super::OverviewRulerDecoration> {
         self.overview_ruler_decorations.iter().flatten().collect()
+    }
+
+    fn overview_ruler_revision(&self) -> u64 {
+        self.overview_ruler_decorations.revision()
     }
 
     fn semantic_token_styles(

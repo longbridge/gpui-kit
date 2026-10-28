@@ -94,14 +94,21 @@ pub trait InputExtras: Default + 'static {
         None
     }
 
-    /// Return all gutter decorations in paint order.
-    fn gutter_decorations(&self) -> Vec<&GutterDecoration> {
+    /// Return the gutter decorations that touch a UTF-8 byte range, in paint
+    /// order. An empty decoration touches the range when it lies inside it.
+    fn gutter_decorations(&self, _range: std::ops::Range<usize>) -> Vec<&GutterDecoration> {
         Vec::new()
     }
 
     /// Return all overview ruler decorations in paint order.
     fn overview_ruler_decorations(&self) -> Vec<&OverviewRulerDecoration> {
         Vec::new()
+    }
+
+    /// A number that changes whenever an overview ruler collection is created,
+    /// replaced, extended, cleared or released.
+    fn overview_ruler_revision(&self) -> u64 {
+        0
     }
 
     /// Semantic-token styles for a visible range, when an LSP supplies them.

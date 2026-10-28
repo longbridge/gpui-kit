@@ -951,6 +951,11 @@ impl Scrollbar {
         WIDTH
     }
 
+    /// The width of a track this theme gives scrollbars without styles of their own.
+    pub(crate) fn themed_track_width(cx: &App) -> Pixels {
+        cx.theme().scrollbar.styles().track.width.unwrap_or(WIDTH)
+    }
+
     fn resolve_track(
         &self,
         cx: &App,
