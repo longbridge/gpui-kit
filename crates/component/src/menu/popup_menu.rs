@@ -894,6 +894,11 @@ impl PopupMenu {
                         }
                         self.dismiss(&Cancel, window, cx)
                     }
+                    Some(PopupMenuItem::Submenu {
+                        disabled: false, ..
+                    }) => {
+                        self._select_submenu(window, cx);
+                    }
                     _ => {}
                 }
             }
@@ -1379,6 +1384,11 @@ impl PopupMenu {
                 menu,
                 disabled,
             } => this
+                .when(!disabled, |this| {
+                    this.on_click(cx.listener(move |this, event, window, cx| {
+                        this.on_click(ix, event, window, cx)
+                    }))
+                })
                 .selected(selected)
                 .disabled(*disabled)
                 .items_start()

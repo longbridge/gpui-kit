@@ -2,7 +2,7 @@ use crate::common;
 use gpui_kit::component::{
     button::Button,
     input::{Copy, Input, InputState, SelectAll, Textarea, TextareaState},
-    menu::{ContextMenuExt, DropdownMenu, PopupMenuItem},
+    menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
     text::{TextView, TextViewState},
 };
 use gpui_kit::test::{TestAppContextExt, TestSupportExt, TestWindowExt};
@@ -41,6 +41,15 @@ impl Render for Commands {
                             .submenu("More", window, cx, |menu, _, _| {
                                 menu.menu("Save copy", Box::new(Save))
                             })
+                            .item(
+                                PopupMenuItem::submenu(
+                                    "Unavailable submenu",
+                                    PopupMenu::build(window, cx, |menu, _, _| {
+                                        menu.menu("Unavailable", Box::new(Unavailable))
+                                    }),
+                                )
+                                .disabled(true),
+                            )
                     }),
             )
             .child(div().id("result").test_support().child(if self.saved {
@@ -89,6 +98,66 @@ async fn menu_skips_disabled_commands_confirms_and_restores_focus(cx: &mut TestA
         window.try_find("popup-menu").is_none()
     })
     .await;
+}
+
+#[gpui_kit::test]
+fn activating_a_submenu_enters_it_without_dismissing_its_parent(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    for keyboard in [false, true] {
+        let (handle, commands) =
+            common::open_window(cx, Some(size(px(640.), px(480.))), |window, cx| {
+                let view = cx.new(|cx| Commands {
+                    saved: false,
+                    focus: cx.focus_handle(),
+                });
+                view.read(cx).focus.clone().focus(window, cx);
+                view
+            });
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("commands", cx);
+            if keyboard {
+                let mut menu = window.within("popup-menu");
+                menu.press("up", cx);
+                assert_eq!(menu.find(2usize).selected(), Some(true));
+                menu.press("enter", cx);
+            } else {
+                window.within("popup-menu").click(2usize, cx);
+            }
+            assert_eq!(
+                window.within("submenu").find("popup-menu").focused(),
+                Some(true)
+            );
+            assert_eq!(window.within("submenu").find(0usize).selected(), Some(true));
+            assert_eq!(window.find_all("popup-menu").len(), 2);
+            assert!(!commands.read(cx).saved);
+        })
+        .unwrap();
+        press_context_menu_key(handle.into(), "enter", cx);
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(commands.read(cx).saved);
+            assert!(window.try_find("popup-menu").is_none());
+            assert_eq!(window.find("workspace").focused(), Some(true));
+
+            window.click("commands", cx);
+            window.within("popup-menu").hover(3usize, cx);
+            window.press("enter", cx);
+            assert_eq!(window.find_all("popup-menu").len(), 2);
+            assert_eq!(
+                window.within("submenu").find("popup-menu").focused(),
+                Some(false)
+            );
+        })
+        .unwrap();
+        press_context_menu_key(handle.into(), "escape", cx);
+        cx.update_window(handle.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("popup-menu").is_none());
+            assert_eq!(window.find("workspace").focused(), Some(true));
+        })
+        .unwrap();
+    }
 }
 
 #[gpui_kit::test]
