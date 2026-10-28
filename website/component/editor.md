@@ -475,8 +475,9 @@ the same values to `prewrap`.
 
 The editor paints its code in the theme's monospace font — `mono_font_family` at
 `mono_font_size` — with rows 1.5 times the font size. That is only the default:
-a text style set on the editor refines over it, and the gutter and row height
-follow the size. The theme's platform default (`Menlo`, `Consolas`, `DejaVu Sans
+a text style set on the editor refines over it, and the row height follows the
+size. Unless gutter typography is specified separately, line numbers follow
+the body font and size too. The theme's platform default (`Menlo`, `Consolas`, `DejaVu Sans
 Mono`) is checked against the installed fonts when the theme loads and swapped
 for an installed monospace font, or `.SystemUIFont`, when it is missing; a
 family you set yourself is used as-is.
@@ -491,6 +492,45 @@ Editor::new(&editor)
 
 These are the ordinary [`Styled`](https://docs.rs/gpui/latest/gpui/trait.Styled.html)
 methods every element has, so `font_weight` and `line_height` work the same way.
+
+### Line-number style
+
+Set application-wide defaults with `Theme::update`, then override only the
+properties needed by an individual editor:
+
+```rust
+use gpui_kit::{px, component::{Theme, input::{Editor, GutterStyle}}};
+
+Theme::update(cx, |theme| {
+    theme.set_editor_gutter_style(
+        GutterStyle::default()
+            .with_gap(px(12.))
+            .with_line_number_color(theme.muted_foreground)
+            .with_active_line_number_color(theme.foreground)
+            .with_line_number_font_family("JetBrains Mono")
+            .with_line_number_font_size(px(12.)),
+    );
+});
+
+Editor::new(&editor).apply_gutter_style(
+    GutterStyle::default().with_line_number_font_size(px(11.)),
+)
+```
+
+Individual properties override the theme; unspecified theme properties use the
+existing editor defaults: a 6px gap, the editor's muted/normal foreground for
+normal/current line numbers, and the body font and size. Explicit transparent
+colors are preserved. The gap separates the number/folding lane from the body.
+Line-number typography controls both measurement and painting, including for
+proportional fonts, without changing body typography or row height.
+
+`Theme::get_editor_gutter_style()` returns the configured theme properties.
+These settings are runtime configuration and are not saved in theme JSON.
+Omitting `apply_gutter_style` on a later render restores the theme settings;
+setting the theme style to `GutterStyle::default()` clears its overrides.
+For Base-only editors, use `EditorState::set_gutter_style(style)` and notify the
+state afterwards. Styled editors project their theme and element settings on
+each render.
 
 ## Sizes
 

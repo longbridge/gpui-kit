@@ -388,7 +388,8 @@ let rows = editor.read(cx).display_map().wrap_row_count();
 ## 字体
 
 Editor 默认使用主题中的等宽字体 —— `mono_font_family` 和 `mono_font_size`，行高为字号的
-1.5 倍。这只是默认值：在 Editor 上设置的文本样式会覆盖它，gutter 和行高都跟随字号变化。
+1.5 倍。这只是默认值：在 Editor 上设置的文本样式会覆盖它，行高跟随字号变化。
+未单独设置行号字体时，行号也使用正文的字体和字号。
 主题加载时会核对平台默认等宽字体（`Menlo`、`Consolas`、`DejaVu Sans Mono`）是否已安装，
 缺失时换成已安装的等宽字体，再不行退到 `.SystemUIFont`；你自己指定的字体族则原样使用。
 
@@ -402,6 +403,41 @@ Editor::new(&editor)
 
 这些就是所有元素都有的 [`Styled`](https://docs.rs/gpui/latest/gpui/trait.Styled.html)
 方法，`font_weight`、`line_height` 用法相同。
+
+### 行号样式
+
+通过 `Theme::update` 设置应用内 Editor 的默认值，再按需覆盖单个编辑器的部分属性：
+
+```rust
+use gpui_kit::{px, component::{Theme, input::{Editor, GutterStyle}}};
+
+Theme::update(cx, |theme| {
+    theme.set_editor_gutter_style(
+        GutterStyle::default()
+            .with_gap(px(12.))
+            .with_line_number_color(theme.muted_foreground)
+            .with_active_line_number_color(theme.foreground)
+            .with_line_number_font_family("JetBrains Mono")
+            .with_line_number_font_size(px(12.)),
+    );
+});
+
+Editor::new(&editor).apply_gutter_style(
+    GutterStyle::default().with_line_number_font_size(px(11.)),
+)
+```
+
+单个编辑器的显式属性优先于主题；主题未指定的属性沿用现有默认值：间距为 6px，
+普通行号和当前行号分别使用编辑器的次要前景色和前景色，字体及字号跟随正文。
+显式设置的透明色会保留。间距位于行号和折叠控件区域与正文之间。
+行号字体和字号同时用于宽度测量与绘制，也支持比例字体，不会改变正文的字体或行高。
+
+`Theme::get_editor_gutter_style()` 返回主题中已配置的属性。
+这些设置只在运行时生效，不写入主题 JSON。
+后续渲染时省略 `apply_gutter_style` 即恢复主题设置；将主题样式设为
+`GutterStyle::default()` 即清除主题覆盖。
+直接使用 Base 时，可调用 `EditorState::set_gutter_style(style)`，然后通知状态更新。
+带样式的 Editor 会在每次渲染时应用主题和组件上的设置。
 
 ## 尺寸
 

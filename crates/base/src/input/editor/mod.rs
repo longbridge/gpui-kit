@@ -204,6 +204,14 @@ impl InputModeKind for EditorMode {
 }
 
 impl EditorState {
+    /// Replaces the line-number presentation for the next layout.
+    ///
+    /// Like `set_editor_style`, this does not notify: styled wrappers project
+    /// their presentation during render. Other callers must notify afterwards.
+    pub fn set_gutter_style(&mut self, style: super::GutterStyle) {
+        self.extras.gutter_style = style;
+    }
+
     /// The LSP providers and their cached results.
     ///
     /// This exists on the editor alone: an ordinary input or textarea has no
@@ -245,6 +253,10 @@ impl RenderOnce for Editor {
 
 /// What a code editor exposes to the renderer. See [`crate::input::InputExtras`].
 impl crate::input::InputExtras for super::EditorExtras {
+    fn get_gutter_style(&self) -> Option<&super::GutterStyle> {
+        Some(&self.gutter_style)
+    }
+
     fn decoration_layers(&self) -> Vec<&[super::TextDecoration]> {
         self.decorations.iter().collect()
     }
