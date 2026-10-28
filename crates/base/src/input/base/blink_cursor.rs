@@ -8,33 +8,75 @@ static PAUSE_DELAY: Duration = Duration::from_millis(300);
 pub(super) const CURSOR_WIDTH: Pixels = px(1.);
 
 /// Application-wide caret visibility policy.
+///
+/// The default blinks every 500 ms without an idle timeout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CursorBlink {
-    /// Keep the focused caret visible without a timer.
-    Steady,
-    /// Alternate visible and hidden phases until the optional idle deadline.
-    Blinking {
-        /// Duration of each visible or hidden phase; zero means steady.
-        interval: Duration,
-        /// Time since the last activity after which blinking stops visibly.
-        idle_timeout: Option<Duration>,
-    },
+pub struct CursorBlink {
+    interval: Duration,
+    idle_timeout: Option<Duration>,
 }
 
-impl Default for CursorBlink {
-    fn default() -> Self {
-        Self::Blinking {
-            interval: INTERVAL,
+impl CursorBlink {
+    /// Keep the focused caret visible without a timer.
+    pub const fn steady() -> Self {
+        Self {
+            interval: Duration::ZERO,
             idle_timeout: None,
+        }
+    }
+
+    /// Alternate visible and hidden phases of `interval` each; zero means steady.
+    pub const fn blinking(interval: Duration) -> Self {
+        Self {
+            interval,
+            idle_timeout: None,
+        }
+    }
+
+    /// Stop blinking, with the caret visible, once `timeout` has passed since
+    /// the last focus, edit or cursor movement.
+    pub const fn with_idle_timeout(mut self, timeout: Duration) -> Self {
+        self.idle_timeout = Some(timeout);
+        self
+    }
+
+    /// The duration of each visible or hidden phase, or `None` when steady.
+    pub fn interval(&self) -> Option<Duration> {
+        (!self.interval.is_zero()).then_some(self.interval)
+    }
+
+    /// The time since the last activity after which blinking stops.
+    pub fn idle_timeout(&self) -> Option<Duration> {
+        self.interval().and(self.idle_timeout)
+    }
+
+    /// Whether the focused caret stays visible without blinking.
+    pub fn is_steady(&self) -> bool {
+        self.interval.is_zero()
+    }
+
+    /// Collapse every steady spelling to one value, so a change between them
+    /// is not mistaken for a policy change.
+    fn normalized(self) -> Self {
+        if self.is_steady() {
+            Self::steady()
+        } else {
+            self
         }
     }
 }
 
-fn cursor_blink(cx: &App) -> CursorBlink {
-    match crate::Theme::global(cx).cursor_blink {
-        CursorBlink::Blinking { interval, .. } if interval.is_zero() => CursorBlink::Steady,
-        policy => policy,
+impl Default for CursorBlink {
+    fn default() -> Self {
+        Self::blinking(INTERVAL)
     }
+}
+
+fn cursor_blink(cx: &App) -> CursorBlink {
+    cx.try_global::<crate::Theme>()
+        .map(|theme| theme.cursor_blink)
+        .unwrap_or_default()
+        .normalized()
 }
 
 pub(crate) struct BlinkCursor {
@@ -112,13 +154,7 @@ impl BlinkCursor {
 
     fn blink_delay(&self, cx: &App) -> Option<Duration> {
         let last_activity = self.last_activity?;
-        let CursorBlink::Blinking {
-            interval,
-            idle_timeout,
-        } = cursor_blink(cx)
-        else {
-            return None;
-        };
+        let interval = self.policy.interval()?;
 
         let elapsed = cx.background_executor().now() - last_activity;
         let delay = if self.paused && elapsed < PAUSE_DELAY {
@@ -127,7 +163,7 @@ impl BlinkCursor {
             interval
         };
 
-        match idle_timeout {
+        match self.policy.idle_timeout() {
             Some(timeout) if elapsed >= timeout => None,
             Some(timeout) => Some(delay.min(timeout - elapsed)),
             None => Some(delay),
@@ -169,6 +205,21 @@ mod tests {
 
     fn set_cursor_blink(policy: CursorBlink, cx: &mut App) {
         crate::Theme::global_mut(cx).cursor_blink = policy;
+    }
+
+    #[test]
+    fn test_cursor_blink_builder() {
+        let policy = CursorBlink::blinking(INTERVAL).with_idle_timeout(Duration::from_secs(5));
+        assert_eq!(policy.interval(), Some(INTERVAL));
+        assert_eq!(policy.idle_timeout(), Some(Duration::from_secs(5)));
+        assert!(!policy.is_steady());
+        assert_eq!(CursorBlink::default(), CursorBlink::blinking(INTERVAL));
+
+        let steady = CursorBlink::blinking(Duration::ZERO).with_idle_timeout(INTERVAL);
+        assert!(steady.is_steady());
+        assert_eq!(steady.interval(), None);
+        assert_eq!(steady.idle_timeout(), None);
+        assert_eq!(steady.normalized(), CursorBlink::steady());
     }
 
     fn advance(cx: &mut TestAppContext, duration: Duration) {
@@ -336,10 +387,7 @@ mod tests {
     fn idle_timeout_stops_between_blinks_and_activity_restarts_it(cx: &mut TestAppContext) {
         cx.update(|cx| {
             set_cursor_blink(
-                CursorBlink::Blinking {
-                    interval: INTERVAL,
-                    idle_timeout: Some(Duration::from_millis(750)),
-                },
+                CursorBlink::blinking(INTERVAL).with_idle_timeout(Duration::from_millis(750)),
                 cx,
             )
         });
@@ -368,10 +416,7 @@ mod tests {
     fn idle_timeout_includes_the_typing_pause(cx: &mut TestAppContext) {
         cx.update(|cx| {
             set_cursor_blink(
-                CursorBlink::Blinking {
-                    interval: INTERVAL,
-                    idle_timeout: Some(Duration::from_millis(200)),
-                },
+                CursorBlink::blinking(INTERVAL).with_idle_timeout(Duration::from_millis(200)),
                 cx,
             )
         });
@@ -389,15 +434,9 @@ mod tests {
     #[gpui::test]
     fn steady_and_zero_durations_never_schedule_blinks(cx: &mut TestAppContext) {
         for policy in [
-            CursorBlink::Steady,
-            CursorBlink::Blinking {
-                interval: Duration::ZERO,
-                idle_timeout: None,
-            },
-            CursorBlink::Blinking {
-                interval: INTERVAL,
-                idle_timeout: Some(Duration::ZERO),
-            },
+            CursorBlink::steady(),
+            CursorBlink::blinking(Duration::ZERO),
+            CursorBlink::blinking(INTERVAL).with_idle_timeout(Duration::ZERO),
         ] {
             cx.update(|cx| set_cursor_blink(policy, cx));
             let cursor = cx.new(BlinkCursor::new);
@@ -415,16 +454,14 @@ mod tests {
         advance(cx, INTERVAL);
         assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
 
-        cx.update(|cx| set_cursor_blink(CursorBlink::Steady, cx));
+        cx.update(|cx| set_cursor_blink(CursorBlink::steady(), cx));
         assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
         advance(cx, Duration::from_secs(1));
 
         cx.update(|cx| {
             set_cursor_blink(
-                CursorBlink::Blinking {
-                    interval: Duration::from_millis(100),
-                    idle_timeout: Some(Duration::from_secs(1)),
-                },
+                CursorBlink::blinking(Duration::from_millis(100))
+                    .with_idle_timeout(Duration::from_secs(1)),
                 cx,
             )
         });
@@ -432,10 +469,8 @@ mod tests {
 
         cx.update(|cx| {
             set_cursor_blink(
-                CursorBlink::Blinking {
-                    interval: Duration::from_millis(100),
-                    idle_timeout: Some(Duration::from_secs(2)),
-                },
+                CursorBlink::blinking(Duration::from_millis(100))
+                    .with_idle_timeout(Duration::from_secs(2)),
                 cx,
             )
         });
@@ -445,15 +480,7 @@ mod tests {
         assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
         assert!(cursor.read_with(cx, |cursor, _| cursor._task.is_ready()));
 
-        cx.update(|cx| {
-            set_cursor_blink(
-                CursorBlink::Blinking {
-                    interval: Duration::from_millis(100),
-                    idle_timeout: None,
-                },
-                cx,
-            )
-        });
+        cx.update(|cx| set_cursor_blink(CursorBlink::blinking(Duration::from_millis(100)), cx));
         advance(cx, Duration::from_millis(100));
         assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
     }
@@ -466,15 +493,7 @@ mod tests {
         cursor.update(cx, |cursor, cx| cursor.start(cx));
         advance(cx, Duration::from_millis(250));
 
-        cx.update(|cx| {
-            set_cursor_blink(
-                CursorBlink::Blinking {
-                    interval: Duration::from_secs(1),
-                    idle_timeout: None,
-                },
-                cx,
-            )
-        });
+        cx.update(|cx| set_cursor_blink(CursorBlink::blinking(Duration::from_secs(1)), cx));
         advance(cx, Duration::from_millis(250));
         assert!(cursor.read_with(cx, |cursor, _| cursor.visible()));
         advance(cx, Duration::from_millis(749));
@@ -482,16 +501,13 @@ mod tests {
         advance(cx, Duration::from_millis(1));
         assert!(!cursor.read_with(cx, |cursor, _| cursor.visible()));
 
-        cx.update(|cx| set_cursor_blink(CursorBlink::Steady, cx));
+        cx.update(|cx| set_cursor_blink(CursorBlink::steady(), cx));
         assert_idle(&cursor, true, cx);
     }
 
     #[gpui::test]
     fn unchanged_policy_preserves_the_phase_and_idle_deadline(cx: &mut TestAppContext) {
-        let policy = CursorBlink::Blinking {
-            interval: INTERVAL,
-            idle_timeout: Some(Duration::from_millis(750)),
-        };
+        let policy = CursorBlink::blinking(INTERVAL).with_idle_timeout(Duration::from_millis(750));
         cx.update(|cx| set_cursor_blink(policy, cx));
         let cursor = cx.new(BlinkCursor::new);
         cursor.update(cx, |cursor, cx| cursor.start(cx));
@@ -510,10 +526,7 @@ mod tests {
     fn unrelated_theme_changes_preserve_the_blink_phase_and_idle_deadline(cx: &mut TestAppContext) {
         cx.update(|cx| {
             set_cursor_blink(
-                CursorBlink::Blinking {
-                    interval: INTERVAL,
-                    idle_timeout: Some(Duration::from_millis(750)),
-                },
+                CursorBlink::blinking(INTERVAL).with_idle_timeout(Duration::from_millis(750)),
                 cx,
             );
         });
@@ -539,10 +552,8 @@ mod tests {
 
         cx.update(|cx| {
             set_cursor_blink(
-                CursorBlink::Blinking {
-                    interval: Duration::from_millis(200),
-                    idle_timeout: Some(Duration::from_millis(400)),
-                },
+                CursorBlink::blinking(Duration::from_millis(200))
+                    .with_idle_timeout(Duration::from_millis(400)),
                 cx,
             )
         });
@@ -560,7 +571,7 @@ mod tests {
         cursor.update(cx, |cursor, cx| cursor.start(cx));
         cursor.update(cx, |cursor, cx| cursor.pause(cx));
         advance(cx, Duration::from_millis(100));
-        cx.update(|cx| set_cursor_blink(CursorBlink::Steady, cx));
+        cx.update(|cx| set_cursor_blink(CursorBlink::steady(), cx));
         assert_idle(&cursor, true, cx);
     }
 
@@ -572,7 +583,7 @@ mod tests {
         blurred.update(cx, |cursor, cx| cursor.pause(cx));
         blurred.update(cx, |cursor, cx| cursor.stop(cx));
 
-        for policy in [CursorBlink::Steady, CursorBlink::default()] {
+        for policy in [CursorBlink::steady(), CursorBlink::default()] {
             cx.update(|cx| set_cursor_blink(policy, cx));
             assert_idle(&never_focused, false, cx);
             assert_idle(&blurred, false, cx);
@@ -592,10 +603,7 @@ mod tests {
 
         cx.update(|cx| {
             set_cursor_blink(
-                CursorBlink::Blinking {
-                    interval: INTERVAL,
-                    idle_timeout: Some(Duration::from_millis(400)),
-                },
+                CursorBlink::blinking(INTERVAL).with_idle_timeout(Duration::from_millis(400)),
                 cx,
             )
         });
@@ -604,7 +612,7 @@ mod tests {
 
     #[gpui::test]
     fn initialization_preserves_an_application_policy(cx: &mut TestAppContext) {
-        cx.update(|cx| set_cursor_blink(CursorBlink::Steady, cx));
+        cx.update(|cx| set_cursor_blink(CursorBlink::steady(), cx));
         cx.update(crate::init);
         let cursor = cx.new(BlinkCursor::new);
         cursor.update(cx, |cursor, cx| cursor.start(cx));

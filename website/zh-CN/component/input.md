@@ -254,6 +254,25 @@ Textarea::new(&self.composer).on_paste(move |item, _, cx| {
 
 已知限制：在 web 上 `read_from_clipboard()` 为 `None`（文本经由平台输入处理器到达）；那里的图片粘贴需要异步剪贴板访问和权限，不在本次范围内。
 
+### 光标闪烁
+
+获得焦点的输入框中，光标每 500 ms 闪烁一次。设置 `Theme::cursor_blink` 可修改应用中所有 Input、Textarea、Editor 和 OTP 输入框的光标策略，已获得焦点的输入框也会立即生效：
+
+```rust
+use std::time::Duration;
+use gpui_kit::component::{Theme, input::CursorBlink};
+
+Theme::update(cx, |theme| {
+    theme.cursor_blink = CursorBlink::blinking(Duration::from_millis(530))
+        .with_idle_timeout(Duration::from_secs(5));
+});
+
+// 光标保持显示，不闪烁。
+Theme::update(cx, |theme| theme.cursor_blink = CursorBlink::steady());
+```
+
+`Theme::update` 会把策略同步到 Base，因此切换主题或明暗模式后策略依然保留。计时规则见 [Base Input](../base/primitives/input.md#光标闪烁)。
+
 ## 示例
 
 ### 搜索输入框

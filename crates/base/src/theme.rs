@@ -2,7 +2,10 @@ use gpui::{App, Global};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::{PlotMotion, ScrollbarMode, ScrollbarMotion, ScrollbarStyles, SemanticThemeTokens};
+use crate::{
+    PlotMotion, ScrollbarMode, ScrollbarMotion, ScrollbarStyles, SemanticThemeTokens,
+    input::CursorBlink,
+};
 
 /// Application-wide defaults for Base behavior modules.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -21,7 +24,7 @@ pub struct Theme {
     pub resizable: ResizableTheme,
     pub plot: PlotTheme,
     /// Application-wide caret blink behavior.
-    pub cursor_blink: crate::input::CursorBlink,
+    pub cursor_blink: CursorBlink,
 }
 
 impl Global for Theme {}

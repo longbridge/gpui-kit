@@ -1043,20 +1043,20 @@ mod base_theme_projection_tests {
         cx.update(|cx| {
             init(cx);
             Theme::update(cx, |theme| {
-                theme.cursor_blink = gpui_base::input::CursorBlink::Steady;
+                theme.cursor_blink = gpui_base::input::CursorBlink::steady();
             });
             assert_eq!(
                 gpui_base::Theme::global(cx).cursor_blink,
-                gpui_base::input::CursorBlink::Steady
+                gpui_base::input::CursorBlink::steady()
             );
             Theme::change(ThemeMode::Dark, None, cx);
             assert_eq!(
                 Theme::global(cx).cursor_blink,
-                gpui_base::input::CursorBlink::Steady
+                gpui_base::input::CursorBlink::steady()
             );
             assert_eq!(
                 gpui_base::Theme::global(cx).cursor_blink,
-                gpui_base::input::CursorBlink::Steady
+                gpui_base::input::CursorBlink::steady()
             );
         });
     }
