@@ -50,6 +50,10 @@ impl Render for Commands {
                                 )
                                 .disabled(true),
                             )
+                            .submenu("More commands", window, cx, |menu, _, _| {
+                                menu.menu_with_disabled("Unavailable", Box::new(Unavailable), true)
+                                    .menu("Save copy", Box::new(Save))
+                            })
                     }),
             )
             .child(div().id("result").test_support().child(if self.saved {
@@ -118,7 +122,8 @@ fn activating_a_submenu_enters_it_without_dismissing_its_parent(cx: &mut TestApp
             window.click("commands", cx);
             if keyboard {
                 let mut menu = window.within("popup-menu");
-                menu.press("up", cx);
+                menu.press("down", cx);
+                menu.press("down", cx);
                 assert_eq!(menu.find(2usize).selected(), Some(true));
                 menu.press("enter", cx);
             } else {
@@ -158,6 +163,33 @@ fn activating_a_submenu_enters_it_without_dismissing_its_parent(cx: &mut TestApp
         })
         .unwrap();
     }
+}
+
+#[gpui_kit::test]
+fn submenu_activation_skips_disabled_items(cx: &mut TestAppContext) {
+    cx.update(gpui_kit::init);
+    let (handle, commands) = common::open_window(cx, Some(size(px(640.), px(480.))), |_, cx| {
+        cx.new(|cx| Commands {
+            saved: false,
+            focus: cx.focus_handle(),
+        })
+    });
+    cx.update_window(handle.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.click("commands", cx);
+        // Hover can select a disabled row, but confirmation must not execute it.
+        window.within("popup-menu").hover(0usize, cx);
+        window.press("enter", cx);
+        assert!(window.try_find("popup-menu").is_some());
+        assert!(!commands.read(cx).saved);
+        window.within("popup-menu").click(4usize, cx);
+        assert_eq!(window.within("submenu").find(1usize).selected(), Some(true));
+        window.within("submenu").hover(0usize, cx);
+        window.press("enter", cx);
+        assert_eq!(window.find_all("popup-menu").len(), 2);
+        assert!(!commands.read(cx).saved);
+    })
+    .unwrap();
 }
 
 #[gpui_kit::test]
